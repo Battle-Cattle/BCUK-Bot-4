@@ -7,15 +7,15 @@ import { startTwitchMonitor, stopTwitchMonitor } from './twitchMonitor';
 import { startWebPanel } from './web/server';
 import { disconnect } from './audioPlayer';
 
-function shutdown(signal: string): void {
+async function shutdown(signal: string): Promise<void> {
   console.log(`[Bot] ${signal} received — disconnecting from voice and shutting down.`);
-  stopTwitchMonitor();
+  await stopTwitchMonitor();
   disconnect();
   process.exit(0);
 }
 
-process.on('SIGINT',  () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => { shutdown('SIGINT').catch(() => process.exit(1)); });
+process.on('SIGTERM', () => { shutdown('SIGTERM').catch(() => process.exit(1)); });
 
 async function main(): Promise<void> {
   console.log('[Bot] Starting BCUK SFX Bot...');

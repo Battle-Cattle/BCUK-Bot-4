@@ -5,6 +5,8 @@ import {
   removeUser,
   updateAccessLevel,
   ACCESS_LEVEL_LABELS,
+  AccessLevel,
+  AccessLevelValue,
 } from '../../db';
 import { requireManager, requireAdmin } from '../middleware';
 
@@ -35,8 +37,9 @@ router.post('/users/add', requireAdmin, async (req, res) => {
   if (!discord_id || !access_level) return res.redirect('/admin/users');
   const level = parseInt(access_level, 10);
   if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
+  if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   try {
-    await upsertUser(discord_id.trim(), (discord_name ?? '').trim(), level);
+    await upsertUser(discord_id.trim(), (discord_name ?? '').trim(), level as AccessLevelValue);
   } catch (err) {
     console.error('[Web] Add user error:', err);
   }
@@ -49,6 +52,7 @@ router.post('/users/update', requireAdmin, async (req, res) => {
   if (!discord_id || access_level === undefined) return res.redirect('/admin/users');
   const level = parseInt(access_level, 10);
   if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
+  if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
 
   // Prevent demoting yourself
   if (discord_id === req.session.user!.discordId) {

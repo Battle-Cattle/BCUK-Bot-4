@@ -138,7 +138,7 @@
               <td class="actions">
                 <button type="button" class="btn btn-sm btn-ghost" onclick="toggleGroupEdit(<%= g.id %>)">✏️ Edit</button>
                 <form method="POST" action="/admin/streams/groups/remove" class="inline-form-sm"
-                      onsubmit="return confirm('Remove group \u201c<%= g.name %>\u201d and all its streamers?')">
+                      onsubmit="return confirm('Remove group \u201c' + <%= JSON.stringify(g.name) %> + '\u201d and all its streamers?')">
                   <input type="hidden" name="group_id" value="<%= g.id %>">
                   <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                 </form>
@@ -223,7 +223,7 @@
               <td><%= s.group_name %></td>
               <td class="actions">
                 <form method="POST" action="/admin/streams/streamers/remove" class="inline-form-sm"
-                      onsubmit="return confirm('Remove streamer \u201c<%= s.name %>\u201d?')">
+                      onsubmit="return confirm('Remove streamer \u201c' + <%= JSON.stringify(s.name) %> + '\u201d?')">
                   <input type="hidden" name="streamer_id" value="<%= s.id %>">
                   <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                 </form>
