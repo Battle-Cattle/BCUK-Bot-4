@@ -26,10 +26,7 @@ function readSettings(): MonitorSettings {
 }
 
 function writeSettings(settings: MonitorSettings): void {
-  cachedSettings = settings;
   const json = JSON.stringify(settings, null, 2);
-  // NOTE: eventSubToken is stored in plaintext. Consider moving it to the DB
-  // or OS-level credential storage if stronger security is required.
   // Write temp file beside the target so rename() stays on the same filesystem.
   const tmpFile = path.join(path.dirname(SETTINGS_FILE), `.monitor-settings-${process.pid}.tmp`);
   const fd = fs.openSync(tmpFile, 'w', 0o600);
@@ -40,6 +37,8 @@ function writeSettings(settings: MonitorSettings): void {
     fs.closeSync(fd);
   }
   fs.renameSync(tmpFile, SETTINGS_FILE);
+  // Only update the cache after a successful disk write to keep cache/disk in sync.
+  cachedSettings = settings;
 }
 
 export function getMonitorEnabled(): boolean {

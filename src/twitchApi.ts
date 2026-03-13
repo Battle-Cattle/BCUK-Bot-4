@@ -1,5 +1,17 @@
 import { TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET } from './config';
 
+const FETCH_TIMEOUT_MS = 10_000;
+
+async function twitchFetch(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 let cachedAppToken: string | null = null;
 let appTokenExpiry = 0;
 
@@ -12,7 +24,7 @@ async function getAppToken(): Promise<string> {
     grant_type: 'client_credentials',
   });
 
-  const res = await fetch('https://id.twitch.tv/oauth2/token', {
+  const res = await twitchFetch('https://id.twitch.tv/oauth2/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
@@ -51,7 +63,7 @@ export async function getUsers(logins: string[]): Promise<TwitchUser[]> {
   const results: TwitchUser[] = [];
   for (const batch of chunks(logins, 100)) {
     const params = batch.map((l) => `login=${encodeURIComponent(l)}`).join('&');
-    const res = await fetch(`https://api.twitch.tv/helix/users?${params}`, {
+    const res = await twitchFetch(`https://api.twitch.tv/helix/users?${params}`, {
       headers: authHeaders(token),
     });
     if (!res.ok) throw new Error(`[TwitchAPI] getUsers failed: ${res.status}`);
@@ -77,7 +89,7 @@ export async function getStreams(userIds: string[]): Promise<TwitchStream[]> {
   const results: TwitchStream[] = [];
   for (const batch of chunks(userIds, 100)) {
     const params = batch.map((id) => `user_id=${encodeURIComponent(id)}`).join('&');
-    const res = await fetch(`https://api.twitch.tv/helix/streams?${params}&first=100`, {
+    const res = await twitchFetch(`https://api.twitch.tv/helix/streams?${params}&first=100`, {
       headers: authHeaders(token),
     });
     if (!res.ok) throw new Error(`[TwitchAPI] getStreams failed: ${res.status}`);

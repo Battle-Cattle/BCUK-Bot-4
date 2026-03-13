@@ -2,6 +2,8 @@ import express from 'express';
 import session from 'express-session';
 import path from 'path';
 import { WEB_PORT, SESSION_SECRET } from '../config';
+
+const isProduction = process.env.NODE_ENV === 'production';
 import authRouter from './routes/auth';
 import dashboardRouter from './routes/dashboard';
 import adminRouter from './routes/admin';
@@ -23,12 +25,13 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
 // Session
+if (isProduction) app.set('trust proxy', 1);
 app.use(
   session({
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 },
+    cookie: { secure: isProduction, maxAge: 24 * 60 * 60 * 1000 },
   }),
 );
 

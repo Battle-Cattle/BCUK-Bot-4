@@ -1,5 +1,5 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
-import { getPool } from './db';
+import { getPool, closePool } from './db';
 import { startTwitchBot } from './twitchBot';
 import { startDiscordBot } from './discordBot';
 import { startTikTokBot } from './tiktokBot';
@@ -11,6 +11,7 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`[Bot] ${signal} received — disconnecting from voice and shutting down.`);
   await stopTwitchMonitor();
   disconnect();
+  await closePool();
   process.exit(0);
 }
 

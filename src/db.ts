@@ -19,7 +19,7 @@ export interface SfxFile {
   category_id: number | null;
 }
 
-let pool: mysql.Pool;
+let pool: mysql.Pool | undefined;
 
 export function getPool(): mysql.Pool {
   if (!pool) {
@@ -34,11 +34,19 @@ export function getPool(): mysql.Pool {
       queueLimit: 0,
     });
   }
-  return pool;
+  return pool!;
+}
+
+export async function closePool(): Promise<void> {
+  if (pool) {
+    await pool.end();
+    pool = undefined;
+  }
 }
 
 /**
- * Look up a trigger by its command string (case-insensitive, hidden excluded).
+ * Look up a trigger by its command string (case-insensitive).
+ * Hidden triggers ARE included — the hidden flag only affects public listing, not playback.
  */
 export async function findTrigger(command: string): Promise<SfxTrigger | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -140,6 +148,9 @@ export async function upsertUser(
   discordName: string,
   accessLevel: number,
 ): Promise<void> {
+  if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
+    throw new Error(`Invalid accessLevel: ${accessLevel}`);
+  }
   await getPool().execute(
     `INSERT INTO \`user\` (discord_id, discord_name, access_level, is_twitch_bot_enabled)
      VALUES (?, ?, ?, 0)

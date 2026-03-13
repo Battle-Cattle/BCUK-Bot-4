@@ -15,6 +15,12 @@
     <section class="section">
       <h2 class="section-title">Stream Monitor</h2>
 
+      <% if (error) { %>
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem">
+        <span style="color:var(--danger)">&#9888; Operation failed: <%= error.replace(/_/g, ' ') %></span>
+      </div>
+      <% } %>
+
       <!-- Discord posts toggle -->
       <div class="card" style="margin-bottom:1.5rem">
         <div class="card-header">
@@ -230,6 +236,7 @@
   <script>
     function toggleGroupEdit(id) {
       var row = document.getElementById('group-edit-' + id);
+      if (!row) return;
       row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
     }
 
@@ -237,10 +244,18 @@
       return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    var liveNowInflight = false;
+
     function refreshLiveNow() {
+      if (liveNowInflight) return;
+      liveNowInflight = true;
       fetch('/admin/streams/live')
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
         .then(function(data) {
+          liveNowInflight = false;
           var enabled = data.enabled;
           var streams = data.streams;
           var tbody = document.getElementById('live-tbody');
@@ -269,6 +284,7 @@
           if (el) el.textContent = 'Updated ' + new Date().toLocaleTimeString();
         })
         .catch(function() {
+          liveNowInflight = false;
           var tbody = document.getElementById('live-tbody');
           if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="empty-msg">Failed to load live data.</td></tr>';
         });

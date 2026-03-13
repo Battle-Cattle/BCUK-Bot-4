@@ -6,7 +6,8 @@ const router = Router();
 
 router.get('/', async (req, res) => {
   try {
-    const [triggers, status] = await Promise.all([getAllSfxTriggers(), getStatus()]);
+    const triggers = await getAllSfxTriggers();
+    const status = getStatus();
     res.render('dashboard', { user: req.session.user, triggers, status });
   } catch (err) {
     console.error('[Web] Dashboard error:', err);

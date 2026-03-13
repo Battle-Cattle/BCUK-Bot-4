@@ -271,7 +271,10 @@ async function handleStreamOffline(login: string): Promise<void> {
   if (state.offlineTimer) clearTimeout(state.offlineTimer);
 
   state.offlineTimer = setTimeout(async () => {
-    state.offlineTimer = null;
+    // Re-fetch current state to guard against stale closure after monitor restart.
+    const currentState = liveStates.get(key);
+    if (!currentState) return;
+    currentState.offlineTimer = null;
     const userId = loginToUserId.get(key);
     if (!userId) return;
 
@@ -559,15 +562,33 @@ export async function catchUpDiscordPosts(): Promise<void> {
   if (!discordClient) return;
   const groupsToUpdate = new Set<number>();
 
-  for (const state of Array.from(liveStates.values())) {
+  const states = Array.from(liveStates.values());
+  // Batch all live-state user IDs into a single Helix request instead of one per streamer.
+  const allUserIds = states
+    .map((s) => loginToUserId.get(s.login))
+    .filter((id): id is string => id !== undefined);
+
+  let streamsByUserId = new Map<string, TwitchStream>();
+  if (allUserIds.length > 0) {
+    try {
+      const fetched = await getStreams(allUserIds);
+      streamsByUserId = new Map(
+        fetched.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
+      );
+    } catch (err) {
+      console.error('[TwitchMonitor] Catch-up getStreams failed:', err);
+      return;
+    }
+  }
+
+  for (const state of states) {
     const streamerInfo = streamersData.find((s) => s.name.toLowerCase() === state.login);
     if (!streamerInfo) continue;
     const userId = loginToUserId.get(state.login);
     if (!userId) continue;
 
     try {
-      const streams = await getStreams([userId]);
-      const stream = streams.find((s) => s.user_id === userId && s.type === 'live');
+      const stream = streamsByUserId.get(userId);
 
       if (!stream) {
         // Went offline while posts were disabled — clean up any stale message

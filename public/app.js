@@ -102,14 +102,25 @@ function applyStatus(status) {
   if (tiktokEl) tiktokEl.innerHTML = buildChannelHTML(status.tiktok);
 }
 
+let consecutiveFailures = 0;
+const STALE_THRESHOLD = 3;
+
 async function fetchStatus() {
   try {
     const res = await fetch('/api/status');
-    if (!res.ok) return;
-    const data = await res.json();
-    applyStatus(data);
+    if (!res.ok) {
+      consecutiveFailures++;
+    } else {
+      const data = await res.json();
+      consecutiveFailures = 0;
+      applyStatus(data);
+    }
   } catch (_) {
-    // silently ignore network errors during polling
+    consecutiveFailures++;
+  }
+  if (consecutiveFailures >= STALE_THRESHOLD) {
+    const staleEl = document.getElementById('discord-tag');
+    if (staleEl) staleEl.textContent = '(status unavailable)';
   }
 }
 

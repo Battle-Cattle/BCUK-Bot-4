@@ -25,6 +25,7 @@ router.get('/streams', requireManager, async (req, res) => {
       groups,
       streamers,
       monitorEnabled: getMonitorEnabled(),
+      error: (req.query.error as string | undefined) ?? null,
     });
   } catch (err) {
     console.error('[Web] Streams page error:', err);
@@ -79,6 +80,7 @@ router.post('/streams/groups/add', requireManager, async (req, res) => {
     triggerRestart();
   } catch (err) {
     console.error('[Web] Add stream group error:', err);
+    return res.redirect('/admin/streams?error=add_group_failed');
   }
   res.redirect('/admin/streams');
 });
@@ -91,10 +93,12 @@ router.post('/streams/groups/update', requireManager, async (req, res) => {
   if (!group_id || !name || !discord_channel || !live_message || !new_game_message) {
     return res.redirect('/admin/streams?error=missing_fields');
   }
+  const parsedGroupId = parseInt(group_id, 10);
+  if (!Number.isInteger(parsedGroupId)) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
     await updateStreamGroup(
-      parseInt(group_id, 10),
+      parsedGroupId,
       name.trim(),
       discord_channel.trim(),
       live_message.trim(),
@@ -106,6 +110,7 @@ router.post('/streams/groups/update', requireManager, async (req, res) => {
     triggerRestart();
   } catch (err) {
     console.error('[Web] Update stream group error:', err);
+    return res.redirect('/admin/streams?error=update_group_failed');
   }
   res.redirect('/admin/streams');
 });
@@ -113,14 +118,17 @@ router.post('/streams/groups/update', requireManager, async (req, res) => {
 router.post('/streams/groups/remove', requireManager, async (req, res) => {
   const { group_id } = req.body as { group_id?: string };
   if (!group_id) return res.redirect('/admin/streams');
+  const parsedGroupId = parseInt(group_id, 10);
+  if (!Number.isInteger(parsedGroupId)) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
     // Delete streamers in the group first (avoids FK constraint errors)
-    await removeStreamersByGroup(parseInt(group_id, 10));
-    await removeStreamGroup(parseInt(group_id, 10));
+    await removeStreamersByGroup(parsedGroupId);
+    await removeStreamGroup(parsedGroupId);
     triggerRestart();
   } catch (err) {
     console.error('[Web] Remove stream group error:', err);
+    return res.redirect('/admin/streams?error=remove_group_failed');
   }
   res.redirect('/admin/streams');
 });
@@ -130,12 +138,15 @@ router.post('/streams/groups/remove', requireManager, async (req, res) => {
 router.post('/streams/streamers/add', requireManager, async (req, res) => {
   const { name, group_id } = req.body as { name?: string; group_id?: string };
   if (!name || !group_id) return res.redirect('/admin/streams');
+  const parsedGroupId = parseInt(group_id, 10);
+  if (!Number.isInteger(parsedGroupId)) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
-    await addStreamer(name.trim(), parseInt(group_id, 10));
+    await addStreamer(name.trim(), parsedGroupId);
     triggerRestart();
   } catch (err) {
     console.error('[Web] Add streamer error:', err);
+    return res.redirect('/admin/streams?error=add_streamer_failed');
   }
   res.redirect('/admin/streams');
 });
@@ -143,12 +154,15 @@ router.post('/streams/streamers/add', requireManager, async (req, res) => {
 router.post('/streams/streamers/remove', requireManager, async (req, res) => {
   const { streamer_id } = req.body as { streamer_id?: string };
   if (!streamer_id) return res.redirect('/admin/streams');
+  const parsedStreamerId = parseInt(streamer_id, 10);
+  if (!Number.isInteger(parsedStreamerId)) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
-    await removeStreamer(parseInt(streamer_id, 10));
+    await removeStreamer(parsedStreamerId);
     triggerRestart();
   } catch (err) {
     console.error('[Web] Remove streamer error:', err);
+    return res.redirect('/admin/streams?error=remove_streamer_failed');
   }
   res.redirect('/admin/streams');
 });

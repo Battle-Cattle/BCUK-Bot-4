@@ -50,6 +50,9 @@ const _WEB_PORT = parseInt(process.env.WEB_PORT ?? '3000', 10);
 if (Number.isNaN(_WEB_PORT)) throw new Error('Invalid WEB_PORT: must be a number');
 export const WEB_PORT = _WEB_PORT;
 export const SESSION_SECRET = require_env('SESSION_SECRET');
+if (SESSION_SECRET === '__REQUIRED_GENERATE_LONG_RANDOM_SECRET__') {
+  throw new Error('SESSION_SECRET has not been set — replace the placeholder in .env with a long random string');
+}
 export const DISCORD_CLIENT_ID = require_env('DISCORD_CLIENT_ID');
 export const DISCORD_CLIENT_SECRET = require_env('DISCORD_CLIENT_SECRET');
 export const DISCORD_CALLBACK_URL = require_env('DISCORD_CALLBACK_URL');
