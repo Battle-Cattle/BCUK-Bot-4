@@ -5,7 +5,6 @@ const SETTINGS_FILE = path.join(process.cwd(), 'monitor-settings.json');
 
 interface MonitorSettings {
   twitchMonitorEnabled: boolean;
-  eventSubToken?: string;
 }
 
 let cachedSettings: MonitorSettings | null = null;
@@ -50,16 +49,5 @@ export function getMonitorEnabled(): boolean {
 export function setMonitorEnabled(enabled: boolean): void {
   const settings = readSettings();
   settings.twitchMonitorEnabled = enabled;
-  writeSettings(settings);
-}
-
-/** Returns the stored EventSub user token, or null if not yet authorised. */
-export function getEventSubToken(): string | null {
-  return readSettings().eventSubToken ?? null;
-}
-
-export function setEventSubToken(token: string): void {
-  const settings = readSettings();
-  settings.eventSubToken = token;
   writeSettings(settings);
 }

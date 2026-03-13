@@ -15,27 +15,6 @@
     <section class="section">
       <h2 class="section-title">Stream Monitor</h2>
 
-      <!-- Twitch authorisation (admin only) -->
-      <% if (user && user.accessLevel >= 3) { %>
-      <div class="card" style="margin-bottom:1rem">
-        <div class="card-header">
-          <span class="card-icon">🔑</span>
-          <span class="card-label">Twitch Authorisation</span>
-          <span class="badge <%= twitchTokenSaved ? 'badge-active' : 'badge-offline' %>" style="margin-left:auto">
-            <%= twitchTokenSaved ? 'Token saved' : 'Not authorised' %>
-          </span>
-        </div>
-        <div class="card-body" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-          <% if (twitchAuthConfigured) { %>
-            <a href="/admin/streams/twitch-auth" class="btn">🔗 <%= twitchTokenSaved ? 'Re-authorise with Twitch' : 'Authorise with Twitch' %></a>
-            <span style="color:var(--text-muted);font-size:.85rem">Authorise once to link this bot's Twitch app credentials. Required for stream event subscriptions.</span>
-          <% } else { %>
-            <span style="color:var(--text-muted);font-size:.85rem">Add <code>TWITCH_EVENTSUB_REDIRECT_URL</code> to <code>.env</code> and restart to enable Twitch authorisation.<br>Set it to <strong>&lt;your panel URL&gt;/admin/streams/twitch-auth/callback</strong> and add the same URL in the Twitch Developer Console.</span>
-          <% } %>
-        </div>
-      </div>
-      <% } %>
-
       <!-- Discord posts toggle -->
       <div class="card" style="margin-bottom:1.5rem">
         <div class="card-header">

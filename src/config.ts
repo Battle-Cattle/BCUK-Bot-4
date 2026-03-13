@@ -53,5 +53,3 @@ export const SESSION_SECRET = require_env('SESSION_SECRET');
 export const DISCORD_CLIENT_ID = require_env('DISCORD_CLIENT_ID');
 export const DISCORD_CLIENT_SECRET = require_env('DISCORD_CLIENT_SECRET');
 export const DISCORD_CALLBACK_URL = require_env('DISCORD_CALLBACK_URL');
-// Redirect URI registered in the Twitch Developer Console for EventSub token generation
-export const TWITCH_EVENTSUB_REDIRECT_URL: string | undefined = process.env.TWITCH_EVENTSUB_REDIRECT_URL || undefined;

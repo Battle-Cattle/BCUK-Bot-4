@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { Router } from 'express';
 import {
   getAllStreamGroups,
@@ -11,9 +10,8 @@ import {
   removeStreamersByGroup,
 } from '../../db';
 import { requireManager, requireAdmin } from '../middleware';
-import { getMonitorEnabled, setMonitorEnabled, getEventSubToken, setEventSubToken } from '../../monitorSettings';
+import { getMonitorEnabled, setMonitorEnabled } from '../../monitorSettings';
 import { restartTwitchMonitor, getLiveStates, catchUpDiscordPosts } from '../../twitchMonitor';
-import { TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET, TWITCH_EVENTSUB_REDIRECT_URL } from '../../config';
 
 const router = Router();
 
@@ -27,8 +25,6 @@ router.get('/streams', requireManager, async (req, res) => {
       groups,
       streamers,
       monitorEnabled: getMonitorEnabled(),
-      twitchTokenSaved: !!getEventSubToken(),
-      twitchAuthConfigured: !!TWITCH_EVENTSUB_REDIRECT_URL,
     });
   } catch (err) {
     console.error('[Web] Streams page error:', err);
@@ -51,69 +47,6 @@ router.post('/streams/toggle', requireManager, (req, res) => {
   // Turning OFF — nothing to do; monitor keeps running, Discord posts are silenced
 
   res.redirect('/admin/streams');
-});
-
-// ─── Twitch OAuth (EventSub token) ───────────────────────────────────────────
-
-router.get('/streams/twitch-auth', requireAdmin, (req, res) => {
-  if (!TWITCH_EVENTSUB_REDIRECT_URL) {
-    return res.status(400).render('error', {
-      message: 'TWITCH_EVENTSUB_REDIRECT_URL is not set in .env. Add it and restart the bot.',
-      user: req.session.user ?? null,
-    });
-  }
-  const state = crypto.randomBytes(16).toString('hex');
-  req.session.oauthState = state;
-  const params = new URLSearchParams({
-    client_id: TWITCH_CLIENT_ID,
-    redirect_uri: TWITCH_EVENTSUB_REDIRECT_URL,
-    response_type: 'code',
-    scope: '',
-    state,
-  });
-  res.redirect(`https://id.twitch.tv/oauth2/authorize?${params}`);
-});
-
-router.get('/streams/twitch-auth/callback', requireAdmin, async (req, res) => {
-  const { code, state } = req.query as { code?: string; state?: string };
-  if (!code || !state || state !== req.session.oauthState) {
-    return res.status(400).render('error', {
-      message: 'Invalid OAuth state — please try the Twitch authorisation again.',
-      user: req.session.user ?? null,
-    });
-  }
-  delete req.session.oauthState;
-
-  if (!TWITCH_EVENTSUB_REDIRECT_URL) {
-    return res.status(400).render('error', { message: 'TWITCH_EVENTSUB_REDIRECT_URL is not configured.', user: req.session.user ?? null });
-  }
-
-  try {
-    const tokenRes = await fetch('https://id.twitch.tv/oauth2/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: TWITCH_CLIENT_ID,
-        client_secret: TWITCH_CLIENT_SECRET,
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: TWITCH_EVENTSUB_REDIRECT_URL,
-      }).toString(),
-    });
-    if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
-    const raw = await tokenRes.json() as unknown;
-    if (typeof raw !== 'object' || raw === null || typeof (raw as Record<string, unknown>).access_token !== 'string') {
-      throw new Error('Invalid token response from Twitch');
-    }
-    setEventSubToken((raw as { access_token: string }).access_token);
-    // Restart monitor so it picks up the new token immediately
-    triggerRestart();
-    console.log('[Web] Twitch EventSub token saved and monitor restarted');
-    res.redirect('/admin/streams');
-  } catch (err) {
-    console.error('[Web] Twitch auth callback error:', err);
-    res.status(500).render('error', { message: 'Twitch token exchange failed. Please try again.', user: req.session.user ?? null });
-  }
 });
 
 // ─── Live state snapshot ──────────────────────────────────────────────────────
