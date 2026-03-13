@@ -252,6 +252,9 @@ When ≥2 streamers in the same group are live on the same game, each matching D
 ### Twitch stream monitor — hot reload
 Any CRUD change to groups or streamers via the web panel calls `restartTwitchMonitor()` which tears down the poll timer, clears in-memory state, and re-runs `startTwitchMonitor()` (including startup live-check). Existing Discord messages are NOT deleted on restart; the live-check will re-sync them.
 
+### Twitch stream monitor — process exit
+`index.ts` calls `stopTwitchMonitor()` on `SIGINT`/`SIGTERM`. This stops the poll timer and clears in-memory state **without deleting Discord announcement messages** — they are left in place so the startup live-check on the next boot can re-sync them. `shutdownTwitchMonitor()` (which does delete all messages) is intentionally not used on process exit.
+
 ### Twitch stream monitor — EventSub token (stored but not yet wired)
 The Twitch OAuth flow at `/admin/streams/twitch-auth` stores a user access token in `monitor-settings.json` via `setEventSubToken()`. The current `twitchMonitor.ts` implementation does not use this token — it relies on an app (client credentials) token from `twitchApi.ts`. The stored token is reserved for future EventSub WebSocket subscriptions.
 

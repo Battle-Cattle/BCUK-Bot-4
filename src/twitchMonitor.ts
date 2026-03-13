@@ -481,8 +481,20 @@ export async function startTwitchMonitor(): Promise<void> {
 }
 
 /**
+ * Stops the monitor on process exit without touching Discord messages.
+ * The startup live-check on next boot will re-sync any stale announcements.
+ */
+export async function stopTwitchMonitor(): Promise<void> {
+  await teardown();
+  liveStates.clear();
+  loginToUserId.clear();
+  streamersData = [];
+  console.log('[TwitchMonitor] Stopped — Discord messages preserved for restart sync');
+}
+
+/**
  * Shuts down the monitor and deletes all live Discord announcement messages.
- * Used on process exit to clean up Discord messages.
+ * Only call this if you intentionally want to clear all announcements (e.g. disabling the feature permanently).
  */
 export async function shutdownTwitchMonitor(): Promise<void> {
   await teardown();

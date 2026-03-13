@@ -3,13 +3,13 @@ import { getPool } from './db';
 import { startTwitchBot } from './twitchBot';
 import { startDiscordBot } from './discordBot';
 import { startTikTokBot } from './tiktokBot';
-import { startTwitchMonitor, shutdownTwitchMonitor } from './twitchMonitor';
+import { startTwitchMonitor, stopTwitchMonitor } from './twitchMonitor';
 import { startWebPanel } from './web/server';
 import { disconnect } from './audioPlayer';
 
 function shutdown(signal: string): void {
   console.log(`[Bot] ${signal} received — disconnecting from voice and shutting down.`);
-  shutdownTwitchMonitor();
+  stopTwitchMonitor();
   disconnect();
   process.exit(0);
 }
