@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Users</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <%- include('partials/nav') %>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">User Management</h2>
+
+      <!-- Add user (Admin only) -->
+      <% if (user.accessLevel >= 3) { %>
+      <div class="card" style="margin-bottom:1.5rem">
+        <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add / Update User</span></div>
+        <form method="POST" action="/admin/users/add" class="inline-form">
+          <input class="input" type="text" name="discord_id"   placeholder="Discord User ID"  required>
+          <input class="input" type="text" name="discord_name" placeholder="Display name (optional)">
+          <select class="input" name="access_level">
+            <% Object.entries(accessLevelLabels).forEach(([val, label]) => { %>
+            <option value="<%= val %>"><%= label %></option>
+            <% }) %>
+          </select>
+          <button type="submit" class="btn">Add / Update</button>
+        </form>
+        <p class="hint">Enter the user's Discord numeric ID (right-click user in Discord → Copy User ID with Developer Mode on).</p>
+      </div>
+      <% } %>
+
+      <!-- User list -->
+      <div class="card">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Discord ID</th>
+              <th>Name</th>
+              <th>Twitch</th>
+              <th>Level</th>
+              <% if (user.accessLevel >= 3) { %><th>Actions</th><% } %>
+            </tr>
+          </thead>
+          <tbody>
+            <% users.forEach(function(u) { %>
+            <tr>
+              <td class="mono"><%= u.discord_id %></td>
+              <td><%= u.discord_name || '—' %></td>
+              <td class="mono"><%= u.twitch_name || '—' %></td>
+              <td><span class="badge level-<%= u.access_level %>"><%= accessLevelLabels[u.access_level] || u.access_level %></span></td>
+              <% if (user.accessLevel >= 3) { %>
+              <td class="actions">
+                <!-- Change level -->
+                <form method="POST" action="/admin/users/update" class="inline-form-sm">
+                  <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
+                  <select class="input input-sm" name="access_level">
+                    <% Object.entries(accessLevelLabels).forEach(([val, label]) => { %>
+                    <option value="<%= val %>" <%= parseInt(val) === u.access_level ? 'selected' : '' %>><%= label %></option>
+                    <% }) %>
+                  </select>
+                  <button type="submit" class="btn btn-sm">Set</button>
+                </form>
+                <!-- Remove -->
+                <% if (u.discord_id !== user.discordId) { %>
+                <form method="POST" action="/admin/users/remove" class="inline-form-sm" onsubmit="return confirm('Remove <%= u.discord_name || u.discord_id %>?')">
+                  <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
+                  <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+                </form>
+                <% } %>
+              </td>
+              <% } %>
+            </tr>
+            <% }) %>
+            <% if (users.length === 0) { %>
+            <tr><td colspan="5" class="empty-msg">No users in the database.</td></tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Error</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <% if (user) { %><%- include('partials/nav') %><% } %>
+  <div class="error-page">
+    <div class="error-card">
+      <div class="error-icon">⚠️</div>
+      <h1 class="error-title">Something went wrong</h1>
+      <p class="error-message"><%= message %></p>
+      <div class="error-actions">
+        <% if (user) { %>
+        <a href="/" class="btn">Go to Dashboard</a>
+        <% } else { %>
+        <a href="/auth/login" class="btn">Back to Login</a>
+        <% } %>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

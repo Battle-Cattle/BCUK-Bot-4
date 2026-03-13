@@ -1,0 +1,43 @@
+{
+  "name": "bcuk-bot-4",
+  "version": "1.0.0",
+  "description": "Twitch & Discord SFX bot",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@discordjs/voice": "^1.0.0-dev.1772884937-84b85f4c9",
+    "@snazzah/davey": "^0.1.10",
+    "@types/libsodium-wrappers": "^0.7.14",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5",
+    "ejs": "^5.0.1",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "ffmpeg-static": "^5.2.0",
+    "libsodium-wrappers": "^0.8.2",
+    "mediaplex": "^1.0.0",
+    "mysql2": "^3.9.3",
+    "opusscript": "^0.0.8",
+    "tiktok-live-connector": "^2.1.1-beta1",
+    "tmi.js": "^1.8.5",
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.19.0"
+  },
+  "overrides": {
+    "undici": "^7.22.0"
+  },
+  "devDependencies": {
+    "@types/ejs": "^3.1.5",
+    "@types/express": "^5.0.6",
+    "@types/express-session": "^1.18.2",
+    "@types/ffmpeg-static": "^3.0.3",
+    "@types/node": "^20.11.30",
+    "@types/tmi.js": "^1.8.6",
+    "@types/ws": "^8.18.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.2"
+  }
+}
