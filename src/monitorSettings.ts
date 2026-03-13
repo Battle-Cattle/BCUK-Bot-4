@@ -8,16 +8,25 @@ interface MonitorSettings {
   eventSubToken?: string;
 }
 
+let cachedSettings: MonitorSettings | null = null;
+
 function readSettings(): MonitorSettings {
+  if (cachedSettings) {
+    return cachedSettings;
+  }
+
   try {
     const content = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-    return JSON.parse(content) as MonitorSettings;
+    cachedSettings = JSON.parse(content) as MonitorSettings;
   } catch {
-    return { twitchMonitorEnabled: true };
+    cachedSettings = { twitchMonitorEnabled: true };
   }
+
+  return cachedSettings;
 }
 
 function writeSettings(settings: MonitorSettings): void {
+  cachedSettings = settings;
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
 }
 
