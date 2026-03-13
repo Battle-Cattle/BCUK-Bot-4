@@ -18,12 +18,13 @@ export const TWITCH_CHANNELS: string[] = require_env('TWITCH_CHANNELS')
   .map((c) => c.trim().replace(/^#/, ''))
   .filter(Boolean);
 
-// TikTok
-// Comma-separated list of TikTok usernames whose LIVE streams to monitor
 // Twitch stream monitor (stream announcements — separate from chat bot)
+// Client credentials for Twitch API / EventSub
 export const TWITCH_CLIENT_ID     = require_env('TWITCH_CLIENT_ID');
 export const TWITCH_CLIENT_SECRET = require_env('TWITCH_CLIENT_SECRET');
 
+// TikTok LIVE monitoring
+// Comma-separated list of TikTok usernames whose LIVE streams to monitor
 export const TIKTOK_CHANNELS: string[] = (process.env.TIKTOK_CHANNELS ?? '')
   .split(',')
   .map((c) => c.trim().replace(/^@/, ''))
