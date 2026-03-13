@@ -425,9 +425,6 @@ async function pollStreams(): Promise<void> {
           existing.offlineTimer = null;
           console.log(`[TwitchMonitor] ${key} came back — offline timer cancelled`);
         }
-        if (!existing || existing.offlineTimer === null && !liveStates.has(key)) {
-          // Shouldn't happen (covered above), but guard
-        }
         if (!liveStates.has(key)) {
           // Went live
           await postAnnouncement(streamer, pollStream);
