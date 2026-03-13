@@ -13,6 +13,15 @@ function relativeTime(isoString) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function setText(id, value) {
   const el = document.getElementById(id);
   if (el) el.textContent = value || '—';
@@ -39,7 +48,7 @@ function buildChannelHTML(channelMap) {
     const meta  = ts ? relativeTime(ts) : 'Never seen';
     return `<div class="channel-item">
       <div>
-        <div class="channel-name">${name}</div>
+        <div class="channel-name">${escapeHtml(name)}</div>
         <div class="channel-meta">${meta}</div>
       </div>
       <span class="badge ${cls}">${label}</span>
@@ -82,7 +91,7 @@ function applyStatus(status) {
 
   // Last played
   setText('last-command', status.voice.lastCommand);
-  setText('last-file',    status.voice.currentFile || status.voice.lastCommand && '—');
+  setText('last-file',    status.voice.currentFile || (status.voice.lastCommand && '—'));
   setText('last-source',  status.voice.lastSource);
   setText('last-when',    relativeTime(status.voice.lastPlayedAt));
 

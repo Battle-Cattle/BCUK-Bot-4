@@ -98,7 +98,7 @@
             <% triggers.forEach(function(t) { %>
             <tr class="sfx-row<%= t.hidden ? ' row-hidden' : '' %>" data-command="<%= t.triggerCommand.toLowerCase() %>" data-category="<%= (t.categoryName || '').toLowerCase() %>">
               <td class="mono"><%= t.triggerCommand %></td>
-              <td><%- t.categoryName || '<em class="muted">None</em>' %></td>
+              <td><% if (t.categoryName) { %><%= t.categoryName %><% } else { %><em class="muted">None</em><% } %></td>
               <td><%= t.files.length %> file<%= t.files.length !== 1 ? 's' : '' %></td>
               <td>
                 <% if (t.hidden) { %>
@@ -141,7 +141,7 @@
   </main>
 
   <script>
-    const initialStatus = <%- JSON.stringify(status) %>;
+    const initialStatus = <%- JSON.stringify(status).replace(/</g, '\u003c') %>;
     let currentStatus = initialStatus;
   </script>
   <script src="/app.js"></script>

@@ -101,8 +101,11 @@ router.get('/streams/twitch-auth/callback', requireAdmin, async (req, res) => {
       }).toString(),
     });
     if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
-    const data = await tokenRes.json() as { access_token: string };
-    setEventSubToken(data.access_token);
+    const raw = await tokenRes.json() as unknown;
+    if (typeof raw !== 'object' || raw === null || typeof (raw as Record<string, unknown>).access_token !== 'string') {
+      throw new Error('Invalid token response from Twitch');
+    }
+    setEventSubToken((raw as { access_token: string }).access_token);
     // Restart monitor so it picks up the new token immediately
     triggerRestart();
     console.log('[Web] Twitch EventSub token saved and monitor restarted');
@@ -127,7 +130,7 @@ router.post('/streams/groups/add', requireManager, async (req, res) => {
   const delete_old_posts = req.body.delete_old_posts === 'on';
 
   if (!name || !discord_channel || !live_message || !new_game_message) {
-    return res.redirect('/admin/streams');
+    return res.redirect('/admin/streams?error=missing_fields');
   }
 
   try {
@@ -153,7 +156,7 @@ router.post('/streams/groups/update', requireManager, async (req, res) => {
   const delete_old_posts = req.body.delete_old_posts === 'on';
 
   if (!group_id || !name || !discord_channel || !live_message || !new_game_message) {
-    return res.redirect('/admin/streams');
+    return res.redirect('/admin/streams?error=missing_fields');
   }
 
   try {
@@ -219,11 +222,14 @@ router.post('/streams/streamers/remove', requireManager, async (req, res) => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Fire-and-forget monitor restart; always runs so in-memory state stays current. */
+/** Fire-and-forget monitor restart serialised via a promise chain so concurrent
+ * CRUD operations cannot interleave teardown and startTwitchMonitor. */
+let restartChain: Promise<void> = Promise.resolve();
+
 function triggerRestart(): void {
-  restartTwitchMonitor().catch((err) =>
-    console.error('[Web] TwitchMonitor restart error:', err),
-  );
+  restartChain = restartChain
+    .then(() => restartTwitchMonitor())
+    .catch((err) => console.error('[Web] TwitchMonitor restart error:', err));
 }
 
 export default router;

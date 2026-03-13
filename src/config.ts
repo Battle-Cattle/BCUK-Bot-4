@@ -33,16 +33,22 @@ export const TIKTOK_CHANNELS: string[] = (process.env.TIKTOK_CHANNELS ?? '')
 export const TIKTOK_SIGN_API_KEY: string | undefined = process.env.TIKTOK_SIGN_API_KEY || undefined;
 
 export const DB_HOST = process.env.DB_HOST ?? 'localhost';
-export const DB_PORT = parseInt(process.env.DB_PORT ?? '3306', 10);
+const _DB_PORT = parseInt(process.env.DB_PORT ?? '3306', 10);
+if (Number.isNaN(_DB_PORT)) throw new Error('Invalid DB_PORT: must be a number');
+export const DB_PORT = _DB_PORT;
 export const DB_USER = require_env('DB_USER');
 export const DB_PASSWORD = require_env('DB_PASSWORD');
 export const DB_NAME = require_env('DB_NAME');
 
 export const SFX_FOLDER = process.env.SFX_FOLDER ?? './sfx';
-export const GLOBAL_COOLDOWN_MS = parseInt(process.env.GLOBAL_COOLDOWN_MS ?? '3000', 10);
+const _COOLDOWN = parseInt(process.env.GLOBAL_COOLDOWN_MS ?? '3000', 10);
+if (Number.isNaN(_COOLDOWN)) throw new Error('Invalid GLOBAL_COOLDOWN_MS: must be a number');
+export const GLOBAL_COOLDOWN_MS = _COOLDOWN;
 
 // Web panel
-export const WEB_PORT = parseInt(process.env.WEB_PORT ?? '3000', 10);
+const _WEB_PORT = parseInt(process.env.WEB_PORT ?? '3000', 10);
+if (Number.isNaN(_WEB_PORT)) throw new Error('Invalid WEB_PORT: must be a number');
+export const WEB_PORT = _WEB_PORT;
 export const SESSION_SECRET = require_env('SESSION_SECRET');
 export const DISCORD_CLIENT_ID = require_env('DISCORD_CLIENT_ID');
 export const DISCORD_CLIENT_SECRET = require_env('DISCORD_CLIENT_SECRET');

@@ -18,6 +18,7 @@ router.post('/voice/join', requireMod, async (_req, res) => {
     return;
   }
   try {
+    disconnect();
     await connect(discordClient);
     res.json({ ok: true });
   } catch (err) {

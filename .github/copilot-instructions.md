@@ -10,7 +10,7 @@ A multi-platform SFX bot that listens to Twitch, Discord, and TikTok chat, match
 
 ## Repository Structure
 
-```
+```text
 BCUK_Bot_4/
 ├── src/
 │   ├── index.ts              — Entry point: starts all services
@@ -62,6 +62,7 @@ BCUK_Bot_4/
 Tables in the existing MySQL/MariaDB database:
 
 ### `sfxtrigger`
+
 | Column           | Type         | Notes                                      |
 |------------------|--------------|--------------------------------------------|
 | `id`             | bigint PK    |                                            |
@@ -71,6 +72,7 @@ Tables in the existing MySQL/MariaDB database:
 | `description`    | varchar      | nullable                                   |
 
 ### `sfx`
+
 | Column           | Type         | Notes                                      |
 |------------------|--------------|--------------------------------------------|
 | `id`             | int PK       |                                            |
@@ -82,12 +84,14 @@ Tables in the existing MySQL/MariaDB database:
 | `category_id`    | int FK→sfxcategory | nullable                            |
 
 ### `sfxcategory`
+
 | Column | Type    |
 |--------|---------|
 | `id`   | int PK  |
 | `name` | varchar |
 
 ### `user`
+
 | Column                 | Type         | Notes                      |
 |------------------------|--------------|----------------------------|
 | `discord_id`           | varchar PK   | Discord numeric user ID    |
@@ -98,6 +102,7 @@ Tables in the existing MySQL/MariaDB database:
 | `access_level`         | int          | 0=USER 1=MOD 2=MANAGER 3=ADMIN |
 
 ### `stream_group`
+
 | Column               | Type       | Notes                                      |
 |----------------------|------------|--------------------------------------------|
 | `id`                 | int PK     |                                            |
@@ -110,6 +115,7 @@ Tables in the existing MySQL/MariaDB database:
 | `delete_old_posts`   | bit(1)     | Delete old embed on game change instead of edit |
 
 ### `streamer`
+
 | Column                | Type        | Notes                                      |
 |-----------------------|-------------|--------------------------------------------|
 | `id`                  | int PK      |                                            |

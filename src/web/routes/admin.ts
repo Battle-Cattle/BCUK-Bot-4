@@ -33,8 +33,10 @@ router.post('/users/add', requireAdmin, async (req, res) => {
     access_level?: string;
   };
   if (!discord_id || !access_level) return res.redirect('/admin/users');
+  const level = parseInt(access_level, 10);
+  if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   try {
-    await upsertUser(discord_id.trim(), (discord_name ?? '').trim(), parseInt(access_level, 10));
+    await upsertUser(discord_id.trim(), (discord_name ?? '').trim(), level);
   } catch (err) {
     console.error('[Web] Add user error:', err);
   }
@@ -45,6 +47,8 @@ router.post('/users/add', requireAdmin, async (req, res) => {
 router.post('/users/update', requireAdmin, async (req, res) => {
   const { discord_id, access_level } = req.body as { discord_id?: string; access_level?: string };
   if (!discord_id || access_level === undefined) return res.redirect('/admin/users');
+  const level = parseInt(access_level, 10);
+  if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
 
   // Prevent demoting yourself
   if (discord_id === req.session.user!.discordId) {
@@ -54,7 +58,7 @@ router.post('/users/update', requireAdmin, async (req, res) => {
     });
   }
   try {
-    await updateAccessLevel(discord_id, parseInt(access_level, 10));
+    await updateAccessLevel(discord_id, level);
   } catch (err) {
     console.error('[Web] Update access level error:', err);
   }

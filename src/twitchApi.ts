@@ -34,6 +34,12 @@ function authHeaders(token: string): Record<string, string> {
   };
 }
 
+function chunks<T>(arr: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) result.push(arr.slice(i, i + size));
+  return result;
+}
+
 export interface TwitchUser {
   login: string;
   id: string;
@@ -42,13 +48,17 @@ export interface TwitchUser {
 export async function getUsers(logins: string[]): Promise<TwitchUser[]> {
   if (logins.length === 0) return [];
   const token = await getAppToken();
-  const params = logins.map((l) => `login=${encodeURIComponent(l)}`).join('&');
-  const res = await fetch(`https://api.twitch.tv/helix/users?${params}`, {
-    headers: authHeaders(token),
-  });
-  if (!res.ok) throw new Error(`[TwitchAPI] getUsers failed: ${res.status}`);
-  const data = await res.json() as { data: Array<{ login: string; id: string }> };
-  return data.data.map((u) => ({ login: u.login, id: u.id }));
+  const results: TwitchUser[] = [];
+  for (const batch of chunks(logins, 100)) {
+    const params = batch.map((l) => `login=${encodeURIComponent(l)}`).join('&');
+    const res = await fetch(`https://api.twitch.tv/helix/users?${params}`, {
+      headers: authHeaders(token),
+    });
+    if (!res.ok) throw new Error(`[TwitchAPI] getUsers failed: ${res.status}`);
+    const data = await res.json() as { data: Array<{ login: string; id: string }> };
+    results.push(...data.data.map((u) => ({ login: u.login, id: u.id })));
+  }
+  return results;
 }
 
 export interface TwitchStream {
@@ -64,14 +74,17 @@ export interface TwitchStream {
 export async function getStreams(userIds: string[]): Promise<TwitchStream[]> {
   if (userIds.length === 0) return [];
   const token = await getAppToken();
-  // Helix allows up to 100 user_id params per request
-  const params = userIds.map((id) => `user_id=${encodeURIComponent(id)}`).join('&');
-  const res = await fetch(`https://api.twitch.tv/helix/streams?${params}&first=100`, {
-    headers: authHeaders(token),
-  });
-  if (!res.ok) throw new Error(`[TwitchAPI] getStreams failed: ${res.status}`);
-  const data = await res.json() as { data: TwitchStream[] };
-  return data.data;
+  const results: TwitchStream[] = [];
+  for (const batch of chunks(userIds, 100)) {
+    const params = batch.map((id) => `user_id=${encodeURIComponent(id)}`).join('&');
+    const res = await fetch(`https://api.twitch.tv/helix/streams?${params}&first=100`, {
+      headers: authHeaders(token),
+    });
+    if (!res.ok) throw new Error(`[TwitchAPI] getStreams failed: ${res.status}`);
+    const data = await res.json() as { data: TwitchStream[] };
+    results.push(...data.data);
+  }
+  return results;
 }
 
 

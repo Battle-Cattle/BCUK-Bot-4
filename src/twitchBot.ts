@@ -7,7 +7,7 @@ let client: tmi.Client;
 
 export function startTwitchBot(): void {
   // Seed all configured channels as disconnected so they appear in status immediately
-  TWITCH_CHANNELS.forEach((ch) => setTwitchChannel(ch, false));
+  TWITCH_CHANNELS.forEach((ch) => { setTwitchChannel(ch, false); });
 
   client = new tmi.Client({
     identity: {
@@ -33,12 +33,12 @@ export function startTwitchBot(): void {
   client.on('connected', (addr, port) => {
     console.log(`[Twitch] Connected to ${addr}:${port}`);
     console.log(`[Twitch] Listening on: ${TWITCH_CHANNELS.join(', ')}`);
-    TWITCH_CHANNELS.forEach((ch) => setTwitchChannel(ch, true));
+    TWITCH_CHANNELS.forEach((ch) => { setTwitchChannel(ch, true); });
   });
 
   client.on('disconnected', (reason) => {
     console.warn(`[Twitch] Disconnected: ${reason}`);
-    TWITCH_CHANNELS.forEach((ch) => setTwitchChannel(ch, false));
+    TWITCH_CHANNELS.forEach((ch) => { setTwitchChannel(ch, false); });
   });
 
   client.connect().catch((err) => console.error('[Twitch] Failed to connect:', err));

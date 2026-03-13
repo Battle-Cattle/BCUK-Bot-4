@@ -53,7 +53,7 @@ export async function findTrigger(command: string): Promise<SfxTrigger | null> {
     id: BigInt(row.id),
     trigger_command: row.trigger_command,
     category_id: row.category_id,
-    hidden: Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden == 1,
+    hidden: Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden === 1,
     description: row.description,
   };
 }
@@ -75,7 +75,7 @@ export async function findSoundFiles(triggerId: bigint): Promise<SfxFile[]> {
     file: row.file,
     trigger_command: row.trigger_command,
     weight: row.weight,
-    hidden: Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden == 1,
+    hidden: Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden === 1,
     category_id: row.category_id,
   }));
 }
@@ -116,7 +116,7 @@ export async function findUser(discordId: string): Promise<DbUser | null> {
   return {
     discord_id: String(r.discord_id),
     discord_name: r.discord_name,
-    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled == 1,
+    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled === 1,
     twitch_name: r.twitch_name,
     access_level: r.access_level,
   };
@@ -129,7 +129,7 @@ export async function getAllUsers(): Promise<DbUser[]> {
   return rows.map((r) => ({
     discord_id: String(r.discord_id),
     discord_name: r.discord_name,
-    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled == 1,
+    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled === 1,
     twitch_name: r.twitch_name,
     access_level: r.access_level,
   }));
@@ -197,9 +197,9 @@ function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
     discord_channel: String(r.discord_channel),
     live_message: r.live_message,
     new_game_message: r.new_game_message,
-    multi_twitch: Buffer.isBuffer(r.multi_twitch) ? r.multi_twitch[0] === 1 : r.multi_twitch == 1,
+    multi_twitch: Buffer.isBuffer(r.multi_twitch) ? r.multi_twitch[0] === 1 : r.multi_twitch === 1,
     multi_twitch_message: r.multi_twitch_message ?? '',
-    delete_old_posts: Buffer.isBuffer(r.delete_old_posts) ? r.delete_old_posts[0] === 1 : r.delete_old_posts == 1,
+    delete_old_posts: Buffer.isBuffer(r.delete_old_posts) ? r.delete_old_posts[0] === 1 : r.delete_old_posts === 1,
   };
 }
 
@@ -285,9 +285,9 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
       discord_channel: String(r.discord_channel),
       live_message: r.live_message,
       new_game_message: r.new_game_message,
-      multi_twitch: Buffer.isBuffer(r.multi_twitch) ? r.multi_twitch[0] === 1 : r.multi_twitch == 1,
+      multi_twitch: Buffer.isBuffer(r.multi_twitch) ? r.multi_twitch[0] === 1 : r.multi_twitch === 1,
       multi_twitch_message: r.multi_twitch_message ?? '',
-      delete_old_posts: Buffer.isBuffer(r.delete_old_posts) ? r.delete_old_posts[0] === 1 : r.delete_old_posts == 1,
+      delete_old_posts: Buffer.isBuffer(r.delete_old_posts) ? r.delete_old_posts[0] === 1 : r.delete_old_posts === 1,
     },
   }));
 }
@@ -362,7 +362,7 @@ export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
         triggerId: r.triggerId,
         triggerCommand: r.triggerCommand,
         description: r.description ?? null,
-        hidden: Buffer.isBuffer(r.triggerHidden) ? r.triggerHidden[0] === 1 : r.triggerHidden == 1,
+        hidden: Buffer.isBuffer(r.triggerHidden) ? r.triggerHidden[0] === 1 : r.triggerHidden === 1,
         categoryName: r.categoryName ?? null,
         files: [],
       });
@@ -372,7 +372,7 @@ export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
         id: r.sfxId,
         file: r.file,
         weight: r.weight,
-        hidden: Buffer.isBuffer(r.sfxHidden) ? r.sfxHidden[0] === 1 : r.sfxHidden == 1,
+        hidden: Buffer.isBuffer(r.sfxHidden) ? r.sfxHidden[0] === 1 : r.sfxHidden === 1,
       });
     }
   }

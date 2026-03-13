@@ -8,9 +8,8 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@discordjs/voice": "^1.0.0-dev.1772884937-84b85f4c9",
+    "@discordjs/voice": "1.0.0-dev.1772884937-84b85f4c9",
     "@snazzah/davey": "^0.1.10",
-    "@types/libsodium-wrappers": "^0.7.14",
     "discord.js": "^14.14.1",
     "dotenv": "^16.4.5",
     "ejs": "^5.0.1",
@@ -32,6 +31,7 @@
   "devDependencies": {
     "@types/ejs": "^3.1.5",
     "@types/express": "^5.0.6",
+    "@types/libsodium-wrappers": "^0.7.14",
     "@types/express-session": "^1.18.2",
     "@types/ffmpeg-static": "^3.0.3",
     "@types/node": "^20.11.30",

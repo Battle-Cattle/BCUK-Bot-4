@@ -45,6 +45,7 @@ router.get('/discord/callback', async (req, res) => {
         code,
         redirect_uri: DISCORD_CALLBACK_URL,
       }),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
     const { access_token } = (await tokenRes.json()) as { access_token: string };
@@ -52,6 +53,7 @@ router.get('/discord/callback', async (req, res) => {
     // 2. Fetch Discord user profile
     const profileRes = await fetch('https://discord.com/api/users/@me', {
       headers: { Authorization: `Bearer ${access_token}` },
+      signal: AbortSignal.timeout(10_000),
     });
     if (!profileRes.ok) throw new Error(`Profile fetch failed: ${profileRes.status}`);
     const profile = (await profileRes.json()) as {
@@ -76,7 +78,7 @@ router.get('/discord/callback', async (req, res) => {
       discordAvatar: profile.avatar
         ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
         : null,
-      accessLevel: dbUser.access_level,
+      accessLevel: dbUser.access_level as 0 | 1 | 2 | 3,
     };
 
     res.redirect('/');

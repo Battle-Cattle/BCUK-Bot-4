@@ -17,6 +17,7 @@ function connectToChannel(username: string): void {
   function scheduleReconnect(): void {
     if (reconnectScheduled) return;
     reconnectScheduled = true;
+    try { connection.disconnect(); } catch { /* already disconnected or never connected */ }
     setTimeout(() => connectToChannel(username), RECONNECT_DELAY_MS);
   }
 

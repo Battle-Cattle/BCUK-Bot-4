@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 const SETTINGS_FILE = path.join(process.cwd(), 'monitor-settings.json');
 
@@ -18,7 +19,8 @@ function readSettings(): MonitorSettings {
   try {
     const content = fs.readFileSync(SETTINGS_FILE, 'utf-8');
     cachedSettings = JSON.parse(content) as MonitorSettings;
-  } catch {
+  } catch (err) {
+    console.warn(`[MonitorSettings] Failed to read ${SETTINGS_FILE}:`, err);
     cachedSettings = { twitchMonitorEnabled: true };
   }
 
@@ -27,7 +29,16 @@ function readSettings(): MonitorSettings {
 
 function writeSettings(settings: MonitorSettings): void {
   cachedSettings = settings;
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+  const json = JSON.stringify(settings, null, 2);
+  const tmpFile = path.join(os.tmpdir(), `monitor-settings-${process.pid}.tmp`);
+  const fd = fs.openSync(tmpFile, 'w', 0o600);
+  try {
+    fs.writeSync(fd, json);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmpFile, SETTINGS_FILE);
 }
 
 export function getMonitorEnabled(): boolean {
