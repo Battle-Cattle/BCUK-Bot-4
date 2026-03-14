@@ -31,7 +31,7 @@ app.use(
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: isProduction, maxAge: 24 * 60 * 60 * 1000 },
+    cookie: { secure: isProduction, httpOnly: true, sameSite: 'lax', maxAge: 24 * 60 * 60 * 1000 },
   }),
 );
 
@@ -41,6 +41,17 @@ app.use('/api', requireAuth, apiRouter);
 app.use('/admin', requireAuth, adminRouter);
 app.use('/admin', requireAuth, streamsRouter);
 app.use('/', requireAuth, dashboardRouter);
+
+// 404 handler
+app.use((_req, res) => {
+  res.status(404).render('error', { message: 'Page not found.', user: null });
+});
+
+// Centralised error handler
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('[Web] Unhandled error:', err);
+  res.status(500).render('error', { message: 'An unexpected error occurred.', user: null });
+});
 
 export function startWebPanel(): void {
   app.listen(WEB_PORT, () => {

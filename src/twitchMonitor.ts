@@ -36,6 +36,7 @@ const OFFLINE_GRACE_MS = 5 * 60 * 1000;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let pollRunning = false;
+let currentPollPromise: Promise<void> = Promise.resolve();
 
 // ─── Template helpers ─────────────────────────────────────────────────────────
 
@@ -235,42 +236,7 @@ async function deleteAnnouncement(stateKey: string): Promise<void> {
   await updateMultitwitch(groupId);
 }
 
-// ─── Event handlers ───────────────────────────────────────────────────────────
-
-async function handleStreamOnline(login: string): Promise<void> {
-  const key = login.toLowerCase();
-  const streamerInfos = streamersData.filter((s) => s.name.toLowerCase() === key);
-  if (streamerInfos.length === 0) return;
-
-  // If there are pending offline timers, the streamer came back before the grace period expired
-  let hasPendingTimer = false;
-  for (const state of liveStates.values()) {
-    if (state.login === key && state.offlineTimer) {
-      clearTimeout(state.offlineTimer);
-      state.offlineTimer = null;
-      hasPendingTimer = true;
-    }
-  }
-  if (hasPendingTimer) {
-    console.log(`[TwitchMonitor] ${login} came back online — offline timer(s) cancelled`);
-    return;
-  }
-
-  const userId = loginToUserId.get(key);
-  if (!userId) return;
-
-  const streams = await getStreams([userId]);
-  const stream = streams.find((s) => s.user_id === userId && s.type === 'live');
-  if (!stream) {
-    console.warn(`[TwitchMonitor] ${login} stream.online fired but Helix shows not live yet`);
-    return;
-  }
-
-  for (const streamerInfo of streamerInfos) {
-    await postAnnouncement(streamerInfo, stream);
-  }
-  console.log(`[TwitchMonitor] ${login} went live — announcement posted`);
-}
+// ─── Offline grace period ────────────────────────────────────────────────────
 
 async function handleStreamOffline(login: string): Promise<void> {
   const key = login.toLowerCase();
@@ -296,29 +262,10 @@ async function handleStreamOffline(login: string): Promise<void> {
         await deleteAnnouncement(stateKey);
         console.log(`[TwitchMonitor] ${login} confirmed offline — announcement removed`);
       }
-      // If live again, stream.online will have already cleared the timer
     }, OFFLINE_GRACE_MS);
   }
 
   console.log(`[TwitchMonitor] ${login} went offline — grace period started`);
-}
-
-async function handleChannelUpdate(login: string): Promise<void> {
-  const key = login.toLowerCase();
-  const matchingStates = Array.from(liveStates.values()).filter((s) => s.login === key);
-  if (matchingStates.length === 0) return; // Ignore updates for streamers that aren't live
-
-  const userId = loginToUserId.get(key);
-  if (!userId) return;
-
-  const streams = await getStreams([userId]);
-  const stream = streams.find((s) => s.user_id === userId && s.type === 'live');
-  if (!stream) return; // Stream is offline — ignore game/title changes
-
-  for (const state of matchingStates) {
-    await editAnnouncement(state, stream, 'new_game_message');
-  }
-  console.log(`[TwitchMonitor] ${login} game/title updated — announcement edited`);
 }
 
 // ─── Startup live-check ───────────────────────────────────────────────────────
@@ -399,9 +346,18 @@ async function performStartupLiveCheck(): Promise<void> {
       await postAnnouncement(streamer, liveStream);
       groupsWithChanges.add(streamer.group.id);
     } else if (hasStoredMsg) {
-      // Stream ended while bot was offline — clean up
-      await deleteAnnouncement(String(streamer.id));
-      // deleteAnnouncement also calls clearStreamerLive + updateMultitwitch
+      // Stream ended while bot was offline — liveStates is empty at startup so
+      // deleteAnnouncement() would early-return without clearing DB state. Do it directly.
+      if (discordClient && streamer.discord_channel_id && streamer.discord_message_id) {
+        try {
+          const ch = await discordClient.channels.fetch(streamer.discord_channel_id);
+          if (ch && ch.isTextBased()) {
+            const msg = await ch.messages.fetch(streamer.discord_message_id).catch(() => null);
+            if (msg) await msg.delete();
+          }
+        } catch { /* already deleted */ }
+      }
+      await clearStreamerLive(streamer.id);
       groupsWithChanges.add(streamer.group.id);
     }
   }
@@ -411,13 +367,12 @@ async function performStartupLiveCheck(): Promise<void> {
   }
 }
 
-// ─── WebSocket ────────────────────────────────────────────────────────────────
-
 // ─── Polling ───────────────────────────────────────────────────────────────
 
 async function pollStreams(): Promise<void> {
   if (pollRunning || streamersData.length === 0) return;
   pollRunning = true;
+  currentPollPromise = (async () => {
   try {
     const userIds = Array.from(loginToUserId.values());
     if (userIds.length === 0) return;
@@ -447,10 +402,10 @@ async function pollStreams(): Promise<void> {
           }
           console.log(`[TwitchMonitor] ${loginKey} came back — offline timer(s) cancelled`);
         }
-        if (!liveStates.has(stateKey)) {
-          // Went live (for this group)
+        if (!liveStates.has(stateKey) || (existing && !existing.messageId)) {
+          // Went live, or state exists with no Discord message (e.g. Discord wasn't ready at startup)
           await postAnnouncement(streamer, pollStream);
-          console.log(`[TwitchMonitor] ${loginKey} went live in group ${streamer.group.name}`);
+          if (!liveStates.has(stateKey)) console.log(`[TwitchMonitor] ${loginKey} went live in group ${streamer.group.name}`);
         } else if (existing && existing.currentGame !== pollStream.game_name) {
           // Game changed
           await editAnnouncement(existing, pollStream, 'new_game_message');
@@ -469,12 +424,16 @@ async function pollStreams(): Promise<void> {
   } finally {
     pollRunning = false;
   }
+  })();
+  await currentPollPromise;
 }
 
 // ─── Internal teardown ────────────────────────────────────────────────────────
 
 async function teardown(): Promise<void> {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  // Wait for any in-flight poll to complete before callers mutate liveStates.
+  await currentPollPromise;
   for (const state of liveStates.values()) {
     if (state.offlineTimer) clearTimeout(state.offlineTimer);
   }

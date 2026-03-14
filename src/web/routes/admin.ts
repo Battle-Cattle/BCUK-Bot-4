@@ -12,6 +12,8 @@ import { requireManager, requireAdmin } from '../middleware';
 
 const router = Router();
 
+const KNOWN_ERRORS = new Set(['add_failed', 'update_failed', 'remove_failed']);
+
 // View user list (Manager+)
 router.get('/users', requireManager, async (req, res) => {
   try {
@@ -20,7 +22,7 @@ router.get('/users', requireManager, async (req, res) => {
       user: req.session.user,
       users,
       accessLevelLabels: ACCESS_LEVEL_LABELS,
-      error: req.query.error ?? null,
+      error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
     });
   } catch (err) {
     console.error('[Web] Admin users error:', err);

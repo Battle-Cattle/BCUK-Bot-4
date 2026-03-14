@@ -9,6 +9,14 @@ interface MonitorSettings {
 
 let cachedSettings: MonitorSettings | null = null;
 
+function isValidMonitorSettings(v: unknown): v is MonitorSettings {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as Record<string, unknown>).twitchMonitorEnabled === 'boolean'
+  );
+}
+
 function readSettings(): MonitorSettings {
   if (cachedSettings) {
     return cachedSettings;
@@ -16,7 +24,13 @@ function readSettings(): MonitorSettings {
 
   try {
     const content = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-    cachedSettings = JSON.parse(content) as MonitorSettings;
+    const parsed: unknown = JSON.parse(content);
+    if (isValidMonitorSettings(parsed)) {
+      cachedSettings = parsed;
+    } else {
+      console.warn('[MonitorSettings] Settings file has unexpected shape — using defaults');
+      cachedSettings = { twitchMonitorEnabled: true };
+    }
   } catch (err) {
     console.warn(`[MonitorSettings] Failed to read ${SETTINGS_FILE}:`, err);
     cachedSettings = { twitchMonitorEnabled: true };

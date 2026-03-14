@@ -15,8 +15,8 @@ async function shutdown(signal: string): Promise<void> {
   process.exit(0);
 }
 
-process.on('SIGINT',  () => { shutdown('SIGINT').catch(() => process.exit(1)); });
-process.on('SIGTERM', () => { shutdown('SIGTERM').catch(() => process.exit(1)); });
+process.on('SIGINT',  () => { shutdown('SIGINT').catch((err)  => { console.error('[Bot] Shutdown error:', err); process.exit(1); }); });
+process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err) => { console.error('[Bot] Shutdown error:', err); process.exit(1); }); });
 
 async function main(): Promise<void> {
   console.log('[Bot] Starting BCUK SFX Bot...');

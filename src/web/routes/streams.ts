@@ -15,6 +15,12 @@ import { restartTwitchMonitor, getLiveStates, catchUpDiscordPosts } from '../../
 
 const router = Router();
 
+const KNOWN_ERRORS = new Set([
+  'missing_fields', 'invalid_id',
+  'add_group_failed', 'update_group_failed', 'remove_group_failed',
+  'add_streamer_failed', 'remove_streamer_failed',
+]);
+
 // ─── View ─────────────────────────────────────────────────────────────────────
 
 router.get('/streams', requireManager, async (req, res) => {
@@ -25,7 +31,7 @@ router.get('/streams', requireManager, async (req, res) => {
       groups,
       streamers,
       monitorEnabled: getMonitorEnabled(),
-      error: (req.query.error as string | undefined) ?? null,
+      error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
     });
   } catch (err) {
     console.error('[Web] Streams page error:', err);
