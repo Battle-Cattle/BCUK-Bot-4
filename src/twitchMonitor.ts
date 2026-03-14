@@ -402,10 +402,11 @@ async function pollStreams(): Promise<void> {
           }
           console.log(`[TwitchMonitor] ${loginKey} came back — offline timer(s) cancelled`);
         }
-        if (!liveStates.has(stateKey) || (existing && !existing.messageId)) {
+        const isNew = !liveStates.has(stateKey);
+        if (isNew || (existing && !existing.messageId)) {
           // Went live, or state exists with no Discord message (e.g. Discord wasn't ready at startup)
           await postAnnouncement(streamer, pollStream);
-          if (!liveStates.has(stateKey)) console.log(`[TwitchMonitor] ${loginKey} went live in group ${streamer.group.name}`);
+          if (isNew) console.log(`[TwitchMonitor] ${loginKey} went live in group ${streamer.group.name}`);
         } else if (existing && existing.currentGame !== pollStream.game_name) {
           // Game changed
           await editAnnouncement(existing, pollStream, 'new_game_message');
