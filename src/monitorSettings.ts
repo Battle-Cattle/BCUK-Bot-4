@@ -46,7 +46,6 @@ export function getMonitorEnabled(): boolean {
 }
 
 export function setMonitorEnabled(enabled: boolean): void {
-  const settings = readSettings();
-  settings.twitchMonitorEnabled = enabled;
-  writeSettings(settings);
+  const current = readSettings();
+  writeSettings({ ...current, twitchMonitorEnabled: enabled });
 }

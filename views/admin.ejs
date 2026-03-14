@@ -13,6 +13,12 @@
     <section class="section">
       <h2 class="section-title">User Management</h2>
 
+      <% if (error) { %>
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem">
+        <span style="color:var(--danger)">&#9888; Operation failed: <%= error.replace(/_/g, ' ') %></span>
+      </div>
+      <% } %>
+
       <!-- Add user (Admin only) -->
       <% if (user.accessLevel >= 3) { %>
       <div class="card" style="margin-bottom:1.5rem">

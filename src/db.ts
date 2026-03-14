@@ -160,6 +160,9 @@ export async function upsertUser(
 }
 
 export async function updateAccessLevel(discordId: string, accessLevel: number): Promise<void> {
+  if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
+    throw new Error(`Invalid accessLevel: ${accessLevel}`);
+  }
   await getPool().execute(
     'UPDATE `user` SET access_level = ? WHERE discord_id = ?',
     [accessLevel, discordId],

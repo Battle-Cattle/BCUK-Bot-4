@@ -96,7 +96,13 @@ export async function connect(client: Client): Promise<void> {
     selfMute: false,
   });
 
-  await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+  try {
+    await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+  } catch (err) {
+    connection.destroy();
+    connection = null;
+    throw err;
+  }
   console.log('[AudioPlayer] Voice connection ready.');
 
   connection.on(VoiceConnectionStatus.Disconnected, async () => {

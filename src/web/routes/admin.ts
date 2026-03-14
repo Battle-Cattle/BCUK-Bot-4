@@ -20,6 +20,7 @@ router.get('/users', requireManager, async (req, res) => {
       user: req.session.user,
       users,
       accessLevelLabels: ACCESS_LEVEL_LABELS,
+      error: req.query.error ?? null,
     });
   } catch (err) {
     console.error('[Web] Admin users error:', err);
@@ -42,6 +43,7 @@ router.post('/users/add', requireAdmin, async (req, res) => {
     await upsertUser(discord_id.trim(), (discord_name ?? '').trim(), level as AccessLevelValue);
   } catch (err) {
     console.error('[Web] Add user error:', err);
+    return res.redirect('/admin/users?error=add_failed');
   }
   res.redirect('/admin/users');
 });
@@ -65,6 +67,7 @@ router.post('/users/update', requireAdmin, async (req, res) => {
     await updateAccessLevel(discord_id, level);
   } catch (err) {
     console.error('[Web] Update access level error:', err);
+    return res.redirect('/admin/users?error=update_failed');
   }
   res.redirect('/admin/users');
 });
@@ -84,6 +87,7 @@ router.post('/users/remove', requireAdmin, async (req, res) => {
     await removeUser(discord_id);
   } catch (err) {
     console.error('[Web] Remove user error:', err);
+    return res.redirect('/admin/users?error=remove_failed');
   }
   res.redirect('/admin/users');
 });

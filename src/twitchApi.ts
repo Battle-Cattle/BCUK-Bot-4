@@ -66,7 +66,12 @@ export async function getUsers(logins: string[]): Promise<TwitchUser[]> {
     const res = await twitchFetch(`https://api.twitch.tv/helix/users?${params}`, {
       headers: authHeaders(token),
     });
-    if (!res.ok) throw new Error(`[TwitchAPI] getUsers failed: ${res.status}`);
+    if (!res.ok) {
+      // Clear the cached token on 401 so the next call re-fetches rather than
+      // reusing an invalidated token until appTokenExpiry.
+      if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
+      throw new Error(`[TwitchAPI] getUsers failed: ${res.status}`);
+    }
     const data = await res.json() as { data: Array<{ login: string; id: string }> };
     results.push(...data.data.map((u) => ({ login: u.login, id: u.id })));
   }
@@ -92,7 +97,10 @@ export async function getStreams(userIds: string[]): Promise<TwitchStream[]> {
     const res = await twitchFetch(`https://api.twitch.tv/helix/streams?${params}&first=100`, {
       headers: authHeaders(token),
     });
-    if (!res.ok) throw new Error(`[TwitchAPI] getStreams failed: ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
+      throw new Error(`[TwitchAPI] getStreams failed: ${res.status}`);
+    }
     const data = await res.json() as { data: TwitchStream[] };
     results.push(...data.data);
   }

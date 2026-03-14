@@ -25,7 +25,7 @@ BCUK_Bot_4/
 │   ├── tiktokBot.ts          — tiktok-live-connector + auto-reconnect
 │   ├── twitchApi.ts          — Twitch Helix API wrapper (app token, getUsers, getStreams)
 │   ├── twitchMonitor.ts      — Polling-based stream monitor + Discord announcements
-│   ├── monitorSettings.ts    — Read/write monitor-settings.json (toggle + EventSub token)
+│   ├── monitorSettings.ts    — Read/write monitor-settings.json (toggle only)
 │   ├── types/
 │   │   └── express.d.ts      — Augments express-session SessionData
 │   └── web/
@@ -36,7 +36,7 @@ BCUK_Bot_4/
 │           ├── dashboard.ts  — GET / → renders dashboard
 │           ├── admin.ts      — User CRUD (GET+POST /admin/users/*)
 │           ├── api.ts        — GET /api/status, POST /api/voice/join|leave
-│           └── streams.ts    — Stream group/streamer CRUD + toggle + Twitch OAuth
+│           └── streams.ts    — Stream group/streamer CRUD + toggle
 ├── views/
 │   ├── partials/nav.ejs
 │   ├── login.ejs
@@ -48,7 +48,7 @@ BCUK_Bot_4/
 │   ├── style.css             — Dark theme CSS
 │   └── app.js                — Status polling, SFX search, file expand, voice join/leave
 ├── sfx/                      — Sound files go here (not in git)
-├── monitor-settings.json     — Local settings (gitignored): toggle state + EventSub token
+├── monitor-settings.json     — Local settings (gitignored): toggle state only
 ├── .env.example
 ├── .gitignore
 ├── package.json
@@ -163,7 +163,6 @@ Copy `.env.example` → `.env` and fill in all values.
 | `DISCORD_CALLBACK_URL`  | ✅ | e.g. `http://localhost:3000/auth/discord/callback` |
 | `TWITCH_CLIENT_ID`      | ✅ | Twitch app Client ID — for stream monitoring (separate from chat bot) |
 | `TWITCH_CLIENT_SECRET`  | ✅ | Twitch app Client Secret — for stream monitoring |
-| `TWITCH_EVENTSUB_REDIRECT_URL` | ❌ | Callback URL for Twitch OAuth in web panel (e.g. `http://localhost:3000/admin/streams/twitch-auth/callback`). Must also be registered in the Twitch Developer Console. Optional — only needed to use the in-panel Twitch auth flow. |
 
 ---
 
@@ -174,7 +173,7 @@ Copy `.env.example` → `.env` and fill in all values.
 | 0     | User    | View dashboard only |
 | 1     | Mod     | View dashboard + join/leave voice channel |
 | 2     | Manager | View dashboard + user list + join/leave voice + stream monitor management |
-| 3     | Admin   | Full access: add/update/remove users + Twitch OAuth + all above |
+| 3     | Admin   | Full access: add/update/remove users + all above |
 
 > **First-time setup:** Manually INSERT a row into the `user` table with your Discord ID and `access_level = 3` before first login.
 
@@ -238,7 +237,7 @@ Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden == 1
 Apply this same pattern whenever reading any boolean/tinyint column.
 
 ### Session cookie in production
-`src/web/server.ts` sets `cookie: { secure: false }`. Behind an HTTPS reverse proxy (e.g. nginx with `certbot`), change this to `secure: true` and add `app.set('trust proxy', 1)` so Express trusts the `X-Forwarded-Proto` header.
+`src/web/server.ts` automatically sets `cookie: { secure: true }` and `app.set('trust proxy', 1)` when `NODE_ENV=production`. In development (default), `secure: false` is used so cookies work over plain HTTP. No manual code changes are needed — just set `NODE_ENV=production` when deploying behind an HTTPS reverse proxy.
 
 ### Twitch stream monitor — polling-based
 `twitchMonitor.ts` uses **polling** (every 60 s via `setInterval`) rather than EventSub WebSocket subscriptions. `getStreams()` is called on each poll tick; the module keeps an in-memory `liveStates` map and reconciles against the Helix response to detect go-live, game-change, and go-offline events.
@@ -261,11 +260,8 @@ Any CRUD change to groups or streamers via the web panel calls `restartTwitchMon
 ### Twitch stream monitor — process exit
 `index.ts` calls `stopTwitchMonitor()` on `SIGINT`/`SIGTERM`. This stops the poll timer and clears in-memory state **without deleting Discord announcement messages** — they are left in place so the startup live-check on the next boot can re-sync them. `shutdownTwitchMonitor()` (which does delete all messages) is intentionally not used on process exit.
 
-### Twitch stream monitor — EventSub token (stored but not yet wired)
-The Twitch OAuth flow at `/admin/streams/twitch-auth` stores a user access token in `monitor-settings.json` via `setEventSubToken()`. The current `twitchMonitor.ts` implementation does not use this token — it relies on an app (client credentials) token from `twitchApi.ts`. The stored token is reserved for future EventSub WebSocket subscriptions.
-
 ### monitor-settings.json
-Local file (`monitor-settings.json` at `process.cwd()`) persists two values: `twitchMonitorEnabled` (boolean, default `true` if file missing) and `eventSubToken` (string, optional). It is **gitignored**. Read/write via `src/monitorSettings.ts` helpers only.
+Local file (`monitor-settings.json` at `process.cwd()`) persists one value: `twitchMonitorEnabled` (boolean, default `true` if file missing). It is **gitignored**. Read/write via `src/monitorSettings.ts` helpers only.
 
 ---
 
@@ -310,8 +306,6 @@ npm start        # node dist/index.js (production)
 | GET    | `/admin/streams`        | Manager+    | Stream monitor management page |
 | GET    | `/admin/streams/live`   | Manager+    | JSON snapshot of currently live streams |
 | POST   | `/admin/streams/toggle` | Manager+    | Enable/disable Discord announcements |
-| GET    | `/admin/streams/twitch-auth` | Admin  | Start Twitch OAuth2 flow |
-| GET    | `/admin/streams/twitch-auth/callback` | Admin | Twitch OAuth2 callback |
 | POST   | `/admin/streams/groups/add`    | Manager+ | Add stream group |
 | POST   | `/admin/streams/groups/update` | Manager+ | Update stream group |
 | POST   | `/admin/streams/groups/remove` | Manager+ | Remove stream group (and its streamers) |
@@ -339,8 +333,8 @@ In-memory singleton. Functions:
 - `findSoundFiles(triggerId)` — returns all `sfx` rows for a trigger including hidden ones; used by `commandRouter.ts`
 - `getAllSfxTriggers()` — **dashboard aggregate**: single JOIN query across `sfxtrigger`, `sfxcategory`, and `sfx`; returns `SfxTriggerRow[]` where each entry has a `files[]` array already grouped
 - `findUser(discordId)` / `getAllUsers()` — user lookups for auth and admin panel
-- `upsertUser(discordId, discordName, accessLevel)` — INSERT … ON DUPLICATE KEY UPDATE
-- `updateAccessLevel(discordId, accessLevel)` / `removeUser(discordId)` — admin mutations
+- `upsertUser(discordId, discordName, accessLevel)` — INSERT … ON DUPLICATE KEY UPDATE; validates `accessLevel` is a known `AccessLevel` value
+- `updateAccessLevel(discordId, accessLevel)` / `removeUser(discordId)` — admin mutations; `updateAccessLevel` validates `accessLevel` before executing SQL
 - `AccessLevel` const object (`USER=0 MOD=1 MANAGER=2 ADMIN=3`) and `AccessLevelValue` type are exported from `db.ts` — use these instead of raw numbers
 - `getAllStreamersWithGroups()` — JOIN query returning `DbStreamerFull[]` (each row includes full `DbStreamGroup` as `.group`); used by `twitchMonitor.ts`
 - `getAllStreamGroups()` — returns all `stream_group` rows as `DbStreamGroup[]`
