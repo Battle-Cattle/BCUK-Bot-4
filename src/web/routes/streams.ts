@@ -9,7 +9,7 @@ import {
   removeStreamer,
   removeStreamersByGroup,
 } from '../../db';
-import { requireManager, requireAdmin } from '../middleware';
+import { requireManager } from '../middleware';
 import { getMonitorEnabled, setMonitorEnabled } from '../../monitorSettings';
 import { restartTwitchMonitor, getLiveStates, catchUpDiscordPosts } from '../../twitchMonitor';
 
