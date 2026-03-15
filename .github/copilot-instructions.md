@@ -345,7 +345,7 @@ In-memory singleton. Functions:
 - `clearStreamerLive(id)` — null out all three live columns on a streamer row
 - `DbStreamGroup` and `DbStreamerFull` interfaces exported from `db.ts`
 
-> **Note:** State is lost on process restart. Sessions are also in-memory (no persistent session store configured).
+> **Note:** State is lost on process restart. Sessions are stored in the `sessions` MySQL table via `express-mysql-session` (created automatically on first run).
 
 ---
 

@@ -1,7 +1,8 @@
 import express from 'express';
 import session from 'express-session';
+import MySQLStore from 'express-mysql-session';
 import path from 'path';
-import { WEB_PORT, SESSION_SECRET } from '../config';
+import { WEB_PORT, SESSION_SECRET, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../config';
 
 const isProduction = process.env.NODE_ENV === 'production';
 import authRouter from './routes/auth';
@@ -26,11 +27,22 @@ app.use(express.json());
 
 // Session
 if (isProduction) app.set('trust proxy', 1);
+const sessionStore = new (MySQLStore(session))({
+  host: DB_HOST,
+  port: DB_PORT,
+  user: DB_USER,
+  password: DB_PASSWORD,
+  database: DB_NAME,
+  expiration: 24 * 60 * 60 * 1000,
+  createDatabaseTable: true,
+  schema: { tableName: 'sessions' },
+});
 app.use(
   session({
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
+    store: sessionStore,
     cookie: { secure: isProduction, httpOnly: true, sameSite: 'lax', maxAge: 24 * 60 * 60 * 1000 },
   }),
 );

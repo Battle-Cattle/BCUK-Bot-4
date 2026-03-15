@@ -14,6 +14,7 @@
     "dotenv": "^16.4.5",
     "ejs": "^5.0.1",
     "express": "^5.2.1",
+    "express-mysql-session": "^3.0.3",
     "express-session": "^1.19.0",
     "ffmpeg-static": "^5.2.0",
     "libsodium-wrappers": "^0.8.2",
@@ -26,14 +27,15 @@
     "ws": "^8.19.0"
   },
   "overrides": {
-    "undici": "^7.22.0"
+    "undici": "^7.24.0"
   },
   "devDependencies": {
     "@types/ejs": "^3.1.5",
     "@types/express": "^5.0.6",
-    "@types/libsodium-wrappers": "^0.7.14",
+    "@types/express-mysql-session": "^3.0.8",
     "@types/express-session": "^1.18.2",
     "@types/ffmpeg-static": "^3.0.3",
+    "@types/libsodium-wrappers": "^0.7.14",
     "@types/node": "^20.11.30",
     "@types/tmi.js": "^1.8.6",
     "@types/ws": "^8.18.1",
