@@ -13,15 +13,6 @@ function relativeTime(isoString) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
 function setText(id, value) {
   const el = document.getElementById(id);
   if (el) el.textContent = value || '—';
@@ -36,24 +27,52 @@ function setClass(id, className) {
   }
 }
 
-function buildChannelHTML(channelMap) {
-  const entries = Object.entries(channelMap);
-  if (entries.length === 0) return '<p class="empty-msg">None configured.</p>';
+function clearChildren(el) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+}
 
-  return entries.map(([name, info]) => {
+function renderChannels(container, channelMap) {
+  clearChildren(container);
+  const entries = Object.entries(channelMap);
+  if (entries.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'empty-msg';
+    p.textContent = 'None configured.';
+    container.appendChild(p);
+    return;
+  }
+
+  for (const [name, info] of entries) {
     const online = info.connected;
     const ts = online ? info.lastConnectedAt : info.lastDisconnectedAt;
     const label = online ? 'Online' : 'Offline';
-    const cls   = online ? 'badge-online' : 'badge-offline';
-    const meta  = ts ? relativeTime(ts) : 'Never seen';
-    return `<div class="channel-item">
-      <div>
-        <div class="channel-name">${escapeHtml(name)}</div>
-        <div class="channel-meta">${meta}</div>
-      </div>
-      <span class="badge ${cls}">${label}</span>
-    </div>`;
-  }).join('');
+    const cls = online ? 'badge-online' : 'badge-offline';
+    const meta = ts ? relativeTime(ts) : 'Never seen';
+
+    const item = document.createElement('div');
+    item.className = 'channel-item';
+
+    const left = document.createElement('div');
+
+    const channelName = document.createElement('div');
+    channelName.className = 'channel-name';
+    channelName.textContent = name;
+
+    const channelMeta = document.createElement('div');
+    channelMeta.className = 'channel-meta';
+    channelMeta.textContent = meta;
+
+    left.appendChild(channelName);
+    left.appendChild(channelMeta);
+
+    const badge = document.createElement('span');
+    badge.className = `badge ${cls}`;
+    badge.textContent = label;
+
+    item.appendChild(left);
+    item.appendChild(badge);
+    container.appendChild(item);
+  }
 }
 
 function applyStatus(status) {
@@ -97,9 +116,9 @@ function applyStatus(status) {
 
   // Channels
   const twitchEl = document.getElementById('twitch-channels');
-  if (twitchEl) twitchEl.innerHTML = buildChannelHTML(status.twitch);
+  if (twitchEl) renderChannels(twitchEl, status.twitch);
   const tiktokEl = document.getElementById('tiktok-channels');
-  if (tiktokEl) tiktokEl.innerHTML = buildChannelHTML(status.tiktok);
+  if (tiktokEl) renderChannels(tiktokEl, status.tiktok);
 }
 
 let consecutiveFailures = 0;
@@ -124,12 +143,18 @@ async function fetchStatus() {
   }
 }
 
-// Apply initial status immediately
-if (typeof currentStatus !== 'undefined') {
-  applyStatus(currentStatus);
+// Apply server-provided initial status without inline script execution.
+const initialStatusRaw = document.body?.dataset?.initialStatus;
+if (initialStatusRaw) {
+  try {
+    applyStatus(JSON.parse(initialStatusRaw));
+  } catch {
+    // Fallback to fetchStatus below.
+  }
 }
 
-// Poll every 5 seconds
+// Refresh immediately then poll every 5 seconds.
+fetchStatus();
 setInterval(fetchStatus, 5000);
 
 /* ── SFX table search ──────────────────────────────────── */
@@ -179,6 +204,15 @@ function toggleFiles(btn) {
   filesRow.style.display = shown ? 'none' : '';
   btn.textContent = shown ? '▶ Files' : '▼ Files';
 }
+
+document.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const toggleBtn = target.closest('.btn-toggle-files');
+  if (toggleBtn instanceof HTMLElement) {
+    toggleFiles(toggleBtn);
+  }
+});
 
 /* ── Rejoin Voice button ─────────────────────────────────── */
 

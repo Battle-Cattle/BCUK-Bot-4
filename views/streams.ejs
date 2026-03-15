@@ -121,9 +121,8 @@
               <td><span class="badge <%= g.multi_twitch ? 'badge-active' : '' %>"><%= g.multi_twitch ? 'Yes' : 'No' %></span></td>
               <td><span class="badge <%= g.delete_old_posts ? 'badge-active' : '' %>"><%= g.delete_old_posts ? 'Yes' : 'No' %></span></td>
               <td class="actions">
-                <button type="button" class="btn btn-sm btn-ghost" onclick="toggleGroupEdit(<%= g.id %>)">✏️ Edit</button>
-                <form method="POST" action="/admin/streams/groups/remove" class="inline-form-sm"
-                      onsubmit="return confirm('Remove group \u201c' + <%= JSON.stringify(g.name) %> + '\u201d and all its streamers?')">
+                <button type="button" class="btn btn-sm btn-ghost btn-toggle-group-edit" data-group-id="<%= g.id %>">✏️ Edit</button>
+                    <form method="POST" action="/admin/streams/groups/remove" class="inline-form-sm js-confirm-remove-group" data-group-name="<%= g.name %>">
                   <input type="hidden" name="group_id" value="<%= g.id %>">
                   <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                 </form>
@@ -158,7 +157,7 @@
                     </div>
                     <div style="display:flex;gap:.5rem">
                       <button type="submit" class="btn">Save Changes</button>
-                      <button type="button" class="btn btn-ghost" onclick="toggleGroupEdit(<%= g.id %>)">Cancel</button>
+                      <button type="button" class="btn btn-ghost btn-toggle-group-edit" data-group-id="<%= g.id %>">Cancel</button>
                     </div>
                   </form>
                 </div>
@@ -207,8 +206,7 @@
               <td class="mono"><%= s.name %></td>
               <td><%= s.group_name %></td>
               <td class="actions">
-                <form method="POST" action="/admin/streams/streamers/remove" class="inline-form-sm"
-                      onsubmit="return confirm('Remove streamer \u201c' + <%= JSON.stringify(s.name) %> + '\u201d?')">
+                    <form method="POST" action="/admin/streams/streamers/remove" class="inline-form-sm js-confirm-remove-streamer" data-streamer-name="<%= s.name %>">
                   <input type="hidden" name="streamer_id" value="<%= s.id %>">
                   <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                 </form>
@@ -233,65 +231,6 @@
 
   </main>
 
-  <script>
-    function toggleGroupEdit(id) {
-      var row = document.getElementById('group-edit-' + id);
-      if (!row) return;
-      row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
-    }
-
-    function escHtml(s) {
-      return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    }
-
-    var liveNowInflight = false;
-
-    function refreshLiveNow() {
-      if (liveNowInflight) return;
-      liveNowInflight = true;
-      fetch('/admin/streams/live')
-        .then(function(r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.json();
-        })
-        .then(function(data) {
-          liveNowInflight = false;
-          var enabled = data.enabled;
-          var streams = data.streams;
-          var tbody = document.getElementById('live-tbody');
-          if (!streams || !streams.length) {
-            tbody.innerHTML = '<tr><td colspan="5" class="empty-msg">No streamers currently live.</td></tr>';
-          } else {
-            tbody.innerHTML = streams.map(function(item) {
-              var post;
-              if (!enabled) {
-                post = '<span style="color:var(--text-muted)">— disabled</span>';
-              } else if (item.messageId) {
-                post = '<span class="badge badge-active">✓ posted</span>';
-              } else {
-                post = '<span style="color:var(--text-muted)">— none</span>';
-              }
-              return '<tr>' +
-                '<td class="mono">' + escHtml(item.login) + '</td>' +
-                '<td>' + escHtml(item.groupName) + '</td>' +
-                '<td>' + escHtml(item.currentGame || '—') + '</td>' +
-                '<td>' + escHtml(item.title || '—') + '</td>' +
-                '<td>' + post + '</td>' +
-                '</tr>';
-            }).join('');
-          }
-          var el = document.getElementById('live-updated');
-          if (el) el.textContent = 'Updated ' + new Date().toLocaleTimeString();
-        })
-        .catch(function() {
-          liveNowInflight = false;
-          var tbody = document.getElementById('live-tbody');
-          if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="empty-msg">Failed to load live data.</td></tr>';
-        });
-    }
-
-    refreshLiveNow();
-    setInterval(refreshLiveNow, 15000);
-  </script>
+  <script src="/streams.js"></script>
 </body>
 </html>

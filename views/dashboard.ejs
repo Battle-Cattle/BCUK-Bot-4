@@ -6,7 +6,7 @@
   <title>BCUK Bot — Dashboard</title>
   <link rel="stylesheet" href="/style.css">
 </head>
-<body>
+<body data-initial-status="<%= JSON.stringify(status) %>">
   <%- include('partials/nav') %>
 
   <main class="container">
@@ -109,7 +109,7 @@
               </td>
               <td>
                 <% if (t.files.length > 0) { %>
-                <button class="btn btn-xs" onclick="toggleFiles(this)">▶ Files</button>
+                <button type="button" class="btn btn-xs btn-toggle-files">▶ Files</button>
                 <% } %>
               </td>
             </tr>
@@ -140,10 +140,6 @@
 
   </main>
 
-  <script>
-    const initialStatus = <%- JSON.stringify(status).replace(/</g, '\u003c') %>;
-    let currentStatus = initialStatus;
-  </script>
   <script src="/app.js"></script>
 </body>
 </html>

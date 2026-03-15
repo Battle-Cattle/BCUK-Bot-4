@@ -70,7 +70,7 @@
                 </form>
                 <!-- Remove -->
                 <% if (u.discord_id !== user.discordId) { %>
-                <form method="POST" action="/admin/users/remove" class="inline-form-sm" onsubmit="return confirm('Remove ' + <%= JSON.stringify(u.discord_name || u.discord_id) %> + '?')">
+                <form method="POST" action="/admin/users/remove" class="inline-form-sm js-confirm-remove-user" data-user-name="<%= u.discord_name || u.discord_id %>">
                   <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
                   <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                 </form>
@@ -87,5 +87,6 @@
       </div>
     </section>
   </main>
+  <script src="/admin.js"></script>
 </body>
 </html>

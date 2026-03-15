@@ -17,6 +17,7 @@
     "express-mysql-session": "^3.0.3",
     "express-session": "^1.19.0",
     "ffmpeg-static": "^5.2.0",
+    "helmet": "^8.1.0",
     "libsodium-wrappers": "^0.8.2",
     "mediaplex": "^1.0.0",
     "mysql2": "^3.9.3",

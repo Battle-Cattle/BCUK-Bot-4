@@ -1,6 +1,7 @@
 import express from 'express';
 import session from 'express-session';
 import MySQLStore from 'express-mysql-session';
+import helmet from 'helmet';
 import path from 'path';
 import { WEB_PORT, SESSION_SECRET, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../config';
 
@@ -13,6 +14,26 @@ import streamsRouter from './routes/streams';
 import { requireAuth } from './middleware';
 
 const app = express();
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        scriptSrcAttr: ["'none'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https://cdn.discordapp.com'],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+        formAction: ["'self'"],
+      },
+    },
+    referrerPolicy: { policy: 'no-referrer' },
+  }),
+);
 
 // View engine
 app.set('view engine', 'ejs');
