@@ -17,6 +17,9 @@ const app = express();
 
 app.use(
   helmet({
+    hsts: isProduction
+      ? { maxAge: 31536000, includeSubDomains: true }
+      : false,
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
@@ -29,6 +32,7 @@ app.use(
         baseUri: ["'self'"],
         frameAncestors: ["'none'"],
         formAction: ["'self'"],
+        upgradeInsecureRequests: isProduction ? [] : null,
       },
     },
     referrerPolicy: { policy: 'no-referrer' },
