@@ -351,7 +351,6 @@ In-memory singleton. Functions:
 
 ## Potential Future Work
 
-- Persistent sessions (e.g. `connect-session-sequelize` or `express-mysql-session`)
 - Ability to create/edit/hide SFX triggers from the web panel
 - Bot activity log / recent commands on dashboard
 - Twitch channel points reward handling (currently only chat commands)

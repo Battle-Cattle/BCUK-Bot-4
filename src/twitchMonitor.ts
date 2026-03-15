@@ -482,9 +482,9 @@ export async function shutdownTwitchMonitor(): Promise<void> {
   await teardown();
 
   // Delete all live announcements and clear DB state
-  const logins = Array.from(liveStates.keys());
-  for (const login of logins) {
-    await deleteAnnouncement(login);
+  const stateKeys = Array.from(liveStates.keys());
+  for (const key of stateKeys) {
+    await deleteAnnouncement(key);
   }
 
   liveStates.clear();

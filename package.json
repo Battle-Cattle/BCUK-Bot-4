@@ -21,7 +21,7 @@
     "mediaplex": "^1.0.0",
     "mysql2": "^3.9.3",
     "opusscript": "^0.0.8",
-    "tiktok-live-connector": "^2.1.1-beta1",
+    "tiktok-live-connector": "2.1.1-beta1",
     "tmi.js": "^1.8.5",
     "tweetnacl": "^1.0.3",
     "ws": "^8.19.0"
