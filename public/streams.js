@@ -50,9 +50,32 @@ function renderMetadataItem(label, value, extraClass) {
     '</div>';
 }
 
+function sanitizeUrl(url, options) {
+  if (!url) return null;
+  var raw = String(url).trim();
+  if (!raw) return null;
+
+  var parsed;
+  try {
+    parsed = new URL(raw);
+  } catch (_err) {
+    return null;
+  }
+
+  var protocol = parsed.protocol.toLowerCase();
+  var requireHttps = !!(options && options.requireHttps);
+  if (requireHttps) {
+    return protocol === 'https:' ? parsed.href : null;
+  }
+
+  if (protocol === 'https:' || protocol === 'http:') return parsed.href;
+  return null;
+}
+
 function renderLink(url, label) {
-  if (!url) return '<span class="muted">—</span>';
-  return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noreferrer">' + escapeHtml(label || url) + '</a>';
+  var safeUrl = sanitizeUrl(url);
+  if (!safeUrl) return '<span class="muted">—</span>';
+  return '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(label || safeUrl) + '</a>';
 }
 
 function renderEmbedFields(fields) {
@@ -72,6 +95,8 @@ function renderEmbedFields(fields) {
 function renderMessagePreview(title, preview) {
   var embed = preview && preview.embed ? preview.embed : null;
   var content = preview ? formatValue(preview.content, '') : '';
+  var safeEmbedUrl = embed ? sanitizeUrl(embed.url) : null;
+  var safeImageUrl = embed ? sanitizeUrl(embed.imageUrl, { requireHttps: true }) : null;
 
   return '' +
     '<section class="live-message-preview">' +
@@ -82,9 +107,13 @@ function renderMessagePreview(title, preview) {
           '<div class="discord-embed-preview">' +
             '<div class="discord-embed-accent"></div>' +
             '<div class="discord-embed-body">' +
-              '<div class="discord-embed-title"><a href="' + escapeHtml(embed.url) + '" target="_blank" rel="noreferrer">' + escapeHtml(formatValue(embed.title)) + '</a></div>' +
+              '<div class="discord-embed-title">' + (safeEmbedUrl
+                ? '<a href="' + escapeHtml(safeEmbedUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(formatValue(embed.title)) + '</a>'
+                : escapeHtml(formatValue(embed.title))) + '</div>' +
               '<div class="discord-embed-fields">' + renderEmbedFields(embed.fields) + '</div>' +
-              '<div class="discord-embed-image"><img src="' + escapeHtml(embed.imageUrl) + '" alt="Stream thumbnail preview"></div>' +
+              '<div class="discord-embed-image">' + (safeImageUrl
+                ? '<img src="' + escapeHtml(safeImageUrl) + '" alt="Stream thumbnail preview">'
+                : '<span class="muted">Thumbnail unavailable</span>') + '</div>' +
               (embed.footer ? '<div class="discord-embed-footer">' + escapeHtml(embed.footer) + '</div>' : '<div class="discord-embed-footer muted">No footer</div>') +
             '</div>' +
           '</div>' : '') +
@@ -206,7 +235,7 @@ function renderLiveRows(enabled, streams) {
     var postTd = document.createElement('td');
     if (!enabled) {
       var disabledSpan = document.createElement('span');
-      disabledSpan.style.color = 'var(--text-muted)';
+      disabledSpan.style.color = 'var(--muted)';
       disabledSpan.textContent = '— disabled';
       postTd.appendChild(disabledSpan);
     } else if (item.messageId) {
@@ -216,7 +245,7 @@ function renderLiveRows(enabled, streams) {
       postTd.appendChild(postedBadge);
     } else {
       var noneSpan = document.createElement('span');
-      noneSpan.style.color = 'var(--text-muted)';
+      noneSpan.style.color = 'var(--muted)';
       noneSpan.textContent = '— none';
       postTd.appendChild(noneSpan);
     }

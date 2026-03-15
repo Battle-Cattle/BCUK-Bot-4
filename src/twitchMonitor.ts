@@ -48,7 +48,6 @@ export interface MultiTwitchPreview {
 }
 
 interface MultiTwitchContext {
-  statesByGroupId: Map<number, LiveState[]>;
   participantsByGroupAndGame: Map<string, string[]>;
 }
 
@@ -93,13 +92,19 @@ function buildEmbedPreview(stream: TwitchStream, footer?: string): DiscordEmbedP
   };
 }
 
+function parseHexColor(color: string): number {
+  const normalized = color.trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return 0x9146ff;
+  return parseInt(normalized, 16);
+}
+
 function buildEmbed(stream: TwitchStream, footer?: string): EmbedBuilder {
   const preview = buildEmbedPreview(stream, footer);
 
   const embed = new EmbedBuilder()
     .setTitle(preview.title)
     .setURL(preview.url)
-    .setColor(0x9146ff)
+    .setColor(parseHexColor(preview.color))
     .addFields(...preview.fields)
     .setImage(preview.imageUrl);
 
@@ -122,17 +127,9 @@ function groupGameKey(groupId: number, game: string): string {
 }
 
 function buildMultiTwitchContext(states: Iterable<LiveState>): MultiTwitchContext {
-  const statesByGroupId = new Map<number, LiveState[]>();
   const participantSets = new Map<string, Set<string>>();
 
   for (const state of states) {
-    const groupStates = statesByGroupId.get(state.groupId);
-    if (groupStates) {
-      groupStates.push(state);
-    } else {
-      statesByGroupId.set(state.groupId, [state]);
-    }
-
     const key = groupGameKey(state.groupId, state.currentGame);
     const participants = participantSets.get(key);
     if (participants) {
@@ -147,11 +144,13 @@ function buildMultiTwitchContext(states: Iterable<LiveState>): MultiTwitchContex
     participantsByGroupAndGame.set(key, Array.from(participants).sort((left, right) => left.localeCompare(right)));
   }
 
-  return { statesByGroupId, participantsByGroupAndGame };
+  return { participantsByGroupAndGame };
 }
 
 function getMultitwitchPreview(state: LiveState, context?: MultiTwitchContext): MultiTwitchPreview {
-  const participants = context?.participantsByGroupAndGame.get(groupGameKey(state.groupId, state.currentGame));
+  const participants = context
+    ? context.participantsByGroupAndGame.get(groupGameKey(state.groupId, state.currentGame))
+    : buildMultiTwitchContext(liveStates.values()).participantsByGroupAndGame.get(groupGameKey(state.groupId, state.currentGame));
   const applicable = !!participants && participants.length >= 2;
 
   if (!state.group.multi_twitch || !applicable) {
