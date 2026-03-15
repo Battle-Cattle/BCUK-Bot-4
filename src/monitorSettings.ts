@@ -1,0 +1,65 @@
+import fs from 'fs';
+import path from 'path';
+
+const SETTINGS_FILE = path.join(process.cwd(), 'monitor-settings.json');
+
+interface MonitorSettings {
+  twitchMonitorEnabled: boolean;
+}
+
+let cachedSettings: MonitorSettings | null = null;
+
+function isValidMonitorSettings(v: unknown): v is MonitorSettings {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as Record<string, unknown>).twitchMonitorEnabled === 'boolean'
+  );
+}
+
+function readSettings(): MonitorSettings {
+  if (cachedSettings) {
+    return cachedSettings;
+  }
+
+  try {
+    const content = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+    const parsed: unknown = JSON.parse(content);
+    if (isValidMonitorSettings(parsed)) {
+      cachedSettings = parsed;
+    } else {
+      console.warn('[MonitorSettings] Settings file has unexpected shape — using defaults');
+      cachedSettings = { twitchMonitorEnabled: true };
+    }
+  } catch (err) {
+    console.warn(`[MonitorSettings] Failed to read ${SETTINGS_FILE}:`, err);
+    cachedSettings = { twitchMonitorEnabled: true };
+  }
+
+  return cachedSettings;
+}
+
+function writeSettings(settings: MonitorSettings): void {
+  const json = JSON.stringify(settings, null, 2);
+  // Write temp file beside the target so rename() stays on the same filesystem.
+  const tmpFile = path.join(path.dirname(SETTINGS_FILE), `.monitor-settings-${process.pid}.tmp`);
+  const fd = fs.openSync(tmpFile, 'w', 0o600);
+  try {
+    fs.writeSync(fd, json);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmpFile, SETTINGS_FILE);
+  // Only update the cache after a successful disk write to keep cache/disk in sync.
+  cachedSettings = settings;
+}
+
+export function getMonitorEnabled(): boolean {
+  return readSettings().twitchMonitorEnabled;
+}
+
+export function setMonitorEnabled(enabled: boolean): void {
+  const current = readSettings();
+  writeSettings({ ...current, twitchMonitorEnabled: enabled });
+}

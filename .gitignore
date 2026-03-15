@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+*.js.map
+monitor-settings.json
+commit-msg.txt
+sfx/*
+!sfx/.gitkeep

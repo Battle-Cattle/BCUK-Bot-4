@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-initial-status="<%= JSON.stringify(status) %>">
+  <%- include('partials/nav') %>
+
+  <main class="container">
+
+    <!-- ── Status Cards ── -->
+    <section class="section">
+      <h2 class="section-title">Bot Status</h2>
+      <div class="status-grid">
+
+        <div class="card" id="card-discord">
+          <div class="card-header">
+            <span class="card-icon">💬</span>
+            <span class="card-label">Discord Bot</span>
+            <span class="dot dot--offline" id="dot-discord"></span>
+          </div>
+          <div class="card-body">
+            <div class="stat-row"><span class="stat-label">Account</span><span class="stat-value" id="discord-tag">—</span></div>
+            <div class="stat-row"><span class="stat-label">Server</span><span class="stat-value" id="discord-guild">—</span></div>
+          </div>
+        </div>
+
+        <div class="card" id="card-voice">
+          <div class="card-header">
+            <span class="card-icon">🔊</span>
+            <span class="card-label">Voice Channel</span>
+            <span class="dot dot--offline" id="dot-voice"></span>
+          </div>
+          <div class="card-body">
+            <div class="stat-row"><span class="stat-label">Channel</span><span class="stat-value" id="voice-channel">—</span></div>
+            <div class="stat-row"><span class="stat-label">State</span><span class="stat-value" id="voice-state">Idle</span></div>
+            <% if (user && user.accessLevel >= 1) { %>
+            <div class="stat-row" style="margin-top:0.75rem">
+              <button class="btn btn-sm" id="btn-rejoin-voice"><%= status.voice.connected ? 'Leave Voice' : 'Rejoin Voice' %></button>
+            </div>
+            <% } %>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-icon">🎵</span>
+            <span class="card-label">Last Played</span>
+          </div>
+          <div class="card-body">
+            <div class="stat-row"><span class="stat-label">Command</span><span class="stat-value mono" id="last-command">—</span></div>
+            <div class="stat-row"><span class="stat-label">File</span><span class="stat-value mono" id="last-file">—</span></div>
+            <div class="stat-row"><span class="stat-label">Source</span><span class="stat-value" id="last-source">—</span></div>
+            <div class="stat-row"><span class="stat-label">When</span><span class="stat-value" id="last-when">—</span></div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ── Channels ── -->
+    <section class="section">
+      <h2 class="section-title">Channels</h2>
+      <div class="channels-grid">
+        <div class="card">
+          <div class="card-header"><span class="card-icon">🟣</span><span class="card-label">Twitch</span></div>
+          <div class="card-body" id="twitch-channels"><p class="empty-msg">No Twitch channels configured.</p></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-icon">🎵</span><span class="card-label">TikTok</span></div>
+          <div class="card-body" id="tiktok-channels"><p class="empty-msg">No TikTok channels configured.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── SFX Commands ── -->
+    <section class="section">
+      <div class="section-header">
+        <h2 class="section-title">SFX Commands (<span id="cmd-count"><%= triggers.length %></span>)</h2>
+        <input type="search" id="sfx-search" class="search-input" placeholder="Filter commands…">
+      </div>
+
+      <div class="card">
+        <table class="table" id="sfx-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Category</th>
+              <th>Files</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <% triggers.forEach(function(t) { %>
+            <tr class="sfx-row<%= t.hidden ? ' row-hidden' : '' %>" data-command="<%= t.triggerCommand.toLowerCase() %>" data-category="<%= (t.categoryName || '').toLowerCase() %>">
+              <td class="mono"><%= t.triggerCommand %></td>
+              <td><% if (t.categoryName) { %><%= t.categoryName %><% } else { %><em class="muted">None</em><% } %></td>
+              <td><%= t.files.length %> file<%= t.files.length !== 1 ? 's' : '' %></td>
+              <td>
+                <% if (t.hidden) { %>
+                <span class="badge badge-hidden">Hidden</span>
+                <% } else { %>
+                <span class="badge badge-active">Active</span>
+                <% } %>
+              </td>
+              <td>
+                <% if (t.files.length > 0) { %>
+                <button type="button" class="btn btn-xs btn-toggle-files">▶ Files</button>
+                <% } %>
+              </td>
+            </tr>
+            <% if (t.files.length > 0) { %>
+            <tr class="files-row" style="display:none">
+              <td colspan="5">
+                <table class="inner-table">
+                  <thead><tr><th>File</th><th>Weight</th><th>Status</th></tr></thead>
+                  <tbody>
+                    <% t.files.forEach(function(f) { %>
+                    <tr>
+                      <td class="mono"><%= f.file %></td>
+                      <td><%= f.weight %></td>
+                      <td><% if (f.hidden) { %><span class="badge badge-hidden">Hidden</span><% } else { %><span class="badge badge-active">Active</span><% } %></td>
+                    </tr>
+                    <% }) %>
+                  </tbody>
+                </table>
+              </td>
+            </tr>
+            <% } %>
+            <% }) %>
+          </tbody>
+        </table>
+        <div id="no-results" class="empty-msg" style="display:none;padding:1rem">No commands match your filter.</div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

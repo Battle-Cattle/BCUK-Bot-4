@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Stream Monitor</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <%- include('partials/nav') %>
+
+  <main class="container">
+
+    <!-- ── Monitor toggle ──────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Stream Monitor</h2>
+
+      <% if (error) { %>
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem">
+        <span style="color:var(--danger)">&#9888; Operation failed: <%= error.replace(/_/g, ' ') %></span>
+      </div>
+      <% } %>
+
+      <!-- Discord posts toggle -->
+      <div class="card" style="margin-bottom:1.5rem">
+        <div class="card-header">
+          <span class="card-icon">📡</span>
+          <span class="card-label">Discord Announcements</span>
+          <span class="badge <%= monitorEnabled ? 'badge-active' : 'badge-offline' %>" style="margin-left:auto">
+            <%= monitorEnabled ? 'Enabled' : 'Disabled' %>
+          </span>
+        </div>
+        <div class="card-body" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+          <form method="POST" action="/admin/streams/toggle">
+            <button type="submit" class="btn <%= monitorEnabled ? 'btn-danger' : '' %>">
+              <%= monitorEnabled ? '⏹ Disable Discord Posts' : '▶ Enable Discord Posts' %>
+            </button>
+          </form>
+          <span style="color:var(--text-muted);font-size:.85rem">Stream tracking always runs — use <strong>Live Now</strong> below to verify data before enabling posts.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Live Now ─────────────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Live Now</h2>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-icon">🔴</span>
+          <span class="card-label">Currently Tracked Live Streams</span>
+          <span id="live-updated" style="margin-left:auto;font-size:.75rem;color:var(--text-muted)"></span>
+        </div>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Streamer</th>
+              <th>Group</th>
+              <th>Game</th>
+              <th>Title</th>
+              <th>Discord Post</th>
+            </tr>
+          </thead>
+          <tbody id="live-tbody">
+            <tr><td colspan="5" class="empty-msg">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── Stream groups ───────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Stream Groups</h2>
+
+      <div class="card" style="margin-bottom:1.5rem">
+        <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add Group</span></div>
+        <div class="card-body">
+          <form method="POST" action="/admin/streams/groups/add">
+            <div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.75rem">
+              <input class="input" type="text" name="name" placeholder="Group name" required style="flex:1;min-width:160px">
+              <input class="input" type="text" name="discord_channel" placeholder="Discord channel ID" required style="flex:1;min-width:180px">
+              <label class="input" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+                <input type="checkbox" name="multi_twitch"> Multi-Twitch links
+              </label>
+              <label class="input" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+                <input type="checkbox" name="delete_old_posts"> Delete old posts on game change
+              </label>
+            </div>
+            <div style="margin-bottom:.6rem">
+              <p class="hint" style="padding:0 0 .3rem">Live message — shown when a stream goes live. Variables: <code>{streamer} {game} {title} {url}</code></p>
+              <textarea class="input stream-textarea" name="live_message" rows="2" placeholder="@everyone {streamer} is now live playing {game}! {url}" required></textarea>
+            </div>
+            <div style="margin-bottom:.6rem">
+              <p class="hint" style="padding:0 0 .3rem">Game change message — shown when the streamer switches games. Same variables.</p>
+              <textarea class="input stream-textarea" name="new_game_message" rows="2" placeholder="{streamer} switched to {game}! {url}" required></textarea>
+            </div>
+            <div style="margin-bottom:.75rem">
+              <p class="hint" style="padding:0 0 .3rem">Multi-Twitch footer (optional) — appended to embeds when 2+ group members play the same game. Variable: <code>{multitwitch}</code></p>
+              <textarea class="input stream-textarea" name="multi_twitch_message" rows="1" placeholder="Watch together: {multitwitch}"></textarea>
+            </div>
+            <button type="submit" class="btn">Add Group</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Channel ID</th>
+              <th>Multi-Twitch</th>
+              <th>Delete Old</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% groups.forEach(function(g) { %>
+            <tr class="sfx-row">
+              <td><strong><%= g.name %></strong></td>
+              <td class="mono"><%= g.discord_channel %></td>
+              <td><span class="badge <%= g.multi_twitch ? 'badge-active' : '' %>"><%= g.multi_twitch ? 'Yes' : 'No' %></span></td>
+              <td><span class="badge <%= g.delete_old_posts ? 'badge-active' : '' %>"><%= g.delete_old_posts ? 'Yes' : 'No' %></span></td>
+              <td class="actions">
+                <button type="button" class="btn btn-sm btn-ghost btn-toggle-group-edit" data-group-id="<%= g.id %>">✏️ Edit</button>
+                    <form method="POST" action="/admin/streams/groups/remove" class="inline-form-sm js-confirm-remove-group" data-group-name="<%= g.name %>">
+                  <input type="hidden" name="group_id" value="<%= g.id %>">
+                  <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+                </form>
+              </td>
+            </tr>
+            <tr class="files-row" id="group-edit-<%= g.id %>" style="display:none">
+              <td colspan="5">
+                <div style="padding:.75rem 1rem;background:var(--bg);border-radius:6px">
+                  <form method="POST" action="/admin/streams/groups/update">
+                    <input type="hidden" name="group_id" value="<%= g.id %>">
+                    <div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.75rem">
+                      <input class="input" type="text" name="name" value="<%= g.name %>" required style="flex:1;min-width:160px">
+                      <input class="input" type="text" name="discord_channel" value="<%= g.discord_channel %>" required style="flex:1;min-width:180px">
+                      <label class="input" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+                        <input type="checkbox" name="multi_twitch" <%= g.multi_twitch ? 'checked' : '' %>> Multi-Twitch links
+                      </label>
+                      <label class="input" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+                        <input type="checkbox" name="delete_old_posts" <%= g.delete_old_posts ? 'checked' : '' %>> Delete old posts on game change
+                      </label>
+                    </div>
+                    <div style="margin-bottom:.6rem">
+                      <p class="hint" style="padding:0 0 .3rem">Live message</p>
+                      <textarea class="input stream-textarea" name="live_message" rows="2" required><%= g.live_message %></textarea>
+                    </div>
+                    <div style="margin-bottom:.6rem">
+                      <p class="hint" style="padding:0 0 .3rem">Game change message</p>
+                      <textarea class="input stream-textarea" name="new_game_message" rows="2" required><%= g.new_game_message %></textarea>
+                    </div>
+                    <div style="margin-bottom:.75rem">
+                      <p class="hint" style="padding:0 0 .3rem">Multi-Twitch footer</p>
+                      <textarea class="input stream-textarea" name="multi_twitch_message" rows="1"><%= g.multi_twitch_message %></textarea>
+                    </div>
+                    <div style="display:flex;gap:.5rem">
+                      <button type="submit" class="btn">Save Changes</button>
+                      <button type="button" class="btn btn-ghost btn-toggle-group-edit" data-group-id="<%= g.id %>">Cancel</button>
+                    </div>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            <% }) %>
+            <% if (groups.length === 0) { %>
+            <tr><td colspan="5" class="empty-msg">No stream groups configured yet.</td></tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── Streamers ────────────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Streamers</h2>
+
+      <% if (groups.length > 0) { %>
+      <div class="card" style="margin-bottom:1.5rem">
+        <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add Streamer</span></div>
+        <form method="POST" action="/admin/streams/streamers/add" class="inline-form">
+          <input class="input" type="text" name="name" placeholder="Twitch username (lowercase)" required>
+          <select class="input" name="group_id">
+            <% groups.forEach(function(g) { %>
+            <option value="<%= g.id %>"><%= g.name %></option>
+            <% }) %>
+          </select>
+          <button type="submit" class="btn">Add Streamer</button>
+        </form>
+      </div>
+      <% } %>
+
+      <div class="card">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Group</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% streamers.forEach(function(s) { %>
+            <tr>
+              <td class="mono"><%= s.name %></td>
+              <td><%= s.group_name %></td>
+              <td class="actions">
+                    <form method="POST" action="/admin/streams/streamers/remove" class="inline-form-sm js-confirm-remove-streamer" data-streamer-name="<%= s.name %>">
+                  <input type="hidden" name="streamer_id" value="<%= s.id %>">
+                  <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+                </form>
+              </td>
+            </tr>
+            <% }) %>
+            <% if (streamers.length === 0) { %>
+            <tr>
+              <td colspan="3" class="empty-msg">
+                <% if (groups.length === 0) { %>
+                Add a stream group above before adding streamers.
+                <% } else { %>
+                No streamers configured yet.
+                <% } %>
+              </td>
+            </tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/streams.js"></script>
+</body>
+</html>
