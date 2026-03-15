@@ -153,11 +153,21 @@ function getMultitwitchPreview(state: LiveState, context?: MultiTwitchContext): 
     : buildMultiTwitchContext(liveStates.values()).participantsByGroupAndGame.get(groupGameKey(state.groupId, state.currentGame));
   const applicable = !!participants && participants.length >= 2;
 
-  if (!state.group.multi_twitch || !applicable) {
+  if (!applicable) {
     return {
       enabled: state.group.multi_twitch,
       applicable: false,
       participants: [state.login],
+      url: null,
+      renderedFooter: null,
+    };
+  }
+
+  if (!state.group.multi_twitch) {
+    return {
+      enabled: false,
+      applicable: true,
+      participants,
       url: null,
       renderedFooter: null,
     };
