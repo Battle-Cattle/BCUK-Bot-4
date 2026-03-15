@@ -6,12 +6,17 @@ function toggleGroupEdit(id) {
 
 var expandedLiveRows = Object.create(null);
 
-var LIVE_TABLE_COLUMNS = (function () {
-  // Derive the column count from the Live Now header row at runtime.
+var liveTableColumnsCache = null;
+
+function getLiveTableColumns() {
+  if (liveTableColumnsCache !== null) return liveTableColumnsCache;
+
   var headerRow = document.querySelector('#live-table thead tr');
-  if (!headerRow) return 1;
-  return headerRow.children ? headerRow.children.length : 1;
-})();
+  liveTableColumnsCache = headerRow && headerRow.children
+    ? headerRow.children.length
+    : 1;
+  return liveTableColumnsCache;
+}
 
 function clearChildren(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
@@ -79,7 +84,7 @@ function renderLink(url, label) {
 }
 
 function renderEmbedFields(fields) {
-  if (!fields || !fields.length) {
+  if (!Array.isArray(fields) || fields.length === 0) {
     return '<div class="discord-embed-field"><span class="muted">No embed fields</span></div>';
   }
 
@@ -158,7 +163,7 @@ function createDetailRow(item) {
   detailTr.style.display = expandedLiveRows[key] ? 'table-row' : 'none';
 
   var detailTd = document.createElement('td');
-  detailTd.colSpan = LIVE_TABLE_COLUMNS;
+  detailTd.colSpan = getLiveTableColumns();
   detailTd.innerHTML = '' +
     '<div class="live-detail-shell">' +
       '<div class="live-detail-grid">' +
@@ -196,7 +201,7 @@ function setLiveTableMessage(text) {
   clearChildren(tbody);
   var tr = document.createElement('tr');
   var td = document.createElement('td');
-  td.colSpan = LIVE_TABLE_COLUMNS;
+  td.colSpan = getLiveTableColumns();
   td.className = 'empty-msg';
   td.textContent = text;
   tr.appendChild(td);
