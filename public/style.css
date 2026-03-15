@@ -129,7 +129,7 @@ a:hover { text-decoration: underline; }
 .live-footer-state { margin-top: .75rem; }
 
 .discord-message-box { display: grid; gap: .85rem; }
-.discord-message-content { white-space: pre-wrap; overflow-wrap: break-word; word-wrap: break-word; padding: .8rem .9rem; background: rgba(17, 20, 33, .96); border: 1px solid rgba(255,255,255,.05); border-radius: 8px; }
+.discord-message-content { white-space: pre-wrap; overflow-wrap: break-word; padding: .8rem .9rem; background: rgba(17, 20, 33, .96); border: 1px solid rgba(255,255,255,.05); border-radius: 8px; }
 .discord-embed-preview { display: grid; grid-template-columns: 4px minmax(0, 1fr); background: rgba(49, 51, 56, .75); border: 1px solid rgba(255,255,255,.05); border-radius: 8px; overflow: hidden; }
 .discord-embed-accent { background: #9146FF; }
 .discord-embed-body { padding: .9rem; display: grid; gap: .75rem; }

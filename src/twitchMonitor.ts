@@ -144,17 +144,18 @@ function getMultitwitchPreview(state: LiveState): MultiTwitchPreview {
 function buildMessagePreview(
   state: LiveState,
   templateKey: 'live_message' | 'new_game_message',
+  multiTwitch?: MultiTwitchPreview,
 ): DiscordMessagePreview {
   const stream = state.currentStream;
-  const multiTwitch = getMultitwitchPreview(state);
+  const resolvedMultiTwitch = multiTwitch ?? getMultitwitchPreview(state);
   const template = templateKey === 'new_game_message'
     ? state.group.new_game_message
     : state.group.live_message;
-  const vars = templateVars(state.login, stream, multiTwitch.url ?? undefined);
+  const vars = templateVars(state.login, stream, resolvedMultiTwitch.url ?? undefined);
 
   return {
     content: fillTemplate(template, vars),
-    embed: buildEmbedPreview(stream, multiTwitch.renderedFooter ?? undefined),
+    embed: buildEmbedPreview(stream, resolvedMultiTwitch.renderedFooter ?? undefined),
   };
 }
 
@@ -617,23 +618,27 @@ export interface LiveStateSnapshot {
 
 export function getLiveStates(): LiveStateSnapshot[] {
   return Array.from(liveStates.values())
-    .map((state) => ({
-      streamerId: state.streamerId,
-      login: state.login,
-      twitchUrl: getStreamUrl(state.login),
-      groupId: state.groupId,
-      groupName: state.group.name,
-      groupDiscordChannelId: state.group.discord_channel,
-      multiTwitchEnabled: state.group.multi_twitch,
-      deleteOldPosts: state.group.delete_old_posts,
-      currentGame: state.currentGame,
-      title: state.title,
-      messageId: state.messageId,
-      channelId: state.channelId,
-      multiTwitch: getMultitwitchPreview(state),
-      liveMessagePreview: buildMessagePreview(state, 'live_message'),
-      gameChangePreview: buildMessagePreview(state, 'new_game_message'),
-    }))
+    .map((state) => {
+      const multiTwitch = getMultitwitchPreview(state);
+
+      return {
+        streamerId: state.streamerId,
+        login: state.login,
+        twitchUrl: getStreamUrl(state.login),
+        groupId: state.groupId,
+        groupName: state.group.name,
+        groupDiscordChannelId: state.group.discord_channel,
+        multiTwitchEnabled: state.group.multi_twitch,
+        deleteOldPosts: state.group.delete_old_posts,
+        currentGame: state.currentGame,
+        title: state.title,
+        messageId: state.messageId,
+        channelId: state.channelId,
+        multiTwitch,
+        liveMessagePreview: buildMessagePreview(state, 'live_message', multiTwitch),
+        gameChangePreview: buildMessagePreview(state, 'new_game_message', multiTwitch),
+      };
+    })
     .sort((left, right) => {
       const groupCompare = left.groupName.localeCompare(right.groupName);
       if (groupCompare !== 0) return groupCompare;
