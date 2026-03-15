@@ -4,8 +4,14 @@ function toggleGroupEdit(id) {
   row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
 }
 
-var LIVE_TABLE_COLUMNS = 6;
 var expandedLiveRows = Object.create(null);
+
+var LIVE_TABLE_COLUMNS = (function () {
+  // Derive the column count from the Live Now header row at runtime.
+  var headerRow = document.querySelector('#live-table thead tr');
+  if (!headerRow) return 1;
+  return headerRow.children ? headerRow.children.length : 1;
+})();
 
 function clearChildren(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
@@ -186,6 +192,8 @@ function renderLiveRows(enabled, streams) {
     toggleBtn.className = 'btn btn-sm btn-ghost btn-toggle-live-details';
     toggleBtn.dataset.liveKey = key;
     toggleBtn.setAttribute('aria-expanded', expandedLiveRows[key] ? 'true' : 'false');
+    toggleBtn.setAttribute('aria-label', 'Toggle stream details for ' + String(item.login || 'stream'));
+    toggleBtn.title = 'Toggle stream details';
     toggleBtn.textContent = expandedLiveRows[key] ? '▼' : '▶';
     toggleTd.appendChild(toggleBtn);
     tr.appendChild(toggleTd);

@@ -47,6 +47,11 @@ export interface MultiTwitchPreview {
   renderedFooter: string | null;
 }
 
+interface MultiTwitchContext {
+  statesByGroupId: Map<number, LiveState[]>;
+  participantsByGroupAndGame: Map<string, string[]>;
+}
+
 // ─── Module-level state ──────────────────────────────────────────────────────
 
 /** Keyed by lowercase broadcaster login */
@@ -112,13 +117,44 @@ function templateVars(login: string, stream: TwitchStream, multitwitch?: string)
   };
 }
 
-function getMultitwitchPreview(state: LiveState): MultiTwitchPreview {
-  const groupLive = Array.from(liveStates.values()).filter((entry) => entry.groupId === state.groupId);
-  const sameGame = groupLive.filter(
-    (entry) => entry.currentGame === state.currentGame && entry.login !== state.login,
-  );
+function groupGameKey(groupId: number, game: string): string {
+  return `${groupId}::${game.toLowerCase()}`;
+}
 
-  if (!state.group.multi_twitch || sameGame.length === 0) {
+function buildMultiTwitchContext(states: Iterable<LiveState>): MultiTwitchContext {
+  const statesByGroupId = new Map<number, LiveState[]>();
+  const participantSets = new Map<string, Set<string>>();
+
+  for (const state of states) {
+    const groupStates = statesByGroupId.get(state.groupId);
+    if (groupStates) {
+      groupStates.push(state);
+    } else {
+      statesByGroupId.set(state.groupId, [state]);
+    }
+
+    const key = groupGameKey(state.groupId, state.currentGame);
+    const participants = participantSets.get(key);
+    if (participants) {
+      participants.add(state.login);
+    } else {
+      participantSets.set(key, new Set([state.login]));
+    }
+  }
+
+  const participantsByGroupAndGame = new Map<string, string[]>();
+  for (const [key, participants] of participantSets.entries()) {
+    participantsByGroupAndGame.set(key, Array.from(participants).sort((left, right) => left.localeCompare(right)));
+  }
+
+  return { statesByGroupId, participantsByGroupAndGame };
+}
+
+function getMultitwitchPreview(state: LiveState, context?: MultiTwitchContext): MultiTwitchPreview {
+  const participants = context?.participantsByGroupAndGame.get(groupGameKey(state.groupId, state.currentGame));
+  const applicable = !!participants && participants.length >= 2;
+
+  if (!state.group.multi_twitch || !applicable) {
     return {
       enabled: state.group.multi_twitch,
       applicable: false,
@@ -128,7 +164,6 @@ function getMultitwitchPreview(state: LiveState): MultiTwitchPreview {
     };
   }
 
-  const participants = [state.login, ...sameGame.map((entry) => entry.login)];
   const url = `https://www.multitwitch.tv/${participants.join('/')}`;
   const renderedFooter = fillTemplate(state.group.multi_twitch_message, { multitwitch: url }) || null;
 
@@ -165,10 +200,11 @@ async function updateMultitwitch(groupId: number): Promise<void> {
   if (!getMonitorEnabled() || !discordClient) return;
 
   const groupLive = Array.from(liveStates.values()).filter((s) => s.groupId === groupId);
+  const context = buildMultiTwitchContext(groupLive);
 
   for (const state of groupLive) {
     if (!state.messageId || !state.channelId) continue;
-    const multiTwitch = getMultitwitchPreview(state);
+    const multiTwitch = getMultitwitchPreview(state, context);
     const footer = multiTwitch.renderedFooter ?? undefined;
 
     try {
@@ -617,9 +653,12 @@ export interface LiveStateSnapshot {
 }
 
 export function getLiveStates(): LiveStateSnapshot[] {
-  return Array.from(liveStates.values())
+  const states = Array.from(liveStates.values());
+  const multiTwitchContext = buildMultiTwitchContext(states);
+
+  return states
     .map((state) => {
-      const multiTwitch = getMultitwitchPreview(state);
+      const multiTwitch = getMultitwitchPreview(state, multiTwitchContext);
 
       return {
         streamerId: state.streamerId,
