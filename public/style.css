@@ -123,13 +123,13 @@ a:hover { text-decoration: underline; }
 .live-meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem .9rem; }
 .live-meta-item { display: flex; flex-direction: column; gap: .2rem; min-width: 0; }
 .live-meta-label { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }
-.live-meta-value { color: var(--text); word-break: break-word; }
+.live-meta-value { color: var(--text); overflow-wrap: break-word; }
 .live-link-row { display: flex; gap: .75rem; align-items: flex-start; margin-top: .9rem; padding-top: .9rem; border-top: 1px solid var(--border); }
 .live-link-row .live-meta-value { min-width: 0; overflow-wrap: anywhere; }
 .live-footer-state { margin-top: .75rem; }
 
 .discord-message-box { display: grid; gap: .85rem; }
-.discord-message-content { white-space: pre-wrap; word-break: break-word; padding: .8rem .9rem; background: rgba(17, 20, 33, .96); border: 1px solid rgba(255,255,255,.05); border-radius: 8px; }
+.discord-message-content { white-space: pre-wrap; overflow-wrap: break-word; word-wrap: break-word; padding: .8rem .9rem; background: rgba(17, 20, 33, .96); border: 1px solid rgba(255,255,255,.05); border-radius: 8px; }
 .discord-embed-preview { display: grid; grid-template-columns: 4px minmax(0, 1fr); background: rgba(49, 51, 56, .75); border: 1px solid rgba(255,255,255,.05); border-radius: 8px; overflow: hidden; }
 .discord-embed-accent { background: #9146FF; }
 .discord-embed-body { padding: .9rem; display: grid; gap: .75rem; }
@@ -140,7 +140,7 @@ a:hover { text-decoration: underline; }
 .discord-embed-field-value { color: var(--text); font-size: .84rem; }
 .discord-embed-image { border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,.05); background: #0c0e18; }
 .discord-embed-image img { display: block; width: 100%; height: auto; }
-.discord-embed-footer { color: var(--muted); font-size: .78rem; word-break: break-word; }
+.discord-embed-footer { color: var(--muted); font-size: .78rem; word-break: normal; overflow-wrap: break-word; }
 
 @media (max-width: 980px) {
   .live-detail-grid,

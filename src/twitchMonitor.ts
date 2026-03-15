@@ -209,7 +209,7 @@ async function postAnnouncement(streamerData: DbStreamerFull, stream: TwitchStre
       channelId: null,
       currentGame: stream.game_name,
       title: stream.title,
-        currentStream: stream,
+      currentStream: stream,
       offlineTimer: null,
     });
     return;
