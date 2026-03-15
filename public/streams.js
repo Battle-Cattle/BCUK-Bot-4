@@ -4,6 +4,9 @@ function toggleGroupEdit(id) {
   row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
 }
 
+var LIVE_TABLE_COLUMNS = 6;
+var expandedLiveRows = Object.create(null);
+
 function clearChildren(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
@@ -15,13 +18,150 @@ function makeCell(text, className) {
   return td;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatValue(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback || '—';
+  return String(value);
+}
+
+function renderBadge(label, className) {
+  return '<span class="badge ' + className + '">' + escapeHtml(label) + '</span>';
+}
+
+function renderMetadataItem(label, value, extraClass) {
+  return '' +
+    '<div class="live-meta-item">' +
+      '<span class="live-meta-label">' + escapeHtml(label) + '</span>' +
+      '<span class="live-meta-value' + (extraClass ? ' ' + extraClass : '') + '">' + escapeHtml(formatValue(value)) + '</span>' +
+    '</div>';
+}
+
+function renderLink(url, label) {
+  if (!url) return '<span class="muted">—</span>';
+  return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noreferrer">' + escapeHtml(label || url) + '</a>';
+}
+
+function renderEmbedFields(fields) {
+  if (!fields || !fields.length) {
+    return '<div class="discord-embed-field"><span class="muted">No embed fields</span></div>';
+  }
+
+  return fields.map(function(field) {
+    return '' +
+      '<div class="discord-embed-field">' +
+        '<div class="discord-embed-field-name">' + escapeHtml(formatValue(field.name)) + '</div>' +
+        '<div class="discord-embed-field-value">' + escapeHtml(formatValue(field.value)) + '</div>' +
+      '</div>';
+  }).join('');
+}
+
+function renderMessagePreview(title, preview) {
+  var embed = preview && preview.embed ? preview.embed : null;
+  var content = preview ? formatValue(preview.content, '') : '';
+
+  return '' +
+    '<section class="live-message-preview">' +
+      '<h4 class="live-message-title">' + escapeHtml(title) + '</h4>' +
+      '<div class="discord-message-box">' +
+        '<div class="discord-message-content">' + (content ? escapeHtml(content) : '<span class="muted">No message content</span>') + '</div>' +
+        (embed ? '' +
+          '<div class="discord-embed-preview">' +
+            '<div class="discord-embed-accent"></div>' +
+            '<div class="discord-embed-body">' +
+              '<div class="discord-embed-title"><a href="' + escapeHtml(embed.url) + '" target="_blank" rel="noreferrer">' + escapeHtml(formatValue(embed.title)) + '</a></div>' +
+              '<div class="discord-embed-fields">' + renderEmbedFields(embed.fields) + '</div>' +
+              '<div class="discord-embed-image"><img src="' + escapeHtml(embed.imageUrl) + '" alt="Stream thumbnail preview"></div>' +
+              (embed.footer ? '<div class="discord-embed-footer">' + escapeHtml(embed.footer) + '</div>' : '<div class="discord-embed-footer muted">No footer</div>') +
+            '</div>' +
+          '</div>' : '') +
+      '</div>' +
+    '</section>';
+}
+
+function getLiveRowKey(item) {
+  return String(item.streamerId || '') + ':' + String(item.groupId || '');
+}
+
+function renderMultiTwitchDetails(multiTwitch) {
+  var participants = multiTwitch && multiTwitch.participants && multiTwitch.participants.length
+    ? multiTwitch.participants.join(', ')
+    : '—';
+  var footerState = multiTwitch && multiTwitch.renderedFooter
+    ? renderBadge('Footer active', 'badge-active')
+    : '<span class="muted">No footer rendered</span>';
+
+  return '' +
+    '<section class="live-detail-section">' +
+      '<h4 class="live-message-title">Multi-Twitch</h4>' +
+      '<div class="live-meta-grid">' +
+        renderMetadataItem('Setting', multiTwitch && multiTwitch.enabled ? 'Enabled' : 'Disabled') +
+        renderMetadataItem('Applicable Now', multiTwitch && multiTwitch.applicable ? 'Yes' : 'No') +
+        renderMetadataItem('Participants', participants, 'mono') +
+        renderMetadataItem('Footer', multiTwitch && multiTwitch.renderedFooter ? multiTwitch.renderedFooter : '—', 'mono') +
+      '</div>' +
+      '<div class="live-link-row">' +
+        '<span class="live-meta-label">Computed link</span>' +
+        '<span class="live-meta-value mono">' + renderLink(multiTwitch ? multiTwitch.url : null, multiTwitch && multiTwitch.url ? multiTwitch.url : '—') + '</span>' +
+      '</div>' +
+      '<div class="live-footer-state">' + footerState + '</div>' +
+    '</section>';
+}
+
+function createDetailRow(item) {
+  var key = getLiveRowKey(item);
+  var detailTr = document.createElement('tr');
+  detailTr.className = 'files-row live-detail-row';
+  detailTr.dataset.liveKey = key;
+  detailTr.style.display = expandedLiveRows[key] ? 'table-row' : 'none';
+
+  var detailTd = document.createElement('td');
+  detailTd.colSpan = LIVE_TABLE_COLUMNS;
+  detailTd.innerHTML = '' +
+    '<div class="live-detail-shell">' +
+      '<div class="live-detail-grid">' +
+        '<section class="live-detail-section">' +
+          '<h4 class="live-message-title">Current Details</h4>' +
+          '<div class="live-meta-grid">' +
+            renderMetadataItem('Streamer ID', item.streamerId, 'mono') +
+            renderMetadataItem('Group ID', item.groupId, 'mono') +
+            renderMetadataItem('Group', item.groupName) +
+            renderMetadataItem('Target Discord Channel', item.groupDiscordChannelId, 'mono') +
+            renderMetadataItem('Posted Channel', item.channelId, 'mono') +
+            renderMetadataItem('Discord Message ID', item.messageId, 'mono') +
+            renderMetadataItem('Delete Old Posts', item.deleteOldPosts ? 'Yes' : 'No') +
+            renderMetadataItem('Current Game', item.currentGame) +
+          '</div>' +
+          '<div class="live-link-row">' +
+            '<span class="live-meta-label">Twitch</span>' +
+            '<span class="live-meta-value mono">' + renderLink(item.twitchUrl, item.twitchUrl) + '</span>' +
+          '</div>' +
+        '</section>' +
+        renderMultiTwitchDetails(item.multiTwitch) +
+      '</div>' +
+      '<div class="live-preview-grid">' +
+        renderMessagePreview('Live Announcement Preview', item.liveMessagePreview) +
+        renderMessagePreview('Game Change Preview', item.gameChangePreview) +
+      '</div>' +
+    '</div>';
+  detailTr.appendChild(detailTd);
+  return detailTr;
+}
+
 function setLiveTableMessage(text) {
   var tbody = document.getElementById('live-tbody');
   if (!tbody) return;
   clearChildren(tbody);
   var tr = document.createElement('tr');
   var td = document.createElement('td');
-  td.colSpan = 5;
+  td.colSpan = LIVE_TABLE_COLUMNS;
   td.className = 'empty-msg';
   td.textContent = text;
   tr.appendChild(td);
@@ -35,7 +175,20 @@ function renderLiveRows(enabled, streams) {
 
   for (var i = 0; i < streams.length; i++) {
     var item = streams[i];
+    var key = getLiveRowKey(item);
     var tr = document.createElement('tr');
+    tr.className = 'sfx-row';
+    tr.dataset.liveKey = key;
+
+    var toggleTd = document.createElement('td');
+    var toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'btn btn-sm btn-ghost btn-toggle-live-details';
+    toggleBtn.dataset.liveKey = key;
+    toggleBtn.setAttribute('aria-expanded', expandedLiveRows[key] ? 'true' : 'false');
+    toggleBtn.textContent = expandedLiveRows[key] ? '▼' : '▶';
+    toggleTd.appendChild(toggleBtn);
+    tr.appendChild(toggleTd);
 
     tr.appendChild(makeCell(String(item.login || ''), 'mono'));
     tr.appendChild(makeCell(String(item.groupName || '')));
@@ -61,6 +214,7 @@ function renderLiveRows(enabled, streams) {
     }
     tr.appendChild(postTd);
     tbody.appendChild(tr);
+    tbody.appendChild(createDetailRow(item));
   }
 }
 
@@ -72,6 +226,25 @@ document.addEventListener('click', function (event) {
   if (toggleBtn instanceof HTMLElement) {
     var id = toggleBtn.dataset.groupId;
     if (id) toggleGroupEdit(id);
+    return;
+  }
+
+  var liveToggleBtn = target.closest('.btn-toggle-live-details');
+  if (liveToggleBtn instanceof HTMLElement) {
+    var liveKey = liveToggleBtn.dataset.liveKey;
+    if (!liveKey) return;
+    expandedLiveRows[liveKey] = !expandedLiveRows[liveKey];
+
+    var detailRow = document.querySelector('tr.live-detail-row[data-live-key="' + liveKey + '"]');
+    if (detailRow instanceof HTMLElement) {
+      detailRow.style.display = expandedLiveRows[liveKey] ? 'table-row' : 'none';
+    }
+
+    var summaryButton = document.querySelector('.btn-toggle-live-details[data-live-key="' + liveKey + '"]');
+    if (summaryButton instanceof HTMLElement) {
+      summaryButton.textContent = expandedLiveRows[liveKey] ? '▼' : '▶';
+      summaryButton.setAttribute('aria-expanded', expandedLiveRows[liveKey] ? 'true' : 'false');
+    }
   }
 });
 
