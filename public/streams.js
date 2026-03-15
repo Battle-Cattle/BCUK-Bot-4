@@ -5,6 +5,7 @@ function toggleGroupEdit(id) {
 }
 
 var expandedLiveRows = Object.create(null);
+var liveItemsByKey = Object.create(null);
 
 var liveTableColumnsCache = null;
 
@@ -39,7 +40,11 @@ function escapeHtml(value) {
 }
 
 function formatValue(value, fallback) {
-  if (value === null || value === undefined || value === '') return fallback || '—';
+  if (value === null || value === undefined || value === '') {
+    return fallback === undefined || fallback === null
+      ? '—'
+      : String(fallback);
+  }
   return String(value);
 }
 
@@ -186,13 +191,27 @@ function createDetailRow(item) {
         '</section>' +
         renderMultiTwitchDetails(item.multiTwitch) +
       '</div>' +
-      '<div class="live-preview-grid">' +
-        renderMessagePreview('Live Announcement Preview', item.liveMessagePreview) +
-        renderMessagePreview('Game Change Preview', item.gameChangePreview) +
-      '</div>' +
+      '<div class="live-preview-grid" data-live-key="' + escapeHtml(key) + '" data-hydrated="false"></div>' +
     '</div>';
   detailTr.appendChild(detailTd);
   return detailTr;
+}
+
+function hydrateLivePreviewGrid(liveKey) {
+  var detailRow = document.querySelector('tr.live-detail-row[data-live-key="' + liveKey + '"]');
+  if (!(detailRow instanceof HTMLElement)) return;
+
+  var grid = detailRow.querySelector('.live-preview-grid');
+  if (!(grid instanceof HTMLElement)) return;
+  if (grid.dataset.hydrated === 'true') return;
+
+  var item = liveItemsByKey[liveKey];
+  if (!item) return;
+
+  grid.innerHTML = '' +
+    renderMessagePreview('Live Announcement Preview', item.liveMessagePreview) +
+    renderMessagePreview('Game Change Preview', item.gameChangePreview);
+  grid.dataset.hydrated = 'true';
 }
 
 function setLiveTableMessage(text) {
@@ -212,10 +231,12 @@ function renderLiveRows(enabled, streams) {
   var tbody = document.getElementById('live-tbody');
   if (!tbody) return;
   clearChildren(tbody);
+  liveItemsByKey = Object.create(null);
 
   for (var i = 0; i < streams.length; i++) {
     var item = streams[i];
     var key = getLiveRowKey(item);
+    liveItemsByKey[key] = item;
     var tr = document.createElement('tr');
     tr.className = 'sfx-row';
     tr.dataset.liveKey = key;
@@ -257,6 +278,10 @@ function renderLiveRows(enabled, streams) {
     tr.appendChild(postTd);
     tbody.appendChild(tr);
     tbody.appendChild(createDetailRow(item));
+
+    if (expandedLiveRows[key]) {
+      hydrateLivePreviewGrid(key);
+    }
   }
 }
 
@@ -280,6 +305,10 @@ document.addEventListener('click', function (event) {
     var detailRow = document.querySelector('tr.live-detail-row[data-live-key="' + liveKey + '"]');
     if (detailRow instanceof HTMLElement) {
       detailRow.style.display = expandedLiveRows[liveKey] ? 'table-row' : 'none';
+    }
+
+    if (expandedLiveRows[liveKey]) {
+      hydrateLivePreviewGrid(liveKey);
     }
 
     liveToggleBtn.textContent = expandedLiveRows[liveKey] ? '▼' : '▶';
