@@ -248,11 +248,8 @@ document.addEventListener('click', function (event) {
       detailRow.style.display = expandedLiveRows[liveKey] ? 'table-row' : 'none';
     }
 
-    var summaryButton = document.querySelector('.btn-toggle-live-details[data-live-key="' + liveKey + '"]');
-    if (summaryButton instanceof HTMLElement) {
-      summaryButton.textContent = expandedLiveRows[liveKey] ? '▼' : '▶';
-      summaryButton.setAttribute('aria-expanded', expandedLiveRows[liveKey] ? 'true' : 'false');
-    }
+    liveToggleBtn.textContent = expandedLiveRows[liveKey] ? '▼' : '▶';
+    liveToggleBtn.setAttribute('aria-expanded', expandedLiveRows[liveKey] ? 'true' : 'false');
   }
 });
 

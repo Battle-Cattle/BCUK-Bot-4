@@ -367,19 +367,26 @@ async function handleStreamOffline(login: string): Promise<void> {
     if (state.offlineTimer) clearTimeout(state.offlineTimer);
 
     state.offlineTimer = setTimeout(async () => {
-      // Re-fetch current state to guard against stale closure after monitor restart.
-      const currentState = liveStates.get(stateKey);
-      if (!currentState) return;
-      currentState.offlineTimer = null;
-      const userId = loginToUserId.get(key);
-      if (!userId) return;
+      let currentState: LiveState | undefined;
+      try {
+        // Re-fetch current state to guard against stale closure after monitor restart.
+        currentState = liveStates.get(stateKey);
+        if (!currentState) return;
 
-      const streams = await getStreams([userId]);
-      const isLive = streams.some((s) => s.user_id === userId && s.type === 'live');
+        const userId = loginToUserId.get(key);
+        if (!userId) return;
 
-      if (!isLive) {
-        await deleteAnnouncement(stateKey);
-        console.log(`[TwitchMonitor] ${login} confirmed offline — announcement removed`);
+        const streams = await getStreams([userId]);
+        const isLive = streams.some((s) => s.user_id === userId && s.type === 'live');
+
+        if (!isLive) {
+          await deleteAnnouncement(stateKey);
+          console.log(`[TwitchMonitor] ${login} confirmed offline — announcement removed`);
+        }
+      } catch (err) {
+        console.error(`[TwitchMonitor] Offline-check failed for ${key} (${stateKey}):`, err);
+      } finally {
+        if (currentState) currentState.offlineTimer = null;
       }
     }, OFFLINE_GRACE_MS);
   }
@@ -459,13 +466,11 @@ async function performStartupLiveCheck(): Promise<void> {
             currentStream: liveStream,
             offlineTimer: null,
           });
-          groupsWithChanges.add(streamer.group.id);
           continue;
         }
       }
       // Post fresh announcement
       await postAnnouncement(streamer, liveStream);
-      groupsWithChanges.add(streamer.group.id);
     } else if (hasStoredMsg) {
       // Stream ended while bot was offline — liveStates is empty at startup so
       // deleteAnnouncement() would early-return without clearing DB state. Do it directly.
@@ -691,7 +696,6 @@ export function getLiveStates(): LiveStateSnapshot[] {
  */
 export async function catchUpDiscordPosts(): Promise<void> {
   if (!discordClient) return;
-  const groupsToUpdate = new Set<number>();
 
   const states = Array.from(liveStates.values());
   // Batch all live-state user IDs into a single Helix request instead of one per streamer.
@@ -724,7 +728,6 @@ export async function catchUpDiscordPosts(): Promise<void> {
       if (!stream) {
         // Went offline while posts were disabled — clean up any stale message
         await deleteAnnouncement(String(state.streamerId));
-        groupsToUpdate.add(state.groupId);
         continue;
       }
 
@@ -735,13 +738,8 @@ export async function catchUpDiscordPosts(): Promise<void> {
         // No message yet — post fresh
         await postAnnouncement(streamerInfo, stream);
       }
-      groupsToUpdate.add(state.groupId);
     } catch (err) {
       console.error(`[TwitchMonitor] Catch-up post failed for ${state.login}:`, err);
     }
-  }
-
-  for (const gid of groupsToUpdate) {
-    await updateMultitwitch(gid);
   }
 }
