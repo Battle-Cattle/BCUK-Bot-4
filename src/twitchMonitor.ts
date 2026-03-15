@@ -185,7 +185,8 @@ function buildMessagePreview(
   const template = templateKey === 'new_game_message'
     ? state.group.new_game_message
     : state.group.live_message;
-  const vars = templateVars(state.login, stream, resolvedMultiTwitch.url ?? undefined);
+  // Match production content generation: announcements do not currently inject {multitwitch} in content.
+  const vars = templateVars(state.login, stream);
 
   return {
     content: fillTemplate(template, vars),

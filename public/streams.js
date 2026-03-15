@@ -232,11 +232,15 @@ function renderLiveRows(enabled, streams) {
   if (!tbody) return;
   clearChildren(tbody);
   liveItemsByKey = Object.create(null);
+  var nextExpandedLiveRows = Object.create(null);
 
   for (var i = 0; i < streams.length; i++) {
     var item = streams[i];
     var key = getLiveRowKey(item);
     liveItemsByKey[key] = item;
+    if (expandedLiveRows[key]) {
+      nextExpandedLiveRows[key] = true;
+    }
     var tr = document.createElement('tr');
     tr.className = 'sfx-row';
     tr.dataset.liveKey = key;
@@ -279,10 +283,12 @@ function renderLiveRows(enabled, streams) {
     tbody.appendChild(tr);
     tbody.appendChild(createDetailRow(item));
 
-    if (expandedLiveRows[key]) {
+    if (nextExpandedLiveRows[key]) {
       hydrateLivePreviewGrid(key);
     }
   }
+
+  expandedLiveRows = nextExpandedLiveRows;
 }
 
 document.addEventListener('click', function (event) {
@@ -351,6 +357,8 @@ function refreshLiveNow() {
       var enabled = data.enabled;
       var streams = data.streams;
       if (!streams || !streams.length) {
+        expandedLiveRows = Object.create(null);
+        liveItemsByKey = Object.create(null);
         setLiveTableMessage('No streamers currently live.');
       } else {
         renderLiveRows(enabled, streams);
