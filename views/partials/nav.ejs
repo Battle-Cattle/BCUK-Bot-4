@@ -1,7 +1,7 @@
 <nav class="navbar">
   <a href="/" class="navbar-brand">🤖 BCUK Bot</a>
-  <button class="navbar-toggle" aria-label="Toggle navigation" aria-expanded="false">&#9776;</button>
-  <div class="navbar-collapse">
+  <button class="navbar-toggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="navbar-collapse">&#9776;</button>
+  <div class="navbar-collapse" id="navbar-collapse">
     <div class="navbar-menu">
       <a href="/" class="nav-item">Dashboard</a>
       <% if (user && user.accessLevel >= 2) { %>
@@ -35,6 +35,13 @@
         nav.classList.remove('nav-open');
         toggle.setAttribute('aria-expanded', 'false');
         toggle.focus();
+      }
+    });
+    var mql = window.matchMedia('(max-width: 640px)');
+    mql.addEventListener('change', function (e) {
+      if (!e.matches && nav.classList.contains('nav-open')) {
+        nav.classList.remove('nav-open');
+        toggle.setAttribute('aria-expanded', 'false');
       }
     });
   }

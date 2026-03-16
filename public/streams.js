@@ -45,7 +45,7 @@ function renderLiveRows(enabled, streams) {
     var postTd = document.createElement('td');
     if (!enabled) {
       var disabledSpan = document.createElement('span');
-      disabledSpan.style.color = 'var(--text-muted)';
+      disabledSpan.style.color = 'var(--muted)';
       disabledSpan.textContent = '— disabled';
       postTd.appendChild(disabledSpan);
     } else if (item.messageId) {
@@ -55,7 +55,7 @@ function renderLiveRows(enabled, streams) {
       postTd.appendChild(postedBadge);
     } else {
       var noneSpan = document.createElement('span');
-      noneSpan.style.color = 'var(--text-muted)';
+      noneSpan.style.color = 'var(--muted)';
       noneSpan.textContent = '— none';
       postTd.appendChild(noneSpan);
     }
