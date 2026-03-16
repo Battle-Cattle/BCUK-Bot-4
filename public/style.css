@@ -103,6 +103,7 @@ a:hover { text-decoration: underline; }
 .btn-discord:hover { background: var(--primary-h); }
 
 /* ── Tables ────────────────────────────────────────────── */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .table { width: 100%; border-collapse: collapse; font-size: .855rem; }
 .table th { color: var(--muted); text-align: left; font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; padding: .6rem 1rem; border-bottom: 2px solid var(--border); }
 .table td { padding: .6rem 1rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
@@ -174,9 +175,12 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
   }
   .nav-item { width: 100%; border-radius: 6px; }
 
-  /* Tables: horizontal scroll — override card's overflow:hidden */
-  .card { overflow-x: auto; }
-  .table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Tables: allow horizontal scroll within the scroll wrapper */
+  .card { overflow: visible; }
+  .table-scroll { border-radius: var(--radius); overflow-x: auto; }
+  .table-scroll .table { width: max-content; min-width: 100%; }
+  .table-scroll .table th,
+  .table-scroll .table td { white-space: nowrap; }
 
   /* Section header: stack title + search vertically */
   .section-header { flex-wrap: wrap; gap: .5rem; }
