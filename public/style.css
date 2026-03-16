@@ -177,7 +177,7 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 
   /* Tables: allow horizontal scroll within the scroll wrapper */
   .card { overflow: visible; }
-  .table-scroll { border-radius: var(--radius); overflow-x: auto; }
+  .table-scroll { border-radius: var(--radius); }
   .table-scroll .table { width: max-content; min-width: 100%; }
   .table-scroll .table th,
   .table-scroll .table td { white-space: nowrap; }

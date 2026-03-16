@@ -25,10 +25,17 @@
 (function () {
   var toggle = document.querySelector('.navbar-toggle');
   if (toggle) {
+    var nav = toggle.closest('.navbar');
     toggle.addEventListener('click', function () {
-      var nav = toggle.closest('.navbar');
       var open = nav.classList.toggle('nav-open');
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && nav.classList.contains('nav-open')) {
+        nav.classList.remove('nav-open');
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.focus();
+      }
     });
   }
 }());
