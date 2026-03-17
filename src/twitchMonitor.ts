@@ -21,7 +21,34 @@ interface LiveState {
   channelId: string | null;
   currentGame: string;
   title: string;
+  currentStream: TwitchStream;
   offlineTimer: ReturnType<typeof setTimeout> | null;
+}
+
+export interface DiscordEmbedPreview {
+  title: string;
+  url: string;
+  color: string;
+  fields: Array<{ name: string; value: string }>;
+  imageUrl: string;
+  footer: string | null;
+}
+
+export interface DiscordMessagePreview {
+  content: string;
+  embed: DiscordEmbedPreview;
+}
+
+export interface MultiTwitchPreview {
+  enabled: boolean;
+  applicable: boolean;
+  participants: string[];
+  url: string | null;
+  renderedFooter: string | null;
+}
+
+interface MultiTwitchContext {
+  participantsByGroupAndGame: Map<string, string[]>;
 }
 
 // ─── Module-level state ──────────────────────────────────────────────────────
@@ -44,19 +71,44 @@ function fillTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
 }
 
-function buildEmbed(stream: TwitchStream, footer?: string): EmbedBuilder {
-  const thumbnailUrl = stream.thumbnail_url
+function getStreamUrl(login: string): string {
+  return `https://www.twitch.tv/${login}`;
+}
+
+function getThumbnailUrl(stream: TwitchStream): string {
+  return stream.thumbnail_url
     .replace('{width}', '640')
     .replace('{height}', '360');
+}
+
+function buildEmbedPreview(stream: TwitchStream, footer?: string): DiscordEmbedPreview {
+  return {
+    title: stream.title,
+    url: getStreamUrl(stream.user_login),
+    color: '#9146FF',
+    fields: [{ name: 'Game', value: stream.game_name || 'Unknown' }],
+    imageUrl: getThumbnailUrl(stream),
+    footer: footer || null,
+  };
+}
+
+function parseHexColor(color: string): number {
+  const normalized = color.trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return 0x9146ff;
+  return parseInt(normalized, 16);
+}
+
+function buildEmbed(stream: TwitchStream, footer?: string): EmbedBuilder {
+  const preview = buildEmbedPreview(stream, footer);
 
   const embed = new EmbedBuilder()
-    .setTitle(stream.title)
-    .setURL(`https://www.twitch.tv/${stream.user_login}`)
-    .setColor(0x9146ff)
-    .addFields({ name: 'Game', value: stream.game_name || 'Unknown' })
-    .setImage(thumbnailUrl);
+    .setTitle(preview.title)
+    .setURL(preview.url)
+    .setColor(parseHexColor(preview.color))
+    .addFields(...preview.fields)
+    .setImage(preview.imageUrl);
 
-  if (footer) embed.setFooter({ text: footer });
+  if (preview.footer) embed.setFooter({ text: preview.footer });
   return embed;
 }
 
@@ -65,8 +117,90 @@ function templateVars(login: string, stream: TwitchStream, multitwitch?: string)
     streamer: login,
     game: stream.game_name || 'Unknown',
     title: stream.title,
-    url: `https://www.twitch.tv/${login}`,
+    url: getStreamUrl(login),
     multitwitch: multitwitch ?? '',
+  };
+}
+
+function groupGameKey(groupId: number, game: string): string {
+  return `${groupId}::${game.toLowerCase()}`;
+}
+
+function buildMultiTwitchContext(states: Iterable<LiveState>): MultiTwitchContext {
+  const participantSets = new Map<string, Set<string>>();
+
+  for (const state of states) {
+    const key = groupGameKey(state.groupId, state.currentGame);
+    const participants = participantSets.get(key);
+    if (participants) {
+      participants.add(state.login);
+    } else {
+      participantSets.set(key, new Set([state.login]));
+    }
+  }
+
+  const participantsByGroupAndGame = new Map<string, string[]>();
+  for (const [key, participants] of participantSets.entries()) {
+    participantsByGroupAndGame.set(key, Array.from(participants).sort((left, right) => left.localeCompare(right)));
+  }
+
+  return { participantsByGroupAndGame };
+}
+
+function getMultitwitchPreview(state: LiveState, context?: MultiTwitchContext): MultiTwitchPreview {
+  const participants = context
+    ? context.participantsByGroupAndGame.get(groupGameKey(state.groupId, state.currentGame))
+    : buildMultiTwitchContext(liveStates.values()).participantsByGroupAndGame.get(groupGameKey(state.groupId, state.currentGame));
+  const applicable = !!participants && participants.length >= 2;
+
+  if (!applicable) {
+    return {
+      enabled: state.group.multi_twitch,
+      applicable: false,
+      participants: [state.login],
+      url: null,
+      renderedFooter: null,
+    };
+  }
+
+  if (!state.group.multi_twitch) {
+    return {
+      enabled: false,
+      applicable: true,
+      participants,
+      url: null,
+      renderedFooter: null,
+    };
+  }
+
+  const url = `https://www.multitwitch.tv/${participants.join('/')}`;
+  const renderedFooter = fillTemplate(state.group.multi_twitch_message, { multitwitch: url }) || null;
+
+  return {
+    enabled: true,
+    applicable: true,
+    participants,
+    url,
+    renderedFooter,
+  };
+}
+
+function buildMessagePreview(
+  state: LiveState,
+  templateKey: 'live_message' | 'new_game_message',
+  multiTwitch?: MultiTwitchPreview,
+): DiscordMessagePreview {
+  const stream = state.currentStream;
+  const resolvedMultiTwitch = multiTwitch ?? getMultitwitchPreview(state);
+  const template = templateKey === 'new_game_message'
+    ? state.group.new_game_message
+    : state.group.live_message;
+  // Match production content generation: announcements do not currently inject {multitwitch} in content.
+  const vars = templateVars(state.login, stream);
+
+  return {
+    content: fillTemplate(template, vars),
+    embed: buildEmbedPreview(stream, resolvedMultiTwitch.renderedFooter ?? undefined),
   };
 }
 
@@ -76,20 +210,12 @@ async function updateMultitwitch(groupId: number): Promise<void> {
   if (!getMonitorEnabled() || !discordClient) return;
 
   const groupLive = Array.from(liveStates.values()).filter((s) => s.groupId === groupId);
+  const context = buildMultiTwitchContext(groupLive);
 
   for (const state of groupLive) {
     if (!state.messageId || !state.channelId) continue;
-
-    const sameGame = groupLive.filter(
-      (s) => s.currentGame === state.currentGame && s.login !== state.login,
-    );
-
-    let footer: string | undefined;
-    if (state.group.multi_twitch && sameGame.length >= 1) {
-      const logins = [state.login, ...sameGame.map((s) => s.login)];
-      const multitwitchUrl = `https://www.multitwitch.tv/${logins.join('/')}`;
-      footer = fillTemplate(state.group.multi_twitch_message, { multitwitch: multitwitchUrl });
-    }
+    const multiTwitch = getMultitwitchPreview(state, context);
+    const footer = multiTwitch.renderedFooter ?? undefined;
 
     try {
       const channel = await discordClient.channels.fetch(state.channelId);
@@ -130,6 +256,7 @@ async function postAnnouncement(streamerData: DbStreamerFull, stream: TwitchStre
       channelId: null,
       currentGame: stream.game_name,
       title: stream.title,
+      currentStream: stream,
       offlineTimer: null,
     });
     return;
@@ -157,6 +284,7 @@ async function postAnnouncement(streamerData: DbStreamerFull, stream: TwitchStre
       channelId: msg.channelId,
       currentGame: stream.game_name,
       title: stream.title,
+      currentStream: stream,
       offlineTimer: null,
     });
 
@@ -175,6 +303,7 @@ async function editAnnouncement(
   // Always update in-memory state so liveStates stays current even when posts are disabled
   state.currentGame = stream.game_name;
   state.title = stream.title;
+  state.currentStream = stream;
 
   if (!getMonitorEnabled() || !discordClient || !state.messageId || !state.channelId) return;
 
@@ -248,19 +377,26 @@ async function handleStreamOffline(login: string): Promise<void> {
     if (state.offlineTimer) clearTimeout(state.offlineTimer);
 
     state.offlineTimer = setTimeout(async () => {
-      // Re-fetch current state to guard against stale closure after monitor restart.
-      const currentState = liveStates.get(stateKey);
-      if (!currentState) return;
-      currentState.offlineTimer = null;
-      const userId = loginToUserId.get(key);
-      if (!userId) return;
+      let currentState: LiveState | undefined;
+      try {
+        // Re-fetch current state to guard against stale closure after monitor restart.
+        currentState = liveStates.get(stateKey);
+        if (!currentState) return;
 
-      const streams = await getStreams([userId]);
-      const isLive = streams.some((s) => s.user_id === userId && s.type === 'live');
+        const userId = loginToUserId.get(key);
+        if (!userId) return;
 
-      if (!isLive) {
-        await deleteAnnouncement(stateKey);
-        console.log(`[TwitchMonitor] ${login} confirmed offline — announcement removed`);
+        const streams = await getStreams([userId]);
+        const isLive = streams.some((s) => s.user_id === userId && s.type === 'live');
+
+        if (!isLive) {
+          await deleteAnnouncement(stateKey);
+          console.log(`[TwitchMonitor] ${login} confirmed offline — announcement removed`);
+        }
+      } catch (err) {
+        console.error(`[TwitchMonitor] Offline-check failed for ${key} (${stateKey}):`, err);
+      } finally {
+        if (currentState) currentState.offlineTimer = null;
       }
     }, OFFLINE_GRACE_MS);
   }
@@ -316,6 +452,7 @@ async function performStartupLiveCheck(): Promise<void> {
                 channelId: streamer.discord_channel_id,
                 currentGame: liveStream.game_name,
                 title: liveStream.title,
+                currentStream: liveStream,
                 offlineTimer: null,
               });
               await setStreamerLive(streamer.id, streamer.discord_message_id!, streamer.discord_channel_id!, liveStream.game_name);
@@ -336,15 +473,14 @@ async function performStartupLiveCheck(): Promise<void> {
             channelId: streamer.discord_channel_id,
             currentGame: liveStream.game_name,
             title: liveStream.title,
+            currentStream: liveStream,
             offlineTimer: null,
           });
-          groupsWithChanges.add(streamer.group.id);
           continue;
         }
       }
       // Post fresh announcement
       await postAnnouncement(streamer, liveStream);
-      groupsWithChanges.add(streamer.group.id);
     } else if (hasStoredMsg) {
       // Stream ended while bot was offline — liveStates is empty at startup so
       // deleteAnnouncement() would early-return without clearing DB state. Do it directly.
@@ -413,7 +549,9 @@ async function pollStreams(): Promise<void> {
           console.log(`[TwitchMonitor] ${loginKey} game changed to ${pollStream.game_name}`);
         } else if (existing) {
           // Still live — keep title in sync
+          existing.currentGame = pollStream.game_name;
           existing.title = pollStream.title;
+          existing.currentStream = pollStream;
         }
       } else if (existing && !existing.offlineTimer) {
         // Appears offline — start grace period (handleStreamOffline handles all groups for this login)
@@ -512,25 +650,54 @@ export async function restartTwitchMonitor(): Promise<void> {
 // ─── Live state snapshot (for web panel) ─────────────────────────────────────
 
 export interface LiveStateSnapshot {
+  streamerId: number;
   login: string;
+  twitchUrl: string;
   groupId: number;
   groupName: string;
+  groupDiscordChannelId: string;
+  multiTwitchEnabled: boolean;
+  deleteOldPosts: boolean;
   currentGame: string;
   title: string;
   messageId: string | null;
   channelId: string | null;
+  multiTwitch: MultiTwitchPreview;
+  liveMessagePreview: DiscordMessagePreview;
+  gameChangePreview: DiscordMessagePreview;
 }
 
 export function getLiveStates(): LiveStateSnapshot[] {
-  return Array.from(liveStates.values()).map((s) => ({
-    login: s.login,
-    groupId: s.groupId,
-    groupName: s.group.name,
-    currentGame: s.currentGame,
-    title: s.title,
-    messageId: s.messageId,
-    channelId: s.channelId,
-  }));
+  const states = Array.from(liveStates.values());
+  const multiTwitchContext = buildMultiTwitchContext(states);
+
+  return states
+    .map((state) => {
+      const multiTwitch = getMultitwitchPreview(state, multiTwitchContext);
+
+      return {
+        streamerId: state.streamerId,
+        login: state.login,
+        twitchUrl: getStreamUrl(state.login),
+        groupId: state.groupId,
+        groupName: state.group.name,
+        groupDiscordChannelId: state.group.discord_channel,
+        multiTwitchEnabled: state.group.multi_twitch,
+        deleteOldPosts: state.group.delete_old_posts,
+        currentGame: state.currentGame,
+        title: state.title,
+        messageId: state.messageId,
+        channelId: state.channelId,
+        multiTwitch,
+        liveMessagePreview: buildMessagePreview(state, 'live_message', multiTwitch),
+        gameChangePreview: buildMessagePreview(state, 'new_game_message', multiTwitch),
+      };
+    })
+    .sort((left, right) => {
+      const groupCompare = left.groupName.localeCompare(right.groupName);
+      if (groupCompare !== 0) return groupCompare;
+      return left.login.localeCompare(right.login);
+    });
 }
 
 /**
@@ -539,7 +706,6 @@ export function getLiveStates(): LiveStateSnapshot[] {
  */
 export async function catchUpDiscordPosts(): Promise<void> {
   if (!discordClient) return;
-  const groupsToUpdate = new Set<number>();
 
   const states = Array.from(liveStates.values());
   // Batch all live-state user IDs into a single Helix request instead of one per streamer.
@@ -572,7 +738,6 @@ export async function catchUpDiscordPosts(): Promise<void> {
       if (!stream) {
         // Went offline while posts were disabled — clean up any stale message
         await deleteAnnouncement(String(state.streamerId));
-        groupsToUpdate.add(state.groupId);
         continue;
       }
 
@@ -583,13 +748,8 @@ export async function catchUpDiscordPosts(): Promise<void> {
         // No message yet — post fresh
         await postAnnouncement(streamerInfo, stream);
       }
-      groupsToUpdate.add(state.groupId);
     } catch (err) {
       console.error(`[TwitchMonitor] Catch-up post failed for ${state.login}:`, err);
     }
-  }
-
-  for (const gid of groupsToUpdate) {
-    await updateMultitwitch(gid);
   }
 }
