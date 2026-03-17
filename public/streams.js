@@ -65,6 +65,11 @@ function sanitizeUrl(url, options) {
   var raw = String(url).trim();
   if (!raw) return null;
 
+  // Twitch/CDN URLs may occasionally arrive protocol-relative (//host/path).
+  if (raw.indexOf('//') === 0) {
+    raw = 'https:' + raw;
+  }
+
   var parsed;
   try {
     parsed = new URL(raw);
@@ -122,8 +127,11 @@ function renderMessagePreview(title, preview) {
                 : escapeHtml(formatValue(embed.title))) + '</div>' +
               '<div class="discord-embed-fields">' + renderEmbedFields(embed.fields) + '</div>' +
               '<div class="discord-embed-image">' + (safeImageUrl
-                ? '<img src="' + escapeHtml(safeImageUrl) + '" alt="Stream thumbnail preview">'
+                ? '<img src="' + escapeHtml(safeImageUrl) + '" alt="Stream thumbnail preview" loading="lazy" referrerpolicy="no-referrer">'
                 : '<span class="muted">Thumbnail unavailable</span>') + '</div>' +
+              (safeImageUrl
+                ? '<div class="discord-embed-footer">Image: ' + renderLink(safeImageUrl, 'open thumbnail') + '</div>'
+                : '') +
               (embed.footer ? '<div class="discord-embed-footer">' + escapeHtml(embed.footer) + '</div>' : '<div class="discord-embed-footer muted">No footer</div>') +
             '</div>' +
           '</div>' : '') +
