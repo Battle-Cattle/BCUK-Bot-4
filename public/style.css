@@ -103,7 +103,7 @@ a:hover { text-decoration: underline; }
 .btn-discord:hover { background: var(--primary-h); }
 
 /* ── Tables ────────────────────────────────────────────── */
-.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll { overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; font-size: .855rem; }
 .table th { color: var(--muted); text-align: left; font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; padding: .6rem 1rem; border-bottom: 2px solid var(--border); }
 .table td { padding: .6rem 1rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
@@ -216,12 +216,6 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
   .table-scroll .table { width: max-content; min-width: 100%; }
   .table-scroll .table th,
   .table-scroll .table td { white-space: nowrap; }
-
-  /* Live-now table: the card itself scrolls horizontally */
-  .live-now-card { overflow-x: auto; }
-  .live-now-card .table { width: max-content; min-width: 100%; }
-  .live-now-card .table th,
-  .live-now-card .table td { white-space: nowrap; }
 
   /* Section header: stack title + search vertically */
   .section-header { flex-wrap: wrap; gap: .5rem; }
