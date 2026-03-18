@@ -1,7 +1,7 @@
 <nav class="navbar">
   <a href="/" class="navbar-brand">🤖 BCUK Bot</a>
   <button class="navbar-toggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="navbar-collapse">&#9776;</button>
-  <div class="navbar-collapse" id="navbar-collapse" aria-hidden="true">
+  <div class="navbar-collapse" id="navbar-collapse" aria-hidden="false">
     <div class="navbar-menu">
       <a href="/" class="nav-item">Dashboard</a>
       <% if (user && user.accessLevel >= 2) { %>
@@ -21,40 +21,4 @@
     </div>
   </div>
 </nav>
-<script>
-(function () {
-  var toggle = document.querySelector('.navbar-toggle');
-  if (toggle) {
-    var nav = toggle.closest('.navbar');
-    var collapse = document.getElementById('navbar-collapse');
-    toggle.addEventListener('click', function () {
-      var open = nav.classList.toggle('nav-open');
-      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-      collapse.setAttribute('aria-hidden', open ? 'false' : 'true');
-    });
-    document.addEventListener('click', function (e) {
-      if (nav.classList.contains('nav-open') && !nav.contains(e.target)) {
-        nav.classList.remove('nav-open');
-        toggle.setAttribute('aria-expanded', 'false');
-        collapse.setAttribute('aria-hidden', 'true');
-      }
-    });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && nav.classList.contains('nav-open')) {
-        nav.classList.remove('nav-open');
-        toggle.setAttribute('aria-expanded', 'false');
-        collapse.setAttribute('aria-hidden', 'true');
-        toggle.focus();
-      }
-    });
-    var mql = window.matchMedia('(max-width: 640px)');
-    mql.addEventListener('change', function (e) {
-      if (!e.matches && nav.classList.contains('nav-open')) {
-        nav.classList.remove('nav-open');
-        toggle.setAttribute('aria-expanded', 'false');
-        collapse.setAttribute('aria-hidden', 'true');
-      }
-    });
-  }
-}());
-</script>
+<script src="/navbar.js"></script>
