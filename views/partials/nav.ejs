@@ -1,20 +1,24 @@
 <nav class="navbar">
   <a href="/" class="navbar-brand">🤖 BCUK Bot</a>
-  <div class="navbar-menu">
-    <a href="/" class="nav-item">Dashboard</a>
-    <% if (user && user.accessLevel >= 2) { %>
-    <a href="/admin/users" class="nav-item">Users</a>
-    <a href="/admin/streams" class="nav-item">Streams</a>
-    <% } %>
-  </div>
-  <div class="navbar-end">
-    <% if (user) { %>
-    <% if (user.discordAvatar) { %>
-    <img src="<%= user.discordAvatar %>?size=32" class="avatar" alt="">
-    <% } %>
-    <span class="username"><%= user.discordName %></span>
-    <span class="badge level-<%= user.accessLevel %>"><%= ['User','Mod','Manager','Admin'][user.accessLevel] || 'Unknown' %></span>
-    <a href="/auth/logout" class="btn btn-ghost btn-sm">Logout</a>
-    <% } %>
+  <button class="navbar-toggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="navbar-collapse">&#9776;</button>
+  <div class="navbar-collapse" id="navbar-collapse" aria-hidden="false">
+    <div class="navbar-menu">
+      <a href="/" class="nav-item">Dashboard</a>
+      <% if (user && user.accessLevel >= 2) { %>
+      <a href="/admin/users" class="nav-item">Users</a>
+      <a href="/admin/streams" class="nav-item">Streams</a>
+      <% } %>
+    </div>
+    <div class="navbar-end">
+      <% if (user) { %>
+      <% if (user.discordAvatar) { %>
+      <img src="<%= user.discordAvatar %>?size=32" class="avatar" alt="">
+      <% } %>
+      <span class="username"><%= user.discordName %></span>
+      <span class="badge level-<%= user.accessLevel %>"><%= ['User','Mod','Manager','Admin'][user.accessLevel] || 'Unknown' %></span>
+      <a href="/auth/logout" class="btn btn-ghost btn-sm">Logout</a>
+      <% } %>
+    </div>
   </div>
 </nav>
+<script src="/navbar.js"></script>
