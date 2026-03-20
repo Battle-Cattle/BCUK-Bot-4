@@ -23,7 +23,6 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => cache.addAll(STATIC_ASSETS))
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -74,6 +73,11 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate') {
     event.respondWith(handleNavigationRequest(request));
+    return;
+  }
+
+  if (url.pathname === '/service-worker.js') {
+    event.respondWith(fetch(request));
     return;
   }
 
