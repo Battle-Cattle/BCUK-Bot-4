@@ -1,3 +1,4 @@
+const APP_CACHE_PREFIX = 'bcuk-panel-';
 const CACHE_VERSION = 'bcuk-panel-v3';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
@@ -32,7 +33,12 @@ self.addEventListener('activate', (event) => {
       .then((cacheNames) =>
         Promise.all(
           cacheNames
-            .filter((cacheName) => cacheName !== STATIC_CACHE && cacheName !== RUNTIME_CACHE)
+            .filter(
+              (cacheName) =>
+                cacheName.startsWith(APP_CACHE_PREFIX) &&
+                cacheName !== STATIC_CACHE &&
+                cacheName !== RUNTIME_CACHE
+            )
             .map((cacheName) => caches.delete(cacheName))
         )
       )
@@ -72,7 +78,9 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (isStaticAsset(url.pathname)) {
-    event.respondWith(staleWhileRevalidate(request));
+    const swr = staleWhileRevalidate(request);
+    event.respondWith(swr.responsePromise);
+    event.waitUntil(swr.updatePromise);
     return;
   }
 
@@ -88,25 +96,34 @@ async function handleNavigationRequest(request) {
   }
 }
 
-async function staleWhileRevalidate(request) {
-  const cache = await caches.open(STATIC_CACHE);
-  const cached = await cache.match(request);
+function staleWhileRevalidate(request) {
+  const cachePromise = caches.open(STATIC_CACHE);
+  const cachedPromise = cachePromise.then((cache) => cache.match(request));
 
-  const networkPromise = fetch(request)
-    .then((response) => {
+  const networkPromise = cachePromise.then(async (cache) => {
+    try {
+      const response = await fetch(request);
       if (response && response.ok) {
-        cache.put(request, response.clone());
+        await cache.put(request, response.clone());
       }
       return response;
-    })
-    .catch(() => null);
+    } catch (_error) {
+      return null;
+    }
+  });
 
-  if (cached) {
-    return cached;
-  }
+  const responsePromise = cachedPromise.then(async (cached) => {
+    if (cached) {
+      return cached;
+    }
 
-  const networkResponse = await networkPromise;
-  return networkResponse || Response.error();
+    const networkResponse = await networkPromise;
+    return networkResponse || Response.error();
+  });
+
+  const updatePromise = networkPromise.then(() => undefined);
+
+  return { responsePromise, updatePromise };
 }
 
 async function networkFirst(request) {
