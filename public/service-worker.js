@@ -1,6 +1,7 @@
-const CACHE_VERSION = 'bcuk-panel-v2';
+const CACHE_VERSION = 'bcuk-panel-v3';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
+const RUNTIME_CACHE_MAX_ENTRIES = 50;
 
 const STATIC_ASSETS = [
   '/offline.html',
@@ -12,7 +13,9 @@ const STATIC_ASSETS = [
   '/pwa-register.js',
   '/manifest.json',
   '/icons/BCUK-192.svg',
-  '/icons/BCUK-512.svg'
+  '/icons/BCUK-512.svg',
+  '/icons/BCUK-192.png',
+  '/icons/BCUK-512.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -55,7 +58,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname.startsWith('/api/')) {
+  if (
+    request.method === 'GET' &&
+    request.mode !== 'navigate' &&
+    (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth') || url.pathname.startsWith('/admin'))
+  ) {
     event.respondWith(fetch(request));
     return;
   }
@@ -102,6 +109,11 @@ async function networkFirst(request) {
     if (response && response.ok) {
       const cache = await caches.open(RUNTIME_CACHE);
       cache.put(request, response.clone());
+      let keys = await cache.keys();
+      while (keys.length > RUNTIME_CACHE_MAX_ENTRIES) {
+        await cache.delete(keys[0]);
+        keys = await cache.keys();
+      }
     }
     return response;
   } catch (_error) {
