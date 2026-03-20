@@ -59,9 +59,8 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (
-    request.method === 'GET' &&
     request.mode !== 'navigate' &&
-    (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth') || url.pathname.startsWith('/admin'))
+    isBypassPath(url.pathname)
   ) {
     event.respondWith(fetch(request));
     return;
@@ -73,7 +72,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (isStaticAsset(url.pathname)) {
-    event.respondWith(cacheFirst(request));
+    event.respondWith(staleWhileRevalidate(request));
     return;
   }
 
@@ -89,18 +88,25 @@ async function handleNavigationRequest(request) {
   }
 }
 
-async function cacheFirst(request) {
-  const cached = await caches.match(request);
+async function staleWhileRevalidate(request) {
+  const cache = await caches.open(STATIC_CACHE);
+  const cached = await cache.match(request);
+
+  const networkPromise = fetch(request)
+    .then((response) => {
+      if (response && response.ok) {
+        cache.put(request, response.clone());
+      }
+      return response;
+    })
+    .catch(() => null);
+
   if (cached) {
     return cached;
   }
 
-  const response = await fetch(request);
-  if (response && response.ok) {
-    const cache = await caches.open(STATIC_CACHE);
-    cache.put(request, response.clone());
-  }
-  return response;
+  const networkResponse = await networkPromise;
+  return networkResponse || Response.error();
 }
 
 async function networkFirst(request) {
@@ -131,5 +137,15 @@ function isStaticAsset(pathname) {
     pathname.endsWith('.png') ||
     pathname.endsWith('.svg') ||
     pathname.endsWith('.woff2')
+  );
+}
+
+function isBypassPath(pathname) {
+  return (
+    pathname.startsWith('/api/') ||
+    pathname === '/auth' ||
+    pathname.startsWith('/auth/') ||
+    pathname === '/admin' ||
+    pathname.startsWith('/admin/')
   );
 }
