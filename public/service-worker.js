@@ -132,10 +132,10 @@ async function networkFirst(request) {
     if (response && response.ok) {
       const cache = await caches.open(RUNTIME_CACHE);
       await cache.put(request, response.clone());
-      let keys = await cache.keys();
-      while (keys.length > RUNTIME_CACHE_MAX_ENTRIES) {
-        await cache.delete(keys[0]);
-        keys = await cache.keys();
+      const keys = await cache.keys();
+      const entriesToDelete = Math.max(0, keys.length - RUNTIME_CACHE_MAX_ENTRIES);
+      for (let i = 0; i < entriesToDelete; i++) {
+        await cache.delete(keys[i]);
       }
     }
     return response;
