@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Offline - BCUK Bot</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --card: #111a33;
+      --text: #ecf1ff;
+      --muted: #98a2c1;
+      --accent: #66c6ff;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: radial-gradient(circle at 20% 20%, #1a2b58, var(--bg));
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: var(--text);
+      padding: 1.25rem;
+    }
+
+    .card {
+      width: min(520px, 100%);
+      background: rgba(17, 26, 51, 0.95);
+      border: 1px solid rgba(102, 198, 255, 0.35);
+      border-radius: 14px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+      padding: 1.5rem;
+    }
+
+    h1 {
+      margin: 0 0 0.5rem;
+      font-size: 1.5rem;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .actions {
+      margin-top: 1rem;
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    button,
+    a {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 0.55rem 1rem;
+      font-size: 0.95rem;
+      cursor: pointer;
+      text-decoration: none;
+      color: #05122a;
+      background: var(--accent);
+      font-weight: 700;
+    }
+
+    a.secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid rgba(236, 241, 255, 0.35);
+    }
+  </style>
+</head>
+<body>
+  <article class="card">
+    <h1>You are offline</h1>
+    <p>The control panel needs a network connection for live status and login checks. Reconnect and refresh to continue.</p>
+    <div class="actions">
+      <button type="button" onclick="location.reload()">Try again</button>
+      <a class="secondary" href="/auth/login">Open login</a>
+    </div>
+  </article>
+</body>
+</html>
