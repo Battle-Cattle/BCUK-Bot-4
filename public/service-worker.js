@@ -114,7 +114,7 @@ async function networkFirst(request) {
     const response = await fetch(request);
     if (response && response.ok) {
       const cache = await caches.open(RUNTIME_CACHE);
-      cache.put(request, response.clone());
+      await cache.put(request, response.clone());
       let keys = await cache.keys();
       while (keys.length > RUNTIME_CACHE_MAX_ENTRIES) {
         await cache.delete(keys[0]);
