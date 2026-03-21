@@ -167,6 +167,8 @@ function isBypassPath(pathname) {
     pathname === '/auth' ||
     pathname.startsWith('/auth/') ||
     pathname === '/admin' ||
-    pathname.startsWith('/admin/')
+    pathname.startsWith('/admin/') ||
+    pathname === '/streams' ||
+    pathname.startsWith('/streams/')
   );
 }
