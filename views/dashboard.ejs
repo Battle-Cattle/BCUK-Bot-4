@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BCUK Bot — Dashboard</title>
   <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
 </head>
 <body data-initial-status="<%= JSON.stringify(status) %>">
   <%- include('partials/nav') %>
@@ -142,6 +143,7 @@
 
   </main>
 
+  <%- include('partials/pwa-register') %>
   <script src="/app.js"></script>
 </body>
 </html>

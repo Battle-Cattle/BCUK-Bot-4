@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BCUK Bot — Error</title>
   <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
 </head>
 <body>
   <% if (user) { %><%- include('partials/nav') %><% } %>
@@ -22,5 +23,6 @@
       </div>
     </div>
   </div>
+  <%- include('partials/pwa-register') %>
 </body>
 </html>
