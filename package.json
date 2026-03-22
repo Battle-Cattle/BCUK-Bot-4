@@ -8,7 +8,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@discordjs/voice": "1.0.0-dev.1772884937-84b85f4c9",
+    "@discordjs/voice": "^0.19.2",
     "@snazzah/davey": "^0.1.10",
     "discord.js": "^14.14.1",
     "dotenv": "^16.4.5",
