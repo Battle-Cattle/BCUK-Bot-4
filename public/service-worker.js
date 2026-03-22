@@ -88,7 +88,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(networkFirst(request));
+  if (shouldUseRuntimeCache(request, url)) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  event.respondWith(fetch(request));
 });
 
 async function handleNavigationRequest(request) {
@@ -163,6 +168,7 @@ function isStaticAsset(pathname) {
 
 function isBypassPath(pathname) {
   return (
+    pathname === '/api' ||
     pathname.startsWith('/api/') ||
     pathname === '/auth' ||
     pathname.startsWith('/auth/') ||
@@ -171,4 +177,20 @@ function isBypassPath(pathname) {
     pathname === '/streams' ||
     pathname.startsWith('/streams/')
   );
+}
+
+function shouldUseRuntimeCache(request, url) {
+  if (request.method !== 'GET') {
+    return false;
+  }
+
+  if (url.origin !== self.location.origin) {
+    return false;
+  }
+
+  return isRuntimeCachePath(url.pathname);
+}
+
+function isRuntimeCachePath(pathname) {
+  return pathname === '/';
 }
