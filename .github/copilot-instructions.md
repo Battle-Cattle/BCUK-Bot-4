@@ -39,18 +39,29 @@ BCUK_Bot_4/
 │           └── streams.ts    — Stream group/streamer CRUD + toggle
 ├── views/
 │   ├── partials/nav.ejs
+│   ├── partials/pwa-head.ejs
+│   ├── partials/pwa-register.ejs
 │   ├── login.ejs
 │   ├── dashboard.ejs
 │   ├── admin.ejs
 │   ├── streams.ejs           — Stream monitor management page
 │   └── error.ejs
 ├── public/
-│   ├── style.css             — Dark theme CSS
-│   └── app.js                — Status polling, SFX search, file expand, voice join/leave
+│   ├── style.css             — Shared dashboard styles
+│   ├── app.js                — Dashboard status polling + voice controls
+│   ├── navbar.js             — Mobile nav toggle behavior
+│   ├── admin.js              — Admin users page interactions
+│   ├── streams.js            — Stream monitor admin page interactions
+│   ├── pwa-register.js       — Service worker registration + update prompt
+│   ├── service-worker.js     — Offline cache + runtime caching strategy
+│   ├── manifest.json         — PWA metadata
+│   ├── offline.html          — Offline fallback page
+│   └── icons/                — PWA/app icons (PNG + SVG)
 ├── sfx/                      — Sound files go here (not in git)
 ├── monitor-settings.json     — Local settings (gitignored): toggle state only
 ├── .env.example
 ├── .gitignore
+├── commit-msg.txt
 ├── package.json
 └── tsconfig.json
 ```
@@ -224,7 +235,10 @@ Copy `.env.example` → `.env` and fill in all values.
 `guild.voiceAdapterCreator` is **not used**. Instead, `audioPlayer.ts` builds a custom `DiscordGatewayAdapterCreator` that listens to `client.on('raw', ...)` and manually forwards `VOICE_STATE_UPDATE` and `VOICE_SERVER_UPDATE` packets to `@discordjs/voice`. This is required because the built-in adapter has type/version incompatibilities with discord.js v14.
 
 ### DAVE E2EE voice protocol
-Discord requires the DAVE (E2EE) protocol for voice connections. `@discordjs/voice` dev branch (`1.0.0-dev.*`) handles this automatically when `@snazzah/davey` is installed. **The endpoint passed to `@discordjs/voice` must include the port** (e.g. `c-lhr16.discord.media:2096`) — do **not** strip the port. The voice WebSocket server lives on port 2096, not 443; stripping the port would cause the connection to fail after Hello.
+Discord requires the DAVE (E2EE) protocol for voice connections. The current stable `@discordjs/voice` package handles this handshake when the required crypto libs are installed (`@snazzah/davey`, `libsodium-wrappers`, `tweetnacl`, `ws`). Keep these dependencies installed together.
+
+### PWA + offline behavior
+The web panel is PWA-enabled. `public/service-worker.js` pre-caches core static assets, serves `public/offline.html` as a navigation fallback when offline, and bypasses auth/API/admin endpoints to avoid caching sensitive or session-dependent responses. `views/partials/pwa-head.ejs` and `views/partials/pwa-register.ejs` must stay included in pages that should support install/offline behavior.
 
 ### TikTok reconnect dedup
 `tiktokBot.ts` uses a per-connection `reconnectScheduled` boolean to prevent duplicate `setTimeout` calls when both `STREAM_END` and `DISCONNECTED` fire for the same connection.
@@ -277,11 +291,12 @@ npm start        # node dist/index.js (production)
 
 ## Package Notes
 
-- `@discordjs/voice` is the **dev branch** build (`1.0.0-dev.*`) — required for DAVE E2EE protocol support.
-- `@snazzah/davey` is the DAVE protocol library auto-used by `@discordjs/voice` dev for E2EE voice handshake.
-- `opusscript` is the pure-JS Opus encoder used by `@discordjs/voice`.
+- `@discordjs/voice` is pinned to the stable `^0.19.2` line.
+- `@snazzah/davey`, `libsodium-wrappers`, `tweetnacl`, and `ws` are part of the voice crypto/runtime stack used by `@discordjs/voice`.
+- `opusscript` is installed as the JS Opus provider and `mediaplex` is imported first in `src/index.ts` to register it.
 - `ffmpeg-static` provides the ffmpeg binary for audio transcoding.
-- `"overrides": { "undici": "^7.22.0" }` in `package.json` resolves an indirect vulnerability from older `undici` pulled in by other packages.
+- `helmet` is enabled in the web app for secure response headers.
+- `"overrides": { "undici": "^7.24.0" }` in `package.json` pins the transitive `undici` version.
 - `npm audit` should report **0 vulnerabilities**.
 - TypeScript: `npx tsc --noEmit` should produce **no output** (clean).
 
