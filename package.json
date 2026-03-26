@@ -25,7 +25,7 @@
     "tiktok-live-connector": "2.1.1-beta1",
     "tmi.js": "^1.8.5",
     "tweetnacl": "^1.0.3",
-    "ws": "^8.19.0"
+    "ws": "^8.20.0"
   },
   "overrides": {
     "undici": "^7.24.0"
