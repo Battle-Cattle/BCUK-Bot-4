@@ -67,6 +67,39 @@ let currentAttemptId = 0;
 const RECONNECT_BASE_DELAY_MS = 5_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
 
+function isPermanentMisconfigurationError(err: unknown): boolean {
+  if (!(err instanceof Error)) {
+    return false;
+  }
+
+  const message = err.message;
+  if (
+    message.includes('Missing DISCORD_GUILD_ID or DISCORD_VOICE_CHANNEL_ID') ||
+    message.includes('is not a voice channel')
+  ) {
+    return true;
+  }
+
+  const apiErr = err as Error & { status?: number; code?: number | string; rawError?: { message?: string } };
+  const status = apiErr.status;
+  const code = typeof apiErr.code === 'string' ? Number(apiErr.code) : apiErr.code;
+  const rawMessage = apiErr.rawError?.message ?? '';
+
+  if (status === 403 || status === 404) {
+    return true;
+  }
+
+  if (code === 10003 || code === 10004 || code === 50001) {
+    return true;
+  }
+
+  if (rawMessage.includes('Unknown Guild') || rawMessage.includes('Unknown Channel')) {
+    return true;
+  }
+
+  return false;
+}
+
 function clearReconnectTimer(): void {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
@@ -124,6 +157,7 @@ function getPlayer(): DjsAudioPlayer {
  * Should be called once the Discord client is ready.
  */
 export async function connect(client: Client): Promise<void> {
+  clearReconnectTimer();
   const attemptId = ++currentAttemptId;
   let nextConnection: VoiceConnection | null = null;
 
@@ -235,10 +269,7 @@ export async function connect(client: Client): Promise<void> {
     setVoiceConnected(channel.name);
     console.log(`[AudioPlayer] Joined voice channel: ${channel.name}`);
   } catch (err) {
-    const message = err instanceof Error ? err.message : '';
-    const isPermanentMisconfiguration =
-      message.includes('Missing DISCORD_GUILD_ID or DISCORD_VOICE_CHANNEL_ID') ||
-      message.includes('is not a voice channel');
+    const isPermanentMisconfiguration = isPermanentMisconfigurationError(err);
 
     if (attemptId === currentAttemptId && connection === nextConnection && nextConnection) {
       nextConnection.destroy();
