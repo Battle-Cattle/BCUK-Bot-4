@@ -178,15 +178,14 @@ export async function connect(client: Client): Promise<void> {
     const netErr = err as NodeJS.ErrnoException & { hostname?: string };
     const host = netErr.hostname;
     const code = netErr.code;
+    // Reconnect scheduling is handled by the Disconnected state handler.
     if (code === 'EAI_AGAIN') {
       console.warn(
         `[AudioPlayer] Voice DNS lookup failed temporarily${host ? ` (${host})` : ''}; connection will retry via state handler.`,
       );
-      scheduleReconnect('dns lookup failure');
       return;
     }
     console.error('[AudioPlayer] Voice connection error:', err);
-    scheduleReconnect('connection error');
   });
 
   connection.subscribe(getPlayer());
