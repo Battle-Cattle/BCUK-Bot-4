@@ -58,6 +58,47 @@ function buildAdapter(channel: VoiceBasedChannel): DiscordGatewayAdapterCreator 
 let connection: VoiceConnection | null = null;
 let player: DjsAudioPlayer;
 let playing = false;
+let activeClient: Client | null = null;
+let reconnectTimer: NodeJS.Timeout | null = null;
+let reconnectAttempts = 0;
+let shouldAutoReconnect = false;
+
+const RECONNECT_BASE_DELAY_MS = 5_000;
+const RECONNECT_MAX_DELAY_MS = 60_000;
+
+function clearReconnectTimer(): void {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function scheduleReconnect(reason: string): void {
+  if (!shouldAutoReconnect || !activeClient || reconnectTimer || connection) {
+    return;
+  }
+
+  const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts, RECONNECT_MAX_DELAY_MS);
+  reconnectAttempts += 1;
+
+  console.warn(`[AudioPlayer] Scheduling voice rejoin in ${delay}ms (${reason}).`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (!shouldAutoReconnect || !activeClient || connection) {
+      return;
+    }
+
+    connect(activeClient)
+      .then(() => {
+        reconnectAttempts = 0;
+        console.log('[AudioPlayer] Voice rejoin successful.');
+      })
+      .catch((err) => {
+        console.error('[AudioPlayer] Voice rejoin failed:', err);
+        scheduleReconnect('retry failed');
+      });
+  }, delay);
+}
 
 function getPlayer(): DjsAudioPlayer {
   if (!player) {
@@ -81,6 +122,15 @@ function getPlayer(): DjsAudioPlayer {
  * Should be called once the Discord client is ready.
  */
 export async function connect(client: Client): Promise<void> {
+  activeClient = client;
+  shouldAutoReconnect = true;
+  clearReconnectTimer();
+
+  if (connection) {
+    connection.destroy();
+    connection = null;
+  }
+
   const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
   const channel = await guild.channels.fetch(DISCORD_VOICE_CHANNEL_ID);
 
@@ -104,6 +154,7 @@ export async function connect(client: Client): Promise<void> {
     throw err;
   }
   console.log('[AudioPlayer] Voice connection ready.');
+  reconnectAttempts = 0;
 
   connection.on(VoiceConnectionStatus.Disconnected, async () => {
     try {
@@ -118,7 +169,24 @@ export async function connect(client: Client): Promise<void> {
       connection = null;
       setVoiceDisconnected();
       console.warn('[AudioPlayer] Voice connection lost.');
+      scheduleReconnect('disconnected');
     }
+  });
+
+  // Prevent process crash on unhandled VoiceConnection errors (for example transient DNS failures).
+  connection.on('error', (err) => {
+    const netErr = err as NodeJS.ErrnoException & { hostname?: string };
+    const host = netErr.hostname;
+    const code = netErr.code;
+    if (code === 'EAI_AGAIN') {
+      console.warn(
+        `[AudioPlayer] Voice DNS lookup failed temporarily${host ? ` (${host})` : ''}; connection will retry via state handler.`,
+      );
+      scheduleReconnect('dns lookup failure');
+      return;
+    }
+    console.error('[AudioPlayer] Voice connection error:', err);
+    scheduleReconnect('connection error');
   });
 
   connection.subscribe(getPlayer());
@@ -131,6 +199,10 @@ export async function connect(client: Client): Promise<void> {
  * Safe to call when already disconnected.
  */
 export function disconnect(): void {
+  shouldAutoReconnect = false;
+  clearReconnectTimer();
+  reconnectAttempts = 0;
+
   if (connection) {
     connection.destroy();
     connection = null;
