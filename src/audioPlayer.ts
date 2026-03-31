@@ -265,7 +265,7 @@ export async function connect(client: Client): Promise<void> {
     console.log('[AudioPlayer] Voice connection ready.');
     reconnectAttempts = 0;
 
-    nextConnection.subscribe(getPlayer());
+    joinedConnection.subscribe(getPlayer());
     setVoiceConnected(channel.name);
     console.log(`[AudioPlayer] Joined voice channel: ${channel.name}`);
   } catch (err) {
