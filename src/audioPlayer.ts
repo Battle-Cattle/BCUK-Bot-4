@@ -165,12 +165,6 @@ export async function connect(client: Client): Promise<void> {
   shouldAutoReconnect = true;
 
   const previousConnection = connection;
-  if (previousConnection) {
-    previousConnection.destroy();
-    if (connection === previousConnection) {
-      connection = null;
-    }
-  }
 
   try {
     if (!DISCORD_GUILD_ID || !DISCORD_VOICE_CHANNEL_ID) {
@@ -206,11 +200,9 @@ export async function connect(client: Client): Promise<void> {
 
     const joinedConnection = nextConnection;
 
-    connection = joinedConnection;
-
     // Register immediately so join/rejoin handshake errors do not become unhandled.
     joinedConnection.on('error', (err) => {
-      if (attemptId !== currentAttemptId || connection !== joinedConnection) {
+      if (attemptId !== currentAttemptId) {
         return;
       }
 
@@ -228,7 +220,11 @@ export async function connect(client: Client): Promise<void> {
     });
 
     joinedConnection.on(VoiceConnectionStatus.Disconnected, async () => {
-      if (attemptId !== currentAttemptId || connection !== joinedConnection) {
+      if (attemptId !== currentAttemptId) {
+        return;
+      }
+
+      if (connection && connection !== joinedConnection) {
         return;
       }
 
@@ -239,7 +235,11 @@ export async function connect(client: Client): Promise<void> {
         ]);
         // Reconnecting
       } catch {
-        if (attemptId !== currentAttemptId || connection !== joinedConnection) {
+        if (attemptId !== currentAttemptId) {
+          return;
+        }
+
+        if (connection && connection !== joinedConnection) {
           return;
         }
 
@@ -248,6 +248,12 @@ export async function connect(client: Client): Promise<void> {
         if (connection === joinedConnection) {
           connection = null;
         }
+        try {
+          getPlayer().stop(true);
+        } catch {
+          // Ignore audio stop errors during disconnect cleanup.
+        }
+        playing = false;
         setVoiceDisconnected();
         console.warn('[AudioPlayer] Voice connection lost.');
         scheduleReconnect('disconnected');
@@ -256,10 +262,19 @@ export async function connect(client: Client): Promise<void> {
 
     await entersState(joinedConnection, VoiceConnectionStatus.Ready, 30_000);
 
-    if (attemptId !== currentAttemptId || connection !== joinedConnection) {
+    if (attemptId !== currentAttemptId) {
       joinedConnection.destroy();
       return;
     }
+
+    if (previousConnection && previousConnection !== joinedConnection) {
+      previousConnection.destroy();
+      if (connection === previousConnection) {
+        connection = null;
+      }
+    }
+
+    connection = joinedConnection;
 
     clearReconnectTimer();
     console.log('[AudioPlayer] Voice connection ready.');
@@ -270,6 +285,10 @@ export async function connect(client: Client): Promise<void> {
     console.log(`[AudioPlayer] Joined voice channel: ${channel.name}`);
   } catch (err) {
     const isPermanentMisconfiguration = isPermanentMisconfigurationError(err);
+
+    if (nextConnection) {
+      nextConnection.destroy();
+    }
 
     if (attemptId === currentAttemptId && connection === nextConnection && nextConnection) {
       nextConnection.destroy();
