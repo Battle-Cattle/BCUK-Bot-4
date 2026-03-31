@@ -97,9 +97,6 @@ function scheduleReconnect(reason: string): void {
 
     connect(activeClient)
       .catch((err) => {
-        if (scheduledAttemptId !== currentAttemptId) {
-          return;
-        }
         console.error('[AudioPlayer] Voice rejoin failed:', err);
       });
   }, delay);
@@ -128,6 +125,7 @@ function getPlayer(): DjsAudioPlayer {
  */
 export async function connect(client: Client): Promise<void> {
   const attemptId = ++currentAttemptId;
+  let nextConnection: VoiceConnection | null = null;
 
   activeClient = client;
   shouldAutoReconnect = true;
@@ -140,107 +138,120 @@ export async function connect(client: Client): Promise<void> {
     }
   }
 
-  const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
-  if (attemptId !== currentAttemptId) {
-    return;
-  }
+  try {
+    if (!DISCORD_GUILD_ID || !DISCORD_VOICE_CHANNEL_ID) {
+      throw new Error('Missing DISCORD_GUILD_ID or DISCORD_VOICE_CHANNEL_ID');
+    }
 
-  const channel = await guild.channels.fetch(DISCORD_VOICE_CHANNEL_ID);
-  if (attemptId !== currentAttemptId) {
-    return;
-  }
-
-  if (!channel || channel.type !== ChannelType.GuildVoice) {
-    throw new Error(`Channel ${DISCORD_VOICE_CHANNEL_ID} is not a voice channel`);
-  }
-
-  const nextConnection = joinVoiceChannel({
-    channelId: channel.id,
-    guildId: guild.id,
-    adapterCreator: buildAdapter(channel),
-    selfDeaf: false,
-    selfMute: false,
-  });
-
-  if (attemptId !== currentAttemptId) {
-    nextConnection.destroy();
-    return;
-  }
-
-  connection = nextConnection;
-
-  // Register immediately so join/rejoin handshake errors do not become unhandled.
-  nextConnection.on('error', (err) => {
-    if (attemptId !== currentAttemptId || connection !== nextConnection) {
+    const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
+    if (attemptId !== currentAttemptId) {
       return;
     }
 
-    const netErr = err as NodeJS.ErrnoException & { hostname?: string };
-    const host = netErr.hostname;
-    const code = netErr.code;
-    // Reconnect scheduling is handled by the Disconnected state handler.
-    if (code === 'EAI_AGAIN') {
-      console.warn(
-        `[AudioPlayer] Voice DNS lookup failed temporarily${host ? ` (${host})` : ''}; connection will retry via state handler.`,
-      );
-      return;
-    }
-    console.error('[AudioPlayer] Voice connection error:', err);
-  });
-
-  nextConnection.on(VoiceConnectionStatus.Disconnected, async () => {
-    if (attemptId !== currentAttemptId || connection !== nextConnection) {
+    const channel = await guild.channels.fetch(DISCORD_VOICE_CHANNEL_ID);
+    if (attemptId !== currentAttemptId) {
       return;
     }
 
-    try {
-      await Promise.race([
-        entersState(nextConnection, VoiceConnectionStatus.Signalling, 5_000),
-        entersState(nextConnection, VoiceConnectionStatus.Connecting, 5_000),
-      ]);
-      // Reconnecting
-    } catch {
-      if (attemptId !== currentAttemptId || connection !== nextConnection) {
+    if (!channel || channel.type !== ChannelType.GuildVoice) {
+      throw new Error(`Channel ${DISCORD_VOICE_CHANNEL_ID} is not a voice channel`);
+    }
+
+    nextConnection = joinVoiceChannel({
+      channelId: channel.id,
+      guildId: guild.id,
+      adapterCreator: buildAdapter(channel),
+      selfDeaf: false,
+      selfMute: false,
+    });
+
+    if (attemptId !== currentAttemptId) {
+      nextConnection.destroy();
+      return;
+    }
+
+    const joinedConnection = nextConnection;
+
+    connection = joinedConnection;
+
+    // Register immediately so join/rejoin handshake errors do not become unhandled.
+    joinedConnection.on('error', (err) => {
+      if (attemptId !== currentAttemptId || connection !== joinedConnection) {
         return;
       }
 
-      // Truly disconnected - clean up
-      nextConnection.destroy();
-      if (connection === nextConnection) {
-        connection = null;
+      const netErr = err as NodeJS.ErrnoException & { hostname?: string };
+      const host = netErr.hostname;
+      const code = netErr.code;
+      // Reconnect scheduling is handled by the Disconnected state handler.
+      if (code === 'EAI_AGAIN') {
+        console.warn(
+          `[AudioPlayer] Voice DNS lookup failed temporarily${host ? ` (${host})` : ''}; connection will retry via state handler.`,
+        );
+        return;
       }
-      setVoiceDisconnected();
-      console.warn('[AudioPlayer] Voice connection lost.');
-      scheduleReconnect('disconnected');
-    }
-  });
+      console.error('[AudioPlayer] Voice connection error:', err);
+    });
 
-  try {
-    await entersState(nextConnection, VoiceConnectionStatus.Ready, 30_000);
+    joinedConnection.on(VoiceConnectionStatus.Disconnected, async () => {
+      if (attemptId !== currentAttemptId || connection !== joinedConnection) {
+        return;
+      }
+
+      try {
+        await Promise.race([
+          entersState(joinedConnection, VoiceConnectionStatus.Signalling, 5_000),
+          entersState(joinedConnection, VoiceConnectionStatus.Connecting, 5_000),
+        ]);
+        // Reconnecting
+      } catch {
+        if (attemptId !== currentAttemptId || connection !== joinedConnection) {
+          return;
+        }
+
+        // Truly disconnected - clean up
+        joinedConnection.destroy();
+        if (connection === joinedConnection) {
+          connection = null;
+        }
+        setVoiceDisconnected();
+        console.warn('[AudioPlayer] Voice connection lost.');
+        scheduleReconnect('disconnected');
+      }
+    });
+
+    await entersState(joinedConnection, VoiceConnectionStatus.Ready, 30_000);
+
+    if (attemptId !== currentAttemptId || connection !== joinedConnection) {
+      joinedConnection.destroy();
+      return;
+    }
+
+    clearReconnectTimer();
+    console.log('[AudioPlayer] Voice connection ready.');
+    reconnectAttempts = 0;
+
+    nextConnection.subscribe(getPlayer());
+    setVoiceConnected(channel.name);
+    console.log(`[AudioPlayer] Joined voice channel: ${channel.name}`);
   } catch (err) {
-    if (attemptId === currentAttemptId && connection === nextConnection) {
+    const message = err instanceof Error ? err.message : '';
+    const isPermanentMisconfiguration =
+      message.includes('Missing DISCORD_GUILD_ID or DISCORD_VOICE_CHANNEL_ID') ||
+      message.includes('is not a voice channel');
+
+    if (attemptId === currentAttemptId && connection === nextConnection && nextConnection) {
       nextConnection.destroy();
       connection = null;
       setVoiceDisconnected();
-      if (shouldAutoReconnect) {
-        scheduleReconnect('connect failed');
-      }
     }
+
+    if (attemptId === currentAttemptId && shouldAutoReconnect && !isPermanentMisconfiguration) {
+      scheduleReconnect('connect failed');
+    }
+
     throw err;
   }
-
-  if (attemptId !== currentAttemptId || connection !== nextConnection) {
-    nextConnection.destroy();
-    return;
-  }
-
-  clearReconnectTimer();
-  console.log('[AudioPlayer] Voice connection ready.');
-  reconnectAttempts = 0;
-
-  nextConnection.subscribe(getPlayer());
-  setVoiceConnected(channel.name);
-  console.log(`[AudioPlayer] Joined voice channel: ${channel.name}`);
 }
 
 /**
