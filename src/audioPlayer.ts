@@ -62,6 +62,7 @@ let activeClient: Client | null = null;
 let reconnectTimer: NodeJS.Timeout | null = null;
 let reconnectAttempts = 0;
 let shouldAutoReconnect = false;
+let currentAttemptId = 0;
 
 const RECONNECT_BASE_DELAY_MS = 5_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
@@ -78,24 +79,28 @@ function scheduleReconnect(reason: string): void {
     return;
   }
 
+  const scheduledAttemptId = currentAttemptId;
+
   const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts, RECONNECT_MAX_DELAY_MS);
   reconnectAttempts += 1;
 
   console.warn(`[AudioPlayer] Scheduling voice rejoin in ${delay}ms (${reason}).`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
+    if (scheduledAttemptId !== currentAttemptId) {
+      return;
+    }
+
     if (!shouldAutoReconnect || !activeClient || connection) {
       return;
     }
 
     connect(activeClient)
-      .then(() => {
-        reconnectAttempts = 0;
-        console.log('[AudioPlayer] Voice rejoin successful.');
-      })
       .catch((err) => {
+        if (scheduledAttemptId !== currentAttemptId) {
+          return;
+        }
         console.error('[AudioPlayer] Voice rejoin failed:', err);
-        scheduleReconnect('retry failed');
       });
   }, delay);
 }
@@ -122,23 +127,34 @@ function getPlayer(): DjsAudioPlayer {
  * Should be called once the Discord client is ready.
  */
 export async function connect(client: Client): Promise<void> {
+  const attemptId = ++currentAttemptId;
+
   activeClient = client;
   shouldAutoReconnect = true;
-  clearReconnectTimer();
 
-  if (connection) {
-    connection.destroy();
-    connection = null;
+  const previousConnection = connection;
+  if (previousConnection) {
+    previousConnection.destroy();
+    if (connection === previousConnection) {
+      connection = null;
+    }
   }
 
   const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
+  if (attemptId !== currentAttemptId) {
+    return;
+  }
+
   const channel = await guild.channels.fetch(DISCORD_VOICE_CHANNEL_ID);
+  if (attemptId !== currentAttemptId) {
+    return;
+  }
 
   if (!channel || channel.type !== ChannelType.GuildVoice) {
     throw new Error(`Channel ${DISCORD_VOICE_CHANNEL_ID} is not a voice channel`);
   }
 
-  connection = joinVoiceChannel({
+  const nextConnection = joinVoiceChannel({
     channelId: channel.id,
     guildId: guild.id,
     adapterCreator: buildAdapter(channel),
@@ -146,35 +162,19 @@ export async function connect(client: Client): Promise<void> {
     selfMute: false,
   });
 
-  try {
-    await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
-  } catch (err) {
-    connection.destroy();
-    connection = null;
-    throw err;
+  if (attemptId !== currentAttemptId) {
+    nextConnection.destroy();
+    return;
   }
-  console.log('[AudioPlayer] Voice connection ready.');
-  reconnectAttempts = 0;
 
-  connection.on(VoiceConnectionStatus.Disconnected, async () => {
-    try {
-      await Promise.race([
-        entersState(connection!, VoiceConnectionStatus.Signalling, 5_000),
-        entersState(connection!, VoiceConnectionStatus.Connecting, 5_000),
-      ]);
-      // Reconnecting
-    } catch {
-      // Truly disconnected - clean up
-      connection?.destroy();
-      connection = null;
-      setVoiceDisconnected();
-      console.warn('[AudioPlayer] Voice connection lost.');
-      scheduleReconnect('disconnected');
+  connection = nextConnection;
+
+  // Register immediately so join/rejoin handshake errors do not become unhandled.
+  nextConnection.on('error', (err) => {
+    if (attemptId !== currentAttemptId || connection !== nextConnection) {
+      return;
     }
-  });
 
-  // Prevent process crash on unhandled VoiceConnection errors (for example transient DNS failures).
-  connection.on('error', (err) => {
     const netErr = err as NodeJS.ErrnoException & { hostname?: string };
     const host = netErr.hostname;
     const code = netErr.code;
@@ -188,7 +188,57 @@ export async function connect(client: Client): Promise<void> {
     console.error('[AudioPlayer] Voice connection error:', err);
   });
 
-  connection.subscribe(getPlayer());
+  nextConnection.on(VoiceConnectionStatus.Disconnected, async () => {
+    if (attemptId !== currentAttemptId || connection !== nextConnection) {
+      return;
+    }
+
+    try {
+      await Promise.race([
+        entersState(nextConnection, VoiceConnectionStatus.Signalling, 5_000),
+        entersState(nextConnection, VoiceConnectionStatus.Connecting, 5_000),
+      ]);
+      // Reconnecting
+    } catch {
+      if (attemptId !== currentAttemptId || connection !== nextConnection) {
+        return;
+      }
+
+      // Truly disconnected - clean up
+      nextConnection.destroy();
+      if (connection === nextConnection) {
+        connection = null;
+      }
+      setVoiceDisconnected();
+      console.warn('[AudioPlayer] Voice connection lost.');
+      scheduleReconnect('disconnected');
+    }
+  });
+
+  try {
+    await entersState(nextConnection, VoiceConnectionStatus.Ready, 30_000);
+  } catch (err) {
+    if (attemptId === currentAttemptId && connection === nextConnection) {
+      nextConnection.destroy();
+      connection = null;
+      setVoiceDisconnected();
+      if (shouldAutoReconnect) {
+        scheduleReconnect('connect failed');
+      }
+    }
+    throw err;
+  }
+
+  if (attemptId !== currentAttemptId || connection !== nextConnection) {
+    nextConnection.destroy();
+    return;
+  }
+
+  clearReconnectTimer();
+  console.log('[AudioPlayer] Voice connection ready.');
+  reconnectAttempts = 0;
+
+  nextConnection.subscribe(getPlayer());
   setVoiceConnected(channel.name);
   console.log(`[AudioPlayer] Joined voice channel: ${channel.name}`);
 }
@@ -198,12 +248,14 @@ export async function connect(client: Client): Promise<void> {
  * Safe to call when already disconnected.
  */
 export function disconnect(): void {
+  currentAttemptId += 1;
   shouldAutoReconnect = false;
   clearReconnectTimer();
   reconnectAttempts = 0;
 
-  if (connection) {
-    connection.destroy();
+  const existingConnection = connection;
+  if (existingConnection) {
+    existingConnection.destroy();
     connection = null;
     playing = false;
     setVoiceDisconnected();
