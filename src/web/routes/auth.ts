@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import { DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_CALLBACK_URL } from '../../config';
-import { findUser } from '../../db';
+import { findUser, updateDiscordName } from '../../db';
+import { fetchMemberDisplayName } from '../../discordBot';
 
 const router = Router();
 
@@ -71,10 +72,21 @@ router.get('/discord/callback', async (req, res) => {
       });
     }
 
+    let syncedDiscordName = profile.username;
+    try {
+      const displayName = await fetchMemberDisplayName(profile.id);
+      if (displayName && displayName.trim()) {
+        syncedDiscordName = displayName.trim();
+        await updateDiscordName(profile.id, syncedDiscordName);
+      }
+    } catch (syncErr) {
+      console.warn('[Web] Non-blocking discord_name sync failed:', syncErr);
+    }
+
     // 4. Save to session
     req.session.user = {
       discordId: profile.id,
-      discordName: profile.username,
+      discordName: syncedDiscordName,
       discordAvatar: profile.avatar
         ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
         : null,
