@@ -148,15 +148,46 @@ export async function upsertUser(
   discordId: string,
   discordName: string,
   accessLevel: number,
+  twitchName?: string,
 ): Promise<void> {
   if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
     throw new Error(`Invalid accessLevel: ${accessLevel}`);
   }
+  const normalizedTwitchName = twitchName !== undefined
+    ? (twitchName.trim() || null)
+    : null;
   await getPool().execute(
-    `INSERT INTO \`user\` (discord_id, discord_name, access_level, is_twitch_bot_enabled)
-     VALUES (?, ?, ?, 0)
-     ON DUPLICATE KEY UPDATE discord_name = VALUES(discord_name), access_level = VALUES(access_level)`,
-    [discordId, discordName, accessLevel],
+    `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
+     VALUES (?, ?, ?, ?, 0)
+     ON DUPLICATE KEY UPDATE discord_name = VALUES(discord_name), access_level = VALUES(access_level), twitch_name = VALUES(twitch_name)`,
+    [discordId, discordName, accessLevel, normalizedTwitchName],
+  );
+}
+
+export async function updateDiscordName(discordId: string, name: string): Promise<void> {
+  await getPool().execute(
+    'UPDATE `user` SET discord_name = ? WHERE discord_id = ?',
+    [name, discordId],
+  );
+}
+
+export async function getTwitchEnabledChannels(): Promise<string[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT twitch_name
+     FROM \`user\`
+     WHERE is_twitch_bot_enabled = 1
+       AND twitch_name IS NOT NULL
+       AND twitch_name <> ''`,
+  );
+  return rows
+    .map((r) => String(r.twitch_name).trim().toLowerCase())
+    .filter((v) => v.length > 0);
+}
+
+export async function updateTwitchBotEnabled(discordId: string, enabled: boolean): Promise<void> {
+  await getPool().execute(
+    'UPDATE `user` SET is_twitch_bot_enabled = ? WHERE discord_id = ?',
+    [enabled ? 1 : 0, discordId],
   );
 }
 
