@@ -59,7 +59,12 @@ export async function startTwitchBot(): Promise<void> {
     activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
   });
 
-  await client.connect().catch((err) => console.error('[Twitch] Failed to connect:', err));
+  try {
+    await client.connect();
+  } catch (err) {
+    console.error('[Twitch] Failed to connect:', err);
+    throw err;
+  }
 }
 
 export async function joinTwitchChannel(channel: string): Promise<void> {
@@ -85,6 +90,9 @@ export async function partTwitchChannel(channel: string): Promise<void> {
   if (!normalized || !activeChannels.has(normalized)) return;
 
   if (!client || !connected) {
+    // Intentional divergence from join flow: when disabling a channel while the
+    // Twitch client is offline, we still remove local state so auto-reconnect
+    // does not rejoin this channel from stale in-memory data.
     activeChannels.delete(normalized);
     setTwitchChannel(normalized, false);
     return;
