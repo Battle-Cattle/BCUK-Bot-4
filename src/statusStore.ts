@@ -37,6 +37,8 @@ export function setVoiceConnected(channelName: string): void {
 export function setVoiceDisconnected(): void {
   state.voice.connected = false;
   state.voice.channelName = null;
+  state.voice.playing = false;
+  state.voice.currentFile = null;
 }
 
 export function setVoicePlaying(file: string, command: string, source: string): void {
