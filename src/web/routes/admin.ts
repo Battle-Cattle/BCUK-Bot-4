@@ -49,7 +49,13 @@ router.post('/users/add', requireAdmin, async (req, res) => {
   if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   try {
-    await upsertUser(discord_id.trim(), (discord_name ?? '').trim(), level as AccessLevelValue, twitch_name);
+    const normalizedTwitchName = (twitch_name ?? '').trim();
+    await upsertUser(
+      discord_id.trim(),
+      (discord_name ?? '').trim(),
+      level as AccessLevelValue,
+      normalizedTwitchName.length > 0 ? normalizedTwitchName : undefined,
+    );
   } catch (err) {
     console.error('[Web] Add user error:', err);
     return res.redirect('/admin/users?error=add_failed');
@@ -133,20 +139,25 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
 router.post('/users/refresh-names', requireManager, async (req, res) => {
   try {
     const users = await getAllUsers();
+    let updatedCount = 0;
     for (const u of users) {
       const name = await fetchMemberDisplayName(u.discord_id);
       if (name && name.trim()) {
         await updateDiscordName(u.discord_id, name.trim());
+        updatedCount++;
       }
       // Small delay between requests to stay within Discord API rate limits
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
+
+    if (updatedCount > 0) {
+      return res.redirect('/admin/users?refreshed=1');
+    }
+    return res.redirect('/admin/users?refreshed=0');
   } catch (err) {
     console.error('[Web] Refresh Discord names failed:', err);
     return res.redirect('/admin/users?error=update_failed');
   }
-
-  res.redirect('/admin/users?refreshed=1');
 });
 
 export default router;

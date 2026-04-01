@@ -40,4 +40,7 @@ async function main(): Promise<void> {
   startTwitchMonitor().catch((err) => console.error('[Bot] TwitchMonitor startup error:', err));
 }
 
-main();
+main().catch((err) => {
+  console.error('[Bot] Fatal startup error:', err);
+  process.exit(1);
+});
