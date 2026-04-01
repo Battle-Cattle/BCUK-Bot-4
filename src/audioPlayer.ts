@@ -294,6 +294,14 @@ export async function connect(client: Client): Promise<void> {
       }
     }
 
+    // If the new attempt failed before promoting, previousConnection was never torn down.
+    // Destroy it now so scheduleReconnect is not blocked by a stale non-null connection.
+    if (previousConnection && connection === previousConnection) {
+      previousConnection.destroy();
+      connection = null;
+      setVoiceDisconnected();
+    }
+
     if (attemptId === currentAttemptId && shouldAutoReconnect && !isPermanentMisconfiguration) {
       scheduleReconnect('connect failed');
     }
@@ -317,6 +325,11 @@ export function disconnect(): void {
   if (existingConnection) {
     existingConnection.destroy();
     connection = null;
+    try {
+      getPlayer().stop(true);
+    } catch {
+      // Ignore audio stop errors during disconnect cleanup.
+    }
     playing = false;
     setVoiceDisconnected();
     console.log('[AudioPlayer] Disconnected from voice channel.');
