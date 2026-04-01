@@ -295,6 +295,12 @@ export async function connect(client: Client): Promise<void> {
     if (previousConnection && connection === previousConnection) {
       previousConnection.destroy();
       connection = null;
+      try {
+        getPlayer().stop(true);
+      } catch {
+        // Ignore audio stop errors during disconnect cleanup.
+      }
+      playing = false;
       setVoiceDisconnected();
     }
 
