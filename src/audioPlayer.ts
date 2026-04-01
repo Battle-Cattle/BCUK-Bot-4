@@ -288,10 +288,6 @@ export async function connect(client: Client): Promise<void> {
 
     if (nextConnection) {
       nextConnection.destroy();
-      if (connection === nextConnection) {
-        connection = null;
-        setVoiceDisconnected();
-      }
     }
 
     // If the new attempt failed before promoting, previousConnection was never torn down.
