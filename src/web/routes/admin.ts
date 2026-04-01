@@ -113,13 +113,14 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
     }
 
     const nextEnabled = !user.is_twitch_bot_enabled;
-    await updateTwitchBotEnabled(discord_id, nextEnabled);
 
     if (nextEnabled) {
       await joinTwitchChannel(user.twitch_name);
     } else {
       await partTwitchChannel(user.twitch_name);
     }
+
+    await updateTwitchBotEnabled(discord_id, nextEnabled);
   } catch (err) {
     console.error('[Web] Toggle twitch user error:', err);
     return res.redirect('/admin/users?error=toggle_failed');
@@ -132,13 +133,14 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
 router.post('/users/refresh-names', requireManager, async (req, res) => {
   try {
     const users = await getAllUsers();
-    await Promise.allSettled(
-      users.map(async (u) => {
-        const name = await fetchMemberDisplayName(u.discord_id);
-        if (!name || !name.trim()) return;
+    for (const u of users) {
+      const name = await fetchMemberDisplayName(u.discord_id);
+      if (name && name.trim()) {
         await updateDiscordName(u.discord_id, name.trim());
-      }),
-    );
+      }
+      // Small delay between requests to stay within Discord API rate limits
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
   } catch (err) {
     console.error('[Web] Refresh Discord names failed:', err);
     return res.redirect('/admin/users?error=update_failed');

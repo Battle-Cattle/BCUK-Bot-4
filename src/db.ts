@@ -153,14 +153,13 @@ export async function upsertUser(
   if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
     throw new Error(`Invalid accessLevel: ${accessLevel}`);
   }
-  const normalizedTwitchName = twitchName !== undefined
-    ? (twitchName.trim() || null)
-    : null;
+  const twitchNameProvided = twitchName !== undefined;
+  const normalizedTwitchName = twitchNameProvided ? (twitchName!.trim() || null) : null;
   await getPool().execute(
     `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
      VALUES (?, ?, ?, ?, 0)
-     ON DUPLICATE KEY UPDATE discord_name = VALUES(discord_name), access_level = VALUES(access_level), twitch_name = VALUES(twitch_name)`,
-    [discordId, discordName, accessLevel, normalizedTwitchName],
+     ON DUPLICATE KEY UPDATE discord_name = VALUES(discord_name), access_level = VALUES(access_level), twitch_name = IF(?, VALUES(twitch_name), twitch_name)`,
+    [discordId, discordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
   );
 }
 

@@ -70,8 +70,14 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
   setTwitchChannel(normalized, false);
 
   if (!client || !connected) return;
-  await client.join(normalized);
-  setTwitchChannel(normalized, true);
+  try {
+    await client.join(normalized);
+    setTwitchChannel(normalized, true);
+  } catch (err) {
+    console.error(`[Twitch] Failed to join channel ${normalized}:`, err);
+    activeChannels.delete(normalized);
+    setTwitchChannel(normalized, false);
+  }
 }
 
 export async function partTwitchChannel(channel: string): Promise<void> {
