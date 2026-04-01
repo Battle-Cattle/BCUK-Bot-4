@@ -288,12 +288,10 @@ export async function connect(client: Client): Promise<void> {
 
     if (nextConnection) {
       nextConnection.destroy();
-    }
-
-    if (attemptId === currentAttemptId && connection === nextConnection && nextConnection) {
-      nextConnection.destroy();
-      connection = null;
-      setVoiceDisconnected();
+      if (connection === nextConnection) {
+        connection = null;
+        setVoiceDisconnected();
+      }
     }
 
     if (attemptId === currentAttemptId && shouldAutoReconnect && !isPermanentMisconfiguration) {
@@ -311,6 +309,7 @@ export async function connect(client: Client): Promise<void> {
 export function disconnect(): void {
   currentAttemptId += 1;
   shouldAutoReconnect = false;
+  activeClient = null;
   clearReconnectTimer();
   reconnectAttempts = 0;
 
