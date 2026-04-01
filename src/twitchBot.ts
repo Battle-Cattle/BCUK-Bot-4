@@ -66,17 +66,17 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
   const normalized = normalizeChannel(channel);
   if (!normalized || activeChannels.has(normalized)) return;
 
-  activeChannels.add(normalized);
-  setTwitchChannel(normalized, false);
+  if (!client || !connected) {
+    throw new Error(`Cannot join ${normalized}: Twitch client is not connected`);
+  }
 
-  if (!client || !connected) return;
   try {
     await client.join(normalized);
+    activeChannels.add(normalized);
     setTwitchChannel(normalized, true);
   } catch (err) {
     console.error(`[Twitch] Failed to join channel ${normalized}:`, err);
-    activeChannels.delete(normalized);
-    setTwitchChannel(normalized, false);
+    throw err;
   }
 }
 
@@ -84,9 +84,18 @@ export async function partTwitchChannel(channel: string): Promise<void> {
   const normalized = normalizeChannel(channel);
   if (!normalized || !activeChannels.has(normalized)) return;
 
-  activeChannels.delete(normalized);
-  setTwitchChannel(normalized, false);
+  if (!client || !connected) {
+    activeChannels.delete(normalized);
+    setTwitchChannel(normalized, false);
+    return;
+  }
 
-  if (!client || !connected) return;
-  await client.part(normalized);
+  try {
+    await client.part(normalized);
+    activeChannels.delete(normalized);
+    setTwitchChannel(normalized, false);
+  } catch (err) {
+    console.error(`[Twitch] Failed to part channel ${normalized}:`, err);
+    throw err;
+  }
 }
