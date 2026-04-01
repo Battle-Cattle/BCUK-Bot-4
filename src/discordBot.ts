@@ -6,7 +6,7 @@ import { setDiscordReady } from './statusStore';
 
 let client: Client;
 
-/** The Discord.js Client instance once it has fired `ready`, or null before then. */
+/** The Discord.js Client instance once it has fired `clientReady`, or null before then. */
 export let discordClient: Client | null = null;
 
 export function startDiscordBot(): void {
@@ -19,7 +19,7 @@ export function startDiscordBot(): void {
     ],
   });
 
-  client.once('ready', async (c) => {
+  client.once('clientReady', async (c) => {
     console.log(`[Discord] Logged in as ${c.user.tag}`);
     discordClient = c;
     try {
