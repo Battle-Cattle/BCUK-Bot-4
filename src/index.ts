@@ -34,7 +34,7 @@ async function main(): Promise<void> {
   }
 
   startDiscordBot();
-  startTwitchBot();
+  await startTwitchBot();
   startTikTokBot();
   startWebPanel();
   startTwitchMonitor().catch((err) => console.error('[Bot] TwitchMonitor startup error:', err));

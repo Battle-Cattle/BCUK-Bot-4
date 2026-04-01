@@ -1,20 +1,36 @@
 import tmi from 'tmi.js';
-import { TWITCH_USERNAME, TWITCH_OAUTH_TOKEN, TWITCH_CHANNELS } from './config';
+import { TWITCH_USERNAME, TWITCH_OAUTH_TOKEN } from './config';
 import { handleCommand } from './commandRouter';
 import { setTwitchChannel } from './statusStore';
+import { getTwitchEnabledChannels } from './db';
 
-let client: tmi.Client;
+let client: tmi.Client | null = null;
+let connected = false;
+const activeChannels = new Set<string>();
 
-export function startTwitchBot(): void {
-  // Seed all configured channels as disconnected so they appear in status immediately
-  TWITCH_CHANNELS.forEach((ch) => { setTwitchChannel(ch, false); });
+function normalizeChannel(channel: string): string {
+  return channel.trim().replace(/^#/, '').toLowerCase();
+}
+
+export async function startTwitchBot(): Promise<void> {
+  const configuredChannels = await getTwitchEnabledChannels();
+  configuredChannels.forEach((ch) => {
+    const normalized = normalizeChannel(ch);
+    if (!normalized) return;
+    activeChannels.add(normalized);
+    setTwitchChannel(normalized, false);
+  });
+
+  if (activeChannels.size === 0) {
+    console.warn('[Twitch] No enabled Twitch channels found in DB; connecting with no joined channels.');
+  }
 
   client = new tmi.Client({
     identity: {
       username: TWITCH_USERNAME,
       password: TWITCH_OAUTH_TOKEN,
     },
-    channels: TWITCH_CHANNELS,
+    channels: [...activeChannels],
     options: { debug: false },
     connection: {
       reconnect: true,
@@ -31,15 +47,40 @@ export function startTwitchBot(): void {
   });
 
   client.on('connected', (addr, port) => {
+    connected = true;
     console.log(`[Twitch] Connected to ${addr}:${port}`);
-    console.log(`[Twitch] Listening on: ${TWITCH_CHANNELS.join(', ')}`);
-    TWITCH_CHANNELS.forEach((ch) => { setTwitchChannel(ch, true); });
+    console.log(`[Twitch] Listening on: ${[...activeChannels].join(', ') || '(none)'}`);
+    activeChannels.forEach((ch) => { setTwitchChannel(ch, true); });
   });
 
   client.on('disconnected', (reason) => {
+    connected = false;
     console.warn(`[Twitch] Disconnected: ${reason}`);
-    TWITCH_CHANNELS.forEach((ch) => { setTwitchChannel(ch, false); });
+    activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
   });
 
-  client.connect().catch((err) => console.error('[Twitch] Failed to connect:', err));
+  await client.connect().catch((err) => console.error('[Twitch] Failed to connect:', err));
+}
+
+export async function joinTwitchChannel(channel: string): Promise<void> {
+  const normalized = normalizeChannel(channel);
+  if (!normalized || activeChannels.has(normalized)) return;
+
+  activeChannels.add(normalized);
+  setTwitchChannel(normalized, false);
+
+  if (!client || !connected) return;
+  await client.join(normalized);
+  setTwitchChannel(normalized, true);
+}
+
+export async function partTwitchChannel(channel: string): Promise<void> {
+  const normalized = normalizeChannel(channel);
+  if (!normalized || !activeChannels.has(normalized)) return;
+
+  activeChannels.delete(normalized);
+  setTwitchChannel(normalized, false);
+
+  if (!client || !connected) return;
+  await client.part(normalized);
 }
