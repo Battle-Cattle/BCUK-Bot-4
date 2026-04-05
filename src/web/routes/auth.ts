@@ -74,9 +74,12 @@ router.get('/discord/callback', async (req, res) => {
 
     let syncedDiscordName = profile.username;
     try {
-      const displayName = await fetchMemberDisplayName(profile.id, false);
-      if (displayName && displayName.trim()) {
-        syncedDiscordName = displayName.trim();
+      const displayName = await fetchMemberDisplayName(profile.id, true);
+      const trimmedDisplayName = displayName?.trim();
+      if (trimmedDisplayName) {
+        syncedDiscordName = trimmedDisplayName;
+      }
+      if (syncedDiscordName !== dbUser.discord_name) {
         await updateDiscordName(profile.id, syncedDiscordName);
       }
     } catch (syncErr) {

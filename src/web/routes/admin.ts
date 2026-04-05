@@ -51,7 +51,7 @@ async function runDiscordNameRefresh(): Promise<void> {
     let updatedCount = 0;
 
     for (const user of users) {
-      const name = await fetchMemberDisplayName(user.discord_id);
+      const name = await fetchMemberDisplayName(user.discord_id, true);
       const trimmedName = name?.trim();
       if (trimmedName && trimmedName !== user.discord_name) {
         await updateDiscordName(user.discord_id, trimmedName);
@@ -130,9 +130,11 @@ router.post('/users/add', requireAdmin, async (req, res) => {
     );
 
     if (existingUser?.is_twitch_bot_enabled && previousTwitchChannel !== nextTwitchChannel) {
+      let previousChannelParted = false;
       try {
         if (previousTwitchChannel) {
           await partTwitchChannel(previousTwitchChannel);
+          previousChannelParted = true;
         }
 
         if (nextTwitchChannel) {
@@ -141,7 +143,25 @@ router.post('/users/add', requireAdmin, async (req, res) => {
           await updateTwitchBotEnabled(trimmedDiscordId, false);
         }
       } catch (err) {
-        await updateTwitchBotEnabled(trimmedDiscordId, false);
+        if (previousChannelParted && previousTwitchChannel) {
+          try {
+            await joinTwitchChannel(previousTwitchChannel);
+          } catch (rollbackErr) {
+            console.error('[Web] Add user Twitch channel rollback failed:', rollbackErr);
+          }
+        }
+
+        try {
+          await upsertUser(
+            trimmedDiscordId,
+            trimmedDiscordName,
+            level as AccessLevelValue,
+            previousTwitchChannel ?? '',
+          );
+          await updateTwitchBotEnabled(trimmedDiscordId, existingUser.is_twitch_bot_enabled);
+        } catch (rollbackErr) {
+          console.error('[Web] Add user DB rollback failed:', rollbackErr);
+        }
         throw err;
       }
     }
