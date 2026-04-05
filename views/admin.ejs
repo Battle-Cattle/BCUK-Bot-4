@@ -54,6 +54,10 @@
           <input class="input" type="text" name="discord_id"   placeholder="Discord User ID"  required>
           <input class="input" type="text" name="discord_name" placeholder="Display name (optional)">
           <input class="input" type="text" name="twitch_name" placeholder="Twitch name (optional)">
+          <label class="hint" style="display:flex;align-items:center;gap:.4rem;white-space:nowrap">
+            <input type="checkbox" name="clear_twitch_name" value="1">
+            Clear Twitch name
+          </label>
           <select class="input" name="access_level">
             <% Object.entries(accessLevelLabels).forEach(([val, label]) => { %>
             <option value="<%= val %>"><%= label %></option>

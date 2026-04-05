@@ -15,7 +15,8 @@ export async function fetchMemberDisplayName(discordId: string, force = false): 
     const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
     const member = await guild.members.fetch({ user: discordId, force });
     return member.displayName;
-  } catch {
+  } catch (err) {
+    console.warn(`[Discord] Failed to fetch display name for ${discordId}:`, err);
     return null;
   }
 }

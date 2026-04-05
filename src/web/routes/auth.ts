@@ -73,14 +73,10 @@ router.get('/discord/callback', async (req, res) => {
     }
 
     let syncedDiscordName = profile.username;
-    try {
-      const displayName = await fetchMemberDisplayName(profile.id, true);
-      if (displayName && displayName.trim()) {
-        syncedDiscordName = displayName.trim();
-        await updateDiscordName(profile.id, syncedDiscordName);
-      }
-    } catch (syncErr) {
-      console.warn('[Web] Non-blocking discord_name sync failed:', syncErr);
+    const displayName = await fetchMemberDisplayName(profile.id, true);
+    if (displayName && displayName.trim()) {
+      syncedDiscordName = displayName.trim();
+      await updateDiscordName(profile.id, syncedDiscordName);
     }
 
     // 4. Save to session

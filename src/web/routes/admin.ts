@@ -93,24 +93,53 @@ router.get('/users/refresh-status', requireManager, (_req, res) => {
 
 // Add or update a user (Admin only)
 router.post('/users/add', requireAdmin, async (req, res) => {
-  const { discord_id, discord_name, access_level, twitch_name } = req.body as {
+  const { discord_id, discord_name, access_level, twitch_name, clear_twitch_name } = req.body as {
     discord_id?: string;
     discord_name?: string;
     access_level?: string;
     twitch_name?: string;
+    clear_twitch_name?: string;
   };
   if (!discord_id || !access_level) return res.redirect('/admin/users');
   const level = parseInt(access_level, 10);
   if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   try {
+    const trimmedDiscordId = discord_id.trim();
+    const trimmedDiscordName = (discord_name ?? '').trim();
     const normalizedTwitchName = (twitch_name ?? '').trim();
+    const shouldClearTwitchName = clear_twitch_name === '1';
+    const existingUser = await findUser(trimmedDiscordId);
+    const previousTwitchChannel = existingUser?.twitch_name ? existingUser.twitch_name.trim().toLowerCase() : null;
+    const nextTwitchName = shouldClearTwitchName
+      ? ''
+      : normalizedTwitchName.length > 0
+        ? normalizedTwitchName
+        : undefined;
+    const nextTwitchChannel = shouldClearTwitchName
+      ? null
+      : normalizedTwitchName.length > 0
+        ? normalizedTwitchName.toLowerCase()
+        : previousTwitchChannel;
+
     await upsertUser(
-      discord_id.trim(),
-      (discord_name ?? '').trim(),
+      trimmedDiscordId,
+      trimmedDiscordName,
       level as AccessLevelValue,
-      normalizedTwitchName.length > 0 ? normalizedTwitchName : undefined,
+      nextTwitchName,
     );
+
+    if (existingUser?.is_twitch_bot_enabled && previousTwitchChannel !== nextTwitchChannel) {
+      if (previousTwitchChannel) {
+        await partTwitchChannel(previousTwitchChannel);
+      }
+
+      if (nextTwitchChannel) {
+        await joinTwitchChannel(nextTwitchChannel);
+      } else {
+        await updateTwitchBotEnabled(trimmedDiscordId, false);
+      }
+    }
   } catch (err) {
     console.error('[Web] Add user error:', err);
     return res.redirect('/admin/users?error=add_failed');
