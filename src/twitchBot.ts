@@ -12,6 +12,29 @@ function normalizeChannel(channel: string): string {
   return channel.trim().replace(/^#/, '').toLowerCase();
 }
 
+async function reconcileJoinedChannels(): Promise<void> {
+  if (!client || !connected) return;
+
+  const joinedChannels = client.getChannels()
+    .map((channel) => normalizeChannel(channel))
+    .filter((channel) => channel.length > 0);
+
+  for (const channel of joinedChannels) {
+    if (activeChannels.has(channel)) {
+      setTwitchChannel(channel, true);
+      continue;
+    }
+
+    try {
+      await client.part(channel);
+      setTwitchChannel(channel, false);
+      console.log(`[Twitch] Parted stale channel after reconnect: ${channel}`);
+    } catch (err) {
+      console.error(`[Twitch] Failed to part stale channel ${channel}:`, err);
+    }
+  }
+}
+
 export async function startTwitchBot(): Promise<void> {
   const configuredChannels = await getTwitchEnabledChannels();
   configuredChannels.forEach((ch) => {
@@ -38,9 +61,11 @@ export async function startTwitchBot(): Promise<void> {
     },
   });
 
-  client.on('message', (_channel, tags, message, self) => {
+  client.on('message', (channel, tags, message, self) => {
     // Don't respond to own messages
     if (self) return;
+    const normalizedChannel = normalizeChannel(channel);
+    if (!activeChannels.has(normalizedChannel)) return;
     handleCommand(message, 'twitch').catch((err) =>
       console.error('[Twitch] Command handler error:', err),
     );
@@ -51,6 +76,9 @@ export async function startTwitchBot(): Promise<void> {
     console.log(`[Twitch] Connected to ${addr}:${port}`);
     console.log(`[Twitch] Listening on: ${[...activeChannels].join(', ') || '(none)'}`);
     activeChannels.forEach((ch) => { setTwitchChannel(ch, true); });
+    void reconcileJoinedChannels().catch((err) => {
+      console.error('[Twitch] Failed to reconcile joined channels:', err);
+    });
   });
 
   client.on('disconnected', (reason) => {
@@ -90,9 +118,6 @@ export async function partTwitchChannel(channel: string): Promise<void> {
   if (!normalized || !activeChannels.has(normalized)) return;
 
   if (!client || !connected) {
-    // Intentional divergence from join flow: when disabling a channel while the
-    // Twitch client is offline, we still remove local state so auto-reconnect
-    // does not rejoin this channel from stale in-memory data.
     activeChannels.delete(normalized);
     setTwitchChannel(normalized, false);
     return;

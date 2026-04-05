@@ -12,12 +12,59 @@ import {
   AccessLevelValue,
 } from '../../db';
 import { requireManager, requireAdmin } from '../middleware';
-import { fetchMemberDisplayName } from '../../discordBot';
+import { discordClient, fetchMemberDisplayName } from '../../discordBot';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitchBot';
 
 const router = Router();
 
 const KNOWN_ERRORS = new Set(['add_failed', 'update_failed', 'remove_failed', 'toggle_failed']);
+
+type RefreshOutcome = 'idle' | 'running' | 'success' | 'noop' | 'error';
+
+const refreshState: {
+  outcome: RefreshOutcome;
+  updatedCount: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+} = {
+  outcome: 'idle',
+  updatedCount: 0,
+  startedAt: null,
+  finishedAt: null,
+};
+
+async function runDiscordNameRefresh(): Promise<void> {
+  refreshState.outcome = 'running';
+  refreshState.updatedCount = 0;
+  refreshState.startedAt = Date.now();
+  refreshState.finishedAt = null;
+
+  try {
+    if (!discordClient) {
+      throw new Error('Discord client is not ready');
+    }
+
+    const users = await getAllUsers();
+    let updatedCount = 0;
+
+    for (const user of users) {
+      const name = await fetchMemberDisplayName(user.discord_id);
+      if (name && name.trim()) {
+        await updateDiscordName(user.discord_id, name.trim());
+        updatedCount++;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    refreshState.updatedCount = updatedCount;
+    refreshState.outcome = updatedCount > 0 ? 'success' : 'noop';
+  } catch (err) {
+    refreshState.outcome = 'error';
+    console.error('[Web] Refresh Discord names failed:', err);
+  } finally {
+    refreshState.finishedAt = Date.now();
+  }
+}
 
 // View user list (Manager+)
 router.get('/users', requireManager, async (req, res) => {
@@ -28,12 +75,16 @@ router.get('/users', requireManager, async (req, res) => {
       users,
       accessLevelLabels: ACCESS_LEVEL_LABELS,
       error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
-      refreshed: req.query.refreshed === '1',
+      refreshState,
     });
   } catch (err) {
     console.error('[Web] Admin users error:', err);
     res.status(500).render('error', { message: 'Failed to load users.', user: req.session.user ?? null });
   }
+});
+
+router.get('/users/refresh-status', requireManager, (_req, res) => {
+  res.json(refreshState);
 });
 
 // Add or update a user (Admin only)
@@ -118,15 +169,25 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
       return res.redirect('/admin/users?error=toggle_failed');
     }
 
-    const nextEnabled = !user.is_twitch_bot_enabled;
-
-    if (nextEnabled) {
-      await joinTwitchChannel(user.twitch_name);
-    } else {
-      await partTwitchChannel(user.twitch_name);
-    }
+    const currentEnabled = user.is_twitch_bot_enabled;
+    const nextEnabled = !currentEnabled;
 
     await updateTwitchBotEnabled(discord_id, nextEnabled);
+
+    try {
+      if (nextEnabled) {
+        await joinTwitchChannel(user.twitch_name);
+      } else {
+        await partTwitchChannel(user.twitch_name);
+      }
+    } catch (err) {
+      try {
+        await updateTwitchBotEnabled(discord_id, currentEnabled);
+      } catch (rollbackErr) {
+        console.error('[Web] Toggle twitch user rollback failed:', rollbackErr);
+      }
+      throw err;
+    }
   } catch (err) {
     console.error('[Web] Toggle twitch user error:', err);
     return res.redirect('/admin/users?error=toggle_failed');
@@ -137,27 +198,12 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
 
 // Refresh Discord names for all users (Manager+)
 router.post('/users/refresh-names', requireManager, async (req, res) => {
-  try {
-    const users = await getAllUsers();
-    let updatedCount = 0;
-    for (const u of users) {
-      const name = await fetchMemberDisplayName(u.discord_id);
-      if (name && name.trim()) {
-        await updateDiscordName(u.discord_id, name.trim());
-        updatedCount++;
-      }
-      // Small delay between requests to stay within Discord API rate limits
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-
-    if (updatedCount > 0) {
-      return res.redirect('/admin/users?refreshed=1');
-    }
-    return res.redirect('/admin/users?refreshed=0');
-  } catch (err) {
-    console.error('[Web] Refresh Discord names failed:', err);
-    return res.redirect('/admin/users?error=update_failed');
+  if (refreshState.outcome === 'running') {
+    return res.redirect('/admin/users');
   }
+
+  void runDiscordNameRefresh();
+  return res.redirect('/admin/users');
 });
 
 export default router;
