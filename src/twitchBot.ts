@@ -118,6 +118,8 @@ export async function partTwitchChannel(channel: string): Promise<void> {
   if (!normalized || !activeChannels.has(normalized)) return;
 
   if (!client || !connected) {
+    // We remove local state immediately and let reconcileJoinedChannels() part
+    // any stale tmi.js channel memberships on the next successful connect.
     activeChannels.delete(normalized);
     setTwitchChannel(normalized, false);
     return;

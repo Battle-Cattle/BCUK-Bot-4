@@ -21,6 +21,9 @@ const KNOWN_ERRORS = new Set(['add_failed', 'update_failed', 'remove_failed', 't
 
 type RefreshOutcome = 'idle' | 'running' | 'success' | 'noop' | 'error';
 
+// This progress state is intentionally in-process because the web panel runs as
+// a single bot instance today. If the panel is ever scaled horizontally, move
+// this state into shared storage before relying on /users/refresh-status.
 const refreshState: {
   outcome: RefreshOutcome;
   updatedCount: number;
@@ -49,8 +52,9 @@ async function runDiscordNameRefresh(): Promise<void> {
 
     for (const user of users) {
       const name = await fetchMemberDisplayName(user.discord_id);
-      if (name && name.trim()) {
-        await updateDiscordName(user.discord_id, name.trim());
+      const trimmedName = name?.trim();
+      if (trimmedName && trimmedName !== user.discord_name) {
+        await updateDiscordName(user.discord_id, trimmedName);
         updatedCount++;
       }
       await new Promise((resolve) => setTimeout(resolve, 200));
