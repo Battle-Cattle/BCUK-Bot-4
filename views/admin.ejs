@@ -20,6 +20,32 @@
       </div>
       <% } %>
 
+      <% if (refreshState.outcome === 'running') { %>
+      <div class="card" data-refresh-running="true" style="margin-bottom:1rem;border-left:3px solid var(--accent);padding:.75rem 1rem">
+        <span style="color:var(--accent)">Refreshing Discord names in the background...</span>
+      </div>
+      <% } else if (refreshState.outcome === 'success') { %>
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--success);padding:.75rem 1rem">
+        <span style="color:var(--success)">&#10003; Discord names refreshed for <%= refreshState.updatedCount %> user<%= refreshState.updatedCount === 1 ? '' : 's' %>.</span>
+      </div>
+      <% } else if (refreshState.outcome === 'noop') { %>
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--muted);padding:.75rem 1rem">
+        <span style="color:var(--text-muted)">No Discord names needed refreshing.</span>
+      </div>
+      <% } else if (refreshState.outcome === 'error') { %>
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem">
+        <span style="color:var(--danger)">&#9888; Discord name refresh failed.</span>
+      </div>
+      <% } %>
+
+      <% if (user.accessLevel >= 2) { %>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:1rem">
+        <form method="POST" action="/admin/users/refresh-names" class="inline-form-sm">
+          <button type="submit" class="btn btn-sm" <%= refreshState.outcome === 'running' ? 'disabled' : '' %>><%= refreshState.outcome === 'running' ? 'Refreshing...' : 'Refresh Discord Names' %></button>
+        </form>
+      </div>
+      <% } %>
+
       <!-- Add user (Admin only) -->
       <% if (user.accessLevel >= 3) { %>
       <div class="card" style="margin-bottom:1.5rem">
@@ -27,6 +53,7 @@
         <form method="POST" action="/admin/users/add" class="inline-form">
           <input class="input" type="text" name="discord_id"   placeholder="Discord User ID"  required>
           <input class="input" type="text" name="discord_name" placeholder="Display name (optional)">
+          <input class="input" type="text" name="twitch_name" placeholder="Twitch name (optional)">
           <select class="input" name="access_level">
             <% Object.entries(accessLevelLabels).forEach(([val, label]) => { %>
             <option value="<%= val %>"><%= label %></option>
@@ -47,6 +74,7 @@
               <th>Discord ID</th>
               <th>Name</th>
               <th>Twitch</th>
+              <th>Twitch Bot</th>
               <th>Level</th>
               <% if (user.accessLevel >= 3) { %><th>Actions</th><% } %>
             </tr>
@@ -57,6 +85,24 @@
               <td class="mono"><%= u.discord_id %></td>
               <td><%= u.discord_name || '—' %></td>
               <td class="mono"><%= u.twitch_name || '—' %></td>
+              <td>
+                <% if (u.twitch_name) { %>
+                  <span class="badge <%= u.is_twitch_bot_enabled ? 'badge-online' : 'badge-offline' %>">
+                    <%= u.is_twitch_bot_enabled ? 'Enabled' : 'Disabled' %>
+                  </span>
+                  <% if (user.accessLevel >= 2) { %>
+                  <form method="POST" action="/admin/users/toggle-twitch" class="inline-form-sm" style="margin-top:.45rem">
+                    <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
+                    <button type="submit" class="btn btn-sm"><%= u.is_twitch_bot_enabled ? 'Disable' : 'Enable' %></button>
+                  </form>
+                  <% } %>
+                <% } else { %>
+                  <span class="badge badge-offline">Unavailable</span>
+                  <% if (user.accessLevel >= 2) { %>
+                  <button type="button" class="btn btn-sm" disabled style="margin-top:.45rem;opacity:.55">Set Twitch Name</button>
+                  <% } %>
+                <% } %>
+              </td>
               <td><span class="badge level-<%= u.access_level %>"><%= accessLevelLabels[u.access_level] || u.access_level %></span></td>
               <% if (user.accessLevel >= 3) { %>
               <td class="actions">
@@ -82,7 +128,7 @@
             </tr>
             <% }) %>
             <% if (users.length === 0) { %>
-            <tr><td colspan="<%= user.accessLevel >= 3 ? 5 : 4 %>" class="empty-msg">No users in the database.</td></tr>
+            <tr><td colspan="<%= user.accessLevel >= 3 ? 6 : 5 %>" class="empty-msg">No users in the database.</td></tr>
             <% } %>
           </tbody>
         </table>

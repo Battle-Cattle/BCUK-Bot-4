@@ -13,10 +13,6 @@ export const DISCORD_VOICE_CHANNEL_ID = require_env('DISCORD_VOICE_CHANNEL_ID');
 
 export const TWITCH_USERNAME = require_env('TWITCH_USERNAME');
 export const TWITCH_OAUTH_TOKEN = require_env('TWITCH_OAUTH_TOKEN');
-export const TWITCH_CHANNELS: string[] = require_env('TWITCH_CHANNELS')
-  .split(',')
-  .map((c) => c.trim().replace(/^#/, ''))
-  .filter(Boolean);
 
 // Twitch stream monitor (stream announcements — separate from chat bot)
 // Client credentials for Twitch API / EventSub

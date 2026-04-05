@@ -9,6 +9,17 @@ let client: Client;
 /** The Discord.js Client instance once it has fired `clientReady`, or null before then. */
 export let discordClient: Client | null = null;
 
+export async function fetchMemberDisplayName(discordId: string, force = false): Promise<string | null> {
+  if (!discordClient) return null;
+  try {
+    const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
+    const member = await guild.members.fetch({ user: discordId, force });
+    return member.displayName;
+  } catch {
+    return null;
+  }
+}
+
 export function startDiscordBot(): void {
   client = new Client({
     intents: [
