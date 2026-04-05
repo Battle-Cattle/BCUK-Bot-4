@@ -130,14 +130,19 @@ router.post('/users/add', requireAdmin, async (req, res) => {
     );
 
     if (existingUser?.is_twitch_bot_enabled && previousTwitchChannel !== nextTwitchChannel) {
-      if (previousTwitchChannel) {
-        await partTwitchChannel(previousTwitchChannel);
-      }
+      try {
+        if (previousTwitchChannel) {
+          await partTwitchChannel(previousTwitchChannel);
+        }
 
-      if (nextTwitchChannel) {
-        await joinTwitchChannel(nextTwitchChannel);
-      } else {
+        if (nextTwitchChannel) {
+          await joinTwitchChannel(nextTwitchChannel);
+        } else {
+          await updateTwitchBotEnabled(trimmedDiscordId, false);
+        }
+      } catch (err) {
         await updateTwitchBotEnabled(trimmedDiscordId, false);
+        throw err;
       }
     }
   } catch (err) {
@@ -208,6 +213,8 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
     await updateTwitchBotEnabled(discord_id, nextEnabled);
 
     try {
+      // joinTwitchChannel/partTwitchChannel are expected to throw on failure so
+      // this rollback keeps DB state aligned with runtime channel membership.
       if (nextEnabled) {
         await joinTwitchChannel(user.twitch_name);
       } else {
