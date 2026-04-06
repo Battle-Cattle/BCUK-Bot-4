@@ -72,7 +72,7 @@ router.get('/discord/callback', async (req, res) => {
       });
     }
 
-    let syncedDiscordName = profile.username;
+    let syncedDiscordName = dbUser.discord_name?.trim() || profile.username;
     try {
       const displayName = await fetchMemberDisplayName(profile.id, true);
       const trimmedDisplayName = displayName?.trim();

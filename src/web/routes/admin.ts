@@ -130,6 +130,12 @@ router.post('/users/add', requireAdmin, async (req, res) => {
     );
 
     if (existingUser?.is_twitch_bot_enabled && previousTwitchChannel !== nextTwitchChannel) {
+      if (!nextTwitchChannel) {
+        await partTwitchChannel(previousTwitchChannel ?? '');
+        await updateTwitchBotEnabled(trimmedDiscordId, false);
+        return res.redirect('/admin/users');
+      }
+
       let previousChannelParted = false;
       try {
         if (previousTwitchChannel) {
@@ -137,11 +143,7 @@ router.post('/users/add', requireAdmin, async (req, res) => {
           previousChannelParted = true;
         }
 
-        if (nextTwitchChannel) {
-          await joinTwitchChannel(nextTwitchChannel);
-        } else {
-          await updateTwitchBotEnabled(trimmedDiscordId, false);
-        }
+        await joinTwitchChannel(nextTwitchChannel);
       } catch (err) {
         if (previousChannelParted && previousTwitchChannel) {
           try {
