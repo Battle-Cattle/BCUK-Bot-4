@@ -238,10 +238,11 @@ router.post('/users/remove', requireAdmin, async (req, res) => {
 // Toggle twitch bot participation for a user (Manager+)
 router.post('/users/toggle-twitch', requireManager, async (req, res) => {
   const { discord_id } = req.body as { discord_id?: string };
-  if (!discord_id) return res.redirect('/admin/users');
+  const trimmedDiscordId = (discord_id ?? '').trim();
+  if (!trimmedDiscordId) return res.redirect('/admin/users');
 
   try {
-    const user = await findUser(discord_id);
+    const user = await findUser(trimmedDiscordId);
     if (!user || !user.twitch_name) {
       return res.redirect('/admin/users?error=toggle_failed');
     }
@@ -249,7 +250,7 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
     const currentEnabled = user.is_twitch_bot_enabled;
     const nextEnabled = !currentEnabled;
 
-    await updateTwitchBotEnabled(discord_id, nextEnabled);
+    await updateTwitchBotEnabled(trimmedDiscordId, nextEnabled);
 
     try {
       // joinTwitchChannel/partTwitchChannel are expected to throw on failure so
@@ -261,7 +262,7 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
       }
     } catch (err) {
       try {
-        await updateTwitchBotEnabled(discord_id, currentEnabled);
+        await updateTwitchBotEnabled(trimmedDiscordId, currentEnabled);
       } catch (rollbackErr) {
         console.error('[Web] Toggle twitch user rollback failed:', rollbackErr);
       }
