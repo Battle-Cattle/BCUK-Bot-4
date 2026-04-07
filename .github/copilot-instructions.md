@@ -256,7 +256,7 @@ Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden == 1
 Apply this same pattern whenever reading any boolean/tinyint column.
 
 ### MySQL 8 upsert syntax
-The project targets MySQL 8 semantics. For `INSERT ... ON DUPLICATE KEY UPDATE`, prefer the row-alias form (`VALUES (...) AS new_row`) instead of deprecated `VALUES(column)` expressions.
+The project targets MySQL 8 semantics. For `INSERT ... ON DUPLICATE KEY UPDATE`, prefer the row-alias form (`VALUES (...) AS new_row`) instead of deprecated `VALUES(column)` expressions. This alias form requires MySQL 8.0.19 or later; earlier 8.0 releases do not support row aliases in `INSERT ... VALUES (...) AS alias`.
 
 ### Session cookie in production
 `src/web/server.ts` automatically sets `cookie: { secure: true }` and `app.set('trust proxy', 1)` when `NODE_ENV=production`. In development (default), `secure: false` is used so cookies work over plain HTTP. No manual code changes are needed — just set `NODE_ENV=production` when deploying behind an HTTPS reverse proxy.
