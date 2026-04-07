@@ -70,7 +70,7 @@ BCUK_Bot_4/
 
 ## Database Schema
 
-Tables in the existing MySQL/MariaDB database:
+Tables in the existing MySQL 8 database:
 
 ### `sfxtrigger`
 
@@ -157,7 +157,6 @@ Copy `.env.example` → `.env` and fill in all values.
 | `DISCORD_VOICE_CHANNEL_ID` | ✅ | Voice channel to join |
 | `TWITCH_USERNAME`       | ✅ | Bot account username |
 | `TWITCH_OAUTH_TOKEN`    | ✅ | Format: `oauth:xxxx` |
-| `TWITCH_CHANNELS`       | ✅ | Comma-separated channel names |
 | `TIKTOK_CHANNELS`       | ❌ | Comma-separated usernames (@ optional) |
 | `TIKTOK_SIGN_API_KEY`   | ❌ | From eulerstream.com, improves reliability |
 | `DB_HOST`               | ✅ | Default: localhost |
@@ -219,11 +218,17 @@ Copy `.env.example` → `.env` and fill in all values.
 ### Exported Discord client
 `src/discordBot.ts` exports `discordClient: Client | null`. It is `null` until the `ready` event fires, then set to the live `Client` instance. Other modules (e.g. `src/web/routes/api.ts`) import this to call Discord APIs without holding a circular reference to the full bot module.
 
+### Twitch channels are DB-driven
+`TWITCH_CHANNELS` is no longer used. `startTwitchBot()` loads enabled Twitch channels from the `user` table via `getTwitchEnabledChannels()`, and admin user updates/toggles reconcile live channel membership with `joinTwitchChannel()` / `partTwitchChannel()`.
+
 ### Voice join/leave from web panel
 `audioPlayer.ts` exports both `connect(client)` (join) and `disconnect()` (leave). `POST /api/voice/join` and `POST /api/voice/leave` in `src/web/routes/api.ts` are guarded by `requireMod` (access level ≥ 1). The dashboard shows a **Join Voice** / **Leave Voice** toggle button to Mod+ users; the button label and state are kept in sync by `applyStatus()` on every poll.
 
 ### Auth
 `passport` and `passport-discord` were **not used** — they are deprecated. Discord OAuth2 is implemented directly in `src/web/routes/auth.ts` using `fetch` calls to the Discord API.
+
+### Login-time Discord name sync
+During OAuth login, `auth.ts` treats Discord display-name sync as non-blocking: it prefers the current guild display name from `fetchMemberDisplayName(..., true)`, falls back to the stored `discord_name` (or OAuth username if none exists), and only updates the DB when the final value changed.
 
 ### dotenv override
 `config.ts` uses `dotenv.config({ override: true })` to ensure `.env` values always take precedence over any system/user environment variables with the same name.
@@ -244,11 +249,14 @@ The web panel is PWA-enabled. `public/service-worker.js` pre-caches core static 
 `tiktokBot.ts` uses a per-connection `reconnectScheduled` boolean to prevent duplicate `setTimeout` calls when both `STREAM_END` and `DISCONNECTED` fire for the same connection.
 
 ### MySQL tinyint(1) / bit columns returned as Buffer
-MariaDB (and some MySQL configs) return `tinyint(1)` columns as a single-byte `Buffer` rather than `0`/`1`. All boolean reads in `db.ts` use the pattern:
+Some MySQL configurations/drivers can return `tinyint(1)` or `bit` columns as a single-byte `Buffer` rather than `0`/`1`. All boolean reads in `db.ts` use the pattern:
 ```ts
 Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden == 1
 ```
 Apply this same pattern whenever reading any boolean/tinyint column.
+
+### MySQL 8 upsert syntax
+The project targets MySQL 8 semantics. For `INSERT ... ON DUPLICATE KEY UPDATE`, prefer the row-alias form (`VALUES (...) AS new_row`) instead of deprecated `VALUES(column)` expressions.
 
 ### Session cookie in production
 `src/web/server.ts` automatically sets `cookie: { secure: true }` and `app.set('trust proxy', 1)` when `NODE_ENV=production`. In development (default), `secure: false` is used so cookies work over plain HTTP. No manual code changes are needed — just set `NODE_ENV=production` when deploying behind an HTTPS reverse proxy.
@@ -315,6 +323,7 @@ npm start        # node dist/index.js (production)
 | POST   | `/api/voice/join`       | Mod+        | Join configured voice channel |
 | POST   | `/api/voice/leave`      | Mod+        | Leave voice channel |
 | GET    | `/admin/users`          | Manager+    | User list |
+| GET    | `/admin/users/refresh-status` | Manager+ | JSON status for background Discord-name refresh |
 | POST   | `/admin/users/add`      | Admin       | Add/update user |
 | POST   | `/admin/users/update`   | Admin       | Change access level |
 | POST   | `/admin/users/remove`   | Admin       | Remove user |
@@ -348,8 +357,10 @@ In-memory singleton. Functions:
 - `findSoundFiles(triggerId)` — returns all `sfx` rows for a trigger including hidden ones; used by `commandRouter.ts`
 - `getAllSfxTriggers()` — **dashboard aggregate**: single JOIN query across `sfxtrigger`, `sfxcategory`, and `sfx`; returns `SfxTriggerRow[]` where each entry has a `files[]` array already grouped
 - `findUser(discordId)` / `getAllUsers()` — user lookups for auth and admin panel
-- `upsertUser(discordId, discordName, accessLevel)` — INSERT … ON DUPLICATE KEY UPDATE; validates `accessLevel` is a known `AccessLevel` value
+- `upsertUser(discordId, discordName, accessLevel, twitchName?)` — INSERT … ON DUPLICATE KEY UPDATE using MySQL 8 alias syntax; validates `accessLevel`, preserves existing `twitch_name` when `twitchName` is `undefined`, and clears `twitch_name` when `twitchName` is provided as an empty string
 - `updateAccessLevel(discordId, accessLevel)` / `removeUser(discordId)` — admin mutations; `updateAccessLevel` validates `accessLevel` before executing SQL
+- `updateDiscordName(discordId, name)` — persists the resolved Discord display name after login sync or bulk refresh
+- `getTwitchEnabledChannels()` / `updateTwitchBotEnabled(discordId, enabled)` — DB-driven Twitch channel enablement used by startup and admin user management
 - `AccessLevel` const object (`USER=0 MOD=1 MANAGER=2 ADMIN=3`) and `AccessLevelValue` type are exported from `db.ts` — use these instead of raw numbers
 - `getAllStreamersWithGroups()` — JOIN query returning `DbStreamerFull[]` (each row includes full `DbStreamGroup` as `.group`); used by `twitchMonitor.ts`
 - `getAllStreamGroups()` — returns all `stream_group` rows as `DbStreamGroup[]`
