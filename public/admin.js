@@ -23,8 +23,10 @@ function scheduleRefreshStatusPolling(retryCount) {
         window.location.reload();
         return null;
       }
+      // Treat HTML/error responses as terminal so expired sessions do not loop forever.
       if (!response.ok || contentType.indexOf('application/json') === -1) {
-        throw new Error('Failed to read refresh status');
+        refreshBanner.textContent = 'Refresh status unavailable. Reload the page to check progress.';
+        return null;
       }
       return response.json();
     }).then(function (state) {

@@ -100,12 +100,12 @@ router.post('/users/add', requireAdmin, async (req, res) => {
     twitch_name?: string;
     clear_twitch_name?: string;
   };
-  if (!discord_id || !access_level) return res.redirect('/admin/users');
+  const trimmedDiscordId = (discord_id ?? '').trim();
+  if (!trimmedDiscordId || !access_level) return res.redirect('/admin/users');
   const level = parseInt(access_level, 10);
   if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   try {
-    const trimmedDiscordId = discord_id.trim();
     const trimmedDiscordName = (discord_name ?? '').trim();
     const normalizedTwitchName = (twitch_name ?? '').trim();
     const shouldClearTwitchName = clear_twitch_name === '1';
@@ -132,8 +132,9 @@ router.post('/users/add', requireAdmin, async (req, res) => {
     if (existingUser?.is_twitch_bot_enabled && previousTwitchChannel !== nextTwitchChannel) {
       if (!nextTwitchChannel) {
         try {
-          await partTwitchChannel(previousTwitchChannel ?? '');
+          // Persist disable first so the rollback path can safely restore both DB and runtime state.
           await updateTwitchBotEnabled(trimmedDiscordId, false);
+          await partTwitchChannel(previousTwitchChannel ?? '');
         } catch (err) {
           try {
             await upsertUser(
@@ -160,6 +161,7 @@ router.post('/users/add', requireAdmin, async (req, res) => {
 
         await joinTwitchChannel(nextTwitchChannel);
       } catch (err) {
+        // If the channel swap fails mid-transition, restore the old channel and DB values together.
         if (previousChannelParted && previousTwitchChannel) {
           try {
             await joinTwitchChannel(previousTwitchChannel);
