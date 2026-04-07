@@ -31,7 +31,7 @@ function scheduleRefreshStatusPolling(retryCount) {
       return response.json();
     }).then(function (state) {
       if (!state) return;
-      if (state && state.outcome === 'running') {
+      if (state.outcome === 'running') {
         scheduleRefreshStatusPolling(0);
         return;
       }
