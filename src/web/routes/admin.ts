@@ -131,8 +131,23 @@ router.post('/users/add', requireAdmin, async (req, res) => {
 
     if (existingUser?.is_twitch_bot_enabled && previousTwitchChannel !== nextTwitchChannel) {
       if (!nextTwitchChannel) {
-        await partTwitchChannel(previousTwitchChannel ?? '');
-        await updateTwitchBotEnabled(trimmedDiscordId, false);
+        try {
+          await partTwitchChannel(previousTwitchChannel ?? '');
+          await updateTwitchBotEnabled(trimmedDiscordId, false);
+        } catch (err) {
+          try {
+            await upsertUser(
+              trimmedDiscordId,
+              trimmedDiscordName,
+              level as AccessLevelValue,
+              previousTwitchChannel ?? '',
+            );
+            await updateTwitchBotEnabled(trimmedDiscordId, existingUser.is_twitch_bot_enabled);
+          } catch (rollbackErr) {
+            console.error('[Web] Add user clear Twitch rollback failed:', rollbackErr);
+          }
+          throw err;
+        }
         return res.redirect('/admin/users');
       }
 

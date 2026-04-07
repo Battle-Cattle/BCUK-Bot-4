@@ -9,26 +9,39 @@ document.addEventListener('submit', function (event) {
   }
 });
 
-function scheduleRefreshStatusPolling() {
+function scheduleRefreshStatusPolling(retryCount) {
   var refreshBanner = document.querySelector('[data-refresh-running="true"]');
   if (!refreshBanner) return;
+  var attempt = typeof retryCount === 'number' ? retryCount : 0;
 
   window.setTimeout(function () {
     window.fetch('/admin/users/refresh-status', {
       headers: { Accept: 'application/json' }
     }).then(function (response) {
-      if (!response.ok) throw new Error('Failed to read refresh status');
+      var contentType = response.headers.get('content-type') || '';
+      if (response.status === 401 || response.status === 403) {
+        window.location.reload();
+        return null;
+      }
+      if (!response.ok || contentType.indexOf('application/json') === -1) {
+        throw new Error('Failed to read refresh status');
+      }
       return response.json();
     }).then(function (state) {
+      if (!state) return;
       if (state && state.outcome === 'running') {
-        scheduleRefreshStatusPolling();
+        scheduleRefreshStatusPolling(0);
         return;
       }
       window.location.reload();
     }).catch(function () {
-      scheduleRefreshStatusPolling();
+      if (attempt >= 4) {
+        refreshBanner.textContent = 'Refresh status unavailable. Reload the page to check progress.';
+        return;
+      }
+      scheduleRefreshStatusPolling(attempt + 1);
     });
   }, 2000);
 }
 
-scheduleRefreshStatusPolling();
+scheduleRefreshStatusPolling(0);
