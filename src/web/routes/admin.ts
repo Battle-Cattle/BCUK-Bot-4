@@ -23,7 +23,7 @@ const KNOWN_ERRORS = new Set(['add_failed', 'update_failed', 'remove_failed', 't
 // shared storage or a DB transaction/row lock before scaling out.
 const userMutationQueues = new Map<string, Promise<void>>();
 
-type RefreshOutcome = 'idle' | 'running' | 'success' | 'noop' | 'error';
+type RefreshOutcome = 'idle' | 'running' | 'success' | 'partial' | 'noop' | 'error';
 
 // This progress state is intentionally in-process because the web panel runs as
 // a single bot instance today. If the panel is ever scaled horizontally, move
@@ -31,11 +31,13 @@ type RefreshOutcome = 'idle' | 'running' | 'success' | 'noop' | 'error';
 const refreshState: {
   outcome: RefreshOutcome;
   updatedCount: number;
+  failureCount: number;
   startedAt: number | null;
   finishedAt: number | null;
 } = {
   outcome: 'idle',
   updatedCount: 0,
+  failureCount: 0,
   startedAt: null,
   finishedAt: null,
 };
@@ -64,6 +66,7 @@ async function withUserMutationLock<T>(discordId: string, operation: () => Promi
 async function runDiscordNameRefresh(): Promise<void> {
   refreshState.outcome = 'running';
   refreshState.updatedCount = 0;
+  refreshState.failureCount = 0;
   refreshState.startedAt = Date.now();
   refreshState.finishedAt = null;
 
@@ -74,6 +77,7 @@ async function runDiscordNameRefresh(): Promise<void> {
 
     const users = await getAllUsers();
     let updatedCount = 0;
+    let failureCount = 0;
 
     for (const user of users) {
       try {
@@ -85,14 +89,20 @@ async function runDiscordNameRefresh(): Promise<void> {
           refreshState.updatedCount = updatedCount;
         }
       } catch (err) {
+        failureCount++;
+        refreshState.failureCount = failureCount;
         console.error(`[Web] Failed to refresh Discord name for ${user.discord_id}:`, err);
       }
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
 
     refreshState.updatedCount = updatedCount;
-    refreshState.outcome = updatedCount > 0 ? 'success' : 'noop';
+    refreshState.failureCount = failureCount;
+    refreshState.outcome = updatedCount > 0
+      ? (failureCount > 0 ? 'partial' : 'success')
+      : (failureCount > 0 ? 'error' : 'noop');
   } catch (err) {
+    refreshState.failureCount = Math.max(refreshState.failureCount, 1);
     refreshState.outcome = 'error';
     console.error('[Web] Refresh Discord names failed:', err);
   } finally {
@@ -277,17 +287,27 @@ router.post('/users/remove', requireAdmin, async (req, res) => {
   try {
     await withUserMutationLock(trimmedDiscordId, async () => {
       const existingUser = await findUser(trimmedDiscordId);
+      let channelParted = false;
       if (existingUser?.is_twitch_bot_enabled && existingUser.twitch_name) {
-        try {
-          await partTwitchChannel(existingUser.twitch_name);
-        } catch (err) {
-          console.error(
-            `[Web] Failed to part Twitch channel "${existingUser.twitch_name}" while removing user ${trimmedDiscordId}; continuing with DB removal:`,
-            err,
-          );
-        }
+        await partTwitchChannel(existingUser.twitch_name);
+        channelParted = true;
       }
-      await removeUser(trimmedDiscordId);
+
+      try {
+        await removeUser(trimmedDiscordId);
+      } catch (err) {
+        if (channelParted && existingUser?.twitch_name) {
+          try {
+            await joinTwitchChannel(existingUser.twitch_name);
+          } catch (rollbackErr) {
+            console.error(
+              `[Web] Failed to rejoin Twitch channel "${existingUser.twitch_name}" after removeUser failed for ${trimmedDiscordId}:`,
+              rollbackErr,
+            );
+          }
+        }
+        throw err;
+      }
     });
   } catch (err) {
     console.error('[Web] Remove user error:', err);
