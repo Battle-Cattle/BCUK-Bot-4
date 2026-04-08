@@ -45,7 +45,9 @@ export async function startTwitchBot(): Promise<void> {
   const configuredChannels = await getTwitchEnabledChannels();
   configuredChannels.forEach((ch) => {
     const normalized = normalizeChannel(ch);
-    if (!normalized) return;
+    if (!normalized) {
+      throw new Error(`[Twitch] Invalid enabled channel in DB: ${ch}`);
+    }
     activeChannels.add(normalized);
     setTwitchChannel(normalized, false);
   });
@@ -103,7 +105,10 @@ export async function startTwitchBot(): Promise<void> {
 
 export async function joinTwitchChannel(channel: string): Promise<void> {
   const normalized = normalizeChannel(channel);
-  if (!normalized || activeChannels.has(normalized)) return;
+  if (!normalized) {
+    throw new Error(`[Twitch] Invalid channel name: ${channel}`);
+  }
+  if (activeChannels.has(normalized)) return;
 
   if (!client || !connected) {
     throw new Error(`Cannot join ${normalized}: Twitch client is not connected`);

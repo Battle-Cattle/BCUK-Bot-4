@@ -259,16 +259,23 @@ router.post('/users/update', requireAdmin, async (req, res) => {
 // Remove a user (Admin only)
 router.post('/users/remove', requireAdmin, async (req, res) => {
   const { discord_id } = req.body as { discord_id?: string };
-  if (!discord_id) return res.redirect('/admin/users');
+  const trimmedDiscordId = (discord_id ?? '').trim();
+  if (!trimmedDiscordId) return res.redirect('/admin/users');
 
-  if (discord_id === req.session.user!.discordId) {
+  if (trimmedDiscordId === req.session.user!.discordId) {
     return res.status(400).render('error', {
       message: 'You cannot remove yourself.',
       user: req.session.user ?? null,
     });
   }
   try {
-    await removeUser(discord_id);
+    await withUserMutationLock(trimmedDiscordId, async () => {
+      const existingUser = await findUser(trimmedDiscordId);
+      if (existingUser?.is_twitch_bot_enabled && existingUser.twitch_name) {
+        await partTwitchChannel(existingUser.twitch_name);
+      }
+      await removeUser(trimmedDiscordId);
+    });
   } catch (err) {
     console.error('[Web] Remove user error:', err);
     return res.redirect('/admin/users?error=remove_failed');
