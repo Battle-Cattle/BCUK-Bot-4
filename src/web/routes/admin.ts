@@ -132,9 +132,18 @@ router.post('/users/add', requireAdmin, async (req, res) => {
   };
   const trimmedDiscordId = (discord_id ?? '').trim();
   if (!trimmedDiscordId || !access_level) return res.redirect('/admin/users');
+  const submittedTwitchName = (twitch_name ?? '').trim();
+  const shouldClearTwitchName = clear_twitch_name === '1';
+  const normalizedTwitchName = submittedTwitchName ? normalizeTwitchChannelName(submittedTwitchName) : null;
   const level = parseInt(access_level, 10);
   if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
+  if (!shouldClearTwitchName && submittedTwitchName && !normalizedTwitchName) {
+    return res.status(400).render('error', {
+      message: 'Invalid Twitch name.',
+      user: req.session.user ?? null,
+    });
+  }
   if (trimmedDiscordId === req.session.user?.discordId) {
     return res.status(400).render('error', {
       message: 'You cannot update your own account from this form.',
@@ -144,9 +153,6 @@ router.post('/users/add', requireAdmin, async (req, res) => {
   try {
     await withUserMutationLock(trimmedDiscordId, async () => {
       const trimmedDiscordName = (discord_name ?? '').trim();
-      const submittedTwitchName = (twitch_name ?? '').trim();
-      const normalizedTwitchName = submittedTwitchName ? normalizeTwitchChannelName(submittedTwitchName) : null;
-      const shouldClearTwitchName = clear_twitch_name === '1';
       const existingUser = await findUser(trimmedDiscordId);
       const previousTwitchChannel = existingUser?.twitch_name ? existingUser.twitch_name.trim().toLowerCase() : null;
       const nextTwitchName = shouldClearTwitchName
@@ -272,7 +278,14 @@ router.post('/users/remove', requireAdmin, async (req, res) => {
     await withUserMutationLock(trimmedDiscordId, async () => {
       const existingUser = await findUser(trimmedDiscordId);
       if (existingUser?.is_twitch_bot_enabled && existingUser.twitch_name) {
-        await partTwitchChannel(existingUser.twitch_name);
+        try {
+          await partTwitchChannel(existingUser.twitch_name);
+        } catch (err) {
+          console.error(
+            `[Web] Failed to part Twitch channel "${existingUser.twitch_name}" while removing user ${trimmedDiscordId}; continuing with DB removal:`,
+            err,
+          );
+        }
       }
       await removeUser(trimmedDiscordId);
     });
