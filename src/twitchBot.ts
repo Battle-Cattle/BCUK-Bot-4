@@ -7,9 +7,15 @@ import { getTwitchEnabledChannels } from './db';
 let client: tmi.Client | null = null;
 let connected = false;
 const activeChannels = new Set<string>();
+const TWITCH_CHANNEL_NAME_PATTERN = /^[a-z0-9_]{4,25}$/;
+
+export function normalizeTwitchChannelName(channel: string): string | null {
+  const normalized = channel.trim().replace(/^#/, '').toLowerCase();
+  return TWITCH_CHANNEL_NAME_PATTERN.test(normalized) ? normalized : null;
+}
 
 function normalizeChannel(channel: string): string {
-  return channel.trim().replace(/^#/, '').toLowerCase();
+  return normalizeTwitchChannelName(channel) ?? '';
 }
 
 async function reconcileJoinedChannels(): Promise<void> {

@@ -13,7 +13,7 @@ import {
 } from '../../db';
 import { requireManager, requireAdmin } from '../middleware';
 import { discordClient, fetchMemberDisplayName } from '../../discordBot';
-import { joinTwitchChannel, partTwitchChannel } from '../../twitchBot';
+import { joinTwitchChannel, normalizeTwitchChannelName, partTwitchChannel } from '../../twitchBot';
 
 const router = Router();
 
@@ -76,12 +76,16 @@ async function runDiscordNameRefresh(): Promise<void> {
     let updatedCount = 0;
 
     for (const user of users) {
-      const name = await fetchMemberDisplayName(user.discord_id, true);
-      const trimmedName = name?.trim();
-      if (trimmedName && trimmedName !== user.discord_name) {
-        await updateDiscordName(user.discord_id, trimmedName);
-        updatedCount++;
-        refreshState.updatedCount = updatedCount;
+      try {
+        const name = await fetchMemberDisplayName(user.discord_id, true);
+        const trimmedName = name?.trim();
+        if (trimmedName && trimmedName !== user.discord_name) {
+          await updateDiscordName(user.discord_id, trimmedName);
+          updatedCount++;
+          refreshState.updatedCount = updatedCount;
+        }
+      } catch (err) {
+        console.error(`[Web] Failed to refresh Discord name for ${user.discord_id}:`, err);
       }
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
@@ -131,16 +135,23 @@ router.post('/users/add', requireAdmin, async (req, res) => {
   const level = parseInt(access_level, 10);
   if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
+  if (trimmedDiscordId === req.session.user?.discordId) {
+    return res.status(400).render('error', {
+      message: 'You cannot update your own account from this form.',
+      user: req.session.user ?? null,
+    });
+  }
   try {
     await withUserMutationLock(trimmedDiscordId, async () => {
       const trimmedDiscordName = (discord_name ?? '').trim();
-      const normalizedTwitchName = (twitch_name ?? '').trim();
+      const submittedTwitchName = (twitch_name ?? '').trim();
+      const normalizedTwitchName = submittedTwitchName ? normalizeTwitchChannelName(submittedTwitchName) : null;
       const shouldClearTwitchName = clear_twitch_name === '1';
       const existingUser = await findUser(trimmedDiscordId);
       const previousTwitchChannel = existingUser?.twitch_name ? existingUser.twitch_name.trim().toLowerCase() : null;
       const nextTwitchName = shouldClearTwitchName
         ? ''
-        : normalizedTwitchName.length > 0
+        : normalizedTwitchName
           ? normalizedTwitchName
           : undefined;
 
@@ -190,10 +201,12 @@ router.post('/users/add', requireAdmin, async (req, res) => {
         await joinTwitchChannel(committedTwitchChannel);
       } catch (err) {
         // If the channel swap fails mid-transition, restore the old channel and DB values together.
+        let rollbackSuccess = true;
         if (previousChannelParted && previousTwitchChannel) {
           try {
             await joinTwitchChannel(previousTwitchChannel);
           } catch (rollbackErr) {
+            rollbackSuccess = false;
             console.error('[Web] Add user Twitch channel rollback failed:', rollbackErr);
           }
         }
@@ -205,7 +218,7 @@ router.post('/users/add', requireAdmin, async (req, res) => {
             level as AccessLevelValue,
             previousTwitchChannel ?? '',
           );
-          await updateTwitchBotEnabled(trimmedDiscordId, existingUser.is_twitch_bot_enabled);
+          await updateTwitchBotEnabled(trimmedDiscordId, rollbackSuccess ? existingUser.is_twitch_bot_enabled : false);
         } catch (rollbackErr) {
           console.error('[Web] Add user DB rollback failed:', rollbackErr);
         }
