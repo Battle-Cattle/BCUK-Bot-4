@@ -18,6 +18,11 @@ function normalizeChannel(channel: string): string {
   return normalizeTwitchChannelName(channel) ?? '';
 }
 
+function isChannelJoined(channel: string): boolean {
+  if (!client || !connected) return false;
+  return client.getChannels().some((joinedChannel) => normalizeChannel(joinedChannel) === channel);
+}
+
 async function reconcileJoinedChannels(): Promise<void> {
   if (!client || !connected) return;
 
@@ -123,7 +128,11 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
   if (!normalized) {
     throw new Error(`[Twitch] Invalid channel name: ${channel}`);
   }
-  if (activeChannels.has(normalized)) return;
+  if (activeChannels.has(normalized)) {
+    // When the desired membership is already queued offline we should still no-op,
+    // but if a previous live join failed we need to retry once the client is connected.
+    if (!client || !connected || isChannelJoined(normalized)) return;
+  }
 
   if (!client || !connected) {
     // Queue the desired membership locally so reconnect reconciliation can join

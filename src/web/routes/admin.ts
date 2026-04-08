@@ -49,10 +49,21 @@ async function withUserMutationLock<T>(discordId: string, operation: () => Promi
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const queued = previous.catch(() => undefined).then(() => current);
+  const queued = (async () => {
+    try {
+      await previous;
+    } catch {
+      // Ignore failures from earlier queued operations so later mutations still run.
+    }
+    await current;
+  })();
   userMutationQueues.set(discordId, queued);
 
-  await previous.catch(() => undefined);
+  try {
+    await previous;
+  } catch {
+    // Ignore failures from earlier queued operations so later mutations still run.
+  }
 
   try {
     return await operation();
@@ -198,7 +209,10 @@ router.post('/users/add', requireAdmin, async (req, res) => {
         try {
           // Persist disable first so the rollback path can safely restore both DB and runtime state.
           await updateTwitchBotEnabled(trimmedDiscordId, false);
-          await partTwitchChannel(previousTwitchChannel ?? '');
+          const enabledChannels = await getTwitchEnabledChannels();
+          if (previousTwitchChannel && !enabledChannels.includes(previousTwitchChannel)) {
+            await partTwitchChannel(previousTwitchChannel);
+          }
         } catch (err) {
           try {
             await upsertUser(
@@ -296,26 +310,33 @@ router.post('/users/remove', requireAdmin, async (req, res) => {
   try {
     await withUserMutationLock(trimmedDiscordId, async () => {
       const existingUser = await findUser(trimmedDiscordId);
-      let channelParted = false;
-      if (existingUser?.is_twitch_bot_enabled && existingUser.twitch_name) {
-        await partTwitchChannel(existingUser.twitch_name);
-        channelParted = true;
-      }
+      await removeUser(trimmedDiscordId);
 
-      try {
-        await removeUser(trimmedDiscordId);
-      } catch (err) {
-        if (channelParted && existingUser?.twitch_name) {
+      if (existingUser?.is_twitch_bot_enabled && existingUser.twitch_name) {
+        const normalizedChannel = normalizeTwitchChannelName(existingUser.twitch_name);
+        const enabledChannels = await getTwitchEnabledChannels();
+
+        if (normalizedChannel && !enabledChannels.includes(normalizedChannel)) {
           try {
-            await joinTwitchChannel(existingUser.twitch_name);
-          } catch (rollbackErr) {
-            console.error(
-              `[Web] Failed to rejoin Twitch channel "${existingUser.twitch_name}" after removeUser failed for ${trimmedDiscordId}:`,
-              rollbackErr,
-            );
+            await partTwitchChannel(normalizedChannel);
+          } catch (partErr) {
+            try {
+              await upsertUser(
+                existingUser.discord_id,
+                existingUser.discord_name?.trim() ?? '',
+                existingUser.access_level as AccessLevelValue,
+                existingUser.twitch_name,
+              );
+              await updateTwitchBotEnabled(existingUser.discord_id, existingUser.is_twitch_bot_enabled);
+            } catch (rollbackErr) {
+              console.error(
+                `[Web] Failed to restore user ${trimmedDiscordId} after Twitch part failed during removal:`,
+                rollbackErr,
+              );
+            }
+            throw partErr;
           }
         }
-        throw err;
       }
     });
   } catch (err) {
