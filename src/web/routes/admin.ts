@@ -18,6 +18,10 @@ import { joinTwitchChannel, partTwitchChannel } from '../../twitchBot';
 const router = Router();
 
 const KNOWN_ERRORS = new Set(['add_failed', 'update_failed', 'remove_failed', 'toggle_failed']);
+// Twitch membership changes are serialized per user in-process because this bot
+// currently runs as a single web instance. If that changes, move this lock into
+// shared storage or a DB transaction/row lock before scaling out.
+const userMutationQueues = new Map<string, Promise<void>>();
 
 type RefreshOutcome = 'idle' | 'running' | 'success' | 'noop' | 'error';
 
@@ -35,6 +39,27 @@ const refreshState: {
   startedAt: null,
   finishedAt: null,
 };
+
+async function withUserMutationLock<T>(discordId: string, operation: () => Promise<T>): Promise<T> {
+  const previous = userMutationQueues.get(discordId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.catch(() => undefined).then(() => current);
+  userMutationQueues.set(discordId, queued);
+
+  await previous.catch(() => undefined);
+
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (userMutationQueues.get(discordId) === queued) {
+      userMutationQueues.delete(discordId);
+    }
+  }
+}
 
 async function runDiscordNameRefresh(): Promise<void> {
   refreshState.outcome = 'running';
@@ -56,6 +81,7 @@ async function runDiscordNameRefresh(): Promise<void> {
       if (trimmedName && trimmedName !== user.discord_name) {
         await updateDiscordName(user.discord_id, trimmedName);
         updatedCount++;
+        refreshState.updatedCount = updatedCount;
       }
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
@@ -106,31 +132,33 @@ router.post('/users/add', requireAdmin, async (req, res) => {
   if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   try {
-    const trimmedDiscordName = (discord_name ?? '').trim();
-    const normalizedTwitchName = (twitch_name ?? '').trim();
-    const shouldClearTwitchName = clear_twitch_name === '1';
-    const existingUser = await findUser(trimmedDiscordId);
-    const previousTwitchChannel = existingUser?.twitch_name ? existingUser.twitch_name.trim().toLowerCase() : null;
-    const nextTwitchName = shouldClearTwitchName
-      ? ''
-      : normalizedTwitchName.length > 0
-        ? normalizedTwitchName
-        : undefined;
-    const nextTwitchChannel = shouldClearTwitchName
-      ? null
-      : normalizedTwitchName.length > 0
-        ? normalizedTwitchName.toLowerCase()
-        : previousTwitchChannel;
+    await withUserMutationLock(trimmedDiscordId, async () => {
+      const trimmedDiscordName = (discord_name ?? '').trim();
+      const normalizedTwitchName = (twitch_name ?? '').trim();
+      const shouldClearTwitchName = clear_twitch_name === '1';
+      const existingUser = await findUser(trimmedDiscordId);
+      const previousTwitchChannel = existingUser?.twitch_name ? existingUser.twitch_name.trim().toLowerCase() : null;
+      const nextTwitchName = shouldClearTwitchName
+        ? ''
+        : normalizedTwitchName.length > 0
+          ? normalizedTwitchName
+          : undefined;
 
-    await upsertUser(
-      trimmedDiscordId,
-      trimmedDiscordName,
-      level as AccessLevelValue,
-      nextTwitchName,
-    );
+      await upsertUser(
+        trimmedDiscordId,
+        trimmedDiscordName,
+        level as AccessLevelValue,
+        nextTwitchName,
+      );
 
-    if (existingUser?.is_twitch_bot_enabled && previousTwitchChannel !== nextTwitchChannel) {
-      if (!nextTwitchChannel) {
+      const committedUser = await findUser(trimmedDiscordId);
+      const committedTwitchChannel = committedUser?.twitch_name ? committedUser.twitch_name.trim().toLowerCase() : null;
+
+      if (!existingUser?.is_twitch_bot_enabled || previousTwitchChannel === committedTwitchChannel) {
+        return;
+      }
+
+      if (!committedTwitchChannel) {
         try {
           // Persist disable first so the rollback path can safely restore both DB and runtime state.
           await updateTwitchBotEnabled(trimmedDiscordId, false);
@@ -149,7 +177,7 @@ router.post('/users/add', requireAdmin, async (req, res) => {
           }
           throw err;
         }
-        return res.redirect('/admin/users');
+        return;
       }
 
       let previousChannelParted = false;
@@ -159,7 +187,7 @@ router.post('/users/add', requireAdmin, async (req, res) => {
           previousChannelParted = true;
         }
 
-        await joinTwitchChannel(nextTwitchChannel);
+        await joinTwitchChannel(committedTwitchChannel);
       } catch (err) {
         // If the channel swap fails mid-transition, restore the old channel and DB values together.
         if (previousChannelParted && previousTwitchChannel) {
@@ -183,7 +211,7 @@ router.post('/users/add', requireAdmin, async (req, res) => {
         }
         throw err;
       }
-    }
+    });
   } catch (err) {
     console.error('[Web] Add user error:', err);
     return res.redirect('/admin/users?error=add_failed');
@@ -242,32 +270,34 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
   if (!trimmedDiscordId) return res.redirect('/admin/users');
 
   try {
-    const user = await findUser(trimmedDiscordId);
-    if (!user || !user.twitch_name) {
-      return res.redirect('/admin/users?error=toggle_failed');
-    }
-
-    const currentEnabled = user.is_twitch_bot_enabled;
-    const nextEnabled = !currentEnabled;
-
-    await updateTwitchBotEnabled(trimmedDiscordId, nextEnabled);
-
-    try {
-      // joinTwitchChannel/partTwitchChannel are expected to throw on failure so
-      // this rollback keeps DB state aligned with runtime channel membership.
-      if (nextEnabled) {
-        await joinTwitchChannel(user.twitch_name);
-      } else {
-        await partTwitchChannel(user.twitch_name);
+    await withUserMutationLock(trimmedDiscordId, async () => {
+      const user = await findUser(trimmedDiscordId);
+      if (!user || !user.twitch_name) {
+        throw new Error('Toggle target user is missing or has no Twitch channel');
       }
-    } catch (err) {
+
+      const currentEnabled = user.is_twitch_bot_enabled;
+      const nextEnabled = !currentEnabled;
+
+      await updateTwitchBotEnabled(trimmedDiscordId, nextEnabled);
+
       try {
-        await updateTwitchBotEnabled(trimmedDiscordId, currentEnabled);
-      } catch (rollbackErr) {
-        console.error('[Web] Toggle twitch user rollback failed:', rollbackErr);
+        // joinTwitchChannel/partTwitchChannel are expected to throw on failure so
+        // this rollback keeps DB state aligned with runtime channel membership.
+        if (nextEnabled) {
+          await joinTwitchChannel(user.twitch_name);
+        } else {
+          await partTwitchChannel(user.twitch_name);
+        }
+      } catch (err) {
+        try {
+          await updateTwitchBotEnabled(trimmedDiscordId, currentEnabled);
+        } catch (rollbackErr) {
+          console.error('[Web] Toggle twitch user rollback failed:', rollbackErr);
+        }
+        throw err;
       }
-      throw err;
-    }
+    });
   } catch (err) {
     console.error('[Web] Toggle twitch user error:', err);
     return res.redirect('/admin/users?error=toggle_failed');
