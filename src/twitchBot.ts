@@ -24,6 +24,7 @@ async function reconcileJoinedChannels(): Promise<void> {
   const joinedChannels = client.getChannels()
     .map((channel) => normalizeChannel(channel))
     .filter((channel) => channel.length > 0);
+  const joinedChannelSet = new Set(joinedChannels);
 
   for (const channel of joinedChannels) {
     if (activeChannels.has(channel)) {
@@ -37,6 +38,19 @@ async function reconcileJoinedChannels(): Promise<void> {
       console.log(`[Twitch] Parted stale channel after reconnect: ${channel}`);
     } catch (err) {
       console.error(`[Twitch] Failed to part stale channel ${channel}:`, err);
+    }
+  }
+
+  for (const channel of activeChannels) {
+    if (joinedChannelSet.has(channel)) continue;
+
+    try {
+      await client.join(channel);
+      setTwitchChannel(channel, true);
+      console.log(`[Twitch] Joined queued channel after reconnect: ${channel}`);
+    } catch (err) {
+      setTwitchChannel(channel, false);
+      console.error(`[Twitch] Failed to join queued channel ${channel}:`, err);
     }
   }
 }
@@ -83,7 +97,7 @@ export async function startTwitchBot(): Promise<void> {
     connected = true;
     console.log(`[Twitch] Connected to ${addr}:${port}`);
     console.log(`[Twitch] Listening on: ${[...activeChannels].join(', ') || '(none)'}`);
-    activeChannels.forEach((ch) => { setTwitchChannel(ch, true); });
+    activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
     void reconcileJoinedChannels().catch((err) => {
       console.error('[Twitch] Failed to reconcile joined channels:', err);
     });
@@ -111,7 +125,11 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
   if (activeChannels.has(normalized)) return;
 
   if (!client || !connected) {
-    throw new Error(`Cannot join ${normalized}: Twitch client is not connected`);
+    // Queue the desired membership locally so reconnect reconciliation can join
+    // it once the Twitch client is available again.
+    activeChannels.add(normalized);
+    setTwitchChannel(normalized, false);
+    return;
   }
 
   try {
