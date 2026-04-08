@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   getAllUsers,
+  getTwitchEnabledChannels,
   findUser,
   upsertUser,
   removeUser,
@@ -82,6 +83,14 @@ async function runDiscordNameRefresh(): Promise<void> {
     for (const user of users) {
       try {
         const name = await fetchMemberDisplayName(user.discord_id, true);
+        if (name == null) {
+          failureCount++;
+          refreshState.failureCount = failureCount;
+          console.error(`[Web] Failed to refresh Discord name for ${user.discord_id}: Discord lookup returned no display name`);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          continue;
+        }
+
         const trimmedName = name?.trim();
         if (trimmedName && trimmedName !== user.discord_name) {
           await updateDiscordName(user.discord_id, trimmedName);
@@ -331,16 +340,26 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
 
       const currentEnabled = user.is_twitch_bot_enabled;
       const nextEnabled = !currentEnabled;
+      const normalizedChannel = normalizeTwitchChannelName(user.twitch_name);
+
+      if (!normalizedChannel) {
+        throw new Error('Toggle target user has an invalid Twitch channel');
+      }
 
       await updateTwitchBotEnabled(trimmedDiscordId, nextEnabled);
 
       try {
         // joinTwitchChannel/partTwitchChannel are expected to throw on failure so
         // this rollback keeps DB state aligned with runtime channel membership.
-        if (nextEnabled) {
-          await joinTwitchChannel(user.twitch_name);
+        // Derive desired membership from the committed DB state so duplicate user
+        // rows that share the same Twitch channel do not part it prematurely.
+        const enabledChannels = await getTwitchEnabledChannels();
+        const shouldBeJoined = enabledChannels.includes(normalizedChannel);
+
+        if (shouldBeJoined) {
+          await joinTwitchChannel(normalizedChannel);
         } else {
-          await partTwitchChannel(user.twitch_name);
+          await partTwitchChannel(normalizedChannel);
         }
       } catch (err) {
         try {

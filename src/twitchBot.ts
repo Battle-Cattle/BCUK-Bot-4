@@ -57,14 +57,15 @@ async function reconcileJoinedChannels(): Promise<void> {
 
 export async function startTwitchBot(): Promise<void> {
   const configuredChannels = await getTwitchEnabledChannels();
-  configuredChannels.forEach((ch) => {
+  for (const ch of configuredChannels) {
     const normalized = normalizeChannel(ch);
     if (!normalized) {
-      throw new Error(`[Twitch] Invalid enabled channel in DB: ${ch}`);
+      console.error(`[Twitch] Skipping invalid enabled channel in DB: ${ch}`);
+      continue;
     }
     activeChannels.add(normalized);
     setTwitchChannel(normalized, false);
-  });
+  }
 
   if (activeChannels.size === 0) {
     console.warn('[Twitch] No enabled Twitch channels found in DB; connecting with no joined channels.');
