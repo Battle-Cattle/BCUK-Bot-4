@@ -7,6 +7,7 @@ import { getTwitchEnabledChannels } from './db';
 let client: tmi.Client | null = null;
 let connected = false;
 const activeChannels = new Set<string>();
+const membershipMutationQueues = new Map<string, Promise<void>>();
 const TWITCH_CHANNEL_NAME_PATTERN = /^[a-z0-9_]{4,25}$/;
 
 export function normalizeTwitchChannelName(channel: string): string | null {
@@ -23,6 +24,38 @@ function isChannelJoined(channel: string): boolean {
   return client.getChannels().some((joinedChannel) => normalizeChannel(joinedChannel) === channel);
 }
 
+async function withMembershipMutationLock<T>(channel: string, operation: () => Promise<T>): Promise<T> {
+  const previous = membershipMutationQueues.get(channel) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queued = (async () => {
+    try {
+      await previous;
+    } catch {
+      // Ignore earlier failures so later membership changes still run.
+    }
+    await current;
+  })();
+  membershipMutationQueues.set(channel, queued);
+
+  try {
+    await previous;
+  } catch {
+    // Ignore earlier failures so later membership changes still run.
+  }
+
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (membershipMutationQueues.get(channel) === queued) {
+      membershipMutationQueues.delete(channel);
+    }
+  }
+}
+
 async function reconcileJoinedChannels(): Promise<void> {
   if (!client || !connected) return;
 
@@ -32,15 +65,21 @@ async function reconcileJoinedChannels(): Promise<void> {
   const joinedChannelSet = new Set(joinedChannels);
 
   for (const channel of joinedChannels) {
-    if (activeChannels.has(channel)) {
-      setTwitchChannel(channel, true);
-      continue;
-    }
-
     try {
-      await client.part(channel);
-      setTwitchChannel(channel, false);
-      console.log(`[Twitch] Parted stale channel after reconnect: ${channel}`);
+      await withMembershipMutationLock(channel, async () => {
+        if (activeChannels.has(channel)) {
+          setTwitchChannel(channel, true);
+          return;
+        }
+        if (!client || !connected || !isChannelJoined(channel)) {
+          setTwitchChannel(channel, false);
+          return;
+        }
+
+        await client.part(channel);
+        setTwitchChannel(channel, false);
+        console.log(`[Twitch] Parted stale channel after reconnect: ${channel}`);
+      });
     } catch (err) {
       console.error(`[Twitch] Failed to part stale channel ${channel}:`, err);
     }
@@ -50,9 +89,21 @@ async function reconcileJoinedChannels(): Promise<void> {
     if (joinedChannelSet.has(channel)) continue;
 
     try {
-      await client.join(channel);
-      setTwitchChannel(channel, true);
-      console.log(`[Twitch] Joined queued channel after reconnect: ${channel}`);
+      await withMembershipMutationLock(channel, async () => {
+        if (!activeChannels.has(channel)) return;
+        if (!client || !connected) {
+          setTwitchChannel(channel, false);
+          return;
+        }
+        if (isChannelJoined(channel)) {
+          setTwitchChannel(channel, true);
+          return;
+        }
+
+        await client.join(channel);
+        setTwitchChannel(channel, true);
+        console.log(`[Twitch] Joined queued channel after reconnect: ${channel}`);
+      });
     } catch (err) {
       setTwitchChannel(channel, false);
       console.error(`[Twitch] Failed to join queued channel ${channel}:`, err);
@@ -128,48 +179,57 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
   if (!normalized) {
     throw new Error(`[Twitch] Invalid channel name: ${channel}`);
   }
-  if (activeChannels.has(normalized)) {
-    // When the desired membership is already queued offline we should still no-op,
-    // but if a previous live join failed we need to retry once the client is connected.
-    if (!client || !connected || isChannelJoined(normalized)) return;
-  }
 
-  if (!client || !connected) {
-    // Queue the desired membership locally so reconnect reconciliation can join
-    // it once the Twitch client is available again.
-    activeChannels.add(normalized);
-    setTwitchChannel(normalized, false);
-    return;
-  }
+  await withMembershipMutationLock(normalized, async () => {
+    if (activeChannels.has(normalized)) {
+      // When the desired membership is already queued offline we should still no-op,
+      // but if a previous live join failed we need to retry once the client is connected.
+      if (!client || !connected || isChannelJoined(normalized)) return;
+    }
 
-  try {
-    await client.join(normalized);
-    activeChannels.add(normalized);
-    setTwitchChannel(normalized, true);
-  } catch (err) {
-    console.error(`[Twitch] Failed to join channel ${normalized}:`, err);
-    throw err;
-  }
+    if (!client || !connected) {
+      // Queue the desired membership locally so reconnect reconciliation can join
+      // it once the Twitch client is available again.
+      activeChannels.add(normalized);
+      setTwitchChannel(normalized, false);
+      return;
+    }
+
+    try {
+      await client.join(normalized);
+      activeChannels.add(normalized);
+      setTwitchChannel(normalized, true);
+    } catch (err) {
+      console.error(`[Twitch] Failed to join channel ${normalized}:`, err);
+      throw err;
+    }
+  });
 }
 
 export async function partTwitchChannel(channel: string): Promise<void> {
   const normalized = normalizeChannel(channel);
-  if (!normalized || !activeChannels.has(normalized)) return;
+  if (!normalized) return;
 
-  if (!client || !connected) {
-    // We remove local state immediately and let reconcileJoinedChannels() part
-    // any stale tmi.js channel memberships on the next successful connect.
-    activeChannels.delete(normalized);
-    setTwitchChannel(normalized, false);
-    return;
-  }
+  await withMembershipMutationLock(normalized, async () => {
+    if (!activeChannels.has(normalized) && !isChannelJoined(normalized)) return;
 
-  try {
-    await client.part(normalized);
-    activeChannels.delete(normalized);
-    setTwitchChannel(normalized, false);
-  } catch (err) {
-    console.error(`[Twitch] Failed to part channel ${normalized}:`, err);
-    throw err;
-  }
+    if (!client || !connected) {
+      // We remove local state immediately and let reconcileJoinedChannels() part
+      // any stale tmi.js channel memberships on the next successful connect.
+      activeChannels.delete(normalized);
+      setTwitchChannel(normalized, false);
+      return;
+    }
+
+    try {
+      if (isChannelJoined(normalized)) {
+        await client.part(normalized);
+      }
+      activeChannels.delete(normalized);
+      setTwitchChannel(normalized, false);
+    } catch (err) {
+      console.error(`[Twitch] Failed to part channel ${normalized}:`, err);
+      throw err;
+    }
+  });
 }
