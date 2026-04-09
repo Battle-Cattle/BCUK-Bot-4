@@ -16,7 +16,7 @@
 
       <% if (error) { %>
       <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem">
-        <span style="color:var(--danger)">&#9888; Operation failed: <%= error.replace(/_/g, ' ') %></span>
+        <span style="color:var(--danger)">&#9888; <%= error === 'duplicate_twitch_name' ? 'Twitch name is already assigned to another user.' : 'Operation failed: ' + error.replace(/_/g, ' ') %></span>
       </div>
       <% } %>
 

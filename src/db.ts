@@ -132,6 +132,38 @@ export async function findUser(discordId: string): Promise<DbUser | null> {
   };
 }
 
+export async function findUserByTwitchName(twitchName: string, excludeDiscordId?: string): Promise<DbUser | null> {
+  const normalizedTwitchName = normalizeTwitchChannelName(twitchName);
+  if (!normalizedTwitchName) {
+    return null;
+  }
+
+  const sql = excludeDiscordId
+    ? `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level
+       FROM \`user\`
+       WHERE LOWER(twitch_name) = ?
+         AND discord_id <> ?
+       LIMIT 1`
+    : `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level
+       FROM \`user\`
+       WHERE LOWER(twitch_name) = ?
+       LIMIT 1`;
+  const params = excludeDiscordId
+    ? [normalizedTwitchName, excludeDiscordId]
+    : [normalizedTwitchName];
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(sql, params);
+
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    discord_id: String(r.discord_id),
+    discord_name: r.discord_name,
+    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled === 1,
+    twitch_name: r.twitch_name,
+    access_level: r.access_level,
+  };
+}
+
 export async function getAllUsers(): Promise<DbUser[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level FROM `user` ORDER BY access_level DESC, discord_name ASC',

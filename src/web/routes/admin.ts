@@ -3,6 +3,7 @@ import {
   getAllUsers,
   getTwitchEnabledChannels,
   findUser,
+  findUserByTwitchName,
   upsertUser,
   removeUser,
   updateAccessLevel,
@@ -19,7 +20,7 @@ import { normalizeTwitchChannelName } from '../../twitchChannelName';
 
 const router = Router();
 
-const KNOWN_ERRORS = new Set(['add_failed', 'update_failed', 'remove_failed', 'toggle_failed']);
+const KNOWN_ERRORS = new Set(['add_failed', 'duplicate_twitch_name', 'update_failed', 'remove_failed', 'toggle_failed']);
 // Twitch membership changes are serialized per user in-process because this bot
 // currently runs as a single web instance. If that changes, move this lock into
 // shared storage or a DB transaction/row lock before scaling out.
@@ -43,6 +44,13 @@ const refreshState: {
   startedAt: null,
   finishedAt: null,
 };
+
+class DuplicateTwitchNameError extends Error {
+  constructor(twitchChannel: string) {
+    super(`Twitch channel ${twitchChannel} is already assigned to another user`);
+    this.name = 'DuplicateTwitchNameError';
+  }
+}
 
 async function withUserMutationLock<T>(discordId: string, operation: () => Promise<T>): Promise<T> {
   const previous = userMutationQueues.get(discordId) ?? Promise.resolve();
@@ -194,6 +202,13 @@ router.post('/users/add', requireAdmin, async (req, res) => {
           ? normalizedTwitchName
           : undefined;
 
+      if (normalizedTwitchName) {
+        const conflictingUser = await findUserByTwitchName(normalizedTwitchName, trimmedDiscordId);
+        if (conflictingUser) {
+          throw new DuplicateTwitchNameError(normalizedTwitchName);
+        }
+      }
+
       await upsertUser(
         trimmedDiscordId,
         trimmedDiscordName,
@@ -235,26 +250,21 @@ router.post('/users/add', requireAdmin, async (req, res) => {
         return;
       }
 
-      let previousChannelParted = false;
       try {
-        if (previousTwitchChannel) {
+        const enabledChannels = await getTwitchEnabledChannels();
+        const shouldJoinCommittedChannel = enabledChannels.includes(committedTwitchChannel);
+        const shouldPartPreviousChannel = !!previousTwitchChannel
+          && previousTwitchChannel !== committedTwitchChannel
+          && !enabledChannels.includes(previousTwitchChannel);
+
+        if (shouldJoinCommittedChannel) {
+          await joinTwitchChannel(committedTwitchChannel);
+        }
+
+        if (shouldPartPreviousChannel) {
           await partTwitchChannel(previousTwitchChannel);
-          previousChannelParted = true;
         }
-
-        await joinTwitchChannel(committedTwitchChannel);
       } catch (err) {
-        // If the channel swap fails mid-transition, restore the old channel and DB values together.
-        let rollbackSuccess = true;
-        if (previousChannelParted && previousTwitchChannel) {
-          try {
-            await joinTwitchChannel(previousTwitchChannel);
-          } catch (rollbackErr) {
-            rollbackSuccess = false;
-            console.error('[Web] Add user Twitch channel rollback failed:', rollbackErr);
-          }
-        }
-
         try {
           await upsertUser(
             trimmedDiscordId,
@@ -262,7 +272,21 @@ router.post('/users/add', requireAdmin, async (req, res) => {
             level as AccessLevelValue,
             previousTwitchChannel ?? '',
           );
-          await updateTwitchBotEnabled(trimmedDiscordId, rollbackSuccess ? existingUser.is_twitch_bot_enabled : false);
+          await updateTwitchBotEnabled(trimmedDiscordId, existingUser.is_twitch_bot_enabled);
+
+          const rollbackEnabledChannels = await getTwitchEnabledChannels();
+          const shouldRejoinPreviousChannel = !!previousTwitchChannel
+            && rollbackEnabledChannels.includes(previousTwitchChannel);
+          const shouldPartCommittedChannel = committedTwitchChannel !== previousTwitchChannel
+            && !rollbackEnabledChannels.includes(committedTwitchChannel);
+
+          if (shouldRejoinPreviousChannel) {
+            await joinTwitchChannel(previousTwitchChannel);
+          }
+
+          if (shouldPartCommittedChannel) {
+            await partTwitchChannel(committedTwitchChannel);
+          }
         } catch (rollbackErr) {
           console.error('[Web] Add user DB rollback failed:', rollbackErr);
         }
@@ -271,6 +295,9 @@ router.post('/users/add', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error('[Web] Add user error:', err);
+    if (err instanceof DuplicateTwitchNameError) {
+      return res.redirect('/admin/users?error=duplicate_twitch_name');
+    }
     return res.redirect('/admin/users?error=add_failed');
   }
   res.redirect('/admin/users');
@@ -377,8 +404,8 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
       try {
         // joinTwitchChannel/partTwitchChannel are expected to throw on failure so
         // this rollback keeps DB state aligned with runtime channel membership.
-        // Derive desired membership from the committed DB state so duplicate user
-        // rows that share the same Twitch channel do not part it prematurely.
+        // Derive desired membership from the committed DB state so route handlers
+        // always reconcile against the effective enabled-channel set.
         const enabledChannels = await getTwitchEnabledChannels();
         const shouldBeJoined = enabledChannels.includes(normalizedChannel);
 
