@@ -258,6 +258,9 @@ Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden == 1
 ```
 Apply this same pattern whenever reading any boolean/tinyint column.
 
+### MySQL BIGINT IDs must stay as strings
+Discord IDs and other snowflake-style values in MySQL can exceed JavaScript's safe integer range. `db.ts` configures mysql2 with `supportBigNumbers: true` and `bigNumberStrings: true` so BIGINT values are returned as exact strings instead of rounded numbers. Preserve that behavior for any future pool or connection changes.
+
 ### MySQL 8 upsert syntax
 The project targets MySQL 8 semantics. For `INSERT ... ON DUPLICATE KEY UPDATE`, prefer the row-alias form (`VALUES (...) AS new_row`) instead of deprecated `VALUES(column)` expressions. This alias form requires MySQL 8.0.19 or later; earlier 8.0 releases do not support row aliases in `INSERT ... VALUES (...) AS alias`.
 

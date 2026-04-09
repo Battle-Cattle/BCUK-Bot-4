@@ -30,6 +30,8 @@ export function getPool(): mysql.Pool {
       user: DB_USER,
       password: DB_PASSWORD,
       database: DB_NAME,
+      supportBigNumbers: true,
+      bigNumberStrings: true,
       waitForConnections: true,
       connectionLimit: 5,
       queueLimit: 0,
