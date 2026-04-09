@@ -52,6 +52,16 @@ class DuplicateTwitchNameError extends Error {
   }
 }
 
+function isDuplicateTwitchNameDbError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const dbError = error as { code?: string; message?: string };
+  return dbError.code === 'ER_DUP_ENTRY'
+    && (dbError.message?.includes('ux_user_twitch_name') ?? false);
+}
+
 async function withUserMutationLock<T>(discordId: string, operation: () => Promise<T>): Promise<T> {
   const previous = userMutationQueues.get(discordId) ?? Promise.resolve();
   let release!: () => void;
@@ -295,7 +305,7 @@ router.post('/users/add', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error('[Web] Add user error:', err);
-    if (err instanceof DuplicateTwitchNameError) {
+    if (err instanceof DuplicateTwitchNameError || isDuplicateTwitchNameDbError(err)) {
       return res.redirect('/admin/users?error=duplicate_twitch_name');
     }
     return res.redirect('/admin/users?error=add_failed');

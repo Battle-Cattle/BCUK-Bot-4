@@ -105,10 +105,10 @@ Tables in the existing MySQL 8 database:
 
 | Column                 | Type         | Notes                      |
 |------------------------|--------------|----------------------------|
-| `discord_id`           | varchar PK   | Discord numeric user ID    |
+| `discord_id`           | bigint PK    | Discord numeric user ID    |
 | `discord_name`         | varchar      | nullable                   |
-| `is_twitch_bot_enabled`| tinyint(1)   |                            |
-| `twitch_name`          | varchar      | nullable                   |
+| `is_twitch_bot_enabled`| bit(1)       |                            |
+| `twitch_name`          | varchar      | nullable, UNIQUE, case-insensitive (`utf8mb4_0900_ai_ci`) |
 | `twitchoauth`          | varchar      | nullable                   |
 | `access_level`         | int          | 0=USER 1=MOD 2=MANAGER 3=ADMIN |
 
@@ -222,7 +222,7 @@ Copy `.env.example` → `.env` and fill in all values.
 `TWITCH_CHANNELS` is no longer used. `startTwitchBot()` loads enabled Twitch channels from the `user` table via `getTwitchEnabledChannels()`, and admin user updates/toggles reconcile live channel membership with `joinTwitchChannel()` / `partTwitchChannel()`.
 
 ### Twitch user ownership is unique
-Each `user.twitch_name` must belong to at most one user row. The admin add/update flow rejects duplicate Twitch names so live channel membership stays a direct reflection of the enabled-user set.
+Each `user.twitch_name` must belong to at most one user row. The database enforces this with a unique index on `user.twitch_name` using a case-insensitive collation, and the admin add/update flow also pre-checks for duplicates so most conflicts can be shown as a friendly validation error before the write races the database constraint.
 
 ### Voice join/leave from web panel
 `audioPlayer.ts` exports both `connect(client)` (join) and `disconnect()` (leave). `POST /api/voice/join` and `POST /api/voice/leave` in `src/web/routes/api.ts` are guarded by `requireMod` (access level ≥ 1). The dashboard shows a **Join Voice** / **Leave Voice** toggle button to Mod+ users; the button label and state are kept in sync by `applyStatus()` on every poll.
@@ -260,6 +260,9 @@ Apply this same pattern whenever reading any boolean/tinyint column.
 
 ### MySQL BIGINT IDs must stay as strings
 Discord IDs and other snowflake-style values in MySQL can exceed JavaScript's safe integer range. `db.ts` configures mysql2 with `supportBigNumbers: true` and `bigNumberStrings: true` so BIGINT values are returned as exact strings instead of rounded numbers. Preserve that behavior for any future pool or connection changes.
+
+### Blank Twitch names should be stored as NULL
+Because `user.twitch_name` is protected by a unique index, blank values must not be stored as empty strings. `upsertUser()` normalizes blank Twitch names to `NULL`, which allows multiple users with no Twitch channel while still enforcing uniqueness for real channel names.
 
 ### MySQL 8 upsert syntax
 The project targets MySQL 8 semantics. For `INSERT ... ON DUPLICATE KEY UPDATE`, prefer the row-alias form (`VALUES (...) AS new_row`) instead of deprecated `VALUES(column)` expressions. This alias form requires MySQL 8.0.19 or later; earlier 8.0 releases do not support row aliases in `INSERT ... VALUES (...) AS alias`.
@@ -364,8 +367,8 @@ In-memory singleton. Functions:
 - `findTrigger(command)` — looks up an `sfxtrigger` row by its full command string (case-insensitive); includes hidden triggers (hidden = listing-only flag, not a playback gate)
 - `findSoundFiles(triggerId)` — returns all `sfx` rows for a trigger including hidden ones; used by `commandRouter.ts`
 - `getAllSfxTriggers()` — **dashboard aggregate**: single JOIN query across `sfxtrigger`, `sfxcategory`, and `sfx`; returns `SfxTriggerRow[]` where each entry has a `files[]` array already grouped
-- `findUser(discordId)` / `findUserByTwitchName(twitchName, excludeDiscordId?)` / `getAllUsers()` — user lookups for auth and admin panel; duplicate Twitch-name assignments are rejected by the admin route
-- `upsertUser(discordId, discordName, accessLevel, twitchName?)` — INSERT … ON DUPLICATE KEY UPDATE using MySQL 8 alias syntax; validates `accessLevel`, preserves existing `twitch_name` when `twitchName` is `undefined`, and clears `twitch_name` when `twitchName` is provided as an empty string
+- `findUser(discordId)` / `findUserByTwitchName(twitchName, excludeDiscordId?)` / `getAllUsers()` — user lookups for auth and admin panel; duplicate Twitch-name assignments are pre-checked in the admin route and ultimately enforced by the DB unique index on `user.twitch_name`
+- `upsertUser(discordId, discordName, accessLevel, twitchName?)` — INSERT … ON DUPLICATE KEY UPDATE using MySQL 8 alias syntax; validates `accessLevel`, preserves existing `twitch_name` when `twitchName` is `undefined`, and normalizes blank Twitch names to `NULL` so the unique index allows multiple “no Twitch name” rows
 - `updateAccessLevel(discordId, accessLevel)` / `removeUser(discordId)` — admin mutations; `updateAccessLevel` validates `accessLevel` before executing SQL
 - `updateDiscordName(discordId, name)` — persists the resolved Discord display name after login sync or bulk refresh
 - `getTwitchEnabledChannels()` / `updateTwitchBotEnabled(discordId, enabled)` — DB-driven Twitch channel enablement used by startup and admin user management
