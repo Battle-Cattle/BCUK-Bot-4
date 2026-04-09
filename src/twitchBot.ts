@@ -197,6 +197,8 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       await client.join(normalized);
       setTwitchChannel(normalized, true);
     } catch (err) {
+      activeChannels.delete(normalized);
+      setTwitchChannel(normalized, false);
       console.error(`[Twitch] Failed to join channel ${normalized}:`, err);
       throw err;
     }
@@ -225,6 +227,8 @@ export async function partTwitchChannel(channel: string): Promise<void> {
         await client.part(normalized);
       }
     } catch (err) {
+      activeChannels.add(normalized);
+      setTwitchChannel(normalized, isChannelJoined(normalized));
       console.error(`[Twitch] Failed to part channel ${normalized}:`, err);
       throw err;
     }
