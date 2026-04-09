@@ -10,8 +10,8 @@ let connected = false;
 const activeChannels = new Set<string>();
 const membershipMutationQueues = new Map<string, Promise<void>>();
 
-function normalizeChannel(channel: string): string {
-  return normalizeTwitchChannelName(channel) ?? '';
+function normalizeChannel(channel: string): string | null {
+  return normalizeTwitchChannelName(channel);
 }
 
 function isChannelJoined(channel: string): boolean {
@@ -56,7 +56,7 @@ async function reconcileJoinedChannels(): Promise<void> {
 
   const joinedChannels = client.getChannels()
     .map((channel) => normalizeChannel(channel))
-    .filter((channel) => channel.length > 0);
+    .filter((channel): channel is string => channel !== null);
   const joinedChannelSet = new Set(joinedChannels);
 
   for (const channel of joinedChannels) {
@@ -139,6 +139,7 @@ export async function startTwitchBot(): Promise<void> {
     // Don't respond to own messages
     if (self) return;
     const normalizedChannel = normalizeChannel(channel);
+    if (!normalizedChannel) return;
     if (!activeChannels.has(normalizedChannel)) return;
     handleCommand(message, 'twitch').catch((err) =>
       console.error('[Twitch] Command handler error:', err),
