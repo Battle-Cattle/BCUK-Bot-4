@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from './config';
+import { normalizeTwitchChannelName } from './twitchChannelName';
 
 export interface SfxTrigger {
   id: bigint;
@@ -179,8 +180,8 @@ export async function getTwitchEnabledChannels(): Promise<string[]> {
        AND twitch_name <> ''`,
   );
   return rows
-    .map((r) => String(r.twitch_name).trim().toLowerCase())
-    .filter((v) => v.length > 0);
+    .map((r) => normalizeTwitchChannelName(String(r.twitch_name)))
+    .filter((v): v is string => v !== null);
 }
 
 export async function updateTwitchBotEnabled(discordId: string, enabled: boolean): Promise<void> {

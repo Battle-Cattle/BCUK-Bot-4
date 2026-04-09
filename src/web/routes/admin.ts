@@ -14,7 +14,8 @@ import {
 } from '../../db';
 import { requireManager, requireAdmin } from '../middleware';
 import { discordClient, fetchMemberDisplayName } from '../../discordBot';
-import { joinTwitchChannel, normalizeTwitchChannelName, partTwitchChannel } from '../../twitchBot';
+import { joinTwitchChannel, partTwitchChannel } from '../../twitchBot';
+import { normalizeTwitchChannelName } from '../../twitchChannelName';
 
 const router = Router();
 
@@ -184,7 +185,9 @@ router.post('/users/add', requireAdmin, async (req, res) => {
     await withUserMutationLock(trimmedDiscordId, async () => {
       const trimmedDiscordName = (discord_name ?? '').trim();
       const existingUser = await findUser(trimmedDiscordId);
-      const previousTwitchChannel = existingUser?.twitch_name ? existingUser.twitch_name.trim().toLowerCase() : null;
+      const previousTwitchChannel = existingUser?.twitch_name
+        ? normalizeTwitchChannelName(existingUser.twitch_name)
+        : null;
       const nextTwitchName = shouldClearTwitchName
         ? ''
         : normalizedTwitchName
@@ -199,7 +202,9 @@ router.post('/users/add', requireAdmin, async (req, res) => {
       );
 
       const committedUser = await findUser(trimmedDiscordId);
-      const committedTwitchChannel = committedUser?.twitch_name ? committedUser.twitch_name.trim().toLowerCase() : null;
+      const committedTwitchChannel = committedUser?.twitch_name
+        ? normalizeTwitchChannelName(committedUser.twitch_name)
+        : null;
 
       if (!existingUser?.is_twitch_bot_enabled || previousTwitchChannel === committedTwitchChannel) {
         return;
