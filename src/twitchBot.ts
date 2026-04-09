@@ -150,6 +150,9 @@ export async function startTwitchBot(): Promise<void> {
     connected = true;
     console.log(`[Twitch] Connected to ${addr}:${port}`);
     console.log(`[Twitch] Listening on: ${[...activeChannels].join(', ') || '(none)'}`);
+    // Reset every activeChannels entry via setTwitchChannel to a pessimistic
+    // disconnected state until reconcileJoinedChannels() asynchronously
+    // rechecks the actual joined memberships and corrects the status.
     activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
     void reconcileJoinedChannels().catch((err) => {
       console.error('[Twitch] Failed to reconcile joined channels:', err);
