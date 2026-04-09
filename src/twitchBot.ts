@@ -200,7 +200,8 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       await client.join(normalized);
       setTwitchChannel(normalized, true);
     } catch (err) {
-      activeChannels.delete(normalized);
+      // Keep the desired membership queued so reconnect reconciliation can retry
+      // instead of permanently desyncing runtime state from the DB.
       setTwitchChannel(normalized, false);
       console.error(`[Twitch] Failed to join channel ${normalized}:`, err);
       throw err;
