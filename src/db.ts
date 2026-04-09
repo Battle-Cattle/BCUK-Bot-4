@@ -143,12 +143,12 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
   const sql = excludeDiscordId
     ? `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level
        FROM \`user\`
-       WHERE LOWER(twitch_name) = ?
+       WHERE twitch_name = ?
          AND discord_id <> ?
        LIMIT 1`
     : `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level
        FROM \`user\`
-       WHERE LOWER(twitch_name) = ?
+       WHERE twitch_name = ?
        LIMIT 1`;
   const params = excludeDiscordId
     ? [normalizedTwitchName, excludeDiscordId]
@@ -183,13 +183,17 @@ export async function upsertUser(
   discordId: string,
   discordName: string,
   accessLevel: number,
-  twitchName?: string,
+  twitchName?: string | null,
 ): Promise<void> {
   if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
     throw new Error(`Invalid accessLevel: ${accessLevel}`);
   }
   const twitchNameProvided = twitchName !== undefined;
-  const normalizedTwitchName = twitchNameProvided ? (twitchName!.trim() || null) : null;
+  const normalizedTwitchName = !twitchNameProvided
+    ? null
+    : twitchName === null
+      ? null
+      : (twitchName.trim() || null);
   await getPool().execute(
     `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
      VALUES (?, ?, ?, ?, 0) AS new_user

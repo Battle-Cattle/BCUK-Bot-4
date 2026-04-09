@@ -222,7 +222,7 @@ Copy `.env.example` → `.env` and fill in all values.
 `TWITCH_CHANNELS` is no longer used. `startTwitchBot()` loads enabled Twitch channels from the `user` table via `getTwitchEnabledChannels()`, and admin user updates/toggles reconcile live channel membership with `joinTwitchChannel()` / `partTwitchChannel()`.
 
 ### Twitch user ownership is unique
-Each `user.twitch_name` must belong to at most one user row. The database enforces this with a unique index on `user.twitch_name` using a case-insensitive collation, and the admin add/update flow also pre-checks for duplicates so most conflicts can be shown as a friendly validation error before the write races the database constraint.
+Each `user.twitch_name` must belong to at most one user row. The database enforces this with a unique index on `user.twitch_name` using a case-insensitive collation, and the admin add/update flow also pre-checks for duplicates so most conflicts can be shown as a friendly validation error before the write races the database constraint. `findUserByTwitchName()` compares directly against the normalized parameter so MySQL can use that index.
 
 ### Voice join/leave from web panel
 `audioPlayer.ts` exports both `connect(client)` (join) and `disconnect()` (leave). `POST /api/voice/join` and `POST /api/voice/leave` in `src/web/routes/api.ts` are guarded by `requireMod` (access level ≥ 1). The dashboard shows a **Join Voice** / **Leave Voice** toggle button to Mod+ users; the button label and state are kept in sync by `applyStatus()` on every poll.
@@ -367,8 +367,8 @@ In-memory singleton. Functions:
 - `findTrigger(command)` — looks up an `sfxtrigger` row by its full command string (case-insensitive); includes hidden triggers (hidden = listing-only flag, not a playback gate)
 - `findSoundFiles(triggerId)` — returns all `sfx` rows for a trigger including hidden ones; used by `commandRouter.ts`
 - `getAllSfxTriggers()` — **dashboard aggregate**: single JOIN query across `sfxtrigger`, `sfxcategory`, and `sfx`; returns `SfxTriggerRow[]` where each entry has a `files[]` array already grouped
-- `findUser(discordId)` / `findUserByTwitchName(twitchName, excludeDiscordId?)` / `getAllUsers()` — user lookups for auth and admin panel; duplicate Twitch-name assignments are pre-checked in the admin route and ultimately enforced by the DB unique index on `user.twitch_name`
-- `upsertUser(discordId, discordName, accessLevel, twitchName?)` — INSERT … ON DUPLICATE KEY UPDATE using MySQL 8 alias syntax; validates `accessLevel`, preserves existing `twitch_name` when `twitchName` is `undefined`, and normalizes blank Twitch names to `NULL` so the unique index allows multiple “no Twitch name” rows
+- `findUser(discordId)` / `findUserByTwitchName(twitchName, excludeDiscordId?)` / `getAllUsers()` — user lookups for auth and admin panel; duplicate Twitch-name assignments are pre-checked in the admin route and ultimately enforced by the DB unique index on `user.twitch_name`. `findUserByTwitchName()` uses `twitch_name = ?` against the case-insensitive column so the lookup stays index-friendly.
+- `upsertUser(discordId, discordName, accessLevel, twitchName?)` — INSERT … ON DUPLICATE KEY UPDATE using MySQL 8 alias syntax; validates `accessLevel`, preserves existing `twitch_name` when `twitchName` is `undefined`, and treats `null` or blank strings as an explicit update to `NULL` so the unique index allows multiple “no Twitch name” rows
 - `updateAccessLevel(discordId, accessLevel)` / `removeUser(discordId)` — admin mutations; `updateAccessLevel` validates `accessLevel` before executing SQL
 - `updateDiscordName(discordId, name)` — persists the resolved Discord display name after login sync or bulk refresh
 - `getTwitchEnabledChannels()` / `updateTwitchBotEnabled(discordId, enabled)` — DB-driven Twitch channel enablement used by startup and admin user management
