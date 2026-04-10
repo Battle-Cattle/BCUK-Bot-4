@@ -22,10 +22,6 @@ function getSubmittedCsrfToken(req: Parameters<RequestHandler>[0]): string | nul
     return req.body._csrf;
   }
 
-  if (typeof req.query._csrf === 'string') {
-    return req.query._csrf;
-  }
-
   return null;
 }
 

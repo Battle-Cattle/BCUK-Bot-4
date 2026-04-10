@@ -53,7 +53,7 @@ function parseCommandId(value: string | undefined): number | null {
   }
 
   const parsedValue = Number(value);
-  return Number.isSafeInteger(parsedValue) ? parsedValue : null;
+  return Number.isSafeInteger(parsedValue) && parsedValue > 0 ? parsedValue : null;
 }
 
 function normalizeDiscordId(value: string | undefined): string | null {
