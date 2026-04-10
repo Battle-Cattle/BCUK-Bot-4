@@ -90,7 +90,7 @@
                 </td>
                 <td class="actions">
                   <button type="button" class="btn btn-sm btn-ghost btn-toggle-command-edit" data-command-id="<%= command.command_id %>">✏️ Edit</button>
-                  <form method="POST" action="/admin/commands/remove" class="inline-form-sm" onsubmit="return window.confirm('Remove command <%= command.trigger_string.replace(/'/g, "\\'") %>?')">
+                  <form method="POST" action="/admin/commands/remove" class="inline-form-sm js-confirm-remove-command" data-command-trigger="<%= command.trigger_string %>">
                     <input type="hidden" name="command_id" value="<%= command.command_id %>">
                     <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                   </form>
@@ -177,16 +177,6 @@
   </main>
 
   <%- include('partials/pwa-register') %>
-  <script>
-    document.querySelectorAll('.btn-toggle-command-edit').forEach(function(button) {
-      button.addEventListener('click', function() {
-        var commandId = button.getAttribute('data-command-id');
-        if (!commandId) return;
-        var row = document.getElementById('command-edit-' + commandId);
-        if (!row) return;
-        row.style.display = row.style.display === 'none' ? '' : 'none';
-      });
-    });
-  </script>
+  <script src="/commands.js"></script>
 </body>
 </html>
