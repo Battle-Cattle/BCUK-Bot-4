@@ -16,7 +16,37 @@
 
       <% if (error) { %>
       <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem">
-        <span style="color:var(--danger)">&#9888; Operation failed: <%= error.replace(/_/g, ' ') %></span>
+        <span style="color:var(--danger)">&#9888; <%= error === 'duplicate_twitch_name' ? 'Twitch name is already assigned to another user.' : 'Operation failed: ' + error.replace(/_/g, ' ') %></span>
+      </div>
+      <% } %>
+
+      <% if (refreshState.outcome === 'running') { %>
+      <div class="card" data-refresh-running="true" style="margin-bottom:1rem;border-left:3px solid var(--accent);padding:.75rem 1rem">
+        <span style="color:var(--accent)">Refreshing Discord names in the background...</span>
+      </div>
+      <% } else if (refreshState.outcome === 'success') { %>
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--success);padding:.75rem 1rem">
+        <span style="color:var(--success)">&#10003; Discord names refreshed for <%= refreshState.updatedCount %> user<%= refreshState.updatedCount === 1 ? '' : 's' %>.</span>
+      </div>
+      <% } else if (refreshState.outcome === 'partial') { %>
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--warn);padding:.75rem 1rem">
+        <span style="color:var(--warn)">&#9888; Discord names refreshed for <%= refreshState.updatedCount %> user<%= refreshState.updatedCount === 1 ? '' : 's' %>, but <%= refreshState.failureCount %> lookup<%= refreshState.failureCount === 1 ? '' : 's' %> failed.</span>
+      </div>
+      <% } else if (refreshState.outcome === 'noop') { %>
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--muted);padding:.75rem 1rem">
+        <span style="color:var(--text-muted)">No Discord names needed refreshing.</span>
+      </div>
+      <% } else if (refreshState.outcome === 'error') { %>
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem">
+        <span style="color:var(--danger)">&#9888; Discord name refresh failed<%= refreshState.failureCount > 0 ? ' for ' + refreshState.failureCount + ' user' + (refreshState.failureCount === 1 ? '' : 's') : '' %>.</span>
+      </div>
+      <% } %>
+
+      <% if (user.accessLevel >= 2) { %>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:1rem">
+        <form method="POST" action="/admin/users/refresh-names" class="inline-form-sm">
+          <button type="submit" class="btn btn-sm" <%= refreshState.outcome === 'running' ? 'disabled' : '' %>><%= refreshState.outcome === 'running' ? 'Refreshing...' : 'Refresh Discord Names' %></button>
+        </form>
       </div>
       <% } %>
 
@@ -27,6 +57,11 @@
         <form method="POST" action="/admin/users/add" class="inline-form">
           <input class="input" type="text" name="discord_id"   placeholder="Discord User ID"  required>
           <input class="input" type="text" name="discord_name" placeholder="Display name (optional)">
+          <input class="input" type="text" name="twitch_name" placeholder="Twitch name (optional)" data-twitch-name-input>
+          <label class="hint" style="display:flex;align-items:center;gap:.4rem;white-space:nowrap">
+            <input type="checkbox" name="clear_twitch_name" value="1" data-clear-twitch-name-input>
+            Clear Twitch name
+          </label>
           <select class="input" name="access_level">
             <% Object.entries(accessLevelLabels).forEach(([val, label]) => { %>
             <option value="<%= val %>"><%= label %></option>
@@ -47,6 +82,7 @@
               <th>Discord ID</th>
               <th>Name</th>
               <th>Twitch</th>
+              <th>Twitch Bot</th>
               <th>Level</th>
               <% if (user.accessLevel >= 3) { %><th>Actions</th><% } %>
             </tr>
@@ -57,9 +93,33 @@
               <td class="mono"><%= u.discord_id %></td>
               <td><%= u.discord_name || '—' %></td>
               <td class="mono"><%= u.twitch_name || '—' %></td>
+              <td>
+                <% if (u.twitch_name) { %>
+                  <div class="twitch-bot-controls">
+                    <span class="badge <%= u.is_twitch_bot_enabled ? 'badge-online' : 'badge-offline' %>">
+                      <%= u.is_twitch_bot_enabled ? 'Enabled' : 'Disabled' %>
+                    </span>
+                    <% if (user.accessLevel >= 2) { %>
+                    <form method="POST" action="/admin/users/toggle-twitch" class="inline-form-sm">
+                      <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
+                      <input type="hidden" name="is_twitch_bot_enabled" value="<%= u.is_twitch_bot_enabled ? 'false' : 'true' %>">
+                      <button type="submit" class="btn btn-sm"><%= u.is_twitch_bot_enabled ? 'Disable' : 'Enable' %></button>
+                    </form>
+                    <% } %>
+                  </div>
+                <% } else { %>
+                  <div class="twitch-bot-controls">
+                    <span class="badge badge-offline">Unavailable</span>
+                    <% if (user.accessLevel >= 2) { %>
+                    <button type="button" class="btn btn-sm" disabled style="opacity:.55">Set Twitch Name</button>
+                    <% } %>
+                  </div>
+                <% } %>
+              </td>
               <td><span class="badge level-<%= u.access_level %>"><%= accessLevelLabels[u.access_level] || u.access_level %></span></td>
               <% if (user.accessLevel >= 3) { %>
-              <td class="actions">
+              <td>
+                <div class="actions">
                 <!-- Change level -->
                 <form method="POST" action="/admin/users/update" class="inline-form-sm">
                   <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
@@ -77,12 +137,13 @@
                   <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                 </form>
                 <% } %>
+                </div>
               </td>
               <% } %>
             </tr>
             <% }) %>
             <% if (users.length === 0) { %>
-            <tr><td colspan="<%= user.accessLevel >= 3 ? 5 : 4 %>" class="empty-msg">No users in the database.</td></tr>
+            <tr><td colspan="<%= user.accessLevel >= 3 ? 6 : 5 %>" class="empty-msg">No users in the database.</td></tr>
             <% } %>
           </tbody>
         </table>

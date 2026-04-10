@@ -158,7 +158,8 @@ a:hover { text-decoration: underline; }
 textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: var(--mono); font-size: .82rem; line-height: 1.5; }
 .inline-form    { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .75rem 1rem; }
 .inline-form-sm { display: flex; gap: .35rem; align-items: center; }
-.actions        { display: flex; gap: .5rem; align-items: center; }
+.twitch-bot-controls { display: inline-flex; gap: .5rem; align-items: center; flex-wrap: nowrap; }
+.actions        { display: inline-flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 .hint           { font-size: .78rem; color: var(--muted); padding: 0 1rem .75rem; }
 .search-input   { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: .4rem .75rem; font-size: .85rem; width: 220px; }
 .search-input:focus { outline: none; border-color: var(--primary); }

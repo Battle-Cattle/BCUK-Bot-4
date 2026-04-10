@@ -1,13 +1,45 @@
-import { Client, GatewayIntentBits } from 'discord.js';
+import { Client, GatewayIntentBits, Guild } from 'discord.js';
 import { DISCORD_TOKEN, DISCORD_GUILD_ID } from './config';
 import { connect } from './audioPlayer';
 import { handleCommand } from './commandRouter';
 import { setDiscordReady } from './statusStore';
 
 let client: Client;
+let cachedGuild: Guild | null = null;
 
 /** The Discord.js Client instance once it has fired `clientReady`, or null before then. */
 export let discordClient: Client | null = null;
+
+async function getConfiguredGuild(): Promise<Guild> {
+  if (!discordClient) {
+    throw new Error('Discord client is not ready');
+  }
+
+  const guildFromCache = discordClient.guilds.cache.get(DISCORD_GUILD_ID);
+  if (guildFromCache) {
+    cachedGuild = guildFromCache;
+    return guildFromCache;
+  }
+
+  if (cachedGuild) {
+    return cachedGuild;
+  }
+
+  cachedGuild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
+  return cachedGuild;
+}
+
+export async function fetchMemberDisplayName(discordId: string, force = false): Promise<string | null> {
+  if (!discordClient) return null;
+  try {
+    const guild = await getConfiguredGuild();
+    const member = await guild.members.fetch({ user: discordId, force });
+    return member.displayName;
+  } catch (err) {
+    console.warn(`[Discord] Failed to fetch display name for ${discordId}:`, err);
+    return null;
+  }
+}
 
 export function startDiscordBot(): void {
   client = new Client({
@@ -23,7 +55,7 @@ export function startDiscordBot(): void {
     console.log(`[Discord] Logged in as ${c.user.tag}`);
     discordClient = c;
     try {
-      const guild = await c.guilds.fetch(DISCORD_GUILD_ID);
+      const guild = await getConfiguredGuild();
       setDiscordReady(c.user.tag, guild.name);
       // Small delay to ensure gateway is fully ready before joining voice
       await new Promise((resolve) => setTimeout(resolve, 2000));

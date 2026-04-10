@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from './config';
+import { normalizeTwitchChannelName } from './twitchChannelName';
 
 export interface SfxTrigger {
   id: bigint;
@@ -29,6 +30,8 @@ export function getPool(): mysql.Pool {
       user: DB_USER,
       password: DB_PASSWORD,
       database: DB_NAME,
+      supportBigNumbers: true,
+      bigNumberStrings: true,
       waitForConnections: true,
       connectionLimit: 5,
       queueLimit: 0,
@@ -62,7 +65,7 @@ export async function findTrigger(command: string): Promise<SfxTrigger | null> {
     id: BigInt(row.id),
     trigger_command: row.trigger_command,
     category_id: row.category_id,
-    hidden: Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden === 1,
+    hidden: Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden == 1,
     description: row.description,
   };
 }
@@ -84,7 +87,7 @@ export async function findSoundFiles(triggerId: bigint): Promise<SfxFile[]> {
     file: row.file,
     trigger_command: row.trigger_command,
     weight: row.weight,
-    hidden: Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden === 1,
+    hidden: Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden == 1,
     category_id: row.category_id,
   }));
 }
@@ -125,7 +128,39 @@ export async function findUser(discordId: string): Promise<DbUser | null> {
   return {
     discord_id: String(r.discord_id),
     discord_name: r.discord_name,
-    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled === 1,
+    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled == 1,
+    twitch_name: r.twitch_name,
+    access_level: r.access_level,
+  };
+}
+
+export async function findUserByTwitchName(twitchName: string, excludeDiscordId?: string): Promise<DbUser | null> {
+  const normalizedTwitchName = normalizeTwitchChannelName(twitchName);
+  if (!normalizedTwitchName) {
+    return null;
+  }
+
+  const sql = excludeDiscordId
+    ? `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level
+       FROM \`user\`
+       WHERE twitch_name = ?
+         AND discord_id <> ?
+       LIMIT 1`
+    : `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level
+       FROM \`user\`
+       WHERE twitch_name = ?
+       LIMIT 1`;
+  const params = excludeDiscordId
+    ? [normalizedTwitchName, excludeDiscordId]
+    : [normalizedTwitchName];
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(sql, params);
+
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    discord_id: String(r.discord_id),
+    discord_name: r.discord_name,
+    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled == 1,
     twitch_name: r.twitch_name,
     access_level: r.access_level,
   };
@@ -138,7 +173,7 @@ export async function getAllUsers(): Promise<DbUser[]> {
   return rows.map((r) => ({
     discord_id: String(r.discord_id),
     discord_name: r.discord_name,
-    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled === 1,
+    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled == 1,
     twitch_name: r.twitch_name,
     access_level: r.access_level,
   }));
@@ -148,15 +183,49 @@ export async function upsertUser(
   discordId: string,
   discordName: string,
   accessLevel: number,
+  twitchName?: string | null,
 ): Promise<void> {
   if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
     throw new Error(`Invalid accessLevel: ${accessLevel}`);
   }
+  const twitchNameProvided = twitchName !== undefined;
+  const normalizedTwitchName = !twitchNameProvided
+    ? null
+    : twitchName === null
+      ? null
+      : (twitchName.trim() || null);
   await getPool().execute(
-    `INSERT INTO \`user\` (discord_id, discord_name, access_level, is_twitch_bot_enabled)
-     VALUES (?, ?, ?, 0)
-     ON DUPLICATE KEY UPDATE discord_name = VALUES(discord_name), access_level = VALUES(access_level)`,
-    [discordId, discordName, accessLevel],
+    `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
+     VALUES (?, ?, ?, ?, 0) AS new_user
+     ON DUPLICATE KEY UPDATE discord_name = new_user.discord_name, access_level = new_user.access_level, twitch_name = IF(?, new_user.twitch_name, \`user\`.twitch_name)`,
+    [discordId, discordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
+  );
+}
+
+export async function updateDiscordName(discordId: string, name: string): Promise<void> {
+  await getPool().execute(
+    'UPDATE `user` SET discord_name = ? WHERE discord_id = ?',
+    [name, discordId],
+  );
+}
+
+export async function getTwitchEnabledChannels(): Promise<string[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT twitch_name
+     FROM \`user\`
+     WHERE is_twitch_bot_enabled = 1
+       AND twitch_name IS NOT NULL
+       AND twitch_name <> ''`,
+  );
+  return rows
+    .map((r) => normalizeTwitchChannelName(String(r.twitch_name)))
+    .filter((v): v is string => v !== null);
+}
+
+export async function updateTwitchBotEnabled(discordId: string, enabled: boolean): Promise<void> {
+  await getPool().execute(
+    'UPDATE `user` SET is_twitch_bot_enabled = ? WHERE discord_id = ?',
+    [enabled ? 1 : 0, discordId],
   );
 }
 
@@ -212,9 +281,9 @@ function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
     discord_channel: String(r.discord_channel),
     live_message: r.live_message,
     new_game_message: r.new_game_message,
-    multi_twitch: Buffer.isBuffer(r.multi_twitch) ? r.multi_twitch[0] === 1 : r.multi_twitch === 1,
+    multi_twitch: Buffer.isBuffer(r.multi_twitch) ? r.multi_twitch[0] === 1 : r.multi_twitch == 1,
     multi_twitch_message: r.multi_twitch_message ?? '',
-    delete_old_posts: Buffer.isBuffer(r.delete_old_posts) ? r.delete_old_posts[0] === 1 : r.delete_old_posts === 1,
+    delete_old_posts: Buffer.isBuffer(r.delete_old_posts) ? r.delete_old_posts[0] === 1 : r.delete_old_posts == 1,
   };
 }
 
@@ -300,9 +369,9 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
       discord_channel: String(r.discord_channel),
       live_message: r.live_message,
       new_game_message: r.new_game_message,
-      multi_twitch: Buffer.isBuffer(r.multi_twitch) ? r.multi_twitch[0] === 1 : r.multi_twitch === 1,
+      multi_twitch: Buffer.isBuffer(r.multi_twitch) ? r.multi_twitch[0] === 1 : r.multi_twitch == 1,
       multi_twitch_message: r.multi_twitch_message ?? '',
-      delete_old_posts: Buffer.isBuffer(r.delete_old_posts) ? r.delete_old_posts[0] === 1 : r.delete_old_posts === 1,
+      delete_old_posts: Buffer.isBuffer(r.delete_old_posts) ? r.delete_old_posts[0] === 1 : r.delete_old_posts == 1,
     },
   }));
 }
@@ -377,7 +446,7 @@ export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
         triggerId: r.triggerId,
         triggerCommand: r.triggerCommand,
         description: r.description ?? null,
-        hidden: Buffer.isBuffer(r.triggerHidden) ? r.triggerHidden[0] === 1 : r.triggerHidden === 1,
+        hidden: Buffer.isBuffer(r.triggerHidden) ? r.triggerHidden[0] === 1 : r.triggerHidden == 1,
         categoryName: r.categoryName ?? null,
         files: [],
       });
@@ -387,7 +456,7 @@ export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
         id: r.sfxId,
         file: r.file,
         weight: r.weight,
-        hidden: Buffer.isBuffer(r.sfxHidden) ? r.sfxHidden[0] === 1 : r.sfxHidden === 1,
+        hidden: Buffer.isBuffer(r.sfxHidden) ? r.sfxHidden[0] === 1 : r.sfxHidden == 1,
       });
     }
   }
