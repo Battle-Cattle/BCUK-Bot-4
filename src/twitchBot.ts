@@ -231,8 +231,8 @@ export async function partTwitchChannel(channel: string): Promise<void> {
         await client.part(normalized);
       }
     } catch (err) {
-      activeChannels.add(normalized);
-      setTwitchChannel(normalized, isChannelJoined(normalized));
+      // Keep desired membership removed so later reconciliation can retry
+      // parting any stale runtime join without restoring admin intent here.
       console.error(`[Twitch] Failed to part channel ${normalized}:`, err);
       throw err;
     }
