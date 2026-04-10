@@ -95,25 +95,30 @@
               <td class="mono"><%= u.twitch_name || '—' %></td>
               <td>
                 <% if (u.twitch_name) { %>
-                  <span class="badge <%= u.is_twitch_bot_enabled ? 'badge-online' : 'badge-offline' %>">
-                    <%= u.is_twitch_bot_enabled ? 'Enabled' : 'Disabled' %>
-                  </span>
-                  <% if (user.accessLevel >= 2) { %>
-                  <form method="POST" action="/admin/users/toggle-twitch" class="inline-form-sm" style="margin-top:.45rem">
-                    <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
-                    <button type="submit" class="btn btn-sm"><%= u.is_twitch_bot_enabled ? 'Disable' : 'Enable' %></button>
-                  </form>
-                  <% } %>
+                  <div class="twitch-bot-controls">
+                    <span class="badge <%= u.is_twitch_bot_enabled ? 'badge-online' : 'badge-offline' %>">
+                      <%= u.is_twitch_bot_enabled ? 'Enabled' : 'Disabled' %>
+                    </span>
+                    <% if (user.accessLevel >= 2) { %>
+                    <form method="POST" action="/admin/users/toggle-twitch" class="inline-form-sm">
+                      <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
+                      <button type="submit" class="btn btn-sm"><%= u.is_twitch_bot_enabled ? 'Disable' : 'Enable' %></button>
+                    </form>
+                    <% } %>
+                  </div>
                 <% } else { %>
-                  <span class="badge badge-offline">Unavailable</span>
-                  <% if (user.accessLevel >= 2) { %>
-                  <button type="button" class="btn btn-sm" disabled style="margin-top:.45rem;opacity:.55">Set Twitch Name</button>
-                  <% } %>
+                  <div class="twitch-bot-controls">
+                    <span class="badge badge-offline">Unavailable</span>
+                    <% if (user.accessLevel >= 2) { %>
+                    <button type="button" class="btn btn-sm" disabled style="opacity:.55">Set Twitch Name</button>
+                    <% } %>
+                  </div>
                 <% } %>
               </td>
               <td><span class="badge level-<%= u.access_level %>"><%= accessLevelLabels[u.access_level] || u.access_level %></span></td>
               <% if (user.accessLevel >= 3) { %>
-              <td class="actions">
+              <td>
+                <div class="actions">
                 <!-- Change level -->
                 <form method="POST" action="/admin/users/update" class="inline-form-sm">
                   <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
@@ -131,6 +136,7 @@
                   <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                 </form>
                 <% } %>
+                </div>
               </td>
               <% } %>
             </tr>
