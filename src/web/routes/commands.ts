@@ -44,7 +44,7 @@ function normalizeSingleTokenRequiredText(value: string | undefined): string | n
     return null;
   }
 
-  return normalizedValue;
+  return normalizedValue.toLowerCase();
 }
 
 function parseCommandId(value: string | undefined): number | null {
