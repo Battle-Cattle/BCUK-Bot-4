@@ -390,9 +390,24 @@ router.post('/users/remove', requireAdmin, async (req, res) => {
 
 // Toggle twitch bot participation for a user (Manager+)
 router.post('/users/toggle-twitch', requireManager, async (req, res) => {
-  const { discord_id } = req.body as { discord_id?: string };
+  const { discord_id, is_twitch_bot_enabled } = req.body as {
+    discord_id?: string;
+    is_twitch_bot_enabled?: string;
+  };
   const trimmedDiscordId = (discord_id ?? '').trim();
   if (!trimmedDiscordId) return res.redirect('/admin/users');
+
+  let nextEnabled: boolean;
+  if (is_twitch_bot_enabled === 'true' || is_twitch_bot_enabled === '1') {
+    nextEnabled = true;
+  } else if (is_twitch_bot_enabled === 'false' || is_twitch_bot_enabled === '0') {
+    nextEnabled = false;
+  } else {
+    return res.status(400).render('error', {
+      message: 'Invalid Twitch enabled state.',
+      user: req.session.user ?? null,
+    });
+  }
 
   try {
     await withUserMutationLock(trimmedDiscordId, async () => {
@@ -402,11 +417,14 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
       }
 
       const currentEnabled = user.is_twitch_bot_enabled;
-      const nextEnabled = !currentEnabled;
       const normalizedChannel = normalizeTwitchChannelName(user.twitch_name);
 
       if (!normalizedChannel) {
         throw new Error('Toggle target user has an invalid Twitch channel');
+      }
+
+      if (currentEnabled === nextEnabled) {
+        return;
       }
 
       await updateTwitchBotEnabled(trimmedDiscordId, nextEnabled);

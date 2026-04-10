@@ -57,9 +57,9 @@
         <form method="POST" action="/admin/users/add" class="inline-form">
           <input class="input" type="text" name="discord_id"   placeholder="Discord User ID"  required>
           <input class="input" type="text" name="discord_name" placeholder="Display name (optional)">
-          <input class="input" type="text" name="twitch_name" placeholder="Twitch name (optional)">
+          <input class="input" type="text" name="twitch_name" placeholder="Twitch name (optional)" data-twitch-name-input>
           <label class="hint" style="display:flex;align-items:center;gap:.4rem;white-space:nowrap">
-            <input type="checkbox" name="clear_twitch_name" value="1">
+            <input type="checkbox" name="clear_twitch_name" value="1" data-clear-twitch-name-input>
             Clear Twitch name
           </label>
           <select class="input" name="access_level">
@@ -102,6 +102,7 @@
                     <% if (user.accessLevel >= 2) { %>
                     <form method="POST" action="/admin/users/toggle-twitch" class="inline-form-sm">
                       <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
+                      <input type="hidden" name="is_twitch_bot_enabled" value="<%= u.is_twitch_bot_enabled ? 'false' : 'true' %>">
                       <button type="submit" class="btn btn-sm"><%= u.is_twitch_bot_enabled ? 'Disable' : 'Enable' %></button>
                     </form>
                     <% } %>

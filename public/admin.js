@@ -9,6 +9,56 @@ document.addEventListener('submit', function (event) {
   }
 });
 
+function syncTwitchNameControls(form) {
+  if (!(form instanceof HTMLFormElement)) return;
+
+  var twitchNameInput = form.querySelector('[data-twitch-name-input]');
+  var clearTwitchNameInput = form.querySelector('[data-clear-twitch-name-input]');
+  if (!(twitchNameInput instanceof HTMLInputElement) || !(clearTwitchNameInput instanceof HTMLInputElement)) {
+    return;
+  }
+
+  var hasTwitchName = twitchNameInput.value.trim().length > 0;
+  if (hasTwitchName) {
+    clearTwitchNameInput.checked = false;
+    clearTwitchNameInput.disabled = true;
+    twitchNameInput.disabled = false;
+    return;
+  }
+
+  if (clearTwitchNameInput.checked) {
+    twitchNameInput.value = '';
+    twitchNameInput.disabled = true;
+    clearTwitchNameInput.disabled = false;
+    return;
+  }
+
+  twitchNameInput.disabled = false;
+  clearTwitchNameInput.disabled = false;
+}
+
+document.querySelectorAll('form[action="/admin/users/add"]').forEach(function (form) {
+  if (!(form instanceof HTMLFormElement)) return;
+
+  var twitchNameInput = form.querySelector('[data-twitch-name-input]');
+  var clearTwitchNameInput = form.querySelector('[data-clear-twitch-name-input]');
+  if (!(twitchNameInput instanceof HTMLInputElement) || !(clearTwitchNameInput instanceof HTMLInputElement)) {
+    return;
+  }
+
+  twitchNameInput.addEventListener('input', function () {
+    syncTwitchNameControls(form);
+  });
+  clearTwitchNameInput.addEventListener('change', function () {
+    syncTwitchNameControls(form);
+  });
+  form.addEventListener('submit', function () {
+    syncTwitchNameControls(form);
+  });
+
+  syncTwitchNameControls(form);
+});
+
 function scheduleRefreshStatusPolling(retryCount) {
   var refreshBanner = document.querySelector('[data-refresh-running="true"]');
   if (!refreshBanner) return;
