@@ -361,7 +361,11 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
 
 export async function assignUserToCommand(commandId: number, discordId: string): Promise<void> {
   await getPool().execute(
-    'INSERT IGNORE INTO twitch_user_commands (command_id, discord_id) VALUES (?, ?)',
+    `INSERT INTO twitch_user_commands (command_id, discord_id)
+     VALUES (?, ?) AS new_row
+     ON DUPLICATE KEY UPDATE
+       command_id = new_row.command_id,
+       discord_id = new_row.discord_id`,
     [commandId, discordId],
   );
 }

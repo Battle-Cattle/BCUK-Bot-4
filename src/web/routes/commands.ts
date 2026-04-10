@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   addCustomCommand,
   assignUserToCommand,
+  findUser,
   getAllCustomCommandsWithAssignments,
   getAllUsers,
   removeCustomCommand,
@@ -20,6 +21,7 @@ const KNOWN_ERRORS = new Set([
   'remove_failed',
   'assign_failed',
   'unassign_failed',
+  'invalid_assignment_user',
 ]);
 
 function normalizeRequiredText(value: string | undefined): string | null {
@@ -141,6 +143,11 @@ router.post('/commands/assign', requireManager, async (req, res) => {
     return res.redirect('/admin/commands?error=missing_fields');
   }
 
+  const user = await findUser(normalizedDiscordId);
+  if (!user || !user.twitch_name) {
+    return res.redirect('/admin/commands?error=invalid_assignment_user');
+  }
+
   try {
     await assignUserToCommand(parsedCommandId, normalizedDiscordId);
   } catch (err) {
@@ -158,6 +165,11 @@ router.post('/commands/unassign', requireManager, async (req, res) => {
 
   if (parsedCommandId === null || normalizedDiscordId === null) {
     return res.redirect('/admin/commands?error=missing_fields');
+  }
+
+  const user = await findUser(normalizedDiscordId);
+  if (!user || !user.twitch_name) {
+    return res.redirect('/admin/commands?error=invalid_assignment_user');
   }
 
   try {
