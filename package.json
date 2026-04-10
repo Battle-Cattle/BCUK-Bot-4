@@ -10,8 +10,6 @@
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
     "@snazzah/davey": "^0.1.11",
-    "@types/csurf": "^1.11.5",
-    "csurf": "^1.2.2",
     "discord.js": "^14.26.2",
     "dotenv": "^17.4.1",
     "ejs": "^5.0.1",

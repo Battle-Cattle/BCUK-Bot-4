@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import csurf from 'csurf';
 import {
   addCustomCommand,
   assignUserToCommand,
@@ -12,10 +11,10 @@ import {
   unassignUserFromCommand,
   updateCustomCommand,
 } from '../../db';
+import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 
 const router = Router();
-const csrfProtection = csurf();
 
 const KNOWN_ERRORS = new Set([
   'missing_fields',
