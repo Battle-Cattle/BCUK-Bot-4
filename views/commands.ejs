@@ -80,6 +80,8 @@
                           <%= assignedUser.discord_name || assignedUser.discord_id %>
                           <% if (assignedUser.twitch_name) { %>
                             (<%= assignedUser.twitch_name %>)
+                          <% } else if (assignedUser.is_orphaned_user) { %>
+                            (missing user)
                           <% } %>
                         </span>
                       <% }) %>
@@ -141,7 +143,7 @@
                         <div style="display:flex;justify-content:space-between;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.55rem .7rem;background:var(--bg-card);border:1px solid var(--border);border-radius:6px">
                           <div>
                             <div><strong><%= assignedUser.discord_name || assignedUser.discord_id %></strong></div>
-                            <div class="mono muted"><%= assignedUser.twitch_name || 'No Twitch name' %></div>
+                            <div class="mono muted"><%= assignedUser.twitch_name || (assignedUser.is_orphaned_user ? 'Missing user record' : 'No Twitch name') %></div>
                           </div>
                           <form method="POST" action="/admin/commands/unassign" class="inline-form-sm">
                             <input type="hidden" name="command_id" value="<%= command.command_id %>">

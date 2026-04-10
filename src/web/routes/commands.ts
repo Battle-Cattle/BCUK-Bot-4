@@ -191,11 +191,6 @@ router.post('/commands/unassign', requireManager, async (req, res) => {
   }
 
   try {
-    const user = await findUser(normalizedDiscordId);
-    if (!user || !user.twitch_name) {
-      return res.redirect('/admin/commands?error=invalid_assignment_user');
-    }
-
     await unassignUserFromCommand(parsedCommandId, normalizedDiscordId);
   } catch (err) {
     console.error('[Web] Unassign user from command error:', err);
