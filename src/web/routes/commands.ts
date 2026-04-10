@@ -2,6 +2,8 @@ import { Router } from 'express';
 import {
   addCustomCommand,
   assignUserToCommand,
+  DbCustomCommandWithAssignments,
+  DbUser,
   findUser,
   getAllCustomCommandsWithAssignments,
   getAllUsers,
@@ -23,6 +25,10 @@ const KNOWN_ERRORS = new Set([
   'unassign_failed',
   'invalid_assignment_user',
 ]);
+
+interface CommandViewModel extends DbCustomCommandWithAssignments {
+  unassigned_users: DbUser[];
+}
 
 function normalizeRequiredText(value: string | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -55,11 +61,20 @@ router.get('/commands', requireManager, async (req, res) => {
       getAllCustomCommandsWithAssignments(),
       getAllUsers(),
     ]);
+    const assignableUsers = users.filter((entry) => entry.twitch_name);
+    const commandsForView: CommandViewModel[] = commands.map((command) => {
+      const assignedDiscordIds = new Set(command.assigned_users.map((entry) => entry.discord_id));
+
+      return {
+        ...command,
+        unassigned_users: assignableUsers.filter((entry) => !assignedDiscordIds.has(entry.discord_id)),
+      };
+    });
 
     res.render('commands', {
       user: req.session.user,
-      commands,
-      assignableUsers: users.filter((entry) => entry.twitch_name),
+      commands: commandsForView,
+      assignableUsers,
       error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
     });
   } catch (err) {
