@@ -243,6 +243,118 @@ export async function removeUser(discordId: string): Promise<void> {
   await getPool().execute('DELETE FROM `user` WHERE discord_id = ?', [discordId]);
 }
 
+// ─── Custom commands ────────────────────────────────────────────────────────
+
+export interface DbCustomCommand {
+  command_id: number;
+  trigger_string: string;
+  output: string;
+  is_discord_enabled: boolean;
+  is_multi_twitch: boolean;
+}
+
+export interface DbCustomCommandAssignedUser {
+  discord_id: string;
+  discord_name: string | null;
+  twitch_name: string | null;
+  access_level: number;
+  is_twitch_bot_enabled: boolean;
+}
+
+export interface DbCustomCommandWithAssignments extends DbCustomCommand {
+  assigned_users: DbCustomCommandAssignedUser[];
+}
+
+function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
+  return {
+    command_id: row.command_id,
+    trigger_string: row.trigger_string,
+    output: row.output,
+    is_discord_enabled: Buffer.isBuffer(row.is_discord_enabled) ? row.is_discord_enabled[0] === 1 : row.is_discord_enabled == 1,
+    is_multi_twitch: Buffer.isBuffer(row.is_multi_twitch) ? row.is_multi_twitch[0] === 1 : row.is_multi_twitch == 1,
+  };
+}
+
+export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCommandWithAssignments[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT c.command_id, c.trigger_string, c.output, c.is_discord_enabled, c.is_multi_twitch,
+            u.discord_id, u.discord_name, u.twitch_name, u.access_level, u.is_twitch_bot_enabled
+     FROM custom_command c
+     LEFT JOIN twitch_user_commands tuc ON c.command_id = tuc.command_id
+     LEFT JOIN \`user\` u ON tuc.discord_id = u.discord_id
+     ORDER BY c.trigger_string, u.discord_name, u.discord_id`,
+  );
+
+  const commandMap = new Map<number, DbCustomCommandWithAssignments>();
+
+  for (const row of rows) {
+    if (!commandMap.has(row.command_id)) {
+      commandMap.set(row.command_id, {
+        ...mapCustomCommand(row),
+        assigned_users: [],
+      });
+    }
+
+    if (row.discord_id !== null && row.discord_id !== undefined) {
+      commandMap.get(row.command_id)!.assigned_users.push({
+        discord_id: String(row.discord_id),
+        discord_name: row.discord_name ?? null,
+        twitch_name: row.twitch_name ?? null,
+        access_level: row.access_level,
+        is_twitch_bot_enabled: Buffer.isBuffer(row.is_twitch_bot_enabled) ? row.is_twitch_bot_enabled[0] === 1 : row.is_twitch_bot_enabled == 1,
+      });
+    }
+  }
+
+  return Array.from(commandMap.values());
+}
+
+export async function addCustomCommand(
+  triggerString: string,
+  output: string,
+  isDiscordEnabled: boolean,
+  isMultiTwitch: boolean,
+): Promise<void> {
+  await getPool().execute(
+    `INSERT INTO custom_command (trigger_string, output, is_discord_enabled, is_multi_twitch)
+     VALUES (?, ?, ?, ?)`,
+    [triggerString.trim(), output.trim(), isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0],
+  );
+}
+
+export async function updateCustomCommand(
+  commandId: number,
+  triggerString: string,
+  output: string,
+  isDiscordEnabled: boolean,
+  isMultiTwitch: boolean,
+): Promise<void> {
+  await getPool().execute(
+    `UPDATE custom_command
+     SET trigger_string = ?, output = ?, is_discord_enabled = ?, is_multi_twitch = ?
+     WHERE command_id = ?`,
+    [triggerString.trim(), output.trim(), isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
+  );
+}
+
+export async function removeCustomCommand(commandId: number): Promise<void> {
+  await getPool().execute('DELETE FROM custom_command WHERE command_id = ?', [commandId]);
+}
+
+export async function assignUserToCommand(commandId: number, discordId: string): Promise<void> {
+  await getPool().execute(
+    'INSERT IGNORE INTO twitch_user_commands (command_id, discord_id) VALUES (?, ?)',
+    [commandId, discordId],
+  );
+}
+
+export async function unassignUserFromCommand(commandId: number, discordId: string): Promise<void> {
+  await getPool().execute(
+    'DELETE FROM twitch_user_commands WHERE command_id = ? AND discord_id = ?',
+    [commandId, discordId],
+  );
+}
+
 // ─── Stream monitor ──────────────────────────────────────────────────────────
 
 export interface DbStreamGroup {

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Commands</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body>
+  <%- include('partials/nav') %>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Custom Commands</h2>
+
+      <% if (error) { %>
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem">
+        <span style="color:var(--danger)">&#9888; Operation failed: <%= error.replace(/_/g, ' ') %></span>
+      </div>
+      <% } %>
+
+      <div class="card" style="margin-bottom:1.5rem">
+        <div class="card-header">
+          <span class="card-icon">🛠</span>
+          <span class="card-label">Management Only</span>
+        </div>
+        <div class="card-body" style="color:var(--muted);font-size:.85rem">
+          This page manages custom command records and per-user Twitch assignments. Runtime execution in Twitch and Discord bots is not wired yet.
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:1.5rem">
+        <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add Command</span></div>
+        <div class="card-body">
+          <form method="POST" action="/admin/commands/add">
+            <div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.75rem">
+              <input class="input" type="text" name="trigger_string" placeholder="Trigger string, e.g. !hello" required style="flex:1;min-width:220px">
+              <label class="input" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+                <input type="checkbox" name="is_discord_enabled"> Discord enabled
+              </label>
+              <label class="input" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+                <input type="checkbox" name="is_multi_twitch"> Multi-Twitch broadcast
+              </label>
+            </div>
+            <div style="margin-bottom:.75rem">
+              <p class="hint" style="padding:0 0 .3rem">Reply text to send when the trigger matches.</p>
+              <textarea class="input stream-textarea" name="output" rows="3" placeholder="Hello chat!" required></textarea>
+            </div>
+            <button type="submit" class="btn">Add Command</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="table-scroll">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Trigger</th>
+                <th>Output</th>
+                <th>Discord</th>
+                <th>Multi-Twitch</th>
+                <th>Assigned Twitch Users</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% commands.forEach(function(command) { %>
+              <tr class="sfx-row">
+                <td class="mono"><strong><%= command.trigger_string %></strong></td>
+                <td style="max-width:360px;white-space:normal;overflow-wrap:anywhere"><%= command.output %></td>
+                <td><span class="badge <%= command.is_discord_enabled ? 'badge-active' : 'badge-offline' %>"><%= command.is_discord_enabled ? 'Enabled' : 'Off' %></span></td>
+                <td><span class="badge <%= command.is_multi_twitch ? 'badge-active' : 'badge-offline' %>"><%= command.is_multi_twitch ? 'Enabled' : 'Off' %></span></td>
+                <td>
+                  <% if (command.assigned_users.length > 0) { %>
+                    <div style="display:flex;flex-wrap:wrap;gap:.35rem">
+                      <% command.assigned_users.forEach(function(assignedUser) { %>
+                        <span class="badge <%= assignedUser.is_twitch_bot_enabled ? 'badge-online' : 'badge-offline' %>">
+                          <%= assignedUser.discord_name || assignedUser.discord_id %>
+                          <% if (assignedUser.twitch_name) { %>
+                            (<%= assignedUser.twitch_name %>)
+                          <% } %>
+                        </span>
+                      <% }) %>
+                    </div>
+                  <% } else { %>
+                    <span class="muted">No Twitch assignments</span>
+                  <% } %>
+                </td>
+                <td class="actions">
+                  <button type="button" class="btn btn-sm btn-ghost btn-toggle-command-edit" data-command-id="<%= command.command_id %>">✏️ Edit</button>
+                  <form method="POST" action="/admin/commands/remove" class="inline-form-sm" onsubmit="return window.confirm('Remove command <%= command.trigger_string.replace(/'/g, "\\'") %>?')">
+                    <input type="hidden" name="command_id" value="<%= command.command_id %>">
+                    <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+                  </form>
+                </td>
+              </tr>
+              <tr class="files-row" id="command-edit-<%= command.command_id %>" style="display:none">
+                <td colspan="6">
+                  <div style="padding:.75rem 1rem;background:var(--bg);border-radius:6px">
+                    <form method="POST" action="/admin/commands/update" style="margin-bottom:1rem">
+                      <input type="hidden" name="command_id" value="<%= command.command_id %>">
+                      <div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.75rem">
+                        <input class="input" type="text" name="trigger_string" value="<%= command.trigger_string %>" required style="flex:1;min-width:220px">
+                        <label class="input" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+                          <input type="checkbox" name="is_discord_enabled" <%= command.is_discord_enabled ? 'checked' : '' %>> Discord enabled
+                        </label>
+                        <label class="input" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+                          <input type="checkbox" name="is_multi_twitch" <%= command.is_multi_twitch ? 'checked' : '' %>> Multi-Twitch broadcast
+                        </label>
+                      </div>
+                      <div style="margin-bottom:.75rem">
+                        <textarea class="input stream-textarea" name="output" rows="3" required><%= command.output %></textarea>
+                      </div>
+                      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+                        <button type="submit" class="btn">Save Changes</button>
+                        <button type="button" class="btn btn-ghost btn-toggle-command-edit" data-command-id="<%= command.command_id %>">Cancel</button>
+                      </div>
+                    </form>
+
+                    <div style="border-top:1px solid var(--border);padding-top:1rem">
+                      <h3 style="font-size:.9rem;margin-bottom:.65rem">Twitch Assignments</h3>
+                      <% const assignedIds = new Set(command.assigned_users.map(function(entry) { return entry.discord_id; })); %>
+                      <% if (assignableUsers.length > 0) { %>
+                      <form method="POST" action="/admin/commands/assign" class="inline-form" style="padding:0;margin-bottom:.75rem">
+                        <input type="hidden" name="command_id" value="<%= command.command_id %>">
+                        <select class="input" name="discord_id">
+                          <% assignableUsers.forEach(function(assignableUser) { %>
+                            <% if (!assignedIds.has(assignableUser.discord_id)) { %>
+                            <option value="<%= assignableUser.discord_id %>">
+                              <%= assignableUser.discord_name || assignableUser.discord_id %> (<%= assignableUser.twitch_name %>)
+                            </option>
+                            <% } %>
+                          <% }) %>
+                        </select>
+                        <button type="submit" class="btn">Assign User</button>
+                      </form>
+                      <% } %>
+
+                      <% if (command.assigned_users.length > 0) { %>
+                      <div style="display:flex;flex-direction:column;gap:.5rem">
+                        <% command.assigned_users.forEach(function(assignedUser) { %>
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.55rem .7rem;background:var(--bg-card);border:1px solid var(--border);border-radius:6px">
+                          <div>
+                            <div><strong><%= assignedUser.discord_name || assignedUser.discord_id %></strong></div>
+                            <div class="mono muted"><%= assignedUser.twitch_name || 'No Twitch name' %></div>
+                          </div>
+                          <form method="POST" action="/admin/commands/unassign" class="inline-form-sm">
+                            <input type="hidden" name="command_id" value="<%= command.command_id %>">
+                            <input type="hidden" name="discord_id" value="<%= assignedUser.discord_id %>">
+                            <button type="submit" class="btn btn-danger btn-sm">Unassign</button>
+                          </form>
+                        </div>
+                        <% }) %>
+                      </div>
+                      <% } else if (assignableUsers.length > 0) { %>
+                      <div class="empty-msg">No users assigned yet.</div>
+                      <% } else { %>
+                      <div class="empty-msg">No users with a Twitch name are available for assignment.</div>
+                      <% } %>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              <% }) %>
+              <% if (commands.length === 0) { %>
+              <tr>
+                <td colspan="6" class="empty-msg">No custom commands configured yet.</td>
+              </tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <%- include('partials/pwa-register') %>
+  <script>
+    document.querySelectorAll('.btn-toggle-command-edit').forEach(function(button) {
+      button.addEventListener('click', function() {
+        var commandId = button.getAttribute('data-command-id');
+        if (!commandId) return;
+        var row = document.getElementById('command-edit-' + commandId);
+        if (!row) return;
+        row.style.display = row.style.display === 'none' ? '' : 'none';
+      });
+    });
+  </script>
+</body>
+</html>
