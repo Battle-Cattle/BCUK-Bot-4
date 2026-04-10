@@ -151,11 +151,15 @@ router.post('/commands/remove', requireManager, async (req, res) => {
 
 router.post('/commands/assign', requireManager, async (req, res) => {
   const { command_id, discord_id } = req.body as { command_id?: string; discord_id?: string };
+  if (!command_id || !discord_id) {
+    return res.redirect('/admin/commands?error=missing_fields');
+  }
+
   const parsedCommandId = parseCommandId(command_id);
   const normalizedDiscordId = normalizeDiscordId(discord_id);
 
   if (parsedCommandId === null || normalizedDiscordId === null) {
-    return res.redirect('/admin/commands?error=missing_fields');
+    return res.redirect('/admin/commands?error=invalid_id');
   }
 
   try {
@@ -175,11 +179,15 @@ router.post('/commands/assign', requireManager, async (req, res) => {
 
 router.post('/commands/unassign', requireManager, async (req, res) => {
   const { command_id, discord_id } = req.body as { command_id?: string; discord_id?: string };
+  if (!command_id || !discord_id) {
+    return res.redirect('/admin/commands?error=missing_fields');
+  }
+
   const parsedCommandId = parseCommandId(command_id);
   const normalizedDiscordId = normalizeDiscordId(discord_id);
 
   if (parsedCommandId === null || normalizedDiscordId === null) {
-    return res.redirect('/admin/commands?error=missing_fields');
+    return res.redirect('/admin/commands?error=invalid_id');
   }
 
   try {

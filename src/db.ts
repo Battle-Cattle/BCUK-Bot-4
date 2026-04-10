@@ -278,11 +278,12 @@ function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
 export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCommandWithAssignments[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT c.command_id, c.trigger_string, c.output, c.is_discord_enabled, c.is_multi_twitch,
-            u.discord_id, u.discord_name, u.twitch_name, u.access_level, u.is_twitch_bot_enabled
+            tuc.discord_id AS assigned_discord_id,
+            u.discord_name, u.twitch_name, u.access_level, u.is_twitch_bot_enabled
      FROM custom_command c
      LEFT JOIN twitch_user_commands tuc ON c.command_id = tuc.command_id
      LEFT JOIN \`user\` u ON tuc.discord_id = u.discord_id
-     ORDER BY c.trigger_string, u.discord_name, u.discord_id`,
+     ORDER BY c.trigger_string, u.discord_name, tuc.discord_id`,
   );
 
   const commandMap = new Map<number, DbCustomCommandWithAssignments>();
@@ -295,9 +296,9 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
       });
     }
 
-    if (row.discord_id !== null && row.discord_id !== undefined) {
+    if (row.assigned_discord_id !== null && row.assigned_discord_id !== undefined) {
       commandMap.get(row.command_id)!.assigned_users.push({
-        discord_id: String(row.discord_id),
+        discord_id: String(row.assigned_discord_id),
         discord_name: row.discord_name ?? null,
         twitch_name: row.twitch_name ?? null,
         access_level: row.access_level,
