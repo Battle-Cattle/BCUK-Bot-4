@@ -38,6 +38,15 @@ function parseCommandId(value: string | undefined): number | null {
   return Number.isSafeInteger(parsedValue) ? parsedValue : null;
 }
 
+function normalizeDiscordId(value: string | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmedValue = value.trim();
+  return /^\d+$/.test(trimmedValue) ? trimmedValue : null;
+}
+
 router.get('/commands', requireManager, async (req, res) => {
   try {
     const [commands, users] = await Promise.all([
@@ -125,17 +134,15 @@ router.post('/commands/remove', requireManager, async (req, res) => {
 
 router.post('/commands/assign', requireManager, async (req, res) => {
   const { command_id, discord_id } = req.body as { command_id?: string; discord_id?: string };
-  if (!command_id || !discord_id) {
+  const parsedCommandId = parseCommandId(command_id);
+  const normalizedDiscordId = normalizeDiscordId(discord_id);
+
+  if (parsedCommandId === null || normalizedDiscordId === null) {
     return res.redirect('/admin/commands?error=missing_fields');
   }
 
-  const parsedCommandId = parseCommandId(command_id);
-  if (parsedCommandId === null) {
-    return res.redirect('/admin/commands?error=invalid_id');
-  }
-
   try {
-    await assignUserToCommand(parsedCommandId, discord_id);
+    await assignUserToCommand(parsedCommandId, normalizedDiscordId);
   } catch (err) {
     console.error('[Web] Assign user to command error:', err);
     return res.redirect('/admin/commands?error=assign_failed');
@@ -146,17 +153,15 @@ router.post('/commands/assign', requireManager, async (req, res) => {
 
 router.post('/commands/unassign', requireManager, async (req, res) => {
   const { command_id, discord_id } = req.body as { command_id?: string; discord_id?: string };
-  if (!command_id || !discord_id) {
+  const parsedCommandId = parseCommandId(command_id);
+  const normalizedDiscordId = normalizeDiscordId(discord_id);
+
+  if (parsedCommandId === null || normalizedDiscordId === null) {
     return res.redirect('/admin/commands?error=missing_fields');
   }
 
-  const parsedCommandId = parseCommandId(command_id);
-  if (parsedCommandId === null) {
-    return res.redirect('/admin/commands?error=invalid_id');
-  }
-
   try {
-    await unassignUserFromCommand(parsedCommandId, discord_id);
+    await unassignUserFromCommand(parsedCommandId, normalizedDiscordId);
   } catch (err) {
     console.error('[Web] Unassign user from command error:', err);
     return res.redirect('/admin/commands?error=unassign_failed');

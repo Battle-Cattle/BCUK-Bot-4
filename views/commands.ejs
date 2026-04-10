@@ -122,16 +122,15 @@
                     <div style="border-top:1px solid var(--border);padding-top:1rem">
                       <h3 style="font-size:.9rem;margin-bottom:.65rem">Twitch Assignments</h3>
                       <% const assignedIds = new Set(command.assigned_users.map(function(entry) { return entry.discord_id; })); %>
-                      <% if (assignableUsers.length > 0) { %>
+                      <% const unassignedUsers = assignableUsers.filter(function(assignableUser) { return !assignedIds.has(assignableUser.discord_id); }); %>
+                      <% if (unassignedUsers.length > 0) { %>
                       <form method="POST" action="/admin/commands/assign" class="inline-form" style="padding:0;margin-bottom:.75rem">
                         <input type="hidden" name="command_id" value="<%= command.command_id %>">
                         <select class="input" name="discord_id">
-                          <% assignableUsers.forEach(function(assignableUser) { %>
-                            <% if (!assignedIds.has(assignableUser.discord_id)) { %>
+                          <% unassignedUsers.forEach(function(assignableUser) { %>
                             <option value="<%= assignableUser.discord_id %>">
                               <%= assignableUser.discord_name || assignableUser.discord_id %> (<%= assignableUser.twitch_name %>)
                             </option>
-                            <% } %>
                           <% }) %>
                         </select>
                         <button type="submit" class="btn">Assign User</button>
@@ -154,8 +153,10 @@
                         </div>
                         <% }) %>
                       </div>
-                      <% } else if (assignableUsers.length > 0) { %>
+                      <% } else if (unassignedUsers.length > 0) { %>
                       <div class="empty-msg">No users assigned yet.</div>
+                      <% } else if (assignableUsers.length > 0) { %>
+                      <div class="empty-msg">All available Twitch users are already assigned.</div>
                       <% } else { %>
                       <div class="empty-msg">No users with a Twitch name are available for assignment.</div>
                       <% } %>
