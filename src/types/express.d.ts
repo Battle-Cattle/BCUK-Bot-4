@@ -1,4 +1,5 @@
 import 'express-session';
+import 'express-serve-static-core';
 
 export interface SessionUser {
   discordId: string;
@@ -11,6 +12,12 @@ declare module 'express-session' {
   interface SessionData {
     user?: SessionUser;
     oauthState?: string;
+  }
+}
+
+declare module 'express-serve-static-core' {
+  interface Request {
+    csrfToken(): string;
   }
 }
 

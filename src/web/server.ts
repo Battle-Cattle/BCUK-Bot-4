@@ -1,4 +1,5 @@
 import express from 'express';
+import type { ErrorRequestHandler } from 'express';
 import session from 'express-session';
 import MySQLStore from 'express-mysql-session';
 import helmet from 'helmet';
@@ -85,6 +86,21 @@ app.use('/', requireAuth, dashboardRouter);
 app.use((_req, res) => {
   res.status(404).render('error', { message: 'Page not found.', user: null });
 });
+
+const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
+  if ((err as { code?: string } | undefined)?.code !== 'EBADCSRFTOKEN') {
+    next(err);
+    return;
+  }
+
+  console.error('[Web] Invalid CSRF token:', err);
+  res.status(403).render('error', {
+    message: 'Your form session expired or the request could not be verified. Please reload the page and try again.',
+    user: req.session.user ?? null,
+  });
+};
+
+app.use(csrfErrorHandler);
 
 // Centralised error handler
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

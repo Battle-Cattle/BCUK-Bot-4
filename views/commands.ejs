@@ -34,6 +34,7 @@
         <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add Command</span></div>
         <div class="card-body">
           <form method="POST" action="/admin/commands/add">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
             <div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.75rem">
               <div style="flex:1;min-width:220px">
                 <label for="trigger_string" style="display:block;margin-bottom:.3rem">Trigger</label>
@@ -97,6 +98,7 @@
                 <td class="actions">
                   <button type="button" class="btn btn-sm btn-ghost btn-toggle-command-edit" data-command-id="<%= command.command_id %>">✏️ Edit</button>
                   <form method="POST" action="/admin/commands/remove" class="inline-form-sm js-confirm-remove-command" data-command-trigger="<%= command.trigger_string %>">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <input type="hidden" name="command_id" value="<%= command.command_id %>">
                     <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                   </form>
@@ -106,6 +108,7 @@
                 <td colspan="6">
                   <div style="padding:.75rem 1rem;background:var(--bg);border-radius:6px">
                     <form method="POST" action="/admin/commands/update" style="margin-bottom:1rem">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="command_id" value="<%= command.command_id %>">
                       <div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.75rem">
                         <div style="flex:1;min-width:220px">
@@ -133,8 +136,10 @@
                       <h3 style="font-size:.9rem;margin-bottom:.65rem">Twitch Assignments</h3>
                       <% if (command.unassigned_users.length > 0) { %>
                       <form method="POST" action="/admin/commands/assign" class="inline-form" style="padding:0;margin-bottom:.75rem">
+                        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                         <input type="hidden" name="command_id" value="<%= command.command_id %>">
-                        <select class="input" name="discord_id">
+                        <label for="assign-discord-<%= command.command_id %>" style="display:block;margin-bottom:.3rem">Assign user</label>
+                        <select id="assign-discord-<%= command.command_id %>" class="input" name="discord_id">
                           <% command.unassigned_users.forEach(function(assignableUser) { %>
                             <option value="<%= assignableUser.discord_id %>">
                               <%= assignableUser.discord_name || assignableUser.discord_id %> (<%= assignableUser.twitch_name %>)
@@ -154,6 +159,7 @@
                             <div class="mono muted"><%= assignedUser.twitch_name || (assignedUser.is_orphaned_user ? 'Missing user record' : 'No Twitch name') %></div>
                           </div>
                           <form method="POST" action="/admin/commands/unassign" class="inline-form-sm">
+                            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                             <input type="hidden" name="command_id" value="<%= command.command_id %>">
                             <input type="hidden" name="discord_id" value="<%= assignedUser.discord_id %>">
                             <button type="submit" class="btn btn-danger btn-sm">Unassign</button>

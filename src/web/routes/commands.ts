@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import csurf from 'csurf';
 import {
   addCustomCommand,
   assignUserToCommand,
@@ -14,6 +15,7 @@ import {
 import { requireManager } from '../middleware';
 
 const router = Router();
+const csrfProtection = csurf();
 
 const KNOWN_ERRORS = new Set([
   'missing_fields',
@@ -64,7 +66,7 @@ function normalizeDiscordId(value: string | undefined): string | null {
   return /^\d+$/.test(trimmedValue) ? trimmedValue : null;
 }
 
-router.get('/commands', requireManager, async (req, res) => {
+router.get('/commands', requireManager, csrfProtection, async (req, res) => {
   try {
     const [commands, users] = await Promise.all([
       getAllCustomCommandsWithAssignments(),
@@ -84,6 +86,7 @@ router.get('/commands', requireManager, async (req, res) => {
       user: req.session.user,
       commands: commandsForView,
       assignableUsers,
+      csrfToken: req.csrfToken(),
       error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
     });
   } catch (err) {
@@ -92,7 +95,7 @@ router.get('/commands', requireManager, async (req, res) => {
   }
 });
 
-router.post('/commands/add', requireManager, async (req, res) => {
+router.post('/commands/add', requireManager, csrfProtection, async (req, res) => {
   const { trigger_string, output } = req.body as Record<string, string | undefined>;
   const isDiscordEnabled = req.body.is_discord_enabled === 'on';
   const isMultiTwitch = req.body.is_multi_twitch === 'on';
@@ -113,7 +116,7 @@ router.post('/commands/add', requireManager, async (req, res) => {
   res.redirect('/admin/commands');
 });
 
-router.post('/commands/update', requireManager, async (req, res) => {
+router.post('/commands/update', requireManager, csrfProtection, async (req, res) => {
   const { command_id, trigger_string, output } = req.body as Record<string, string | undefined>;
   const isDiscordEnabled = req.body.is_discord_enabled === 'on';
   const isMultiTwitch = req.body.is_multi_twitch === 'on';
@@ -139,7 +142,7 @@ router.post('/commands/update', requireManager, async (req, res) => {
   res.redirect('/admin/commands');
 });
 
-router.post('/commands/remove', requireManager, async (req, res) => {
+router.post('/commands/remove', requireManager, csrfProtection, async (req, res) => {
   const { command_id } = req.body as { command_id?: string };
   if (!command_id) return res.redirect('/admin/commands');
 
@@ -158,7 +161,7 @@ router.post('/commands/remove', requireManager, async (req, res) => {
   res.redirect('/admin/commands');
 });
 
-router.post('/commands/assign', requireManager, async (req, res) => {
+router.post('/commands/assign', requireManager, csrfProtection, async (req, res) => {
   const { command_id, discord_id } = req.body as { command_id?: string; discord_id?: string };
   if (!command_id || !discord_id) {
     return res.redirect('/admin/commands?error=missing_fields');
@@ -186,7 +189,7 @@ router.post('/commands/assign', requireManager, async (req, res) => {
   res.redirect('/admin/commands');
 });
 
-router.post('/commands/unassign', requireManager, async (req, res) => {
+router.post('/commands/unassign', requireManager, csrfProtection, async (req, res) => {
   const { command_id, discord_id } = req.body as { command_id?: string; discord_id?: string };
   if (!command_id || !discord_id) {
     return res.redirect('/admin/commands?error=missing_fields');
