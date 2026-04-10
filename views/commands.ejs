@@ -35,7 +35,10 @@
         <div class="card-body">
           <form method="POST" action="/admin/commands/add">
             <div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.75rem">
-              <input class="input" type="text" name="trigger_string" placeholder="Trigger string, e.g. !hello" required style="flex:1;min-width:220px">
+              <div style="flex:1;min-width:220px">
+                <label for="trigger_string" style="display:block;margin-bottom:.3rem">Trigger</label>
+                <input id="trigger_string" class="input" type="text" name="trigger_string" placeholder="Trigger string, e.g. !hello" required style="width:100%">
+              </div>
               <label class="input" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
                 <input type="checkbox" name="is_discord_enabled"> Discord enabled
               </label>
@@ -44,8 +47,9 @@
               </label>
             </div>
             <div style="margin-bottom:.75rem">
+              <label for="output" style="display:block;margin-bottom:.3rem">Output</label>
               <p class="hint" style="padding:0 0 .3rem">Reply text to send when the trigger matches.</p>
-              <textarea class="input stream-textarea" name="output" rows="3" placeholder="Hello chat!" required></textarea>
+              <textarea id="output" class="input stream-textarea" name="output" rows="3" placeholder="Hello chat!" required></textarea>
             </div>
             <button type="submit" class="btn">Add Command</button>
           </form>
@@ -104,7 +108,10 @@
                     <form method="POST" action="/admin/commands/update" style="margin-bottom:1rem">
                       <input type="hidden" name="command_id" value="<%= command.command_id %>">
                       <div style="display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:.75rem">
-                        <input class="input" type="text" name="trigger_string" value="<%= command.trigger_string %>" required style="flex:1;min-width:220px">
+                        <div style="flex:1;min-width:220px">
+                          <label for="trigger_string_<%= command.command_id %>" style="display:block;margin-bottom:.3rem">Trigger</label>
+                          <input id="trigger_string_<%= command.command_id %>" class="input" type="text" name="trigger_string" value="<%= command.trigger_string %>" required style="width:100%">
+                        </div>
                         <label class="input" style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
                           <input type="checkbox" name="is_discord_enabled" <%= command.is_discord_enabled ? 'checked' : '' %>> Discord enabled
                         </label>
@@ -113,7 +120,8 @@
                         </label>
                       </div>
                       <div style="margin-bottom:.75rem">
-                        <textarea class="input stream-textarea" name="output" rows="3" required><%= command.output %></textarea>
+                        <label for="output_<%= command.command_id %>" style="display:block;margin-bottom:.3rem">Output</label>
+                        <textarea id="output_<%= command.command_id %>" class="input stream-textarea" name="output" rows="3" required><%= command.output %></textarea>
                       </div>
                       <div style="display:flex;gap:.5rem;flex-wrap:wrap">
                         <button type="submit" class="btn">Save Changes</button>

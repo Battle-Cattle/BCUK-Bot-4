@@ -257,7 +257,7 @@ export interface DbCustomCommandAssignedUser {
   discord_id: string;
   discord_name: string | null;
   twitch_name: string | null;
-  access_level: number;
+  access_level: AccessLevelValue;
   is_twitch_bot_enabled: boolean;
   is_orphaned_user: boolean;
 }

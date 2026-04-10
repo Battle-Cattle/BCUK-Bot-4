@@ -37,6 +37,15 @@ function normalizeRequiredText(value: string | undefined): string | null {
   return normalizedValue.length > 0 ? normalizedValue : null;
 }
 
+function normalizeSingleTokenRequiredText(value: string | undefined): string | null {
+  const normalizedValue = normalizeRequiredText(value);
+  if (!normalizedValue || /\s/.test(normalizedValue)) {
+    return null;
+  }
+
+  return normalizedValue;
+}
+
 function parseCommandId(value: string | undefined): number | null {
   if (typeof value !== 'string' || !/^\d+$/.test(value)) {
     return null;
@@ -87,7 +96,7 @@ router.post('/commands/add', requireManager, async (req, res) => {
   const { trigger_string, output } = req.body as Record<string, string | undefined>;
   const isDiscordEnabled = req.body.is_discord_enabled === 'on';
   const isMultiTwitch = req.body.is_multi_twitch === 'on';
-  const normalizedTriggerString = normalizeRequiredText(trigger_string);
+  const normalizedTriggerString = normalizeSingleTokenRequiredText(trigger_string);
   const normalizedOutput = normalizeRequiredText(output);
 
   if (!normalizedTriggerString || !normalizedOutput) {
@@ -108,7 +117,7 @@ router.post('/commands/update', requireManager, async (req, res) => {
   const { command_id, trigger_string, output } = req.body as Record<string, string | undefined>;
   const isDiscordEnabled = req.body.is_discord_enabled === 'on';
   const isMultiTwitch = req.body.is_multi_twitch === 'on';
-  const normalizedTriggerString = normalizeRequiredText(trigger_string);
+  const normalizedTriggerString = normalizeSingleTokenRequiredText(trigger_string);
   const normalizedOutput = normalizeRequiredText(output);
   const parsedCommandId = parseCommandId(command_id);
 
