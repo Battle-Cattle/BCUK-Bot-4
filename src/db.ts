@@ -338,7 +338,25 @@ export async function updateCustomCommand(
 }
 
 export async function removeCustomCommand(commandId: number): Promise<void> {
-  await getPool().execute('DELETE FROM custom_command WHERE command_id = ?', [commandId]);
+  const connection = await getPool().getConnection();
+
+  try {
+    await connection.beginTransaction();
+    await connection.execute(
+      'DELETE FROM twitch_user_commands WHERE command_id = ?',
+      [commandId],
+    );
+    await connection.execute(
+      'DELETE FROM custom_command WHERE command_id = ?',
+      [commandId],
+    );
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 export async function assignUserToCommand(commandId: number, discordId: string): Promise<void> {
