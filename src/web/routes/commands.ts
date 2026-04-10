@@ -143,12 +143,12 @@ router.post('/commands/assign', requireManager, async (req, res) => {
     return res.redirect('/admin/commands?error=missing_fields');
   }
 
-  const user = await findUser(normalizedDiscordId);
-  if (!user || !user.twitch_name) {
-    return res.redirect('/admin/commands?error=invalid_assignment_user');
-  }
-
   try {
+    const user = await findUser(normalizedDiscordId);
+    if (!user || !user.twitch_name) {
+      return res.redirect('/admin/commands?error=invalid_assignment_user');
+    }
+
     await assignUserToCommand(parsedCommandId, normalizedDiscordId);
   } catch (err) {
     console.error('[Web] Assign user to command error:', err);
@@ -167,12 +167,12 @@ router.post('/commands/unassign', requireManager, async (req, res) => {
     return res.redirect('/admin/commands?error=missing_fields');
   }
 
-  const user = await findUser(normalizedDiscordId);
-  if (!user || !user.twitch_name) {
-    return res.redirect('/admin/commands?error=invalid_assignment_user');
-  }
-
   try {
+    const user = await findUser(normalizedDiscordId);
+    if (!user || !user.twitch_name) {
+      return res.redirect('/admin/commands?error=invalid_assignment_user');
+    }
+
     await unassignUserFromCommand(parsedCommandId, normalizedDiscordId);
   } catch (err) {
     console.error('[Web] Unassign user from command error:', err);
