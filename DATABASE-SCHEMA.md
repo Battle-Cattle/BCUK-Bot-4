@@ -12,6 +12,45 @@ Schema changes are managed outside this repository. This file documents the expe
 - Boolean-like columns may be returned by `mysql2` as `Buffer` or numeric values depending on server/driver configuration.
 - `express-mysql-session` manages the `sessions` table automatically on first run when enabled.
 
+### Verifying and Enforcing `utf8mb4`
+
+Use these statements to verify the current server and database character-set settings:
+
+```sql
+SHOW VARIABLES LIKE 'character_set_%';
+SELECT @@character_set_database, @@collation_database;
+```
+
+When creating a database or table, explicitly set the character set and collation rather than relying on server defaults. For example:
+
+```sql
+CREATE DATABASE your_database
+	CHARACTER SET = utf8mb4
+	COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE example_table (
+	id INT NOT NULL AUTO_INCREMENT,
+	name VARCHAR(255) NOT NULL,
+	PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+If the database already exists and needs to be aligned with `utf8mb4`, update it explicitly:
+
+```sql
+ALTER DATABASE your_database
+	CHARACTER SET = utf8mb4
+	COLLATE = utf8mb4_unicode_ci;
+```
+
+Where needed, existing tables can also be converted individually:
+
+```sql
+ALTER TABLE example_table
+	CONVERT TO CHARACTER SET utf8mb4
+	COLLATE utf8mb4_unicode_ci;
+```
+
 ## `sfxtrigger`
 
 Stores top-level sound trigger commands.
