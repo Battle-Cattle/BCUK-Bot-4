@@ -122,7 +122,7 @@ Join table mapping users to custom commands.
 
 Expected constraints and behavior:
 
-- Composite primary key or unique constraint on `(`command_id`, `discord_id`)`.
+- Composite primary key or unique constraint on `command_id, discord_id`.
 - Foreign key from `command_id` to `custom_command.command_id`.
 - Foreign key from `discord_id` to `user.discord_id`.
 - `ON DELETE CASCADE` is preferred on both foreign keys so deleting a command or user automatically removes mapping rows.
