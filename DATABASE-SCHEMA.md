@@ -25,13 +25,13 @@ When creating a database or table, explicitly set the character set and collatio
 
 ```sql
 CREATE DATABASE your_database
-	CHARACTER SET = utf8mb4
-	COLLATE = utf8mb4_unicode_ci;
+    CHARACTER SET = utf8mb4
+    COLLATE = utf8mb4_unicode_ci;
 
 CREATE TABLE example_table (
-	id INT NOT NULL AUTO_INCREMENT,
-	name VARCHAR(255) NOT NULL,
-	PRIMARY KEY (id)
+    id INT NOT NULL AUTO_INCREMENT,
+    name VARCHAR(255) NOT NULL,
+    PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
@@ -39,16 +39,16 @@ If the database already exists and needs to be aligned with `utf8mb4`, update it
 
 ```sql
 ALTER DATABASE your_database
-	CHARACTER SET = utf8mb4
-	COLLATE = utf8mb4_unicode_ci;
+    CHARACTER SET = utf8mb4
+    COLLATE = utf8mb4_unicode_ci;
 ```
 
 Where needed, existing tables can also be converted individually:
 
 ```sql
 ALTER TABLE example_table
-	CONVERT TO CHARACTER SET utf8mb4
-	COLLATE utf8mb4_unicode_ci;
+    CONVERT TO CHARACTER SET utf8mb4
+    COLLATE utf8mb4_unicode_ci;
 ```
 
 ## `sfxtrigger`
