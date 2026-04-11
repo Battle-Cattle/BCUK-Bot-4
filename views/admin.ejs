@@ -45,6 +45,7 @@
       <% if (user.accessLevel >= 2) { %>
       <div style="display:flex;justify-content:flex-end;margin-bottom:1rem">
         <form method="POST" action="/admin/users/refresh-names" class="inline-form-sm">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
           <button type="submit" class="btn btn-sm" <%= refreshState.outcome === 'running' ? 'disabled' : '' %>><%= refreshState.outcome === 'running' ? 'Refreshing...' : 'Refresh Discord Names' %></button>
         </form>
       </div>
@@ -55,6 +56,7 @@
       <div class="card" style="margin-bottom:1.5rem">
         <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add / Update User</span></div>
         <form method="POST" action="/admin/users/add" class="inline-form">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
           <input class="input" type="text" name="discord_id"   placeholder="Discord User ID"  required>
           <input class="input" type="text" name="discord_name" placeholder="Display name (optional)">
           <input class="input" type="text" name="twitch_name" placeholder="Twitch name (optional)" data-twitch-name-input>
@@ -101,6 +103,7 @@
                     </span>
                     <% if (user.accessLevel >= 2) { %>
                     <form method="POST" action="/admin/users/toggle-twitch" class="inline-form-sm">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
                       <input type="hidden" name="is_twitch_bot_enabled" value="<%= u.is_twitch_bot_enabled ? 'false' : 'true' %>">
                       <button type="submit" class="btn btn-sm"><%= u.is_twitch_bot_enabled ? 'Disable' : 'Enable' %></button>
@@ -122,6 +125,7 @@
                 <div class="actions">
                 <!-- Change level -->
                 <form method="POST" action="/admin/users/update" class="inline-form-sm">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                   <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
                   <select class="input input-sm" name="access_level">
                     <% Object.entries(accessLevelLabels).forEach(([val, label]) => { %>
@@ -133,6 +137,7 @@
                 <!-- Remove -->
                 <% if (u.discord_id !== user.discordId) { %>
                 <form method="POST" action="/admin/users/remove" class="inline-form-sm js-confirm-remove-user" data-user-name="<%= u.discord_name || u.discord_id %>">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                   <input type="hidden" name="discord_id" value="<%= u.discord_id %>">
                   <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                 </form>

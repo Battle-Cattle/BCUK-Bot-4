@@ -368,8 +368,7 @@ export async function assignUserToCommand(commandId: number, discordId: string):
     `INSERT INTO twitch_user_commands (command_id, discord_id)
      VALUES (?, ?) AS new_row
      ON DUPLICATE KEY UPDATE
-       command_id = new_row.command_id,
-       discord_id = new_row.discord_id`,
+       command_id = command_id`,
     [commandId, discordId],
   );
 }
