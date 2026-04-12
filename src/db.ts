@@ -198,7 +198,11 @@ export async function upsertUser(
           if (!trimmedTwitchName) {
             return null;
           }
-          return normalizeTwitchChannelName(trimmedTwitchName);
+          const normalizedChannelName = normalizeTwitchChannelName(trimmedTwitchName);
+          if (!normalizedChannelName) {
+            throw new Error(`Invalid twitchName: ${twitchName}`);
+          }
+          return normalizedChannelName;
         })();
   await getPool().execute(
     `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
@@ -325,10 +329,19 @@ export async function addCustomCommand(
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
 ): Promise<void> {
+  const normalizedTriggerString = triggerString.trim();
+  const normalizedOutput = output.trim();
+  if (!normalizedTriggerString) {
+    throw new Error('Missing trigger_string');
+  }
+  if (!normalizedOutput) {
+    throw new Error('Missing output');
+  }
+
   await getPool().execute(
     `INSERT INTO custom_command (trigger_string, output, is_discord_enabled, is_multi_twitch)
      VALUES (?, ?, ?, ?)`,
-    [triggerString.trim(), output.trim(), isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0],
+    [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0],
   );
 }
 
@@ -339,11 +352,20 @@ export async function updateCustomCommand(
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
 ): Promise<void> {
+  const normalizedTriggerString = triggerString.trim();
+  const normalizedOutput = output.trim();
+  if (!normalizedTriggerString) {
+    throw new Error('Missing trigger_string');
+  }
+  if (!normalizedOutput) {
+    throw new Error('Missing output');
+  }
+
   await getPool().execute(
     `UPDATE custom_command
      SET trigger_string = ?, output = ?, is_discord_enabled = ?, is_multi_twitch = ?
      WHERE command_id = ?`,
-    [triggerString.trim(), output.trim(), isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
+    [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
   );
 }
 
