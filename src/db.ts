@@ -193,7 +193,13 @@ export async function upsertUser(
     ? null
     : twitchName === null
       ? null
-      : (twitchName.trim() || null);
+      : (() => {
+          const trimmedTwitchName = twitchName.trim();
+          if (!trimmedTwitchName) {
+            return null;
+          }
+          return normalizeTwitchChannelName(trimmedTwitchName);
+        })();
   await getPool().execute(
     `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
      VALUES (?, ?, ?, ?, 0) AS new_user
