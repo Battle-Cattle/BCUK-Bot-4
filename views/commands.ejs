@@ -97,7 +97,7 @@
                 </td>
                 <td>
                   <div class="actions">
-                    <button type="button" class="btn btn-sm btn-ghost btn-toggle-command-edit" data-command-id="<%= command.command_id %>">✏️ Edit</button>
+                    <button type="button" class="btn btn-sm btn-ghost btn-toggle-command-edit" data-command-id="<%= command.command_id %>" aria-controls="command-edit-<%= command.command_id %>" aria-expanded="false">✏️ Edit</button>
                     <form method="POST" action="/admin/commands/remove" class="inline-form-sm js-confirm-remove-command" data-command-trigger="<%= command.trigger_string %>">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="command_id" value="<%= command.command_id %>">

@@ -12,6 +12,14 @@ document.addEventListener('click', function (event) {
   if (!(row instanceof HTMLElement)) return;
 
   row.style.display = row.style.display === 'none' ? '' : 'none';
+
+  var isOpen = row.style.display !== 'none';
+  var openerButton = document.querySelector(
+    '.btn-toggle-command-edit[aria-expanded][data-command-id="' + commandId + '"]'
+  );
+  if (openerButton instanceof HTMLElement) {
+    openerButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
 });
 
 document.addEventListener('submit', function (event) {
