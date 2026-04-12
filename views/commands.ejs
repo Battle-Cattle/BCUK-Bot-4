@@ -95,13 +95,15 @@
                     <span class="muted">No Twitch assignments</span>
                   <% } %>
                 </td>
-                <td class="actions">
-                  <button type="button" class="btn btn-sm btn-ghost btn-toggle-command-edit" data-command-id="<%= command.command_id %>">✏️ Edit</button>
-                  <form method="POST" action="/admin/commands/remove" class="inline-form-sm js-confirm-remove-command" data-command-trigger="<%= command.trigger_string %>">
-                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                    <input type="hidden" name="command_id" value="<%= command.command_id %>">
-                    <button type="submit" class="btn btn-danger btn-sm">Remove</button>
-                  </form>
+                <td>
+                  <div class="actions">
+                    <button type="button" class="btn btn-sm btn-ghost btn-toggle-command-edit" data-command-id="<%= command.command_id %>">✏️ Edit</button>
+                    <form method="POST" action="/admin/commands/remove" class="inline-form-sm js-confirm-remove-command" data-command-trigger="<%= command.trigger_string %>">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <input type="hidden" name="command_id" value="<%= command.command_id %>">
+                      <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+                    </form>
+                  </div>
                 </td>
               </tr>
               <tr class="files-row" id="command-edit-<%= command.command_id %>" style="display:none">
