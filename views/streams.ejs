@@ -17,7 +17,7 @@
       <h2 class="section-title">Stream Monitor</h2>
 
       <% if (error) { %>
-      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem">
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem" role="alert" aria-live="assertive" aria-atomic="true">
         <span style="color:var(--danger)">&#9888; Operation failed: <%= error.replace(/_/g, ' ') %></span>
       </div>
       <% } %>
@@ -53,15 +53,15 @@
           <span id="live-updated" style="margin-left:auto;font-size:.75rem;color:var(--muted)"></span>
         </div>
         <div class="table-scroll">
-        <table class="table" id="live-table">
+        <table class="table" id="live-table" aria-label="Currently live streams">
           <thead>
             <tr>
-              <th>Details</th>
-              <th>Streamer</th>
-              <th>Group</th>
-              <th>Game</th>
-              <th>Title</th>
-              <th>Discord Post</th>
+              <th scope="col">Details</th>
+              <th scope="col">Streamer</th>
+              <th scope="col">Group</th>
+              <th scope="col">Game</th>
+              <th scope="col">Title</th>
+              <th scope="col">Discord Post</th>
             </tr>
           </thead>
           <tbody id="live-tbody">
@@ -110,14 +110,14 @@
 
       <div class="card">
         <div class="table-scroll">
-        <table class="table">
+        <table class="table" aria-label="Stream groups">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Channel ID</th>
-              <th>Multi-Twitch</th>
-              <th>Delete Old</th>
-              <th>Actions</th>
+              <th scope="col">Name</th>
+              <th scope="col">Channel ID</th>
+              <th scope="col">Multi-Twitch</th>
+              <th scope="col">Delete Old</th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -206,12 +206,12 @@
 
       <div class="card">
         <div class="table-scroll">
-        <table class="table">
+        <table class="table" aria-label="Streamers">
           <thead>
             <tr>
-              <th>Username</th>
-              <th>Group</th>
-              <th>Actions</th>
+              <th scope="col">Username</th>
+              <th scope="col">Group</th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>

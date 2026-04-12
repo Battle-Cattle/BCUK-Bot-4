@@ -15,7 +15,7 @@
       <h2 class="section-title">Custom Commands</h2>
 
       <% if (error) { %>
-      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem">
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem" role="alert" aria-live="assertive" aria-atomic="true">
         <span style="color:var(--danger)">&#9888; Operation failed: <%= error.replace(/_/g, ' ') %></span>
       </div>
       <% } %>
@@ -59,15 +59,15 @@
 
       <div class="card">
         <div class="table-scroll">
-          <table class="table">
+          <table class="table" aria-label="Custom commands">
             <thead>
               <tr>
-                <th>Trigger</th>
-                <th>Output</th>
-                <th>Discord</th>
-                <th>Multi-Twitch</th>
-                <th>Assigned Twitch Users</th>
-                <th>Actions</th>
+                <th scope="col">Trigger</th>
+                <th scope="col">Output</th>
+                <th scope="col">Discord</th>
+                <th scope="col">Multi-Twitch</th>
+                <th scope="col">Assigned Twitch Users</th>
+                <th scope="col">Actions</th>
               </tr>
             </thead>
             <tbody>

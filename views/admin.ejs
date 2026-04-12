@@ -15,7 +15,7 @@
       <h2 class="section-title">User Management</h2>
 
       <% if (error) { %>
-      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem">
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem" role="alert" aria-live="assertive" aria-atomic="true">
         <span style="color:var(--danger)">&#9888; <%= error === 'duplicate_twitch_name' ? 'Twitch name is already assigned to another user.' : 'Operation failed: ' + error.replace(/_/g, ' ') %></span>
       </div>
       <% } %>
@@ -37,7 +37,7 @@
         <span style="color:var(--text-muted)">No Discord names needed refreshing.</span>
       </div>
       <% } else if (refreshState.outcome === 'error') { %>
-      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem">
+      <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger);padding:.75rem 1rem" role="alert" aria-live="assertive" aria-atomic="true">
         <span style="color:var(--danger)">&#9888; Discord name refresh failed<%= refreshState.failureCount > 0 ? ' for ' + refreshState.failureCount + ' user' + (refreshState.failureCount === 1 ? '' : 's') : '' %>.</span>
       </div>
       <% } %>
@@ -78,15 +78,15 @@
       <!-- User list -->
       <div class="card">
         <div class="table-scroll">
-        <table class="table">
+        <table class="table" aria-label="Users">
           <thead>
             <tr>
-              <th>Discord ID</th>
-              <th>Name</th>
-              <th>Twitch</th>
-              <th>Twitch Bot</th>
-              <th>Level</th>
-              <% if (user.accessLevel >= 3) { %><th>Actions</th><% } %>
+              <th scope="col">Discord ID</th>
+              <th scope="col">Name</th>
+              <th scope="col">Twitch</th>
+              <th scope="col">Twitch Bot</th>
+              <th scope="col">Level</th>
+              <% if (user.accessLevel >= 3) { %><th scope="col">Actions</th><% } %>
             </tr>
           </thead>
           <tbody>
