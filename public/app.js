@@ -183,12 +183,12 @@ if (searchInput && sfxTable) {
       } else {
         row.style.display = 'none';
         if (filesRow && filesRow.classList.contains('files-row')) {
-          filesRow.style.display = 'none';
+          filesRow.classList.add('is-hidden');
         }
       }
     });
 
-    if (noResults) noResults.style.display = visible === 0 ? '' : 'none';
+    if (noResults) noResults.classList.toggle('is-hidden', visible !== 0);
     if (cmdCount)  cmdCount.textContent = String(visible);
   });
 }
@@ -200,8 +200,8 @@ function toggleFiles(btn) {
   const filesRow = sfxRow && sfxRow.nextElementSibling;
   if (!filesRow || !filesRow.classList.contains('files-row')) return;
 
-  const shown = filesRow.style.display !== 'none';
-  filesRow.style.display = shown ? 'none' : '';
+  const shown = !filesRow.classList.contains('is-hidden');
+  filesRow.classList.toggle('is-hidden', shown);
   btn.textContent = shown ? '▶ Files' : '▼ Files';
 }
 

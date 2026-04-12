@@ -39,7 +39,7 @@
             <div class="stat-row"><span class="stat-label">Channel</span><span class="stat-value" id="voice-channel">—</span></div>
             <div class="stat-row"><span class="stat-label">State</span><span class="stat-value" id="voice-state">Idle</span></div>
             <% if (user && user.accessLevel >= 1) { %>
-            <div class="stat-row" style="margin-top:0.75rem">
+            <div class="stat-row stat-row-top-gap">
               <button class="btn btn-sm" id="btn-rejoin-voice"><%= status.voice.connected ? 'Leave Voice' : 'Rejoin Voice' %></button>
             </div>
             <% } %>
@@ -86,14 +86,14 @@
 
       <div class="card">
         <div class="table-scroll">
-        <table class="table" id="sfx-table">
+        <table class="table" id="sfx-table" aria-label="SFX commands">
           <thead>
             <tr>
-              <th>Command</th>
-              <th>Category</th>
-              <th>Files</th>
-              <th>Status</th>
-              <th></th>
+              <th scope="col">Command</th>
+              <th scope="col">Category</th>
+              <th scope="col">Files</th>
+              <th scope="col">Status</th>
+              <th scope="col"></th>
             </tr>
           </thead>
           <tbody>
@@ -116,10 +116,10 @@
               </td>
             </tr>
             <% if (t.files.length > 0) { %>
-            <tr class="files-row" style="display:none">
+            <tr class="files-row is-hidden">
               <td colspan="5">
                 <table class="inner-table">
-                  <thead><tr><th>File</th><th>Weight</th><th>Status</th></tr></thead>
+                  <thead><tr><th scope="col">File</th><th scope="col">Weight</th><th scope="col">Status</th></tr></thead>
                   <tbody>
                     <% t.files.forEach(function(f) { %>
                     <tr>
@@ -137,7 +137,7 @@
           </tbody>
         </table>
         </div>
-        <div id="no-results" class="empty-msg" style="display:none;padding:1rem">No commands match your filter.</div>
+        <div id="no-results" class="empty-msg empty-msg-padded is-hidden">No commands match your filter.</div>
       </div>
     </section>
 
