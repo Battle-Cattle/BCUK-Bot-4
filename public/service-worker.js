@@ -10,6 +10,7 @@ const STATIC_ASSETS = [
   '/app.js',
   '/navbar.js',
   '/admin.js',
+  '/commands.js',
   '/streams.js',
   '/pwa-register.js',
   '/manifest.json',

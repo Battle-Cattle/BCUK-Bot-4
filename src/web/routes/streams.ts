@@ -9,6 +9,7 @@ import {
   removeStreamer,
   removeStreamersByGroup,
 } from '../../db';
+import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { getMonitorEnabled, setMonitorEnabled } from '../../monitorSettings';
 import { restartTwitchMonitor, getLiveStates, catchUpDiscordPosts } from '../../twitchMonitor';
@@ -23,13 +24,14 @@ const KNOWN_ERRORS = new Set([
 
 // ─── View ─────────────────────────────────────────────────────────────────────
 
-router.get('/streams', requireManager, async (req, res) => {
+router.get('/streams', requireManager, csrfProtection, async (req, res) => {
   try {
     const [groups, streamers] = await Promise.all([getAllStreamGroups(), getAllStreamers()]);
     res.render('streams', {
       user: req.session.user,
       groups,
       streamers,
+      csrfToken: req.csrfToken(),
       monitorEnabled: getMonitorEnabled(),
       error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
     });
@@ -41,7 +43,7 @@ router.get('/streams', requireManager, async (req, res) => {
 
 // ─── Toggle ───────────────────────────────────────────────────────────────────
 
-router.post('/streams/toggle', requireManager, (req, res) => {
+router.post('/streams/toggle', requireManager, csrfProtection, (req, res) => {
   const wasEnabled = getMonitorEnabled();
   setMonitorEnabled(!wasEnabled);
 
@@ -64,7 +66,7 @@ router.get('/streams/live', requireManager, (_req, res) => {
 
 // ─── Groups ───────────────────────────────────────────────────────────────────
 
-router.post('/streams/groups/add', requireManager, async (req, res) => {
+router.post('/streams/groups/add', requireManager, csrfProtection, async (req, res) => {
   const { name, discord_channel, live_message, new_game_message, multi_twitch_message } = req.body as Record<string, string | undefined>;
   const multi_twitch = req.body.multi_twitch === 'on';
   const delete_old_posts = req.body.delete_old_posts === 'on';
@@ -91,7 +93,7 @@ router.post('/streams/groups/add', requireManager, async (req, res) => {
   res.redirect('/admin/streams');
 });
 
-router.post('/streams/groups/update', requireManager, async (req, res) => {
+router.post('/streams/groups/update', requireManager, csrfProtection, async (req, res) => {
   const { group_id, name, discord_channel, live_message, new_game_message, multi_twitch_message } = req.body as Record<string, string | undefined>;
   const multi_twitch = req.body.multi_twitch === 'on';
   const delete_old_posts = req.body.delete_old_posts === 'on';
@@ -121,7 +123,7 @@ router.post('/streams/groups/update', requireManager, async (req, res) => {
   res.redirect('/admin/streams');
 });
 
-router.post('/streams/groups/remove', requireManager, async (req, res) => {
+router.post('/streams/groups/remove', requireManager, csrfProtection, async (req, res) => {
   const { group_id } = req.body as { group_id?: string };
   if (!group_id) return res.redirect('/admin/streams');
   const parsedGroupId = parseInt(group_id, 10);
@@ -141,7 +143,7 @@ router.post('/streams/groups/remove', requireManager, async (req, res) => {
 
 // ─── Streamers ────────────────────────────────────────────────────────────────
 
-router.post('/streams/streamers/add', requireManager, async (req, res) => {
+router.post('/streams/streamers/add', requireManager, csrfProtection, async (req, res) => {
   const { name, group_id } = req.body as { name?: string; group_id?: string };
   if (!name || !group_id) return res.redirect('/admin/streams');
   const parsedGroupId = parseInt(group_id, 10);
@@ -157,7 +159,7 @@ router.post('/streams/streamers/add', requireManager, async (req, res) => {
   res.redirect('/admin/streams');
 });
 
-router.post('/streams/streamers/remove', requireManager, async (req, res) => {
+router.post('/streams/streamers/remove', requireManager, csrfProtection, async (req, res) => {
   const { streamer_id } = req.body as { streamer_id?: string };
   if (!streamer_id) return res.redirect('/admin/streams');
   const parsedStreamerId = parseInt(streamer_id, 10);

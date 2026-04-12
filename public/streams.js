@@ -1,7 +1,7 @@
 function toggleGroupEdit(id) {
   var row = document.getElementById('group-edit-' + id);
   if (!row) return;
-  row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+  row.classList.toggle('is-hidden');
 }
 
 var expandedLiveRows = Object.create(null);
@@ -283,7 +283,7 @@ function renderLiveRows(enabled, streams) {
       postTd.appendChild(postedBadge);
     } else {
       var noneSpan = document.createElement('span');
-      noneSpan.style.color = 'var(--muted)';
+      noneSpan.className = 'muted';
       noneSpan.textContent = '— none';
       postTd.appendChild(noneSpan);
     }
