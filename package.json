@@ -12,7 +12,7 @@
     "@snazzah/davey": "^0.1.11",
     "discord.js": "^14.26.2",
     "dotenv": "^17.4.2",
-    "ejs": "^5.0.1",
+    "ejs": "^5.0.2",
     "express": "^5.2.1",
     "express-mysql-session": "^3.0.3",
     "express-session": "^1.19.0",
