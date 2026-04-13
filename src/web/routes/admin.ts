@@ -13,6 +13,7 @@ import {
   AccessLevel,
   AccessLevelValue,
 } from '../../db';
+import { csrfProtection } from '../csrf';
 import { requireManager, requireAdmin } from '../middleware';
 import { discordClient, fetchMemberDisplayName } from '../../discordBot';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitchBot';
@@ -150,12 +151,13 @@ async function runDiscordNameRefresh(): Promise<void> {
 }
 
 // View user list (Manager+)
-router.get('/users', requireManager, async (req, res) => {
+router.get('/users', requireManager, csrfProtection, async (req, res) => {
   try {
     const users = await getAllUsers();
     res.render('admin', {
       user: req.session.user,
       users,
+      csrfToken: req.csrfToken(),
       accessLevelLabels: ACCESS_LEVEL_LABELS,
       error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
       refreshState,
@@ -171,7 +173,7 @@ router.get('/users/refresh-status', requireManager, (_req, res) => {
 });
 
 // Add or update a user (Admin only)
-router.post('/users/add', requireAdmin, async (req, res) => {
+router.post('/users/add', requireAdmin, csrfProtection, async (req, res) => {
   const { discord_id, discord_name, access_level, twitch_name, clear_twitch_name } = req.body as {
     discord_id?: string;
     discord_name?: string;
@@ -314,7 +316,7 @@ router.post('/users/add', requireAdmin, async (req, res) => {
 });
 
 // Update access level (Admin only)
-router.post('/users/update', requireAdmin, async (req, res) => {
+router.post('/users/update', requireAdmin, csrfProtection, async (req, res) => {
   const { discord_id, access_level } = req.body as { discord_id?: string; access_level?: string };
   if (!discord_id || access_level === undefined) return res.redirect('/admin/users');
   const level = parseInt(access_level, 10);
@@ -338,7 +340,7 @@ router.post('/users/update', requireAdmin, async (req, res) => {
 });
 
 // Remove a user (Admin only)
-router.post('/users/remove', requireAdmin, async (req, res) => {
+router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
   const { discord_id } = req.body as { discord_id?: string };
   const trimmedDiscordId = (discord_id ?? '').trim();
   if (!trimmedDiscordId) return res.redirect('/admin/users');
@@ -389,7 +391,7 @@ router.post('/users/remove', requireAdmin, async (req, res) => {
 });
 
 // Toggle twitch bot participation for a user (Manager+)
-router.post('/users/toggle-twitch', requireManager, async (req, res) => {
+router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, res) => {
   const { discord_id, is_twitch_bot_enabled } = req.body as {
     discord_id?: string;
     is_twitch_bot_enabled?: string;
@@ -460,7 +462,7 @@ router.post('/users/toggle-twitch', requireManager, async (req, res) => {
 });
 
 // Refresh Discord names for all users (Manager+)
-router.post('/users/refresh-names', requireManager, async (req, res) => {
+router.post('/users/refresh-names', requireManager, csrfProtection, async (req, res) => {
   if (refreshState.outcome === 'running') {
     return res.redirect('/admin/users');
   }
