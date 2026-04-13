@@ -11,9 +11,9 @@ document.addEventListener('click', function (event) {
   var row = document.getElementById('command-edit-' + commandId);
   if (!(row instanceof HTMLElement)) return;
 
-  row.style.display = row.style.display === 'none' ? '' : 'none';
+  row.classList.toggle('is-hidden');
 
-  var isOpen = row.style.display !== 'none';
+  var isOpen = !row.classList.contains('is-hidden');
   var openerButton = document.querySelector(
     '.btn-toggle-command-edit[aria-expanded][data-command-id="' + commandId + '"]'
   );
