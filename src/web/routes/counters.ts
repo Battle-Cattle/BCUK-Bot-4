@@ -13,12 +13,17 @@ const router = Router();
 
 const KNOWN_ERRORS = new Set([
   'missing_fields',
+  'same_commands',
   'invalid_id',
   'add_failed',
   'update_failed',
   'remove_failed',
   'reset_failed',
 ]);
+
+function isCounterNotFoundError(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith('Counter not found:');
+}
 
 function normalizeRequiredText(value: string | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -75,6 +80,10 @@ router.post('/counters/add', requireManager, csrfProtection, async (req, res) =>
     return res.redirect('/admin/counters?error=missing_fields');
   }
 
+  if (normalizedTriggerCommand === normalizedCheckCommand) {
+    return res.redirect('/admin/counters?error=same_commands');
+  }
+
   try {
     await addCounter(
       normalizedTriggerCommand,
@@ -105,6 +114,10 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
     return res.redirect('/admin/counters?error=missing_fields');
   }
 
+  if (normalizedTriggerCommand === normalizedCheckCommand) {
+    return res.redirect('/admin/counters?error=same_commands');
+  }
+
   if (parsedId === null) {
     return res.redirect('/admin/counters?error=invalid_id');
   }
@@ -119,6 +132,10 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
       resetYearly,
     );
   } catch (err) {
+    if (isCounterNotFoundError(err)) {
+      return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
+    }
+
     console.error('[Web] Update counter error:', err);
     return res.redirect('/admin/counters?error=update_failed');
   }
@@ -137,6 +154,10 @@ router.post('/counters/remove', requireManager, csrfProtection, async (req, res)
   try {
     await removeCounter(parsedId);
   } catch (err) {
+    if (isCounterNotFoundError(err)) {
+      return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
+    }
+
     console.error('[Web] Remove counter error:', err);
     return res.redirect('/admin/counters?error=remove_failed');
   }
@@ -154,6 +175,10 @@ router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, r
   try {
     await resetCounterCurrentValue(parsedId);
   } catch (err) {
+    if (isCounterNotFoundError(err)) {
+      return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
+    }
+
     console.error('[Web] Reset counter error:', err);
     return res.redirect('/admin/counters?error=reset_failed');
   }

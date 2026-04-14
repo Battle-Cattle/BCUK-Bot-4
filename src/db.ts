@@ -464,7 +464,7 @@ export async function updateCounter(
   incrementMessage: string,
   resetYearly: boolean,
 ): Promise<void> {
-  await getPool().execute(
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `UPDATE counter
      SET trigger_command = ?,
          check_command = ?,
@@ -474,17 +474,28 @@ export async function updateCounter(
      WHERE id = ?`,
     [triggerCommand.trim(), checkCommand.trim(), message.trim(), incrementMessage.trim(), resetYearly ? 1 : 0, id],
   );
+
+  if (result.affectedRows === 0) {
+    throw new Error(`Counter not found: ${id}`);
+  }
 }
 
 export async function removeCounter(id: number): Promise<void> {
-  await getPool().execute('DELETE FROM counter WHERE id = ?', [id]);
+  const [result] = await getPool().execute<mysql.ResultSetHeader>('DELETE FROM counter WHERE id = ?', [id]);
+  if (result.affectedRows === 0) {
+    throw new Error(`Counter not found: ${id}`);
+  }
 }
 
 export async function resetCounterCurrentValue(id: number): Promise<void> {
-  await getPool().execute(
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
     'UPDATE counter SET current_value = 0 WHERE id = ?',
     [id],
   );
+
+  if (result.affectedRows === 0) {
+    throw new Error(`Counter not found: ${id}`);
+  }
 }
 
 // ─── Stream monitor ──────────────────────────────────────────────────────────

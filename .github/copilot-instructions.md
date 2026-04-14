@@ -220,8 +220,10 @@ Copy `.env.example` → `.env` and fill in all values.
 |-------|---------|-------------|
 | 0     | User    | View dashboard only |
 | 1     | Mod     | View dashboard + join/leave voice channel |
-| 2     | Manager | View dashboard + user list + join/leave voice + stream monitor management |
+| 2     | Manager | View dashboard + user list + join/leave voice + Manager+ admin routes (stream monitor, custom commands, and counters) |
 | 3     | Admin   | Full access: add/update/remove users + all above |
+
+`Manager+` in the route table means access level 2 or 3 (`Manager` or `Admin`).
 
 > **First-time setup:** Manually INSERT a row into the `user` table with your Discord ID and `access_level = 3` before first login.
 
