@@ -420,6 +420,13 @@ export interface DbCounter {
   current_value: number;
 }
 
+export class CounterNotFoundError extends Error {
+  constructor(id: number) {
+    super(`Counter not found: ${id}`);
+    this.name = 'CounterNotFoundError';
+  }
+}
+
 function mapCounter(row: mysql.RowDataPacket): DbCounter {
   return {
     id: row.id,
@@ -484,14 +491,14 @@ export async function updateCounter(
   );
 
   if (result.affectedRows === 0 && !(await counterExists(id))) {
-    throw new Error(`Counter not found: ${id}`);
+    throw new CounterNotFoundError(id);
   }
 }
 
 export async function removeCounter(id: number): Promise<void> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>('DELETE FROM counter WHERE id = ?', [id]);
   if (result.affectedRows === 0) {
-    throw new Error(`Counter not found: ${id}`);
+    throw new CounterNotFoundError(id);
   }
 }
 
@@ -502,7 +509,7 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
   );
 
   if (result.affectedRows === 0 && !(await counterExists(id))) {
-    throw new Error(`Counter not found: ${id}`);
+    throw new CounterNotFoundError(id);
   }
 }
 

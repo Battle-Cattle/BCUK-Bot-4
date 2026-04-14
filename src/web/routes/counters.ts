@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   addCounter,
+  CounterNotFoundError,
   getAllCounters,
   removeCounter,
   resetCounterCurrentValue,
@@ -20,10 +21,6 @@ const KNOWN_ERRORS = new Set([
   'remove_failed',
   'reset_failed',
 ]);
-
-function isCounterNotFoundError(err: unknown): boolean {
-  return err instanceof Error && err.message.startsWith('Counter not found:');
-}
 
 function normalizeRequiredText(value: string | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -50,6 +47,46 @@ function parseCounterId(value: string | undefined): number | null {
   return Number.isSafeInteger(parsedValue) && parsedValue > 0 ? parsedValue : null;
 }
 
+type CounterFormValidationResult =
+  | {
+      error: null;
+      triggerCommand: string;
+      checkCommand: string;
+      message: string;
+      incrementMessage: string;
+      resetYearly: boolean;
+    }
+  | {
+      error: 'missing_fields' | 'same_commands';
+    };
+
+function validateAndNormalizeCounterForm(
+  rawForm: Record<string, string | undefined>,
+): CounterFormValidationResult {
+  const normalizedTriggerCommand = normalizeSingleTokenRequiredText(rawForm.trigger_command);
+  const normalizedCheckCommand = normalizeSingleTokenRequiredText(rawForm.check_command);
+  const normalizedMessage = normalizeRequiredText(rawForm.message);
+  const normalizedIncrementMessage = normalizeRequiredText(rawForm.increment_message);
+  const resetYearly = rawForm.reset_yearly === 'on';
+
+  if (!normalizedTriggerCommand || !normalizedCheckCommand || !normalizedMessage || !normalizedIncrementMessage) {
+    return { error: 'missing_fields' };
+  }
+
+  if (normalizedTriggerCommand === normalizedCheckCommand) {
+    return { error: 'same_commands' };
+  }
+
+  return {
+    error: null,
+    triggerCommand: normalizedTriggerCommand,
+    checkCommand: normalizedCheckCommand,
+    message: normalizedMessage,
+    incrementMessage: normalizedIncrementMessage,
+    resetYearly,
+  };
+}
+
 router.get('/counters', requireManager, csrfProtection, async (req, res) => {
   try {
     const counters = await getAllCounters();
@@ -68,29 +105,18 @@ router.get('/counters', requireManager, csrfProtection, async (req, res) => {
 });
 
 router.post('/counters/add', requireManager, csrfProtection, async (req, res) => {
-  const { trigger_command, check_command, message, increment_message } = req.body as Record<string, string | undefined>;
-  const resetYearly = req.body.reset_yearly === 'on';
-
-  const normalizedTriggerCommand = normalizeSingleTokenRequiredText(trigger_command);
-  const normalizedCheckCommand = normalizeSingleTokenRequiredText(check_command);
-  const normalizedMessage = normalizeRequiredText(message);
-  const normalizedIncrementMessage = normalizeRequiredText(increment_message);
-
-  if (!normalizedTriggerCommand || !normalizedCheckCommand || !normalizedMessage || !normalizedIncrementMessage) {
-    return res.redirect('/admin/counters?error=missing_fields');
-  }
-
-  if (normalizedTriggerCommand === normalizedCheckCommand) {
-    return res.redirect('/admin/counters?error=same_commands');
+  const form = validateAndNormalizeCounterForm(req.body as Record<string, string | undefined>);
+  if (form.error) {
+    return res.redirect(`/admin/counters?error=${form.error}`);
   }
 
   try {
     await addCounter(
-      normalizedTriggerCommand,
-      normalizedCheckCommand,
-      normalizedMessage,
-      normalizedIncrementMessage,
-      resetYearly,
+      form.triggerCommand,
+      form.checkCommand,
+      form.message,
+      form.incrementMessage,
+      form.resetYearly,
     );
   } catch (err) {
     console.error('[Web] Add counter error:', err);
@@ -101,21 +127,12 @@ router.post('/counters/add', requireManager, csrfProtection, async (req, res) =>
 });
 
 router.post('/counters/update', requireManager, csrfProtection, async (req, res) => {
-  const { id, trigger_command, check_command, message, increment_message } = req.body as Record<string, string | undefined>;
-  const resetYearly = req.body.reset_yearly === 'on';
+  const { id } = req.body as Record<string, string | undefined>;
 
   const parsedId = parseCounterId(id);
-  const normalizedTriggerCommand = normalizeSingleTokenRequiredText(trigger_command);
-  const normalizedCheckCommand = normalizeSingleTokenRequiredText(check_command);
-  const normalizedMessage = normalizeRequiredText(message);
-  const normalizedIncrementMessage = normalizeRequiredText(increment_message);
-
-  if (!normalizedTriggerCommand || !normalizedCheckCommand || !normalizedMessage || !normalizedIncrementMessage) {
-    return res.redirect('/admin/counters?error=missing_fields');
-  }
-
-  if (normalizedTriggerCommand === normalizedCheckCommand) {
-    return res.redirect('/admin/counters?error=same_commands');
+  const form = validateAndNormalizeCounterForm(req.body as Record<string, string | undefined>);
+  if (form.error) {
+    return res.redirect(`/admin/counters?error=${form.error}`);
   }
 
   if (parsedId === null) {
@@ -125,14 +142,14 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
   try {
     await updateCounter(
       parsedId,
-      normalizedTriggerCommand,
-      normalizedCheckCommand,
-      normalizedMessage,
-      normalizedIncrementMessage,
-      resetYearly,
+      form.triggerCommand,
+      form.checkCommand,
+      form.message,
+      form.incrementMessage,
+      form.resetYearly,
     );
   } catch (err) {
-    if (isCounterNotFoundError(err)) {
+    if (err instanceof CounterNotFoundError) {
       return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
     }
 
@@ -154,7 +171,7 @@ router.post('/counters/remove', requireManager, csrfProtection, async (req, res)
   try {
     await removeCounter(parsedId);
   } catch (err) {
-    if (isCounterNotFoundError(err)) {
+    if (err instanceof CounterNotFoundError) {
       return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
     }
 
@@ -175,7 +192,7 @@ router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, r
   try {
     await resetCounterCurrentValue(parsedId);
   } catch (err) {
-    if (isCounterNotFoundError(err)) {
+    if (err instanceof CounterNotFoundError) {
       return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
     }
 
