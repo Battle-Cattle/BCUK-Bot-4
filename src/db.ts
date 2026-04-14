@@ -408,6 +408,85 @@ export async function unassignUserFromCommand(commandId: number, discordId: stri
   );
 }
 
+// ─── Counter commands ───────────────────────────────────────────────────────
+
+export interface DbCounter {
+  id: number;
+  trigger_command: string;
+  check_command: string;
+  message: string;
+  increment_message: string;
+  reset_yearly: boolean;
+  current_value: number;
+}
+
+function mapCounter(row: mysql.RowDataPacket): DbCounter {
+  return {
+    id: row.id,
+    trigger_command: row.trigger_command,
+    check_command: row.check_command,
+    message: row.message,
+    increment_message: row.increment_message,
+    reset_yearly: Buffer.isBuffer(row.reset_yearly) ? row.reset_yearly[0] === 1 : row.reset_yearly == 1,
+    current_value: row.current_value,
+  };
+}
+
+export async function getAllCounters(): Promise<DbCounter[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value
+     FROM counter
+     ORDER BY trigger_command`,
+  );
+
+  return rows.map(mapCounter);
+}
+
+export async function addCounter(
+  triggerCommand: string,
+  checkCommand: string,
+  message: string,
+  incrementMessage: string,
+  resetYearly: boolean,
+): Promise<void> {
+  await getPool().execute(
+    `INSERT INTO counter (trigger_command, check_command, message, increment_message, reset_yearly, current_value)
+     VALUES (?, ?, ?, ?, ?, 0)`,
+    [triggerCommand.trim(), checkCommand.trim(), message.trim(), incrementMessage.trim(), resetYearly ? 1 : 0],
+  );
+}
+
+export async function updateCounter(
+  id: number,
+  triggerCommand: string,
+  checkCommand: string,
+  message: string,
+  incrementMessage: string,
+  resetYearly: boolean,
+): Promise<void> {
+  await getPool().execute(
+    `UPDATE counter
+     SET trigger_command = ?,
+         check_command = ?,
+         message = ?,
+         increment_message = ?,
+         reset_yearly = ?
+     WHERE id = ?`,
+    [triggerCommand.trim(), checkCommand.trim(), message.trim(), incrementMessage.trim(), resetYearly ? 1 : 0, id],
+  );
+}
+
+export async function removeCounter(id: number): Promise<void> {
+  await getPool().execute('DELETE FROM counter WHERE id = ?', [id]);
+}
+
+export async function resetCounterCurrentValue(id: number): Promise<void> {
+  await getPool().execute(
+    'UPDATE counter SET current_value = 0 WHERE id = ?',
+    [id],
+  );
+}
+
 // ─── Stream monitor ──────────────────────────────────────────────────────────
 
 export interface DbStreamGroup {

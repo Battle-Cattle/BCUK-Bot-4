@@ -26,17 +26,21 @@ BCUK_Bot_4/
 │   ├── twitchApi.ts          — Twitch Helix API wrapper (app token, getUsers, getStreams)
 │   ├── twitchMonitor.ts      — Polling-based stream monitor + Discord announcements
 │   ├── monitorSettings.ts    — Read/write monitor-settings.json (toggle only)
+│   ├── twitchChannelName.ts   — Twitch channel-name normalization helper
 │   ├── types/
 │   │   └── express.d.ts      — Augments express-session SessionData
 │   └── web/
 │       ├── server.ts         — Express app + startWebPanel()
+│       ├── csrf.ts           — CSRF token middleware for web forms
 │       ├── middleware.ts     — requireAuth / requireMod / requireManager / requireAdmin
 │       └── routes/
 │           ├── auth.ts       — Discord OAuth2 (manual, no passport)
 │           ├── dashboard.ts  — GET / → renders dashboard
 │           ├── admin.ts      — User CRUD (GET+POST /admin/users/*)
 │           ├── api.ts        — GET /api/status, POST /api/voice/join|leave
-│           └── streams.ts    — Stream group/streamer CRUD + toggle
+│           ├── streams.ts    — Stream group/streamer CRUD + toggle
+│           ├── commands.ts   — Custom command CRUD + assignment management (web panel)
+│           └── counters.ts   — Counter CRUD + manual reset management (web panel)
 ├── views/
 │   ├── partials/nav.ejs
 │   ├── partials/pwa-head.ejs
@@ -44,6 +48,8 @@ BCUK_Bot_4/
 │   ├── login.ejs
 │   ├── dashboard.ejs
 │   ├── admin.ejs
+│   ├── commands.ejs          — Custom command management page
+│   ├── counters.ejs          — Counter management page
 │   ├── streams.ejs           — Stream monitor management page
 │   └── error.ejs
 ├── public/
@@ -52,6 +58,8 @@ BCUK_Bot_4/
 │   ├── navbar.js             — Mobile nav toggle behavior
 │   ├── admin.js              — Admin users page interactions
 │   ├── streams.js            — Stream monitor admin page interactions
+│   ├── commands.js           — Commands page interactions
+│   ├── counters.js           — Counters page interactions
 │   ├── pwa-register.js       — Service worker registration + update prompt
 │   ├── service-worker.js     — Offline cache + runtime caching strategy
 │   ├── manifest.json         — PWA metadata
@@ -135,6 +143,36 @@ Tables in the existing MySQL 8 database:
 | `discord_message_id`  | varchar(20) | nullable — ID of live announcement message |
 | `discord_channel_id`  | bigint      | nullable — channel the announcement was posted in |
 | `live_game`           | varchar(255)| nullable — game at time of last announcement |
+
+### `custom_command`
+
+| Column              | Type         | Notes                                      |
+|---------------------|--------------|--------------------------------------------|
+| `command_id`        | int PK       |                                            |
+| `trigger_string`    | varchar      | Full command token including prefix        |
+| `output`            | text         | Reply text                                 |
+| `is_discord_enabled`| tinyint(1)   | Enables Discord-side execution             |
+| `is_multi_twitch`   | tinyint(1)   | Enables multi-channel Twitch broadcast mode |
+
+### `twitch_user_commands`
+
+| Column       | Type       | Notes                          |
+|--------------|------------|--------------------------------|
+| `command_id` | int FK→custom_command.command_id | |
+| `discord_id` | bigint FK→user.discord_id        | |
+
+### `counter`
+
+| Column              | Type         | Notes                                      |
+|---------------------|--------------|--------------------------------------------|
+| `id`                | int PK       |                                            |
+| `trigger_command`   | varchar      | Command that increments the counter        |
+| `check_command`     | varchar      | Command that reads current value           |
+| `message`           | text         | Check reply format (`%d` placeholder)      |
+| `increment_message` | text         | Increment reply format (`%d` placeholder)  |
+| `reset_yearly`      | tinyint(1)   | Whether current_value resets on yearly archive |
+| `current_value`     | int          | Live counter value                         |
+| `value2020`-`value2025` | int nullable | Yearly archived values (expanded over time) |
 
 > **DB migration** (run once before first use of stream monitoring):
 > ```sql
@@ -294,6 +332,9 @@ Any CRUD change to groups or streamers via the web panel calls `restartTwitchMon
 ### monitor-settings.json
 Local file (`monitor-settings.json` at `process.cwd()`) persists one value: `twitchMonitorEnabled` (boolean, default `true` if file missing). It is **gitignored**. Read/write via `src/monitorSettings.ts` helpers only.
 
+### Custom commands and counters are panel-first
+`/admin/commands` and `/admin/counters` currently provide management CRUD in the web panel. Runtime execution wiring in Twitch/Discord message handlers and counter yearly scheduler logic may be implemented separately from panel work.
+
 ---
 
 ## Scripts
@@ -346,6 +387,17 @@ npm start        # node dist/index.js (production)
 | POST   | `/admin/streams/groups/remove` | Manager+ | Remove stream group (and its streamers) |
 | POST   | `/admin/streams/streamers/add`    | Manager+ | Add streamer to group |
 | POST   | `/admin/streams/streamers/remove` | Manager+ | Remove streamer |
+| GET    | `/admin/commands`       | Manager+    | Custom command management page |
+| POST   | `/admin/commands/add`   | Manager+    | Add custom command |
+| POST   | `/admin/commands/update`| Manager+    | Update custom command |
+| POST   | `/admin/commands/remove`| Manager+    | Remove custom command |
+| POST   | `/admin/commands/assign`| Manager+    | Assign user to custom command |
+| POST   | `/admin/commands/unassign`| Manager+  | Remove user assignment from custom command |
+| GET    | `/admin/counters`       | Manager+    | Counter management page |
+| POST   | `/admin/counters/add`   | Manager+    | Add counter definition |
+| POST   | `/admin/counters/update`| Manager+    | Update counter definition |
+| POST   | `/admin/counters/remove`| Manager+    | Remove counter definition |
+| POST   | `/admin/counters/reset/:id`| Manager+ | Manually reset current_value to 0 |
 
 ---
 
@@ -381,6 +433,11 @@ In-memory singleton. Functions:
 - `setStreamerLive(id, messageId, channelId, game)` — update `discord_message_id`, `discord_channel_id`, `live_game` on a streamer row
 - `clearStreamerLive(id)` — null out all three live columns on a streamer row
 - `DbStreamGroup` and `DbStreamerFull` interfaces exported from `db.ts`
+- `getAllCustomCommandsWithAssignments()` / `addCustomCommand()` / `updateCustomCommand()` / `removeCustomCommand()` — custom command management
+- `assignUserToCommand()` / `unassignUserFromCommand()` — custom command-to-user assignment management
+- `DbCustomCommand` / `DbCustomCommandAssignedUser` / `DbCustomCommandWithAssignments` interfaces exported from `db.ts`
+- `getAllCounters()` / `addCounter()` / `updateCounter()` / `removeCounter()` / `resetCounterCurrentValue()` — counter management for web panel
+- `DbCounter` interface exported from `db.ts`
 
 > **Note:** State is lost on process restart. Sessions are stored in the `sessions` MySQL table via `express-mysql-session` (created automatically on first run).
 
