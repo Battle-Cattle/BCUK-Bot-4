@@ -351,17 +351,19 @@ export function playFile(filePath: string): void {
   if (!connection) {
     throw new Error('Not connected to a voice channel');
   }
-  const resolved = path.resolve(filePath);
-
-  // Prevent path-traversal: the resolved path must stay inside the SFX folder,
-  // and it must point to a real file rather than the folder itself.
-  const sfxRoot = path.resolve(SFX_FOLDER);
-  if (!resolved.startsWith(`${sfxRoot}${path.sep}`)) {
-    throw new Error(`Path traversal blocked: ${filePath} resolves outside SFX folder`);
+  const candidatePath = path.resolve(filePath);
+  if (!fs.existsSync(candidatePath)) {
+    throw new Error(`Sound file not found: ${candidatePath}`);
   }
 
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`Sound file not found: ${resolved}`);
+  const resolved = fs.realpathSync(candidatePath);
+
+  // Prevent path-traversal by comparing the real resolved path against the
+  // real SFX root. This blocks symlink escapes and the folder itself.
+  const sfxRoot = fs.realpathSync(path.resolve(SFX_FOLDER));
+  const relativeToRoot = path.relative(sfxRoot, resolved);
+  if (!relativeToRoot || relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
+    throw new Error(`Path traversal blocked: ${filePath} resolves outside SFX folder`);
   }
 
   const fileStats = fs.statSync(resolved);
