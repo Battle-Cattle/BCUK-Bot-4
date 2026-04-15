@@ -181,11 +181,23 @@ Stores counter command definitions and values managed through the admin panel.
 | `current_value` | `INT` | Current live value |
 | `value2020`-`value2025` | `INT` nullable | Existing yearly archive columns; additional `valueYYYY` columns may be added over time |
 
+Indexes:
+
+- `UNIQUE` on `trigger_command` — enforces uniqueness and optimizes the `ORDER BY trigger_command` used by the admin panel listing query.
+- `UNIQUE` on `check_command` — enforces uniqueness and supports future runtime command-lookup queries.
+
 Expected constraints and behavior:
 
 - `trigger_command` and `check_command` should be unique.
 - Both command columns should store single-token commands including any prefix.
 - Current panel support includes CRUD and manual reset of `current_value`; runtime command handling/scheduler wiring can be implemented independently.
+
+> **DB migration** (run once to add counter indexes):
+> ```sql
+> ALTER TABLE counter
+>   ADD UNIQUE INDEX idx_counter_trigger_command (trigger_command),
+>   ADD UNIQUE INDEX idx_counter_check_command (check_command);
+> ```
 
 ## `sessions`
 

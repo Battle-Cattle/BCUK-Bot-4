@@ -174,6 +174,15 @@ Tables in the existing MySQL 8 database:
 | `current_value`     | int          | Live counter value                         |
 | `value2020`-`value2025` | int nullable | Yearly archived values (expanded over time) |
 
+Indexes: `UNIQUE` on `trigger_command`, `UNIQUE` on `check_command`.
+
+> **DB migration** (run once to add counter indexes):
+> ```sql
+> ALTER TABLE counter
+>   ADD UNIQUE INDEX idx_counter_trigger_command (trigger_command),
+>   ADD UNIQUE INDEX idx_counter_check_command (check_command);
+> ```
+
 > **DB migration** (run once before first use of stream monitoring):
 > ```sql
 > ALTER TABLE streamer
