@@ -347,6 +347,13 @@ export async function addCustomCommand(
   );
 }
 
+export class CommandNotFoundError extends Error {
+  constructor(id: number) {
+    super(`Command not found: ${id}`);
+    this.name = 'CommandNotFoundError';
+  }
+}
+
 export async function updateCustomCommand(
   commandId: number,
   triggerString: string,
@@ -357,12 +364,16 @@ export async function updateCustomCommand(
   const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string');
   const normalizedOutput = requireTrimmedString(output, 'output');
 
-  await getPool().execute(
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `UPDATE custom_command
      SET trigger_string = ?, output = ?, is_discord_enabled = ?, is_multi_twitch = ?
      WHERE command_id = ?`,
     [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
   );
+
+  if (result.affectedRows === 0) {
+    throw new CommandNotFoundError(commandId);
+  }
 }
 
 export async function removeCustomCommand(commandId: number): Promise<void> {
