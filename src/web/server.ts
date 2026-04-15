@@ -15,7 +15,6 @@ import streamsRouter from './routes/streams';
 import commandsRouter from './routes/commands';
 import countersRouter from './routes/counters';
 import { requireAuth } from './middleware';
-import { csrfProtection } from './csrf';
 
 const app = express();
 
@@ -76,11 +75,9 @@ app.use(
   }),
 );
 
-app.use(csrfProtection);
-
 app.use((req, res, next) => {
   res.locals.user = req.session.user ?? null;
-  res.locals.csrfToken = req.csrfToken();
+  res.locals.csrfToken = typeof req.session.csrfToken === 'string' ? req.session.csrfToken : '';
   next();
 });
 
