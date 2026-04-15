@@ -29,7 +29,7 @@
   },
   "overrides": {
     "axios": "^1.15.0",
-    "lodash": ">=4.18.0",
+    "lodash": "^4.18.0",
     "undici": "^7.24.0"
   },
   "devDependencies": {
