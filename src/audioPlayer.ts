@@ -66,6 +66,20 @@ let currentAttemptId = 0;
 
 const RECONNECT_BASE_DELAY_MS = 5_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
+const sfxRoot = path.resolve(SFX_FOLDER);
+let realSfxRoot: string | null = null;
+
+function isPathInsideRoot(rootPath: string, targetPath: string): boolean {
+  const relativePath = path.relative(rootPath, targetPath);
+  return relativePath !== '' && !relativePath.startsWith('..') && !path.isAbsolute(relativePath);
+}
+
+function getRealSfxRoot(): string {
+  if (!realSfxRoot) {
+    realSfxRoot = fs.realpathSync(sfxRoot);
+  }
+  return realSfxRoot;
+}
 
 function isPermanentMisconfigurationError(err: unknown): boolean {
   if (!(err instanceof Error)) {
@@ -351,18 +365,22 @@ export function playFile(filePath: string): void {
   if (!connection) {
     throw new Error('Not connected to a voice channel');
   }
+
   const candidatePath = path.resolve(filePath);
+
+  // Reject obvious traversal attempts before touching the filesystem.
+  if (!isPathInsideRoot(sfxRoot, candidatePath)) {
+    throw new Error(`Path traversal blocked: ${filePath} resolves outside SFX folder`);
+  }
+
   if (!fs.existsSync(candidatePath)) {
     throw new Error(`Sound file not found: ${candidatePath}`);
   }
 
   const resolved = fs.realpathSync(candidatePath);
 
-  // Prevent path-traversal by comparing the real resolved path against the
-  // real SFX root. This blocks symlink escapes and the folder itself.
-  const sfxRoot = fs.realpathSync(path.resolve(SFX_FOLDER));
-  const relativeToRoot = path.relative(sfxRoot, resolved);
-  if (!relativeToRoot || relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
+  // Resolve symlinks and verify the final real path is still inside the SFX root.
+  if (!isPathInsideRoot(getRealSfxRoot(), resolved)) {
     throw new Error(`Path traversal blocked: ${filePath} resolves outside SFX folder`);
   }
 
