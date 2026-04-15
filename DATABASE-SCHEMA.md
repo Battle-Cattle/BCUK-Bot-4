@@ -166,6 +166,27 @@ Expected constraints and behavior:
 - Foreign key from `discord_id` to `user.discord_id`.
 - `ON DELETE CASCADE` is preferred on both foreign keys so deleting a command or user automatically removes mapping rows.
 
+## `counter`
+
+Stores counter command definitions and values managed through the admin panel.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK | Counter row identifier |
+| `trigger_command` | `VARCHAR(...)` | Full command token used for increment actions (including prefix) |
+| `check_command` | `VARCHAR(...)` | Full command token used for read/check actions |
+| `message` | `TEXT` | Read/check reply template; `%d` placeholder is used for current value |
+| `increment_message` | `TEXT` | Increment reply template; `%d` placeholder is used for incremented value |
+| `reset_yearly` | `BIT(1)` or `TINYINT(1)` | Whether yearly archival should reset `current_value` |
+| `current_value` | `INT` | Current live value |
+| `value2020`-`value2025` | `INT` nullable | Existing yearly archive columns; additional `valueYYYY` columns may be added over time |
+
+Expected constraints and behavior:
+
+- `trigger_command` and `check_command` should be unique.
+- Both command columns should store single-token commands including any prefix.
+- Current panel support includes CRUD and manual reset of `current_value`; runtime command handling/scheduler wiring can be implemented independently.
+
 ## `sessions`
 
 Managed automatically by `express-mysql-session`.

@@ -13,6 +13,7 @@ import adminRouter from './routes/admin';
 import apiRouter from './routes/api';
 import streamsRouter from './routes/streams';
 import commandsRouter from './routes/commands';
+import countersRouter from './routes/counters';
 import { requireAuth } from './middleware';
 
 const app = express();
@@ -80,6 +81,7 @@ app.use('/api', requireAuth, apiRouter);
 app.use('/admin', requireAuth, adminRouter);
 app.use('/admin', requireAuth, streamsRouter);
 app.use('/admin', requireAuth, commandsRouter);
+app.use('/admin', requireAuth, countersRouter);
 app.use('/', requireAuth, dashboardRouter);
 
 // 404 handler

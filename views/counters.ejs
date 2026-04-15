@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Counters</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body>
+  <%- include('partials/nav') %>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Counters</h2>
+
+      <% if (error) { %>
+      <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
+        <span class="text-danger">&#9888; Operation failed: <%= error.replace(/_/g, ' ') %></span>
+      </div>
+      <% } %>
+
+      <% if (reset) { %>
+      <div class="card card-alert-success" role="status" aria-live="polite" aria-atomic="true">
+        <span class="text-success">&#10003; Counter value reset to 0.</span>
+      </div>
+      <% } %>
+
+      <div class="card card-spaced">
+        <div class="card-header">
+          <span class="card-icon">🧮</span>
+          <span class="card-label">Management Only</span>
+        </div>
+        <div class="card-body card-body-muted">
+          This page manages counter definitions and current values. Runtime counter execution and yearly scheduler wiring are not enabled yet.
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add Counter</span></div>
+        <div class="card-body">
+          <form method="POST" action="/admin/counters/add">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="form-row-wrap form-section-gap">
+              <div class="form-col-grow">
+                <label for="trigger_command" class="form-label">Trigger Command</label>
+                <input id="trigger_command" class="input full-width" type="text" name="trigger_command" placeholder="e.g. !deaths" required>
+              </div>
+              <div class="form-col-grow">
+                <label for="check_command" class="form-label">Check Command</label>
+                <input id="check_command" class="input full-width" type="text" name="check_command" placeholder="e.g. !deathscheck" required>
+              </div>
+              <label class="input checkbox-input-label">
+                <input type="checkbox" name="reset_yearly"> Reset yearly at Jan 1
+              </label>
+            </div>
+            <div class="form-section-gap">
+              <label for="message" class="form-label">Check Message</label>
+              <p class="hint hint-compact">Shown when check command is used. Use <strong>%d</strong> for current value.</p>
+              <textarea id="message" class="input stream-textarea" name="message" rows="2" placeholder="Current deaths: %d" required></textarea>
+            </div>
+            <div class="form-section-gap">
+              <label for="increment_message" class="form-label">Increment Message</label>
+              <p class="hint hint-compact">Shown when trigger command increments. Use <strong>%d</strong> for new value.</p>
+              <textarea id="increment_message" class="input stream-textarea" name="increment_message" rows="2" placeholder="Deaths increased to %d" required></textarea>
+            </div>
+            <button type="submit" class="btn">Add Counter</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="table-scroll">
+          <table class="table" aria-label="Counters">
+            <thead>
+              <tr>
+                <th scope="col">Trigger</th>
+                <th scope="col">Check</th>
+                <th scope="col" class="counter-value-cell">Current</th>
+                <th scope="col">Reset Yearly</th>
+                <th scope="col">Check Message</th>
+                <th scope="col">Increment Message</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% counters.forEach(function(counter) { %>
+              <tr class="sfx-row">
+                <td class="mono"><strong><%= counter.trigger_command %></strong></td>
+                <td class="mono"><%= counter.check_command %></td>
+                <td class="counter-value-cell"><span class="counter-value-badge"><%= counter.current_value %></span></td>
+                <td><span class="badge <%= counter.reset_yearly ? 'badge-active' : 'badge-offline' %>"><%= counter.reset_yearly ? 'Yes' : 'No' %></span></td>
+                <td class="command-output-cell"><%= counter.message %></td>
+                <td class="command-output-cell"><%= counter.increment_message %></td>
+                <td>
+                  <div class="actions">
+                    <button type="button" class="btn btn-sm btn-ghost btn-toggle-counter-edit" data-counter-id="<%= counter.id %>" aria-controls="counter-edit-<%= counter.id %>" aria-expanded="false">✏️ Edit</button>
+                    <form method="POST" action="/admin/counters/reset/<%= counter.id %>" class="inline-form-sm js-confirm-reset-counter" data-counter-trigger="<%= counter.trigger_command %>">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <button type="submit" class="btn btn-sm">Reset</button>
+                    </form>
+                    <form method="POST" action="/admin/counters/remove" class="inline-form-sm js-confirm-remove-counter" data-counter-trigger="<%= counter.trigger_command %>">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <input type="hidden" name="id" value="<%= counter.id %>">
+                      <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+              <tr class="files-row is-hidden" id="counter-edit-<%= counter.id %>">
+                <td colspan="7">
+                  <div class="command-edit-panel">
+                    <form method="POST" action="/admin/counters/update" class="stack-gap-md">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <input type="hidden" name="id" value="<%= counter.id %>">
+                      <div class="form-row-wrap form-section-gap">
+                        <div class="form-col-grow">
+                          <label for="trigger_command_<%= counter.id %>" class="form-label">Trigger Command</label>
+                          <input id="trigger_command_<%= counter.id %>" class="input full-width" type="text" name="trigger_command" value="<%= counter.trigger_command %>" required>
+                        </div>
+                        <div class="form-col-grow">
+                          <label for="check_command_<%= counter.id %>" class="form-label">Check Command</label>
+                          <input id="check_command_<%= counter.id %>" class="input full-width" type="text" name="check_command" value="<%= counter.check_command %>" required>
+                        </div>
+                        <label class="input checkbox-input-label">
+                          <input type="checkbox" name="reset_yearly" <%= counter.reset_yearly ? 'checked' : '' %>> Reset yearly at Jan 1
+                        </label>
+                      </div>
+                      <div class="form-section-gap">
+                        <label for="message_<%= counter.id %>" class="form-label">Check Message</label>
+                        <textarea id="message_<%= counter.id %>" class="input stream-textarea" name="message" rows="2" required><%= counter.message %></textarea>
+                      </div>
+                      <div class="form-section-gap">
+                        <label for="increment_message_<%= counter.id %>" class="form-label">Increment Message</label>
+                        <textarea id="increment_message_<%= counter.id %>" class="input stream-textarea" name="increment_message" rows="2" required><%= counter.increment_message %></textarea>
+                      </div>
+                      <div class="button-row-wrap">
+                        <button type="submit" class="btn">Save Changes</button>
+                        <button type="button" class="btn btn-ghost btn-toggle-counter-edit" data-counter-id="<%= counter.id %>">Cancel</button>
+                      </div>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+              <% }) %>
+              <% if (counters.length === 0) { %>
+              <tr>
+                <td colspan="7" class="empty-msg">No counters configured yet.</td>
+              </tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <%- include('partials/pwa-register') %>
+  <script src="/counters.js"></script>
+</body>
+</html>

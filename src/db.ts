@@ -323,20 +323,22 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
   return Array.from(commandMap.values());
 }
 
+function requireTrimmedString(value: string, fieldName: string): string {
+  const normalizedValue = value.trim();
+  if (!normalizedValue) {
+    throw new Error(`Missing ${fieldName}`);
+  }
+  return normalizedValue;
+}
+
 export async function addCustomCommand(
   triggerString: string,
   output: string,
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
 ): Promise<void> {
-  const normalizedTriggerString = triggerString.trim();
-  const normalizedOutput = output.trim();
-  if (!normalizedTriggerString) {
-    throw new Error('Missing trigger_string');
-  }
-  if (!normalizedOutput) {
-    throw new Error('Missing output');
-  }
+  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string');
+  const normalizedOutput = requireTrimmedString(output, 'output');
 
   await getPool().execute(
     `INSERT INTO custom_command (trigger_string, output, is_discord_enabled, is_multi_twitch)
@@ -352,14 +354,8 @@ export async function updateCustomCommand(
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
 ): Promise<void> {
-  const normalizedTriggerString = triggerString.trim();
-  const normalizedOutput = output.trim();
-  if (!normalizedTriggerString) {
-    throw new Error('Missing trigger_string');
-  }
-  if (!normalizedOutput) {
-    throw new Error('Missing output');
-  }
+  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string');
+  const normalizedOutput = requireTrimmedString(output, 'output');
 
   await getPool().execute(
     `UPDATE custom_command
@@ -406,6 +402,149 @@ export async function unassignUserFromCommand(commandId: number, discordId: stri
     'DELETE FROM twitch_user_commands WHERE command_id = ? AND discord_id = ?',
     [commandId, discordId],
   );
+}
+
+// ─── Counter commands ───────────────────────────────────────────────────────
+
+export interface DbCounter {
+  id: number;
+  trigger_command: string;
+  check_command: string;
+  message: string;
+  increment_message: string;
+  reset_yearly: boolean;
+  current_value: number;
+}
+
+export class CounterNotFoundError extends Error {
+  constructor(id: number) {
+    super(`Counter not found: ${id}`);
+    this.name = 'CounterNotFoundError';
+  }
+}
+
+interface NormalizedCounterFields {
+  triggerCommand: string;
+  checkCommand: string;
+  message: string;
+  incrementMessage: string;
+}
+
+function normalizeCounterFields(
+  triggerCommand: string,
+  checkCommand: string,
+  message: string,
+  incrementMessage: string,
+): NormalizedCounterFields {
+  return {
+    triggerCommand: requireTrimmedString(triggerCommand, 'trigger_command'),
+    checkCommand: requireTrimmedString(checkCommand, 'check_command'),
+    message: requireTrimmedString(message, 'message'),
+    incrementMessage: requireTrimmedString(incrementMessage, 'increment_message'),
+  };
+}
+
+function mapCounter(row: mysql.RowDataPacket): DbCounter {
+  return {
+    id: row.id,
+    trigger_command: row.trigger_command,
+    check_command: row.check_command,
+    message: row.message,
+    increment_message: row.increment_message,
+    reset_yearly: Buffer.isBuffer(row.reset_yearly) ? row.reset_yearly[0] === 1 : row.reset_yearly == 1,
+    current_value: row.current_value,
+  };
+}
+
+export async function getAllCounters(): Promise<DbCounter[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value
+     FROM counter
+     ORDER BY trigger_command`,
+  );
+
+  return rows.map(mapCounter);
+}
+
+export async function addCounter(
+  triggerCommand: string,
+  checkCommand: string,
+  message: string,
+  incrementMessage: string,
+  resetYearly: boolean,
+): Promise<void> {
+  const normalizedFields = normalizeCounterFields(triggerCommand, checkCommand, message, incrementMessage);
+
+  await getPool().execute(
+    `INSERT INTO counter (trigger_command, check_command, message, increment_message, reset_yearly, current_value)
+     VALUES (?, ?, ?, ?, ?, 0)`,
+    [
+      normalizedFields.triggerCommand,
+      normalizedFields.checkCommand,
+      normalizedFields.message,
+      normalizedFields.incrementMessage,
+      resetYearly ? 1 : 0,
+    ],
+  );
+}
+
+async function counterExists(id: number): Promise<boolean> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    'SELECT 1 FROM counter WHERE id = ? LIMIT 1',
+    [id],
+  );
+  return rows.length > 0;
+}
+
+export async function updateCounter(
+  id: number,
+  triggerCommand: string,
+  checkCommand: string,
+  message: string,
+  incrementMessage: string,
+  resetYearly: boolean,
+): Promise<void> {
+  const normalizedFields = normalizeCounterFields(triggerCommand, checkCommand, message, incrementMessage);
+
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    `UPDATE counter
+     SET trigger_command = ?,
+         check_command = ?,
+         message = ?,
+         increment_message = ?,
+         reset_yearly = ?
+     WHERE id = ?`,
+    [
+      normalizedFields.triggerCommand,
+      normalizedFields.checkCommand,
+      normalizedFields.message,
+      normalizedFields.incrementMessage,
+      resetYearly ? 1 : 0,
+      id,
+    ],
+  );
+
+  if (result.affectedRows === 0 && !(await counterExists(id))) {
+    throw new CounterNotFoundError(id);
+  }
+}
+
+export async function removeCounter(id: number): Promise<void> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>('DELETE FROM counter WHERE id = ?', [id]);
+  if (result.affectedRows === 0) {
+    throw new CounterNotFoundError(id);
+  }
+}
+
+export async function resetCounterCurrentValue(id: number): Promise<void> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    'UPDATE counter SET current_value = 0 WHERE id = ?',
+    [id],
+  );
+
+  if (result.affectedRows === 0 && !(await counterExists(id))) {
+    throw new CounterNotFoundError(id);
+  }
 }
 
 // ─── Stream monitor ──────────────────────────────────────────────────────────
