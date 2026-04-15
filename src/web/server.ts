@@ -1,6 +1,5 @@
 import express from 'express';
 import type { ErrorRequestHandler } from 'express';
-import crypto from 'crypto';
 import session from 'express-session';
 import MySQLStore from 'express-mysql-session';
 import helmet from 'helmet';
@@ -16,6 +15,7 @@ import streamsRouter from './routes/streams';
 import commandsRouter from './routes/commands';
 import countersRouter from './routes/counters';
 import { requireAuth } from './middleware';
+import { csrfProtection } from './csrf';
 
 const app = express();
 
@@ -76,18 +76,11 @@ app.use(
   }),
 );
 
+app.use(csrfProtection);
+
 app.use((req, res, next) => {
   res.locals.user = req.session.user ?? null;
-
-  if (req.session.user) {
-    if (typeof req.session.csrfToken !== 'string' || req.session.csrfToken.length === 0) {
-      req.session.csrfToken = crypto.randomBytes(32).toString('hex');
-    }
-    res.locals.csrfToken = req.session.csrfToken;
-  } else {
-    res.locals.csrfToken = '';
-  }
-
+  res.locals.csrfToken = req.csrfToken();
   next();
 });
 
