@@ -95,7 +95,7 @@ app.use('/', requireAuth, dashboardRouter);
 
 // 404 handler
 app.use((_req, res) => {
-  res.status(404).render('error', { message: 'Page not found.', user: null });
+  res.status(404).render('error', { message: 'Page not found.', user: null, csrfToken: '' });
 });
 
 const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
@@ -108,15 +108,20 @@ const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
   res.status(403).render('error', {
     message: 'Your form session expired or the request could not be verified. Please reload the page and try again.',
     user: req.session.user ?? null,
+    csrfToken: typeof req.session.csrfToken === 'string' ? req.session.csrfToken : '',
   });
 };
 
 app.use(csrfErrorHandler);
 
 // Centralised error handler
-app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('[Web] Unhandled error:', err);
-  res.status(500).render('error', { message: 'An unexpected error occurred.', user: null });
+  res.status(500).render('error', {
+    message: 'An unexpected error occurred.',
+    user: req.session.user ?? null,
+    csrfToken: typeof req.session.csrfToken === 'string' ? req.session.csrfToken : '',
+  });
 });
 
 export function startWebPanel(): void {
