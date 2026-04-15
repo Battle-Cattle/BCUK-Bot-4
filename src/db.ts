@@ -323,20 +323,22 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
   return Array.from(commandMap.values());
 }
 
+function requireTrimmedString(value: string, fieldName: string): string {
+  const normalizedValue = value.trim();
+  if (!normalizedValue) {
+    throw new Error(`Missing ${fieldName}`);
+  }
+  return normalizedValue;
+}
+
 export async function addCustomCommand(
   triggerString: string,
   output: string,
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
 ): Promise<void> {
-  const normalizedTriggerString = triggerString.trim();
-  const normalizedOutput = output.trim();
-  if (!normalizedTriggerString) {
-    throw new Error('Missing trigger_string');
-  }
-  if (!normalizedOutput) {
-    throw new Error('Missing output');
-  }
+  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string');
+  const normalizedOutput = requireTrimmedString(output, 'output');
 
   await getPool().execute(
     `INSERT INTO custom_command (trigger_string, output, is_discord_enabled, is_multi_twitch)
@@ -352,14 +354,8 @@ export async function updateCustomCommand(
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
 ): Promise<void> {
-  const normalizedTriggerString = triggerString.trim();
-  const normalizedOutput = output.trim();
-  if (!normalizedTriggerString) {
-    throw new Error('Missing trigger_string');
-  }
-  if (!normalizedOutput) {
-    throw new Error('Missing output');
-  }
+  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string');
+  const normalizedOutput = requireTrimmedString(output, 'output');
 
   await getPool().execute(
     `UPDATE custom_command
@@ -427,6 +423,27 @@ export class CounterNotFoundError extends Error {
   }
 }
 
+interface NormalizedCounterFields {
+  triggerCommand: string;
+  checkCommand: string;
+  message: string;
+  incrementMessage: string;
+}
+
+function normalizeCounterFields(
+  triggerCommand: string,
+  checkCommand: string,
+  message: string,
+  incrementMessage: string,
+): NormalizedCounterFields {
+  return {
+    triggerCommand: requireTrimmedString(triggerCommand, 'trigger_command'),
+    checkCommand: requireTrimmedString(checkCommand, 'check_command'),
+    message: requireTrimmedString(message, 'message'),
+    incrementMessage: requireTrimmedString(incrementMessage, 'increment_message'),
+  };
+}
+
 function mapCounter(row: mysql.RowDataPacket): DbCounter {
   return {
     id: row.id,
@@ -456,10 +473,18 @@ export async function addCounter(
   incrementMessage: string,
   resetYearly: boolean,
 ): Promise<void> {
+  const normalizedFields = normalizeCounterFields(triggerCommand, checkCommand, message, incrementMessage);
+
   await getPool().execute(
     `INSERT INTO counter (trigger_command, check_command, message, increment_message, reset_yearly, current_value)
      VALUES (?, ?, ?, ?, ?, 0)`,
-    [triggerCommand.trim(), checkCommand.trim(), message.trim(), incrementMessage.trim(), resetYearly ? 1 : 0],
+    [
+      normalizedFields.triggerCommand,
+      normalizedFields.checkCommand,
+      normalizedFields.message,
+      normalizedFields.incrementMessage,
+      resetYearly ? 1 : 0,
+    ],
   );
 }
 
@@ -479,6 +504,8 @@ export async function updateCounter(
   incrementMessage: string,
   resetYearly: boolean,
 ): Promise<void> {
+  const normalizedFields = normalizeCounterFields(triggerCommand, checkCommand, message, incrementMessage);
+
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `UPDATE counter
      SET trigger_command = ?,
@@ -487,7 +514,14 @@ export async function updateCounter(
          increment_message = ?,
          reset_yearly = ?
      WHERE id = ?`,
-    [triggerCommand.trim(), checkCommand.trim(), message.trim(), incrementMessage.trim(), resetYearly ? 1 : 0, id],
+    [
+      normalizedFields.triggerCommand,
+      normalizedFields.checkCommand,
+      normalizedFields.message,
+      normalizedFields.incrementMessage,
+      resetYearly ? 1 : 0,
+      id,
+    ],
   );
 
   if (result.affectedRows === 0 && !(await counterExists(id))) {
