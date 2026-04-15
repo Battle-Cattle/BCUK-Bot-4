@@ -1,5 +1,6 @@
 import express from 'express';
 import type { ErrorRequestHandler } from 'express';
+import crypto from 'crypto';
 import session from 'express-session';
 import MySQLStore from 'express-mysql-session';
 import helmet from 'helmet';
@@ -74,6 +75,21 @@ app.use(
     cookie: { secure: isProduction, httpOnly: true, sameSite: 'lax', maxAge: 24 * 60 * 60 * 1000 },
   }),
 );
+
+app.use((req, res, next) => {
+  res.locals.user = req.session.user ?? null;
+
+  if (req.session.user) {
+    if (typeof req.session.csrfToken !== 'string' || req.session.csrfToken.length === 0) {
+      req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+    }
+    res.locals.csrfToken = req.session.csrfToken;
+  } else {
+    res.locals.csrfToken = '';
+  }
+
+  next();
+});
 
 // Routes
 app.use('/auth', authRouter);

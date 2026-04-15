@@ -353,14 +353,20 @@ export function playFile(filePath: string): void {
   }
   const resolved = path.resolve(filePath);
 
-  // Prevent path-traversal: the resolved path must stay inside the SFX folder.
+  // Prevent path-traversal: the resolved path must stay inside the SFX folder,
+  // and it must point to a real file rather than the folder itself.
   const sfxRoot = path.resolve(SFX_FOLDER);
-  if (!resolved.startsWith(sfxRoot + path.sep) && resolved !== sfxRoot) {
+  if (!resolved.startsWith(`${sfxRoot}${path.sep}`)) {
     throw new Error(`Path traversal blocked: ${filePath} resolves outside SFX folder`);
   }
 
   if (!fs.existsSync(resolved)) {
     throw new Error(`Sound file not found: ${resolved}`);
+  }
+
+  const fileStats = fs.statSync(resolved);
+  if (!fileStats.isFile()) {
+    throw new Error(`Sound path is not a file: ${resolved}`);
   }
 
   playing = true;
