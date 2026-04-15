@@ -76,7 +76,7 @@
               <tr>
                 <th scope="col">Trigger</th>
                 <th scope="col">Check</th>
-                <th scope="col">Current</th>
+                <th scope="col" class="counter-value-cell">Current</th>
                 <th scope="col">Reset Yearly</th>
                 <th scope="col">Check Message</th>
                 <th scope="col">Increment Message</th>
@@ -88,7 +88,7 @@
               <tr class="sfx-row">
                 <td class="mono"><strong><%= counter.trigger_command %></strong></td>
                 <td class="mono"><%= counter.check_command %></td>
-                <td><span class="badge badge-active"><%= counter.current_value %></span></td>
+                <td class="counter-value-cell"><span class="counter-value-badge"><%= counter.current_value %></span></td>
                 <td><span class="badge <%= counter.reset_yearly ? 'badge-active' : 'badge-offline' %>"><%= counter.reset_yearly ? 'Yes' : 'No' %></span></td>
                 <td class="command-output-cell"><%= counter.message %></td>
                 <td class="command-output-cell"><%= counter.increment_message %></td>
