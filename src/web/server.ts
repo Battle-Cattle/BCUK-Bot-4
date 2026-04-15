@@ -91,8 +91,12 @@ app.use('/admin', requireAuth, countersRouter);
 app.use('/', requireAuth, dashboardRouter);
 
 // 404 handler
-app.use((_req, res) => {
-  res.status(404).render('error', { message: 'Page not found.', user: null, csrfToken: '' });
+app.use((req, res) => {
+  res.status(404).render('error', {
+    message: 'Page not found.',
+    user: req.session.user ?? null,
+    csrfToken: typeof req.session.csrfToken === 'string' ? req.session.csrfToken : '',
+  });
 });
 
 const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
