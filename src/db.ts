@@ -488,12 +488,25 @@ export async function addCounter(
   );
 }
 
-async function counterExists(id: number): Promise<boolean> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT 1 FROM counter WHERE id = ? LIMIT 1',
-    [id],
-  );
-  return rows.length > 0;
+export async function findCounterByCommand(command: string, excludeId?: number): Promise<DbCounter | null> {
+  const sql = excludeId != null
+    ? `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value
+       FROM counter
+       WHERE (LOWER(trigger_command) = ? OR LOWER(check_command) = ?)
+         AND id <> ?
+       LIMIT 1`
+    : `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value
+       FROM counter
+       WHERE LOWER(trigger_command) = ? OR LOWER(check_command) = ?
+       LIMIT 1`;
+  const lowerCommand = command.toLowerCase();
+  const params = excludeId != null
+    ? [lowerCommand, lowerCommand, excludeId]
+    : [lowerCommand, lowerCommand];
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(sql, params);
+
+  if (rows.length === 0) return null;
+  return mapCounter(rows[0]);
 }
 
 export async function updateCounter(
@@ -524,7 +537,7 @@ export async function updateCounter(
     ],
   );
 
-  if (result.affectedRows === 0 && !(await counterExists(id))) {
+  if (result.affectedRows === 0) {
     throw new CounterNotFoundError(id);
   }
 }
@@ -542,7 +555,7 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
     [id],
   );
 
-  if (result.affectedRows === 0 && !(await counterExists(id))) {
+  if (result.affectedRows === 0) {
     throw new CounterNotFoundError(id);
   }
 }

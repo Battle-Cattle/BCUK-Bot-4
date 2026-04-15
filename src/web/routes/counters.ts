@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   addCounter,
   CounterNotFoundError,
+  findCounterByCommand,
   getAllCounters,
   removeCounter,
   resetCounterCurrentValue,
@@ -15,6 +16,7 @@ const router = Router();
 const KNOWN_ERRORS = new Set([
   'missing_fields',
   'same_commands',
+  'duplicate_command',
   'invalid_id',
   'add_failed',
   'update_failed',
@@ -111,6 +113,12 @@ router.post('/counters/add', requireManager, csrfProtection, async (req, res) =>
   }
 
   try {
+    const existingTrigger = await findCounterByCommand(form.triggerCommand);
+    const existingCheck = await findCounterByCommand(form.checkCommand);
+    if (existingTrigger || existingCheck) {
+      return res.redirect('/admin/counters?error=duplicate_command');
+    }
+
     await addCounter(
       form.triggerCommand,
       form.checkCommand,
@@ -140,6 +148,12 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
   }
 
   try {
+    const existingTrigger = await findCounterByCommand(form.triggerCommand, parsedId);
+    const existingCheck = await findCounterByCommand(form.checkCommand, parsedId);
+    if (existingTrigger || existingCheck) {
+      return res.redirect('/admin/counters?error=duplicate_command');
+    }
+
     await updateCounter(
       parsedId,
       form.triggerCommand,
