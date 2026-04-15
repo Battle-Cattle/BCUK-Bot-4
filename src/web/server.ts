@@ -15,6 +15,7 @@ import streamsRouter from './routes/streams';
 import commandsRouter from './routes/commands';
 import countersRouter from './routes/counters';
 import { requireAuth } from './middleware';
+import { ensureSessionCsrfToken } from './csrf';
 
 const app = express();
 
@@ -77,7 +78,7 @@ app.use(
 
 app.use((req, res, next) => {
   res.locals.user = req.session.user ?? null;
-  res.locals.csrfToken = typeof req.session.csrfToken === 'string' ? req.session.csrfToken : '';
+  res.locals.csrfToken = req.session.user ? ensureSessionCsrfToken(req) : '';
   next();
 });
 
@@ -95,7 +96,7 @@ app.use((req, res) => {
   res.status(404).render('error', {
     message: 'Page not found.',
     user: req.session.user ?? null,
-    csrfToken: typeof req.session.csrfToken === 'string' ? req.session.csrfToken : '',
+    csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
   });
 });
 
@@ -109,7 +110,7 @@ const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
   res.status(403).render('error', {
     message: 'Your form session expired or the request could not be verified. Please reload the page and try again.',
     user: req.session.user ?? null,
-    csrfToken: typeof req.session.csrfToken === 'string' ? req.session.csrfToken : '',
+    csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
   });
 };
 
@@ -121,7 +122,7 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
   res.status(500).render('error', {
     message: 'An unexpected error occurred.',
     user: req.session.user ?? null,
-    csrfToken: typeof req.session.csrfToken === 'string' ? req.session.csrfToken : '',
+    csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
   });
 });
 

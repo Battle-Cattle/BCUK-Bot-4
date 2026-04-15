@@ -9,7 +9,7 @@ function createCsrfError(): Error & { code: string } {
   return error;
 }
 
-function ensureSessionCsrfToken(req: Parameters<RequestHandler>[0]): string {
+export function ensureSessionCsrfToken(req: Parameters<RequestHandler>[0]): string {
   if (typeof req.session.csrfToken !== 'string' || req.session.csrfToken.length === 0) {
     req.session.csrfToken = crypto.randomBytes(32).toString('hex');
   }
