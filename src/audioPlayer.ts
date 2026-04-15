@@ -15,7 +15,7 @@ import { Client, ChannelType, type VoiceBasedChannel } from 'discord.js';
 import path from 'path';
 import fs from 'fs';
 import ffmpegPath from 'ffmpeg-static';
-import { DISCORD_GUILD_ID, DISCORD_VOICE_CHANNEL_ID } from './config';
+import { DISCORD_GUILD_ID, DISCORD_VOICE_CHANNEL_ID, SFX_FOLDER } from './config';
 import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from './statusStore';
 
 // Tell @discordjs/voice where the ffmpeg binary is
@@ -352,6 +352,13 @@ export function playFile(filePath: string): void {
     throw new Error('Not connected to a voice channel');
   }
   const resolved = path.resolve(filePath);
+
+  // Prevent path-traversal: the resolved path must stay inside the SFX folder.
+  const sfxRoot = path.resolve(SFX_FOLDER);
+  if (!resolved.startsWith(sfxRoot + path.sep) && resolved !== sfxRoot) {
+    throw new Error(`Path traversal blocked: ${filePath} resolves outside SFX folder`);
+  }
+
   if (!fs.existsSync(resolved)) {
     throw new Error(`Sound file not found: ${resolved}`);
   }

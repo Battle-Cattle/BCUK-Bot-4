@@ -107,7 +107,8 @@ router.get('/discord/callback', async (req, res) => {
 });
 
 // ─── Logout ───────────────────────────────────────────────────────────────────
-router.get('/logout', (req, res) => {
+// POST-only to prevent CSRF-triggered logouts (e.g. via <img src="/auth/logout">).
+router.post('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/auth/login'));
 });
 
