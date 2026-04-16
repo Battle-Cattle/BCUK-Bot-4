@@ -71,8 +71,7 @@ let realSfxRoot: string | null = null;
 
 function isPathInsideRoot(rootPath: string, targetPath: string): boolean {
   const relativePath = path.relative(rootPath, targetPath);
-  return relativePath !== ''
-    && relativePath !== '..'
+  return relativePath !== '..'
     && !relativePath.startsWith(`..${path.sep}`)
     && !path.isAbsolute(relativePath);
 }
