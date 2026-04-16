@@ -1,5 +1,5 @@
 const APP_CACHE_PREFIX = 'bcuk-panel-';
-const CACHE_VERSION = 'bcuk-panel-v4';
+const CACHE_VERSION = 'bcuk-panel-v5';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const RUNTIME_CACHE_MAX_ENTRIES = 50;
