@@ -15,7 +15,7 @@ import { Client, ChannelType, type VoiceBasedChannel } from 'discord.js';
 import path from 'path';
 import fs from 'fs';
 import ffmpegPath from 'ffmpeg-static';
-import { DISCORD_GUILD_ID, DISCORD_VOICE_CHANNEL_ID } from './config';
+import { DISCORD_GUILD_ID, DISCORD_VOICE_CHANNEL_ID, SFX_FOLDER } from './config';
 import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from './statusStore';
 
 // Tell @discordjs/voice where the ffmpeg binary is
@@ -66,6 +66,22 @@ let currentAttemptId = 0;
 
 const RECONNECT_BASE_DELAY_MS = 5_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
+const sfxRoot = path.resolve(SFX_FOLDER);
+let realSfxRoot: string | null = null;
+
+function isPathInsideRoot(rootPath: string, targetPath: string): boolean {
+  const relativePath = path.relative(rootPath, targetPath);
+  return relativePath !== '..'
+    && !relativePath.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relativePath);
+}
+
+function getRealSfxRoot(): string {
+  if (!realSfxRoot) {
+    realSfxRoot = fs.realpathSync(sfxRoot);
+  }
+  return realSfxRoot;
+}
 
 function isPermanentMisconfigurationError(err: unknown): boolean {
   if (!(err instanceof Error)) {
@@ -351,9 +367,28 @@ export function playFile(filePath: string): void {
   if (!connection) {
     throw new Error('Not connected to a voice channel');
   }
-  const resolved = path.resolve(filePath);
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`Sound file not found: ${resolved}`);
+
+  const candidatePath = path.resolve(filePath);
+
+  // Reject obvious traversal attempts before touching the filesystem.
+  if (!isPathInsideRoot(sfxRoot, candidatePath)) {
+    throw new Error(`Path traversal blocked: ${filePath} resolves outside SFX folder`);
+  }
+
+  if (!fs.existsSync(candidatePath)) {
+    throw new Error(`Sound file not found: ${candidatePath}`);
+  }
+
+  const resolved = fs.realpathSync(candidatePath);
+
+  // Resolve symlinks and verify the final real path is still inside the SFX root.
+  if (!isPathInsideRoot(getRealSfxRoot(), resolved)) {
+    throw new Error(`Path traversal blocked: ${filePath} resolves outside SFX folder`);
+  }
+
+  const fileStats = fs.statSync(resolved);
+  if (!fileStats.isFile()) {
+    throw new Error(`Sound path is not a file: ${resolved}`);
   }
 
   playing = true;

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A multi-platform SFX bot that listens to Twitch, Discord, and TikTok chat, matches messages against DB-stored commands, and plays weighted-random sound files into a Discord voice channel. Includes a web control panel with Discord OAuth login and role-based access.
+A multi-platform community bot for Twitch, Discord, and TikTok with a web control panel, Discord OAuth login, role-based access, stream monitoring, custom commands, counters, and voice features. Weighted-random SFX playback is one subsystem of the bot, not its sole purpose.
 
 **Tech stack:** TypeScript + Node.js (CommonJS), discord.js v14, tmi.js, tiktok-live-connector, mysql2, Express + EJS, express-session.
 
@@ -369,7 +369,7 @@ npm start        # node dist/index.js (production)
 | GET    | `/auth/login`           | —           | Login page  |
 | GET    | `/auth/discord`         | —           | Start OAuth2 flow |
 | GET    | `/auth/discord/callback`| —           | OAuth2 callback |
-| GET    | `/auth/logout`          | —           | Destroy session |
+| POST   | `/auth/logout`          | requireAuth + CSRF | Destroy session |
 | GET    | `/`                     | requireAuth | Dashboard |
 | GET    | `/api/status`           | requireAuth | JSON status snapshot |
 | POST   | `/api/voice/join`       | Mod+        | Join configured voice channel |

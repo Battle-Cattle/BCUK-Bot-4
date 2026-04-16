@@ -3,6 +3,8 @@ import crypto from 'crypto';
 import { DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_CALLBACK_URL } from '../../config';
 import { findUser, updateDiscordName } from '../../db';
 import { fetchMemberDisplayName } from '../../discordBot';
+import { csrfProtection } from '../csrf';
+import { requireAuth } from '../middleware';
 
 const router = Router();
 
@@ -107,7 +109,8 @@ router.get('/discord/callback', async (req, res) => {
 });
 
 // ─── Logout ───────────────────────────────────────────────────────────────────
-router.get('/logout', (req, res) => {
+// POST-only and CSRF-protected to prevent cross-site triggered logouts.
+router.post('/logout', requireAuth, csrfProtection, (req, res) => {
   req.session.destroy(() => res.redirect('/auth/login'));
 });
 
