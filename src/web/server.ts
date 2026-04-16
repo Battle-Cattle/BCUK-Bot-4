@@ -108,7 +108,7 @@ const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
 
   console.error('[Web] Invalid CSRF token:', err);
 
-  if (req.originalUrl.startsWith('/api/')) {
+  if (req.originalUrl === '/api' || req.originalUrl.startsWith('/api/')) {
     res.status(403).json({
       ok: false,
       error: 'Your form session expired or the request could not be verified. Please reload the page and try again.',
