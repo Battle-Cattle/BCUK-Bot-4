@@ -44,7 +44,7 @@ export async function previewCustomCommandForDiscord(
     null,
     username,
     getCustomCommandForDiscord,
-    (command) => `[Discord] Preview custom command '${command}' matched; reply suppressed while preview monitoring is enabled.`,
+    (command) => `[Discord] Preview custom command '${command}' matched (recorded for monitoring).`,
   );
 }
 
@@ -59,6 +59,6 @@ export async function previewCustomCommandForTwitch(
     channel,
     username,
     (command) => getCustomCommandForTwitchChannel(channel, command),
-    (command) => `[Twitch] Preview custom command '${command}' matched in ${channel}; reply suppressed while preview monitoring is enabled.`,
+    (command) => `[Twitch] Preview custom command '${command}' matched in ${channel} (recorded for monitoring).`,
   );
 }
