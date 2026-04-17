@@ -290,6 +290,14 @@ interface CustomCommandLookupCache {
   twitchByChannelAndTrigger: Map<string, DbCustomCommand>;
 }
 
+function createEmptyCustomCommandLookupCache(): CustomCommandLookupCache {
+  return {
+    loadedAt: Date.now(),
+    discordByTrigger: new Map<string, DbCustomCommand>(),
+    twitchByChannelAndTrigger: new Map<string, DbCustomCommand>(),
+  };
+}
+
 const CUSTOM_COMMAND_CACHE_TTL_MS = 15_000;
 const CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
 const CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
@@ -439,7 +447,7 @@ function refreshCustomCommandLookupCacheInBackground(): void {
   }
 
   const now = Date.now();
-  if (customCommandLookupCache && now < customCommandLookupRefreshAllowedAt) {
+  if (now < customCommandLookupRefreshAllowedAt) {
     return;
   }
 
@@ -465,15 +473,17 @@ function refreshCustomCommandLookupCacheInBackground(): void {
         return;
       }
 
-      if (customCommandLookupCache) {
-        customCommandLookupRefreshFailureCount += 1;
-        const retryDelayMs = getCustomCommandLookupRefreshBackoffMs();
-        customCommandLookupRefreshAllowedAt = Date.now() + retryDelayMs;
-        console.error(`[DB] Background custom command cache refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
+      customCommandLookupRefreshFailureCount += 1;
+      const retryDelayMs = getCustomCommandLookupRefreshBackoffMs();
+      customCommandLookupRefreshAllowedAt = Date.now() + retryDelayMs;
+
+      if (!customCommandLookupCache) {
+        customCommandLookupCache = createEmptyCustomCommandLookupCache();
+        console.error(`[DB] Background custom command cache refresh failed; serving an empty cache and retrying after ${retryDelayMs}ms.`, err);
         return;
       }
 
-      console.error('[DB] Background custom command cache refresh failed:', err);
+      console.error(`[DB] Background custom command cache refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
     })
     .finally(() => {
       if (customCommandLookupPromise === inFlightPromise) {
@@ -498,10 +508,22 @@ async function getCustomCommandLookupCache(): Promise<CustomCommandLookupCache> 
   refreshCustomCommandLookupCacheInBackground();
 
   if (!customCommandLookupPromise) {
+    if (customCommandLookupCache) {
+      return customCommandLookupCache;
+    }
+
     throw new Error('Custom command lookup cache refresh did not start');
   }
 
-  return customCommandLookupPromise;
+  try {
+    return await customCommandLookupPromise;
+  } catch (err) {
+    if (customCommandLookupCache) {
+      return customCommandLookupCache;
+    }
+
+    throw err;
+  }
 }
 
 export function invalidateCustomCommandLookupCache(): void {
