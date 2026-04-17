@@ -323,6 +323,47 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
   return Array.from(commandMap.values());
 }
 
+export async function getCustomCommandForTwitchChannel(channelName: string, triggerString: string): Promise<DbCustomCommand | null> {
+  const normalizedChannelName = normalizeTwitchChannelName(channelName);
+  const normalizedTriggerString = triggerString.trim().toLowerCase();
+
+  if (!normalizedChannelName || !normalizedTriggerString) {
+    return null;
+  }
+
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT c.command_id, c.trigger_string, c.output, c.is_discord_enabled, c.is_multi_twitch
+     FROM custom_command c
+     INNER JOIN twitch_user_commands tuc ON c.command_id = tuc.command_id
+     INNER JOIN \`user\` u ON tuc.discord_id = u.discord_id
+     WHERE LOWER(c.trigger_string) = ?
+       AND u.twitch_name = ?
+       AND u.is_twitch_bot_enabled = 1
+     LIMIT 1`,
+    [normalizedTriggerString, normalizedChannelName],
+  );
+
+  return rows.length > 0 ? mapCustomCommand(rows[0]) : null;
+}
+
+export async function getCustomCommandForDiscord(triggerString: string): Promise<DbCustomCommand | null> {
+  const normalizedTriggerString = triggerString.trim().toLowerCase();
+  if (!normalizedTriggerString) {
+    return null;
+  }
+
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT command_id, trigger_string, output, is_discord_enabled, is_multi_twitch
+     FROM custom_command
+     WHERE LOWER(trigger_string) = ?
+       AND is_discord_enabled = 1
+     LIMIT 1`,
+    [normalizedTriggerString],
+  );
+
+  return rows.length > 0 ? mapCustomCommand(rows[0]) : null;
+}
+
 function requireTrimmedString(value: string, fieldName: string): string {
   const normalizedValue = value.trim();
   if (!normalizedValue) {

@@ -1,6 +1,7 @@
 import tmi from 'tmi.js';
 import { TWITCH_USERNAME, TWITCH_OAUTH_TOKEN } from './config';
 import { handleCommand } from './commandRouter';
+import { previewCustomCommandForTwitch } from './customCommandHandler';
 import { setTwitchChannel } from './statusStore';
 import { getTwitchEnabledChannels } from './db';
 import { normalizeTwitchChannelName } from './twitchChannelName';
@@ -141,6 +142,11 @@ export async function startTwitchBot(): Promise<void> {
     const normalizedChannel = normalizeChannel(channel);
     if (!normalizedChannel) return;
     if (!activeChannels.has(normalizedChannel)) return;
+
+    previewCustomCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
+      console.error('[Twitch] Custom command preview error:', err),
+    );
+
     handleCommand(message, 'twitch').catch((err) =>
       console.error('[Twitch] Command handler error:', err),
     );

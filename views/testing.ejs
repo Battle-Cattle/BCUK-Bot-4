@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Command Testing</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body data-command-test-entries='<%- JSON.stringify(recentEntries).replace(/&/g, '&amp;').replace(/'/g, '&#39;') %>'>
+  <%- include('partials/nav') %>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Command Testing</h2>
+
+      <div class="card card-spaced">
+        <div class="card-header">
+          <span class="card-icon">🧪</span>
+          <span class="card-label">Preview Only</span>
+        </div>
+        <div class="card-body card-body-muted">
+          This page shows the most recent custom command matches detected by this bot. Replies are suppressed during testing, and counters are not incremented in this stage.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-icon">📜</span>
+          <span class="card-label">Recent Matches</span>
+          <span class="live-updated-meta">Auto-refreshes every 5s</span>
+        </div>
+        <div class="table-scroll">
+          <table class="table" aria-label="Recent command matches">
+            <thead>
+              <tr>
+                <th scope="col">When</th>
+                <th scope="col">Source</th>
+                <th scope="col">User</th>
+                <th scope="col">Channel</th>
+                <th scope="col">Command</th>
+                <th scope="col">Response Preview</th>
+              </tr>
+            </thead>
+            <tbody id="command-test-body">
+              <% if (recentEntries.length === 0) { %>
+              <tr id="command-test-empty-row">
+                <td colspan="6" class="empty-msg">No matching custom commands have been seen yet.</td>
+              </tr>
+              <% } else { %>
+                <% recentEntries.forEach(function(entry) { %>
+                <tr>
+                  <td class="mono"><%= new Date(entry.createdAt).toLocaleTimeString() %></td>
+                  <td><span class="badge <%= entry.source === 'discord' ? 'level-1' : 'badge-active' %>"><%= entry.source %></span></td>
+                  <td><%= entry.user || '—' %></td>
+                  <td class="mono"><%= entry.channel || '—' %></td>
+                  <td class="mono"><strong><%= entry.command %></strong></td>
+                  <td class="command-output-cell"><%= entry.response %></td>
+                </tr>
+                <% }) %>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <%- include('partials/pwa-register') %>
+  <script src="/testing.js"></script>
+</body>
+</html>

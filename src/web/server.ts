@@ -14,6 +14,7 @@ import apiRouter from './routes/api';
 import streamsRouter from './routes/streams';
 import commandsRouter from './routes/commands';
 import countersRouter from './routes/counters';
+import testingRouter from './routes/testing';
 import { requireAuth } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
 
@@ -89,6 +90,7 @@ app.use('/admin', requireAuth, adminRouter);
 app.use('/admin', requireAuth, streamsRouter);
 app.use('/admin', requireAuth, commandsRouter);
 app.use('/admin', requireAuth, countersRouter);
+app.use('/admin', requireAuth, testingRouter);
 app.use('/', requireAuth, dashboardRouter);
 
 // 404 handler
