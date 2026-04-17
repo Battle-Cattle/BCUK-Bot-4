@@ -210,6 +210,8 @@ export async function upsertUser(
      ON DUPLICATE KEY UPDATE discord_name = new_user.discord_name, access_level = new_user.access_level, twitch_name = IF(?, new_user.twitch_name, \`user\`.twitch_name)`,
     [discordId, discordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
   );
+
+  invalidateCustomCommandLookupCache();
 }
 
 export async function updateDiscordName(discordId: string, name: string): Promise<void> {
@@ -237,6 +239,8 @@ export async function updateTwitchBotEnabled(discordId: string, enabled: boolean
     'UPDATE `user` SET is_twitch_bot_enabled = ? WHERE discord_id = ?',
     [enabled ? 1 : 0, discordId],
   );
+
+  invalidateCustomCommandLookupCache();
 }
 
 export async function updateAccessLevel(discordId: string, accessLevel: number): Promise<void> {
@@ -251,6 +255,8 @@ export async function updateAccessLevel(discordId: string, accessLevel: number):
 
 export async function removeUser(discordId: string): Promise<void> {
   await getPool().execute('DELETE FROM `user` WHERE discord_id = ?', [discordId]);
+
+  invalidateCustomCommandLookupCache();
 }
 
 // ─── Custom commands ────────────────────────────────────────────────────────
