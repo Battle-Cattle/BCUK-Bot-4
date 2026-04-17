@@ -438,11 +438,15 @@ function refreshCustomCommandLookupCacheInBackground(): void {
   })();
 
   const inFlightPromise = customCommandLookupPromise;
-  void inFlightPromise.finally(() => {
-    if (customCommandLookupPromise === inFlightPromise) {
-      customCommandLookupPromise = null;
-    }
-  });
+  void inFlightPromise
+    .catch((err) => {
+      console.error('[DB] Background custom command cache refresh failed:', err);
+    })
+    .finally(() => {
+      if (customCommandLookupPromise === inFlightPromise) {
+        customCommandLookupPromise = null;
+      }
+    });
 }
 
 async function getCustomCommandLookupCache(): Promise<CustomCommandLookupCache> {
