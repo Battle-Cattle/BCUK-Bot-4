@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — Command Testing</title>
+  <title>BCUK Bot — Command Monitor</title>
   <link rel="stylesheet" href="/style.css">
   <%- include('partials/pwa-head') %>
 </head>
@@ -12,7 +12,7 @@
 
   <main class="container">
     <section class="section">
-      <h2 class="section-title">Command Testing</h2>
+      <h2 class="section-title">Command Monitor</h2>
 
       <div class="card card-spaced">
         <div class="card-header">
@@ -20,7 +20,7 @@
           <span class="card-label">Preview Only</span>
         </div>
         <div class="card-body card-body-muted">
-          This page shows the most recent custom command matches detected by this bot. Replies are suppressed during testing, and counters are not incremented in this stage.
+          This page shows the most recent custom command matches detected by this bot for monitoring. Replies are currently suppressed in preview mode, and counters are not incremented here.
         </div>
       </div>
 
@@ -67,6 +67,6 @@
   </main>
 
   <%- include('partials/pwa-register') %>
-  <script src="/testing.js"></script>
+  <script src="/command-monitor.js"></script>
 </body>
 </html>

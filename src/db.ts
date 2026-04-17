@@ -276,6 +276,16 @@ export interface DbCustomCommandWithAssignments extends DbCustomCommand {
   assigned_users: DbCustomCommandAssignedUser[];
 }
 
+interface CustomCommandLookupCache {
+  loadedAt: number;
+  discordByTrigger: Map<string, DbCustomCommand>;
+  twitchByChannelAndTrigger: Map<string, DbCustomCommand>;
+}
+
+const CUSTOM_COMMAND_CACHE_TTL_MS = 15_000;
+let customCommandLookupCache: CustomCommandLookupCache | null = null;
+let customCommandLookupPromise: Promise<CustomCommandLookupCache> | null = null;
+
 function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
   return {
     command_id: row.command_id,
@@ -323,7 +333,17 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
   return Array.from(commandMap.values());
 }
 
-export async function getCustomCommandForTwitchChannel(channelName: string, triggerString: string): Promise<DbCustomCommand | null> {
+function toDbCustomCommand(command: DbCustomCommandWithAssignments): DbCustomCommand {
+  return {
+    command_id: command.command_id,
+    trigger_string: command.trigger_string,
+    output: command.output,
+    is_discord_enabled: command.is_discord_enabled,
+    is_multi_twitch: command.is_multi_twitch,
+  };
+}
+
+function getTwitchCommandCacheKey(channelName: string, triggerString: string): string | null {
   const normalizedChannelName = normalizeTwitchChannelName(channelName);
   const normalizedTriggerString = triggerString.trim().toLowerCase();
 
@@ -331,19 +351,76 @@ export async function getCustomCommandForTwitchChannel(channelName: string, trig
     return null;
   }
 
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT c.command_id, c.trigger_string, c.output, c.is_discord_enabled, c.is_multi_twitch
-     FROM custom_command c
-     INNER JOIN twitch_user_commands tuc ON c.command_id = tuc.command_id
-     INNER JOIN \`user\` u ON tuc.discord_id = u.discord_id
-     WHERE LOWER(c.trigger_string) = ?
-       AND u.twitch_name = ?
-       AND u.is_twitch_bot_enabled = 1
-     LIMIT 1`,
-    [normalizedTriggerString, normalizedChannelName],
-  );
+  return `${normalizedChannelName}::${normalizedTriggerString}`;
+}
 
-  return rows.length > 0 ? mapCustomCommand(rows[0]) : null;
+function buildCustomCommandLookupCache(commands: DbCustomCommandWithAssignments[]): CustomCommandLookupCache {
+  const discordByTrigger = new Map<string, DbCustomCommand>();
+  const twitchByChannelAndTrigger = new Map<string, DbCustomCommand>();
+
+  for (const command of commands) {
+    const normalizedTriggerString = command.trigger_string.toLowerCase();
+    const baseCommand = toDbCustomCommand(command);
+
+    if (command.is_discord_enabled && !discordByTrigger.has(normalizedTriggerString)) {
+      discordByTrigger.set(normalizedTriggerString, baseCommand);
+    }
+
+    for (const assignedUser of command.assigned_users) {
+      if (!assignedUser.twitch_name || !assignedUser.is_twitch_bot_enabled) {
+        continue;
+      }
+
+      const cacheKey = getTwitchCommandCacheKey(assignedUser.twitch_name, normalizedTriggerString);
+      if (!cacheKey || twitchByChannelAndTrigger.has(cacheKey)) {
+        continue;
+      }
+
+      twitchByChannelAndTrigger.set(cacheKey, baseCommand);
+    }
+  }
+
+  return {
+    loadedAt: Date.now(),
+    discordByTrigger,
+    twitchByChannelAndTrigger,
+  };
+}
+
+async function getCustomCommandLookupCache(): Promise<CustomCommandLookupCache> {
+  const now = Date.now();
+  if (customCommandLookupCache && now - customCommandLookupCache.loadedAt < CUSTOM_COMMAND_CACHE_TTL_MS) {
+    return customCommandLookupCache;
+  }
+
+  if (!customCommandLookupPromise) {
+    customCommandLookupPromise = (async () => {
+      const commands = await getAllCustomCommandsWithAssignments();
+      const rebuiltCache = buildCustomCommandLookupCache(commands);
+      customCommandLookupCache = rebuiltCache;
+      return rebuiltCache;
+    })();
+  }
+
+  try {
+    return await customCommandLookupPromise;
+  } finally {
+    customCommandLookupPromise = null;
+  }
+}
+
+export function invalidateCustomCommandLookupCache(): void {
+  customCommandLookupCache = null;
+}
+
+export async function getCustomCommandForTwitchChannel(channelName: string, triggerString: string): Promise<DbCustomCommand | null> {
+  const cacheKey = getTwitchCommandCacheKey(channelName, triggerString);
+  if (!cacheKey) {
+    return null;
+  }
+
+  const cache = await getCustomCommandLookupCache();
+  return cache.twitchByChannelAndTrigger.get(cacheKey) ?? null;
 }
 
 export async function getCustomCommandForDiscord(triggerString: string): Promise<DbCustomCommand | null> {
@@ -352,16 +429,8 @@ export async function getCustomCommandForDiscord(triggerString: string): Promise
     return null;
   }
 
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT command_id, trigger_string, output, is_discord_enabled, is_multi_twitch
-     FROM custom_command
-     WHERE LOWER(trigger_string) = ?
-       AND is_discord_enabled = 1
-     LIMIT 1`,
-    [normalizedTriggerString],
-  );
-
-  return rows.length > 0 ? mapCustomCommand(rows[0]) : null;
+  const cache = await getCustomCommandLookupCache();
+  return cache.discordByTrigger.get(normalizedTriggerString) ?? null;
 }
 
 function requireTrimmedString(value: string, fieldName: string): string {
@@ -386,6 +455,8 @@ export async function addCustomCommand(
      VALUES (?, ?, ?, ?)`,
     [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0],
   );
+
+  invalidateCustomCommandLookupCache();
 }
 
 export async function updateCustomCommand(
@@ -404,6 +475,8 @@ export async function updateCustomCommand(
      WHERE command_id = ?`,
     [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
   );
+
+  invalidateCustomCommandLookupCache();
 }
 
 export async function removeCustomCommand(commandId: number): Promise<void> {
@@ -420,6 +493,7 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
       [commandId],
     );
     await connection.commit();
+    invalidateCustomCommandLookupCache();
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -436,6 +510,8 @@ export async function assignUserToCommand(commandId: number, discordId: string):
        command_id = command_id`,
     [commandId, discordId],
   );
+
+  invalidateCustomCommandLookupCache();
 }
 
 export async function unassignUserFromCommand(commandId: number, discordId: string): Promise<void> {
@@ -443,6 +519,8 @@ export async function unassignUserFromCommand(commandId: number, discordId: stri
     'DELETE FROM twitch_user_commands WHERE command_id = ? AND discord_id = ?',
     [commandId, discordId],
   );
+
+  invalidateCustomCommandLookupCache();
 }
 
 // ─── Counter commands ───────────────────────────────────────────────────────

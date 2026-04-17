@@ -46,7 +46,9 @@ function renderEntries(entries) {
 
     var commandCell = document.createElement('td');
     commandCell.className = 'mono';
-    commandCell.textContent = entry.command || '—';
+    var commandText = document.createElement('strong');
+    commandText.textContent = entry.command || '—';
+    commandCell.appendChild(commandText);
 
     var responseCell = document.createElement('td');
     responseCell.className = 'command-output-cell';
@@ -64,7 +66,7 @@ function renderEntries(entries) {
 
 async function fetchRecentEntries() {
   try {
-    var response = await fetch('/admin/testing/recent', { credentials: 'same-origin' });
+    var response = await fetch('/admin/command-monitor/recent', { credentials: 'same-origin' });
     if (!response.ok) return;
     var data = await response.json();
     renderEntries(data.entries || []);

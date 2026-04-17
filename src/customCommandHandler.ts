@@ -1,5 +1,5 @@
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './db';
-import { recordCommandTestEntry } from './commandTestingStore';
+import { recordCommandTestEntry } from './commandMonitorStore';
 
 function extractCommand(rawMessage: string): string | null {
   const trimmedMessage = rawMessage.trim();
@@ -27,7 +27,7 @@ export async function previewCustomCommandForDiscord(
     user: username ?? null,
   });
 
-  console.log(`[Discord] Preview custom command '${command}' matched; reply suppressed during testing.`);
+  console.log(`[Discord] Preview custom command '${command}' matched; reply suppressed while preview monitoring is enabled.`);
 }
 
 export async function previewCustomCommandForTwitch(
@@ -49,5 +49,5 @@ export async function previewCustomCommandForTwitch(
     user: username ?? null,
   });
 
-  console.log(`[Twitch] Preview custom command '${command}' matched in ${channel}; reply suppressed during testing.`);
+  console.log(`[Twitch] Preview custom command '${command}' matched in ${channel}; reply suppressed while preview monitoring is enabled.`);
 }
