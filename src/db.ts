@@ -494,6 +494,20 @@ function refreshCustomCommandLookupCacheInBackground(): void {
     });
 }
 
+async function awaitCustomCommandLookupPromise(
+  promise: Promise<CustomCommandLookupCache>,
+): Promise<CustomCommandLookupCache> {
+  try {
+    return await promise;
+  } catch (err) {
+    if (customCommandLookupCache) {
+      return customCommandLookupCache;
+    }
+
+    throw err;
+  }
+}
+
 async function getCustomCommandLookupCache(): Promise<CustomCommandLookupCache> {
   const now = Date.now();
 
@@ -507,6 +521,7 @@ async function getCustomCommandLookupCache(): Promise<CustomCommandLookupCache> 
     return customCommandLookupCache;
   }
 
+  const requestVersion = customCommandLookupVersion;
   refreshCustomCommandLookupCacheInBackground();
 
   if (!customCommandLookupPromise) {
@@ -517,15 +532,24 @@ async function getCustomCommandLookupCache(): Promise<CustomCommandLookupCache> 
     throw new Error('Custom command lookup cache refresh did not start');
   }
 
-  try {
-    return await customCommandLookupPromise;
-  } catch (err) {
-    if (customCommandLookupCache) {
-      return customCommandLookupCache;
-    }
+  const inFlightPromise = customCommandLookupPromise;
+  const resolvedCache = await awaitCustomCommandLookupPromise(inFlightPromise);
 
-    throw err;
+  if (requestVersion === customCommandLookupVersion) {
+    return resolvedCache;
   }
+
+  if (customCommandLookupCache) {
+    return customCommandLookupCache;
+  }
+
+  refreshCustomCommandLookupCacheInBackground();
+
+  if (customCommandLookupPromise) {
+    return await awaitCustomCommandLookupPromise(customCommandLookupPromise);
+  }
+
+  throw new Error('Custom command lookup cache refresh did not start');
 }
 
 export function invalidateCustomCommandLookupCache(): void {
