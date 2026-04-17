@@ -211,7 +211,9 @@ export async function upsertUser(
     [discordId, discordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
   );
 
-  invalidateCustomCommandLookupCache();
+  if (twitchNameProvided) {
+    invalidateCustomCommandLookupCache();
+  }
 }
 
 export async function updateDiscordName(discordId: string, name: string): Promise<void> {
@@ -289,9 +291,13 @@ interface CustomCommandLookupCache {
 }
 
 const CUSTOM_COMMAND_CACHE_TTL_MS = 15_000;
+const CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
+const CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
 let customCommandLookupCache: CustomCommandLookupCache | null = null;
 let customCommandLookupPromise: Promise<CustomCommandLookupCache> | null = null;
 let customCommandLookupVersion = 0;
+let customCommandLookupRefreshAllowedAt = 0;
+let customCommandLookupRefreshFailureCount = 0;
 
 function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
   return {
@@ -419,8 +425,21 @@ function buildCustomCommandLookupCache(
   };
 }
 
+function getCustomCommandLookupRefreshBackoffMs(): number {
+  const backoffMultiplier = 2 ** Math.max(0, customCommandLookupRefreshFailureCount - 1);
+  return Math.min(
+    CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_BACKOFF_MS * backoffMultiplier,
+    CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  );
+}
+
 function refreshCustomCommandLookupCacheInBackground(): void {
   if (customCommandLookupPromise) {
+    return;
+  }
+
+  const now = Date.now();
+  if (customCommandLookupCache && now < customCommandLookupRefreshAllowedAt) {
     return;
   }
 
@@ -433,6 +452,8 @@ function refreshCustomCommandLookupCacheInBackground(): void {
     const rebuiltCache = buildCustomCommandLookupCache(commands, activeTwitchChannels);
     if (lookupVersion === customCommandLookupVersion) {
       customCommandLookupCache = rebuiltCache;
+      customCommandLookupRefreshAllowedAt = 0;
+      customCommandLookupRefreshFailureCount = 0;
     }
     return rebuiltCache;
   })();
@@ -440,6 +461,14 @@ function refreshCustomCommandLookupCacheInBackground(): void {
   const inFlightPromise = customCommandLookupPromise;
   void inFlightPromise
     .catch((err) => {
+      if (customCommandLookupCache) {
+        customCommandLookupRefreshFailureCount += 1;
+        const retryDelayMs = getCustomCommandLookupRefreshBackoffMs();
+        customCommandLookupRefreshAllowedAt = Date.now() + retryDelayMs;
+        console.error(`[DB] Background custom command cache refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
+        return;
+      }
+
       console.error('[DB] Background custom command cache refresh failed:', err);
     })
     .finally(() => {
@@ -453,7 +482,10 @@ async function getCustomCommandLookupCache(): Promise<CustomCommandLookupCache> 
   const now = Date.now();
 
   if (customCommandLookupCache) {
-    if (now - customCommandLookupCache.loadedAt >= CUSTOM_COMMAND_CACHE_TTL_MS) {
+    if (
+      now - customCommandLookupCache.loadedAt >= CUSTOM_COMMAND_CACHE_TTL_MS
+      && now >= customCommandLookupRefreshAllowedAt
+    ) {
       refreshCustomCommandLookupCacheInBackground();
     }
     return customCommandLookupCache;
@@ -472,6 +504,8 @@ export function invalidateCustomCommandLookupCache(): void {
   customCommandLookupVersion += 1;
   customCommandLookupCache = null;
   customCommandLookupPromise = null;
+  customCommandLookupRefreshAllowedAt = 0;
+  customCommandLookupRefreshFailureCount = 0;
 }
 
 export async function getCustomCommandForTwitchChannel(channelName: string, triggerString: string): Promise<DbCustomCommand | null> {
