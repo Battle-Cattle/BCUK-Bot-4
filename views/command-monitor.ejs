@@ -58,22 +58,9 @@ function htmlAttrJson(value) {
               </tr>
             </thead>
             <tbody id="command-monitor-body">
-              <% if (recentEntries.length === 0) { %>
               <tr id="command-monitor-empty-row">
                 <td colspan="6" class="empty-msg">No matching custom commands have been seen yet.</td>
               </tr>
-              <% } else { %>
-                <% recentEntries.forEach(function(entry) { %>
-                <tr>
-                  <td class="mono"><%= new Date(entry.createdAt).toLocaleTimeString() %></td>
-                  <td><span class="badge <%= entry.source === 'discord' ? 'level-1' : 'badge-active' %>"><%= entry.source %></span></td>
-                  <td><%= entry.user || '—' %></td>
-                  <td class="mono"><%= entry.channel || '—' %></td>
-                  <td class="mono"><strong><%= entry.command %></strong></td>
-                  <td class="command-output-cell"><%= entry.response %></td>
-                </tr>
-                <% }) %>
-              <% } %>
             </tbody>
           </table>
         </div>

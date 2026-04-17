@@ -22,8 +22,13 @@ router.get('/command-monitor', requireManager, csrfProtection, (req, res) => {
   }
 });
 
-router.get('/command-monitor/recent', requireManager, (_req, res) => {
-  res.json({ entries: getRecentCommandTestEntries() });
+router.get('/command-monitor/recent', requireManager, csrfProtection, (_req, res) => {
+  try {
+    res.json({ entries: getRecentCommandTestEntries() });
+  } catch (err) {
+    console.error('[Web] Command monitor recent entries error:', err);
+    res.status(500).json({ entries: [] });
+  }
 });
 
 export default router;
