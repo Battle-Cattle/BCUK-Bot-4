@@ -461,6 +461,10 @@ function refreshCustomCommandLookupCacheInBackground(): void {
   const inFlightPromise = customCommandLookupPromise;
   void inFlightPromise
     .catch((err) => {
+      if (lookupVersion !== customCommandLookupVersion) {
+        return;
+      }
+
       if (customCommandLookupCache) {
         customCommandLookupRefreshFailureCount += 1;
         const retryDelayMs = getCustomCommandLookupRefreshBackoffMs();
