@@ -1,5 +1,5 @@
 const APP_CACHE_PREFIX = 'bcuk-panel-';
-const CACHE_VERSION = 'bcuk-panel-v5';
+const CACHE_VERSION = 'bcuk-panel-v6';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const RUNTIME_CACHE_MAX_ENTRIES = 50;
@@ -13,6 +13,7 @@ const STATIC_ASSETS = [
   '/commands.js',
   '/counters.js',
   '/streams.js',
+  '/command-monitor.js',
   '/pwa-register.js',
   '/manifest.json',
   '/icons/BCUK-192.svg',
