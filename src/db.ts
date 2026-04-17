@@ -285,6 +285,7 @@ interface CustomCommandLookupCache {
 const CUSTOM_COMMAND_CACHE_TTL_MS = 15_000;
 let customCommandLookupCache: CustomCommandLookupCache | null = null;
 let customCommandLookupPromise: Promise<CustomCommandLookupCache> | null = null;
+let customCommandLookupVersion = 0;
 
 function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
   return {
@@ -343,6 +344,10 @@ function toDbCustomCommand(command: DbCustomCommandWithAssignments): DbCustomCom
   };
 }
 
+function cloneDbCustomCommand(command: DbCustomCommand): DbCustomCommand {
+  return { ...command };
+}
+
 function getTwitchCommandCacheKey(channelName: string, triggerString: string): string | null {
   const normalizedChannelName = normalizeTwitchChannelName(channelName);
   const normalizedTriggerString = triggerString.trim().toLowerCase();
@@ -354,16 +359,37 @@ function getTwitchCommandCacheKey(channelName: string, triggerString: string): s
   return `${normalizedChannelName}::${normalizedTriggerString}`;
 }
 
-function buildCustomCommandLookupCache(commands: DbCustomCommandWithAssignments[]): CustomCommandLookupCache {
+function buildCustomCommandLookupCache(
+  commands: DbCustomCommandWithAssignments[],
+  activeTwitchChannels: string[],
+): CustomCommandLookupCache {
   const discordByTrigger = new Map<string, DbCustomCommand>();
   const twitchByChannelAndTrigger = new Map<string, DbCustomCommand>();
+  const normalizedActiveTwitchChannels = activeTwitchChannels
+    .map((channel) => normalizeTwitchChannelName(channel))
+    .filter((channel): channel is string => channel !== null);
 
   for (const command of commands) {
-    const normalizedTriggerString = command.trigger_string.toLowerCase();
+    const normalizedTriggerString = command.trigger_string.trim().toLowerCase();
+    if (!normalizedTriggerString) {
+      continue;
+    }
+
     const baseCommand = toDbCustomCommand(command);
 
     if (command.is_discord_enabled && !discordByTrigger.has(normalizedTriggerString)) {
       discordByTrigger.set(normalizedTriggerString, baseCommand);
+    }
+
+    if (command.is_multi_twitch) {
+      for (const activeChannel of normalizedActiveTwitchChannels) {
+        const cacheKey = getTwitchCommandCacheKey(activeChannel, normalizedTriggerString);
+        if (!cacheKey || twitchByChannelAndTrigger.has(cacheKey)) {
+          continue;
+        }
+
+        twitchByChannelAndTrigger.set(cacheKey, baseCommand);
+      }
     }
 
     for (const assignedUser of command.assigned_users) {
@@ -394,23 +420,34 @@ async function getCustomCommandLookupCache(): Promise<CustomCommandLookupCache> 
   }
 
   if (!customCommandLookupPromise) {
+    const lookupVersion = customCommandLookupVersion;
     customCommandLookupPromise = (async () => {
-      const commands = await getAllCustomCommandsWithAssignments();
-      const rebuiltCache = buildCustomCommandLookupCache(commands);
-      customCommandLookupCache = rebuiltCache;
+      const [commands, activeTwitchChannels] = await Promise.all([
+        getAllCustomCommandsWithAssignments(),
+        getTwitchEnabledChannels(),
+      ]);
+      const rebuiltCache = buildCustomCommandLookupCache(commands, activeTwitchChannels);
+      if (lookupVersion === customCommandLookupVersion) {
+        customCommandLookupCache = rebuiltCache;
+      }
       return rebuiltCache;
     })();
   }
 
+  const inFlightPromise = customCommandLookupPromise;
   try {
-    return await customCommandLookupPromise;
+    return await inFlightPromise;
   } finally {
-    customCommandLookupPromise = null;
+    if (customCommandLookupPromise === inFlightPromise) {
+      customCommandLookupPromise = null;
+    }
   }
 }
 
 export function invalidateCustomCommandLookupCache(): void {
+  customCommandLookupVersion += 1;
   customCommandLookupCache = null;
+  customCommandLookupPromise = null;
 }
 
 export async function getCustomCommandForTwitchChannel(channelName: string, triggerString: string): Promise<DbCustomCommand | null> {
@@ -420,7 +457,8 @@ export async function getCustomCommandForTwitchChannel(channelName: string, trig
   }
 
   const cache = await getCustomCommandLookupCache();
-  return cache.twitchByChannelAndTrigger.get(cacheKey) ?? null;
+  const cachedCommand = cache.twitchByChannelAndTrigger.get(cacheKey);
+  return cachedCommand ? cloneDbCustomCommand(cachedCommand) : null;
 }
 
 export async function getCustomCommandForDiscord(triggerString: string): Promise<DbCustomCommand | null> {
@@ -430,7 +468,8 @@ export async function getCustomCommandForDiscord(triggerString: string): Promise
   }
 
   const cache = await getCustomCommandLookupCache();
-  return cache.discordByTrigger.get(normalizedTriggerString) ?? null;
+  const cachedCommand = cache.discordByTrigger.get(normalizedTriggerString);
+  return cachedCommand ? cloneDbCustomCommand(cachedCommand) : null;
 }
 
 function requireTrimmedString(value: string, fieldName: string): string {

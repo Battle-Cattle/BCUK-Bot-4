@@ -9,25 +9,43 @@ function extractCommand(rawMessage: string): string | null {
   return command || null;
 }
 
-export async function previewCustomCommandForDiscord(
+async function previewCustomCommand(
   rawMessage: string,
-  username?: string | null,
+  source: 'discord' | 'twitch',
+  channel: string | null,
+  username: string | null | undefined,
+  lookupCommand: (command: string) => Promise<{ output: string } | null>,
+  buildLogMessage: (command: string) => string,
 ): Promise<void> {
   const command = extractCommand(rawMessage);
   if (!command) return;
 
-  const customCommand = await getCustomCommandForDiscord(command);
+  const customCommand = await lookupCommand(command);
   if (!customCommand) return;
 
   recordCommandTestEntry({
-    source: 'discord',
+    source,
     command,
     response: customCommand.output,
-    channel: null,
+    channel,
     user: username ?? null,
   });
 
-  console.log(`[Discord] Preview custom command '${command}' matched; reply suppressed while preview monitoring is enabled.`);
+  console.log(buildLogMessage(command));
+}
+
+export async function previewCustomCommandForDiscord(
+  rawMessage: string,
+  username?: string | null,
+): Promise<void> {
+  await previewCustomCommand(
+    rawMessage,
+    'discord',
+    null,
+    username,
+    getCustomCommandForDiscord,
+    (command) => `[Discord] Preview custom command '${command}' matched; reply suppressed while preview monitoring is enabled.`,
+  );
 }
 
 export async function previewCustomCommandForTwitch(
@@ -35,19 +53,12 @@ export async function previewCustomCommandForTwitch(
   rawMessage: string,
   username?: string | null,
 ): Promise<void> {
-  const command = extractCommand(rawMessage);
-  if (!command) return;
-
-  const customCommand = await getCustomCommandForTwitchChannel(channel, command);
-  if (!customCommand) return;
-
-  recordCommandTestEntry({
-    source: 'twitch',
-    command,
-    response: customCommand.output,
+  await previewCustomCommand(
+    rawMessage,
+    'twitch',
     channel,
-    user: username ?? null,
-  });
-
-  console.log(`[Twitch] Preview custom command '${command}' matched in ${channel}; reply suppressed while preview monitoring is enabled.`);
+    username,
+    (command) => getCustomCommandForTwitchChannel(channel, command),
+    (command) => `[Twitch] Preview custom command '${command}' matched in ${channel}; reply suppressed while preview monitoring is enabled.`,
+  );
 }

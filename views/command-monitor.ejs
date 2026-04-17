@@ -6,8 +6,23 @@
   <title>BCUK Bot — Command Monitor</title>
   <link rel="stylesheet" href="/style.css">
   <%- include('partials/pwa-head') %>
+<%
+function htmlAttrJson(value) {
+  const replacements = {
+    '&': '&amp;',
+    '"': '&quot;',
+    "'": '&#39;',
+    '<': '&lt;',
+    '>': '&gt;',
+  };
+
+  return JSON.stringify(value).replace(/[&"'<>]/g, function (char) {
+    return replacements[char] || char;
+  });
+}
+%>
 </head>
-<body data-command-test-entries='<%- JSON.stringify(recentEntries).replace(/&/g, '&amp;').replace(/'/g, '&#39;') %>'>
+<body data-command-test-entries='<%- htmlAttrJson(recentEntries) %>'>
   <%- include('partials/nav') %>
 
   <main class="container">

@@ -75,6 +75,25 @@ async function fetchRecentEntries() {
   }
 }
 
+var pollHandle = null;
+
+function startPolling() {
+  if (pollHandle !== null || document.visibilityState === 'hidden') {
+    return;
+  }
+
+  pollHandle = window.setInterval(fetchRecentEntries, 5000);
+}
+
+function stopPolling() {
+  if (pollHandle === null) {
+    return;
+  }
+
+  window.clearInterval(pollHandle);
+  pollHandle = null;
+}
+
 var initialEntriesRaw = document.body && document.body.dataset ? document.body.dataset.commandTestEntries : '[]';
 try {
   renderEntries(JSON.parse(initialEntriesRaw || '[]'));
@@ -82,5 +101,17 @@ try {
   renderEntries([]);
 }
 
-fetchRecentEntries();
-setInterval(fetchRecentEntries, 5000);
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'hidden') {
+    stopPolling();
+    return;
+  }
+
+  fetchRecentEntries();
+  startPolling();
+});
+
+if (document.visibilityState === 'visible') {
+  fetchRecentEntries();
+  startPolling();
+}
