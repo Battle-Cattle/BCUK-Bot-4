@@ -419,35 +419,49 @@ function buildCustomCommandLookupCache(
   };
 }
 
-async function getCustomCommandLookupCache(): Promise<CustomCommandLookupCache> {
-  const now = Date.now();
-  if (customCommandLookupCache && now - customCommandLookupCache.loadedAt < CUSTOM_COMMAND_CACHE_TTL_MS) {
-    return customCommandLookupCache;
+function refreshCustomCommandLookupCacheInBackground(): void {
+  if (customCommandLookupPromise) {
+    return;
   }
 
-  if (!customCommandLookupPromise) {
-    const lookupVersion = customCommandLookupVersion;
-    customCommandLookupPromise = (async () => {
-      const [commands, activeTwitchChannels] = await Promise.all([
-        getAllCustomCommandsWithAssignments(),
-        getTwitchEnabledChannels(),
-      ]);
-      const rebuiltCache = buildCustomCommandLookupCache(commands, activeTwitchChannels);
-      if (lookupVersion === customCommandLookupVersion) {
-        customCommandLookupCache = rebuiltCache;
-      }
-      return rebuiltCache;
-    })();
-  }
+  const lookupVersion = customCommandLookupVersion;
+  customCommandLookupPromise = (async () => {
+    const [commands, activeTwitchChannels] = await Promise.all([
+      getAllCustomCommandsWithAssignments(),
+      getTwitchEnabledChannels(),
+    ]);
+    const rebuiltCache = buildCustomCommandLookupCache(commands, activeTwitchChannels);
+    if (lookupVersion === customCommandLookupVersion) {
+      customCommandLookupCache = rebuiltCache;
+    }
+    return rebuiltCache;
+  })();
 
   const inFlightPromise = customCommandLookupPromise;
-  try {
-    return await inFlightPromise;
-  } finally {
+  void inFlightPromise.finally(() => {
     if (customCommandLookupPromise === inFlightPromise) {
       customCommandLookupPromise = null;
     }
+  });
+}
+
+async function getCustomCommandLookupCache(): Promise<CustomCommandLookupCache> {
+  const now = Date.now();
+
+  if (customCommandLookupCache) {
+    if (now - customCommandLookupCache.loadedAt >= CUSTOM_COMMAND_CACHE_TTL_MS) {
+      refreshCustomCommandLookupCacheInBackground();
+    }
+    return customCommandLookupCache;
   }
+
+  refreshCustomCommandLookupCacheInBackground();
+
+  if (!customCommandLookupPromise) {
+    throw new Error('Custom command lookup cache refresh did not start');
+  }
+
+  return customCommandLookupPromise;
 }
 
 export function invalidateCustomCommandLookupCache(): void {

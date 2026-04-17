@@ -22,7 +22,7 @@ function htmlAttrJson(value) {
 }
 %>
 </head>
-<body data-command-test-entries='<%- htmlAttrJson(recentEntries) %>'>
+<body data-command-monitor-entries='<%- htmlAttrJson(recentEntries) %>'>
   <%- include('partials/nav') %>
 
   <main class="container">
@@ -57,9 +57,9 @@ function htmlAttrJson(value) {
                 <th scope="col">Response Preview</th>
               </tr>
             </thead>
-            <tbody id="command-test-body">
+            <tbody id="command-monitor-body">
               <% if (recentEntries.length === 0) { %>
-              <tr id="command-test-empty-row">
+              <tr id="command-monitor-empty-row">
                 <td colspan="6" class="empty-msg">No matching custom commands have been seen yet.</td>
               </tr>
               <% } else { %>

@@ -8,7 +8,7 @@ function formatWhen(value) {
 }
 
 function renderEntries(entries) {
-  var tbody = document.getElementById('command-test-body');
+  var tbody = document.getElementById('command-monitor-body');
   if (!(tbody instanceof HTMLElement)) return;
 
   tbody.innerHTML = '';
@@ -94,7 +94,7 @@ function stopPolling() {
   pollHandle = null;
 }
 
-var initialEntriesRaw = document.body && document.body.dataset ? document.body.dataset.commandTestEntries : '[]';
+var initialEntriesRaw = document.body && document.body.dataset ? document.body.dataset.commandMonitorEntries : '[]';
 try {
   renderEntries(JSON.parse(initialEntriesRaw || '[]'));
 } catch {
