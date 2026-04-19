@@ -684,6 +684,12 @@ export interface DbCounter {
   current_value: number;
 }
 
+export type CounterMatchType = 'trigger' | 'check';
+
+export interface DbMatchedCounter extends DbCounter {
+  matchType: CounterMatchType;
+}
+
 export class CounterNotFoundError extends Error {
   constructor(id: number) {
     super(`Counter not found: ${id}`);
@@ -734,7 +740,7 @@ export async function getAllCounters(): Promise<DbCounter[]> {
   return rows.map(mapCounter);
 }
 
-export async function findCounterByCheckCommand(command: string): Promise<DbCounter | null> {
+export async function findCounterByCommand(command: string): Promise<DbMatchedCounter | null> {
   const normalizedCommand = command.trim().toLowerCase();
   if (!normalizedCommand) {
     return null;
@@ -743,16 +749,20 @@ export async function findCounterByCheckCommand(command: string): Promise<DbCoun
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value
      FROM counter
-     WHERE LOWER(check_command) = ?
+     WHERE LOWER(trigger_command) = ? OR LOWER(check_command) = ?
      LIMIT 1`,
-    [normalizedCommand],
+    [normalizedCommand, normalizedCommand],
   );
 
   if (rows.length === 0) {
     return null;
   }
 
-  return mapCounter(rows[0]);
+  const counter = mapCounter(rows[0]);
+  return {
+    ...counter,
+    matchType: counter.trigger_command.trim().toLowerCase() === normalizedCommand ? 'trigger' : 'check',
+  };
 }
 
 export async function addCounter(
