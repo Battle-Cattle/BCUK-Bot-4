@@ -1,5 +1,10 @@
-import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './db';
+import { findCounterByCheckCommand, getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './db';
 import { recordCommandTestEntry } from './commandMonitorStore';
+
+type PreviewLookupResult = {
+  response: string;
+  logType: 'custom-command' | 'counter-check';
+};
 
 function extractCommand(rawMessage: string): string | null {
   const trimmedMessage = rawMessage.trim();
@@ -9,29 +14,56 @@ function extractCommand(rawMessage: string): string | null {
   return command || null;
 }
 
+function formatCounterPreviewMessage(template: string, value: number): string {
+  return template.replace(/%d/g, String(value));
+}
+
+async function findPreviewLookupResult(
+  command: string,
+  lookupCustomCommand: (command: string) => Promise<{ output: string } | null>,
+): Promise<PreviewLookupResult | null> {
+  const customCommand = await lookupCustomCommand(command);
+  if (customCommand) {
+    return {
+      response: customCommand.output,
+      logType: 'custom-command',
+    };
+  }
+
+  const counter = await findCounterByCheckCommand(command);
+  if (counter) {
+    return {
+      response: formatCounterPreviewMessage(counter.message, counter.current_value),
+      logType: 'counter-check',
+    };
+  }
+
+  return null;
+}
+
 async function previewCustomCommand(
   rawMessage: string,
   source: 'discord' | 'twitch',
   channel: string | null,
   username: string | null | undefined,
   lookupCommand: (command: string) => Promise<{ output: string } | null>,
-  buildLogMessage: (command: string) => string,
+  buildLogMessage: (command: string, logType: PreviewLookupResult['logType']) => string,
 ): Promise<void> {
   const command = extractCommand(rawMessage);
   if (!command) return;
 
-  const customCommand = await lookupCommand(command);
-  if (!customCommand) return;
+  const matchedEntry = await findPreviewLookupResult(command, lookupCommand);
+  if (!matchedEntry) return;
 
   recordCommandTestEntry({
     source,
     command,
-    response: customCommand.output,
+    response: matchedEntry.response,
     channel,
     user: username ?? null,
   });
 
-  console.log(buildLogMessage(command));
+  console.log(buildLogMessage(command, matchedEntry.logType));
 }
 
 export async function previewCustomCommandForDiscord(
@@ -44,7 +76,9 @@ export async function previewCustomCommandForDiscord(
     null,
     username,
     getCustomCommandForDiscord,
-    (command) => `[Discord] Preview custom command '${command}' matched (recorded for monitoring).`,
+    (command, logType) => logType === 'counter-check'
+      ? `[Discord] Preview counter check '${command}' matched (recorded for monitoring).`
+      : `[Discord] Preview custom command '${command}' matched (recorded for monitoring).`,
   );
 }
 
@@ -59,6 +93,8 @@ export async function previewCustomCommandForTwitch(
     channel,
     username,
     (command) => getCustomCommandForTwitchChannel(channel, command),
-    (command) => `[Twitch] Preview custom command '${command}' matched in ${channel} (recorded for monitoring).`,
+    (command, logType) => logType === 'counter-check'
+      ? `[Twitch] Preview counter check '${command}' matched in ${channel} (recorded for monitoring).`
+      : `[Twitch] Preview custom command '${command}' matched in ${channel} (recorded for monitoring).`,
   );
 }

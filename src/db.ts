@@ -734,6 +734,27 @@ export async function getAllCounters(): Promise<DbCounter[]> {
   return rows.map(mapCounter);
 }
 
+export async function findCounterByCheckCommand(command: string): Promise<DbCounter | null> {
+  const normalizedCommand = command.trim().toLowerCase();
+  if (!normalizedCommand) {
+    return null;
+  }
+
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value
+     FROM counter
+     WHERE LOWER(check_command) = ?
+     LIMIT 1`,
+    [normalizedCommand],
+  );
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return mapCounter(rows[0]);
+}
+
 export async function addCounter(
   triggerCommand: string,
   checkCommand: string,

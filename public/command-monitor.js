@@ -18,7 +18,7 @@ function renderEntries(entries) {
     var cell = document.createElement('td');
     cell.colSpan = 6;
     cell.className = 'empty-msg';
-    cell.textContent = 'No matching custom commands have been seen yet.';
+    cell.textContent = 'No matching custom commands or counter commands have been seen yet.';
     emptyRow.appendChild(cell);
     tbody.appendChild(emptyRow);
     return;
