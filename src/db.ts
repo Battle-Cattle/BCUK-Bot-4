@@ -284,8 +284,155 @@ export interface DbCustomCommandWithAssignments extends DbCustomCommand {
   assigned_users: DbCustomCommandAssignedUser[];
 }
 
-interface CustomCommandLookupCache {
+interface RefreshingLookupCache {
   loadedAt: number;
+}
+
+interface ManagedLookupCacheOptions<TCache extends RefreshingLookupCache> {
+  cacheName: string;
+  ttlMs: number;
+  refreshFailureBackoffMs: number;
+  refreshFailureMaxBackoffMs: number;
+  createEmptyCache: () => TCache;
+  loadCache: () => Promise<TCache>;
+}
+
+interface ManagedLookupCache<TCache extends RefreshingLookupCache> {
+  getCache: () => Promise<TCache>;
+  invalidate: () => void;
+}
+
+function createManagedLookupCache<TCache extends RefreshingLookupCache>(
+  options: ManagedLookupCacheOptions<TCache>,
+): ManagedLookupCache<TCache> {
+  let cache: TCache | null = null;
+  let inFlightPromise: Promise<TCache> | null = null;
+  let version = 0;
+  let refreshAllowedAt = 0;
+  let refreshFailureCount = 0;
+
+  function getRefreshBackoffMs(): number {
+    const backoffMultiplier = 2 ** Math.max(0, refreshFailureCount - 1);
+    return Math.min(
+      options.refreshFailureBackoffMs * backoffMultiplier,
+      options.refreshFailureMaxBackoffMs,
+    );
+  }
+
+  function refreshInBackground(): void {
+    if (inFlightPromise) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now < refreshAllowedAt) {
+      return;
+    }
+
+    const requestVersion = version;
+    inFlightPromise = (async () => {
+      const rebuiltCache = await options.loadCache();
+      if (requestVersion === version) {
+        cache = rebuiltCache;
+        refreshAllowedAt = 0;
+        refreshFailureCount = 0;
+      }
+      return rebuiltCache;
+    })();
+
+    const promiseForFinally = inFlightPromise;
+    void promiseForFinally
+      .catch((err) => {
+        if (requestVersion !== version) {
+          return;
+        }
+
+        refreshFailureCount += 1;
+        const retryDelayMs = getRefreshBackoffMs();
+        refreshAllowedAt = Date.now() + retryDelayMs;
+
+        if (!cache) {
+          cache = options.createEmptyCache();
+          console.error(`[DB] Background ${options.cacheName} refresh failed; serving an empty cache and retrying after ${retryDelayMs}ms.`, err);
+          return;
+        }
+
+        console.error(`[DB] Background ${options.cacheName} refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
+      })
+      .finally(() => {
+        if (inFlightPromise === promiseForFinally) {
+          inFlightPromise = null;
+        }
+      });
+  }
+
+  async function awaitCachePromise(promise: Promise<TCache>): Promise<TCache> {
+    try {
+      return await promise;
+    } catch (err) {
+      if (cache) {
+        return cache;
+      }
+
+      throw err;
+    }
+  }
+
+  async function getCache(): Promise<TCache> {
+    const now = Date.now();
+
+    if (cache) {
+      if (now - cache.loadedAt >= options.ttlMs && now >= refreshAllowedAt) {
+        refreshInBackground();
+      }
+      return cache;
+    }
+
+    const requestVersion = version;
+    refreshInBackground();
+
+    if (!inFlightPromise) {
+      if (cache) {
+        return cache;
+      }
+
+      throw new Error(`${options.cacheName} refresh did not start`);
+    }
+
+    const resolvedCache = await awaitCachePromise(inFlightPromise);
+
+    if (requestVersion === version) {
+      return resolvedCache;
+    }
+
+    if (cache) {
+      return cache;
+    }
+
+    refreshInBackground();
+
+    if (inFlightPromise) {
+      return await awaitCachePromise(inFlightPromise);
+    }
+
+    throw new Error(`${options.cacheName} refresh did not start`);
+  }
+
+  function invalidate(): void {
+    version += 1;
+    cache = null;
+    inFlightPromise = null;
+    refreshAllowedAt = 0;
+    refreshFailureCount = 0;
+  }
+
+  return {
+    getCache,
+    invalidate,
+  };
+}
+
+interface CustomCommandLookupCache extends RefreshingLookupCache {
   discordByTrigger: Map<string, DbCustomCommand>;
   twitchByChannelAndTrigger: Map<string, DbCustomCommand>;
 }
@@ -303,11 +450,6 @@ function createEmptyCustomCommandLookupCache(): CustomCommandLookupCache {
 const CUSTOM_COMMAND_CACHE_TTL_MS = 15_000;
 const CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
 const CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
-let customCommandLookupCache: CustomCommandLookupCache | null = null;
-let customCommandLookupPromise: Promise<CustomCommandLookupCache> | null = null;
-let customCommandLookupVersion = 0;
-let customCommandLookupRefreshAllowedAt = 0;
-let customCommandLookupRefreshFailureCount = 0;
 
 function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
   return {
@@ -435,129 +577,27 @@ function buildCustomCommandLookupCache(
   };
 }
 
-function getCustomCommandLookupRefreshBackoffMs(): number {
-  const backoffMultiplier = 2 ** Math.max(0, customCommandLookupRefreshFailureCount - 1);
-  return Math.min(
-    CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_BACKOFF_MS * backoffMultiplier,
-    CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
-  );
-}
-
-function refreshCustomCommandLookupCacheInBackground(): void {
-  if (customCommandLookupPromise) {
-    return;
-  }
-
-  const now = Date.now();
-  if (now < customCommandLookupRefreshAllowedAt) {
-    return;
-  }
-
-  const lookupVersion = customCommandLookupVersion;
-  customCommandLookupPromise = (async () => {
+const customCommandLookupCacheState = createManagedLookupCache<CustomCommandLookupCache>({
+  cacheName: 'custom command cache',
+  ttlMs: CUSTOM_COMMAND_CACHE_TTL_MS,
+  refreshFailureBackoffMs: CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_BACKOFF_MS,
+  refreshFailureMaxBackoffMs: CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  createEmptyCache: createEmptyCustomCommandLookupCache,
+  loadCache: async () => {
     const [commands, activeTwitchChannels] = await Promise.all([
       getAllCustomCommandsWithAssignments(),
       getTwitchEnabledChannels(),
     ]);
-    const rebuiltCache = buildCustomCommandLookupCache(commands, activeTwitchChannels);
-    if (lookupVersion === customCommandLookupVersion) {
-      customCommandLookupCache = rebuiltCache;
-      customCommandLookupRefreshAllowedAt = 0;
-      customCommandLookupRefreshFailureCount = 0;
-    }
-    return rebuiltCache;
-  })();
-
-  const inFlightPromise = customCommandLookupPromise;
-  void inFlightPromise
-    .catch((err) => {
-      if (lookupVersion !== customCommandLookupVersion) {
-        return;
-      }
-
-      customCommandLookupRefreshFailureCount += 1;
-      const retryDelayMs = getCustomCommandLookupRefreshBackoffMs();
-      customCommandLookupRefreshAllowedAt = Date.now() + retryDelayMs;
-
-      if (!customCommandLookupCache) {
-        customCommandLookupCache = createEmptyCustomCommandLookupCache();
-        console.error(`[DB] Background custom command cache refresh failed; serving an empty cache and retrying after ${retryDelayMs}ms.`, err);
-        return;
-      }
-
-      console.error(`[DB] Background custom command cache refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
-    })
-    .finally(() => {
-      if (customCommandLookupPromise === inFlightPromise) {
-        customCommandLookupPromise = null;
-      }
-    });
-}
-
-async function awaitCustomCommandLookupPromise(
-  promise: Promise<CustomCommandLookupCache>,
-): Promise<CustomCommandLookupCache> {
-  try {
-    return await promise;
-  } catch (err) {
-    if (customCommandLookupCache) {
-      return customCommandLookupCache;
-    }
-
-    throw err;
-  }
-}
+    return buildCustomCommandLookupCache(commands, activeTwitchChannels);
+  },
+});
 
 async function getCustomCommandLookupCache(): Promise<CustomCommandLookupCache> {
-  const now = Date.now();
-
-  if (customCommandLookupCache) {
-    if (
-      now - customCommandLookupCache.loadedAt >= CUSTOM_COMMAND_CACHE_TTL_MS
-      && now >= customCommandLookupRefreshAllowedAt
-    ) {
-      refreshCustomCommandLookupCacheInBackground();
-    }
-    return customCommandLookupCache;
-  }
-
-  const requestVersion = customCommandLookupVersion;
-  refreshCustomCommandLookupCacheInBackground();
-
-  if (!customCommandLookupPromise) {
-    if (customCommandLookupCache) {
-      return customCommandLookupCache;
-    }
-
-    throw new Error('Custom command lookup cache refresh did not start');
-  }
-
-  const inFlightPromise = customCommandLookupPromise;
-  const resolvedCache = await awaitCustomCommandLookupPromise(inFlightPromise);
-
-  if (requestVersion === customCommandLookupVersion) {
-    return resolvedCache;
-  }
-
-  if (customCommandLookupCache) {
-    return customCommandLookupCache;
-  }
-
-  refreshCustomCommandLookupCacheInBackground();
-
-  if (customCommandLookupPromise) {
-    return await awaitCustomCommandLookupPromise(customCommandLookupPromise);
-  }
-
-  throw new Error('Custom command lookup cache refresh did not start');
+  return await customCommandLookupCacheState.getCache();
 }
 
 export function invalidateCustomCommandLookupCache(): void {
-  customCommandLookupVersion += 1;
-  customCommandLookupCache = null;
-  customCommandLookupPromise = null;
-  customCommandLookupRefreshAllowedAt = 0;
-  customCommandLookupRefreshFailureCount = 0;
+  customCommandLookupCacheState.invalidate();
 }
 
 export async function getCustomCommandForTwitchChannel(channelName: string, triggerString: string): Promise<DbCustomCommand | null> {
@@ -730,8 +770,7 @@ function mapCounter(row: mysql.RowDataPacket): DbCounter {
   };
 }
 
-interface CounterLookupCache {
-  loadedAt: number;
+interface CounterLookupCache extends RefreshingLookupCache {
   byCommand: Map<string, DbMatchedCounter>;
 }
 
@@ -747,11 +786,6 @@ function createEmptyCounterLookupCache(): CounterLookupCache {
 const COUNTER_LOOKUP_CACHE_TTL_MS = 15_000;
 const COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
 const COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
-let counterLookupCache: CounterLookupCache | null = null;
-let counterLookupPromise: Promise<CounterLookupCache> | null = null;
-let counterLookupVersion = 0;
-let counterLookupRefreshAllowedAt = 0;
-let counterLookupRefreshFailureCount = 0;
 
 function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
   const byCommand = new Map<string, DbMatchedCounter>();
@@ -780,126 +814,21 @@ function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
   };
 }
 
-function getCounterLookupRefreshBackoffMs(): number {
-  const backoffMultiplier = 2 ** Math.max(0, counterLookupRefreshFailureCount - 1);
-  return Math.min(
-    COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_BACKOFF_MS * backoffMultiplier,
-    COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
-  );
-}
-
-function refreshCounterLookupCacheInBackground(): void {
-  if (counterLookupPromise) {
-    return;
-  }
-
-  const now = Date.now();
-  if (now < counterLookupRefreshAllowedAt) {
-    return;
-  }
-
-  const lookupVersion = counterLookupVersion;
-  counterLookupPromise = (async () => {
-    const counters = await getAllCounters();
-    const rebuiltCache = buildCounterLookupCache(counters);
-    if (lookupVersion === counterLookupVersion) {
-      counterLookupCache = rebuiltCache;
-      counterLookupRefreshAllowedAt = 0;
-      counterLookupRefreshFailureCount = 0;
-    }
-    return rebuiltCache;
-  })();
-
-  const inFlightPromise = counterLookupPromise;
-  void inFlightPromise
-    .catch((err) => {
-      if (lookupVersion !== counterLookupVersion) {
-        return;
-      }
-
-      counterLookupRefreshFailureCount += 1;
-      const retryDelayMs = getCounterLookupRefreshBackoffMs();
-      counterLookupRefreshAllowedAt = Date.now() + retryDelayMs;
-
-      if (!counterLookupCache) {
-        counterLookupCache = createEmptyCounterLookupCache();
-        console.error(`[DB] Background counter cache refresh failed; serving an empty cache and retrying after ${retryDelayMs}ms.`, err);
-        return;
-      }
-
-      console.error(`[DB] Background counter cache refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
-    })
-    .finally(() => {
-      if (counterLookupPromise === inFlightPromise) {
-        counterLookupPromise = null;
-      }
-    });
-}
-
-async function awaitCounterLookupPromise(
-  promise: Promise<CounterLookupCache>,
-): Promise<CounterLookupCache> {
-  try {
-    return await promise;
-  } catch (err) {
-    if (counterLookupCache) {
-      return counterLookupCache;
-    }
-
-    throw err;
-  }
-}
+const counterLookupCacheState = createManagedLookupCache<CounterLookupCache>({
+  cacheName: 'counter cache',
+  ttlMs: COUNTER_LOOKUP_CACHE_TTL_MS,
+  refreshFailureBackoffMs: COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_BACKOFF_MS,
+  refreshFailureMaxBackoffMs: COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  createEmptyCache: createEmptyCounterLookupCache,
+  loadCache: async () => buildCounterLookupCache(await getAllCounters()),
+});
 
 async function getCounterLookupCache(): Promise<CounterLookupCache> {
-  const now = Date.now();
-
-  if (counterLookupCache) {
-    if (
-      now - counterLookupCache.loadedAt >= COUNTER_LOOKUP_CACHE_TTL_MS
-      && now >= counterLookupRefreshAllowedAt
-    ) {
-      refreshCounterLookupCacheInBackground();
-    }
-    return counterLookupCache;
-  }
-
-  const requestVersion = counterLookupVersion;
-  refreshCounterLookupCacheInBackground();
-
-  if (!counterLookupPromise) {
-    if (counterLookupCache) {
-      return counterLookupCache;
-    }
-
-    throw new Error('Counter lookup cache refresh did not start');
-  }
-
-  const inFlightPromise = counterLookupPromise;
-  const resolvedCache = await awaitCounterLookupPromise(inFlightPromise);
-
-  if (requestVersion === counterLookupVersion) {
-    return resolvedCache;
-  }
-
-  if (counterLookupCache) {
-    return counterLookupCache;
-  }
-
-  refreshCounterLookupCacheInBackground();
-
-  if (counterLookupPromise) {
-    return await awaitCounterLookupPromise(counterLookupPromise);
-  }
-
-  throw new Error('Counter lookup cache refresh did not start');
+  return await counterLookupCacheState.getCache();
 }
 
 export function invalidateCounterLookupCache(): void {
-  counterLookupVersion += 1;
-  counterLookupCache = null;
-  counterLookupPromise = null;
-  counterLookupRefreshAllowedAt = 0;
-  counterLookupRefreshFailureCount = 0;
+  counterLookupCacheState.invalidate();
 }
 
 export async function getAllCounters(): Promise<DbCounter[]> {
