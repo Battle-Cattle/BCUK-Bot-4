@@ -735,9 +735,21 @@ interface CounterLookupCache {
   byCommand: Map<string, DbMatchedCounter>;
 }
 
+function createEmptyCounterLookupCache(): CounterLookupCache {
+  return {
+    loadedAt: Date.now(),
+    byCommand: new Map<string, DbMatchedCounter>(),
+  };
+}
+
 const COUNTER_LOOKUP_CACHE_TTL_MS = 15_000;
+const COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
+const COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
 let counterLookupCache: CounterLookupCache | null = null;
 let counterLookupPromise: Promise<CounterLookupCache> | null = null;
+let counterLookupVersion = 0;
+let counterLookupRefreshAllowedAt = 0;
+let counterLookupRefreshFailureCount = 0;
 
 function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
   const byCommand = new Map<string, DbMatchedCounter>();
@@ -766,22 +778,54 @@ function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
   };
 }
 
+function getCounterLookupRefreshBackoffMs(): number {
+  const backoffMultiplier = 2 ** Math.max(0, counterLookupRefreshFailureCount - 1);
+  return Math.min(
+    COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_BACKOFF_MS * backoffMultiplier,
+    COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  );
+}
+
 function refreshCounterLookupCacheInBackground(): void {
   if (counterLookupPromise) {
     return;
   }
 
+  const now = Date.now();
+  if (now < counterLookupRefreshAllowedAt) {
+    return;
+  }
+
+  const lookupVersion = counterLookupVersion;
   counterLookupPromise = (async () => {
     const counters = await getAllCounters();
     const rebuiltCache = buildCounterLookupCache(counters);
-    counterLookupCache = rebuiltCache;
+    if (lookupVersion === counterLookupVersion) {
+      counterLookupCache = rebuiltCache;
+      counterLookupRefreshAllowedAt = 0;
+      counterLookupRefreshFailureCount = 0;
+    }
     return rebuiltCache;
   })();
 
   const inFlightPromise = counterLookupPromise;
   void inFlightPromise
     .catch((err) => {
-      console.error('[DB] Counter lookup cache refresh failed.', err);
+      if (lookupVersion !== counterLookupVersion) {
+        return;
+      }
+
+      counterLookupRefreshFailureCount += 1;
+      const retryDelayMs = getCounterLookupRefreshBackoffMs();
+      counterLookupRefreshAllowedAt = Date.now() + retryDelayMs;
+
+      if (!counterLookupCache) {
+        counterLookupCache = createEmptyCounterLookupCache();
+        console.error(`[DB] Background counter cache refresh failed; serving an empty cache and retrying after ${retryDelayMs}ms.`, err);
+        return;
+      }
+
+      console.error(`[DB] Background counter cache refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
     })
     .finally(() => {
       if (counterLookupPromise === inFlightPromise) {
@@ -790,28 +834,70 @@ function refreshCounterLookupCacheInBackground(): void {
     });
 }
 
+async function awaitCounterLookupPromise(
+  promise: Promise<CounterLookupCache>,
+): Promise<CounterLookupCache> {
+  try {
+    return await promise;
+  } catch (err) {
+    if (counterLookupCache) {
+      return counterLookupCache;
+    }
+
+    throw err;
+  }
+}
+
 async function getCounterLookupCache(): Promise<CounterLookupCache> {
   const now = Date.now();
 
   if (counterLookupCache) {
-    if (now - counterLookupCache.loadedAt >= COUNTER_LOOKUP_CACHE_TTL_MS) {
+    if (
+      now - counterLookupCache.loadedAt >= COUNTER_LOOKUP_CACHE_TTL_MS
+      && now >= counterLookupRefreshAllowedAt
+    ) {
       refreshCounterLookupCacheInBackground();
     }
     return counterLookupCache;
   }
 
+  const requestVersion = counterLookupVersion;
   refreshCounterLookupCacheInBackground();
 
   if (!counterLookupPromise) {
+    if (counterLookupCache) {
+      return counterLookupCache;
+    }
+
     throw new Error('Counter lookup cache refresh did not start');
   }
 
-  return await counterLookupPromise;
+  const inFlightPromise = counterLookupPromise;
+  const resolvedCache = await awaitCounterLookupPromise(inFlightPromise);
+
+  if (requestVersion === counterLookupVersion) {
+    return resolvedCache;
+  }
+
+  if (counterLookupCache) {
+    return counterLookupCache;
+  }
+
+  refreshCounterLookupCacheInBackground();
+
+  if (counterLookupPromise) {
+    return await awaitCounterLookupPromise(counterLookupPromise);
+  }
+
+  throw new Error('Counter lookup cache refresh did not start');
 }
 
 export function invalidateCounterLookupCache(): void {
+  counterLookupVersion += 1;
   counterLookupCache = null;
   counterLookupPromise = null;
+  counterLookupRefreshAllowedAt = 0;
+  counterLookupRefreshFailureCount = 0;
 }
 
 export async function getAllCounters(): Promise<DbCounter[]> {
