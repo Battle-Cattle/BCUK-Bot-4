@@ -737,7 +737,9 @@ interface CounterLookupCache {
 
 function createEmptyCounterLookupCache(): CounterLookupCache {
   return {
-    loadedAt: Date.now(),
+    // Keep the fallback cache immediately stale so a new refresh can start as soon
+    // as the backoff window expires rather than waiting for the normal TTL.
+    loadedAt: 0,
     byCommand: new Map<string, DbMatchedCounter>(),
   };
 }
