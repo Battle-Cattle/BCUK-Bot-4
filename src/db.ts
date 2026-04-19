@@ -798,7 +798,9 @@ function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
         matchType: 'trigger',
       });
     }
+  }
 
+  for (const counter of counters) {
     const normalizedCheckCommand = counter.check_command.trim().toLowerCase();
     if (normalizedCheckCommand && !byCommand.has(normalizedCheckCommand)) {
       byCommand.set(normalizedCheckCommand, {
