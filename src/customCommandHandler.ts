@@ -11,16 +11,23 @@ function extractCommand(rawMessage: string): string | null {
   if (!trimmedMessage) return null;
 
   const command = trimmedMessage.split(/\s+/)[0]?.toLowerCase();
-  return command || null;
+  if (!command) return null;
+
+  const firstChar = command.charAt(0);
+  if (!firstChar || /[a-z0-9]/i.test(firstChar)) {
+    return null;
+  }
+
+  return command;
 }
 
 function formatCounterPreviewMessage(template: string, value: number): string {
   return template.replace(/%d/g, String(value));
 }
 
-function buildCounterTriggerPreviewResponse(currentValue: number, checkMessage: string): string {
-  const checkPreview = formatCounterPreviewMessage(checkMessage, currentValue);
-  return `${checkPreview} (preview only — counter not incremented)`;
+function buildCounterTriggerPreviewResponse(currentValue: number, incrementMessage: string): string {
+  const incrementPreview = formatCounterPreviewMessage(incrementMessage, currentValue);
+  return `${incrementPreview} (preview only — counter not incremented)`;
 }
 
 async function findPreviewLookupResult(
@@ -39,7 +46,7 @@ async function findPreviewLookupResult(
   if (counter) {
     return {
       response: counter.matchType === 'trigger'
-        ? buildCounterTriggerPreviewResponse(counter.current_value, counter.message)
+        ? buildCounterTriggerPreviewResponse(counter.current_value, counter.increment_message)
         : formatCounterPreviewMessage(counter.message, counter.current_value),
       logType: counter.matchType === 'trigger' ? 'counter-command' : 'counter-check',
     };

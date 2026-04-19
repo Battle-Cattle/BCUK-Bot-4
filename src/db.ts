@@ -730,6 +730,90 @@ function mapCounter(row: mysql.RowDataPacket): DbCounter {
   };
 }
 
+interface CounterLookupCache {
+  loadedAt: number;
+  byCommand: Map<string, DbMatchedCounter>;
+}
+
+const COUNTER_LOOKUP_CACHE_TTL_MS = 15_000;
+let counterLookupCache: CounterLookupCache | null = null;
+let counterLookupPromise: Promise<CounterLookupCache> | null = null;
+
+function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
+  const byCommand = new Map<string, DbMatchedCounter>();
+
+  for (const counter of counters) {
+    const normalizedTriggerCommand = counter.trigger_command.trim().toLowerCase();
+    if (normalizedTriggerCommand && !byCommand.has(normalizedTriggerCommand)) {
+      byCommand.set(normalizedTriggerCommand, {
+        ...counter,
+        matchType: 'trigger',
+      });
+    }
+
+    const normalizedCheckCommand = counter.check_command.trim().toLowerCase();
+    if (normalizedCheckCommand && !byCommand.has(normalizedCheckCommand)) {
+      byCommand.set(normalizedCheckCommand, {
+        ...counter,
+        matchType: 'check',
+      });
+    }
+  }
+
+  return {
+    loadedAt: Date.now(),
+    byCommand,
+  };
+}
+
+function refreshCounterLookupCacheInBackground(): void {
+  if (counterLookupPromise) {
+    return;
+  }
+
+  counterLookupPromise = (async () => {
+    const counters = await getAllCounters();
+    const rebuiltCache = buildCounterLookupCache(counters);
+    counterLookupCache = rebuiltCache;
+    return rebuiltCache;
+  })();
+
+  const inFlightPromise = counterLookupPromise;
+  void inFlightPromise
+    .catch((err) => {
+      console.error('[DB] Counter lookup cache refresh failed.', err);
+    })
+    .finally(() => {
+      if (counterLookupPromise === inFlightPromise) {
+        counterLookupPromise = null;
+      }
+    });
+}
+
+async function getCounterLookupCache(): Promise<CounterLookupCache> {
+  const now = Date.now();
+
+  if (counterLookupCache) {
+    if (now - counterLookupCache.loadedAt >= COUNTER_LOOKUP_CACHE_TTL_MS) {
+      refreshCounterLookupCacheInBackground();
+    }
+    return counterLookupCache;
+  }
+
+  refreshCounterLookupCacheInBackground();
+
+  if (!counterLookupPromise) {
+    throw new Error('Counter lookup cache refresh did not start');
+  }
+
+  return await counterLookupPromise;
+}
+
+export function invalidateCounterLookupCache(): void {
+  counterLookupCache = null;
+  counterLookupPromise = null;
+}
+
 export async function getAllCounters(): Promise<DbCounter[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value
@@ -746,23 +830,14 @@ export async function findCounterByCommand(command: string): Promise<DbMatchedCo
     return null;
   }
 
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value
-     FROM counter
-     WHERE LOWER(trigger_command) = ? OR LOWER(check_command) = ?
-     LIMIT 1`,
-    [normalizedCommand, normalizedCommand],
-  );
+  const cache = await getCounterLookupCache();
+  const counter = cache.byCommand.get(normalizedCommand);
 
-  if (rows.length === 0) {
-    return null;
-  }
-
-  const counter = mapCounter(rows[0]);
-  return {
-    ...counter,
-    matchType: counter.trigger_command.trim().toLowerCase() === normalizedCommand ? 'trigger' : 'check',
-  };
+  return counter
+    ? {
+      ...counter,
+    }
+    : null;
 }
 
 export async function addCounter(
@@ -785,6 +860,8 @@ export async function addCounter(
       resetYearly ? 1 : 0,
     ],
   );
+
+  invalidateCounterLookupCache();
 }
 
 async function counterExists(id: number): Promise<boolean> {
@@ -826,6 +903,8 @@ export async function updateCounter(
   if (result.affectedRows === 0 && !(await counterExists(id))) {
     throw new CounterNotFoundError(id);
   }
+
+  invalidateCounterLookupCache();
 }
 
 export async function removeCounter(id: number): Promise<void> {
@@ -833,6 +912,8 @@ export async function removeCounter(id: number): Promise<void> {
   if (result.affectedRows === 0) {
     throw new CounterNotFoundError(id);
   }
+
+  invalidateCounterLookupCache();
 }
 
 export async function resetCounterCurrentValue(id: number): Promise<void> {
@@ -844,6 +925,8 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
   if (result.affectedRows === 0 && !(await counterExists(id))) {
     throw new CounterNotFoundError(id);
   }
+
+  invalidateCounterLookupCache();
 }
 
 // ─── Stream monitor ──────────────────────────────────────────────────────────
