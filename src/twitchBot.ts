@@ -143,6 +143,11 @@ export async function startTwitchBot(): Promise<void> {
     if (!normalizedChannel) return;
     if (!activeChannels.has(normalizedChannel)) return;
 
+    // In Twitch shared chat, source-room-id differs from room-id when a message
+    // originated in a partner channel and was shared into this one. Only process
+    // the message in its source channel to avoid duplicate preview entries.
+    if (tags['source-room-id'] && tags['source-room-id'] !== tags['room-id']) return;
+
     previewCustomCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
       console.error('[Twitch] Custom command preview error:', err),
     );
