@@ -150,6 +150,13 @@ Expected constraints and behavior:
 - `trigger_string` should be stored as a single token only, including prefix, for example `!hello`.
 - The application lowercases `trigger_string` before persistence so it matches runtime command lookup behavior.
 
+Recommended migration (run once) for DB-level protection:
+
+```sql
+ALTER TABLE custom_command
+    ADD CONSTRAINT uq_custom_command_trigger_string UNIQUE (trigger_string);
+```
+
 ## `twitch_user_commands`
 
 Join table mapping users to custom commands.

@@ -113,11 +113,11 @@ router.post('/counters/add', requireManager, csrfProtection, async (req, res) =>
   }
 
   try {
-    const [isTriggerTaken, isCheckTaken] = await Promise.all([
-      isCounterCommandTaken(form.triggerCommand),
-      isCounterCommandTaken(form.checkCommand),
+    const hasDuplicateCommand = await isCounterCommandTaken([
+      form.triggerCommand,
+      form.checkCommand,
     ]);
-    if (isTriggerTaken || isCheckTaken) {
+    if (hasDuplicateCommand) {
       return res.redirect('/admin/counters?error=duplicate_command');
     }
 
@@ -150,11 +150,11 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
   }
 
   try {
-    const [isTriggerTaken, isCheckTaken] = await Promise.all([
-      isCounterCommandTaken(form.triggerCommand, parsedId),
-      isCounterCommandTaken(form.checkCommand, parsedId),
-    ]);
-    if (isTriggerTaken || isCheckTaken) {
+    const hasDuplicateCommand = await isCounterCommandTaken(
+      [form.triggerCommand, form.checkCommand],
+      parsedId,
+    );
+    if (hasDuplicateCommand) {
       return res.redirect('/admin/counters?error=duplicate_command');
     }
 

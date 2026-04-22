@@ -526,9 +526,11 @@ function getTwitchCommandCacheKey(channelName: string, triggerString: string): s
 function buildCustomCommandLookupCache(
   commands: DbCustomCommandWithAssignments[],
   activeTwitchChannels: string[],
+  counterCommands: Set<string>,
 ): CustomCommandLookupCache {
   const discordByTrigger = new Map<string, DbCustomCommand>();
   const twitchByChannelAndTrigger = new Map<string, DbCustomCommand>();
+  const loggedCrossTableCollisions = new Set<string>();
   const normalizedActiveTwitchChannels = activeTwitchChannels
     .map((channel) => normalizeTwitchChannelName(channel))
     .filter((channel): channel is string => channel !== null);
@@ -537,6 +539,11 @@ function buildCustomCommandLookupCache(
     const normalizedTriggerString = command.trigger_string.trim().toLowerCase();
     if (!normalizedTriggerString) {
       continue;
+    }
+
+    if (counterCommands.has(normalizedTriggerString) && !loggedCrossTableCollisions.has(normalizedTriggerString)) {
+      loggedCrossTableCollisions.add(normalizedTriggerString);
+      console.warn(`[DB] Cross-table command collision: custom command trigger '${normalizedTriggerString}' also exists in counter trigger/check commands.`);
     }
 
     const baseCommand = toDbCustomCommand(command);
@@ -590,11 +597,26 @@ const customCommandLookupCacheState = createManagedLookupCache<CustomCommandLook
   refreshFailureMaxBackoffMs: CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
   createEmptyCache: createEmptyCustomCommandLookupCache,
   loadCache: async () => {
-    const [commands, activeTwitchChannels] = await Promise.all([
+    const [commands, activeTwitchChannels, counters] = await Promise.all([
       getAllCustomCommandsWithAssignments(),
       getTwitchEnabledChannels(),
+      getAllCounters(),
     ]);
-    return buildCustomCommandLookupCache(commands, activeTwitchChannels);
+
+    const counterCommands = new Set<string>();
+    for (const counter of counters) {
+      const normalizedTriggerCommand = counter.trigger_command.trim().toLowerCase();
+      if (normalizedTriggerCommand) {
+        counterCommands.add(normalizedTriggerCommand);
+      }
+
+      const normalizedCheckCommand = counter.check_command.trim().toLowerCase();
+      if (normalizedCheckCommand) {
+        counterCommands.add(normalizedCheckCommand);
+      }
+    }
+
+    return buildCustomCommandLookupCache(commands, activeTwitchChannels, counterCommands);
   },
 });
 
@@ -636,23 +658,58 @@ function requireTrimmedString(value: string, fieldName: string): string {
   return normalizedValue;
 }
 
-export async function isCustomCommandTriggerTaken(triggerString: string, excludeCommandId?: number): Promise<boolean> {
-  const normalizedTrigger = triggerString.trim().toLowerCase();
-  if (!normalizedTrigger) return false;
+function normalizeCommandInputs(commandOrCommands: string | string[]): string[] {
+  const commands = Array.isArray(commandOrCommands) ? commandOrCommands : [commandOrCommands];
+  const normalized = commands
+    .map((command) => command.trim().toLowerCase())
+    .filter((command) => command.length > 0);
 
-  if (excludeCommandId !== undefined) {
-    const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-      'SELECT 1 FROM custom_command WHERE LOWER(trigger_string) = ? AND command_id != ? LIMIT 1',
-      [normalizedTrigger, excludeCommandId],
-    );
-    return rows.length > 0;
+  return Array.from(new Set(normalized));
+}
+
+function buildInClausePlaceholders(count: number): string {
+  return Array.from({ length: count }, () => '?').join(', ');
+}
+
+async function isAnyCommandTakenAcrossTables(
+  commandOrCommands: string | string[],
+  options?: { excludeCustomCommandId?: number; excludeCounterId?: number },
+): Promise<boolean> {
+  const normalizedCommands = normalizeCommandInputs(commandOrCommands);
+  if (normalizedCommands.length === 0) {
+    return false;
   }
 
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT 1 FROM custom_command WHERE LOWER(trigger_string) = ? LIMIT 1',
-    [normalizedTrigger],
-  );
-  return rows.length > 0;
+  const placeholders = buildInClausePlaceholders(normalizedCommands.length);
+
+  let customCommandSql = `SELECT 1 FROM custom_command WHERE LOWER(trigger_string) IN (${placeholders})`;
+  const customCommandParams: Array<string | number> = [...normalizedCommands];
+  if (options?.excludeCustomCommandId !== undefined) {
+    customCommandSql += ' AND command_id != ?';
+    customCommandParams.push(options.excludeCustomCommandId);
+  }
+  customCommandSql += ' LIMIT 1';
+
+  let counterSql = `SELECT 1 FROM counter WHERE (LOWER(trigger_command) IN (${placeholders}) OR LOWER(check_command) IN (${placeholders}))`;
+  const counterParams: Array<string | number> = [...normalizedCommands, ...normalizedCommands];
+  if (options?.excludeCounterId !== undefined) {
+    counterSql += ' AND id != ?';
+    counterParams.push(options.excludeCounterId);
+  }
+  counterSql += ' LIMIT 1';
+
+  const [customRowsResult, counterRowsResult] = await Promise.all([
+    getPool().execute<mysql.RowDataPacket[]>(customCommandSql, customCommandParams),
+    getPool().execute<mysql.RowDataPacket[]>(counterSql, counterParams),
+  ]);
+
+  const [customRows] = customRowsResult;
+  const [counterRows] = counterRowsResult;
+  return customRows.length > 0 || counterRows.length > 0;
+}
+
+export async function isCustomCommandTriggerTaken(triggerString: string, excludeCommandId?: number): Promise<boolean> {
+  return await isAnyCommandTakenAcrossTables(triggerString, { excludeCustomCommandId: excludeCommandId });
 }
 
 export async function addCustomCommand(
@@ -812,12 +869,17 @@ const COUNTER_LOOKUP_CACHE_TTL_MS = 15_000;
 const COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
 const COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
 
-function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
+function buildCounterLookupCache(counters: DbCounter[], customCommandTriggers: Set<string>): CounterLookupCache {
   const byCommand = new Map<string, DbMatchedCounter>();
+  const loggedCrossTableCollisions = new Set<string>();
 
   for (const counter of counters) {
     const normalizedTriggerCommand = counter.trigger_command.trim().toLowerCase();
     if (!normalizedTriggerCommand) continue;
+    if (customCommandTriggers.has(normalizedTriggerCommand) && !loggedCrossTableCollisions.has(normalizedTriggerCommand)) {
+      loggedCrossTableCollisions.add(normalizedTriggerCommand);
+      console.warn(`[DB] Cross-table command collision: counter trigger/check command '${normalizedTriggerCommand}' also exists in custom command triggers.`);
+    }
     if (byCommand.has(normalizedTriggerCommand)) {
       console.warn(`[DB] Counter trigger_command collision: '${normalizedTriggerCommand}' is already registered (counter id=${byCommand.get(normalizedTriggerCommand)!.id}); ignoring duplicate from counter id=${counter.id}.`);
       continue;
@@ -828,6 +890,10 @@ function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
   for (const counter of counters) {
     const normalizedCheckCommand = counter.check_command.trim().toLowerCase();
     if (!normalizedCheckCommand) continue;
+    if (customCommandTriggers.has(normalizedCheckCommand) && !loggedCrossTableCollisions.has(normalizedCheckCommand)) {
+      loggedCrossTableCollisions.add(normalizedCheckCommand);
+      console.warn(`[DB] Cross-table command collision: counter trigger/check command '${normalizedCheckCommand}' also exists in custom command triggers.`);
+    }
     if (byCommand.has(normalizedCheckCommand)) {
       console.warn(`[DB] Counter check_command collision: '${normalizedCheckCommand}' is already registered (counter id=${byCommand.get(normalizedCheckCommand)!.id}); ignoring duplicate from counter id=${counter.id}.`);
       continue;
@@ -847,7 +913,22 @@ const counterLookupCacheState = createManagedLookupCache<CounterLookupCache>({
   refreshFailureBackoffMs: COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_BACKOFF_MS,
   refreshFailureMaxBackoffMs: COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
   createEmptyCache: createEmptyCounterLookupCache,
-  loadCache: async () => buildCounterLookupCache(await getAllCounters()),
+  loadCache: async () => {
+    const [counters, customCommands] = await Promise.all([
+      getAllCounters(),
+      getAllCustomCommandsWithAssignments(),
+    ]);
+
+    const customCommandTriggers = new Set<string>();
+    for (const customCommand of customCommands) {
+      const normalizedTrigger = customCommand.trigger_string.trim().toLowerCase();
+      if (normalizedTrigger) {
+        customCommandTriggers.add(normalizedTrigger);
+      }
+    }
+
+    return buildCounterLookupCache(counters, customCommandTriggers);
+  },
 });
 
 async function getCounterLookupCache(): Promise<CounterLookupCache> {
@@ -884,23 +965,8 @@ export async function findCounterByCommand(command: string): Promise<DbMatchedCo
     : null;
 }
 
-export async function isCounterCommandTaken(command: string, excludeId?: number): Promise<boolean> {
-  const normalizedCommand = command.trim().toLowerCase();
-  if (!normalizedCommand) return false;
-
-  if (excludeId !== undefined) {
-    const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-      'SELECT 1 FROM counter WHERE (LOWER(trigger_command) = ? OR LOWER(check_command) = ?) AND id != ? LIMIT 1',
-      [normalizedCommand, normalizedCommand, excludeId],
-    );
-    return rows.length > 0;
-  }
-
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT 1 FROM counter WHERE LOWER(trigger_command) = ? OR LOWER(check_command) = ? LIMIT 1',
-    [normalizedCommand, normalizedCommand],
-  );
-  return rows.length > 0;
+export async function isCounterCommandTaken(commandOrCommands: string | string[], excludeCounterId?: number): Promise<boolean> {
+  return await isAnyCommandTakenAcrossTables(commandOrCommands, { excludeCounterId });
 }
 
 export async function addCounter(

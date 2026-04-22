@@ -33,6 +33,15 @@ interface CommandViewModel extends DbCustomCommandWithAssignments {
   unassigned_users: DbUser[];
 }
 
+function isMysqlDuplicateEntryError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const mysqlError = error as { code?: string; errno?: number };
+  return mysqlError.code === 'ER_DUP_ENTRY' || mysqlError.errno === 1062;
+}
+
 function normalizeRequiredText(value: string | undefined): string | null {
   if (typeof value !== 'string') return null;
 
@@ -114,6 +123,10 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
 
     await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
+    if (isMysqlDuplicateEntryError(err)) {
+      return res.redirect('/admin/commands?error=duplicate_trigger');
+    }
+
     console.error('[Web] Add custom command error:', err);
     return res.redirect('/admin/commands?error=add_failed');
   }
@@ -144,6 +157,10 @@ router.post('/commands/update', requireManager, csrfProtection, async (req, res)
 
     await updateCustomCommand(parsedCommandId, normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
+    if (isMysqlDuplicateEntryError(err)) {
+      return res.redirect('/admin/commands?error=duplicate_trigger');
+    }
+
     console.error('[Web] Update custom command error:', err);
     return res.redirect('/admin/commands?error=update_failed');
   }
