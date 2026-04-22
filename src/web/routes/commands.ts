@@ -7,6 +7,7 @@ import {
   findUser,
   getAllCustomCommandsWithAssignments,
   getAllUsers,
+  isCustomCommandTriggerTaken,
   removeCustomCommand,
   unassignUserFromCommand,
   updateCustomCommand,
@@ -18,6 +19,7 @@ const router = Router();
 
 const KNOWN_ERRORS = new Set([
   'missing_fields',
+  'duplicate_trigger',
   'invalid_id',
   'add_failed',
   'update_failed',
@@ -106,6 +108,10 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
   }
 
   try {
+    if (await isCustomCommandTriggerTaken(normalizedTriggerString)) {
+      return res.redirect('/admin/commands?error=duplicate_trigger');
+    }
+
     await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
     console.error('[Web] Add custom command error:', err);
@@ -132,6 +138,10 @@ router.post('/commands/update', requireManager, csrfProtection, async (req, res)
   }
 
   try {
+    if (await isCustomCommandTriggerTaken(normalizedTriggerString, parsedCommandId)) {
+      return res.redirect('/admin/commands?error=duplicate_trigger');
+    }
+
     await updateCustomCommand(parsedCommandId, normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
     console.error('[Web] Update custom command error:', err);

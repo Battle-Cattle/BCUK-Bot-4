@@ -541,17 +541,22 @@ function buildCustomCommandLookupCache(
 
     const baseCommand = toDbCustomCommand(command);
 
-    if (command.is_discord_enabled && !discordByTrigger.has(normalizedTriggerString)) {
-      discordByTrigger.set(normalizedTriggerString, baseCommand);
+    if (command.is_discord_enabled) {
+      if (discordByTrigger.has(normalizedTriggerString)) {
+        console.warn(`[DB] Custom command Discord trigger collision: '${normalizedTriggerString}' is already registered (command_id=${discordByTrigger.get(normalizedTriggerString)!.command_id}); ignoring duplicate from command_id=${command.command_id}.`);
+      } else {
+        discordByTrigger.set(normalizedTriggerString, baseCommand);
+      }
     }
 
     if (command.is_multi_twitch) {
       for (const activeChannel of normalizedActiveTwitchChannels) {
         const cacheKey = getTwitchCommandCacheKey(activeChannel, normalizedTriggerString);
-        if (!cacheKey || twitchByChannelAndTrigger.has(cacheKey)) {
+        if (!cacheKey) continue;
+        if (twitchByChannelAndTrigger.has(cacheKey)) {
+          console.warn(`[DB] Custom command Twitch trigger collision: '${normalizedTriggerString}' in channel '${activeChannel}' is already registered (command_id=${twitchByChannelAndTrigger.get(cacheKey)!.command_id}); ignoring duplicate from command_id=${command.command_id}.`);
           continue;
         }
-
         twitchByChannelAndTrigger.set(cacheKey, baseCommand);
       }
     }
@@ -562,10 +567,11 @@ function buildCustomCommandLookupCache(
       }
 
       const cacheKey = getTwitchCommandCacheKey(assignedUser.twitch_name, normalizedTriggerString);
-      if (!cacheKey || twitchByChannelAndTrigger.has(cacheKey)) {
+      if (!cacheKey) continue;
+      if (twitchByChannelAndTrigger.has(cacheKey)) {
+        console.warn(`[DB] Custom command Twitch trigger collision: '${normalizedTriggerString}' in channel '${assignedUser.twitch_name}' is already registered (command_id=${twitchByChannelAndTrigger.get(cacheKey)!.command_id}); ignoring duplicate from command_id=${command.command_id}.`);
         continue;
       }
-
       twitchByChannelAndTrigger.set(cacheKey, baseCommand);
     }
   }
@@ -628,6 +634,25 @@ function requireTrimmedString(value: string, fieldName: string): string {
     throw new Error(`Missing ${fieldName}`);
   }
   return normalizedValue;
+}
+
+export async function isCustomCommandTriggerTaken(triggerString: string, excludeCommandId?: number): Promise<boolean> {
+  const normalizedTrigger = triggerString.trim().toLowerCase();
+  if (!normalizedTrigger) return false;
+
+  if (excludeCommandId !== undefined) {
+    const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+      'SELECT 1 FROM custom_command WHERE LOWER(trigger_string) = ? AND command_id != ? LIMIT 1',
+      [normalizedTrigger, excludeCommandId],
+    );
+    return rows.length > 0;
+  }
+
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    'SELECT 1 FROM custom_command WHERE LOWER(trigger_string) = ? LIMIT 1',
+    [normalizedTrigger],
+  );
+  return rows.length > 0;
 }
 
 export async function addCustomCommand(
@@ -792,22 +817,22 @@ function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
 
   for (const counter of counters) {
     const normalizedTriggerCommand = counter.trigger_command.trim().toLowerCase();
-    if (normalizedTriggerCommand && !byCommand.has(normalizedTriggerCommand)) {
-      byCommand.set(normalizedTriggerCommand, {
-        ...counter,
-        matchType: 'trigger',
-      });
+    if (!normalizedTriggerCommand) continue;
+    if (byCommand.has(normalizedTriggerCommand)) {
+      console.warn(`[DB] Counter trigger_command collision: '${normalizedTriggerCommand}' is already registered (counter id=${byCommand.get(normalizedTriggerCommand)!.id}); ignoring duplicate from counter id=${counter.id}.`);
+      continue;
     }
+    byCommand.set(normalizedTriggerCommand, { ...counter, matchType: 'trigger' });
   }
 
   for (const counter of counters) {
     const normalizedCheckCommand = counter.check_command.trim().toLowerCase();
-    if (normalizedCheckCommand && !byCommand.has(normalizedCheckCommand)) {
-      byCommand.set(normalizedCheckCommand, {
-        ...counter,
-        matchType: 'check',
-      });
+    if (!normalizedCheckCommand) continue;
+    if (byCommand.has(normalizedCheckCommand)) {
+      console.warn(`[DB] Counter check_command collision: '${normalizedCheckCommand}' is already registered (counter id=${byCommand.get(normalizedCheckCommand)!.id}); ignoring duplicate from counter id=${counter.id}.`);
+      continue;
     }
+    byCommand.set(normalizedCheckCommand, { ...counter, matchType: 'check' });
   }
 
   return {
@@ -857,6 +882,25 @@ export async function findCounterByCommand(command: string): Promise<DbMatchedCo
       ...counter,
     }
     : null;
+}
+
+export async function isCounterCommandTaken(command: string, excludeId?: number): Promise<boolean> {
+  const normalizedCommand = command.trim().toLowerCase();
+  if (!normalizedCommand) return false;
+
+  if (excludeId !== undefined) {
+    const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+      'SELECT 1 FROM counter WHERE (LOWER(trigger_command) = ? OR LOWER(check_command) = ?) AND id != ? LIMIT 1',
+      [normalizedCommand, normalizedCommand, excludeId],
+    );
+    return rows.length > 0;
+  }
+
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    'SELECT 1 FROM counter WHERE LOWER(trigger_command) = ? OR LOWER(check_command) = ? LIMIT 1',
+    [normalizedCommand, normalizedCommand],
+  );
+  return rows.length > 0;
 }
 
 export async function addCounter(
