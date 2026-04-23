@@ -303,6 +303,23 @@ interface ManagedLookupCache<TCache extends RefreshingLookupCache> {
   invalidate: () => void;
 }
 
+/**
+ * Creates a managed lookup cache with TTL, background refresh, and error resilience.
+ *
+ * Caching strategy (stale-while-revalidate):
+ * - Returns cached data immediately when available, even if expired
+ * - Triggers background refresh when cache is expired (TTL exceeded)
+ * - On refresh failure: applies exponential backoff and serves stale cache if available,
+ *   or empty fallback cache on first load to prevent crashes
+ * - On invalidation: clears cache and version counter, forcing fresh load on next access
+ *
+ * Concurrency handling:
+ * - Multiple concurrent getCache() calls coalesce to one in-flight refresh
+ * - Version tracking ensures stale results from old refreshes don't overwrite newer data
+ * - Handles invalidation during in-flight refresh correctly by checking version numbers
+ *
+ * Used for: custom command lookups, counter command lookups
+ */
 function createManagedLookupCache<TCache extends RefreshingLookupCache>(
   options: ManagedLookupCacheOptions<TCache>,
 ): ManagedLookupCache<TCache> {

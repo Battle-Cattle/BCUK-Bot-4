@@ -22,7 +22,7 @@ router.get('/command-monitor', requireManager, csrfProtection, (req, res) => {
   }
 });
 
-router.get('/command-monitor/recent', requireManager, csrfProtection, (_req, res) => {
+router.get('/command-monitor/recent', requireManager, (_req, res) => {
   try {
     res.json({ entries: getRecentCommandTestEntries() });
   } catch (err) {
