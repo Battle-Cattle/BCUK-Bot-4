@@ -717,6 +717,15 @@ export class CommandConflictError extends Error {
   }
 }
 
+export function isMysqlDuplicateEntryError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const mysqlError = error as { code?: string; errno?: number };
+  return mysqlError.code === 'ER_DUP_ENTRY' || mysqlError.errno === 1062;
+}
+
 async function runSerializedCommandWrite<T>(
   commandOrCommands: string | string[],
   options: { excludeCustomCommandId?: number; excludeCounterId?: number } | undefined,

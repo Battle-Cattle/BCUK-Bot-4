@@ -4,6 +4,7 @@ import {
   assignUserToCommand,
   CommandConflictError,
   DbCustomCommandWithAssignments,
+  isMysqlDuplicateEntryError,
   DbUser,
   findUser,
   getAllCustomCommandsWithAssignments,
@@ -32,15 +33,6 @@ const KNOWN_ERRORS = new Set([
 
 interface CommandViewModel extends DbCustomCommandWithAssignments {
   unassigned_users: DbUser[];
-}
-
-function isMysqlDuplicateEntryError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-
-  const mysqlError = error as { code?: string; errno?: number };
-  return mysqlError.code === 'ER_DUP_ENTRY' || mysqlError.errno === 1062;
 }
 
 function normalizeRequiredText(value: string | undefined): string | null {
