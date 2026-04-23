@@ -694,7 +694,9 @@ async function acquireNamedLock(connection: mysql.PoolConnection, lockName: stri
     [lockName, COMMAND_WRITE_LOCK_TIMEOUT_SECONDS],
   );
 
-  if (rows[0]?.lock_status !== 1) {
+  // GET_LOCK returns a BIGINT. With bigNumberStrings: true, it's the string "1", not number 1.
+  const lockStatus = rows[0]?.lock_status;
+  if (lockStatus !== '1' && lockStatus !== 1) {
     throw new Error(`Timed out acquiring command write lock: ${lockName}`);
   }
 }
