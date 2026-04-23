@@ -682,7 +682,7 @@ async function isAnyCommandTakenAcrossTables(
 
   const placeholders = buildInClausePlaceholders(normalizedCommands.length);
 
-  let customCommandSql = `SELECT 1 FROM custom_command WHERE LOWER(trigger_string) IN (${placeholders})`;
+  let customCommandSql = `SELECT 1 FROM custom_command WHERE trigger_string IN (${placeholders})`;
   const customCommandParams: Array<string | number> = [...normalizedCommands];
   if (options?.excludeCustomCommandId !== undefined) {
     customCommandSql += ' AND command_id != ?';
@@ -690,7 +690,7 @@ async function isAnyCommandTakenAcrossTables(
   }
   customCommandSql += ' LIMIT 1';
 
-  let counterSql = `SELECT 1 FROM counter WHERE (LOWER(trigger_command) IN (${placeholders}) OR LOWER(check_command) IN (${placeholders}))`;
+  let counterSql = `SELECT 1 FROM counter WHERE (trigger_command IN (${placeholders}) OR check_command IN (${placeholders}))`;
   const counterParams: Array<string | number> = [...normalizedCommands, ...normalizedCommands];
   if (options?.excludeCounterId !== undefined) {
     counterSql += ' AND id != ?';
@@ -718,7 +718,7 @@ export async function addCustomCommand(
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
 ): Promise<void> {
-  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string');
+  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string').toLowerCase();
   const normalizedOutput = requireTrimmedString(output, 'output');
 
   await getPool().execute(
@@ -737,7 +737,7 @@ export async function updateCustomCommand(
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
 ): Promise<void> {
-  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string');
+  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string').toLowerCase();
   const normalizedOutput = requireTrimmedString(output, 'output');
 
   await getPool().execute(
@@ -833,8 +833,8 @@ function normalizeCounterFields(
   incrementMessage: string,
 ): NormalizedCounterFields {
   return {
-    triggerCommand: requireTrimmedString(triggerCommand, 'trigger_command'),
-    checkCommand: requireTrimmedString(checkCommand, 'check_command'),
+    triggerCommand: requireTrimmedString(triggerCommand, 'trigger_command').toLowerCase(),
+    checkCommand: requireTrimmedString(checkCommand, 'check_command').toLowerCase(),
     message: requireTrimmedString(message, 'message'),
     incrementMessage: requireTrimmedString(incrementMessage, 'increment_message'),
   };
