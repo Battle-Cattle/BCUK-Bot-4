@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import mysql from 'mysql2/promise';
 import { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from './config';
 import { normalizeTwitchChannelName } from './twitchChannelName';
@@ -450,6 +451,9 @@ function createEmptyCustomCommandLookupCache(): CustomCommandLookupCache {
 const CUSTOM_COMMAND_CACHE_TTL_MS = 15_000;
 const CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
 const CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
+const COMMAND_WRITE_LOCK_TIMEOUT_SECONDS = 10;
+
+type SqlExecutor = mysql.Pool | mysql.PoolConnection;
 
 function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
   return {
@@ -531,11 +535,12 @@ function buildCustomCommandLookupCache(
   const discordByTrigger = new Map<string, DbCustomCommand>();
   const twitchByChannelAndTrigger = new Map<string, DbCustomCommand>();
   const loggedCrossTableCollisions = new Set<string>();
+  const sortedCommands = [...commands].sort((left, right) => left.command_id - right.command_id);
   const normalizedActiveTwitchChannels = activeTwitchChannels
     .map((channel) => normalizeTwitchChannelName(channel))
     .filter((channel): channel is string => channel !== null);
 
-  for (const command of commands) {
+  for (const command of sortedCommands) {
     const normalizedTriggerString = command.trigger_string.trim().toLowerCase();
     if (!normalizedTriggerString) {
       continue;
@@ -658,22 +663,104 @@ function requireTrimmedString(value: string, fieldName: string): string {
   return normalizedValue;
 }
 
-function normalizeCommandInputs(commandOrCommands: string | string[]): string[] {
-  const commands = Array.isArray(commandOrCommands) ? commandOrCommands : [commandOrCommands];
-  const normalized = commands
-    .map((command) => command.trim().toLowerCase())
-    .filter((command) => command.length > 0);
+function normalizeCommand(command: string): string | null {
+  const normalizedCommand = command.trim().toLowerCase();
+  return normalizedCommand.length > 0 ? normalizedCommand : null;
+}
 
-  return Array.from(new Set(normalized));
+function normalizeCommandList(commandOrCommands: string | string[]): string[] {
+  const commands = Array.isArray(commandOrCommands) ? commandOrCommands : [commandOrCommands];
+
+  return commands
+    .map((command) => normalizeCommand(command))
+    .filter((command): command is string => command !== null);
+}
+
+function normalizeCommandInputs(commandOrCommands: string | string[]): string[] {
+  return Array.from(new Set(normalizeCommandList(commandOrCommands)));
 }
 
 function buildInClausePlaceholders(count: number): string {
   return Array.from({ length: count }, () => '?').join(', ');
 }
 
+function getCommandWriteLockName(command: string): string {
+  return `bcuk_cmd_${createHash('sha256').update(command).digest('hex').slice(0, 48)}`;
+}
+
+async function acquireNamedLock(connection: mysql.PoolConnection, lockName: string): Promise<void> {
+  const [rows] = await connection.execute<mysql.RowDataPacket[]>(
+    'SELECT GET_LOCK(?, ?) AS lock_status',
+    [lockName, COMMAND_WRITE_LOCK_TIMEOUT_SECONDS],
+  );
+
+  if (rows[0]?.lock_status !== 1) {
+    throw new Error(`Timed out acquiring command write lock: ${lockName}`);
+  }
+}
+
+async function releaseNamedLock(connection: mysql.PoolConnection, lockName: string): Promise<void> {
+  try {
+    await connection.execute('SELECT RELEASE_LOCK(?)', [lockName]);
+  } catch (error) {
+    console.warn(`[DB] Failed to release command write lock '${lockName}':`, error);
+  }
+}
+
+export class CommandConflictError extends Error {
+  readonly commands: string[];
+
+  constructor(commands: string[]) {
+    super(`Command already taken: ${commands.join(', ')}`);
+    this.name = 'CommandConflictError';
+    this.commands = commands;
+  }
+}
+
+async function runSerializedCommandWrite<T>(
+  commandOrCommands: string | string[],
+  options: { excludeCustomCommandId?: number; excludeCounterId?: number } | undefined,
+  writeOperation: (connection: mysql.PoolConnection) => Promise<T>,
+): Promise<T> {
+  const normalizedCommands = normalizeCommandInputs(commandOrCommands);
+  const lockNames = normalizedCommands
+    .slice()
+    .sort((left, right) => left.localeCompare(right))
+    .map((command) => getCommandWriteLockName(command));
+  const connection = await getPool().getConnection();
+
+  try {
+    for (const lockName of lockNames) {
+      await acquireNamedLock(connection, lockName);
+    }
+
+    await connection.beginTransaction();
+
+    try {
+      if (await isAnyCommandTakenAcrossTables(normalizedCommands, options, connection)) {
+        throw new CommandConflictError(normalizedCommands);
+      }
+
+      const result = await writeOperation(connection);
+      await connection.commit();
+      return result;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  } finally {
+    for (let index = lockNames.length - 1; index >= 0; index -= 1) {
+      await releaseNamedLock(connection, lockNames[index]);
+    }
+
+    connection.release();
+  }
+}
+
 async function isAnyCommandTakenAcrossTables(
   commandOrCommands: string | string[],
   options?: { excludeCustomCommandId?: number; excludeCounterId?: number },
+  executor: SqlExecutor = getPool(),
 ): Promise<boolean> {
   const normalizedCommands = normalizeCommandInputs(commandOrCommands);
   if (normalizedCommands.length === 0) {
@@ -699,8 +786,8 @@ async function isAnyCommandTakenAcrossTables(
   counterSql += ' LIMIT 1';
 
   const [customRowsResult, counterRowsResult] = await Promise.all([
-    getPool().execute<mysql.RowDataPacket[]>(customCommandSql, customCommandParams),
-    getPool().execute<mysql.RowDataPacket[]>(counterSql, counterParams),
+    executor.execute<mysql.RowDataPacket[]>(customCommandSql, customCommandParams),
+    executor.execute<mysql.RowDataPacket[]>(counterSql, counterParams),
   ]);
 
   const [customRows] = customRowsResult;
@@ -721,11 +808,13 @@ export async function addCustomCommand(
   const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string').toLowerCase();
   const normalizedOutput = requireTrimmedString(output, 'output');
 
-  await getPool().execute(
-    `INSERT INTO custom_command (trigger_string, output, is_discord_enabled, is_multi_twitch)
-     VALUES (?, ?, ?, ?)`,
-    [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0],
-  );
+  await runSerializedCommandWrite(normalizedTriggerString, undefined, async (connection) => {
+    await connection.execute(
+      `INSERT INTO custom_command (trigger_string, output, is_discord_enabled, is_multi_twitch)
+       VALUES (?, ?, ?, ?)`,
+      [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0],
+    );
+  });
 
   invalidateCustomCommandLookupCache();
 }
@@ -740,11 +829,17 @@ export async function updateCustomCommand(
   const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string').toLowerCase();
   const normalizedOutput = requireTrimmedString(output, 'output');
 
-  await getPool().execute(
-    `UPDATE custom_command
-     SET trigger_string = ?, output = ?, is_discord_enabled = ?, is_multi_twitch = ?
-     WHERE command_id = ?`,
-    [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
+  await runSerializedCommandWrite(
+    normalizedTriggerString,
+    { excludeCustomCommandId: commandId },
+    async (connection) => {
+      await connection.execute(
+        `UPDATE custom_command
+         SET trigger_string = ?, output = ?, is_discord_enabled = ?, is_multi_twitch = ?
+         WHERE command_id = ?`,
+        [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
+      );
+    },
   );
 
   invalidateCustomCommandLookupCache();
@@ -872,33 +967,34 @@ const COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
 function buildCounterLookupCache(counters: DbCounter[], customCommandTriggers: Set<string>): CounterLookupCache {
   const byCommand = new Map<string, DbMatchedCounter>();
   const loggedCrossTableCollisions = new Set<string>();
+  const sortedCounters = [...counters].sort((left, right) => left.id - right.id);
 
-  for (const counter of counters) {
+  for (const counter of sortedCounters) {
     const normalizedTriggerCommand = counter.trigger_command.trim().toLowerCase();
-    if (!normalizedTriggerCommand) continue;
-    if (customCommandTriggers.has(normalizedTriggerCommand) && !loggedCrossTableCollisions.has(normalizedTriggerCommand)) {
-      loggedCrossTableCollisions.add(normalizedTriggerCommand);
-      console.warn(`[DB] Cross-table command collision: counter trigger/check command '${normalizedTriggerCommand}' also exists in custom command triggers.`);
+    if (normalizedTriggerCommand) {
+      if (customCommandTriggers.has(normalizedTriggerCommand) && !loggedCrossTableCollisions.has(normalizedTriggerCommand)) {
+        loggedCrossTableCollisions.add(normalizedTriggerCommand);
+        console.warn(`[DB] Cross-table command collision: counter trigger/check command '${normalizedTriggerCommand}' also exists in custom command triggers.`);
+      }
+      if (byCommand.has(normalizedTriggerCommand)) {
+        console.warn(`[DB] Counter trigger_command collision: '${normalizedTriggerCommand}' is already registered (counter id=${byCommand.get(normalizedTriggerCommand)!.id}); ignoring duplicate from counter id=${counter.id}.`);
+      } else {
+        byCommand.set(normalizedTriggerCommand, { ...counter, matchType: 'trigger' });
+      }
     }
-    if (byCommand.has(normalizedTriggerCommand)) {
-      console.warn(`[DB] Counter trigger_command collision: '${normalizedTriggerCommand}' is already registered (counter id=${byCommand.get(normalizedTriggerCommand)!.id}); ignoring duplicate from counter id=${counter.id}.`);
-      continue;
-    }
-    byCommand.set(normalizedTriggerCommand, { ...counter, matchType: 'trigger' });
-  }
 
-  for (const counter of counters) {
     const normalizedCheckCommand = counter.check_command.trim().toLowerCase();
-    if (!normalizedCheckCommand) continue;
-    if (customCommandTriggers.has(normalizedCheckCommand) && !loggedCrossTableCollisions.has(normalizedCheckCommand)) {
-      loggedCrossTableCollisions.add(normalizedCheckCommand);
-      console.warn(`[DB] Cross-table command collision: counter trigger/check command '${normalizedCheckCommand}' also exists in custom command triggers.`);
+    if (normalizedCheckCommand) {
+      if (customCommandTriggers.has(normalizedCheckCommand) && !loggedCrossTableCollisions.has(normalizedCheckCommand)) {
+        loggedCrossTableCollisions.add(normalizedCheckCommand);
+        console.warn(`[DB] Cross-table command collision: counter trigger/check command '${normalizedCheckCommand}' also exists in custom command triggers.`);
+      }
+      if (byCommand.has(normalizedCheckCommand)) {
+        console.warn(`[DB] Counter check_command collision: '${normalizedCheckCommand}' is already registered (counter id=${byCommand.get(normalizedCheckCommand)!.id}); ignoring duplicate from counter id=${counter.id}.`);
+      } else {
+        byCommand.set(normalizedCheckCommand, { ...counter, matchType: 'check' });
+      }
     }
-    if (byCommand.has(normalizedCheckCommand)) {
-      console.warn(`[DB] Counter check_command collision: '${normalizedCheckCommand}' is already registered (counter id=${byCommand.get(normalizedCheckCommand)!.id}); ignoring duplicate from counter id=${counter.id}.`);
-      continue;
-    }
-    byCommand.set(normalizedCheckCommand, { ...counter, matchType: 'check' });
   }
 
   return {
@@ -966,6 +1062,13 @@ export async function findCounterByCommand(command: string): Promise<DbMatchedCo
 }
 
 export async function isCounterCommandTaken(commandOrCommands: string | string[], excludeCounterId?: number): Promise<boolean> {
+  if (Array.isArray(commandOrCommands)) {
+    const normalizedCommands = normalizeCommandList(commandOrCommands);
+    if (new Set(normalizedCommands).size !== normalizedCommands.length) {
+      return true;
+    }
+  }
+
   return await isAnyCommandTakenAcrossTables(commandOrCommands, { excludeCounterId });
 }
 
@@ -977,24 +1080,33 @@ export async function addCounter(
   resetYearly: boolean,
 ): Promise<void> {
   const normalizedFields = normalizeCounterFields(triggerCommand, checkCommand, message, incrementMessage);
+  if (normalizedFields.triggerCommand === normalizedFields.checkCommand) {
+    throw new Error('Counter trigger_command and check_command must be different');
+  }
 
-  await getPool().execute(
-    `INSERT INTO counter (trigger_command, check_command, message, increment_message, reset_yearly, current_value)
-     VALUES (?, ?, ?, ?, ?, 0)`,
-    [
-      normalizedFields.triggerCommand,
-      normalizedFields.checkCommand,
-      normalizedFields.message,
-      normalizedFields.incrementMessage,
-      resetYearly ? 1 : 0,
-    ],
+  await runSerializedCommandWrite(
+    [normalizedFields.triggerCommand, normalizedFields.checkCommand],
+    undefined,
+    async (connection) => {
+      await connection.execute(
+        `INSERT INTO counter (trigger_command, check_command, message, increment_message, reset_yearly, current_value)
+         VALUES (?, ?, ?, ?, ?, 0)`,
+        [
+          normalizedFields.triggerCommand,
+          normalizedFields.checkCommand,
+          normalizedFields.message,
+          normalizedFields.incrementMessage,
+          resetYearly ? 1 : 0,
+        ],
+      );
+    },
   );
 
   invalidateCounterLookupCache();
 }
 
-async function counterExists(id: number): Promise<boolean> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+async function counterExists(id: number, executor: SqlExecutor = getPool()): Promise<boolean> {
+  const [rows] = await executor.execute<mysql.RowDataPacket[]>(
     'SELECT 1 FROM counter WHERE id = ? LIMIT 1',
     [id],
   );
@@ -1010,28 +1122,37 @@ export async function updateCounter(
   resetYearly: boolean,
 ): Promise<void> {
   const normalizedFields = normalizeCounterFields(triggerCommand, checkCommand, message, incrementMessage);
-
-  const [result] = await getPool().execute<mysql.ResultSetHeader>(
-    `UPDATE counter
-     SET trigger_command = ?,
-         check_command = ?,
-         message = ?,
-         increment_message = ?,
-         reset_yearly = ?
-     WHERE id = ?`,
-    [
-      normalizedFields.triggerCommand,
-      normalizedFields.checkCommand,
-      normalizedFields.message,
-      normalizedFields.incrementMessage,
-      resetYearly ? 1 : 0,
-      id,
-    ],
-  );
-
-  if (result.affectedRows === 0 && !(await counterExists(id))) {
-    throw new CounterNotFoundError(id);
+  if (normalizedFields.triggerCommand === normalizedFields.checkCommand) {
+    throw new Error('Counter trigger_command and check_command must be different');
   }
+
+  await runSerializedCommandWrite(
+    [normalizedFields.triggerCommand, normalizedFields.checkCommand],
+    { excludeCounterId: id },
+    async (connection) => {
+      const [result] = await connection.execute<mysql.ResultSetHeader>(
+        `UPDATE counter
+         SET trigger_command = ?,
+             check_command = ?,
+             message = ?,
+             increment_message = ?,
+             reset_yearly = ?
+         WHERE id = ?`,
+        [
+          normalizedFields.triggerCommand,
+          normalizedFields.checkCommand,
+          normalizedFields.message,
+          normalizedFields.incrementMessage,
+          resetYearly ? 1 : 0,
+          id,
+        ],
+      );
+
+      if (result.affectedRows === 0 && !(await counterExists(id, connection))) {
+        throw new CounterNotFoundError(id);
+      }
+    },
+  );
 
   invalidateCounterLookupCache();
 }

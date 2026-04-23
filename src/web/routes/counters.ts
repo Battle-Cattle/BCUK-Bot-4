@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   addCounter,
+  CommandConflictError,
   CounterNotFoundError,
   getAllCounters,
   isCounterCommandTaken,
@@ -23,6 +24,15 @@ const KNOWN_ERRORS = new Set([
   'remove_failed',
   'reset_failed',
 ]);
+
+function isMysqlDuplicateEntryError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const mysqlError = error as { code?: string; errno?: number };
+  return mysqlError.code === 'ER_DUP_ENTRY' || mysqlError.errno === 1062;
+}
 
 function normalizeRequiredText(value: string | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -129,6 +139,10 @@ router.post('/counters/add', requireManager, csrfProtection, async (req, res) =>
       form.resetYearly,
     );
   } catch (err) {
+    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
+      return res.redirect('/admin/counters?error=duplicate_command');
+    }
+
     console.error('[Web] Add counter error:', err);
     return res.redirect('/admin/counters?error=add_failed');
   }
@@ -169,6 +183,10 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
       return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
+    }
+
+    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
+      return res.redirect('/admin/counters?error=duplicate_command');
     }
 
     console.error('[Web] Update counter error:', err);

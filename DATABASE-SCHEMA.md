@@ -157,6 +157,10 @@ ALTER TABLE custom_command
     ADD CONSTRAINT uq_custom_command_trigger_string UNIQUE (trigger_string);
 ```
 
+Deployment note:
+
+- Apply this migration as part of deployment/bootstrap, not just in documentation. The app serializes cross-table command writes at runtime, but the same-table UNIQUE constraint still needs to exist in MySQL to prevent duplicate `custom_command.trigger_string` rows from legacy scripts or out-of-band writes.
+
 ## `twitch_user_commands`
 
 Join table mapping users to custom commands.
@@ -193,6 +197,18 @@ Expected constraints and behavior:
 - `trigger_command` and `check_command` should be unique.
 - Both command columns should store single-token commands including any prefix.
 - Current panel support includes CRUD and manual reset of `current_value`; runtime command handling/scheduler wiring can be implemented independently.
+
+Recommended migrations (run once) for DB-level protection:
+
+```sql
+ALTER TABLE counter
+    ADD CONSTRAINT uq_counter_trigger_command UNIQUE (trigger_command),
+    ADD CONSTRAINT uq_counter_check_command UNIQUE (check_command);
+```
+
+Deployment note:
+
+- Apply these UNIQUE constraints during deployment/bootstrap. They prevent duplicate rows within `counter`, while the application-layer advisory locks serialize writes across `custom_command` and `counter` so cross-table command collisions cannot slip through concurrent requests.
 
 ## `sessions`
 

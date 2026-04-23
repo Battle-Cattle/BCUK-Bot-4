@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   addCustomCommand,
   assignUserToCommand,
+  CommandConflictError,
   DbCustomCommandWithAssignments,
   DbUser,
   findUser,
@@ -123,7 +124,7 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
 
     await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
-    if (isMysqlDuplicateEntryError(err)) {
+    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
       return res.redirect('/admin/commands?error=duplicate_trigger');
     }
 
@@ -157,7 +158,7 @@ router.post('/commands/update', requireManager, csrfProtection, async (req, res)
 
     await updateCustomCommand(parsedCommandId, normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
-    if (isMysqlDuplicateEntryError(err)) {
+    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
       return res.redirect('/admin/commands?error=duplicate_trigger');
     }
 
