@@ -13,11 +13,6 @@ function extractCommand(rawMessage: string): string | null {
   const command = trimmedMessage.split(/\s+/)[0]?.toLowerCase();
   if (!command) return null;
 
-  const firstChar = command.charAt(0);
-  if (!firstChar || /[a-z0-9]/i.test(firstChar)) {
-    return null;
-  }
-
   return command;
 }
 
