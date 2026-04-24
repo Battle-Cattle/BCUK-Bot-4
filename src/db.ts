@@ -488,6 +488,14 @@ export async function addCounter(
   );
 }
 
+async function counterExists(id: number): Promise<boolean> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    'SELECT 1 FROM counter WHERE id = ? LIMIT 1',
+    [id],
+  );
+  return rows.length > 0;
+}
+
 export async function findCounterByCommand(command: string, excludeId?: number): Promise<DbCounter | null> {
   const sql = excludeId != null
     ? `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value
@@ -537,7 +545,7 @@ export async function updateCounter(
     ],
   );
 
-  if (result.affectedRows === 0) {
+  if (result.affectedRows === 0 && !(await counterExists(id))) {
     throw new CounterNotFoundError(id);
   }
 }
@@ -555,7 +563,7 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
     [id],
   );
 
-  if (result.affectedRows === 0) {
+  if (result.affectedRows === 0 && !(await counterExists(id))) {
     throw new CounterNotFoundError(id);
   }
 }
