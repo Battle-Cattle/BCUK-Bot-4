@@ -9,7 +9,6 @@ import {
   findUser,
   getAllCustomCommandsWithAssignments,
   getAllUsers,
-  isCustomCommandTriggerTaken,
   removeCustomCommand,
   unassignUserFromCommand,
   updateCustomCommand,
@@ -110,10 +109,6 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
   }
 
   try {
-    if (await isCustomCommandTriggerTaken(normalizedTriggerString)) {
-      return res.redirect('/admin/commands?error=command_taken');
-    }
-
     await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
@@ -144,10 +139,6 @@ router.post('/commands/update', requireManager, csrfProtection, async (req, res)
   }
 
   try {
-    if (await isCustomCommandTriggerTaken(normalizedTriggerString, parsedCommandId)) {
-      return res.redirect('/admin/commands?error=command_taken');
-    }
-
     await updateCustomCommand(parsedCommandId, normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
@@ -201,6 +192,10 @@ router.post('/commands/assign', requireManager, csrfProtection, async (req, res)
 
     await assignUserToCommand(parsedCommandId, normalizedDiscordId);
   } catch (err) {
+    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
+      return res.redirect('/admin/commands?error=command_taken');
+    }
+
     console.error('[Web] Assign user to command error:', err);
     return res.redirect('/admin/commands?error=assign_failed');
   }

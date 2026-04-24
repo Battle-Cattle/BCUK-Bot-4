@@ -17,7 +17,7 @@
       <% if (error) { %>
       <% const errorMessages = {
         missing_fields: 'Please provide a single-token trigger and output text.',
-        command_taken: 'That command is already in use by another custom command or counter command.',
+        command_taken: 'That command conflicts with another command in the same Twitch channel scope or with an existing counter command.',
         invalid_id: 'The selected command record is invalid.',
         add_failed: 'Failed to add the custom command.',
         update_failed: 'Failed to update the custom command.',

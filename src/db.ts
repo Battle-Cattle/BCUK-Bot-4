@@ -455,6 +455,13 @@ interface CustomCommandLookupCache extends RefreshingLookupCache {
   twitchByChannelAndTrigger: Map<string, DbCustomCommand>;
 }
 
+interface TwitchCommandCandidate {
+  command: DbCustomCommand;
+  source: 'assigned' | 'multi';
+  priority: number;
+  owner: string;
+}
+
 function createEmptyCustomCommandLookupCache(): CustomCommandLookupCache {
   return {
     // Keep the fallback cache immediately stale so a new refresh can start as soon
@@ -551,11 +558,55 @@ function buildCustomCommandLookupCache(
 ): CustomCommandLookupCache {
   const discordByTrigger = new Map<string, DbCustomCommand>();
   const twitchByChannelAndTrigger = new Map<string, DbCustomCommand>();
+  const twitchCandidateByChannelAndTrigger = new Map<string, TwitchCommandCandidate>();
   const loggedCrossTableCollisions = new Set<string>();
   const sortedCommands = [...commands].sort((left, right) => left.command_id - right.command_id);
   const normalizedActiveTwitchChannels = activeTwitchChannels
     .map((channel) => normalizeTwitchChannelName(channel))
     .filter((channel): channel is string => channel !== null);
+
+  const pickPreferredTwitchCandidate = (
+    existingCandidate: TwitchCommandCandidate,
+    nextCandidate: TwitchCommandCandidate,
+  ): TwitchCommandCandidate => {
+    if (nextCandidate.priority !== existingCandidate.priority) {
+      return nextCandidate.priority > existingCandidate.priority ? nextCandidate : existingCandidate;
+    }
+
+    if (nextCandidate.command.command_id === existingCandidate.command.command_id) {
+      return existingCandidate;
+    }
+
+    return nextCandidate.command.command_id < existingCandidate.command.command_id
+      ? nextCandidate
+      : existingCandidate;
+  };
+
+  const registerTwitchCandidate = (
+    cacheKey: string,
+    triggerString: string,
+    channelName: string,
+    candidate: TwitchCommandCandidate,
+  ): void => {
+    const existingCandidate = twitchCandidateByChannelAndTrigger.get(cacheKey);
+    if (!existingCandidate) {
+      twitchCandidateByChannelAndTrigger.set(cacheKey, candidate);
+      return;
+    }
+
+    const preferredCandidate = pickPreferredTwitchCandidate(existingCandidate, candidate);
+    if (preferredCandidate === existingCandidate) {
+      console.warn(
+        `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}' already maps to command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner}); ignoring command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
+      );
+      return;
+    }
+
+    console.warn(
+      `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}' remapped from command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner}) to command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
+    );
+    twitchCandidateByChannelAndTrigger.set(cacheKey, preferredCandidate);
+  };
 
   for (const command of sortedCommands) {
     const normalizedTriggerString = command.trigger_string.trim().toLowerCase();
@@ -582,11 +633,12 @@ function buildCustomCommandLookupCache(
       for (const activeChannel of normalizedActiveTwitchChannels) {
         const cacheKey = getTwitchCommandCacheKey(activeChannel, normalizedTriggerString);
         if (!cacheKey) continue;
-        if (twitchByChannelAndTrigger.has(cacheKey)) {
-          console.warn(`[DB] Custom command Twitch trigger collision: '${normalizedTriggerString}' in channel '${activeChannel}' is already registered (command_id=${twitchByChannelAndTrigger.get(cacheKey)!.command_id}); ignoring duplicate from command_id=${command.command_id}.`);
-          continue;
-        }
-        twitchByChannelAndTrigger.set(cacheKey, baseCommand);
+        registerTwitchCandidate(cacheKey, normalizedTriggerString, activeChannel, {
+          command: baseCommand,
+          source: 'multi',
+          priority: 1,
+          owner: 'multi_twitch',
+        });
       }
     }
 
@@ -597,12 +649,17 @@ function buildCustomCommandLookupCache(
 
       const cacheKey = getTwitchCommandCacheKey(assignedUser.twitch_name, normalizedTriggerString);
       if (!cacheKey) continue;
-      if (twitchByChannelAndTrigger.has(cacheKey)) {
-        console.warn(`[DB] Custom command Twitch trigger collision: '${normalizedTriggerString}' in channel '${assignedUser.twitch_name}' is already registered (command_id=${twitchByChannelAndTrigger.get(cacheKey)!.command_id}); ignoring duplicate from command_id=${command.command_id}.`);
-        continue;
-      }
-      twitchByChannelAndTrigger.set(cacheKey, baseCommand);
+      registerTwitchCandidate(cacheKey, normalizedTriggerString, assignedUser.twitch_name, {
+        command: baseCommand,
+        source: 'assigned',
+        priority: 2,
+        owner: assignedUser.discord_id,
+      });
     }
+  }
+
+  for (const [cacheKey, candidate] of twitchCandidateByChannelAndTrigger.entries()) {
+    twitchByChannelAndTrigger.set(cacheKey, candidate.command);
   }
 
   return {
@@ -749,6 +806,10 @@ async function runSerializedCommandWrite<T>(
   commandOrCommands: string | string[],
   options: { excludeCustomCommandId?: number; excludeCounterId?: number } | undefined,
   writeOperation: (connection: mysql.PoolConnection) => Promise<T>,
+  checks: { includeCustomCommandTable?: boolean; includeCounterTable?: boolean } = {
+    includeCustomCommandTable: true,
+    includeCounterTable: true,
+  },
 ): Promise<T> {
   const normalizedCommands = normalizeCommandInputs(commandOrCommands);
   const lockNames = normalizedCommands
@@ -765,7 +826,7 @@ async function runSerializedCommandWrite<T>(
     await connection.beginTransaction();
 
     try {
-      if (await isAnyCommandTakenAcrossTables(normalizedCommands, options, connection)) {
+      if (await isAnyCommandTakenAcrossTables(normalizedCommands, options, connection, checks)) {
         throw new CommandConflictError(normalizedCommands);
       }
 
@@ -789,6 +850,10 @@ async function isAnyCommandTakenAcrossTables(
   commandOrCommands: string | string[],
   options?: { excludeCustomCommandId?: number; excludeCounterId?: number },
   executor: SqlExecutor = getPool(),
+  checks: { includeCustomCommandTable?: boolean; includeCounterTable?: boolean } = {
+    includeCustomCommandTable: true,
+    includeCounterTable: true,
+  },
 ): Promise<boolean> {
   const normalizedCommands = normalizeCommandInputs(commandOrCommands);
   if (normalizedCommands.length === 0) {
@@ -796,31 +861,35 @@ async function isAnyCommandTakenAcrossTables(
   }
 
   const placeholders = buildInClausePlaceholders(normalizedCommands.length);
+  const includeCustomCommandTable = checks.includeCustomCommandTable !== false;
+  const includeCounterTable = checks.includeCounterTable !== false;
 
-  let customCommandSql = `SELECT 1 FROM custom_command WHERE trigger_string IN (${placeholders})`;
-  const customCommandParams: Array<string | number> = [...normalizedCommands];
-  if (options?.excludeCustomCommandId !== undefined) {
-    customCommandSql += ' AND command_id != ?';
-    customCommandParams.push(options.excludeCustomCommandId);
+  const checksToRun: Array<Promise<[mysql.RowDataPacket[], mysql.FieldPacket[]]>> = [];
+
+  if (includeCustomCommandTable) {
+    let customCommandSql = `SELECT 1 FROM custom_command WHERE trigger_string IN (${placeholders})`;
+    const customCommandParams: Array<string | number> = [...normalizedCommands];
+    if (options?.excludeCustomCommandId !== undefined) {
+      customCommandSql += ' AND command_id != ?';
+      customCommandParams.push(options.excludeCustomCommandId);
+    }
+    customCommandSql += ' LIMIT 1';
+    checksToRun.push(executor.execute<mysql.RowDataPacket[]>(customCommandSql, customCommandParams));
   }
-  customCommandSql += ' LIMIT 1';
 
-  let counterSql = `SELECT 1 FROM counter WHERE (trigger_command IN (${placeholders}) OR check_command IN (${placeholders}))`;
-  const counterParams: Array<string | number> = [...normalizedCommands, ...normalizedCommands];
-  if (options?.excludeCounterId !== undefined) {
-    counterSql += ' AND id != ?';
-    counterParams.push(options.excludeCounterId);
+  if (includeCounterTable) {
+    let counterSql = `SELECT 1 FROM counter WHERE (trigger_command IN (${placeholders}) OR check_command IN (${placeholders}))`;
+    const counterParams: Array<string | number> = [...normalizedCommands, ...normalizedCommands];
+    if (options?.excludeCounterId !== undefined) {
+      counterSql += ' AND id != ?';
+      counterParams.push(options.excludeCounterId);
+    }
+    counterSql += ' LIMIT 1';
+    checksToRun.push(executor.execute<mysql.RowDataPacket[]>(counterSql, counterParams));
   }
-  counterSql += ' LIMIT 1';
 
-  const [customRowsResult, counterRowsResult] = await Promise.all([
-    executor.execute<mysql.RowDataPacket[]>(customCommandSql, customCommandParams),
-    executor.execute<mysql.RowDataPacket[]>(counterSql, counterParams),
-  ]);
-
-  const [customRows] = customRowsResult;
-  const [counterRows] = counterRowsResult;
-  return customRows.length > 0 || counterRows.length > 0;
+  const results = await Promise.all(checksToRun);
+  return results.some(([rows]) => rows.length > 0);
 }
 
 export async function isCustomCommandTriggerTaken(triggerString: string, excludeCommandId?: number): Promise<boolean> {
@@ -836,13 +905,41 @@ export async function addCustomCommand(
   const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string').toLowerCase();
   const normalizedOutput = requireTrimmedString(output, 'output');
 
-  await runSerializedCommandWrite(normalizedTriggerString, undefined, async (connection) => {
-    await connection.execute(
+  await runSerializedCommandWrite(
+    normalizedTriggerString,
+    undefined,
+    async (connection) => {
+      if (isMultiTwitch) {
+        const [conflictRows] = await connection.execute<mysql.RowDataPacket[]>(
+          `SELECT c.command_id
+           FROM custom_command c
+           LEFT JOIN twitch_user_commands tuc ON tuc.command_id = c.command_id
+           LEFT JOIN \`user\` u ON u.discord_id = tuc.discord_id
+           WHERE c.trigger_string = ?
+             AND (
+               c.is_multi_twitch = 1
+               OR (
+                 u.twitch_name IS NOT NULL
+                 AND u.is_twitch_bot_enabled = 1
+               )
+             )
+           LIMIT 1`,
+          [normalizedTriggerString],
+        );
+
+        if (conflictRows.length > 0) {
+          throw new CommandConflictError([normalizedTriggerString]);
+        }
+      }
+
+      await connection.execute(
       `INSERT INTO custom_command (trigger_string, output, is_discord_enabled, is_multi_twitch)
        VALUES (?, ?, ?, ?)`,
       [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0],
-    );
-  });
+      );
+    },
+    { includeCustomCommandTable: false, includeCounterTable: true },
+  );
 
   invalidateCustomCommandLookupCache();
 }
@@ -861,6 +958,58 @@ export async function updateCustomCommand(
     normalizedTriggerString,
     { excludeCustomCommandId: commandId },
     async (connection) => {
+      if (isMultiTwitch) {
+        const [conflictRows] = await connection.execute<mysql.RowDataPacket[]>(
+          `SELECT c.command_id
+           FROM custom_command c
+           LEFT JOIN twitch_user_commands tuc ON tuc.command_id = c.command_id
+           LEFT JOIN \`user\` u ON u.discord_id = tuc.discord_id
+           WHERE c.command_id <> ?
+             AND c.trigger_string = ?
+             AND (
+               c.is_multi_twitch = 1
+               OR (
+                 u.twitch_name IS NOT NULL
+                 AND u.is_twitch_bot_enabled = 1
+               )
+             )
+           LIMIT 1`,
+          [commandId, normalizedTriggerString],
+        );
+
+        if (conflictRows.length > 0) {
+          throw new CommandConflictError([normalizedTriggerString]);
+        }
+      } else {
+        const [overlapRows] = await connection.execute<mysql.RowDataPacket[]>(
+          `SELECT other.command_id
+           FROM twitch_user_commands current_tuc
+           JOIN \`user\` current_u ON current_u.discord_id = current_tuc.discord_id
+           JOIN custom_command other
+             ON other.command_id <> ?
+            AND other.trigger_string = ?
+           LEFT JOIN twitch_user_commands other_tuc ON other_tuc.command_id = other.command_id
+           LEFT JOIN \`user\` other_u ON other_u.discord_id = other_tuc.discord_id
+           WHERE current_tuc.command_id = ?
+             AND current_u.twitch_name IS NOT NULL
+             AND current_u.is_twitch_bot_enabled = 1
+             AND (
+               other.is_multi_twitch = 1
+               OR (
+                 other_u.twitch_name IS NOT NULL
+                 AND other_u.is_twitch_bot_enabled = 1
+                 AND LOWER(other_u.twitch_name) = LOWER(current_u.twitch_name)
+               )
+             )
+           LIMIT 1`,
+          [commandId, normalizedTriggerString, commandId],
+        );
+
+        if (overlapRows.length > 0) {
+          throw new CommandConflictError([normalizedTriggerString]);
+        }
+      }
+
       await connection.execute(
         `UPDATE custom_command
          SET trigger_string = ?, output = ?, is_discord_enabled = ?, is_multi_twitch = ?
@@ -868,6 +1017,7 @@ export async function updateCustomCommand(
         [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
       );
     },
+    { includeCustomCommandTable: false, includeCounterTable: true },
   );
 
   invalidateCustomCommandLookupCache();
@@ -897,13 +1047,82 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
 }
 
 export async function assignUserToCommand(commandId: number, discordId: string): Promise<void> {
-  await getPool().execute(
-    `INSERT INTO twitch_user_commands (command_id, discord_id)
-     VALUES (?, ?) AS new_row
-     ON DUPLICATE KEY UPDATE
-       command_id = command_id`,
-    [commandId, discordId],
-  );
+  const connection = await getPool().getConnection();
+
+  try {
+    const [commandRows] = await connection.execute<mysql.RowDataPacket[]>(
+      'SELECT trigger_string FROM custom_command WHERE command_id = ? LIMIT 1',
+      [commandId],
+    );
+    if (commandRows.length === 0) {
+      throw new Error(`Custom command not found: ${commandId}`);
+    }
+
+    const normalizedTriggerString = String(commandRows[0].trigger_string).trim().toLowerCase();
+    const lockName = getCommandWriteLockName(normalizedTriggerString);
+
+    await acquireNamedLock(connection, lockName);
+
+    try {
+      await connection.beginTransaction();
+
+      const [userRows] = await connection.execute<mysql.RowDataPacket[]>(
+        'SELECT twitch_name, is_twitch_bot_enabled FROM `user` WHERE discord_id = ? LIMIT 1',
+        [discordId],
+      );
+      if (userRows.length === 0) {
+        throw new Error(`User not found: ${discordId}`);
+      }
+
+      const twitchName = userRows[0].twitch_name ? String(userRows[0].twitch_name) : null;
+      const normalizedTwitchName = twitchName ? normalizeTwitchChannelName(twitchName) : null;
+      const isTwitchBotEnabled = Buffer.isBuffer(userRows[0].is_twitch_bot_enabled)
+        ? userRows[0].is_twitch_bot_enabled[0] === 1
+        : userRows[0].is_twitch_bot_enabled == 1;
+
+      if (normalizedTwitchName && isTwitchBotEnabled) {
+        const [conflictRows] = await connection.execute<mysql.RowDataPacket[]>(
+          `SELECT c.command_id
+           FROM custom_command c
+           LEFT JOIN twitch_user_commands tuc ON tuc.command_id = c.command_id
+           LEFT JOIN \`user\` u ON u.discord_id = tuc.discord_id
+           WHERE c.command_id <> ?
+             AND c.trigger_string = ?
+             AND (
+               c.is_multi_twitch = 1
+               OR (
+                 u.twitch_name IS NOT NULL
+                 AND u.is_twitch_bot_enabled = 1
+                 AND LOWER(u.twitch_name) = ?
+               )
+             )
+           LIMIT 1`,
+          [commandId, normalizedTriggerString, normalizedTwitchName],
+        );
+
+        if (conflictRows.length > 0) {
+          throw new CommandConflictError([normalizedTriggerString]);
+        }
+      }
+
+      await connection.execute(
+        `INSERT INTO twitch_user_commands (command_id, discord_id)
+         VALUES (?, ?) AS new_row
+         ON DUPLICATE KEY UPDATE
+           command_id = command_id`,
+        [commandId, discordId],
+      );
+
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      await releaseNamedLock(connection, lockName);
+    }
+  } finally {
+    connection.release();
+  }
 
   invalidateCustomCommandLookupCache();
 }
