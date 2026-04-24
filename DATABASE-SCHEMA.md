@@ -150,7 +150,7 @@ Expected constraints and behavior:
 - `trigger_string` should be stored as a single token only, including prefix, for example `!hello`.
 - The application lowercases `trigger_string` before persistence so it matches runtime command lookup behavior.
 
-Recommended migration (run once) for DB-level protection:
+Required migration (run once) for DB-level protection:
 
 ```sql
 ALTER TABLE custom_command
@@ -159,7 +159,7 @@ ALTER TABLE custom_command
 
 Deployment note:
 
-- Apply this migration as part of deployment/bootstrap. The `trigger_string` column should have a UNIQUE constraint to prevent duplicates within the `custom_command` table itself.
+- Apply this migration as part of deployment/bootstrap. The `trigger_string` column must have a UNIQUE constraint to prevent duplicates within the `custom_command` table itself.
 - **Shared command namespace:** The application treats the union of `custom_command.trigger_string`, `counter.trigger_command`, and `counter.check_command` as a single shared command namespace. The `isAnyCommandTakenAcrossTables()` function in `src/db.ts` validates that new custom commands do not collide with existing counter commands before writing. This check is wrapped in a serialized advisory lock (`runSerializedCommandWrite()`) to prevent race conditions.
 - **Related deployments:** This migration must be applied alongside the counter table constraints (in the `counter` section below). Both sets of UNIQUE constraints work together to provide DB-level protection; the application's advisory locks add an atomicity layer.
 

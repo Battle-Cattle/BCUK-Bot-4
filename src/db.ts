@@ -1055,23 +1055,24 @@ export async function assignUserToCommand(commandId: number, discordId: string):
     await acquireNamedLock(connection, lockNameById);
 
     await connection.beginTransaction();
-
-    // Step 2: Re-read the current trigger_string inside the transaction
-    const [commandRows] = await connection.execute<mysql.RowDataPacket[]>(
-      'SELECT trigger_string FROM custom_command WHERE command_id = ? LIMIT 1',
-      [commandId],
-    );
-    if (commandRows.length === 0) {
-      throw new Error(`Custom command not found: ${commandId}`);
-    }
-
-    const normalizedTriggerString = String(commandRows[0].trigger_string).trim().toLowerCase();
-    const lockNameByTrigger = getCommandWriteLockName(normalizedTriggerString);
-
-    // Step 3: Acquire the lock for the current trigger_string
-    await acquireNamedLock(connection, lockNameByTrigger);
+    let lockNameByTrigger: string | null = null;
 
     try {
+      // Step 2: Re-read the current trigger_string inside the transaction
+      const [commandRows] = await connection.execute<mysql.RowDataPacket[]>(
+        'SELECT trigger_string FROM custom_command WHERE command_id = ? LIMIT 1',
+        [commandId],
+      );
+      if (commandRows.length === 0) {
+        throw new Error(`Custom command not found: ${commandId}`);
+      }
+
+      const normalizedTriggerString = String(commandRows[0].trigger_string).trim().toLowerCase();
+      lockNameByTrigger = getCommandWriteLockName(normalizedTriggerString);
+
+      // Step 3: Acquire the lock for the current trigger_string
+      await acquireNamedLock(connection, lockNameByTrigger);
+
       // Step 4: Proceed with the rest of the logic inside the transaction
       const [userRows] = await connection.execute<mysql.RowDataPacket[]>(
         'SELECT twitch_name, is_twitch_bot_enabled FROM `user` WHERE discord_id = ? LIMIT 1',
@@ -1126,7 +1127,9 @@ export async function assignUserToCommand(commandId: number, discordId: string):
       throw error;
     } finally {
       // Always release the trigger lock
-      await releaseNamedLock(connection, lockNameByTrigger);
+      if (lockNameByTrigger) {
+        await releaseNamedLock(connection, lockNameByTrigger);
+      }
     }
 
     invalidateCustomCommandLookupCache();
