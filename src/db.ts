@@ -472,7 +472,7 @@ function createEmptyCustomCommandLookupCache(): CustomCommandLookupCache {
   };
 }
 
-const CUSTOM_COMMAND_CACHE_TTL_MS = 15_000;
+const CUSTOM_COMMAND_CACHE_TTL_MS = 300_000;
 const CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
 const CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
 const COMMAND_WRITE_LOCK_TIMEOUT_SECONDS = 10;
@@ -554,12 +554,10 @@ function getTwitchCommandCacheKey(channelName: string, triggerString: string): s
 function buildCustomCommandLookupCache(
   commands: DbCustomCommandWithAssignments[],
   activeTwitchChannels: string[],
-  counterCommands: Set<string>,
 ): CustomCommandLookupCache {
   const discordByTrigger = new Map<string, DbCustomCommand>();
   const twitchByChannelAndTrigger = new Map<string, DbCustomCommand>();
   const twitchCandidateByChannelAndTrigger = new Map<string, TwitchCommandCandidate>();
-  const loggedCrossTableCollisions = new Set<string>();
   const sortedCommands = [...commands].sort((left, right) => left.command_id - right.command_id);
   const normalizedActiveTwitchChannels = activeTwitchChannels
     .map((channel) => normalizeTwitchChannelName(channel))
@@ -612,11 +610,6 @@ function buildCustomCommandLookupCache(
     const normalizedTriggerString = command.trigger_string.trim().toLowerCase();
     if (!normalizedTriggerString) {
       continue;
-    }
-
-    if (counterCommands.has(normalizedTriggerString) && !loggedCrossTableCollisions.has(normalizedTriggerString)) {
-      loggedCrossTableCollisions.add(normalizedTriggerString);
-      console.warn(`[DB] Cross-table command collision: custom command trigger '${normalizedTriggerString}' also exists in counter trigger/check commands.`);
     }
 
     const baseCommand = toDbCustomCommand(command);
@@ -676,26 +669,12 @@ const customCommandLookupCacheState = createManagedLookupCache<CustomCommandLook
   refreshFailureMaxBackoffMs: CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
   createEmptyCache: createEmptyCustomCommandLookupCache,
   loadCache: async () => {
-    const [commands, activeTwitchChannels, counters] = await Promise.all([
+    const [commands, activeTwitchChannels] = await Promise.all([
       getAllCustomCommandsWithAssignments(),
       getTwitchEnabledChannels(),
-      getAllCounters(),
     ]);
 
-    const counterCommands = new Set<string>();
-    for (const counter of counters) {
-      const normalizedTriggerCommand = counter.trigger_command.trim().toLowerCase();
-      if (normalizedTriggerCommand) {
-        counterCommands.add(normalizedTriggerCommand);
-      }
-
-      const normalizedCheckCommand = counter.check_command.trim().toLowerCase();
-      if (normalizedCheckCommand) {
-        counterCommands.add(normalizedCheckCommand);
-      }
-    }
-
-    return buildCustomCommandLookupCache(commands, activeTwitchChannels, counterCommands);
+    return buildCustomCommandLookupCache(commands, activeTwitchChannels);
   },
 });
 
@@ -1220,22 +1199,17 @@ function createEmptyCounterLookupCache(): CounterLookupCache {
   };
 }
 
-const COUNTER_LOOKUP_CACHE_TTL_MS = 15_000;
+const COUNTER_LOOKUP_CACHE_TTL_MS = 300_000;
 const COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
 const COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
 
-function buildCounterLookupCache(counters: DbCounter[], customCommandTriggers: Set<string>): CounterLookupCache {
+function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
   const byCommand = new Map<string, DbMatchedCounter>();
-  const loggedCrossTableCollisions = new Set<string>();
   const sortedCounters = [...counters].sort((left, right) => left.id - right.id);
 
   for (const counter of sortedCounters) {
     const normalizedTriggerCommand = counter.trigger_command.trim().toLowerCase();
     if (normalizedTriggerCommand) {
-      if (customCommandTriggers.has(normalizedTriggerCommand) && !loggedCrossTableCollisions.has(normalizedTriggerCommand)) {
-        loggedCrossTableCollisions.add(normalizedTriggerCommand);
-        console.warn(`[DB] Cross-table command collision: counter trigger/check command '${normalizedTriggerCommand}' also exists in custom command triggers.`);
-      }
       if (byCommand.has(normalizedTriggerCommand)) {
         console.warn(`[DB] Counter trigger_command collision: '${normalizedTriggerCommand}' is already registered (counter id=${byCommand.get(normalizedTriggerCommand)!.id}); ignoring duplicate from counter id=${counter.id}.`);
       } else {
@@ -1245,10 +1219,6 @@ function buildCounterLookupCache(counters: DbCounter[], customCommandTriggers: S
 
     const normalizedCheckCommand = counter.check_command.trim().toLowerCase();
     if (normalizedCheckCommand) {
-      if (customCommandTriggers.has(normalizedCheckCommand) && !loggedCrossTableCollisions.has(normalizedCheckCommand)) {
-        loggedCrossTableCollisions.add(normalizedCheckCommand);
-        console.warn(`[DB] Cross-table command collision: counter trigger/check command '${normalizedCheckCommand}' also exists in custom command triggers.`);
-      }
       if (byCommand.has(normalizedCheckCommand)) {
         console.warn(`[DB] Counter check_command collision: '${normalizedCheckCommand}' is already registered (counter id=${byCommand.get(normalizedCheckCommand)!.id}); ignoring duplicate from counter id=${counter.id}.`);
       } else {
@@ -1270,20 +1240,8 @@ const counterLookupCacheState = createManagedLookupCache<CounterLookupCache>({
   refreshFailureMaxBackoffMs: COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
   createEmptyCache: createEmptyCounterLookupCache,
   loadCache: async () => {
-    const [counters, customCommands] = await Promise.all([
-      getAllCounters(),
-      getAllCustomCommandsWithAssignments(),
-    ]);
-
-    const customCommandTriggers = new Set<string>();
-    for (const customCommand of customCommands) {
-      const normalizedTrigger = customCommand.trigger_string.trim().toLowerCase();
-      if (normalizedTrigger) {
-        customCommandTriggers.add(normalizedTrigger);
-      }
-    }
-
-    return buildCounterLookupCache(counters, customCommandTriggers);
+    const counters = await getAllCounters();
+    return buildCounterLookupCache(counters);
   },
 });
 
