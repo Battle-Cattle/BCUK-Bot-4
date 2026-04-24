@@ -1049,11 +1049,11 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
 export async function assignUserToCommand(commandId: number, discordId: string): Promise<void> {
   const connection = await getPool().getConnection();
 
-  // Step 1: Acquire a lock on the commandId to serialize concurrent assignments/updates for this command
   const lockNameById = `bcuk_cmdid_${commandId}`;
-  await acquireNamedLock(connection, lockNameById);
-
   try {
+    // Step 1: Acquire a lock on the commandId to serialize concurrent assignments/updates for this command
+    await acquireNamedLock(connection, lockNameById);
+
     await connection.beginTransaction();
 
     // Step 2: Re-read the current trigger_string inside the transaction

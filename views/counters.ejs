@@ -18,6 +18,7 @@
       <% if (error) { %>
       <% const errorMessages = {
         missing_fields: 'Please provide both a trigger and check command, and all required fields.',
+        same_commands: 'Trigger and check command must be different.',
         duplicate_command: 'That command is already in use by another custom command or counter command.',
         invalid_id: 'The selected counter record is invalid.',
         add_failed: 'Failed to add the counter.',
