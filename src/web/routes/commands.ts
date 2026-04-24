@@ -21,7 +21,7 @@ const router = Router();
 
 const KNOWN_ERRORS = new Set([
   'missing_fields',
-  'duplicate_trigger',
+  'command_taken',
   'invalid_id',
   'add_failed',
   'update_failed',
@@ -111,13 +111,13 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
 
   try {
     if (await isCustomCommandTriggerTaken(normalizedTriggerString)) {
-      return res.redirect('/admin/commands?error=duplicate_trigger');
+      return res.redirect('/admin/commands?error=command_taken');
     }
 
     await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-      return res.redirect('/admin/commands?error=duplicate_trigger');
+      return res.redirect('/admin/commands?error=command_taken');
     }
 
     console.error('[Web] Add custom command error:', err);
@@ -145,13 +145,13 @@ router.post('/commands/update', requireManager, csrfProtection, async (req, res)
 
   try {
     if (await isCustomCommandTriggerTaken(normalizedTriggerString, parsedCommandId)) {
-      return res.redirect('/admin/commands?error=duplicate_trigger');
+      return res.redirect('/admin/commands?error=command_taken');
     }
 
     await updateCustomCommand(parsedCommandId, normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-      return res.redirect('/admin/commands?error=duplicate_trigger');
+      return res.redirect('/admin/commands?error=command_taken');
     }
 
     console.error('[Web] Update custom command error:', err);
