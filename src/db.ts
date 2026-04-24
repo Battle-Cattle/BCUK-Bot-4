@@ -1049,7 +1049,14 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
 export async function assignUserToCommand(commandId: number, discordId: string): Promise<void> {
   const connection = await getPool().getConnection();
 
+  // Step 1: Acquire a lock on the commandId to serialize concurrent assignments/updates for this command
+  const lockNameById = `bcuk_cmdid_${commandId}`;
+  await acquireNamedLock(connection, lockNameById);
+
   try {
+    await connection.beginTransaction();
+
+    // Step 2: Re-read the current trigger_string inside the transaction
     const [commandRows] = await connection.execute<mysql.RowDataPacket[]>(
       'SELECT trigger_string FROM custom_command WHERE command_id = ? LIMIT 1',
       [commandId],
@@ -1059,13 +1066,13 @@ export async function assignUserToCommand(commandId: number, discordId: string):
     }
 
     const normalizedTriggerString = String(commandRows[0].trigger_string).trim().toLowerCase();
-    const lockName = getCommandWriteLockName(normalizedTriggerString);
+    const lockNameByTrigger = getCommandWriteLockName(normalizedTriggerString);
 
-    await acquireNamedLock(connection, lockName);
+    // Step 3: Acquire the lock for the current trigger_string
+    await acquireNamedLock(connection, lockNameByTrigger);
 
     try {
-      await connection.beginTransaction();
-
+      // Step 4: Proceed with the rest of the logic inside the transaction
       const [userRows] = await connection.execute<mysql.RowDataPacket[]>(
         'SELECT twitch_name, is_twitch_bot_enabled FROM `user` WHERE discord_id = ? LIMIT 1',
         [discordId],
@@ -1118,13 +1125,16 @@ export async function assignUserToCommand(commandId: number, discordId: string):
       await connection.rollback();
       throw error;
     } finally {
-      await releaseNamedLock(connection, lockName);
+      // Always release the trigger lock
+      await releaseNamedLock(connection, lockNameByTrigger);
     }
+
+    invalidateCustomCommandLookupCache();
   } finally {
+    // Always release the id lock
+    await releaseNamedLock(connection, lockNameById);
     connection.release();
   }
-
-  invalidateCustomCommandLookupCache();
 }
 
 export async function unassignUserFromCommand(commandId: number, discordId: string): Promise<void> {
