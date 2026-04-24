@@ -354,6 +354,14 @@ export class CommandNotFoundError extends Error {
   }
 }
 
+async function commandExists(id: number): Promise<boolean> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    'SELECT 1 FROM custom_command WHERE command_id = ? LIMIT 1',
+    [id],
+  );
+  return rows.length > 0;
+}
+
 export async function updateCustomCommand(
   commandId: number,
   triggerString: string,
@@ -371,7 +379,7 @@ export async function updateCustomCommand(
     [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
   );
 
-  if (result.affectedRows === 0) {
+  if (result.affectedRows === 0 && !(await commandExists(commandId))) {
     throw new CommandNotFoundError(commandId);
   }
 }
