@@ -749,9 +749,19 @@ async function acquireNamedLock(connection: mysql.PoolConnection, lockName: stri
 
   // GET_LOCK returns a BIGINT. With bigNumberStrings: true, it's the string "1", not number 1.
   const lockStatus = rows[0]?.lock_status;
-  if (lockStatus !== '1' && lockStatus !== 1) {
-    throw new Error(`Timed out acquiring command write lock: ${lockName}`);
+  if (lockStatus === '1' || lockStatus === 1) {
+    return;
   }
+
+  if (lockStatus === '0' || lockStatus === 0) {
+    throw new Error(`Timed out acquiring command write lock '${lockName}' (lock_status=${String(lockStatus)}).`);
+  }
+
+  if (lockStatus === null || lockStatus === undefined) {
+    throw new Error(`Internal error acquiring command write lock '${lockName}' (lock_status=${String(lockStatus)}).`);
+  }
+
+  throw new Error(`Unexpected result acquiring command write lock '${lockName}' (lock_status=${String(lockStatus)}).`);
 }
 
 async function releaseNamedLock(connection: mysql.PoolConnection, lockName: string): Promise<void> {
