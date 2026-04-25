@@ -772,6 +772,21 @@ async function releaseNamedLock(connection: mysql.PoolConnection, lockName: stri
   }
 }
 
+export class CommandNotFoundError extends Error {
+  constructor(id: number) {
+    super(`Command not found: ${id}`);
+    this.name = 'CommandNotFoundError';
+  }
+}
+
+async function commandExists(id: number, executor: SqlExecutor = getPool()): Promise<boolean> {
+  const [rows] = await executor.execute<mysql.RowDataPacket[]>(
+    'SELECT 1 FROM custom_command WHERE command_id = ? LIMIT 1',
+    [id],
+  );
+  return rows.length > 0;
+}
+
 export class CommandConflictError extends Error {
   readonly commands: string[];
 
@@ -1032,12 +1047,16 @@ export async function updateCustomCommand(
         }
       }
 
-      await connection.execute(
+      const [result] = await connection.execute<mysql.ResultSetHeader>(
         `UPDATE custom_command
          SET trigger_string = ?, output = ?, is_discord_enabled = ?, is_multi_twitch = ?
          WHERE command_id = ?`,
         [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
       );
+
+      if (result.affectedRows === 0 && !(await commandExists(commandId, connection))) {
+        throw new CommandNotFoundError(commandId);
+      }
     },
     { includeCustomCommandTable: false, includeCounterTable: true },
   );

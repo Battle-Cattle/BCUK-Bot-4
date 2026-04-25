@@ -3,6 +3,7 @@ import {
   addCustomCommand,
   assignUserToCommand,
   CommandConflictError,
+  CommandNotFoundError,
   DbCustomCommandWithAssignments,
   isMysqlDuplicateEntryError,
   DbUser,
@@ -141,6 +142,10 @@ router.post('/commands/update', requireManager, csrfProtection, async (req, res)
   try {
     await updateCustomCommand(parsedCommandId, normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
+    if (err instanceof CommandNotFoundError) {
+      return res.status(404).render('error', { message: 'Command not found.', user: req.session.user ?? null });
+    }
+
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
       return res.redirect('/admin/commands?error=command_taken');
     }
