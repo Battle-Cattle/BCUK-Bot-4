@@ -209,7 +209,8 @@ ALTER TABLE counter
 
 Deployment note:
 
-- **CRITICAL:** Apply these UNIQUE constraints during deployment/bootstrap. These migrations must be executed before the application starts in production. They prevent duplicate `trigger_command` and duplicate `check_command` rows within the `counter` table. Without these constraints, concurrent requests could slip duplicate rows past the application-layer checks.
+- **Recommended (defense-in-depth):** Apply these UNIQUE constraints during deployment/bootstrap. They provide DB-level protection against duplicate `trigger_command` and duplicate `check_command` rows, especially for direct DB writes, manual SQL, or future regressions.
+- For current application requests, counter writes are already serialized through `runSerializedCommandWrite()` + MySQL named locks and guarded by `isAnyCommandTakenAcrossTables()` before writes, so concurrent app requests should not create duplicates even without these two column-level UNIQUE constraints.
 
 **Important limitation:** The column-level UNIQUE constraints do **not** prevent **cross-column collisions** within the same table — for example, one row's `trigger_command` could equal another row's `check_command`. Since the application treats the union of both columns as a shared command namespace with `custom_command.trigger_string`, this is a potential consistency gap.
 
