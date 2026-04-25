@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import {
   addCounter,
+  CommandConflictError,
   CounterNotFoundError,
+  isMysqlDuplicateEntryError,
   getAllCounters,
+  isCounterCommandTaken,
   removeCounter,
   resetCounterCurrentValue,
   updateCounter,
@@ -15,6 +18,7 @@ const router = Router();
 const KNOWN_ERRORS = new Set([
   'missing_fields',
   'same_commands',
+  'duplicate_command',
   'invalid_id',
   'add_failed',
   'update_failed',
@@ -111,6 +115,14 @@ router.post('/counters/add', requireManager, csrfProtection, async (req, res) =>
   }
 
   try {
+    const hasDuplicateCommand = await isCounterCommandTaken([
+      form.triggerCommand,
+      form.checkCommand,
+    ]);
+    if (hasDuplicateCommand) {
+      return res.redirect('/admin/counters?error=duplicate_command');
+    }
+
     await addCounter(
       form.triggerCommand,
       form.checkCommand,
@@ -119,6 +131,10 @@ router.post('/counters/add', requireManager, csrfProtection, async (req, res) =>
       form.resetYearly,
     );
   } catch (err) {
+    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
+      return res.redirect('/admin/counters?error=duplicate_command');
+    }
+
     console.error('[Web] Add counter error:', err);
     return res.redirect('/admin/counters?error=add_failed');
   }
@@ -140,6 +156,14 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
   }
 
   try {
+    const hasDuplicateCommand = await isCounterCommandTaken(
+      [form.triggerCommand, form.checkCommand],
+      parsedId,
+    );
+    if (hasDuplicateCommand) {
+      return res.redirect('/admin/counters?error=duplicate_command');
+    }
+
     await updateCounter(
       parsedId,
       form.triggerCommand,
@@ -151,6 +175,10 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
       return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
+    }
+
+    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
+      return res.redirect('/admin/counters?error=duplicate_command');
     }
 
     console.error('[Web] Update counter error:', err);

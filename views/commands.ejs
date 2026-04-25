@@ -15,8 +15,19 @@
       <h2 class="section-title">Custom Commands</h2>
 
       <% if (error) { %>
+      <% const errorMessages = {
+        missing_fields: 'Please provide a single-token trigger and output text.',
+        command_taken: 'That command conflicts with another command in the same Twitch channel scope or with an existing counter command.',
+        invalid_id: 'The selected command record is invalid.',
+        add_failed: 'Failed to add the custom command.',
+        update_failed: 'Failed to update the custom command.',
+        remove_failed: 'Failed to remove the custom command.',
+        assign_failed: 'Failed to assign that user to the command.',
+        unassign_failed: 'Failed to unassign that user from the command.',
+        invalid_assignment_user: 'The selected user cannot be assigned to this command.',
+      }; %>
       <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
-        <span class="text-danger">&#9888; Operation failed: <%= error.replace(/_/g, ' ') %></span>
+        <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
       </div>
       <% } %>
 

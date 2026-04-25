@@ -14,9 +14,20 @@
     <section class="section">
       <h2 class="section-title">Counters</h2>
 
+
       <% if (error) { %>
+      <% const errorMessages = {
+        missing_fields: 'Please provide both a trigger and check command, and all required fields.',
+        same_commands: 'Trigger and check command must be different.',
+        duplicate_command: 'That command is already in use by another custom command or counter command.',
+        invalid_id: 'The selected counter record is invalid.',
+        add_failed: 'Failed to add the counter.',
+        update_failed: 'Failed to update the counter.',
+        remove_failed: 'Failed to remove the counter.',
+        reset_failed: 'Failed to reset the counter value.',
+      }; %>
       <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
-        <span class="text-danger">&#9888; Operation failed: <%= error.replace(/_/g, ' ') %></span>
+        <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
       </div>
       <% } %>
 

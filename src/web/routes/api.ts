@@ -3,6 +3,7 @@ import { getStatus } from '../../statusStore';
 import { requireMod } from '../middleware';
 import { connect, disconnect } from '../../audioPlayer';
 import { discordClient } from '../../discordBot';
+import { csrfProtection } from '../csrf';
 
 const router = Router();
 
@@ -12,7 +13,7 @@ router.get('/status', (_req, res) => {
 });
 
 // Rejoin the configured voice channel — Mod and above
-router.post('/voice/join', requireMod, async (_req, res) => {
+router.post('/voice/join', requireMod, csrfProtection, async (_req, res) => {
   if (!discordClient) {
     res.status(503).json({ ok: false, error: 'Discord client not ready' });
     return;
@@ -28,7 +29,7 @@ router.post('/voice/join', requireMod, async (_req, res) => {
 });
 
 // Leave the voice channel — Mod and above
-router.post('/voice/leave', requireMod, (_req, res) => {
+router.post('/voice/leave', requireMod, csrfProtection, (_req, res) => {
   disconnect();
   res.json({ ok: true });
 });

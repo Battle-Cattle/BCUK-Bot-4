@@ -14,7 +14,9 @@ import apiRouter from './routes/api';
 import streamsRouter from './routes/streams';
 import commandsRouter from './routes/commands';
 import countersRouter from './routes/counters';
+import commandMonitorRouter from './routes/commandMonitor';
 import { requireAuth } from './middleware';
+import { ensureSessionCsrfToken } from './csrf';
 
 const app = express();
 
@@ -75,6 +77,12 @@ app.use(
   }),
 );
 
+app.use((req, res, next) => {
+  res.locals.user = req.session.user ?? null;
+  res.locals.csrfToken = req.session.user ? ensureSessionCsrfToken(req) : '';
+  next();
+});
+
 // Routes
 app.use('/auth', authRouter);
 app.use('/api', requireAuth, apiRouter);
@@ -82,11 +90,16 @@ app.use('/admin', requireAuth, adminRouter);
 app.use('/admin', requireAuth, streamsRouter);
 app.use('/admin', requireAuth, commandsRouter);
 app.use('/admin', requireAuth, countersRouter);
+app.use('/admin', requireAuth, commandMonitorRouter);
 app.use('/', requireAuth, dashboardRouter);
 
 // 404 handler
-app.use((_req, res) => {
-  res.status(404).render('error', { message: 'Page not found.', user: null });
+app.use((req, res) => {
+  res.status(404).render('error', {
+    message: 'Page not found.',
+    user: req.session.user ?? null,
+    csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
+  });
 });
 
 const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
@@ -96,18 +109,32 @@ const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
   }
 
   console.error('[Web] Invalid CSRF token:', err);
+
+  if (req.originalUrl === '/api' || req.originalUrl.startsWith('/api/')) {
+    res.status(403).json({
+      ok: false,
+      error: 'Your form session expired or the request could not be verified. Please reload the page and try again.',
+    });
+    return;
+  }
+
   res.status(403).render('error', {
     message: 'Your form session expired or the request could not be verified. Please reload the page and try again.',
     user: req.session.user ?? null,
+    csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
   });
 };
 
 app.use(csrfErrorHandler);
 
 // Centralised error handler
-app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('[Web] Unhandled error:', err);
-  res.status(500).render('error', { message: 'An unexpected error occurred.', user: null });
+  res.status(500).render('error', {
+    message: 'An unexpected error occurred.',
+    user: req.session.user ?? null,
+    csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
+  });
 });
 
 export function startWebPanel(): void {

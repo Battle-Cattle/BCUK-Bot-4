@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/style.css">
   <%- include('partials/pwa-head') %>
 </head>
-<body data-initial-status="<%= JSON.stringify(status) %>">
+<body data-initial-status="<%= JSON.stringify(status) %>" data-csrf-token="<%= csrfToken %>">
   <%- include('partials/nav') %>
 
   <main class="container">

@@ -145,6 +145,7 @@ async function fetchStatus() {
 
 // Apply server-provided initial status without inline script execution.
 const initialStatusRaw = document.body?.dataset?.initialStatus;
+const csrfToken = document.body?.dataset?.csrfToken || '';
 if (initialStatusRaw) {
   try {
     applyStatus(JSON.parse(initialStatusRaw));
@@ -224,7 +225,11 @@ if (rejoinBtn) {
     rejoinBtn.textContent = leaving ? 'Leaving…' : 'Joining…';
     try {
       const endpoint = leaving ? '/api/voice/leave' : '/api/voice/join';
-      const res = await fetch(endpoint, { method: 'POST' });
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ _csrf: csrfToken }),
+      });
       if (res.ok) {
         // Refresh status immediately so the dot and button update
         await fetchStatus();
