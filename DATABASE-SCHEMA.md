@@ -146,9 +146,21 @@ Stores custom text commands managed through the admin panel.
 
 Expected constraints and behavior:
 
-- `trigger_string` should be unique.
+- `trigger_string` is **not** globally unique by design; the same trigger can exist on different Twitch channels.
 - `trigger_string` should be stored as a single token only, including prefix, for example `!hello`.
 - The application lowercases `trigger_string` before persistence so it matches runtime command lookup behavior.
+
+Deployment note:
+
+- Do **not** enforce a global UNIQUE constraint on `custom_command.trigger_string`; it would block valid per-channel command reuse.
+- **Shared command namespace:** The application treats the union of `custom_command.trigger_string`, `counter.trigger_command`, and `counter.check_command` as a single shared command namespace. The `isAnyCommandTakenAcrossTables()` function in `src/db.ts` validates that new custom commands do not collide with existing counter commands before writing. This check is wrapped in a serialized advisory lock (`runSerializedCommandWrite()`) to prevent race conditions.
+- **Channel-scoped uniqueness:** Twitch command conflicts are validated in application logic using command assignments and channel context (including multi-Twitch behavior) rather than a single table-level UNIQUE key.
+- If `uq_custom_command_trigger_string` was added previously, drop it to restore channel-scoped behavior:
+
+```sql
+ALTER TABLE custom_command
+    DROP INDEX uq_custom_command_trigger_string;
+```
 
 ## `twitch_user_commands`
 
@@ -186,6 +198,31 @@ Expected constraints and behavior:
 - `trigger_command` and `check_command` should be unique.
 - Both command columns should store single-token commands including any prefix.
 - Current panel support includes CRUD and manual reset of `current_value`; runtime command handling/scheduler wiring can be implemented independently.
+
+Recommended migrations (run once) for DB-level protection:
+
+```sql
+ALTER TABLE counter
+    ADD CONSTRAINT uq_counter_trigger_command UNIQUE (trigger_command),
+    ADD CONSTRAINT uq_counter_check_command UNIQUE (check_command);
+```
+
+Deployment note:
+
+- **Recommended (defense-in-depth):** Apply these UNIQUE constraints during deployment/bootstrap. They provide DB-level protection against duplicate `trigger_command` and duplicate `check_command` rows, especially for direct DB writes, manual SQL, or future regressions.
+- For current application requests, counter writes are already serialized through `runSerializedCommandWrite()` + MySQL named locks and guarded by `isAnyCommandTakenAcrossTables()` before writes, so concurrent app requests should not create duplicates even without these two column-level UNIQUE constraints.
+
+**Important limitation:** The column-level UNIQUE constraints do **not** prevent **cross-column collisions** within the same table — for example, one row's `trigger_command` could equal another row's `check_command`. Since the application treats the union of both columns as a shared command namespace with `custom_command.trigger_string`, this is a potential consistency gap.
+
+**Runtime protection:** The application layer mitigates this risk via `isAnyCommandTakenAcrossTables()` in `src/db.ts`. This function is called within `runSerializedCommandWrite()`, which acquires MySQL advisory locks and queries both `trigger_command` and `check_command` (as well as `custom_command.trigger_string`) in a single atomic check before writing. This prevents concurrent collisions across the entire command namespace. The DB-level UNIQUE constraints provide an additional fallback in case of application-layer bugs or direct DB access.
+
+
+**Optional DB-level enforcement:** For additional safety at the database level, you can:
+1. Add a database trigger that validates both `trigger_command` and `check_command` against the union of all command columns, or
+2. Create a separate `command_registry` table with a `UNIQUE KEY` on the command string, then add foreign keys from both `trigger_command` and `check_command` to that table, or
+3. Use a generated column approach (MySQL 8.0.13+): add a generated column that represents the command token and enforce uniqueness on it.
+
+For now, the recommended migration is the two separate UNIQUE constraints above; the application-layer atomic checks provide sufficient protection for typical operations.
 
 ## `sessions`
 

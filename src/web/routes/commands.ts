@@ -2,7 +2,9 @@ import { Router } from 'express';
 import {
   addCustomCommand,
   assignUserToCommand,
+  CommandConflictError,
   DbCustomCommandWithAssignments,
+  isMysqlDuplicateEntryError,
   DbUser,
   findUser,
   getAllCustomCommandsWithAssignments,
@@ -18,6 +20,7 @@ const router = Router();
 
 const KNOWN_ERRORS = new Set([
   'missing_fields',
+  'command_taken',
   'invalid_id',
   'add_failed',
   'update_failed',
@@ -108,6 +111,10 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
   try {
     await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
+    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
+      return res.redirect('/admin/commands?error=command_taken');
+    }
+
     console.error('[Web] Add custom command error:', err);
     return res.redirect('/admin/commands?error=add_failed');
   }
@@ -134,6 +141,10 @@ router.post('/commands/update', requireManager, csrfProtection, async (req, res)
   try {
     await updateCustomCommand(parsedCommandId, normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
+    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
+      return res.redirect('/admin/commands?error=command_taken');
+    }
+
     console.error('[Web] Update custom command error:', err);
     return res.redirect('/admin/commands?error=update_failed');
   }
@@ -181,6 +192,10 @@ router.post('/commands/assign', requireManager, csrfProtection, async (req, res)
 
     await assignUserToCommand(parsedCommandId, normalizedDiscordId);
   } catch (err) {
+    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
+      return res.redirect('/admin/commands?error=command_taken');
+    }
+
     console.error('[Web] Assign user to command error:', err);
     return res.redirect('/admin/commands?error=assign_failed');
   }

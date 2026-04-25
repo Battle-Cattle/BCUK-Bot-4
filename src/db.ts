@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import mysql from 'mysql2/promise';
 import { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from './config';
 import { normalizeTwitchChannelName } from './twitchChannelName';
@@ -210,6 +211,10 @@ export async function upsertUser(
      ON DUPLICATE KEY UPDATE discord_name = new_user.discord_name, access_level = new_user.access_level, twitch_name = IF(?, new_user.twitch_name, \`user\`.twitch_name)`,
     [discordId, discordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
   );
+
+  if (twitchNameProvided) {
+    invalidateCustomCommandLookupCache();
+  }
 }
 
 export async function updateDiscordName(discordId: string, name: string): Promise<void> {
@@ -237,6 +242,8 @@ export async function updateTwitchBotEnabled(discordId: string, enabled: boolean
     'UPDATE `user` SET is_twitch_bot_enabled = ? WHERE discord_id = ?',
     [enabled ? 1 : 0, discordId],
   );
+
+  invalidateCustomCommandLookupCache();
 }
 
 export async function updateAccessLevel(discordId: string, accessLevel: number): Promise<void> {
@@ -251,6 +258,8 @@ export async function updateAccessLevel(discordId: string, accessLevel: number):
 
 export async function removeUser(discordId: string): Promise<void> {
   await getPool().execute('DELETE FROM `user` WHERE discord_id = ?', [discordId]);
+
+  invalidateCustomCommandLookupCache();
 }
 
 // ─── Custom commands ────────────────────────────────────────────────────────
@@ -275,6 +284,200 @@ export interface DbCustomCommandAssignedUser {
 export interface DbCustomCommandWithAssignments extends DbCustomCommand {
   assigned_users: DbCustomCommandAssignedUser[];
 }
+
+interface RefreshingLookupCache {
+  loadedAt: number;
+}
+
+interface ManagedLookupCacheOptions<TCache extends RefreshingLookupCache> {
+  cacheName: string;
+  ttlMs: number;
+  refreshFailureBackoffMs: number;
+  refreshFailureMaxBackoffMs: number;
+  createEmptyCache: () => TCache;
+  loadCache: () => Promise<TCache>;
+}
+
+interface ManagedLookupCache<TCache extends RefreshingLookupCache> {
+  getCache: () => Promise<TCache>;
+  invalidate: () => void;
+}
+
+/**
+ * Creates a managed lookup cache with TTL, background refresh, and error resilience.
+ *
+ * Caching strategy (stale-while-revalidate):
+ * - Returns cached data immediately when available, even if expired
+ * - Triggers background refresh when cache is expired (TTL exceeded)
+ * - On refresh failure: applies exponential backoff and serves stale cache if available,
+ *   or empty fallback cache on first load to prevent crashes
+ * - On invalidation: clears cache and version counter, forcing fresh load on next access
+ *
+ * Concurrency handling:
+ * - Multiple concurrent getCache() calls coalesce to one in-flight refresh
+ * - Version tracking ensures stale results from old refreshes don't overwrite newer data
+ * - Handles invalidation during in-flight refresh correctly by checking version numbers
+ *
+ * Used for: custom command lookups, counter command lookups
+ */
+function createManagedLookupCache<TCache extends RefreshingLookupCache>(
+  options: ManagedLookupCacheOptions<TCache>,
+): ManagedLookupCache<TCache> {
+  let cache: TCache | null = null;
+  let inFlightPromise: Promise<TCache> | null = null;
+  let version = 0;
+  let refreshAllowedAt = 0;
+  let refreshFailureCount = 0;
+
+  function getRefreshBackoffMs(): number {
+    const backoffMultiplier = 2 ** Math.max(0, refreshFailureCount - 1);
+    return Math.min(
+      options.refreshFailureBackoffMs * backoffMultiplier,
+      options.refreshFailureMaxBackoffMs,
+    );
+  }
+
+  function refreshInBackground(): void {
+    if (inFlightPromise) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now < refreshAllowedAt) {
+      return;
+    }
+
+    const requestVersion = version;
+    inFlightPromise = (async () => {
+      const rebuiltCache = await options.loadCache();
+      if (requestVersion === version) {
+        cache = rebuiltCache;
+        refreshAllowedAt = 0;
+        refreshFailureCount = 0;
+      }
+      return rebuiltCache;
+    })();
+
+    const promiseForFinally = inFlightPromise;
+    void promiseForFinally
+      .catch((err) => {
+        if (requestVersion !== version) {
+          return;
+        }
+
+        refreshFailureCount += 1;
+        const retryDelayMs = getRefreshBackoffMs();
+        refreshAllowedAt = Date.now() + retryDelayMs;
+
+        if (!cache) {
+          cache = options.createEmptyCache();
+          console.error(`[DB] Background ${options.cacheName} refresh failed; serving an empty cache and retrying after ${retryDelayMs}ms.`, err);
+          return;
+        }
+
+        console.error(`[DB] Background ${options.cacheName} refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
+      })
+      .finally(() => {
+        if (inFlightPromise === promiseForFinally) {
+          inFlightPromise = null;
+        }
+      });
+  }
+
+  async function awaitCachePromise(promise: Promise<TCache>): Promise<TCache> {
+    try {
+      return await promise;
+    } catch (err) {
+      if (cache) {
+        return cache;
+      }
+
+      throw err;
+    }
+  }
+
+  async function getCache(): Promise<TCache> {
+    const now = Date.now();
+
+    if (cache) {
+      if (now - cache.loadedAt >= options.ttlMs && now >= refreshAllowedAt) {
+        refreshInBackground();
+      }
+      return cache;
+    }
+
+    const requestVersion = version;
+    refreshInBackground();
+
+    if (!inFlightPromise) {
+      if (cache) {
+        return cache;
+      }
+
+      throw new Error(`${options.cacheName} refresh did not start`);
+    }
+
+    const resolvedCache = await awaitCachePromise(inFlightPromise);
+
+    if (requestVersion === version) {
+      return resolvedCache;
+    }
+
+    if (cache) {
+      return cache;
+    }
+
+    refreshInBackground();
+
+    if (inFlightPromise) {
+      return await awaitCachePromise(inFlightPromise);
+    }
+
+    throw new Error(`${options.cacheName} refresh did not start`);
+  }
+
+  function invalidate(): void {
+    version += 1;
+    cache = null;
+    inFlightPromise = null;
+    refreshAllowedAt = 0;
+    refreshFailureCount = 0;
+  }
+
+  return {
+    getCache,
+    invalidate,
+  };
+}
+
+interface CustomCommandLookupCache extends RefreshingLookupCache {
+  discordByTrigger: Map<string, DbCustomCommand>;
+  twitchByChannelAndTrigger: Map<string, DbCustomCommand>;
+}
+
+interface TwitchCommandCandidate {
+  command: DbCustomCommand;
+  source: 'assigned' | 'multi';
+  priority: number;
+  owner: string;
+}
+
+function createEmptyCustomCommandLookupCache(): CustomCommandLookupCache {
+  return {
+    // Keep the fallback cache immediately stale so a new refresh can start as soon
+    // as the backoff window expires rather than waiting for the normal TTL.
+    loadedAt: 0,
+    discordByTrigger: new Map<string, DbCustomCommand>(),
+    twitchByChannelAndTrigger: new Map<string, DbCustomCommand>(),
+  };
+}
+
+const CUSTOM_COMMAND_CACHE_TTL_MS = 300_000;
+const CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
+const CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
+const COMMAND_WRITE_LOCK_TIMEOUT_SECONDS = 10;
+
+type SqlExecutor = mysql.Pool | mysql.PoolConnection;
 
 function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
   return {
@@ -323,6 +526,188 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
   return Array.from(commandMap.values());
 }
 
+function toDbCustomCommand(command: DbCustomCommandWithAssignments): DbCustomCommand {
+  return {
+    command_id: command.command_id,
+    trigger_string: command.trigger_string,
+    output: command.output,
+    is_discord_enabled: command.is_discord_enabled,
+    is_multi_twitch: command.is_multi_twitch,
+  };
+}
+
+function cloneDbCustomCommand(command: DbCustomCommand): DbCustomCommand {
+  return { ...command };
+}
+
+function getTwitchCommandCacheKey(channelName: string, triggerString: string): string | null {
+  const normalizedChannelName = normalizeTwitchChannelName(channelName);
+  const normalizedTriggerString = triggerString.trim().toLowerCase();
+
+  if (!normalizedChannelName || !normalizedTriggerString) {
+    return null;
+  }
+
+  return `${normalizedChannelName}::${normalizedTriggerString}`;
+}
+
+function buildCustomCommandLookupCache(
+  commands: DbCustomCommandWithAssignments[],
+  activeTwitchChannels: string[],
+): CustomCommandLookupCache {
+  const discordByTrigger = new Map<string, DbCustomCommand>();
+  const twitchByChannelAndTrigger = new Map<string, DbCustomCommand>();
+  const twitchCandidateByChannelAndTrigger = new Map<string, TwitchCommandCandidate>();
+  const sortedCommands = [...commands].sort((left, right) => left.command_id - right.command_id);
+  const normalizedActiveTwitchChannels = activeTwitchChannels
+    .map((channel) => normalizeTwitchChannelName(channel))
+    .filter((channel): channel is string => channel !== null);
+
+  const pickPreferredTwitchCandidate = (
+    existingCandidate: TwitchCommandCandidate,
+    nextCandidate: TwitchCommandCandidate,
+  ): TwitchCommandCandidate => {
+    if (nextCandidate.priority !== existingCandidate.priority) {
+      return nextCandidate.priority > existingCandidate.priority ? nextCandidate : existingCandidate;
+    }
+
+    if (nextCandidate.command.command_id === existingCandidate.command.command_id) {
+      return existingCandidate;
+    }
+
+    return nextCandidate.command.command_id < existingCandidate.command.command_id
+      ? nextCandidate
+      : existingCandidate;
+  };
+
+  const registerTwitchCandidate = (
+    cacheKey: string,
+    triggerString: string,
+    channelName: string,
+    candidate: TwitchCommandCandidate,
+  ): void => {
+    const existingCandidate = twitchCandidateByChannelAndTrigger.get(cacheKey);
+    if (!existingCandidate) {
+      twitchCandidateByChannelAndTrigger.set(cacheKey, candidate);
+      return;
+    }
+
+    const preferredCandidate = pickPreferredTwitchCandidate(existingCandidate, candidate);
+    if (preferredCandidate === existingCandidate) {
+      console.warn(
+        `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}' already maps to command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner}); ignoring command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
+      );
+      return;
+    }
+
+    console.warn(
+      `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}' remapped from command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner}) to command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
+    );
+    twitchCandidateByChannelAndTrigger.set(cacheKey, preferredCandidate);
+  };
+
+  for (const command of sortedCommands) {
+    const normalizedTriggerString = command.trigger_string.trim().toLowerCase();
+    if (!normalizedTriggerString) {
+      continue;
+    }
+
+    const baseCommand = toDbCustomCommand(command);
+
+    if (command.is_discord_enabled) {
+      if (discordByTrigger.has(normalizedTriggerString)) {
+        console.warn(`[DB] Custom command Discord trigger collision: '${normalizedTriggerString}' is already registered (command_id=${discordByTrigger.get(normalizedTriggerString)!.command_id}); ignoring duplicate from command_id=${command.command_id}.`);
+      } else {
+        discordByTrigger.set(normalizedTriggerString, baseCommand);
+      }
+    }
+
+    if (command.is_multi_twitch) {
+      for (const activeChannel of normalizedActiveTwitchChannels) {
+        const cacheKey = getTwitchCommandCacheKey(activeChannel, normalizedTriggerString);
+        if (!cacheKey) continue;
+        registerTwitchCandidate(cacheKey, normalizedTriggerString, activeChannel, {
+          command: baseCommand,
+          source: 'multi',
+          priority: 1,
+          owner: 'multi_twitch',
+        });
+      }
+    }
+
+    for (const assignedUser of command.assigned_users) {
+      if (!assignedUser.twitch_name || !assignedUser.is_twitch_bot_enabled) {
+        continue;
+      }
+
+      const cacheKey = getTwitchCommandCacheKey(assignedUser.twitch_name, normalizedTriggerString);
+      if (!cacheKey) continue;
+      registerTwitchCandidate(cacheKey, normalizedTriggerString, assignedUser.twitch_name, {
+        command: baseCommand,
+        source: 'assigned',
+        priority: 2,
+        owner: assignedUser.discord_id,
+      });
+    }
+  }
+
+  for (const [cacheKey, candidate] of twitchCandidateByChannelAndTrigger.entries()) {
+    twitchByChannelAndTrigger.set(cacheKey, candidate.command);
+  }
+
+  return {
+    loadedAt: Date.now(),
+    discordByTrigger,
+    twitchByChannelAndTrigger,
+  };
+}
+
+const customCommandLookupCacheState = createManagedLookupCache<CustomCommandLookupCache>({
+  cacheName: 'custom command cache',
+  ttlMs: CUSTOM_COMMAND_CACHE_TTL_MS,
+  refreshFailureBackoffMs: CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_BACKOFF_MS,
+  refreshFailureMaxBackoffMs: CUSTOM_COMMAND_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  createEmptyCache: createEmptyCustomCommandLookupCache,
+  loadCache: async () => {
+    const [commands, activeTwitchChannels] = await Promise.all([
+      getAllCustomCommandsWithAssignments(),
+      getTwitchEnabledChannels(),
+    ]);
+
+    return buildCustomCommandLookupCache(commands, activeTwitchChannels);
+  },
+});
+
+async function getCustomCommandLookupCache(): Promise<CustomCommandLookupCache> {
+  return await customCommandLookupCacheState.getCache();
+}
+
+export function invalidateCustomCommandLookupCache(): void {
+  customCommandLookupCacheState.invalidate();
+}
+
+export async function getCustomCommandForTwitchChannel(channelName: string, triggerString: string): Promise<DbCustomCommand | null> {
+  const cacheKey = getTwitchCommandCacheKey(channelName, triggerString);
+  if (!cacheKey) {
+    return null;
+  }
+
+  const cache = await getCustomCommandLookupCache();
+  const cachedCommand = cache.twitchByChannelAndTrigger.get(cacheKey);
+  return cachedCommand ? cloneDbCustomCommand(cachedCommand) : null;
+}
+
+export async function getCustomCommandForDiscord(triggerString: string): Promise<DbCustomCommand | null> {
+  const normalizedTriggerString = triggerString.trim().toLowerCase();
+  if (!normalizedTriggerString) {
+    return null;
+  }
+
+  const cache = await getCustomCommandLookupCache();
+  const cachedCommand = cache.discordByTrigger.get(normalizedTriggerString);
+  return cachedCommand ? cloneDbCustomCommand(cachedCommand) : null;
+}
+
 function requireTrimmedString(value: string, fieldName: string): string {
   const normalizedValue = value.trim();
   if (!normalizedValue) {
@@ -331,20 +716,250 @@ function requireTrimmedString(value: string, fieldName: string): string {
   return normalizedValue;
 }
 
+function normalizeCommand(command: string): string | null {
+  const normalizedCommand = command.trim().toLowerCase();
+  return normalizedCommand.length > 0 ? normalizedCommand : null;
+}
+
+function normalizeCommandList(commandOrCommands: string | string[]): string[] {
+  const commands = Array.isArray(commandOrCommands) ? commandOrCommands : [commandOrCommands];
+
+  return commands
+    .map((command) => normalizeCommand(command))
+    .filter((command): command is string => command !== null);
+}
+
+function normalizeCommandInputs(commandOrCommands: string | string[]): string[] {
+  return Array.from(new Set(normalizeCommandList(commandOrCommands)));
+}
+
+function buildInClausePlaceholders(count: number): string {
+  return Array.from({ length: count }, () => '?').join(', ');
+}
+
+function getCommandWriteLockName(command: string): string {
+  return `bcuk_cmd_${createHash('sha256').update(command).digest('hex').slice(0, 48)}`;
+}
+
+async function acquireNamedLock(connection: mysql.PoolConnection, lockName: string): Promise<void> {
+  const [rows] = await connection.execute<mysql.RowDataPacket[]>(
+    'SELECT GET_LOCK(?, ?) AS lock_status',
+    [lockName, COMMAND_WRITE_LOCK_TIMEOUT_SECONDS],
+  );
+
+  // GET_LOCK returns a BIGINT. With bigNumberStrings: true, it's the string "1", not number 1.
+  const lockStatus = rows[0]?.lock_status;
+  if (lockStatus === '1' || lockStatus === 1) {
+    return;
+  }
+
+  if (lockStatus === '0' || lockStatus === 0) {
+    throw new Error(`Timed out acquiring command write lock '${lockName}' (lock_status=${String(lockStatus)}).`);
+  }
+
+  if (lockStatus === null || lockStatus === undefined) {
+    throw new Error(`Internal error acquiring command write lock '${lockName}' (lock_status=${String(lockStatus)}).`);
+  }
+
+  throw new Error(`Unexpected result acquiring command write lock '${lockName}' (lock_status=${String(lockStatus)}).`);
+}
+
+async function releaseNamedLock(connection: mysql.PoolConnection, lockName: string): Promise<void> {
+  try {
+    await connection.execute('SELECT RELEASE_LOCK(?)', [lockName]);
+  } catch (error) {
+    console.warn(`[DB] Failed to release command write lock '${lockName}':`, error);
+  }
+}
+
+export class CommandConflictError extends Error {
+  readonly commands: string[];
+
+  constructor(commands: string[]) {
+    super(`Command already taken: ${commands.join(', ')}`);
+    this.name = 'CommandConflictError';
+    this.commands = commands;
+  }
+}
+
+export function isMysqlDuplicateEntryError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const mysqlError = error as { code?: string; errno?: number };
+  return mysqlError.code === 'ER_DUP_ENTRY' || mysqlError.errno === 1062;
+}
+
+async function runSerializedCommandWrite<T>(
+  commandOrCommands: string | string[],
+  options: { excludeCustomCommandId?: number; excludeCounterId?: number } | undefined,
+  writeOperation: (connection: mysql.PoolConnection) => Promise<T>,
+  checks: { includeCustomCommandTable?: boolean; includeCounterTable?: boolean } = {
+    includeCustomCommandTable: true,
+    includeCounterTable: true,
+  },
+): Promise<T> {
+  const normalizedCommands = normalizeCommandInputs(commandOrCommands);
+  const lockNames = normalizedCommands
+    .slice()
+    .sort((left, right) => left.localeCompare(right))
+    .map((command) => getCommandWriteLockName(command));
+  const connection = await getPool().getConnection();
+
+  try {
+    for (const lockName of lockNames) {
+      await acquireNamedLock(connection, lockName);
+    }
+
+    await connection.beginTransaction();
+
+    try {
+      if (await isAnyCommandTakenAcrossTables(normalizedCommands, options, connection, checks)) {
+        throw new CommandConflictError(normalizedCommands);
+      }
+
+      const result = await writeOperation(connection);
+      await connection.commit();
+      return result;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+  } finally {
+    for (let index = lockNames.length - 1; index >= 0; index -= 1) {
+      await releaseNamedLock(connection, lockNames[index]);
+    }
+
+    connection.release();
+  }
+}
+
+async function isAnyCommandTakenAcrossTables(
+  commandOrCommands: string | string[],
+  options?: { excludeCustomCommandId?: number; excludeCounterId?: number },
+  executor: SqlExecutor = getPool(),
+  checks: { includeCustomCommandTable?: boolean; includeCounterTable?: boolean } = {
+    includeCustomCommandTable: true,
+    includeCounterTable: true,
+  },
+): Promise<boolean> {
+  const normalizedCommands = normalizeCommandInputs(commandOrCommands);
+  if (normalizedCommands.length === 0) {
+    return false;
+  }
+
+  const placeholders = buildInClausePlaceholders(normalizedCommands.length);
+  const includeCustomCommandTable = checks.includeCustomCommandTable !== false;
+  const includeCounterTable = checks.includeCounterTable !== false;
+
+  const checksToRun: Array<Promise<[mysql.RowDataPacket[], mysql.FieldPacket[]]>> = [];
+
+  if (includeCustomCommandTable) {
+    let customCommandSql = `SELECT 1 FROM custom_command WHERE trigger_string IN (${placeholders})`;
+    const customCommandParams: Array<string | number> = [...normalizedCommands];
+    if (options?.excludeCustomCommandId !== undefined) {
+      customCommandSql += ' AND command_id != ?';
+      customCommandParams.push(options.excludeCustomCommandId);
+    }
+    customCommandSql += ' LIMIT 1';
+    checksToRun.push(executor.execute<mysql.RowDataPacket[]>(customCommandSql, customCommandParams));
+  }
+
+  if (includeCounterTable) {
+    let counterSql = `SELECT 1 FROM counter WHERE (trigger_command IN (${placeholders}) OR check_command IN (${placeholders}))`;
+    const counterParams: Array<string | number> = [...normalizedCommands, ...normalizedCommands];
+    if (options?.excludeCounterId !== undefined) {
+      counterSql += ' AND id != ?';
+      counterParams.push(options.excludeCounterId);
+    }
+    counterSql += ' LIMIT 1';
+    checksToRun.push(executor.execute<mysql.RowDataPacket[]>(counterSql, counterParams));
+  }
+
+  const results = await Promise.all(checksToRun);
+  return results.some(([rows]) => rows.length > 0);
+}
+
+export async function isCustomCommandTriggerTaken(triggerString: string, excludeCommandId?: number): Promise<boolean> {
+  return await isAnyCommandTakenAcrossTables(triggerString, { excludeCustomCommandId: excludeCommandId });
+}
+
+async function assertDiscordTriggerAvailable(
+  triggerString: string,
+  executor: SqlExecutor,
+  excludeCommandId?: number,
+): Promise<void> {
+  let sql =
+    `SELECT command_id
+     FROM custom_command
+     WHERE trigger_string = ?
+       AND is_discord_enabled = 1`;
+  const params: Array<string | number> = [triggerString];
+
+  if (excludeCommandId !== undefined) {
+    sql += ' AND command_id <> ?';
+    params.push(excludeCommandId);
+  }
+
+  sql += ' LIMIT 1';
+
+  const [conflictRows] = await executor.execute<mysql.RowDataPacket[]>(sql, params);
+  if (conflictRows.length > 0) {
+    throw new CommandConflictError([triggerString]);
+  }
+}
+
 export async function addCustomCommand(
   triggerString: string,
   output: string,
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
 ): Promise<void> {
-  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string');
+  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string').toLowerCase();
   const normalizedOutput = requireTrimmedString(output, 'output');
 
-  await getPool().execute(
-    `INSERT INTO custom_command (trigger_string, output, is_discord_enabled, is_multi_twitch)
-     VALUES (?, ?, ?, ?)`,
-    [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0],
+  await runSerializedCommandWrite(
+    normalizedTriggerString,
+    undefined,
+    async (connection) => {
+      if (isDiscordEnabled) {
+        await assertDiscordTriggerAvailable(normalizedTriggerString, connection);
+      }
+
+      if (isMultiTwitch) {
+        const [conflictRows] = await connection.execute<mysql.RowDataPacket[]>(
+          `SELECT c.command_id
+           FROM custom_command c
+           LEFT JOIN twitch_user_commands tuc ON tuc.command_id = c.command_id
+           LEFT JOIN \`user\` u ON u.discord_id = tuc.discord_id
+           WHERE c.trigger_string = ?
+             AND (
+               c.is_multi_twitch = 1
+               OR (
+                 u.twitch_name IS NOT NULL
+                 AND u.is_twitch_bot_enabled = 1
+               )
+             )
+           LIMIT 1`,
+          [normalizedTriggerString],
+        );
+
+        if (conflictRows.length > 0) {
+          throw new CommandConflictError([normalizedTriggerString]);
+        }
+      }
+
+      await connection.execute(
+      `INSERT INTO custom_command (trigger_string, output, is_discord_enabled, is_multi_twitch)
+       VALUES (?, ?, ?, ?)`,
+      [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0],
+      );
+    },
+    { includeCustomCommandTable: false, includeCounterTable: true },
   );
+
+  invalidateCustomCommandLookupCache();
 }
 
 export async function updateCustomCommand(
@@ -354,15 +969,80 @@ export async function updateCustomCommand(
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
 ): Promise<void> {
-  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string');
+  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string').toLowerCase();
   const normalizedOutput = requireTrimmedString(output, 'output');
 
-  await getPool().execute(
-    `UPDATE custom_command
-     SET trigger_string = ?, output = ?, is_discord_enabled = ?, is_multi_twitch = ?
-     WHERE command_id = ?`,
-    [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
+  await runSerializedCommandWrite(
+    normalizedTriggerString,
+    { excludeCustomCommandId: commandId },
+    async (connection) => {
+      if (isDiscordEnabled) {
+        await assertDiscordTriggerAvailable(normalizedTriggerString, connection, commandId);
+      }
+
+      if (isMultiTwitch) {
+        const [conflictRows] = await connection.execute<mysql.RowDataPacket[]>(
+          `SELECT c.command_id
+           FROM custom_command c
+           LEFT JOIN twitch_user_commands tuc ON tuc.command_id = c.command_id
+           LEFT JOIN \`user\` u ON u.discord_id = tuc.discord_id
+           WHERE c.command_id <> ?
+             AND c.trigger_string = ?
+             AND (
+               c.is_multi_twitch = 1
+               OR (
+                 u.twitch_name IS NOT NULL
+                 AND u.is_twitch_bot_enabled = 1
+               )
+             )
+           LIMIT 1`,
+          [commandId, normalizedTriggerString],
+        );
+
+        if (conflictRows.length > 0) {
+          throw new CommandConflictError([normalizedTriggerString]);
+        }
+      } else {
+        const [overlapRows] = await connection.execute<mysql.RowDataPacket[]>(
+          `SELECT other.command_id
+           FROM twitch_user_commands current_tuc
+           JOIN \`user\` current_u ON current_u.discord_id = current_tuc.discord_id
+           JOIN custom_command other
+             ON other.command_id <> ?
+            AND other.trigger_string = ?
+           LEFT JOIN twitch_user_commands other_tuc ON other_tuc.command_id = other.command_id
+           LEFT JOIN \`user\` other_u ON other_u.discord_id = other_tuc.discord_id
+           WHERE current_tuc.command_id = ?
+             AND current_u.twitch_name IS NOT NULL
+             AND current_u.is_twitch_bot_enabled = 1
+             AND (
+               other.is_multi_twitch = 1
+               OR (
+                 other_u.twitch_name IS NOT NULL
+                 AND other_u.is_twitch_bot_enabled = 1
+                 AND LOWER(other_u.twitch_name) = LOWER(current_u.twitch_name)
+               )
+             )
+           LIMIT 1`,
+          [commandId, normalizedTriggerString, commandId],
+        );
+
+        if (overlapRows.length > 0) {
+          throw new CommandConflictError([normalizedTriggerString]);
+        }
+      }
+
+      await connection.execute(
+        `UPDATE custom_command
+         SET trigger_string = ?, output = ?, is_discord_enabled = ?, is_multi_twitch = ?
+         WHERE command_id = ?`,
+        [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
+      );
+    },
+    { includeCustomCommandTable: false, includeCounterTable: true },
   );
+
+  invalidateCustomCommandLookupCache();
 }
 
 export async function removeCustomCommand(commandId: number): Promise<void> {
@@ -379,6 +1059,8 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
       [commandId],
     );
     await connection.commit();
+    // Invalidate only after a successful commit; refresh remains lazy on next lookup.
+    invalidateCustomCommandLookupCache();
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -388,13 +1070,102 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
 }
 
 export async function assignUserToCommand(commandId: number, discordId: string): Promise<void> {
-  await getPool().execute(
-    `INSERT INTO twitch_user_commands (command_id, discord_id)
-     VALUES (?, ?) AS new_row
-     ON DUPLICATE KEY UPDATE
-       command_id = command_id`,
-    [commandId, discordId],
-  );
+  const connection = await getPool().getConnection();
+
+  const lockNameById = `bcuk_cmdid_${commandId}`;
+  try {
+    // Step 1: Acquire a lock on the commandId to serialize concurrent assignments/updates for this command
+    await acquireNamedLock(connection, lockNameById);
+
+    await connection.beginTransaction();
+    let lockNameByTrigger: string | null = null;
+
+    try {
+      // Step 2: Re-read the current trigger_string inside the transaction
+      // This read comes from the transaction snapshot. If another transaction updates
+      // the same command's trigger in a tiny concurrent window, the conflict check
+      // below can be conservative until the next cache rebuild.
+      const [commandRows] = await connection.execute<mysql.RowDataPacket[]>(
+        'SELECT trigger_string FROM custom_command WHERE command_id = ? LIMIT 1',
+        [commandId],
+      );
+      if (commandRows.length === 0) {
+        throw new Error(`Custom command not found: ${commandId}`);
+      }
+
+      const normalizedTriggerString = String(commandRows[0].trigger_string).trim().toLowerCase();
+      lockNameByTrigger = getCommandWriteLockName(normalizedTriggerString);
+
+      // Step 3: Acquire the lock for the current trigger_string
+      // Named locks are session-scoped (not transaction-scoped), so this must be released explicitly.
+      await acquireNamedLock(connection, lockNameByTrigger);
+
+      // Step 4: Proceed with the rest of the logic inside the transaction
+      const [userRows] = await connection.execute<mysql.RowDataPacket[]>(
+        'SELECT twitch_name, is_twitch_bot_enabled FROM `user` WHERE discord_id = ? LIMIT 1',
+        [discordId],
+      );
+      if (userRows.length === 0) {
+        throw new Error(`User not found: ${discordId}`);
+      }
+
+      const twitchName = userRows[0].twitch_name ? String(userRows[0].twitch_name) : null;
+      const normalizedTwitchName = twitchName ? normalizeTwitchChannelName(twitchName) : null;
+      const isTwitchBotEnabled = Buffer.isBuffer(userRows[0].is_twitch_bot_enabled)
+        ? userRows[0].is_twitch_bot_enabled[0] === 1
+        : userRows[0].is_twitch_bot_enabled == 1;
+
+      if (normalizedTwitchName && isTwitchBotEnabled) {
+        const [conflictRows] = await connection.execute<mysql.RowDataPacket[]>(
+          `SELECT c.command_id
+           FROM custom_command c
+           LEFT JOIN twitch_user_commands tuc ON tuc.command_id = c.command_id
+           LEFT JOIN \`user\` u ON u.discord_id = tuc.discord_id
+           WHERE c.command_id <> ?
+             AND c.trigger_string = ?
+             AND (
+               c.is_multi_twitch = 1
+               OR (
+                 u.twitch_name IS NOT NULL
+                 AND u.is_twitch_bot_enabled = 1
+                 AND LOWER(u.twitch_name) = ?
+               )
+             )
+           LIMIT 1`,
+          [commandId, normalizedTriggerString, normalizedTwitchName],
+        );
+
+        if (conflictRows.length > 0) {
+          throw new CommandConflictError([normalizedTriggerString]);
+        }
+      }
+
+      await connection.execute(
+        `INSERT INTO twitch_user_commands (command_id, discord_id)
+         VALUES (?, ?) AS new_row
+         ON DUPLICATE KEY UPDATE
+           command_id = command_id`,
+        [commandId, discordId],
+      );
+
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      // Always release the trigger lock
+      if (lockNameByTrigger) {
+        await releaseNamedLock(connection, lockNameByTrigger);
+      }
+    }
+
+    // Invalidate only after commit; keep lock ownership and connection lifecycle deterministic.
+    invalidateCustomCommandLookupCache();
+  } finally {
+    // Always release the id lock
+    await releaseNamedLock(connection, lockNameById);
+    connection.release();
+  }
 }
 
 export async function unassignUserFromCommand(commandId: number, discordId: string): Promise<void> {
@@ -402,6 +1173,8 @@ export async function unassignUserFromCommand(commandId: number, discordId: stri
     'DELETE FROM twitch_user_commands WHERE command_id = ? AND discord_id = ?',
     [commandId, discordId],
   );
+
+  invalidateCustomCommandLookupCache();
 }
 
 // ─── Counter commands ───────────────────────────────────────────────────────
@@ -414,6 +1187,12 @@ export interface DbCounter {
   increment_message: string;
   reset_yearly: boolean;
   current_value: number;
+}
+
+export type CounterMatchType = 'trigger' | 'check';
+
+export interface DbMatchedCounter extends DbCounter {
+  matchType: CounterMatchType;
 }
 
 export class CounterNotFoundError extends Error {
@@ -437,8 +1216,8 @@ function normalizeCounterFields(
   incrementMessage: string,
 ): NormalizedCounterFields {
   return {
-    triggerCommand: requireTrimmedString(triggerCommand, 'trigger_command'),
-    checkCommand: requireTrimmedString(checkCommand, 'check_command'),
+    triggerCommand: requireTrimmedString(triggerCommand, 'trigger_command').toLowerCase(),
+    checkCommand: requireTrimmedString(checkCommand, 'check_command').toLowerCase(),
     message: requireTrimmedString(message, 'message'),
     incrementMessage: requireTrimmedString(incrementMessage, 'increment_message'),
   };
@@ -456,6 +1235,73 @@ function mapCounter(row: mysql.RowDataPacket): DbCounter {
   };
 }
 
+interface CounterLookupCache extends RefreshingLookupCache {
+  byCommand: Map<string, DbMatchedCounter>;
+}
+
+function createEmptyCounterLookupCache(): CounterLookupCache {
+  return {
+    // Keep the fallback cache immediately stale so a new refresh can start as soon
+    // as the backoff window expires rather than waiting for the normal TTL.
+    loadedAt: 0,
+    byCommand: new Map<string, DbMatchedCounter>(),
+  };
+}
+
+const COUNTER_LOOKUP_CACHE_TTL_MS = 300_000;
+const COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
+const COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
+
+function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
+  const byCommand = new Map<string, DbMatchedCounter>();
+  const sortedCounters = [...counters].sort((left, right) => left.id - right.id);
+
+  for (const counter of sortedCounters) {
+    const normalizedTriggerCommand = counter.trigger_command.trim().toLowerCase();
+    if (normalizedTriggerCommand) {
+      if (byCommand.has(normalizedTriggerCommand)) {
+        console.warn(`[DB] Counter trigger_command collision: '${normalizedTriggerCommand}' is already registered (counter id=${byCommand.get(normalizedTriggerCommand)!.id}); ignoring duplicate from counter id=${counter.id}.`);
+      } else {
+        byCommand.set(normalizedTriggerCommand, { ...counter, matchType: 'trigger' });
+      }
+    }
+
+    const normalizedCheckCommand = counter.check_command.trim().toLowerCase();
+    if (normalizedCheckCommand) {
+      if (byCommand.has(normalizedCheckCommand)) {
+        console.warn(`[DB] Counter check_command collision: '${normalizedCheckCommand}' is already registered (counter id=${byCommand.get(normalizedCheckCommand)!.id}); ignoring duplicate from counter id=${counter.id}.`);
+      } else {
+        byCommand.set(normalizedCheckCommand, { ...counter, matchType: 'check' });
+      }
+    }
+  }
+
+  return {
+    loadedAt: Date.now(),
+    byCommand,
+  };
+}
+
+const counterLookupCacheState = createManagedLookupCache<CounterLookupCache>({
+  cacheName: 'counter cache',
+  ttlMs: COUNTER_LOOKUP_CACHE_TTL_MS,
+  refreshFailureBackoffMs: COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_BACKOFF_MS,
+  refreshFailureMaxBackoffMs: COUNTER_LOOKUP_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  createEmptyCache: createEmptyCounterLookupCache,
+  loadCache: async () => {
+    const counters = await getAllCounters();
+    return buildCounterLookupCache(counters);
+  },
+});
+
+async function getCounterLookupCache(): Promise<CounterLookupCache> {
+  return await counterLookupCacheState.getCache();
+}
+
+export function invalidateCounterLookupCache(): void {
+  counterLookupCacheState.invalidate();
+}
+
 export async function getAllCounters(): Promise<DbCounter[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value
@@ -466,6 +1312,33 @@ export async function getAllCounters(): Promise<DbCounter[]> {
   return rows.map(mapCounter);
 }
 
+export async function findCounterByCommand(command: string): Promise<DbMatchedCounter | null> {
+  const normalizedCommand = command.trim().toLowerCase();
+  if (!normalizedCommand) {
+    return null;
+  }
+
+  const cache = await getCounterLookupCache();
+  const counter = cache.byCommand.get(normalizedCommand);
+
+  return counter
+    ? {
+      ...counter,
+    }
+    : null;
+}
+
+export async function isCounterCommandTaken(commandOrCommands: string | string[], excludeCounterId?: number): Promise<boolean> {
+  if (Array.isArray(commandOrCommands)) {
+    const normalizedCommands = normalizeCommandList(commandOrCommands);
+    if (new Set(normalizedCommands).size !== normalizedCommands.length) {
+      return true;
+    }
+  }
+
+  return await isAnyCommandTakenAcrossTables(commandOrCommands, { excludeCounterId });
+}
+
 export async function addCounter(
   triggerCommand: string,
   checkCommand: string,
@@ -474,22 +1347,33 @@ export async function addCounter(
   resetYearly: boolean,
 ): Promise<void> {
   const normalizedFields = normalizeCounterFields(triggerCommand, checkCommand, message, incrementMessage);
+  if (normalizedFields.triggerCommand === normalizedFields.checkCommand) {
+    throw new Error('Counter trigger_command and check_command must be different');
+  }
 
-  await getPool().execute(
-    `INSERT INTO counter (trigger_command, check_command, message, increment_message, reset_yearly, current_value)
-     VALUES (?, ?, ?, ?, ?, 0)`,
-    [
-      normalizedFields.triggerCommand,
-      normalizedFields.checkCommand,
-      normalizedFields.message,
-      normalizedFields.incrementMessage,
-      resetYearly ? 1 : 0,
-    ],
+  await runSerializedCommandWrite(
+    [normalizedFields.triggerCommand, normalizedFields.checkCommand],
+    undefined,
+    async (connection) => {
+      await connection.execute(
+        `INSERT INTO counter (trigger_command, check_command, message, increment_message, reset_yearly, current_value)
+         VALUES (?, ?, ?, ?, ?, 0)`,
+        [
+          normalizedFields.triggerCommand,
+          normalizedFields.checkCommand,
+          normalizedFields.message,
+          normalizedFields.incrementMessage,
+          resetYearly ? 1 : 0,
+        ],
+      );
+    },
   );
+
+  invalidateCounterLookupCache();
 }
 
-async function counterExists(id: number): Promise<boolean> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+async function counterExists(id: number, executor: SqlExecutor = getPool()): Promise<boolean> {
+  const [rows] = await executor.execute<mysql.RowDataPacket[]>(
     'SELECT 1 FROM counter WHERE id = ? LIMIT 1',
     [id],
   );
@@ -505,28 +1389,39 @@ export async function updateCounter(
   resetYearly: boolean,
 ): Promise<void> {
   const normalizedFields = normalizeCounterFields(triggerCommand, checkCommand, message, incrementMessage);
+  if (normalizedFields.triggerCommand === normalizedFields.checkCommand) {
+    throw new Error('Counter trigger_command and check_command must be different');
+  }
 
-  const [result] = await getPool().execute<mysql.ResultSetHeader>(
-    `UPDATE counter
-     SET trigger_command = ?,
-         check_command = ?,
-         message = ?,
-         increment_message = ?,
-         reset_yearly = ?
-     WHERE id = ?`,
-    [
-      normalizedFields.triggerCommand,
-      normalizedFields.checkCommand,
-      normalizedFields.message,
-      normalizedFields.incrementMessage,
-      resetYearly ? 1 : 0,
-      id,
-    ],
+  await runSerializedCommandWrite(
+    [normalizedFields.triggerCommand, normalizedFields.checkCommand],
+    { excludeCounterId: id },
+    async (connection) => {
+      const [result] = await connection.execute<mysql.ResultSetHeader>(
+        `UPDATE counter
+         SET trigger_command = ?,
+             check_command = ?,
+             message = ?,
+             increment_message = ?,
+             reset_yearly = ?
+         WHERE id = ?`,
+        [
+          normalizedFields.triggerCommand,
+          normalizedFields.checkCommand,
+          normalizedFields.message,
+          normalizedFields.incrementMessage,
+          resetYearly ? 1 : 0,
+          id,
+        ],
+      );
+
+      if (result.affectedRows === 0 && !(await counterExists(id, connection))) {
+        throw new CounterNotFoundError(id);
+      }
+    },
   );
 
-  if (result.affectedRows === 0 && !(await counterExists(id))) {
-    throw new CounterNotFoundError(id);
-  }
+  invalidateCounterLookupCache();
 }
 
 export async function removeCounter(id: number): Promise<void> {
@@ -534,6 +1429,8 @@ export async function removeCounter(id: number): Promise<void> {
   if (result.affectedRows === 0) {
     throw new CounterNotFoundError(id);
   }
+
+  invalidateCounterLookupCache();
 }
 
 export async function resetCounterCurrentValue(id: number): Promise<void> {
@@ -545,6 +1442,8 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
   if (result.affectedRows === 0 && !(await counterExists(id))) {
     throw new CounterNotFoundError(id);
   }
+
+  invalidateCounterLookupCache();
 }
 
 // ─── Stream monitor ──────────────────────────────────────────────────────────
