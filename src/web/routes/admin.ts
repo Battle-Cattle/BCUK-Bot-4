@@ -318,20 +318,21 @@ router.post('/users/add', requireAdmin, csrfProtection, async (req, res) => {
 // Update access level (Admin only)
 router.post('/users/update', requireAdmin, csrfProtection, async (req, res) => {
   const { discord_id, access_level } = req.body as { discord_id?: string; access_level?: string };
-  if (!discord_id || access_level === undefined) return res.redirect('/admin/users');
+  const trimmedDiscordId = (discord_id ?? '').trim();
+  if (!trimmedDiscordId || access_level === undefined) return res.redirect('/admin/users');
   const level = parseInt(access_level, 10);
   if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
 
   // Prevent demoting yourself
-  if (discord_id === req.session.user!.discordId) {
+  if (trimmedDiscordId === req.session.user!.discordId) {
     return res.status(400).render('error', {
       message: 'You cannot change your own access level.',
       user: req.session.user ?? null,
     });
   }
   try {
-    await updateAccessLevel(discord_id, level);
+    await updateAccessLevel(trimmedDiscordId, level);
   } catch (err) {
     console.error('[Web] Update access level error:', err);
     return res.redirect('/admin/users?error=update_failed');
