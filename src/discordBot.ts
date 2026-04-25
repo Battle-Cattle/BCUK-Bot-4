@@ -68,6 +68,7 @@ export function startDiscordBot(): void {
 
   client.on('messageCreate', (message) => {
     if (message.author.bot) return;
+    if (message.guildId !== DISCORD_GUILD_ID) return;
 
     previewCustomCommandForDiscord(message.content, message.member?.displayName ?? message.author.username).catch((err) =>
       console.error('[Discord] Custom command preview error:', err),

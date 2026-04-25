@@ -875,6 +875,31 @@ export async function isCustomCommandTriggerTaken(triggerString: string, exclude
   return await isAnyCommandTakenAcrossTables(triggerString, { excludeCustomCommandId: excludeCommandId });
 }
 
+async function assertDiscordTriggerAvailable(
+  triggerString: string,
+  executor: SqlExecutor,
+  excludeCommandId?: number,
+): Promise<void> {
+  let sql =
+    `SELECT command_id
+     FROM custom_command
+     WHERE trigger_string = ?
+       AND is_discord_enabled = 1`;
+  const params: Array<string | number> = [triggerString];
+
+  if (excludeCommandId !== undefined) {
+    sql += ' AND command_id <> ?';
+    params.push(excludeCommandId);
+  }
+
+  sql += ' LIMIT 1';
+
+  const [conflictRows] = await executor.execute<mysql.RowDataPacket[]>(sql, params);
+  if (conflictRows.length > 0) {
+    throw new CommandConflictError([triggerString]);
+  }
+}
+
 export async function addCustomCommand(
   triggerString: string,
   output: string,
@@ -888,6 +913,10 @@ export async function addCustomCommand(
     normalizedTriggerString,
     undefined,
     async (connection) => {
+      if (isDiscordEnabled) {
+        await assertDiscordTriggerAvailable(normalizedTriggerString, connection);
+      }
+
       if (isMultiTwitch) {
         const [conflictRows] = await connection.execute<mysql.RowDataPacket[]>(
           `SELECT c.command_id
@@ -937,6 +966,10 @@ export async function updateCustomCommand(
     normalizedTriggerString,
     { excludeCustomCommandId: commandId },
     async (connection) => {
+      if (isDiscordEnabled) {
+        await assertDiscordTriggerAvailable(normalizedTriggerString, connection, commandId);
+      }
+
       if (isMultiTwitch) {
         const [conflictRows] = await connection.execute<mysql.RowDataPacket[]>(
           `SELECT c.command_id
@@ -1016,6 +1049,7 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
       [commandId],
     );
     await connection.commit();
+    // Invalidate only after a successful commit; refresh remains lazy on next lookup.
     invalidateCustomCommandLookupCache();
   } catch (error) {
     await connection.rollback();
@@ -1038,6 +1072,9 @@ export async function assignUserToCommand(commandId: number, discordId: string):
 
     try {
       // Step 2: Re-read the current trigger_string inside the transaction
+      // This read comes from the transaction snapshot. If another transaction updates
+      // the same command's trigger in a tiny concurrent window, the conflict check
+      // below can be conservative until the next cache rebuild.
       const [commandRows] = await connection.execute<mysql.RowDataPacket[]>(
         'SELECT trigger_string FROM custom_command WHERE command_id = ? LIMIT 1',
         [commandId],
@@ -1050,6 +1087,7 @@ export async function assignUserToCommand(commandId: number, discordId: string):
       lockNameByTrigger = getCommandWriteLockName(normalizedTriggerString);
 
       // Step 3: Acquire the lock for the current trigger_string
+      // Named locks are session-scoped (not transaction-scoped), so this must be released explicitly.
       await acquireNamedLock(connection, lockNameByTrigger);
 
       // Step 4: Proceed with the rest of the logic inside the transaction
@@ -1111,6 +1149,7 @@ export async function assignUserToCommand(commandId: number, discordId: string):
       }
     }
 
+    // Invalidate only after commit; keep lock ownership and connection lifecycle deterministic.
     invalidateCustomCommandLookupCache();
   } finally {
     // Always release the id lock
