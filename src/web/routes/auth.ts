@@ -88,8 +88,8 @@ router.get('/discord/callback', async (req, res) => {
       console.warn('[Web] Non-blocking discord_name sync failed:', syncErr);
     }
 
-    // 4. Save to session
-    req.session.user = {
+    // 4. Save to session — regenerate the session ID first to prevent session fixation.
+    const userData = {
       discordId: profile.id,
       discordName: syncedDiscordName,
       discordAvatar: profile.avatar
@@ -97,6 +97,14 @@ router.get('/discord/callback', async (req, res) => {
         : null,
       accessLevel: dbUser.access_level as 0 | 1 | 2 | 3,
     };
+
+    await new Promise<void>((resolve, reject) => {
+      req.session.regenerate((err) => {
+        if (err) return reject(err);
+        req.session.user = userData;
+        req.session.save((saveErr) => (saveErr ? reject(saveErr) : resolve()));
+      });
+    });
 
     res.redirect('/');
   } catch (err) {

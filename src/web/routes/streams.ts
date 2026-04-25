@@ -16,6 +16,15 @@ import { restartTwitchMonitor, getLiveStates, catchUpDiscordPosts } from '../../
 
 const router = Router();
 
+function parsePositiveIntId(value: string | undefined): number | null {
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 const KNOWN_ERRORS = new Set([
   'missing_fields', 'invalid_id',
   'add_group_failed', 'update_group_failed', 'remove_group_failed',
@@ -101,8 +110,8 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
   if (!group_id || !name || !discord_channel || !live_message || !new_game_message) {
     return res.redirect('/admin/streams?error=missing_fields');
   }
-  const parsedGroupId = parseInt(group_id, 10);
-  if (!Number.isInteger(parsedGroupId)) return res.redirect('/admin/streams?error=invalid_id');
+  const parsedGroupId = parsePositiveIntId(group_id);
+  if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
     await updateStreamGroup(
@@ -126,8 +135,8 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
 router.post('/streams/groups/remove', requireManager, csrfProtection, async (req, res) => {
   const { group_id } = req.body as { group_id?: string };
   if (!group_id) return res.redirect('/admin/streams');
-  const parsedGroupId = parseInt(group_id, 10);
-  if (!Number.isInteger(parsedGroupId)) return res.redirect('/admin/streams?error=invalid_id');
+  const parsedGroupId = parsePositiveIntId(group_id);
+  if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
     // Delete streamers in the group first (avoids FK constraint errors)
@@ -146,8 +155,8 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
 router.post('/streams/streamers/add', requireManager, csrfProtection, async (req, res) => {
   const { name, group_id } = req.body as { name?: string; group_id?: string };
   if (!name || !group_id) return res.redirect('/admin/streams');
-  const parsedGroupId = parseInt(group_id, 10);
-  if (!Number.isInteger(parsedGroupId)) return res.redirect('/admin/streams?error=invalid_id');
+  const parsedGroupId = parsePositiveIntId(group_id);
+  if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
     await addStreamer(name.trim(), parsedGroupId);
@@ -162,8 +171,8 @@ router.post('/streams/streamers/add', requireManager, csrfProtection, async (req
 router.post('/streams/streamers/remove', requireManager, csrfProtection, async (req, res) => {
   const { streamer_id } = req.body as { streamer_id?: string };
   if (!streamer_id) return res.redirect('/admin/streams');
-  const parsedStreamerId = parseInt(streamer_id, 10);
-  if (!Number.isInteger(parsedStreamerId)) return res.redirect('/admin/streams?error=invalid_id');
+  const parsedStreamerId = parsePositiveIntId(streamer_id);
+  if (parsedStreamerId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
     await removeStreamer(parsedStreamerId);
