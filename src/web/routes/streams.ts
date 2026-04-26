@@ -88,10 +88,10 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
     return res.redirect('/admin/streams?error=missing_fields');
   }
 
-  const normalizedName = (name ?? '').trim();
-  const normalizedDiscordChannel = (discord_channel ?? '').trim();
-  const normalizedLiveMessage = (live_message ?? '').trim();
-  const normalizedNewGameMessage = (new_game_message ?? '').trim();
+  const normalizedName = name!.trim();
+  const normalizedDiscordChannel = discord_channel!.trim();
+  const normalizedLiveMessage = live_message!.trim();
+  const normalizedNewGameMessage = new_game_message!.trim();
 
   try {
     await addStreamGroup({
@@ -120,10 +120,10 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
     return res.redirect('/admin/streams?error=missing_fields');
   }
 
-  const normalizedName = (name ?? '').trim();
-  const normalizedDiscordChannel = (discord_channel ?? '').trim();
-  const normalizedLiveMessage = (live_message ?? '').trim();
-  const normalizedNewGameMessage = (new_game_message ?? '').trim();
+  const normalizedName = name!.trim();
+  const normalizedDiscordChannel = discord_channel!.trim();
+  const normalizedLiveMessage = live_message!.trim();
+  const normalizedNewGameMessage = new_game_message!.trim();
 
   const parsedGroupId = parsePositiveIntId(group_id);
   if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');

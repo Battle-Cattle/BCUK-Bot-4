@@ -350,7 +350,7 @@ function createManagedLookupCache<TCache extends RefreshingLookupCache>(
     refreshAllowedAt = Date.now() + retryDelayMs;
   }
 
-  function logRefreshFailure(err: unknown, retryDelayMs: number): void {
+  function handleRefreshFailureFallback(err: unknown, retryDelayMs: number): void {
     if (!cache) {
       cache = options.createEmptyCache();
       console.error(`[DB] Background ${options.cacheName} refresh failed; serving an empty cache and retrying after ${retryDelayMs}ms.`, err);
@@ -383,20 +383,12 @@ function createManagedLookupCache<TCache extends RefreshingLookupCache>(
     refreshFailureCount += 1;
     const retryDelayMs = getRefreshBackoffMs();
     applyRefreshFailure(retryDelayMs);
-    logRefreshFailure(err, retryDelayMs);
+    handleRefreshFailureFallback(err, retryDelayMs);
   }
 
-  function getInFlightPromiseOrThrow(): Promise<TCache> {
-    if (inFlightPromise) {
+  function startRefresh(now: number): Promise<TCache> | null {
+    if (!canStartRefresh(now)) {
       return inFlightPromise;
-    }
-
-    throw new Error(`${options.cacheName} refresh did not start`);
-  }
-
-  function refreshInBackground(): void {
-    if (!canStartRefresh(Date.now())) {
-      return;
     }
 
     const requestVersion = version;
@@ -412,6 +404,8 @@ function createManagedLookupCache<TCache extends RefreshingLookupCache>(
       .finally(() => {
         clearInFlightIfCurrent(promiseForFinally);
       });
+
+    return inFlightPromise;
   }
 
   async function awaitCachePromise(promise: Promise<TCache>): Promise<TCache> {
@@ -431,15 +425,18 @@ function createManagedLookupCache<TCache extends RefreshingLookupCache>(
 
     if (cache) {
       if (now - cache.loadedAt >= options.ttlMs && now >= refreshAllowedAt) {
-        refreshInBackground();
+        startRefresh(now);
       }
       return cache;
     }
 
     const requestVersion = version;
-    refreshInBackground();
+    const initialRefreshPromise = startRefresh(now);
+    if (!initialRefreshPromise) {
+      throw new Error(`${options.cacheName} refresh did not start`);
+    }
 
-    const resolvedCache = await awaitCachePromise(getInFlightPromiseOrThrow());
+    const resolvedCache = await awaitCachePromise(initialRefreshPromise);
 
     if (requestVersion === version) {
       return resolvedCache;
@@ -449,9 +446,12 @@ function createManagedLookupCache<TCache extends RefreshingLookupCache>(
       return cache;
     }
 
-    refreshInBackground();
+    const retryRefreshPromise = startRefresh(Date.now());
+    if (!retryRefreshPromise) {
+      throw new Error(`${options.cacheName} refresh did not start`);
+    }
 
-    return await awaitCachePromise(getInFlightPromiseOrThrow());
+    return await awaitCachePromise(retryRefreshPromise);
   }
 
   function invalidate(): void {
@@ -635,7 +635,10 @@ function registerTwitchCandidate(
     return;
   }
 
-  console.warn(
+  const logOverride = existingCandidate.priority === candidate.priority
+    ? console.warn
+    : console.info;
+  logOverride(
     `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}' remapped from command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner}) to command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
   );
   context.candidateByCacheKey.set(cacheKey, preferredCandidate);
@@ -1380,7 +1383,11 @@ export async function assignUserToCommand(commandId: number, discordId: string):
 
   const lockNameById = `bcuk_cmdid_${commandId}`;
   try {
-    // Acquire a lock on commandId to serialize concurrent assignments/updates for this command.
+    // The outer assignUserToCommand lock serializes writes for one command id.
+    // assignUserToCommandWithinTransaction then re-reads the trigger via
+    // getCommandTriggerStringById, derives lockNameByTrigger, and acquires the
+    // session-scoped trigger lock so cross-command trigger conflicts are checked
+    // against the latest trigger string before inserting the assignment.
     await acquireNamedLock(connection, lockNameById);
 
     await assignUserToCommandWithinTransaction(connection, commandId, discordId);
@@ -1745,6 +1752,18 @@ function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
   };
 }
 
+function streamGroupParams(input: AddStreamGroupInput): Array<string | number> {
+  return [
+    input.name,
+    input.discordChannel,
+    input.liveMessage,
+    input.newGameMessage,
+    input.multiTwitch ? 1 : 0,
+    input.multiTwitchMessage,
+    input.deleteOldPosts ? 1 : 0,
+  ];
+}
+
 export async function getAllStreamGroups(): Promise<DbStreamGroup[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT id, name, discord_channel, live_message, new_game_message, multi_twitch, multi_twitch_message, delete_old_posts
@@ -1754,39 +1773,18 @@ export async function getAllStreamGroups(): Promise<DbStreamGroup[]> {
 }
 
 export async function addStreamGroup(input: AddStreamGroupInput): Promise<void> {
-  const {
-    name,
-    discordChannel,
-    liveMessage,
-    newGameMessage,
-    multiTwitch,
-    multiTwitchMessage,
-    deleteOldPosts,
-  } = input;
-
   await getPool().execute(
     `INSERT INTO stream_group (name, discord_channel, live_message, new_game_message, multi_twitch, multi_twitch_message, delete_old_posts)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [name, discordChannel, liveMessage, newGameMessage, multiTwitch ? 1 : 0, multiTwitchMessage, deleteOldPosts ? 1 : 0],
+    streamGroupParams(input),
   );
 }
 
 export async function updateStreamGroup(input: UpdateStreamGroupInput): Promise<void> {
-  const {
-    id,
-    name,
-    discordChannel,
-    liveMessage,
-    newGameMessage,
-    multiTwitch,
-    multiTwitchMessage,
-    deleteOldPosts,
-  } = input;
-
   await getPool().execute(
     `UPDATE stream_group SET name=?, discord_channel=?, live_message=?, new_game_message=?, multi_twitch=?, multi_twitch_message=?, delete_old_posts=?
      WHERE id=?`,
-    [name, discordChannel, liveMessage, newGameMessage, multiTwitch ? 1 : 0, multiTwitchMessage, deleteOldPosts ? 1 : 0, id],
+    [...streamGroupParams(input), input.id],
   );
 }
 
