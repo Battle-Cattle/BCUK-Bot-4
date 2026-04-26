@@ -100,7 +100,7 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
       liveMessage: normalizedLiveMessage,
       newGameMessage: normalizedNewGameMessage,
       multiTwitch: multi_twitch,
-      multiTwitchMessage: (multi_twitch_message ?? '').trim(),
+      multiTwitchMessage: typeof multi_twitch_message === 'string' ? multi_twitch_message.trim() : '',
       deleteOldPosts: delete_old_posts,
     });
     triggerRestart();
@@ -136,7 +136,7 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
       liveMessage: normalizedLiveMessage,
       newGameMessage: normalizedNewGameMessage,
       multiTwitch: multi_twitch,
-      multiTwitchMessage: (multi_twitch_message ?? '').trim(),
+      multiTwitchMessage: typeof multi_twitch_message === 'string' ? multi_twitch_message.trim() : '',
       deleteOldPosts: delete_old_posts,
     });
     triggerRestart();

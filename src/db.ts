@@ -395,8 +395,7 @@ function createManagedLookupCache<TCache extends RefreshingLookupCache>(
   }
 
   function refreshInBackground(): void {
-    const now = Date.now();
-    if (!canStartRefresh(now)) {
+    if (!canStartRefresh(Date.now())) {
       return;
     }
 
