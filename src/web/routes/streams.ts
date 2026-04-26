@@ -26,7 +26,7 @@ function parsePositiveIntId(value: string | undefined): number | null {
 }
 
 function hasMissingValues(...values: Array<string | undefined>): boolean {
-  return values.some((value) => !value);
+  return values.some((value) => value === undefined || value.trim().length === 0);
 }
 
 const KNOWN_ERRORS = new Set([
