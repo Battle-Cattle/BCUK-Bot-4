@@ -386,9 +386,9 @@ function createManagedLookupCache<TCache extends RefreshingLookupCache>(
     logRefreshFailure(err, retryDelayMs);
   }
 
-  function ensureRefreshStartedOrThrow(): void {
-    if (inFlightPromise || cache) {
-      return;
+  function getInFlightPromiseOrThrow(): Promise<TCache> {
+    if (inFlightPromise) {
+      return inFlightPromise;
     }
 
     throw new Error(`${options.cacheName} refresh did not start`);
@@ -440,9 +440,7 @@ function createManagedLookupCache<TCache extends RefreshingLookupCache>(
     const requestVersion = version;
     refreshInBackground();
 
-    ensureRefreshStartedOrThrow();
-
-    const resolvedCache = await awaitCachePromise(inFlightPromise!);
+    const resolvedCache = await awaitCachePromise(getInFlightPromiseOrThrow());
 
     if (requestVersion === version) {
       return resolvedCache;
@@ -453,9 +451,8 @@ function createManagedLookupCache<TCache extends RefreshingLookupCache>(
     }
 
     refreshInBackground();
-    ensureRefreshStartedOrThrow();
 
-    return await awaitCachePromise(inFlightPromise!);
+    return await awaitCachePromise(getInFlightPromiseOrThrow());
   }
 
   function invalidate(): void {
@@ -486,10 +483,6 @@ interface TwitchCommandCandidate {
 
 interface TwitchCandidateContext {
   candidateByCacheKey: Map<string, TwitchCommandCandidate>;
-  pickPreferred: (
-    existingCandidate: TwitchCommandCandidate,
-    nextCandidate: TwitchCommandCandidate,
-  ) => TwitchCommandCandidate;
 }
 
 function createEmptyCustomCommandLookupCache(): CustomCommandLookupCache {
@@ -635,7 +628,7 @@ function registerTwitchCandidate(
     return;
   }
 
-  const preferredCandidate = context.pickPreferred(existingCandidate, candidate);
+  const preferredCandidate = pickPreferredTwitchCandidate(existingCandidate, candidate);
   if (preferredCandidate === existingCandidate) {
     console.warn(
       `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}' already maps to command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner}); ignoring command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
@@ -720,7 +713,6 @@ function buildCustomCommandLookupCache(
   const normalizedActiveTwitchChannels = normalizeActiveTwitchChannels(activeTwitchChannels);
   const twitchCandidateContext: TwitchCandidateContext = {
     candidateByCacheKey: twitchCandidateByChannelAndTrigger,
-    pickPreferred: pickPreferredTwitchCandidate,
   };
 
   for (const command of sortedCommands) {
