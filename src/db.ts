@@ -824,7 +824,13 @@ function buildInClausePlaceholders(count: number): string {
 function getSortedCommandLockNames(commands: string[]): string[] {
   return commands
     .slice()
-    .sort((left, right) => left.localeCompare(right))
+    .sort((left, right) => {
+      if (left === right) {
+        return 0;
+      }
+
+      return left < right ? -1 : 1;
+    })
     .map((command) => getCommandWriteLockName(command));
 }
 
