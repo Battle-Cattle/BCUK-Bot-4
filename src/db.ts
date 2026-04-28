@@ -583,12 +583,12 @@ function pickPreferredTwitchCandidate(
   existingCandidate: TwitchCommandCandidate,
   nextCandidate: TwitchCommandCandidate,
 ): TwitchCommandCandidate {
-  if (nextCandidate.priority !== existingCandidate.priority) {
-    return nextCandidate.priority > existingCandidate.priority ? nextCandidate : existingCandidate;
-  }
-
   if (nextCandidate.command.command_id === existingCandidate.command.command_id) {
     return existingCandidate;
+  }
+
+  if (nextCandidate.priority !== existingCandidate.priority) {
+    return nextCandidate.priority > existingCandidate.priority ? nextCandidate : existingCandidate;
   }
 
   return nextCandidate.command.command_id < existingCandidate.command.command_id
@@ -629,6 +629,10 @@ function registerTwitchCandidate(
 
   const preferredCandidate = pickPreferredTwitchCandidate(existingCandidate, candidate);
   if (preferredCandidate === existingCandidate) {
+    if (existingCandidate.command.command_id === candidate.command.command_id) {
+      return;
+    }
+
     console.warn(
       `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}' already maps to command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner}); ignoring command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
     );
