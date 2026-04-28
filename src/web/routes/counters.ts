@@ -164,14 +164,14 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
       return res.redirect('/admin/counters?error=duplicate_command');
     }
 
-    await updateCounter(
-      parsedId,
-      form.triggerCommand,
-      form.checkCommand,
-      form.message,
-      form.incrementMessage,
-      form.resetYearly,
-    );
+    await updateCounter({
+      id: parsedId,
+      triggerCommand: form.triggerCommand,
+      checkCommand: form.checkCommand,
+      message: form.message,
+      incrementMessage: form.incrementMessage,
+      resetYearly: form.resetYearly,
+    });
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
       return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
