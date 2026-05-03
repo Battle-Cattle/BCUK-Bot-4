@@ -2,7 +2,7 @@ import { Client, GatewayIntentBits, Guild } from 'discord.js';
 import { DISCORD_TOKEN, DISCORD_GUILD_ID } from './config';
 import { connect } from './audioPlayer';
 import { handleCommand } from './commandRouter';
-import { previewCustomCommandForDiscord } from './customCommandHandler';
+import { executeCustomCommandForDiscord } from './customCommandHandler';
 import { setDiscordReady } from './statusStore';
 
 let client: Client;
@@ -70,8 +70,8 @@ export function startDiscordBot(): void {
     if (message.author.bot) return;
     if (message.guildId !== DISCORD_GUILD_ID) return;
 
-    previewCustomCommandForDiscord(message.content, message.member?.displayName ?? message.author.username).catch((err) =>
-      console.error('[Discord] Custom command preview error:', err),
+    executeCustomCommandForDiscord(message, message.member?.displayName ?? message.author.username).catch((err) =>
+      console.error('[Discord] Custom command error:', err),
     );
 
     handleCommand(message.content, 'discord').catch((err) =>

@@ -1,11 +1,12 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
 import { getPool, closePool } from './db';
-import { startTwitchBot } from './twitchBot';
+import { startTwitchBot, sayInChannel, getActiveChannels, getActiveChannelUserIds } from './twitchBot';
 import { startDiscordBot } from './discordBot';
 import { startTikTokBot } from './tiktokBot';
 import { startTwitchMonitor, stopTwitchMonitor } from './twitchMonitor';
 import { startWebPanel } from './web/server';
 import { disconnect } from './audioPlayer';
+import { registerTwitchChatRuntime } from './customCommandHandler';
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`[Bot] ${signal} received — disconnecting from voice and shutting down.`);
@@ -32,6 +33,14 @@ async function main(): Promise<void> {
     console.error('[Bot] Cannot connect to database:', err);
     process.exit(1);
   }
+
+  // Wire Twitch send/channel helpers before the bot connects so the first
+  // message can already use the execute path (functions capture live state).
+  registerTwitchChatRuntime({
+    send: sayInChannel,
+    getActiveChannels,
+    getLoginUserIds: getActiveChannelUserIds,
+  });
 
   startDiscordBot();
   await startTwitchBot();

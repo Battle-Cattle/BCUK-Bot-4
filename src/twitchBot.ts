@@ -1,14 +1,16 @@
 import tmi from 'tmi.js';
 import { TWITCH_USERNAME, TWITCH_OAUTH_TOKEN } from './config';
 import { handleCommand } from './commandRouter';
-import { previewCustomCommandForTwitch } from './customCommandHandler';
+import { executeCustomCommandForTwitch } from './customCommandHandler';
 import { setTwitchChannel } from './statusStore';
 import { getTwitchEnabledChannels } from './db';
 import { normalizeTwitchChannelName } from './twitchChannelName';
+import { getUsers } from './twitchApi';
 
 let client: tmi.Client | null = null;
 let connected = false;
 const activeChannels = new Set<string>();
+const activeChannelUserIds = new Map<string, string>();
 const membershipMutationQueues = new Map<string, Promise<void>>();
 
 function normalizeChannel(channel: string): string | null {
@@ -123,6 +125,15 @@ export async function startTwitchBot(): Promise<void> {
     console.warn('[Twitch] No enabled Twitch channels found in DB; connecting with no joined channels.');
   }
 
+  if (activeChannels.size > 0) {
+    try {
+      const users = await getUsers([...activeChannels]);
+      for (const u of users) activeChannelUserIds.set(u.login.toLowerCase(), u.id);
+    } catch (err) {
+      console.error('[Twitch] Failed to resolve channel user IDs (shared-chat dedup unavailable):', err);
+    }
+  }
+
   client = new tmi.Client({
     identity: {
       username: TWITCH_USERNAME,
@@ -149,8 +160,8 @@ export async function startTwitchBot(): Promise<void> {
     // its source channel.
     if (tags['source-room-id'] && tags['source-room-id'] !== tags['room-id']) return;
 
-    previewCustomCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
-      console.error('[Twitch] Custom command preview error:', err),
+    executeCustomCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
+      console.error('[Twitch] Custom command error:', err),
     );
 
     handleCommand(message, 'twitch').catch((err) =>
@@ -203,6 +214,9 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       // it once the Twitch client is available again.
       activeChannels.add(normalized);
       setTwitchChannel(normalized, false);
+      getUsers([normalized])
+        .then(([u]) => { if (u) activeChannelUserIds.set(normalized, u.id); })
+        .catch(() => { /* best-effort */ });
       return;
     }
 
@@ -211,6 +225,9 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       setTwitchChannel(normalized, false);
       await client.join(normalized);
       setTwitchChannel(normalized, true);
+      getUsers([normalized])
+        .then(([u]) => { if (u) activeChannelUserIds.set(normalized, u.id); })
+        .catch(() => { /* best-effort */ });
     } catch (err) {
       // Keep the desired membership queued so reconnect reconciliation can retry
       // instead of permanently desyncing runtime state from the DB.
@@ -219,6 +236,21 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       throw err;
     }
   });
+}
+
+export async function sayInChannel(channel: string, message: string): Promise<void> {
+  const normalized = normalizeChannel(channel);
+  if (!normalized) throw new Error(`[Twitch] Invalid channel name: ${channel}`);
+  if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
+  await client.say(normalized, message);
+}
+
+export function getActiveChannels(): ReadonlySet<string> {
+  return activeChannels;
+}
+
+export function getActiveChannelUserIds(): ReadonlyMap<string, string> {
+  return activeChannelUserIds;
 }
 
 export async function partTwitchChannel(channel: string): Promise<void> {
@@ -232,12 +264,14 @@ export async function partTwitchChannel(channel: string): Promise<void> {
       // We remove local state immediately and let reconcileJoinedChannels() part
       // any stale tmi.js channel memberships on the next successful connect.
       activeChannels.delete(normalized);
+      activeChannelUserIds.delete(normalized);
       setTwitchChannel(normalized, false);
       return;
     }
 
     try {
       activeChannels.delete(normalized);
+      activeChannelUserIds.delete(normalized);
       setTwitchChannel(normalized, false);
       if (isChannelJoined(normalized)) {
         await client.part(normalized);
