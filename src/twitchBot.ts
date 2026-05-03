@@ -214,6 +214,9 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       // it once the Twitch client is available again.
       activeChannels.add(normalized);
       setTwitchChannel(normalized, false);
+      getUsers([normalized])
+        .then(([u]) => { if (u) activeChannelUserIds.set(normalized, u.id); })
+        .catch(() => { /* best-effort */ });
       return;
     }
 
@@ -222,6 +225,9 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       setTwitchChannel(normalized, false);
       await client.join(normalized);
       setTwitchChannel(normalized, true);
+      getUsers([normalized])
+        .then(([u]) => { if (u) activeChannelUserIds.set(normalized, u.id); })
+        .catch(() => { /* best-effort */ });
     } catch (err) {
       // Keep the desired membership queued so reconnect reconciliation can retry
       // instead of permanently desyncing runtime state from the DB.
@@ -258,12 +264,14 @@ export async function partTwitchChannel(channel: string): Promise<void> {
       // We remove local state immediately and let reconcileJoinedChannels() part
       // any stale tmi.js channel memberships on the next successful connect.
       activeChannels.delete(normalized);
+      activeChannelUserIds.delete(normalized);
       setTwitchChannel(normalized, false);
       return;
     }
 
     try {
       activeChannels.delete(normalized);
+      activeChannelUserIds.delete(normalized);
       setTwitchChannel(normalized, false);
       if (isChannelJoined(normalized)) {
         await client.part(normalized);
