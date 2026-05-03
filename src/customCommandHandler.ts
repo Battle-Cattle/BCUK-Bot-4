@@ -160,14 +160,16 @@ export async function executeCustomCommandForDiscord(
     : result.logType === 'counter-command'
       ? 'counter command'
       : 'custom command';
-  console.log(`[Discord] ${willSend ? 'Sent' : 'Preview'} ${label} '${command}' (recorded for monitoring).`);
 
   if (willSend) {
     try {
       await message.reply(result.response);
+      console.log(`[Discord] Sent ${label} '${command}' (recorded for monitoring).`);
     } catch (err) {
       console.error(`[Discord] Failed to reply to message ${message.id} for command '${command}':`, err);
     }
+  } else {
+    console.log(`[Discord] Preview ${label} '${command}' (recorded for monitoring).`);
   }
 }
 
@@ -197,13 +199,19 @@ export async function executeCustomCommandForTwitch(
     : result.logType === 'counter-command'
       ? 'counter command'
       : 'custom command';
-  console.log(`[Twitch] ${willSend ? 'Sent' : 'Preview'} ${label} '${command}' in ${channel} (recorded for monitoring).`);
 
   if (willSend && runtime) {
-    if (result.isMultiTwitch) {
-      await broadcastToActiveChannels(channel, result.response);
-    } else {
-      await runtime.send(channel, result.response);
+    try {
+      if (result.isMultiTwitch) {
+        await broadcastToActiveChannels(channel, result.response);
+      } else {
+        await runtime.send(channel, result.response);
+      }
+      console.log(`[Twitch] Sent ${label} '${command}' in ${channel} (recorded for monitoring).`);
+    } catch (err) {
+      console.error(`[Twitch] Failed to send ${label} '${command}' in ${channel}:`, err);
     }
+  } else {
+    console.log(`[Twitch] Preview ${label} '${command}' in ${channel} (recorded for monitoring).`);
   }
 }
