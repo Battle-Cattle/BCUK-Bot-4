@@ -121,16 +121,13 @@ async function broadcastToActiveChannels(sourceChannel: string, output: string):
 
   for (const channel of targets) {
     const userId = loginUserIds.get(channel);
-    if (userId) {
-      const sessionId = sessionIdByUserId.get(userId) ?? null;
-      if (sessionId) {
-        if (repliedSessionIds.has(sessionId)) continue;
-        repliedSessionIds.add(sessionId);
-      }
-    }
+    const sessionId = userId ? (sessionIdByUserId.get(userId) ?? null) : null;
+
+    if (sessionId && repliedSessionIds.has(sessionId)) continue;
 
     try {
       await send(channel, output);
+      if (sessionId) repliedSessionIds.add(sessionId);
     } catch (err) {
       console.error(`[CustomCmd] Failed to send to ${channel}:`, err);
     }
@@ -189,7 +186,8 @@ export async function executeCustomCommandForTwitch(
     user: username ?? null,
   });
 
-  const willSend = CUSTOM_COMMANDS_LIVE_REPLIES && result.logType === 'custom-command';
+  const runtime = _twitchRuntime;
+  const willSend = CUSTOM_COMMANDS_LIVE_REPLIES && !!runtime && result.logType === 'custom-command';
   const label = result.logType === 'counter-check'
     ? 'counter check'
     : result.logType === 'counter-command'
@@ -197,11 +195,11 @@ export async function executeCustomCommandForTwitch(
       : 'custom command';
   console.log(`[Twitch] ${willSend ? 'Sent' : 'Preview'} ${label} '${command}' in ${channel} (recorded for monitoring).`);
 
-  if (willSend && _twitchRuntime) {
+  if (willSend && runtime) {
     if (result.isMultiTwitch) {
       await broadcastToActiveChannels(channel, result.response);
     } else {
-      await _twitchRuntime.send(channel, result.response);
+      await runtime.send(channel, result.response);
     }
   }
 }
