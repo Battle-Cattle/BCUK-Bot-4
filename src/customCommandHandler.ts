@@ -213,6 +213,8 @@ export async function executeCustomCommandForTwitch(
         const sent = await broadcastToActiveChannels(channel, command, result.response);
         if (sent) {
           console.log(`[Twitch] Sent ${label} '${command}' in ${channel} (recorded for monitoring).`);
+        } else {
+          console.log(`[Twitch] Broadcast ${label} '${command}' in ${channel} reached no channels (recorded for monitoring).`);
         }
       } catch (err) {
         console.error(`[Twitch] Failed to broadcast ${label} '${command}' in ${channel}:`, err);
