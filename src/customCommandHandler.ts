@@ -103,8 +103,8 @@ async function resolveSharedChatSessionId(userId: string): Promise<string | null
   }
 }
 
-async function broadcastToActiveChannels(sourceChannel: string, command: string, output: string): Promise<void> {
-  if (!_twitchRuntime) return;
+async function broadcastToActiveChannels(sourceChannel: string, command: string, output: string): Promise<boolean> {
+  if (!_twitchRuntime) return false;
 
   const { send, getActiveChannels, getLoginUserIds } = _twitchRuntime;
   const activeChannels = getActiveChannels();
@@ -123,6 +123,7 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
   const resolvedIds = await Promise.all(userIds.map((uid) => resolveSharedChatSessionId(uid)));
   const sessionIdByUserId = new Map(userIds.map((uid, i) => [uid, resolvedIds[i]]));
 
+  let anySent = false;
   for (const channel of targets) {
     const userId = loginUserIds.get(channel);
     const sessionId = userId ? (sessionIdByUserId.get(userId) ?? null) : null;
@@ -132,10 +133,12 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
     try {
       await send(channel, output);
       if (sessionId) repliedSessionIds.add(sessionId);
+      anySent = true;
     } catch (err) {
       console.error(`[CustomCmd] Failed to send to ${channel}:`, err);
     }
   }
+  return anySent;
 }
 
 // ─── Execute functions ────────────────────────────────────────────────────────
@@ -205,15 +208,18 @@ export async function executeCustomCommandForTwitch(
       : 'custom command';
 
   if (willSend && runtime) {
-    try {
-      if (result.isMultiTwitch) {
-        await broadcastToActiveChannels(channel, command, result.response);
-      } else {
-        await runtime.send(channel, result.response);
+    if (result.isMultiTwitch) {
+      const sent = await broadcastToActiveChannels(channel, command, result.response);
+      if (sent) {
+        console.log(`[Twitch] Sent ${label} '${command}' in ${channel} (recorded for monitoring).`);
       }
-      console.log(`[Twitch] Sent ${label} '${command}' in ${channel} (recorded for monitoring).`);
-    } catch (err) {
-      console.error(`[Twitch] Failed to send ${label} '${command}' in ${channel}:`, err);
+    } else {
+      try {
+        await runtime.send(channel, result.response);
+        console.log(`[Twitch] Sent ${label} '${command}' in ${channel} (recorded for monitoring).`);
+      } catch (err) {
+        console.error(`[Twitch] Failed to send ${label} '${command}' in ${channel}:`, err);
+      }
     }
   } else {
     console.log(`[Twitch] Preview ${label} '${command}' in ${channel} (recorded for monitoring).`);
