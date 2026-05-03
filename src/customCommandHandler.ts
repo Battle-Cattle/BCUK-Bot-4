@@ -1,113 +1,179 @@
+import type { Message } from 'discord.js';
+import { CUSTOM_COMMANDS_LIVE_REPLIES } from './config';
 import { findCounterByCommand, getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './db';
 import { recordCommandTestEntry } from './commandMonitorStore';
+import { getSharedChatSession } from './twitchApi';
 
-type PreviewLookupResult = {
-  response: string;
-  logType: 'custom-command' | 'counter-command' | 'counter-check';
-};
+// ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
+//
+// Avoids a circular import: twitchBot.ts → customCommandHandler.ts → twitchBot.ts.
+// index.ts wires the concrete implementations once both modules are loaded.
 
-function extractCommand(rawMessage: string): string | null {
-  const trimmedMessage = rawMessage.trim();
-  if (!trimmedMessage) return null;
-
-  const command = trimmedMessage.split(/\s+/)[0]?.toLowerCase();
-  if (!command) return null;
-
-  return command;
+interface TwitchChatRuntime {
+  send: (channel: string, message: string) => Promise<void>;
+  getActiveChannels: () => ReadonlySet<string>;
+  getLoginUserIds: () => ReadonlyMap<string, string>;
 }
 
-function formatCounterPreviewMessage(template: string, value: number): string {
+let _twitchRuntime: TwitchChatRuntime | null = null;
+
+export function registerTwitchChatRuntime(runtime: TwitchChatRuntime): void {
+  _twitchRuntime = runtime;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function extractCommand(rawMessage: string): string | null {
+  const trimmed = rawMessage.trim();
+  if (!trimmed) return null;
+  return trimmed.split(/\s+/)[0]?.toLowerCase() ?? null;
+}
+
+function formatCounterMessage(template: string, value: number): string {
   return template.replace(/%d/g, String(value));
 }
 
-function buildCounterTriggerPreviewResponse(currentValue: number, incrementMessage: string): string {
-  const incrementPreview = formatCounterPreviewMessage(incrementMessage, currentValue);
-  return `${incrementPreview} (preview only — counter not incremented)`;
+// ─── Lookup ───────────────────────────────────────────────────────────────────
+
+type LogType = 'custom-command' | 'counter-command' | 'counter-check';
+
+interface LookupResult {
+  response: string;
+  logType: LogType;
+  isMultiTwitch: boolean;
 }
 
-async function findPreviewLookupResult(
+async function lookupCommand(
   command: string,
-  lookupCustomCommand: (command: string) => Promise<{ output: string } | null>,
-): Promise<PreviewLookupResult | null> {
-  const customCommand = await lookupCustomCommand(command);
+  findCustomCommand: (cmd: string) => Promise<{ output: string; is_multi_twitch: boolean } | null>,
+): Promise<LookupResult | null> {
+  const customCommand = await findCustomCommand(command);
   if (customCommand) {
     return {
       response: customCommand.output,
       logType: 'custom-command',
+      isMultiTwitch: customCommand.is_multi_twitch,
     };
   }
 
   const counter = await findCounterByCommand(command);
   if (counter) {
+    const isTrigger = counter.matchType === 'trigger';
     return {
-      response: counter.matchType === 'trigger'
-        ? buildCounterTriggerPreviewResponse(counter.current_value, counter.increment_message)
-        : formatCounterPreviewMessage(counter.message, counter.current_value),
-      logType: counter.matchType === 'trigger' ? 'counter-command' : 'counter-check',
+      response: isTrigger
+        ? `${formatCounterMessage(counter.increment_message, counter.current_value)} (preview only — counter not incremented)`
+        : formatCounterMessage(counter.message, counter.current_value),
+      logType: isTrigger ? 'counter-command' : 'counter-check',
+      isMultiTwitch: false,
     };
   }
 
   return null;
 }
 
-async function previewCustomCommand(
-  rawMessage: string,
-  source: 'discord' | 'twitch',
-  channel: string | null,
-  username: string | null | undefined,
-  lookupCommand: (command: string) => Promise<{ output: string } | null>,
-  buildLogMessage: (command: string, logType: PreviewLookupResult['logType']) => string,
+// ─── Multi-twitch broadcast ───────────────────────────────────────────────────
+
+async function resolveSharedChatSessionId(broadcasterId: string): Promise<string | null> {
+  try {
+    const session = await getSharedChatSession(broadcasterId);
+    return session?.session_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function broadcastToActiveChannels(sourceChannel: string, output: string): Promise<void> {
+  if (!_twitchRuntime) return;
+
+  const { send, getActiveChannels, getLoginUserIds } = _twitchRuntime;
+  const activeChannels = getActiveChannels();
+  const loginUserIds = getLoginUserIds();
+  const repliedSessionIds = new Set<string>();
+
+  // Build ordered list: source channel first, then the rest
+  const targets = [sourceChannel, ...Array.from(activeChannels).filter((ch) => ch !== sourceChannel)];
+
+  for (const channel of targets) {
+    const userId = loginUserIds.get(channel);
+    if (userId) {
+      const sessionId = await resolveSharedChatSessionId(userId);
+      if (sessionId) {
+        if (repliedSessionIds.has(sessionId)) continue;
+        repliedSessionIds.add(sessionId);
+      }
+    }
+
+    try {
+      await send(channel, output);
+    } catch (err) {
+      console.error(`[CustomCmd] Failed to send to ${channel}:`, err);
+    }
+  }
+}
+
+// ─── Execute functions ────────────────────────────────────────────────────────
+
+export async function executeCustomCommandForDiscord(
+  message: Message,
+  username?: string | null,
 ): Promise<void> {
-  const command = extractCommand(rawMessage);
+  const command = extractCommand(message.content);
   if (!command) return;
 
-  const matchedEntry = await findPreviewLookupResult(command, lookupCommand);
-  if (!matchedEntry) return;
+  const result = await lookupCommand(command, getCustomCommandForDiscord);
+  if (!result) return;
 
   recordCommandTestEntry({
-    source,
+    source: 'discord',
     command,
-    response: matchedEntry.response,
-    channel,
+    response: result.response,
+    channel: null,
     user: username ?? null,
   });
 
-  console.log(buildLogMessage(command, matchedEntry.logType));
+  const label = result.logType === 'counter-check'
+    ? 'counter check'
+    : result.logType === 'counter-command'
+      ? 'counter command'
+      : 'custom command';
+  console.log(`[Discord] Preview ${label} '${command}' matched (recorded for monitoring).`);
+
+  if (CUSTOM_COMMANDS_LIVE_REPLIES) {
+    await message.reply(result.response);
+  }
 }
 
-export async function previewCustomCommandForDiscord(
-  rawMessage: string,
-  username?: string | null,
-): Promise<void> {
-  await previewCustomCommand(
-    rawMessage,
-    'discord',
-    null,
-    username,
-    getCustomCommandForDiscord,
-    (command, logType) => logType === 'counter-check'
-      ? `[Discord] Preview counter check '${command}' matched (recorded for monitoring).`
-      : logType === 'counter-command'
-        ? `[Discord] Preview counter command '${command}' matched (recorded for monitoring).`
-        : `[Discord] Preview custom command '${command}' matched (recorded for monitoring).`,
-  );
-}
-
-export async function previewCustomCommandForTwitch(
+export async function executeCustomCommandForTwitch(
   channel: string,
   rawMessage: string,
   username?: string | null,
 ): Promise<void> {
-  await previewCustomCommand(
-    rawMessage,
-    'twitch',
+  const command = extractCommand(rawMessage);
+  if (!command) return;
+
+  const result = await lookupCommand(command, (cmd) => getCustomCommandForTwitchChannel(channel, cmd));
+  if (!result) return;
+
+  recordCommandTestEntry({
+    source: 'twitch',
+    command,
+    response: result.response,
     channel,
-    username,
-    (command) => getCustomCommandForTwitchChannel(channel, command),
-    (command, logType) => logType === 'counter-check'
-      ? `[Twitch] Preview counter check '${command}' matched in ${channel} (recorded for monitoring).`
-      : logType === 'counter-command'
-        ? `[Twitch] Preview counter command '${command}' matched in ${channel} (recorded for monitoring).`
-        : `[Twitch] Preview custom command '${command}' matched in ${channel} (recorded for monitoring).`,
-  );
+    user: username ?? null,
+  });
+
+  const label = result.logType === 'counter-check'
+    ? 'counter check'
+    : result.logType === 'counter-command'
+      ? 'counter command'
+      : 'custom command';
+  console.log(`[Twitch] Preview ${label} '${command}' matched in ${channel} (recorded for monitoring).`);
+
+  if (CUSTOM_COMMANDS_LIVE_REPLIES && _twitchRuntime) {
+    if (result.isMultiTwitch) {
+      await broadcastToActiveChannels(channel, result.response);
+    } else {
+      await _twitchRuntime.send(channel, result.response);
+    }
+  }
 }

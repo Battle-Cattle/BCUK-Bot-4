@@ -1,7 +1,7 @@
 import tmi from 'tmi.js';
 import { TWITCH_USERNAME, TWITCH_OAUTH_TOKEN } from './config';
 import { handleCommand } from './commandRouter';
-import { previewCustomCommandForTwitch } from './customCommandHandler';
+import { executeCustomCommandForTwitch } from './customCommandHandler';
 import { setTwitchChannel } from './statusStore';
 import { getTwitchEnabledChannels } from './db';
 import { normalizeTwitchChannelName } from './twitchChannelName';
@@ -149,8 +149,8 @@ export async function startTwitchBot(): Promise<void> {
     // its source channel.
     if (tags['source-room-id'] && tags['source-room-id'] !== tags['room-id']) return;
 
-    previewCustomCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
-      console.error('[Twitch] Custom command preview error:', err),
+    executeCustomCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
+      console.error('[Twitch] Custom command error:', err),
     );
 
     handleCommand(message, 'twitch').catch((err) =>
@@ -219,6 +219,17 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       throw err;
     }
   });
+}
+
+export async function sayInChannel(channel: string, message: string): Promise<void> {
+  const normalized = normalizeChannel(channel);
+  if (!normalized) throw new Error(`[Twitch] Invalid channel name: ${channel}`);
+  if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
+  await client.say(normalized, message);
+}
+
+export function getActiveChannels(): ReadonlySet<string> {
+  return activeChannels;
 }
 
 export async function partTwitchChannel(channel: string): Promise<void> {

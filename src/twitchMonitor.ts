@@ -647,6 +647,13 @@ export async function restartTwitchMonitor(): Promise<void> {
   await startTwitchMonitor();
 }
 
+// ─── Broadcaster ID lookup (for shared chat dedup) ───────────────────────────
+
+/** Returns the login → Twitch user ID map populated at monitor startup. */
+export function getMonitoredLoginUserIds(): ReadonlyMap<string, string> {
+  return loginToUserId;
+}
+
 // ─── Live state snapshot (for web panel) ─────────────────────────────────────
 
 export interface LiveStateSnapshot {
