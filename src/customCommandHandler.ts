@@ -163,7 +163,11 @@ export async function executeCustomCommandForDiscord(
   console.log(`[Discord] ${willSend ? 'Sent' : 'Preview'} ${label} '${command}' (recorded for monitoring).`);
 
   if (willSend) {
-    await message.reply(result.response);
+    try {
+      await message.reply(result.response);
+    } catch (err) {
+      console.error(`[Discord] Failed to reply to message ${message.id} for command '${command}':`, err);
+    }
   }
 }
 
