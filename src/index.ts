@@ -1,9 +1,9 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
 import { getPool, closePool } from './db';
-import { startTwitchBot, sayInChannel, getActiveChannels } from './twitchBot';
+import { startTwitchBot, sayInChannel, getActiveChannels, getActiveChannelUserIds } from './twitchBot';
 import { startDiscordBot } from './discordBot';
 import { startTikTokBot } from './tiktokBot';
-import { startTwitchMonitor, stopTwitchMonitor, getMonitoredLoginUserIds } from './twitchMonitor';
+import { startTwitchMonitor, stopTwitchMonitor } from './twitchMonitor';
 import { startWebPanel } from './web/server';
 import { disconnect } from './audioPlayer';
 import { registerTwitchChatRuntime } from './customCommandHandler';
@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   registerTwitchChatRuntime({
     send: sayInChannel,
     getActiveChannels,
-    getLoginUserIds: getMonitoredLoginUserIds,
+    getLoginUserIds: getActiveChannelUserIds,
   });
 
   startDiscordBot();

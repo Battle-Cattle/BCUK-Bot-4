@@ -5,10 +5,12 @@ import { executeCustomCommandForTwitch } from './customCommandHandler';
 import { setTwitchChannel } from './statusStore';
 import { getTwitchEnabledChannels } from './db';
 import { normalizeTwitchChannelName } from './twitchChannelName';
+import { getUsers } from './twitchApi';
 
 let client: tmi.Client | null = null;
 let connected = false;
 const activeChannels = new Set<string>();
+const activeChannelUserIds = new Map<string, string>();
 const membershipMutationQueues = new Map<string, Promise<void>>();
 
 function normalizeChannel(channel: string): string | null {
@@ -123,6 +125,15 @@ export async function startTwitchBot(): Promise<void> {
     console.warn('[Twitch] No enabled Twitch channels found in DB; connecting with no joined channels.');
   }
 
+  if (activeChannels.size > 0) {
+    try {
+      const users = await getUsers([...activeChannels]);
+      for (const u of users) activeChannelUserIds.set(u.login.toLowerCase(), u.id);
+    } catch (err) {
+      console.error('[Twitch] Failed to resolve channel user IDs (shared-chat dedup unavailable):', err);
+    }
+  }
+
   client = new tmi.Client({
     identity: {
       username: TWITCH_USERNAME,
@@ -230,6 +241,10 @@ export async function sayInChannel(channel: string, message: string): Promise<vo
 
 export function getActiveChannels(): ReadonlySet<string> {
   return activeChannels;
+}
+
+export function getActiveChannelUserIds(): ReadonlyMap<string, string> {
+  return activeChannelUserIds;
 }
 
 export async function partTwitchChannel(channel: string): Promise<void> {

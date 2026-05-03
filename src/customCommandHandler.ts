@@ -73,10 +73,31 @@ async function lookupCommand(
 
 // ─── Multi-twitch broadcast ───────────────────────────────────────────────────
 
-async function resolveSharedChatSessionId(broadcasterId: string): Promise<string | null> {
+interface SessionCacheEntry {
+  sessionId: string | null;
+  expiry: number;
+}
+const SESSION_CACHE_TTL_MS = 30_000;
+const sessionCache = new Map<string, SessionCacheEntry>();
+
+async function resolveSharedChatSessionId(userId: string): Promise<string | null> {
+  const now = Date.now();
+  const cached = sessionCache.get(userId);
+
+  if (cached) {
+    if (now < cached.expiry) return cached.sessionId;
+    // Stale: serve cached value and refresh in background
+    getSharedChatSession(userId)
+      .then((s) => { sessionCache.set(userId, { sessionId: s?.session_id ?? null, expiry: Date.now() + SESSION_CACHE_TTL_MS }); })
+      .catch(() => { sessionCache.delete(userId); });
+    return cached.sessionId;
+  }
+
   try {
-    const session = await getSharedChatSession(broadcasterId);
-    return session?.session_id ?? null;
+    const session = await getSharedChatSession(userId);
+    const sessionId = session?.session_id ?? null;
+    sessionCache.set(userId, { sessionId, expiry: now + SESSION_CACHE_TTL_MS });
+    return sessionId;
   } catch {
     return null;
   }
@@ -93,10 +114,15 @@ async function broadcastToActiveChannels(sourceChannel: string, output: string):
   // Build ordered list: source channel first, then the rest
   const targets = [sourceChannel, ...Array.from(activeChannels).filter((ch) => ch !== sourceChannel)];
 
+  // Pre-resolve all session IDs in parallel to avoid serial Helix calls per channel
+  const userIds = targets.map((ch) => loginUserIds.get(ch)).filter((id): id is string => id !== undefined);
+  const resolvedIds = await Promise.all(userIds.map((uid) => resolveSharedChatSessionId(uid)));
+  const sessionIdByUserId = new Map(userIds.map((uid, i) => [uid, resolvedIds[i]]));
+
   for (const channel of targets) {
     const userId = loginUserIds.get(channel);
     if (userId) {
-      const sessionId = await resolveSharedChatSessionId(userId);
+      const sessionId = sessionIdByUserId.get(userId) ?? null;
       if (sessionId) {
         if (repliedSessionIds.has(sessionId)) continue;
         repliedSessionIds.add(sessionId);
@@ -131,14 +157,15 @@ export async function executeCustomCommandForDiscord(
     user: username ?? null,
   });
 
+  const willSend = CUSTOM_COMMANDS_LIVE_REPLIES && result.logType === 'custom-command';
   const label = result.logType === 'counter-check'
     ? 'counter check'
     : result.logType === 'counter-command'
       ? 'counter command'
       : 'custom command';
-  console.log(`[Discord] Preview ${label} '${command}' matched (recorded for monitoring).`);
+  console.log(`[Discord] ${willSend ? 'Sent' : 'Preview'} ${label} '${command}' (recorded for monitoring).`);
 
-  if (CUSTOM_COMMANDS_LIVE_REPLIES) {
+  if (willSend) {
     await message.reply(result.response);
   }
 }
@@ -162,14 +189,15 @@ export async function executeCustomCommandForTwitch(
     user: username ?? null,
   });
 
+  const willSend = CUSTOM_COMMANDS_LIVE_REPLIES && result.logType === 'custom-command';
   const label = result.logType === 'counter-check'
     ? 'counter check'
     : result.logType === 'counter-command'
       ? 'counter command'
       : 'custom command';
-  console.log(`[Twitch] Preview ${label} '${command}' matched in ${channel} (recorded for monitoring).`);
+  console.log(`[Twitch] ${willSend ? 'Sent' : 'Preview'} ${label} '${command}' in ${channel} (recorded for monitoring).`);
 
-  if (CUSTOM_COMMANDS_LIVE_REPLIES && _twitchRuntime) {
+  if (willSend && _twitchRuntime) {
     if (result.isMultiTwitch) {
       await broadcastToActiveChannels(channel, result.response);
     } else {
