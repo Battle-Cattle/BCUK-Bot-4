@@ -119,7 +119,7 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
   const targets = candidates.filter((_, i) => registrationResults[i] !== null);
 
   // Pre-resolve all session IDs in parallel to avoid serial Helix calls per channel
-  const userIds = targets.map((ch) => loginUserIds.get(ch)).filter((id): id is string => id !== undefined);
+  const userIds = [...new Set(targets.map((ch) => loginUserIds.get(ch)).filter((id): id is string => id !== undefined))];
   const resolvedIds = await Promise.all(userIds.map((uid) => resolveSharedChatSessionId(uid)));
   const sessionIdByUserId = new Map(userIds.map((uid, i) => [uid, resolvedIds[i]]));
 
