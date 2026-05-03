@@ -103,7 +103,7 @@ async function resolveSharedChatSessionId(userId: string): Promise<string | null
   }
 }
 
-async function broadcastToActiveChannels(sourceChannel: string, output: string): Promise<void> {
+async function broadcastToActiveChannels(sourceChannel: string, command: string, output: string): Promise<void> {
   if (!_twitchRuntime) return;
 
   const { send, getActiveChannels, getLoginUserIds } = _twitchRuntime;
@@ -112,7 +112,11 @@ async function broadcastToActiveChannels(sourceChannel: string, output: string):
   const repliedSessionIds = new Set<string>();
 
   // Build ordered list: source channel first, then the rest
-  const targets = [sourceChannel, ...Array.from(activeChannels).filter((ch) => ch !== sourceChannel)];
+  const candidates = [sourceChannel, ...Array.from(activeChannels).filter((ch) => ch !== sourceChannel)];
+
+  // Only send to channels where the command is registered (in-memory cache lookup)
+  const registrationResults = await Promise.all(candidates.map((ch) => getCustomCommandForTwitchChannel(ch, command)));
+  const targets = candidates.filter((_, i) => registrationResults[i] !== null);
 
   // Pre-resolve all session IDs in parallel to avoid serial Helix calls per channel
   const userIds = targets.map((ch) => loginUserIds.get(ch)).filter((id): id is string => id !== undefined);
@@ -203,7 +207,7 @@ export async function executeCustomCommandForTwitch(
   if (willSend && runtime) {
     try {
       if (result.isMultiTwitch) {
-        await broadcastToActiveChannels(channel, result.response);
+        await broadcastToActiveChannels(channel, command, result.response);
       } else {
         await runtime.send(channel, result.response);
       }
