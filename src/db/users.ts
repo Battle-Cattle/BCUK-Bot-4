@@ -88,6 +88,7 @@ export async function upsertUserRecord(
   if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
     throw new Error(`Invalid accessLevel: ${accessLevel}`);
   }
+  const trimmedDiscordName = discordName.trim() || null;
   const twitchNameProvided = twitchName !== undefined;
   const normalizedTwitchName = !twitchNameProvided
     ? null
@@ -96,7 +97,7 @@ export async function upsertUserRecord(
       : (() => {
           const trimmedTwitchName = twitchName.trim();
           if (!trimmedTwitchName) {
-            return null;
+            throw new Error(`Invalid twitchName: ${twitchName}`);
           }
           const normalizedChannelName = normalizeTwitchChannelName(trimmedTwitchName);
           if (!normalizedChannelName) {
@@ -108,15 +109,16 @@ export async function upsertUserRecord(
     `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
      VALUES (?, ?, ?, ?, 0) AS new_user
      ON DUPLICATE KEY UPDATE discord_name = new_user.discord_name, access_level = new_user.access_level, twitch_name = IF(?, new_user.twitch_name, \`user\`.twitch_name)`,
-    [discordId, discordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
+    [discordId, trimmedDiscordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
   );
   return twitchNameProvided;
 }
 
 export async function updateDiscordName(discordId: string, name: string): Promise<void> {
+  const trimmed = name.trim();
   await getPool().execute(
     'UPDATE `user` SET discord_name = ? WHERE discord_id = ?',
-    [name, discordId],
+    [trimmed || null, discordId],
   );
 }
 

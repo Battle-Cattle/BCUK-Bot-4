@@ -3,6 +3,13 @@ import mysql from 'mysql2/promise';
 import { normalizeTwitchChannelName } from './twitchChannelName';
 import { createManagedLookupCache, type RefreshingLookupCache } from './db/lookupCache';
 import { getPool } from './db/pool';
+import {
+  AccessLevel, ACCESS_LEVEL_LABELS,
+  findUser, findUserByTwitchName, getAllUsers,
+  updateDiscordName, getTwitchEnabledChannels, updateAccessLevel,
+  upsertUserRecord, setTwitchBotEnabledRecord, removeUserRecord,
+} from './db/users';
+import type { AccessLevelValue, DbUser } from './db/users';
 export type { RefreshingLookupCache, ManagedLookupCacheOptions, ManagedLookupCache } from './db/lookupCache';
 export { getPool, closePool } from './db/pool';
 
@@ -75,13 +82,6 @@ export async function findSoundFiles(triggerId: bigint): Promise<SfxFile[]> {
 
 // ─── User / access-level ────────────────────────────────────────────────────
 
-import {
-  AccessLevel, ACCESS_LEVEL_LABELS,
-  findUser, findUserByTwitchName, getAllUsers,
-  updateDiscordName, getTwitchEnabledChannels, updateAccessLevel,
-  upsertUserRecord, setTwitchBotEnabledRecord, removeUserRecord,
-} from './db/users';
-import type { AccessLevelValue, DbUser } from './db/users';
 export {
   AccessLevel, ACCESS_LEVEL_LABELS,
   findUser, findUserByTwitchName, getAllUsers,
