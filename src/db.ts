@@ -1731,7 +1731,7 @@ export async function archiveAndResetYearlyCounters(year: number): Promise<numbe
   // `year` which is validated to a safe integer in [2020, 2100] above.
   const columnName = `value${year}`;
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
-    `UPDATE counter SET \`${columnName}\` = current_value, current_value = 0 WHERE reset_yearly = 1`,
+    `UPDATE counter SET \`${columnName}\` = current_value, current_value = 0 WHERE reset_yearly = 1 AND \`${columnName}\` IS NULL`,
   );
   invalidateCounterLookupCache();
   return result.affectedRows;

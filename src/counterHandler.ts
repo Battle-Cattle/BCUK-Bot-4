@@ -29,6 +29,7 @@ interface CounterResult {
   response: string;
   monitorResponse: string;
   label: string;
+  canReply: boolean;
 }
 
 async function _buildCounterResponse(
@@ -50,7 +51,13 @@ async function _buildCounterResponse(
       didIncrement = true;
     } catch (err) {
       console.error(`${errorPrefix} Failed to increment counter ${counter.id} for command '${command}':`, err);
-      return null;
+      const response = formatCounterMessage(counter.increment_message, displayValue);
+      return {
+        response,
+        monitorResponse: `${response} (write error — counter not incremented)`,
+        label,
+        canReply: false,
+      };
     }
   }
 
@@ -62,7 +69,7 @@ async function _buildCounterResponse(
     ? `${response} (preview only — counter not incremented)`
     : response;
 
-  return { response, monitorResponse, label };
+  return { response, monitorResponse, label, canReply: true };
 }
 
 // ─── Execute functions ────────────────────────────────────────────────────────
@@ -84,6 +91,8 @@ export async function executeCounterCommandForDiscord(
     channel: null,
     user: username ?? null,
   });
+
+  if (!result.canReply) return;
 
   if (CUSTOM_COMMANDS_LIVE_REPLIES) {
     try {
@@ -115,6 +124,8 @@ export async function executeCounterCommandForTwitch(
     channel,
     user: username ?? null,
   });
+
+  if (!result.canReply) return;
 
   const runtime = _twitchRuntime;
   if (CUSTOM_COMMANDS_LIVE_REPLIES && runtime) {
