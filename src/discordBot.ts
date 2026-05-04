@@ -3,6 +3,7 @@ import { DISCORD_TOKEN, DISCORD_GUILD_ID } from './config';
 import { connect } from './audioPlayer';
 import { handleCommand } from './commandRouter';
 import { executeCustomCommandForDiscord } from './customCommandHandler';
+import { executeCounterCommandForDiscord } from './counterHandler';
 import { setDiscordReady } from './statusStore';
 
 let client: Client;
@@ -72,6 +73,10 @@ export function startDiscordBot(): void {
 
     executeCustomCommandForDiscord(message, message.member?.displayName ?? message.author.username).catch((err) =>
       console.error('[Discord] Custom command error:', err),
+    );
+
+    executeCounterCommandForDiscord(message, message.member?.displayName ?? message.author.username).catch((err) =>
+      console.error('[Discord] Counter command error:', err),
     );
 
     handleCommand(message.content, 'discord').catch((err) =>

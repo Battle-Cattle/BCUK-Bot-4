@@ -1,6 +1,6 @@
 import type { Message } from 'discord.js';
 import { CUSTOM_COMMANDS_LIVE_REPLIES } from './config';
-import { findCounterByCommand, getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './db';
+import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './db';
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { getSharedChatSession } from './twitchApi';
 
@@ -29,17 +29,10 @@ function extractCommand(rawMessage: string): string | null {
   return trimmed.split(/\s+/)[0]?.toLowerCase() ?? null;
 }
 
-function formatCounterMessage(template: string, value: number): string {
-  return template.replace(/%d/g, String(value));
-}
-
 // ─── Lookup ───────────────────────────────────────────────────────────────────
-
-type LogType = 'custom-command' | 'counter-command' | 'counter-check';
 
 interface LookupResult {
   response: string;
-  logType: LogType;
   isMultiTwitch: boolean;
 }
 
@@ -51,23 +44,9 @@ async function lookupCommand(
   if (customCommand) {
     return {
       response: customCommand.output,
-      logType: 'custom-command',
       isMultiTwitch: customCommand.is_multi_twitch,
     };
   }
-
-  const counter = await findCounterByCommand(command);
-  if (counter) {
-    const isTrigger = counter.matchType === 'trigger';
-    return {
-      response: isTrigger
-        ? `${formatCounterMessage(counter.increment_message, counter.current_value)} (preview only — counter not incremented)`
-        : formatCounterMessage(counter.message, counter.current_value),
-      logType: isTrigger ? 'counter-command' : 'counter-check',
-      isMultiTwitch: false,
-    };
-  }
-
   return null;
 }
 
@@ -169,22 +148,15 @@ export async function executeCustomCommandForDiscord(
     user: username ?? null,
   });
 
-  const willSend = CUSTOM_COMMANDS_LIVE_REPLIES && result.logType === 'custom-command';
-  const label = result.logType === 'counter-check'
-    ? 'counter check'
-    : result.logType === 'counter-command'
-      ? 'counter command'
-      : 'custom command';
-
-  if (willSend) {
+  if (CUSTOM_COMMANDS_LIVE_REPLIES) {
     try {
       await message.reply(result.response);
-      console.log(`[Discord] Sent ${label} '${command}' (recorded for monitoring).`);
+      console.log(`[Discord] Sent custom command '${command}' (recorded for monitoring).`);
     } catch (err) {
       console.error(`[Discord] Failed to reply to message ${message.id} for command '${command}':`, err);
     }
   } else {
-    console.log(`[Discord] Preview ${label} '${command}' (recorded for monitoring).`);
+    console.log(`[Discord] Preview custom command '${command}' (recorded for monitoring).`);
   }
 }
 
@@ -208,34 +180,27 @@ export async function executeCustomCommandForTwitch(
   });
 
   const runtime = _twitchRuntime;
-  const willSend = CUSTOM_COMMANDS_LIVE_REPLIES && !!runtime && result.logType === 'custom-command';
-  const label = result.logType === 'counter-check'
-    ? 'counter check'
-    : result.logType === 'counter-command'
-      ? 'counter command'
-      : 'custom command';
-
-  if (willSend && runtime) {
+  if (CUSTOM_COMMANDS_LIVE_REPLIES && runtime) {
     if (result.isMultiTwitch) {
       try {
         const sent = await broadcastToActiveChannels(channel, command, result.response);
         if (sent) {
-          console.log(`[Twitch] Sent ${label} '${command}' in ${channel} (recorded for monitoring).`);
+          console.log(`[Twitch] Sent custom command '${command}' in ${channel} (recorded for monitoring).`);
         } else {
-          console.log(`[Twitch] Broadcast ${label} '${command}' in ${channel} reached no channels (recorded for monitoring).`);
+          console.log(`[Twitch] Broadcast custom command '${command}' in ${channel} reached no channels (recorded for monitoring).`);
         }
       } catch (err) {
-        console.error(`[Twitch] Failed to broadcast ${label} '${command}' in ${channel}:`, err);
+        console.error(`[Twitch] Failed to broadcast custom command '${command}' in ${channel}:`, err);
       }
     } else {
       try {
         await runtime.send(channel, result.response);
-        console.log(`[Twitch] Sent ${label} '${command}' in ${channel} (recorded for monitoring).`);
+        console.log(`[Twitch] Sent custom command '${command}' in ${channel} (recorded for monitoring).`);
       } catch (err) {
-        console.error(`[Twitch] Failed to send ${label} '${command}' in ${channel}:`, err);
+        console.error(`[Twitch] Failed to send custom command '${command}' in ${channel}:`, err);
       }
     }
   } else {
-    console.log(`[Twitch] Preview ${label} '${command}' in ${channel} (recorded for monitoring).`);
+    console.log(`[Twitch] Preview custom command '${command}' in ${channel} (recorded for monitoring).`);
   }
 }

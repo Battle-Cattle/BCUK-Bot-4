@@ -27,6 +27,8 @@ BCUK_Bot_4/
 │   ├── twitchMonitor.ts      — Polling-based stream monitor + Discord announcements
 │   ├── monitorSettings.ts    — Read/write monitor-settings.json (toggle only)
 │   ├── twitchChannelName.ts   — Twitch channel-name normalization helper
+│   ├── counterHandler.ts     — Counter command execution (increment/check, shadow mode)
+│   ├── counterScheduler.ts   — Yearly Jan 1 archive-and-reset scheduler
 │   ├── types/
 │   │   └── express.d.ts      — Augments express-session SessionData
 │   └── web/
@@ -211,7 +213,8 @@ Copy `.env.example` → `.env` and fill in all values.
 | `DISCORD_CALLBACK_URL`  | ✅ | e.g. `http://localhost:3000/auth/discord/callback` |
 | `TWITCH_CLIENT_ID`      | ✅ | Twitch app Client ID — for stream monitoring (separate from chat bot) |
 | `TWITCH_CLIENT_SECRET`  | ✅ | Twitch app Client Secret — for stream monitoring |
-| `CUSTOM_COMMANDS_LIVE_REPLIES` | ❌ | Default: `false`. When `false`, custom command matches are recorded for monitoring but no reply is sent (shadow mode). Set to `true` to enable live replies. |
+| `CUSTOM_COMMANDS_LIVE_REPLIES` | ❌ | Default: `false`. When `false`, custom command and counter matches are recorded for monitoring but no reply is sent (shadow mode). Set to `true` to enable live replies. |
+| `COUNTER_LIVE_WRITES` | ❌ | Default: `false`. When `false`, counter trigger commands are matched and logged but `current_value` is not incremented (shadow mode). Set to `true` to enable live increments. |
 
 ---
 
@@ -340,7 +343,9 @@ Local file (`monitor-settings.json` at `process.cwd()`) persists one value: `twi
 
 **Custom command runtime** is implemented in `src/customCommandHandler.ts`. Commands are matched and recorded for monitoring on both Twitch and Discord. Live replies are gated behind `CUSTOM_COMMANDS_LIVE_REPLIES` (default `false` — shadow mode). Multi-Twitch broadcast (shared-chat dedup via Helix) is wired and ready.
 
-**Counter runtime** is not yet implemented. The counter path in `src/customCommandHandler.ts` returns a preview response with `(preview only — counter not incremented)` and does not mutate `current_value`. Counter increment logic and the yearly reset scheduler remain to be implemented.
+**Counter runtime** is implemented in `src/counterHandler.ts`. Counter trigger commands increment `current_value` when `COUNTER_LIVE_WRITES=true`; counter check commands read the current value without writing. Both trigger and check replies are gated behind `CUSTOM_COMMANDS_LIVE_REPLIES`. In shadow mode, trigger commands log `(preview only — counter not incremented)` to the command monitor but do not mutate the DB.
+
+**Counter yearly scheduler** (`src/counterScheduler.ts`) runs once per year at midnight Jan 1. For all counters with `reset_yearly=true` it copies `current_value` to the `value{YYYY}` archive column (e.g. `value2024`) and resets `current_value` to 0. The `value{YYYY}` column must exist in the DB before the scheduler runs — add it manually each year (see DATABASE-SCHEMA.md).
 
 ---
 
