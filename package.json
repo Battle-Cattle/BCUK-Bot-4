@@ -9,7 +9,6 @@
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
-    "@snazzah/davey": "^0.1.11",
     "discord.js": "^14.26.4",
     "dotenv": "^17.4.2",
     "ejs": "^5.0.2",
@@ -21,11 +20,8 @@
     "libsodium-wrappers": "^0.8.4",
     "mediaplex": "^1.0.0",
     "mysql2": "^3.22.3",
-    "opusscript": "^0.1.1",
     "tiktok-live-connector": "2.1.1-beta1",
-    "tmi.js": "^1.8.5",
-    "tweetnacl": "^1.0.3",
-    "ws": "^8.20.0"
+    "tmi.js": "^1.8.5"
   },
   "overrides": {
     "axios": "^1.15.0",
