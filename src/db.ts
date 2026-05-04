@@ -2,6 +2,13 @@ import { createHash } from 'node:crypto';
 import mysql from 'mysql2/promise';
 import { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from './config';
 import { normalizeTwitchChannelName } from './twitchChannelName';
+import { createManagedLookupCache, type RefreshingLookupCache } from './db/lookupCache';
+export type { RefreshingLookupCache, ManagedLookupCacheOptions, ManagedLookupCache } from './db/lookupCache';
+
+/** Coerces a MySQL BIT(1) or TINYINT(1) column to a boolean. */
+function mapBoolColumn(value: unknown): boolean {
+  return Buffer.isBuffer(value) ? value[0] === 1 : value == 1;
+}
 
 export interface SfxTrigger {
   id: bigint;
@@ -66,7 +73,7 @@ export async function findTrigger(command: string): Promise<SfxTrigger | null> {
     id: BigInt(row.id),
     trigger_command: row.trigger_command,
     category_id: row.category_id,
-    hidden: Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden == 1,
+    hidden: mapBoolColumn(row.hidden),
     description: row.description,
   };
 }
@@ -88,7 +95,7 @@ export async function findSoundFiles(triggerId: bigint): Promise<SfxFile[]> {
     file: row.file,
     trigger_command: row.trigger_command,
     weight: row.weight,
-    hidden: Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden == 1,
+    hidden: mapBoolColumn(row.hidden),
     category_id: row.category_id,
   }));
 }
@@ -129,7 +136,7 @@ export async function findUser(discordId: string): Promise<DbUser | null> {
   return {
     discord_id: String(r.discord_id),
     discord_name: r.discord_name,
-    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled == 1,
+    is_twitch_bot_enabled: mapBoolColumn(r.is_twitch_bot_enabled),
     twitch_name: r.twitch_name,
     access_level: r.access_level,
   };
@@ -161,7 +168,7 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
   return {
     discord_id: String(r.discord_id),
     discord_name: r.discord_name,
-    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled == 1,
+    is_twitch_bot_enabled: mapBoolColumn(r.is_twitch_bot_enabled),
     twitch_name: r.twitch_name,
     access_level: r.access_level,
   };
@@ -174,7 +181,7 @@ export async function getAllUsers(): Promise<DbUser[]> {
   return rows.map((r) => ({
     discord_id: String(r.discord_id),
     discord_name: r.discord_name,
-    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled == 1,
+    is_twitch_bot_enabled: mapBoolColumn(r.is_twitch_bot_enabled),
     twitch_name: r.twitch_name,
     access_level: r.access_level,
   }));
@@ -285,189 +292,6 @@ export interface DbCustomCommandWithAssignments extends DbCustomCommand {
   assigned_users: DbCustomCommandAssignedUser[];
 }
 
-interface RefreshingLookupCache {
-  loadedAt: number;
-}
-
-interface ManagedLookupCacheOptions<TCache extends RefreshingLookupCache> {
-  cacheName: string;
-  ttlMs: number;
-  refreshFailureBackoffMs: number;
-  refreshFailureMaxBackoffMs: number;
-  createEmptyCache: () => TCache;
-  loadCache: () => Promise<TCache>;
-}
-
-interface ManagedLookupCache<TCache extends RefreshingLookupCache> {
-  getCache: () => Promise<TCache>;
-  invalidate: () => void;
-}
-
-/**
- * Creates a managed lookup cache with TTL, background refresh, and error resilience.
- *
- * Caching strategy (stale-while-revalidate):
- * - Returns cached data immediately when available, even if expired
- * - Triggers background refresh when cache is expired (TTL exceeded)
- * - On refresh failure: applies exponential backoff and serves stale cache if available,
- *   or empty fallback cache on first load to prevent crashes
- * - On invalidation: clears cache and version counter, forcing fresh load on next access
- *
- * Concurrency handling:
- * - Multiple concurrent getCache() calls coalesce to one in-flight refresh
- * - Version tracking ensures stale results from old refreshes don't overwrite newer data
- * - Handles invalidation during in-flight refresh correctly by checking version numbers
- *
- * Used for: custom command lookups, counter command lookups
- */
-function createManagedLookupCache<TCache extends RefreshingLookupCache>(
-  options: ManagedLookupCacheOptions<TCache>,
-): ManagedLookupCache<TCache> {
-  let cache: TCache | null = null;
-  let inFlightPromise: Promise<TCache> | null = null;
-  let version = 0;
-  let refreshAllowedAt = 0;
-  let refreshFailureCount = 0;
-
-  function getRefreshBackoffMs(): number {
-    const backoffMultiplier = 2 ** Math.max(0, refreshFailureCount - 1);
-    return Math.min(
-      options.refreshFailureBackoffMs * backoffMultiplier,
-      options.refreshFailureMaxBackoffMs,
-    );
-  }
-
-  function canStartRefresh(now: number): boolean {
-    return !inFlightPromise && now >= refreshAllowedAt;
-  }
-
-  function resetRefreshFailureState(): void {
-    refreshAllowedAt = 0;
-    refreshFailureCount = 0;
-  }
-
-  function applyRefreshFailure(retryDelayMs: number): void {
-    refreshAllowedAt = Date.now() + retryDelayMs;
-  }
-
-  function handleRefreshFailureFallback(err: unknown, retryDelayMs: number): void {
-    if (!cache) {
-      cache = options.createEmptyCache();
-      console.error(`[DB] Background ${options.cacheName} refresh failed; serving an empty cache and retrying after ${retryDelayMs}ms.`, err);
-      return;
-    }
-
-    console.error(`[DB] Background ${options.cacheName} refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
-  }
-
-  function clearInFlightIfCurrent(promiseForFinally: Promise<TCache>): void {
-    if (inFlightPromise === promiseForFinally) {
-      inFlightPromise = null;
-    }
-  }
-
-  function applyRefreshSuccess(requestVersion: number, rebuiltCache: TCache): void {
-    if (requestVersion !== version) {
-      return;
-    }
-
-    cache = rebuiltCache;
-    resetRefreshFailureState();
-  }
-
-  function applyRefreshError(requestVersion: number, err: unknown): void {
-    if (requestVersion !== version) {
-      return;
-    }
-
-    refreshFailureCount += 1;
-    const retryDelayMs = getRefreshBackoffMs();
-    applyRefreshFailure(retryDelayMs);
-    handleRefreshFailureFallback(err, retryDelayMs);
-  }
-
-  function startRefresh(now: number): Promise<TCache> | null {
-    if (!canStartRefresh(now)) {
-      return inFlightPromise;
-    }
-
-    const requestVersion = version;
-    inFlightPromise = (async () => {
-      const rebuiltCache = await options.loadCache();
-      applyRefreshSuccess(requestVersion, rebuiltCache);
-      return rebuiltCache;
-    })();
-
-    const promiseForFinally = inFlightPromise;
-    void promiseForFinally
-      .catch((err) => applyRefreshError(requestVersion, err))
-      .finally(() => {
-        clearInFlightIfCurrent(promiseForFinally);
-      });
-
-    return inFlightPromise;
-  }
-
-  async function awaitCachePromise(promise: Promise<TCache>): Promise<TCache> {
-    try {
-      return await promise;
-    } catch (err) {
-      if (cache) {
-        return cache;
-      }
-
-      throw err;
-    }
-  }
-
-  async function getCache(): Promise<TCache> {
-    const now = Date.now();
-
-    if (cache) {
-      if (now - cache.loadedAt >= options.ttlMs && now >= refreshAllowedAt) {
-        startRefresh(now);
-      }
-      return cache;
-    }
-
-    const requestVersion = version;
-    const initialRefreshPromise = startRefresh(now);
-    if (!initialRefreshPromise) {
-      throw new Error(`${options.cacheName} refresh did not start`);
-    }
-
-    const resolvedCache = await awaitCachePromise(initialRefreshPromise);
-
-    if (requestVersion === version) {
-      return resolvedCache;
-    }
-
-    if (cache) {
-      return cache;
-    }
-
-    const retryRefreshPromise = startRefresh(Date.now());
-    if (!retryRefreshPromise) {
-      throw new Error(`${options.cacheName} refresh did not start`);
-    }
-
-    return await awaitCachePromise(retryRefreshPromise);
-  }
-
-  function invalidate(): void {
-    version += 1;
-    cache = null;
-    inFlightPromise = null;
-    refreshAllowedAt = 0;
-    refreshFailureCount = 0;
-  }
-
-  return {
-    getCache,
-    invalidate,
-  };
-}
-
 interface CustomCommandLookupCache extends RefreshingLookupCache {
   discordByTrigger: Map<string, DbCustomCommand>;
   twitchByChannelAndTrigger: Map<string, DbCustomCommand>;
@@ -506,8 +330,8 @@ function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
     command_id: row.command_id,
     trigger_string: row.trigger_string,
     output: row.output,
-    is_discord_enabled: Buffer.isBuffer(row.is_discord_enabled) ? row.is_discord_enabled[0] === 1 : row.is_discord_enabled == 1,
-    is_multi_twitch: Buffer.isBuffer(row.is_multi_twitch) ? row.is_multi_twitch[0] === 1 : row.is_multi_twitch == 1,
+    is_discord_enabled: mapBoolColumn(row.is_discord_enabled),
+    is_multi_twitch: mapBoolColumn(row.is_multi_twitch),
   };
 }
 
@@ -539,7 +363,7 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
         discord_name: row.discord_name ?? null,
         twitch_name: row.twitch_name ?? null,
         access_level: row.access_level ?? AccessLevel.USER,
-        is_twitch_bot_enabled: Buffer.isBuffer(row.is_twitch_bot_enabled) ? row.is_twitch_bot_enabled[0] === 1 : row.is_twitch_bot_enabled == 1,
+        is_twitch_bot_enabled: mapBoolColumn(row.is_twitch_bot_enabled),
         is_orphaned_user: row.user_discord_id === null || row.user_discord_id === undefined,
       });
     }
@@ -1184,9 +1008,7 @@ async function getUserTwitchEligibility(
   const twitchName = userRows[0].twitch_name ? String(userRows[0].twitch_name) : null;
   return {
     normalizedTwitchName: twitchName ? normalizeTwitchChannelName(twitchName) : null,
-    isTwitchBotEnabled: Buffer.isBuffer(userRows[0].is_twitch_bot_enabled)
-      ? userRows[0].is_twitch_bot_enabled[0] === 1
-      : userRows[0].is_twitch_bot_enabled == 1,
+    isTwitchBotEnabled: mapBoolColumn(userRows[0].is_twitch_bot_enabled),
   };
 }
 
@@ -1476,7 +1298,7 @@ function mapCounter(row: mysql.RowDataPacket): DbCounter {
     check_command: row.check_command,
     message: row.message,
     increment_message: row.increment_message,
-    reset_yearly: Buffer.isBuffer(row.reset_yearly) ? row.reset_yearly[0] === 1 : row.reset_yearly == 1,
+    reset_yearly: mapBoolColumn(row.reset_yearly),
     current_value: row.current_value,
   };
 }
@@ -1789,9 +1611,9 @@ function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
     discord_channel: String(r.discord_channel),
     live_message: r.live_message,
     new_game_message: r.new_game_message,
-    multi_twitch: Buffer.isBuffer(r.multi_twitch) ? r.multi_twitch[0] === 1 : r.multi_twitch == 1,
+    multi_twitch: mapBoolColumn(r.multi_twitch),
     multi_twitch_message: r.multi_twitch_message ?? '',
-    delete_old_posts: Buffer.isBuffer(r.delete_old_posts) ? r.delete_old_posts[0] === 1 : r.delete_old_posts == 1,
+    delete_old_posts: mapBoolColumn(r.delete_old_posts),
   };
 }
 
@@ -1872,9 +1694,9 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
       discord_channel: String(r.discord_channel),
       live_message: r.live_message,
       new_game_message: r.new_game_message,
-      multi_twitch: Buffer.isBuffer(r.multi_twitch) ? r.multi_twitch[0] === 1 : r.multi_twitch == 1,
+      multi_twitch: mapBoolColumn(r.multi_twitch),
       multi_twitch_message: r.multi_twitch_message ?? '',
-      delete_old_posts: Buffer.isBuffer(r.delete_old_posts) ? r.delete_old_posts[0] === 1 : r.delete_old_posts == 1,
+      delete_old_posts: mapBoolColumn(r.delete_old_posts),
     },
   }));
 }
@@ -1949,7 +1771,7 @@ export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
         triggerId: r.triggerId,
         triggerCommand: r.triggerCommand,
         description: r.description ?? null,
-        hidden: Buffer.isBuffer(r.triggerHidden) ? r.triggerHidden[0] === 1 : r.triggerHidden == 1,
+        hidden: mapBoolColumn(r.triggerHidden),
         categoryName: r.categoryName ?? null,
         files: [],
       });
@@ -1959,7 +1781,7 @@ export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
         id: r.sfxId,
         file: r.file,
         weight: r.weight,
-        hidden: Buffer.isBuffer(r.sfxHidden) ? r.sfxHidden[0] === 1 : r.sfxHidden == 1,
+        hidden: mapBoolColumn(r.sfxHidden),
       });
     }
   }
