@@ -106,6 +106,7 @@ async function resolveSharedChatSessionId(userId: string): Promise<string | null
     sessionCache.set(userId, { sessionId, expiry: now + SESSION_CACHE_TTL_MS });
     return sessionId;
   } catch {
+    sessionCache.set(userId, { sessionId: null, expiry: now + SHORT_RETRY_TTL_MS });
     return null;
   }
 }
