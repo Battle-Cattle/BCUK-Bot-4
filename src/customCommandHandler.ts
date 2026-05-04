@@ -78,7 +78,9 @@ interface SessionCacheEntry {
   expiry: number;
 }
 const SESSION_CACHE_TTL_MS = 30_000;
+const SHORT_RETRY_TTL_MS = 5_000;
 const sessionCache = new Map<string, SessionCacheEntry>();
+const inFlightRefreshes = new Map<string, Promise<void>>();
 
 async function resolveSharedChatSessionId(userId: string): Promise<string | null> {
   const now = Date.now();
@@ -86,10 +88,15 @@ async function resolveSharedChatSessionId(userId: string): Promise<string | null
 
   if (cached) {
     if (now < cached.expiry) return cached.sessionId;
-    // Stale: serve cached value and refresh in background
-    getSharedChatSession(userId)
-      .then((s) => { sessionCache.set(userId, { sessionId: s?.session_id ?? null, expiry: Date.now() + SESSION_CACHE_TTL_MS }); })
-      .catch(() => { sessionCache.delete(userId); });
+    // Stale: serve cached value and trigger a single background refresh
+    if (!inFlightRefreshes.has(userId)) {
+      const lastKnown = cached.sessionId;
+      const refresh = getSharedChatSession(userId)
+        .then((s) => { sessionCache.set(userId, { sessionId: s?.session_id ?? null, expiry: Date.now() + SESSION_CACHE_TTL_MS }); })
+        .catch(() => { sessionCache.set(userId, { sessionId: lastKnown, expiry: Date.now() + SHORT_RETRY_TTL_MS }); })
+        .finally(() => { inFlightRefreshes.delete(userId); });
+      inFlightRefreshes.set(userId, refresh);
+    }
     return cached.sessionId;
   }
 
