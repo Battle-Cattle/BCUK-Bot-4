@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import mysql from 'mysql2/promise';
-import { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from './config';
 import { normalizeTwitchChannelName } from './twitchChannelName';
 import { createManagedLookupCache, type RefreshingLookupCache } from './db/lookupCache';
+import { getPool } from './db/pool';
 export type { RefreshingLookupCache, ManagedLookupCacheOptions, ManagedLookupCache } from './db/lookupCache';
+export { getPool, closePool } from './db/pool';
 
 /** Coerces a MySQL BIT(1) or TINYINT(1) column to a boolean. */
 function mapBoolColumn(value: unknown): boolean {
@@ -26,34 +27,6 @@ export interface SfxFile {
   weight: number;
   hidden: boolean;
   category_id: number | null;
-}
-
-let pool: mysql.Pool | undefined;
-
-export function getPool(): mysql.Pool {
-  if (!pool) {
-    pool = mysql.createPool({
-      host: DB_HOST,
-      port: DB_PORT,
-      user: DB_USER,
-      password: DB_PASSWORD,
-      database: DB_NAME,
-      supportBigNumbers: true,
-      bigNumberStrings: true,
-      waitForConnections: true,
-      connectionLimit: 5,
-      queueLimit: 0,
-      connectTimeout: 10_000,
-    });
-  }
-  return pool!;
-}
-
-export async function closePool(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = undefined;
-  }
 }
 
 /**
