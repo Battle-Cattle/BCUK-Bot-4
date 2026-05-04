@@ -7,9 +7,12 @@ import { startTwitchMonitor, stopTwitchMonitor } from './twitchMonitor';
 import { startWebPanel } from './web/server';
 import { disconnect } from './audioPlayer';
 import { registerTwitchChatRuntime } from './customCommandHandler';
+import { registerCounterTwitchRuntime } from './counterHandler';
+import { startCounterScheduler, stopCounterScheduler } from './counterScheduler';
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`[Bot] ${signal} received — disconnecting from voice and shutting down.`);
+  stopCounterScheduler();
   await stopTwitchMonitor();
   disconnect();
   await closePool();
@@ -41,11 +44,13 @@ async function main(): Promise<void> {
     getActiveChannels,
     getLoginUserIds: getActiveChannelUserIds,
   });
+  registerCounterTwitchRuntime({ send: sayInChannel });
 
   startDiscordBot();
   await startTwitchBot();
   startTikTokBot();
   startWebPanel();
+  startCounterScheduler();
   startTwitchMonitor().catch((err) => console.error('[Bot] TwitchMonitor startup error:', err));
 }
 

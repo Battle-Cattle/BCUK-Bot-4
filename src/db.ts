@@ -1698,6 +1698,45 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
   invalidateCounterLookupCache();
 }
 
+export async function incrementCounter(id: number): Promise<number> {
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    const [result] = await conn.execute<mysql.ResultSetHeader>(
+      'UPDATE counter SET current_value = current_value + 1 WHERE id = ?',
+      [id],
+    );
+    if (result.affectedRows === 0) throw new CounterNotFoundError(id);
+    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+      'SELECT current_value FROM counter WHERE id = ?',
+      [id],
+    );
+    const newValue = (rows[0] as mysql.RowDataPacket).current_value as number;
+    await conn.commit();
+    invalidateCounterLookupCache();
+    return newValue;
+  } catch (err) {
+    await conn.rollback().catch(() => {});
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function archiveAndResetYearlyCounters(year: number): Promise<number> {
+  if (!Number.isInteger(year) || year < 2020 || year > 2100) {
+    throw new Error(`[DB] Invalid archive year: ${year}`);
+  }
+  // MySQL doesn't support parameterised column names, so the name is built from
+  // `year` which is validated to a safe integer in [2020, 2100] above.
+  const columnName = `value${year}`;
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    `UPDATE counter SET \`${columnName}\` = current_value, current_value = 0 WHERE reset_yearly = 1 AND \`${columnName}\` IS NULL`,
+  );
+  invalidateCounterLookupCache();
+  return result.affectedRows;
+}
+
 // ─── Stream monitor ──────────────────────────────────────────────────────────
 
 export interface DbStreamGroup {

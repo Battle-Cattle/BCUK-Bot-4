@@ -2,6 +2,7 @@ import tmi from 'tmi.js';
 import { TWITCH_USERNAME, TWITCH_OAUTH_TOKEN } from './config';
 import { handleCommand } from './commandRouter';
 import { executeCustomCommandForTwitch } from './customCommandHandler';
+import { executeCounterCommandForTwitch } from './counterHandler';
 import { setTwitchChannel } from './statusStore';
 import { getTwitchEnabledChannels } from './db';
 import { normalizeTwitchChannelName } from './twitchChannelName';
@@ -162,6 +163,10 @@ export async function startTwitchBot(): Promise<void> {
 
     executeCustomCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
       console.error('[Twitch] Custom command error:', err),
+    );
+
+    executeCounterCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
+      console.error('[Twitch] Counter command error:', err),
     );
 
     handleCommand(message, 'twitch').catch((err) =>
