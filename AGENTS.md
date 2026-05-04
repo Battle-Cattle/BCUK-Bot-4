@@ -211,6 +211,7 @@ Copy `.env.example` → `.env` and fill in all values.
 | `DISCORD_CALLBACK_URL`  | ✅ | e.g. `http://localhost:3000/auth/discord/callback` |
 | `TWITCH_CLIENT_ID`      | ✅ | Twitch app Client ID — for stream monitoring (separate from chat bot) |
 | `TWITCH_CLIENT_SECRET`  | ✅ | Twitch app Client Secret — for stream monitoring |
+| `CUSTOM_COMMANDS_LIVE_REPLIES` | ❌ | Default: `false`. When `false`, custom command matches are recorded for monitoring but no reply is sent (shadow mode). Set to `true` to enable live replies. |
 
 ---
 
@@ -335,7 +336,11 @@ Any CRUD change to groups or streamers via the web panel calls `restartTwitchMon
 Local file (`monitor-settings.json` at `process.cwd()`) persists one value: `twitchMonitorEnabled` (boolean, default `true` if file missing). It is **gitignored**. Read/write via `src/monitorSettings.ts` helpers only.
 
 ### Custom commands and counters are panel-first
-`/admin/commands` and `/admin/counters` currently provide management CRUD in the web panel. Runtime execution wiring in Twitch/Discord message handlers and counter yearly scheduler logic may be implemented separately from panel work.
+`/admin/commands` and `/admin/counters` currently provide management CRUD in the web panel.
+
+**Custom command runtime** is implemented in `src/customCommandHandler.ts`. Commands are matched and recorded for monitoring on both Twitch and Discord. Live replies are gated behind `CUSTOM_COMMANDS_LIVE_REPLIES` (default `false` — shadow mode). Multi-Twitch broadcast (shared-chat dedup via Helix) is wired and ready.
+
+**Counter runtime** is not yet implemented. The counter path in `src/customCommandHandler.ts` returns a preview response with `(preview only — counter not incremented)` and does not mutate `current_value`. Counter increment logic and the yearly reset scheduler remain to be implemented.
 
 ---
 

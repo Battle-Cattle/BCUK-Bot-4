@@ -107,4 +107,38 @@ export async function getStreams(userIds: string[]): Promise<TwitchStream[]> {
   return results;
 }
 
+export interface SharedChatParticipant {
+  broadcaster_id: string;
+  broadcaster_login: string;
+  broadcaster_name: string;
+}
 
+export interface SharedChatSession {
+  session_id: string;
+  host_broadcaster_id: string;
+  host_broadcaster_login: string;
+  host_broadcaster_name: string;
+  participants: SharedChatParticipant[];
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Returns the active shared chat session for a broadcaster, or null if none exists.
+ * A 403 response is treated as null — app tokens may lack the required channel scope
+ * for some broadcasters; the caller falls back to no dedup in that case.
+ */
+export async function getSharedChatSession(broadcasterId: string): Promise<SharedChatSession | null> {
+  const token = await getAppToken();
+  const res = await twitchFetch(
+    `https://api.twitch.tv/helix/shared_chat/session?broadcaster_id=${encodeURIComponent(broadcasterId)}`,
+    { headers: authHeaders(token) },
+  );
+  if (res.status === 404 || res.status === 403) return null;
+  if (!res.ok) {
+    if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
+    throw new Error(`[TwitchAPI] getSharedChatSession failed: ${res.status}`);
+  }
+  const data = await res.json() as { data: SharedChatSession[] };
+  return data.data[0] ?? null;
+}
