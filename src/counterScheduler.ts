@@ -1,36 +1,37 @@
 import { archiveAndResetYearlyCounters } from './db';
 
+// Node.js clamps setTimeout delays longer than 2^31-1 ms (~24.8 days) to 1 ms,
+// so a single year-long timeout would fire immediately. Poll hourly instead.
+const POLL_INTERVAL_MS = 3_600_000;
+
 let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
+let lastArchivedYear: number | null = null;
 
-function msUntilNextJan1(): number {
+async function tick(): Promise<void> {
   const now = new Date();
-  const nextJan1 = new Date(now.getFullYear() + 1, 0, 1, 0, 0, 0, 0);
-  return nextJan1.getTime() - now.getTime();
-}
+  const prevYear = now.getFullYear() - 1;
 
-async function runYearlyArchive(): Promise<void> {
-  // Archive the year that just ended (scheduler fires on Jan 1 of the new year)
-  const year = new Date().getFullYear() - 1;
-  try {
-    const count = await archiveAndResetYearlyCounters(year);
-    console.log(`[CounterScheduler] Archived and reset ${count} counter(s) for year ${year}.`);
-  } catch (err) {
-    console.error(`[CounterScheduler] Failed to archive counters for year ${year}:`, err);
+  if (now.getMonth() === 0 && now.getDate() === 1 && lastArchivedYear !== prevYear) {
+    try {
+      const count = await archiveAndResetYearlyCounters(prevYear);
+      console.log(`[CounterScheduler] Archived and reset ${count} counter(s) for year ${prevYear}.`);
+      lastArchivedYear = prevYear;
+    } catch (err) {
+      console.error(`[CounterScheduler] Failed to archive counters for year ${prevYear}:`, err);
+      // lastArchivedYear is not set on failure, so the next hourly poll will retry.
+    }
   }
-  scheduleNextArchive();
-}
 
-function scheduleNextArchive(): void {
-  const delay = msUntilNextJan1();
-  schedulerTimer = setTimeout(() => {
-    runYearlyArchive().catch((err) => console.error('[CounterScheduler] Unhandled error:', err));
-  }, delay);
+  schedulerTimer = setTimeout(
+    () => tick().catch((err) => console.error('[CounterScheduler] Unhandled error:', err)),
+    POLL_INTERVAL_MS,
+  );
 }
 
 export function startCounterScheduler(): void {
-  scheduleNextArchive();
+  tick().catch((err) => console.error('[CounterScheduler] Startup error:', err));
   const hoursUntil = Math.round(msUntilNextJan1() / 3_600_000);
-  console.log(`[CounterScheduler] Started — next yearly archive in ~${hoursUntil}h.`);
+  console.log(`[CounterScheduler] Started — polling hourly, next yearly archive in ~${hoursUntil}h.`);
 }
 
 export function stopCounterScheduler(): void {
@@ -38,4 +39,10 @@ export function stopCounterScheduler(): void {
     clearTimeout(schedulerTimer);
     schedulerTimer = null;
   }
+}
+
+function msUntilNextJan1(): number {
+  const now = new Date();
+  const nextJan1 = new Date(now.getFullYear() + 1, 0, 1, 0, 0, 0, 0);
+  return nextJan1.getTime() - now.getTime();
 }

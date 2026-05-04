@@ -3,6 +3,7 @@ import { CUSTOM_COMMANDS_LIVE_REPLIES } from './config';
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './db';
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { getSharedChatSession } from './twitchApi';
+import { extractCommand } from './commandUtils';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
@@ -19,14 +20,6 @@ let _twitchRuntime: TwitchChatRuntime | null = null;
 
 export function registerTwitchChatRuntime(runtime: TwitchChatRuntime): void {
   _twitchRuntime = runtime;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function extractCommand(rawMessage: string): string | null {
-  const trimmed = rawMessage.trim();
-  if (!trimmed) return null;
-  return trimmed.split(/\s+/)[0]?.toLowerCase() ?? null;
 }
 
 // ─── Lookup ───────────────────────────────────────────────────────────────────
