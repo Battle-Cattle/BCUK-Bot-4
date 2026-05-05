@@ -430,9 +430,12 @@ async function tryEditStartupMessage(streamer: DbStreamerFull, liveStream: Twitc
     });
     await setStreamerLive(streamer.id, streamer.discord_message_id, streamer.discord_channel_id, liveStream.game_name);
     return true;
-  } catch {
-    // Message no longer exists — caller will fall through to post fresh
-    return false;
+  } catch (err) {
+    const e = err as { code?: number | string; status?: number };
+    const code = typeof e.code === 'string' ? Number(e.code) : e.code;
+    if (code === 10008 || e.status === 404) return false;
+    console.error(`[TwitchMonitor] Failed to edit startup message for ${streamer.name}:`, err);
+    throw err;
   }
 }
 
