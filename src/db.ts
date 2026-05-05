@@ -7,8 +7,10 @@ export {
   AccessLevel, ACCESS_LEVEL_LABELS,
   findUser, findUserByTwitchName, getAllUsers,
   updateDiscordName, getTwitchEnabledChannels, updateAccessLevel,
-};
-export type { AccessLevelValue, DbUser };
+} from './db/users';
+export type { AccessLevelValue, DbUser } from './db/users';
+
+import { upsertUserRecord, setTwitchBotEnabledRecord, removeUserRecord } from './db/users';
 
 // Wrappers add cache invalidation — users.ts is a pure DB layer with no cache knowledge.
 
