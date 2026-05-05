@@ -203,6 +203,18 @@ async function counterExists(id: number, executor: SqlExecutor = getPool()): Pro
   return rows.length > 0;
 }
 
+async function getCounterCommandsById(
+  id: number,
+  executor: SqlExecutor = getPool(),
+): Promise<{ trigger_command: string; check_command: string } | null> {
+  const [rows] = await executor.execute<mysql.RowDataPacket[]>(
+    'SELECT trigger_command, check_command FROM counter WHERE id = ? LIMIT 1',
+    [id],
+  );
+  if (rows.length === 0) return null;
+  return { trigger_command: rows[0].trigger_command, check_command: rows[0].check_command };
+}
+
 export async function updateCounter(input: UpdateCounterInput): Promise<void> {
   const { id, triggerCommand, checkCommand, message, incrementMessage, resetYearly } = input;
 
@@ -211,8 +223,20 @@ export async function updateCounter(input: UpdateCounterInput): Promise<void> {
     throw new Error('Counter trigger_command and check_command must be different');
   }
 
+  const current = await getCounterCommandsById(id);
+  if (!current) throw new CounterNotFoundError(id);
+
+  // Lock old commands too so concurrent adds/updates can't sneak in during the
+  // transition window while the old trigger/check names are being released.
+  const commandsToLock = [
+    current.trigger_command.trim().toLowerCase(),
+    current.check_command.trim().toLowerCase(),
+    fields.triggerCommand,
+    fields.checkCommand,
+  ];
+
   await runSerializedCommandWrite(
-    [fields.triggerCommand, fields.checkCommand],
+    commandsToLock,
     { excludeCounterId: id },
     async (connection) => {
       const [result] = await connection.execute<mysql.ResultSetHeader>(
@@ -236,10 +260,20 @@ export async function updateCounter(input: UpdateCounterInput): Promise<void> {
 }
 
 export async function removeCounter(id: number): Promise<void> {
-  const [result] = await getPool().execute<mysql.ResultSetHeader>('DELETE FROM counter WHERE id = ?', [id]);
-  if (result.affectedRows === 0) {
-    throw new CounterNotFoundError(id);
-  }
+  const current = await getCounterCommandsById(id);
+  if (!current) throw new CounterNotFoundError(id);
+
+  await runSerializedCommandWrite(
+    [current.trigger_command, current.check_command],
+    { excludeCounterId: id },
+    async (connection) => {
+      const [result] = await connection.execute<mysql.ResultSetHeader>(
+        'DELETE FROM counter WHERE id = ?',
+        [id],
+      );
+      if (result.affectedRows === 0) throw new CounterNotFoundError(id);
+    },
+  );
 
   invalidateCounterLookupCache();
 }
