@@ -24,7 +24,6 @@ exclude_patterns = [
   "**/build/**",
   "**/cache/**",
   "**/config/**",
-  "**/db/**",
   "**/deps/**",
   "**/dist/**",
   "**/extern/**",
