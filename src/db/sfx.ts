@@ -20,7 +20,7 @@ export interface SfxFile {
 }
 
 export interface SfxTriggerRow {
-  triggerId: number;
+  triggerId: string;
   triggerCommand: string;
   description: string | null;
   hidden: boolean;
@@ -94,7 +94,7 @@ export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
      ORDER BY c.name, t.trigger_command, s.id`,
   );
 
-  const map = new Map<number, SfxTriggerRow>();
+  const map = new Map<string, SfxTriggerRow>();
   for (const r of rows) {
     if (!map.has(r.triggerId)) {
       map.set(r.triggerId, {
