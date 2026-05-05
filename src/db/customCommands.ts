@@ -440,10 +440,13 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
       'DELETE FROM twitch_user_commands WHERE command_id = ?',
       [commandId],
     );
-    await connection.execute(
+    const [result] = await connection.execute<mysql.ResultSetHeader>(
       'DELETE FROM custom_command WHERE command_id = ?',
       [commandId],
     );
+    if (result.affectedRows === 0) {
+      throw new CommandNotFoundError(commandId);
+    }
     await connection.commit();
     // Invalidate only after a successful commit; refresh remains lazy on next lookup.
     invalidateCustomCommandLookupCache();
