@@ -404,6 +404,48 @@ async function handleStreamOffline(login: string): Promise<void> {
   console.log(`[TwitchMonitor] ${login} went offline — grace period started`);
 }
 
+// ─── Startup live-check helpers ──────────────────────────────────────────────
+
+async function tryEditStartupMessage(streamer: DbStreamerFull, liveStream: TwitchStream): Promise<boolean> {
+  if (!streamer.discord_channel_id || !streamer.discord_message_id) return false;
+  try {
+    const channel = await discordClient!.channels.fetch(streamer.discord_channel_id);
+    if (!channel || !channel.isTextBased()) return false;
+    const vars = templateVars(streamer.name, liveStream);
+    const content = fillTemplate(streamer.group.live_message, vars);
+    const embed = buildEmbed(liveStream);
+    const message = await channel.messages.fetch(streamer.discord_message_id);
+    await message.edit({ content, embeds: [embed] });
+    liveStates.set(String(streamer.id), {
+      streamerId: streamer.id,
+      groupId: streamer.group.id,
+      group: streamer.group,
+      login: streamer.name.toLowerCase(),
+      messageId: streamer.discord_message_id,
+      channelId: streamer.discord_channel_id,
+      currentGame: liveStream.game_name,
+      title: liveStream.title,
+      currentStream: liveStream,
+      offlineTimer: null,
+    });
+    await setStreamerLive(streamer.id, streamer.discord_message_id, streamer.discord_channel_id, liveStream.game_name);
+    return true;
+  } catch {
+    // Message no longer exists — caller will fall through to post fresh
+    return false;
+  }
+}
+
+async function tryDeleteDiscordMessage(channelId: string, messageId: string): Promise<void> {
+  if (!discordClient) return;
+  try {
+    const ch = await discordClient.channels.fetch(channelId);
+    if (!ch || !ch.isTextBased()) return;
+    const msg = await ch.messages.fetch(messageId).catch(() => null);
+    if (msg) await msg.delete();
+  } catch { /* already deleted */ }
+}
+
 // ─── Startup live-check ───────────────────────────────────────────────────────
 
 async function performStartupLiveCheck(): Promise<void> {
@@ -433,36 +475,7 @@ async function performStartupLiveCheck(): Promise<void> {
 
     if (liveStream) {
       if (hasStoredMsg && streamer.discord_channel_id) {
-        if (discordClient && getMonitorEnabled()) {
-          // Try to edit the existing message
-          try {
-            const channel = await discordClient.channels.fetch(streamer.discord_channel_id);
-            if (channel && channel.isTextBased()) {
-              const vars = templateVars(streamer.name, liveStream);
-              const content = fillTemplate(streamer.group.live_message, vars);
-              const embed = buildEmbed(liveStream);
-              const message = await channel.messages.fetch(streamer.discord_message_id!);
-              await message.edit({ content, embeds: [embed] });
-              liveStates.set(String(streamer.id), {
-                streamerId: streamer.id,
-                groupId: streamer.group.id,
-                group: streamer.group,
-                login: streamer.name.toLowerCase(),
-                messageId: streamer.discord_message_id,
-                channelId: streamer.discord_channel_id,
-                currentGame: liveStream.game_name,
-                title: liveStream.title,
-                currentStream: liveStream,
-                offlineTimer: null,
-              });
-              await setStreamerLive(streamer.id, streamer.discord_message_id!, streamer.discord_channel_id!, liveStream.game_name);
-              groupsWithChanges.add(streamer.group.id);
-              continue;
-            }
-          } catch {
-            // Message no longer exists — fall through to post fresh
-          }
-        } else {
+        if (!discordClient || !getMonitorEnabled()) {
           // Disabled or no client: restore stored IDs into liveStates without touching Discord
           liveStates.set(String(streamer.id), {
             streamerId: streamer.id,
@@ -478,20 +491,18 @@ async function performStartupLiveCheck(): Promise<void> {
           });
           continue;
         }
+        if (await tryEditStartupMessage(streamer, liveStream)) {
+          groupsWithChanges.add(streamer.group.id);
+          continue;
+        }
       }
       // Post fresh announcement
       await postAnnouncement(streamer, liveStream);
     } else if (hasStoredMsg) {
       // Stream ended while bot was offline — liveStates is empty at startup so
       // deleteAnnouncement() would early-return without clearing DB state. Do it directly.
-      if (discordClient && streamer.discord_channel_id && streamer.discord_message_id) {
-        try {
-          const ch = await discordClient.channels.fetch(streamer.discord_channel_id);
-          if (ch && ch.isTextBased()) {
-            const msg = await ch.messages.fetch(streamer.discord_message_id).catch(() => null);
-            if (msg) await msg.delete();
-          }
-        } catch { /* already deleted */ }
+      if (streamer.discord_channel_id && streamer.discord_message_id) {
+        await tryDeleteDiscordMessage(streamer.discord_channel_id, streamer.discord_message_id);
       }
       await clearStreamerLive(streamer.id);
       groupsWithChanges.add(streamer.group.id);
@@ -504,6 +515,15 @@ async function performStartupLiveCheck(): Promise<void> {
 }
 
 // ─── Polling ───────────────────────────────────────────────────────────────
+
+function cancelOfflineTimersForLogin(loginKey: string): void {
+  for (const state of liveStates.values()) {
+    if (state.login === loginKey && state.offlineTimer) {
+      clearTimeout(state.offlineTimer);
+      state.offlineTimer = null;
+    }
+  }
+}
 
 async function pollStreams(): Promise<void> {
   if (pollRunning || streamersData.length === 0) return;
@@ -530,12 +550,7 @@ async function pollStreams(): Promise<void> {
       if (pollStream) {
         if (existing?.offlineTimer) {
           // Came back during grace period — cancel offline timers for all groups this login belongs to
-          for (const state of liveStates.values()) {
-            if (state.login === loginKey && state.offlineTimer) {
-              clearTimeout(state.offlineTimer);
-              state.offlineTimer = null;
-            }
-          }
+          cancelOfflineTimersForLogin(loginKey);
           console.log(`[TwitchMonitor] ${loginKey} came back — offline timer(s) cancelled`);
         }
         const isNew = !liveStates.has(stateKey);
