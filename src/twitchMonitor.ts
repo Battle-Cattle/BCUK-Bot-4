@@ -662,10 +662,12 @@ export async function shutdownTwitchMonitor(): Promise<void> {
 
   // Delete all live announcements and clear DB state
   const stateKeys = Array.from(liveStates.keys());
+  let failedDeletes = 0;
   for (const key of stateKeys) {
     try {
       await deleteAnnouncement(key);
     } catch (err) {
+      failedDeletes++;
       console.error('[TwitchMonitor] Shutdown: failed to delete announcement:', err);
     }
   }
@@ -673,7 +675,11 @@ export async function shutdownTwitchMonitor(): Promise<void> {
   liveStates.clear();
   loginToUserId.clear();
   streamersData = [];
-  console.log('[TwitchMonitor] Shutdown complete — all live messages deleted');
+  if (failedDeletes === 0) {
+    console.log('[TwitchMonitor] Shutdown complete — all live messages deleted');
+  } else {
+    console.warn(`[TwitchMonitor] Shutdown complete with ${failedDeletes} failed delete(s) — some announcements may remain`);
+  }
 }
 
 /**
