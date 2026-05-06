@@ -357,9 +357,8 @@ async function deleteAnnouncement(stateKey: string): Promise<void> {
         await msg.delete();
       }
     } catch (err) {
-      if (!isDiscordNotFoundError(err)) {
-        console.error(`[TwitchMonitor] Failed to delete message for ${state.login}:`, err);
-      }
+      if (!isDiscordNotFoundError(err)) throw err;
+      // not-found: message already gone — fall through to clear DB state
     }
   }
 
@@ -660,7 +659,11 @@ export async function shutdownTwitchMonitor(): Promise<void> {
   // Delete all live announcements and clear DB state
   const stateKeys = Array.from(liveStates.keys());
   for (const key of stateKeys) {
-    await deleteAnnouncement(key);
+    try {
+      await deleteAnnouncement(key);
+    } catch (err) {
+      console.error('[TwitchMonitor] Shutdown: failed to delete announcement:', err);
+    }
   }
 
   liveStates.clear();
