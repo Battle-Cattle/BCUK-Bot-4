@@ -1,4 +1,4 @@
-import { EmbedBuilder, TextChannel } from 'discord.js';
+import { DiscordAPIError, EmbedBuilder, TextChannel } from 'discord.js';
 import { discordClient } from './discordBot';
 import { getMonitorEnabled } from './monitorSettings';
 import {
@@ -431,9 +431,7 @@ async function tryEditStartupMessage(streamer: DbStreamerFull, liveStream: Twitc
     await setStreamerLive(streamer.id, streamer.discord_message_id, streamer.discord_channel_id, liveStream.game_name);
     return true;
   } catch (err) {
-    const e = err as { code?: number | string; status?: number };
-    const code = typeof e.code === 'string' ? Number(e.code) : e.code;
-    if (code === 10008 || e.status === 404) return false;
+    if (err instanceof DiscordAPIError && (err.code === 10008 || err.status === 404)) return false;
     console.error(`[TwitchMonitor] Failed to edit startup message for ${streamer.name}:`, err);
     throw err;
   }
@@ -447,9 +445,7 @@ async function tryDeleteDiscordMessage(channelId: string, messageId: string): Pr
     const msg = await ch.messages.fetch(messageId);
     await msg.delete();
   } catch (err) {
-    const e = err as { code?: number | string; status?: number };
-    const code = typeof e.code === 'string' ? Number(e.code) : e.code;
-    if (code === 10008 || code === 10003 || e.status === 404) return;
+    if (err instanceof DiscordAPIError && (err.code === 10008 || err.code === 10003 || err.status === 404)) return;
     console.error(`[TwitchMonitor] Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
     throw err;
   }
