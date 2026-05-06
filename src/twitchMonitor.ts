@@ -1,4 +1,4 @@
-import { DiscordAPIError, EmbedBuilder, TextChannel } from 'discord.js';
+import { DiscordAPIError, EmbedBuilder, RESTJSONErrorCodes, TextChannel } from 'discord.js';
 import { discordClient } from './discordBot';
 import { getMonitorEnabled } from './monitorSettings';
 import {
@@ -410,7 +410,11 @@ async function handleStreamOffline(login: string): Promise<void> {
 // ─── Startup live-check helpers ──────────────────────────────────────────────
 
 function isDiscordNotFoundError(err: unknown): boolean {
-  return err instanceof DiscordAPIError && (err.code === 10008 || err.code === 10003 || err.status === 404);
+  return err instanceof DiscordAPIError && (
+    err.code === RESTJSONErrorCodes.UnknownMessage ||
+    err.code === RESTJSONErrorCodes.UnknownChannel ||
+    err.status === 404
+  );
 }
 
 async function tryEditStartupMessage(streamer: DbStreamerFull, liveStream: TwitchStream): Promise<boolean> {
