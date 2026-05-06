@@ -444,9 +444,15 @@ async function tryDeleteDiscordMessage(channelId: string, messageId: string): Pr
   try {
     const ch = await discordClient.channels.fetch(channelId);
     if (!ch || !ch.isTextBased()) return;
-    const msg = await ch.messages.fetch(messageId).catch(() => null);
-    if (msg) await msg.delete();
-  } catch { /* already deleted */ }
+    const msg = await ch.messages.fetch(messageId);
+    await msg.delete();
+  } catch (err) {
+    const e = err as { code?: number | string; status?: number };
+    const code = typeof e.code === 'string' ? Number(e.code) : e.code;
+    if (code === 10008 || code === 10003 || e.status === 404) return;
+    console.error(`[TwitchMonitor] Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
+    throw err;
+  }
 }
 
 // ─── Startup live-check ───────────────────────────────────────────────────────
@@ -505,7 +511,12 @@ async function performStartupLiveCheck(): Promise<void> {
       // Stream ended while bot was offline — liveStates is empty at startup so
       // deleteAnnouncement() would early-return without clearing DB state. Do it directly.
       if (streamer.discord_channel_id && streamer.discord_message_id) {
-        await tryDeleteDiscordMessage(streamer.discord_channel_id, streamer.discord_message_id);
+        try {
+          await tryDeleteDiscordMessage(streamer.discord_channel_id, streamer.discord_message_id);
+        } catch {
+          // Delete failed (already logged) — skip DB clear to avoid orphaning the announcement
+          continue;
+        }
       }
       await clearStreamerLive(streamer.id);
       groupsWithChanges.add(streamer.group.id);
