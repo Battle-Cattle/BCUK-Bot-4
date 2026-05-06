@@ -431,7 +431,7 @@ async function tryEditStartupMessage(streamer: DbStreamerFull, liveStream: Twitc
     await setStreamerLive(streamer.id, streamer.discord_message_id, streamer.discord_channel_id, liveStream.game_name);
     return true;
   } catch (err) {
-    if (err instanceof DiscordAPIError && (err.code === 10008 || err.status === 404)) return false;
+    if (err instanceof DiscordAPIError && (err.code === 10008 || err.code === 10003 || err.status === 404)) return false;
     console.error(`[TwitchMonitor] Failed to edit startup message for ${streamer.name}:`, err);
     throw err;
   }
@@ -496,8 +496,13 @@ async function performStartupLiveCheck(): Promise<void> {
           });
           continue;
         }
-        if (await tryEditStartupMessage(streamer, liveStream)) {
-          groupsWithChanges.add(streamer.group.id);
+        try {
+          if (await tryEditStartupMessage(streamer, liveStream)) {
+            groupsWithChanges.add(streamer.group.id);
+            continue;
+          }
+        } catch {
+          // Edit failed (already logged) — skip postAnnouncement for this streamer
           continue;
         }
       }
