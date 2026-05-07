@@ -11,8 +11,9 @@ export class ReservedCommandError extends Error {
   }
 }
 
-export function assertNotReservedCommand(normalizedTrigger: string): void {
-  if (RESERVED_BUILT_IN_COMMANDS.has(normalizedTrigger)) {
-    throw new ReservedCommandError(normalizedTrigger);
+export function assertNotReservedCommand(trigger: string): void {
+  const normalized = trigger.trim().toLowerCase();
+  if (RESERVED_BUILT_IN_COMMANDS.has(normalized)) {
+    throw new ReservedCommandError(normalized);
   }
 }
