@@ -1,5 +1,6 @@
-import { DiscordAPIError, EmbedBuilder, RESTJSONErrorCodes, TextChannel } from 'discord.js';
+import { EmbedBuilder, TextChannel } from 'discord.js';
 import { discordClient } from './discordBot';
+import { isDiscordNotFoundError, tryDeleteDiscordMessage } from './discordUtils';
 import { getMonitorEnabled } from './monitorSettings';
 import {
   getAllStreamersWithGroups,
@@ -409,14 +410,6 @@ async function handleStreamOffline(login: string): Promise<void> {
 
 // ─── Startup live-check helpers ──────────────────────────────────────────────
 
-function isDiscordNotFoundError(err: unknown): boolean {
-  return err instanceof DiscordAPIError && (
-    err.code === RESTJSONErrorCodes.UnknownMessage ||
-    err.code === RESTJSONErrorCodes.UnknownChannel ||
-    err.status === 404
-  );
-}
-
 async function tryEditStartupMessage(streamer: DbStreamerFull, liveStream: TwitchStream): Promise<boolean> {
   if (!streamer.discord_channel_id || !streamer.discord_message_id) return false;
   try {
@@ -444,20 +437,6 @@ async function tryEditStartupMessage(streamer: DbStreamerFull, liveStream: Twitc
   } catch (err) {
     if (isDiscordNotFoundError(err)) return false;
     console.error(`[TwitchMonitor] Failed to edit startup message for ${streamer.name}:`, err);
-    throw err;
-  }
-}
-
-async function tryDeleteDiscordMessage(channelId: string, messageId: string): Promise<void> {
-  if (!discordClient) return;
-  try {
-    const ch = await discordClient.channels.fetch(channelId);
-    if (!ch || !ch.isTextBased()) return;
-    const msg = await ch.messages.fetch(messageId);
-    await msg.delete();
-  } catch (err) {
-    if (isDiscordNotFoundError(err)) return;
-    console.error(`[TwitchMonitor] Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
     throw err;
   }
 }
