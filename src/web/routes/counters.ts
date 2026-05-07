@@ -4,6 +4,7 @@ import {
   CommandConflictError,
   CounterNotFoundError,
   isMysqlDuplicateEntryError,
+  ReservedCommandError,
   getAllCounters,
   isCounterCommandTaken,
   removeCounter,
@@ -19,6 +20,7 @@ const KNOWN_ERRORS = new Set([
   'missing_fields',
   'same_commands',
   'duplicate_command',
+  'reserved_command',
   'invalid_id',
   'add_failed',
   'update_failed',
@@ -131,6 +133,10 @@ router.post('/counters/add', requireManager, csrfProtection, async (req, res) =>
       form.resetYearly,
     );
   } catch (err) {
+    if (err instanceof ReservedCommandError) {
+      return res.redirect('/admin/counters?error=reserved_command');
+    }
+
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
       return res.redirect('/admin/counters?error=duplicate_command');
     }
@@ -175,6 +181,10 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
       return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
+    }
+
+    if (err instanceof ReservedCommandError) {
+      return res.redirect('/admin/counters?error=reserved_command');
     }
 
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
