@@ -1,4 +1,4 @@
-import { EmbedBuilder, TextChannel } from 'discord.js';
+import { DiscordAPIError, EmbedBuilder, RESTJSONErrorCodes, TextChannel } from 'discord.js';
 import { discordClient } from './discordBot';
 import { getMonitorEnabled } from './monitorSettings';
 import {
@@ -324,7 +324,9 @@ async function editAnnouncement(
       try {
         const old = await textChannel.messages.fetch(state.messageId);
         await old.delete();
-      } catch { /* already deleted */ }
+      } catch (err) {
+        if (!isDiscordNotFoundError(err)) throw err;
+      }
       const msg = await textChannel.send({ content, embeds: [embed] });
       state.messageId = msg.id;
       state.channelId = msg.channelId;
@@ -351,11 +353,12 @@ async function deleteAnnouncement(stateKey: string): Promise<void> {
     try {
       const channel = await discordClient.channels.fetch(state.channelId);
       if (channel && channel.isTextBased()) {
-        const msg = await channel.messages.fetch(state.messageId).catch(() => null);
-        if (msg) await msg.delete();
+        const msg = await channel.messages.fetch(state.messageId);
+        await msg.delete();
       }
     } catch (err) {
-      console.error(`[TwitchMonitor] Failed to delete message for ${state.login}:`, err);
+      if (!isDiscordNotFoundError(err)) throw err;
+      // not-found: message already gone — fall through to clear DB state
     }
   }
 
@@ -406,6 +409,14 @@ async function handleStreamOffline(login: string): Promise<void> {
 
 // ─── Startup live-check helpers ──────────────────────────────────────────────
 
+function isDiscordNotFoundError(err: unknown): boolean {
+  return err instanceof DiscordAPIError && (
+    err.code === RESTJSONErrorCodes.UnknownMessage ||
+    err.code === RESTJSONErrorCodes.UnknownChannel ||
+    err.status === 404
+  );
+}
+
 async function tryEditStartupMessage(streamer: DbStreamerFull, liveStream: TwitchStream): Promise<boolean> {
   if (!streamer.discord_channel_id || !streamer.discord_message_id) return false;
   try {
@@ -431,9 +442,7 @@ async function tryEditStartupMessage(streamer: DbStreamerFull, liveStream: Twitc
     await setStreamerLive(streamer.id, streamer.discord_message_id, streamer.discord_channel_id, liveStream.game_name);
     return true;
   } catch (err) {
-    const e = err as { code?: number | string; status?: number };
-    const code = typeof e.code === 'string' ? Number(e.code) : e.code;
-    if (code === 10008 || e.status === 404) return false;
+    if (isDiscordNotFoundError(err)) return false;
     console.error(`[TwitchMonitor] Failed to edit startup message for ${streamer.name}:`, err);
     throw err;
   }
@@ -444,9 +453,13 @@ async function tryDeleteDiscordMessage(channelId: string, messageId: string): Pr
   try {
     const ch = await discordClient.channels.fetch(channelId);
     if (!ch || !ch.isTextBased()) return;
-    const msg = await ch.messages.fetch(messageId).catch(() => null);
-    if (msg) await msg.delete();
-  } catch { /* already deleted */ }
+    const msg = await ch.messages.fetch(messageId);
+    await msg.delete();
+  } catch (err) {
+    if (isDiscordNotFoundError(err)) return;
+    console.error(`[TwitchMonitor] Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
+    throw err;
+  }
 }
 
 // ─── Startup live-check ───────────────────────────────────────────────────────
@@ -494,8 +507,13 @@ async function performStartupLiveCheck(): Promise<void> {
           });
           continue;
         }
-        if (await tryEditStartupMessage(streamer, liveStream)) {
-          groupsWithChanges.add(streamer.group.id);
+        try {
+          if (await tryEditStartupMessage(streamer, liveStream)) {
+            groupsWithChanges.add(streamer.group.id);
+            continue;
+          }
+        } catch {
+          // Edit failed (already logged) — skip postAnnouncement for this streamer
           continue;
         }
       }
@@ -505,7 +523,12 @@ async function performStartupLiveCheck(): Promise<void> {
       // Stream ended while bot was offline — liveStates is empty at startup so
       // deleteAnnouncement() would early-return without clearing DB state. Do it directly.
       if (streamer.discord_channel_id && streamer.discord_message_id) {
-        await tryDeleteDiscordMessage(streamer.discord_channel_id, streamer.discord_message_id);
+        try {
+          await tryDeleteDiscordMessage(streamer.discord_channel_id, streamer.discord_message_id);
+        } catch {
+          // Delete failed (already logged) — skip DB clear to avoid orphaning the announcement
+          continue;
+        }
       }
       await clearStreamerLive(streamer.id);
       groupsWithChanges.add(streamer.group.id);
@@ -639,14 +662,24 @@ export async function shutdownTwitchMonitor(): Promise<void> {
 
   // Delete all live announcements and clear DB state
   const stateKeys = Array.from(liveStates.keys());
+  let failedDeletes = 0;
   for (const key of stateKeys) {
-    await deleteAnnouncement(key);
+    try {
+      await deleteAnnouncement(key);
+    } catch (err) {
+      failedDeletes++;
+      console.error('[TwitchMonitor] Shutdown: failed to delete announcement:', err);
+    }
   }
 
   liveStates.clear();
   loginToUserId.clear();
   streamersData = [];
-  console.log('[TwitchMonitor] Shutdown complete — all live messages deleted');
+  if (failedDeletes === 0) {
+    console.log('[TwitchMonitor] Shutdown complete — all live messages deleted');
+  } else {
+    console.warn(`[TwitchMonitor] Shutdown complete with ${failedDeletes} failed delete(s) — some announcements may remain`);
+  }
 }
 
 /**
