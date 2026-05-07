@@ -54,7 +54,7 @@ const SHORT_RETRY_TTL_MS = 5_000;
 const sessionCache = new Map<string, SessionCacheEntry>();
 const inFlightRefreshes = new Map<string, Promise<void>>();
 
-async function resolveSharedChatSessionId(userId: string): Promise<string | null> {
+export async function resolveSharedChatSessionId(userId: string): Promise<string | null> {
   const now = Date.now();
   const cached = sessionCache.get(userId);
 

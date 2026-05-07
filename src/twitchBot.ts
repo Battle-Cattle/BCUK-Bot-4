@@ -3,6 +3,7 @@ import { TWITCH_USERNAME, TWITCH_OAUTH_TOKEN } from './config';
 import { handleCommand } from './commandRouter';
 import { executeCustomCommandForTwitch } from './customCommandHandler';
 import { executeCounterCommandForTwitch } from './counterHandler';
+import { executeMultiCommandForTwitch } from './multiCommandHandler';
 import { setTwitchChannel } from './statusStore';
 import { getTwitchEnabledChannels } from './db';
 import { normalizeTwitchChannelName } from './twitchChannelName';
@@ -167,6 +168,10 @@ export async function startTwitchBot(): Promise<void> {
 
     executeCounterCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
       console.error('[Twitch] Counter command error:', err),
+    );
+
+    executeMultiCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
+      console.error('[Twitch] Multi command error:', err),
     );
 
     handleCommand(message, 'twitch').catch((err) =>

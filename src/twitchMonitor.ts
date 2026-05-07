@@ -678,6 +678,32 @@ export async function restartTwitchMonitor(): Promise<void> {
   await startTwitchMonitor();
 }
 
+// ─── Multi-twitch URL query (for !multi command) ─────────────────────────────
+
+export interface MultiTwitchGroupInfo {
+  url: string;
+  participants: string[];
+}
+
+/**
+ * Returns the current multitwitch URL and participant logins for the group that
+ * the given channel belongs to, or null if the channel is not live, not in a
+ * multitwitch-enabled group, or fewer than two streamers are live in the group.
+ */
+export function getMultiTwitchDataForChannel(login: string): MultiTwitchGroupInfo | null {
+  const loginLower = login.toLowerCase();
+  const state = Array.from(liveStates.values()).find((s) => s.login === loginLower);
+  if (!state) return null;
+
+  const groupLive = Array.from(liveStates.values()).filter((s) => s.groupId === state.groupId);
+  const context = buildMultiTwitchContext(groupLive);
+  const preview = getMultitwitchPreview(state, context);
+
+  if (!preview.enabled || !preview.applicable || !preview.url) return null;
+
+  return { url: preview.url, participants: preview.participants };
+}
+
 // ─── Live state snapshot (for web panel) ─────────────────────────────────────
 
 export interface LiveStateSnapshot {
