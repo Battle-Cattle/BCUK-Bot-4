@@ -21,6 +21,7 @@ BCUK_Bot_4/
 │   ├── audioPlayer.ts        — @discordjs/voice connection + playback
 │   ├── statusStore.ts        — In-memory bot state (for web panel)
 │   ├── discordBot.ts         — discord.js client + message listener
+│   ├── discordUtils.ts       — Shared Discord error helpers (isDiscordNotFoundError, tryDeleteDiscordMessage)
 │   ├── twitchBot.ts          — tmi.js client + message listener
 │   ├── tiktokBot.ts          — tiktok-live-connector + auto-reconnect
 │   ├── twitchApi.ts          — Twitch Helix API wrapper (app token, getUsers, getStreams)
@@ -258,6 +259,9 @@ Copy `.env.example` → `.env` and fill in all values.
 
 ### Graceful shutdown
 `src/index.ts` registers `SIGINT` and `SIGTERM` handlers that call `disconnect()` from `audioPlayer.ts` before `process.exit(0)`. This ensures the bot leaves the voice channel cleanly when stopped (e.g. Ctrl+C in dev, `pm2 stop` or `kill` in production) rather than appearing present in the channel until Discord times out.
+
+### Discord error helpers (`src/discordUtils.ts`)
+Shared utilities for Discord API error handling. `isDiscordNotFoundError(err)` returns `true` when `err` is a `DiscordAPIError` with code `UnknownMessage` (10008), `UnknownChannel` (10003), or HTTP status 404 — i.e. the resource is gone and no action is needed. `tryDeleteDiscordMessage(channelId, messageId)` fetches and deletes a message, silently returning on not-found errors and logging + rethrowing all others. Import from here rather than duplicating the predicate inline.
 
 ### Exported Discord client
 `src/discordBot.ts` exports `discordClient: Client | null`. It is `null` until the `ready` event fires, then set to the live `Client` instance. Other modules (e.g. `src/web/routes/api.ts`) import this to call Discord APIs without holding a circular reference to the full bot module.
