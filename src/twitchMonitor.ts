@@ -411,9 +411,10 @@ async function handleStreamOffline(login: string): Promise<void> {
 // ─── Startup live-check helpers ──────────────────────────────────────────────
 
 async function tryEditStartupMessage(streamer: DbStreamerFull, liveStream: TwitchStream): Promise<boolean> {
+  if (!discordClient) return false;
   if (!streamer.discord_channel_id || !streamer.discord_message_id) return false;
   try {
-    const channel = await discordClient!.channels.fetch(streamer.discord_channel_id);
+    const channel = await discordClient.channels.fetch(streamer.discord_channel_id);
     if (!channel || !channel.isTextBased()) return false;
     const vars = templateVars(streamer.name, liveStream);
     const content = fillTemplate(streamer.group.live_message, vars);

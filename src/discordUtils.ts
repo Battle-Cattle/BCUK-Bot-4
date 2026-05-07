@@ -18,7 +18,7 @@ export async function tryDeleteDiscordMessage(channelId: string, messageId: stri
     await msg.delete();
   } catch (err) {
     if (isDiscordNotFoundError(err)) return;
-    console.error(`[TwitchMonitor] Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
+    console.error(`[discordUtils] Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
     throw err;
   }
 }
