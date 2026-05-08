@@ -1,5 +1,5 @@
 import { CUSTOM_COMMANDS_LIVE_REPLIES } from './config';
-import { getUsers, getChannelInfo, getStreams } from './twitchApi';
+import { getUsers, getChannelInfo, getStreams, TwitchChannelInfo, TwitchStream } from './twitchApi';
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { extractCommand } from './commandUtils';
 
@@ -17,13 +17,51 @@ export function registerShoutoutRuntime(runtime: ShoutoutRuntime): void {
   _runtime = runtime;
 }
 
-// ─── Message formatting ───────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatShoutoutMessage(login: string, gameName: string | null, isLive: boolean): string {
   const url = `twitch.tv/${login}`;
   if (isLive && gameName) return `Go check out @${login}, they're live playing ${gameName}! ${url}`;
   if (gameName) return `Go give @${login} a follow! They were last seen playing ${gameName} — ${url}`;
   return `Go give @${login} a follow at ${url}!`;
+}
+
+async function resolveShoutoutData(
+  target: string,
+): Promise<{ login: string; gameName: string | null; isLive: boolean } | null> {
+  const users = await getUsers([target]);
+  const user = users[0];
+  if (!user) return null;
+
+  // Independent failures: a bad getStreams response still lets getChannelInfo succeed.
+  const [channelResult, streamsResult] = await Promise.allSettled([
+    getChannelInfo([user.id]),
+    getStreams([user.id]),
+  ]);
+
+  const channelInfos: TwitchChannelInfo[] = channelResult.status === 'fulfilled' ? channelResult.value : [];
+  const streams: TwitchStream[] = streamsResult.status === 'fulfilled' ? streamsResult.value : [];
+  const stream = streams[0];
+
+  return {
+    login: user.login,
+    gameName: stream?.game_name || channelInfos[0]?.game_name || null,
+    isLive: !!stream,
+  };
+}
+
+async function dispatchShoutout(channel: string, message: string): Promise<void> {
+  const runtime = _runtime;
+  if (!CUSTOM_COMMANDS_LIVE_REPLIES || !runtime) {
+    console.log(`[Twitch] Preview !so in ${channel} — would post: ${message}`);
+    return;
+  }
+  try {
+    await runtime.send(channel, message);
+    console.log(`[Twitch] Sent !so in ${channel} — ${message}`);
+  } catch (err) {
+    console.error(`[Twitch] Failed to send !so in ${channel}:`, err);
+  }
 }
 
 // ─── Execute ──────────────────────────────────────────────────────────────────
@@ -34,56 +72,20 @@ export async function executeShoutoutForTwitch(
   username: string | null,
   isModerator: boolean,
 ): Promise<void> {
-  if (extractCommand(rawMessage) !== SO_COMMAND) return;
-  if (!isModerator) return;
+  if (extractCommand(rawMessage) !== SO_COMMAND || !isModerator) return;
 
   const rawTarget = rawMessage.trim().split(/\s+/)[1];
-  if (!rawTarget) return;
-  const target = rawTarget.replace(/^@/, '').toLowerCase();
+  const target = rawTarget?.replace(/^@/, '').toLowerCase();
   if (!target) return;
 
-  const users = await getUsers([target]);
-  const user = users[0];
+  const data = await resolveShoutoutData(target);
+  const response = data
+    ? formatShoutoutMessage(data.login, data.gameName, data.isLive)
+    : `(unknown user: ${target})`;
 
-  if (!user) {
-    recordCommandTestEntry({
-      source: 'twitch',
-      command: SO_COMMAND,
-      response: `(unknown user: ${target})`,
-      channel,
-      user: username,
-    });
-    return;
-  }
+  recordCommandTestEntry({ source: 'twitch', command: SO_COMMAND, response, channel, user: username });
 
-  const [channelInfos, streams] = await Promise.all([
-    getChannelInfo([user.id]),
-    getStreams([user.id]),
-  ]);
-
-  const stream = streams[0];
-  const gameName = stream?.game_name || channelInfos[0]?.game_name || null;
-  const isLive = !!stream;
-  const message = formatShoutoutMessage(user.login, gameName || null, isLive);
-
-  recordCommandTestEntry({
-    source: 'twitch',
-    command: SO_COMMAND,
-    response: message,
-    channel,
-    user: username,
-  });
-
-  const runtime = _runtime;
-  if (!CUSTOM_COMMANDS_LIVE_REPLIES || !runtime) {
-    console.log(`[Twitch] Preview !so in ${channel} — would post: ${message}`);
-    return;
-  }
-
-  try {
-    await runtime.send(channel, message);
-    console.log(`[Twitch] Sent !so in ${channel} — ${message}`);
-  } catch (err) {
-    console.error(`[Twitch] Failed to send !so in ${channel}:`, err);
+  if (data) {
+    await dispatchShoutout(channel, response);
   }
 }

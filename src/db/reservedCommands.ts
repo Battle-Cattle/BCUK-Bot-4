@@ -1,4 +1,4 @@
-interface BuiltInCommandMeta {
+export interface BuiltInCommandMeta {
   description: string;
 }
 
