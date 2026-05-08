@@ -117,7 +117,7 @@ async function runDiscordNameRefresh(): Promise<void> {
         if (name == null) {
           failureCount++;
           refreshState.failureCount = failureCount;
-          console.error(`[Web] Failed to refresh Discord name for ${user.discord_id}: Discord lookup returned no display name`);
+          console.error('[Web] Failed to refresh Discord name for ' + user.discord_id + ': Discord lookup returned no display name');
           await new Promise((resolve) => setTimeout(resolve, 200));
           continue;
         }
@@ -131,7 +131,7 @@ async function runDiscordNameRefresh(): Promise<void> {
       } catch (err) {
         failureCount++;
         refreshState.failureCount = failureCount;
-        console.error(`[Web] Failed to refresh Discord name for ${user.discord_id}:`, err);
+        console.error('[Web] Failed to refresh Discord name for', user.discord_id, err);
       }
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
@@ -375,7 +375,8 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
               await updateTwitchBotEnabled(existingUser.discord_id, existingUser.is_twitch_bot_enabled);
             } catch (rollbackErr) {
               console.error(
-                `[Web] Failed to restore user ${trimmedDiscordId} after Twitch part failed during removal:`,
+                '[Web] Failed to restore user after Twitch part failed during removal:',
+                trimmedDiscordId,
                 rollbackErr,
               );
             }
