@@ -76,7 +76,7 @@ async function withUserMutationLock<T>(discordId: string, operation: () => Promi
       // Ignore failures from earlier queued operations so later mutations still run.
     }
     await current;
-  })();
+  })().catch(() => {});
   userMutationQueues.set(discordId, queued);
 
   try {
