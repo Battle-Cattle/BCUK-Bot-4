@@ -8,7 +8,7 @@ import { assertNotReservedCommand } from './reservedCommands';
 import {
   requireTrimmedString,
   assertDiscordTriggerAvailable, assertMultiTwitchTriggerAvailable, assertNoSingleTwitchAssignmentOverlap,
-  getCommandWriteLockName, acquireNamedLock, releaseNamedLock,
+  acquireNamedLock, releaseNamedLock,
   assignUserToCommandWithinTransaction, commandExists, runSerializedCommandWrite,
   CommandNotFoundError,
 } from './commandLocks';
