@@ -107,6 +107,32 @@ export async function getStreams(userIds: string[]): Promise<TwitchStream[]> {
   return results;
 }
 
+export interface TwitchChannelInfo {
+  broadcaster_id: string;
+  broadcaster_login: string;
+  game_name: string;
+  title: string;
+}
+
+export async function getChannelInfo(broadcasterIds: string[]): Promise<TwitchChannelInfo[]> {
+  if (broadcasterIds.length === 0) return [];
+  const token = await getAppToken();
+  const results: TwitchChannelInfo[] = [];
+  for (const batch of chunks(broadcasterIds, 100)) {
+    const params = batch.map((id) => `broadcaster_id=${encodeURIComponent(id)}`).join('&');
+    const res = await twitchFetch(`https://api.twitch.tv/helix/channels?${params}`, {
+      headers: authHeaders(token),
+    });
+    if (!res.ok) {
+      if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
+      throw new Error(`[TwitchAPI] getChannelInfo failed: ${res.status}`);
+    }
+    const data = await res.json() as { data: TwitchChannelInfo[] };
+    results.push(...data.data);
+  }
+  return results;
+}
+
 export interface SharedChatParticipant {
   broadcaster_id: string;
   broadcaster_login: string;

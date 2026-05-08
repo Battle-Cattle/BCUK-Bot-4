@@ -4,6 +4,7 @@ import { handleCommand } from './commandRouter';
 import { executeCustomCommandForTwitch } from './customCommandHandler';
 import { executeCounterCommandForTwitch } from './counterHandler';
 import { executeMultiCommandForTwitch } from './multiCommandHandler';
+import { executeShoutoutForTwitch } from './shoutoutHandler';
 import { setTwitchChannel } from './statusStore';
 import { getTwitchEnabledChannels } from './db';
 import { normalizeTwitchChannelName } from './twitchChannelName';
@@ -162,16 +163,23 @@ export async function startTwitchBot(): Promise<void> {
     // its source channel.
     if (tags['source-room-id'] && tags['source-room-id'] !== tags['room-id']) return;
 
-    executeCustomCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
+    const displayName = tags['display-name'] ?? tags.username ?? null;
+    const isMod = tags.mod === true || !!(tags.badges as Record<string, string> | null | undefined)?.broadcaster;
+
+    executeCustomCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
       console.error('[Twitch] Custom command error:', err),
     );
 
-    executeCounterCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
+    executeCounterCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
       console.error('[Twitch] Counter command error:', err),
     );
 
-    executeMultiCommandForTwitch(normalizedChannel, message, tags['display-name'] ?? tags.username ?? null).catch((err) =>
+    executeMultiCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
       console.error('[Twitch] Multi command error:', err),
+    );
+
+    executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod).catch((err) =>
+      console.error('[Twitch] Shoutout error:', err),
     );
 
     handleCommand(message, 'twitch').catch((err) =>

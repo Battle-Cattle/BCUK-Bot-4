@@ -9,6 +9,7 @@ import { disconnect } from './audioPlayer';
 import { registerTwitchChatRuntime } from './customCommandHandler';
 import { registerCounterTwitchRuntime } from './counterHandler';
 import { registerMultiTwitchRuntime } from './multiCommandHandler';
+import { registerShoutoutRuntime } from './shoutoutHandler';
 import { startCounterScheduler, stopCounterScheduler } from './counterScheduler';
 
 async function shutdown(signal: string): Promise<void> {
@@ -47,6 +48,7 @@ async function main(): Promise<void> {
   });
   registerCounterTwitchRuntime({ send: sayInChannel });
   registerMultiTwitchRuntime({ send: sayInChannel, getActiveChannels, getLoginUserIds: getActiveChannelUserIds });
+  registerShoutoutRuntime({ send: sayInChannel });
 
   startDiscordBot();
   await startTwitchBot();

@@ -1,8 +1,18 @@
+interface BuiltInCommandMeta {
+  description: string;
+}
+
 /**
- * Built-in command names that cannot be registered as custom commands or counters.
- * These are handled by dedicated handlers (e.g. multiCommandHandler.ts).
+ * Registry of built-in commands. Add an entry here whenever a new hardcoded
+ * command is introduced so it is automatically protected from being claimed as
+ * a custom command or counter trigger.
  */
-export const RESERVED_BUILT_IN_COMMANDS: ReadonlySet<string> = new Set(['!multi']);
+export const BUILT_IN_COMMANDS: Readonly<Record<string, BuiltInCommandMeta>> = {
+  '!multi': { description: 'Posts a multitwitch.tv link for the active stream group' },
+  '!so': { description: 'Posts a Twitch shoutout for a named streamer (mod/broadcaster only)' },
+};
+
+export const RESERVED_BUILT_IN_COMMANDS: ReadonlySet<string> = new Set(Object.keys(BUILT_IN_COMMANDS));
 
 export class ReservedCommandError extends Error {
   constructor(trigger: string) {
