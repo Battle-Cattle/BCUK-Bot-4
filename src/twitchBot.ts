@@ -36,7 +36,7 @@ async function withMembershipMutationLock<T>(channel: string, operation: () => P
       // Ignore earlier failures so later membership changes still run.
     }
     await current;
-  })();
+  })().catch(() => {});
   membershipMutationQueues.set(channel, queued);
 
   try {
