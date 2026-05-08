@@ -117,7 +117,7 @@ async function runDiscordNameRefresh(): Promise<void> {
         if (name == null) {
           failureCount++;
           refreshState.failureCount = failureCount;
-          console.error('[Web] Failed to refresh Discord name for', user.discord_id, ': Discord lookup returned no display name');
+          console.error('[Web] Failed to refresh Discord name for ' + user.discord_id + ': Discord lookup returned no display name');
           await new Promise((resolve) => setTimeout(resolve, 200));
           continue;
         }
