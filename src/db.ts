@@ -53,6 +53,7 @@ export {
   CommandNotFoundError, CommandConflictError, isMysqlDuplicateEntryError,
   isCustomCommandTriggerTaken,
 } from './db/commandLocks';
+export { ReservedCommandError, RESERVED_BUILT_IN_COMMANDS } from './db/reservedCommands';
 export type { SqlExecutor } from './db/commandLocks';
 
 // ─── Counter commands ───────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import {
   isAnyCommandTakenAcrossTables, runSerializedCommandWrite,
 } from './commandLocks';
 import type { SqlExecutor } from './commandLocks';
+import { assertNotReservedCommand } from './reservedCommands';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -180,6 +181,9 @@ export async function addCounter(
     throw new Error('Counter trigger_command and check_command must be different');
   }
 
+  assertNotReservedCommand(fields.triggerCommand);
+  assertNotReservedCommand(fields.checkCommand);
+
   await runSerializedCommandWrite(
     [fields.triggerCommand, fields.checkCommand],
     undefined,
@@ -222,6 +226,9 @@ export async function updateCounter(input: UpdateCounterInput): Promise<void> {
   if (fields.triggerCommand === fields.checkCommand) {
     throw new Error('Counter trigger_command and check_command must be different');
   }
+
+  assertNotReservedCommand(fields.triggerCommand);
+  assertNotReservedCommand(fields.checkCommand);
 
   const current = await getCounterCommandsById(id);
   if (!current) throw new CounterNotFoundError(id);

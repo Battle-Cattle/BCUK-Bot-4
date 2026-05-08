@@ -4,6 +4,7 @@ import { getPool } from './pool';
 import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
 import { AccessLevel, getTwitchEnabledChannels } from './users';
 import type { AccessLevelValue } from './users';
+import { assertNotReservedCommand } from './reservedCommands';
 import {
   requireTrimmedString,
   assertDiscordTriggerAvailable, assertMultiTwitchTriggerAvailable, assertNoSingleTwitchAssignmentOverlap,
@@ -366,6 +367,8 @@ export async function addCustomCommand(
   const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string').toLowerCase();
   const normalizedOutput = requireTrimmedString(output, 'output');
 
+  assertNotReservedCommand(normalizedTriggerString);
+
   await runSerializedCommandWrite(
     normalizedTriggerString,
     undefined,
@@ -399,6 +402,8 @@ export async function updateCustomCommand(
 ): Promise<void> {
   const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string').toLowerCase();
   const normalizedOutput = requireTrimmedString(output, 'output');
+
+  assertNotReservedCommand(normalizedTriggerString);
 
   await runSerializedCommandWrite(
     normalizedTriggerString,

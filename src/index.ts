@@ -8,6 +8,7 @@ import { startWebPanel } from './web/server';
 import { disconnect } from './audioPlayer';
 import { registerTwitchChatRuntime } from './customCommandHandler';
 import { registerCounterTwitchRuntime } from './counterHandler';
+import { registerMultiTwitchRuntime } from './multiCommandHandler';
 import { startCounterScheduler, stopCounterScheduler } from './counterScheduler';
 
 async function shutdown(signal: string): Promise<void> {
@@ -45,6 +46,7 @@ async function main(): Promise<void> {
     getLoginUserIds: getActiveChannelUserIds,
   });
   registerCounterTwitchRuntime({ send: sayInChannel });
+  registerMultiTwitchRuntime({ send: sayInChannel, getActiveChannels, getLoginUserIds: getActiveChannelUserIds });
 
   startDiscordBot();
   await startTwitchBot();

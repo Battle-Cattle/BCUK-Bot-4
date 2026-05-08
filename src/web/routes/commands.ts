@@ -6,6 +6,7 @@ import {
   CommandNotFoundError,
   DbCustomCommandWithAssignments,
   isMysqlDuplicateEntryError,
+  ReservedCommandError,
   DbUser,
   findUser,
   getAllCustomCommandsWithAssignments,
@@ -22,6 +23,7 @@ const router = Router();
 const KNOWN_ERRORS = new Set([
   'missing_fields',
   'command_taken',
+  'reserved_command',
   'invalid_id',
   'add_failed',
   'update_failed',
@@ -112,6 +114,10 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
   try {
     await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
+    if (err instanceof ReservedCommandError) {
+      return res.redirect('/admin/commands?error=reserved_command');
+    }
+
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
       return res.redirect('/admin/commands?error=command_taken');
     }
@@ -144,6 +150,10 @@ router.post('/commands/update', requireManager, csrfProtection, async (req, res)
   } catch (err) {
     if (err instanceof CommandNotFoundError) {
       return res.status(404).render('error', { message: 'Command not found.', user: req.session.user ?? null });
+    }
+
+    if (err instanceof ReservedCommandError) {
+      return res.redirect('/admin/commands?error=reserved_command');
     }
 
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
