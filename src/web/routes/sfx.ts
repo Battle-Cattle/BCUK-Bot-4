@@ -1,21 +1,21 @@
 import { Router } from 'express';
-import { getStatus } from '../../statusStore';
+import { getAllSfxTriggers } from '../../db';
 import { csrfProtection } from '../csrf';
 
 const router = Router();
 
-router.get('/', csrfProtection, async (req, res) => {
+router.get('/sfx', csrfProtection, async (req, res) => {
   try {
-    const status = getStatus();
-    res.render('dashboard', {
+    const triggers = await getAllSfxTriggers();
+    res.render('sfx', {
       user: req.session.user,
-      status,
+      triggers,
       csrfToken: req.csrfToken(),
     });
   } catch (err) {
-    console.error('[Web] Dashboard error:', err);
+    console.error('[Web] SFX error:', err);
     res.status(500).render('error', {
-      message: 'Failed to load dashboard data.',
+      message: 'Failed to load SFX data.',
       user: req.session.user ?? null,
     });
   }
