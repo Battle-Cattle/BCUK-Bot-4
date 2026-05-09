@@ -302,7 +302,7 @@ router.post('/users/update', requireAdmin, csrfProtection, async (req, res) => {
     });
   }
   try {
-    await updateAccessLevel(trimmedDiscordId, level);
+    await userMutationQueue.run(trimmedDiscordId, () => updateAccessLevel(trimmedDiscordId, level));
   } catch (err) {
     console.error('[Web] Update access level error:', err);
     return res.redirect('/admin/users?error=update_failed');
