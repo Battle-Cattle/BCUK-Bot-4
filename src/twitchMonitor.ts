@@ -371,6 +371,24 @@ async function deleteAnnouncement(stateKey: string): Promise<void> {
 
 // ─── Offline grace period ────────────────────────────────────────────────────
 
+// Re-fetches current state to guard against stale closure after monitor restart.
+async function runOfflineCheck(stateKey: string, key: string, login: string): Promise<void> {
+  const currentState = liveStates.get(stateKey);
+  if (!currentState) return;
+  try {
+    const userId = loginToUserId.get(key);
+    if (!userId) return;
+    const streams = await getStreams([userId]);
+    const isLive = streams.some((s) => s.user_id === userId && s.type === 'live');
+    if (!isLive) {
+      await deleteAnnouncement(stateKey);
+      console.log(`[TwitchMonitor] ${login} confirmed offline — announcement removed`);
+    }
+  } finally {
+    currentState.offlineTimer = null;
+  }
+}
+
 async function handleStreamOffline(login: string): Promise<void> {
   const key = login.toLowerCase();
   // Collect all state entries for this login (one per group they belong to)
@@ -379,28 +397,11 @@ async function handleStreamOffline(login: string): Promise<void> {
 
   for (const [stateKey, state] of matchingEntries) {
     if (state.offlineTimer) clearTimeout(state.offlineTimer);
-
     state.offlineTimer = setTimeout(async () => {
-      let currentState: LiveState | undefined;
       try {
-        // Re-fetch current state to guard against stale closure after monitor restart.
-        currentState = liveStates.get(stateKey);
-        if (!currentState) return;
-
-        const userId = loginToUserId.get(key);
-        if (!userId) return;
-
-        const streams = await getStreams([userId]);
-        const isLive = streams.some((s) => s.user_id === userId && s.type === 'live');
-
-        if (!isLive) {
-          await deleteAnnouncement(stateKey);
-          console.log(`[TwitchMonitor] ${login} confirmed offline — announcement removed`);
-        }
+        await runOfflineCheck(stateKey, key, login);
       } catch (err) {
         console.error(`[TwitchMonitor] Offline-check failed for ${key} (${stateKey}):`, err);
-      } finally {
-        if (currentState) currentState.offlineTimer = null;
       }
     }, OFFLINE_GRACE_MS);
   }
@@ -444,6 +445,59 @@ async function tryEditStartupMessage(streamer: DbStreamerFull, liveStream: Twitc
 
 // ─── Startup live-check ───────────────────────────────────────────────────────
 
+async function handleLiveStreamerOnStartup(
+  streamer: DbStreamerFull,
+  liveStream: TwitchStream,
+  groupsWithChanges: Set<number>,
+): Promise<void> {
+  if (streamer.discord_message_id && streamer.discord_channel_id) {
+    if (!discordClient || !getMonitorEnabled()) {
+      // Disabled or no client: restore stored IDs into liveStates without touching Discord
+      liveStates.set(String(streamer.id), {
+        streamerId: streamer.id,
+        groupId: streamer.group.id,
+        group: streamer.group,
+        login: streamer.name.toLowerCase(),
+        messageId: streamer.discord_message_id,
+        channelId: streamer.discord_channel_id,
+        currentGame: liveStream.game_name,
+        title: liveStream.title,
+        currentStream: liveStream,
+        offlineTimer: null,
+      });
+      return;
+    }
+    try {
+      if (await tryEditStartupMessage(streamer, liveStream)) {
+        groupsWithChanges.add(streamer.group.id);
+        return;
+      }
+    } catch {
+      // Edit failed (already logged) — skip postAnnouncement for this streamer
+      return;
+    }
+  }
+  await postAnnouncement(streamer, liveStream);
+}
+
+async function handleOfflineStreamerOnStartup(
+  streamer: DbStreamerFull,
+  groupsWithChanges: Set<number>,
+): Promise<void> {
+  // Stream ended while bot was offline — liveStates is empty at startup so
+  // deleteAnnouncement() would early-return without clearing DB state. Do it directly.
+  if (streamer.discord_channel_id && streamer.discord_message_id) {
+    try {
+      await tryDeleteDiscordMessage(streamer.discord_channel_id, streamer.discord_message_id);
+    } catch {
+      // Delete failed (already logged) — skip DB clear to avoid orphaning the announcement
+      return;
+    }
+  }
+  await clearStreamerLive(streamer.id);
+  groupsWithChanges.add(streamer.group.id);
+}
+
 async function performStartupLiveCheck(): Promise<void> {
   const userIds = Array.from(loginToUserId.values());
   if (userIds.length === 0) return;
@@ -467,51 +521,11 @@ async function performStartupLiveCheck(): Promise<void> {
     if (!userId) continue;
 
     const liveStream = liveByUserId.get(userId);
-    const hasStoredMsg = !!streamer.discord_message_id;
 
     if (liveStream) {
-      if (hasStoredMsg && streamer.discord_channel_id) {
-        if (!discordClient || !getMonitorEnabled()) {
-          // Disabled or no client: restore stored IDs into liveStates without touching Discord
-          liveStates.set(String(streamer.id), {
-            streamerId: streamer.id,
-            groupId: streamer.group.id,
-            group: streamer.group,
-            login: streamer.name.toLowerCase(),
-            messageId: streamer.discord_message_id,
-            channelId: streamer.discord_channel_id,
-            currentGame: liveStream.game_name,
-            title: liveStream.title,
-            currentStream: liveStream,
-            offlineTimer: null,
-          });
-          continue;
-        }
-        try {
-          if (await tryEditStartupMessage(streamer, liveStream)) {
-            groupsWithChanges.add(streamer.group.id);
-            continue;
-          }
-        } catch {
-          // Edit failed (already logged) — skip postAnnouncement for this streamer
-          continue;
-        }
-      }
-      // Post fresh announcement
-      await postAnnouncement(streamer, liveStream);
-    } else if (hasStoredMsg) {
-      // Stream ended while bot was offline — liveStates is empty at startup so
-      // deleteAnnouncement() would early-return without clearing DB state. Do it directly.
-      if (streamer.discord_channel_id && streamer.discord_message_id) {
-        try {
-          await tryDeleteDiscordMessage(streamer.discord_channel_id, streamer.discord_message_id);
-        } catch {
-          // Delete failed (already logged) — skip DB clear to avoid orphaning the announcement
-          continue;
-        }
-      }
-      await clearStreamerLive(streamer.id);
-      groupsWithChanges.add(streamer.group.id);
+      await handleLiveStreamerOnStartup(streamer, liveStream, groupsWithChanges);
+    } else if (streamer.discord_message_id) {
+      await handleOfflineStreamerOnStartup(streamer, groupsWithChanges);
     }
   }
 
@@ -531,59 +545,66 @@ function cancelOfflineTimersForLogin(loginKey: string): void {
   }
 }
 
+async function handlePollStreamer(
+  streamer: DbStreamerFull,
+  liveByUserId: Map<string, TwitchStream>,
+): Promise<void> {
+  const loginKey = streamer.name.toLowerCase();
+  const stateKey = String(streamer.id);
+  const userId = loginToUserId.get(loginKey);
+  if (!userId) return;
+
+  const pollStream = liveByUserId.get(userId);
+  const existing = liveStates.get(stateKey);
+
+  if (pollStream) {
+    if (existing?.offlineTimer) {
+      // Came back during grace period — cancel offline timers for all groups this login belongs to
+      cancelOfflineTimersForLogin(loginKey);
+      console.log(`[TwitchMonitor] ${loginKey} came back — offline timer(s) cancelled`);
+    }
+    const isNew = !liveStates.has(stateKey);
+    if (isNew || (existing && !existing.messageId)) {
+      // Went live, or state exists with no Discord message (e.g. Discord wasn't ready at startup)
+      await postAnnouncement(streamer, pollStream);
+      if (isNew) console.log(`[TwitchMonitor] ${loginKey} went live in group ${streamer.group.name}`);
+    } else if (existing && existing.currentGame !== pollStream.game_name) {
+      // Game changed
+      await editAnnouncement(existing, pollStream, 'new_game_message');
+      console.log(`[TwitchMonitor] ${loginKey} game changed to ${pollStream.game_name}`);
+    } else if (existing) {
+      // Still live — keep title in sync
+      existing.currentGame = pollStream.game_name;
+      existing.title = pollStream.title;
+      existing.currentStream = pollStream;
+    }
+  } else if (existing && !existing.offlineTimer) {
+    // Appears offline — start grace period (handleStreamOffline handles all groups for this login)
+    await handleStreamOffline(loginKey);
+  }
+}
+
 async function pollStreams(): Promise<void> {
   if (pollRunning || streamersData.length === 0) return;
   pollRunning = true;
   currentPollPromise = (async () => {
-  try {
-    const userIds = Array.from(loginToUserId.values());
-    if (userIds.length === 0) return;
+    try {
+      const userIds = Array.from(loginToUserId.values());
+      if (userIds.length === 0) return;
 
-    const liveStreams = await getStreams(userIds);
-    const liveByUserId = new Map(
-      liveStreams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
-    );
+      const liveStreams = await getStreams(userIds);
+      const liveByUserId = new Map(
+        liveStreams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
+      );
 
-    for (const streamer of streamersData) {
-      const loginKey = streamer.name.toLowerCase();
-      const stateKey = String(streamer.id);
-      const userId = loginToUserId.get(loginKey);
-      if (!userId) continue;
-
-      const pollStream = liveByUserId.get(userId);
-      const existing = liveStates.get(stateKey);
-
-      if (pollStream) {
-        if (existing?.offlineTimer) {
-          // Came back during grace period — cancel offline timers for all groups this login belongs to
-          cancelOfflineTimersForLogin(loginKey);
-          console.log(`[TwitchMonitor] ${loginKey} came back — offline timer(s) cancelled`);
-        }
-        const isNew = !liveStates.has(stateKey);
-        if (isNew || (existing && !existing.messageId)) {
-          // Went live, or state exists with no Discord message (e.g. Discord wasn't ready at startup)
-          await postAnnouncement(streamer, pollStream);
-          if (isNew) console.log(`[TwitchMonitor] ${loginKey} went live in group ${streamer.group.name}`);
-        } else if (existing && existing.currentGame !== pollStream.game_name) {
-          // Game changed
-          await editAnnouncement(existing, pollStream, 'new_game_message');
-          console.log(`[TwitchMonitor] ${loginKey} game changed to ${pollStream.game_name}`);
-        } else if (existing) {
-          // Still live — keep title in sync
-          existing.currentGame = pollStream.game_name;
-          existing.title = pollStream.title;
-          existing.currentStream = pollStream;
-        }
-      } else if (existing && !existing.offlineTimer) {
-        // Appears offline — start grace period (handleStreamOffline handles all groups for this login)
-        await handleStreamOffline(loginKey);
+      for (const streamer of streamersData) {
+        await handlePollStreamer(streamer, liveByUserId);
       }
+    } catch (err) {
+      console.error('[TwitchMonitor] Poll error:', err);
+    } finally {
+      pollRunning = false;
     }
-  } catch (err) {
-    console.error('[TwitchMonitor] Poll error:', err);
-  } finally {
-    pollRunning = false;
-  }
   })();
   await currentPollPromise;
 }
@@ -757,6 +778,32 @@ export function getLiveStates(): LiveStateSnapshot[] {
     });
 }
 
+async function handleCatchUpState(
+  state: LiveState,
+  streamsByUserId: Map<string, TwitchStream>,
+): Promise<void> {
+  const streamerInfo = streamersData.find((s) => s.id === state.streamerId);
+  if (!streamerInfo) return;
+  const userId = loginToUserId.get(state.login);
+  if (!userId) return;
+
+  const stream = streamsByUserId.get(userId);
+
+  if (!stream) {
+    // Went offline while posts were disabled — clean up any stale message
+    await deleteAnnouncement(String(state.streamerId));
+    return;
+  }
+
+  if (state.messageId && state.channelId) {
+    // Existing Discord message — edit it with current stream info
+    await editAnnouncement(state, stream, 'live_message');
+  } else {
+    // No message yet — post fresh
+    await postAnnouncement(streamerInfo, stream);
+  }
+}
+
 /**
  * Posts (or edits) Discord announcements for all currently tracked live streams.
  * Called when Discord posts are re-enabled after being disabled.
@@ -784,27 +831,8 @@ export async function catchUpDiscordPosts(): Promise<void> {
   }
 
   for (const state of states) {
-    const streamerInfo = streamersData.find((s) => s.id === state.streamerId);
-    if (!streamerInfo) continue;
-    const userId = loginToUserId.get(state.login);
-    if (!userId) continue;
-
     try {
-      const stream = streamsByUserId.get(userId);
-
-      if (!stream) {
-        // Went offline while posts were disabled — clean up any stale message
-        await deleteAnnouncement(String(state.streamerId));
-        continue;
-      }
-
-      if (state.messageId && state.channelId) {
-        // Existing Discord message — edit it with current stream info
-        await editAnnouncement(state, stream, 'live_message');
-      } else {
-        // No message yet — post fresh
-        await postAnnouncement(streamerInfo, stream);
-      }
+      await handleCatchUpState(state, streamsByUserId);
     } catch (err) {
       console.error(`[TwitchMonitor] Catch-up post failed for ${state.login}:`, err);
     }
