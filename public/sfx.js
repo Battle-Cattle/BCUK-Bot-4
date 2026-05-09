@@ -24,6 +24,8 @@ if (searchInput && sfxTable) {
         row.style.display = 'none';
         if (filesRow && filesRow.classList.contains('files-row')) {
           filesRow.classList.add('is-hidden');
+          const toggleBtn = row.querySelector('.btn-toggle-files');
+          if (toggleBtn) toggleBtn.textContent = '▶ Files';
         }
       }
     });
