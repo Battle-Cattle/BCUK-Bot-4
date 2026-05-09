@@ -371,7 +371,12 @@ async function deleteAnnouncement(stateKey: string): Promise<void> {
 
 // ─── Offline grace period ────────────────────────────────────────────────────
 
-// Re-fetches current state to guard against stale closure after monitor restart.
+// Re-fetches from liveStates rather than using the closure value so the check
+// reflects any concurrent modifications (e.g. the streamer came back online and
+// pollStreams already updated state, or a manual DB change cleared the entry).
+// teardown() clears all offlineTimers on restart, so this is not restart
+// protection — it is a consistency guard. The finally block ensures
+// offlineTimer is nulled on every exit path, including early returns and errors.
 async function runOfflineCheck(stateKey: string, key: string, login: string): Promise<void> {
   const currentState = liveStates.get(stateKey);
   if (!currentState) return;
