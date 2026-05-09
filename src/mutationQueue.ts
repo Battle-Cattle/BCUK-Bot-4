@@ -7,10 +7,13 @@
  */
 export function createMutationQueue<K = string>(): {
   run<T>(key: K, operation: () => Promise<T>): Promise<T>;
+  /** Number of keys with at least one operation in flight. */
+  size(): number;
 } {
   const queues = new Map<K, Promise<void>>();
 
   return {
+    size: () => queues.size,
     async run<T>(key: K, operation: () => Promise<T>): Promise<T> {
       const previous = queues.get(key) ?? Promise.resolve();
       let release!: () => void;
