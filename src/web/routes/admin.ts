@@ -18,6 +18,7 @@ import { requireManager, requireAdmin } from '../middleware';
 import { discordClient, fetchMemberDisplayName } from '../../discordBot';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitchBot';
 import { normalizeTwitchChannelName } from '../../twitchChannelName';
+import { createMutationQueue } from '../../mutationQueue';
 
 const router = Router();
 
@@ -25,7 +26,7 @@ const KNOWN_ERRORS = new Set(['add_failed', 'duplicate_twitch_name', 'update_fai
 // Twitch membership changes are serialized per user in-process because this bot
 // currently runs as a single web instance. If that changes, move this lock into
 // shared storage or a DB transaction/row lock before scaling out.
-const userMutationQueues = new Map<string, Promise<void>>();
+const userMutationQueue = createMutationQueue();
 
 type RefreshOutcome = 'idle' | 'running' | 'success' | 'partial' | 'noop' | 'error';
 
@@ -63,37 +64,6 @@ function isDuplicateTwitchNameDbError(error: unknown): boolean {
     && (dbError.message?.includes('ux_user_twitch_name') ?? false);
 }
 
-async function withUserMutationLock<T>(discordId: string, operation: () => Promise<T>): Promise<T> {
-  const previous = userMutationQueues.get(discordId) ?? Promise.resolve();
-  let release!: () => void;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const queued = (async () => {
-    try {
-      await previous;
-    } catch {
-      // Ignore failures from earlier queued operations so later mutations still run.
-    }
-    await current;
-  })().catch(() => {});
-  userMutationQueues.set(discordId, queued);
-
-  try {
-    await previous;
-  } catch {
-    // Ignore failures from earlier queued operations so later mutations still run.
-  }
-
-  try {
-    return await operation();
-  } finally {
-    release();
-    if (userMutationQueues.get(discordId) === queued) {
-      userMutationQueues.delete(discordId);
-    }
-  }
-}
 
 async function runDiscordNameRefresh(): Promise<void> {
   refreshState.outcome = 'running';
@@ -202,7 +172,7 @@ router.post('/users/add', requireAdmin, csrfProtection, async (req, res) => {
     });
   }
   try {
-    await withUserMutationLock(trimmedDiscordId, async () => {
+    await userMutationQueue.run(trimmedDiscordId, async () => {
       const trimmedDiscordName = (discord_name ?? '').trim();
       const existingUser = await findUser(trimmedDiscordId);
       const previousTwitchChannel = existingUser?.twitch_name
@@ -332,7 +302,7 @@ router.post('/users/update', requireAdmin, csrfProtection, async (req, res) => {
     });
   }
   try {
-    await updateAccessLevel(trimmedDiscordId, level);
+    await userMutationQueue.run(trimmedDiscordId, () => updateAccessLevel(trimmedDiscordId, level));
   } catch (err) {
     console.error('[Web] Update access level error:', err);
     return res.redirect('/admin/users?error=update_failed');
@@ -353,7 +323,7 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
     });
   }
   try {
-    await withUserMutationLock(trimmedDiscordId, async () => {
+    await userMutationQueue.run(trimmedDiscordId, async () => {
       const existingUser = await findUser(trimmedDiscordId);
       await removeUser(trimmedDiscordId);
 
@@ -414,7 +384,7 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   }
 
   try {
-    await withUserMutationLock(trimmedDiscordId, async () => {
+    await userMutationQueue.run(trimmedDiscordId, async () => {
       const user = await findUser(trimmedDiscordId);
       if (!user || !user.twitch_name) {
         throw new Error('Toggle target user is missing or has no Twitch channel');
