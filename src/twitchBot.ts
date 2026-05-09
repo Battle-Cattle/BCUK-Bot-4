@@ -27,6 +27,35 @@ function isChannelJoined(channel: string): boolean {
 }
 
 
+async function partStaleChannel(channel: string): Promise<void> {
+  if (activeChannels.has(channel)) {
+    setTwitchChannel(channel, true);
+    return;
+  }
+  if (!client || !connected || !isChannelJoined(channel)) {
+    setTwitchChannel(channel, false);
+    return;
+  }
+  await client.part(channel);
+  setTwitchChannel(channel, false);
+  console.log(`[Twitch] Parted stale channel after reconnect: ${channel}`);
+}
+
+async function joinMissingChannel(channel: string): Promise<void> {
+  if (!activeChannels.has(channel)) return;
+  if (!client || !connected) {
+    setTwitchChannel(channel, false);
+    return;
+  }
+  if (isChannelJoined(channel)) {
+    setTwitchChannel(channel, true);
+    return;
+  }
+  await client.join(channel);
+  setTwitchChannel(channel, true);
+  console.log(`[Twitch] Joined queued channel after reconnect: ${channel}`);
+}
+
 async function reconcileJoinedChannels(): Promise<void> {
   if (!client || !connected) return;
 
@@ -37,20 +66,7 @@ async function reconcileJoinedChannels(): Promise<void> {
 
   for (const channel of joinedChannels) {
     try {
-      await membershipMutationQueue.run(channel, async () => {
-        if (activeChannels.has(channel)) {
-          setTwitchChannel(channel, true);
-          return;
-        }
-        if (!client || !connected || !isChannelJoined(channel)) {
-          setTwitchChannel(channel, false);
-          return;
-        }
-
-        await client.part(channel);
-        setTwitchChannel(channel, false);
-        console.log(`[Twitch] Parted stale channel after reconnect: ${channel}`);
-      });
+      await membershipMutationQueue.run(channel, () => partStaleChannel(channel));
     } catch (err) {
       console.error(`[Twitch] Failed to part stale channel ${channel}:`, err);
     }
@@ -58,23 +74,8 @@ async function reconcileJoinedChannels(): Promise<void> {
 
   for (const channel of activeChannels) {
     if (joinedChannelSet.has(channel)) continue;
-
     try {
-      await membershipMutationQueue.run(channel, async () => {
-        if (!activeChannels.has(channel)) return;
-        if (!client || !connected) {
-          setTwitchChannel(channel, false);
-          return;
-        }
-        if (isChannelJoined(channel)) {
-          setTwitchChannel(channel, true);
-          return;
-        }
-
-        await client.join(channel);
-        setTwitchChannel(channel, true);
-        console.log(`[Twitch] Joined queued channel after reconnect: ${channel}`);
-      });
+      await membershipMutationQueue.run(channel, () => joinMissingChannel(channel));
     } catch (err) {
       setTwitchChannel(channel, false);
       console.error(`[Twitch] Failed to join queued channel ${channel}:`, err);
