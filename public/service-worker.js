@@ -1,5 +1,5 @@
 const APP_CACHE_PREFIX = 'bcuk-panel-';
-const CACHE_VERSION = 'bcuk-panel-v6';
+const CACHE_VERSION = 'bcuk-panel-v7';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const RUNTIME_CACHE_MAX_ENTRIES = 50;
@@ -8,6 +8,7 @@ const STATIC_ASSETS = [
   '/offline.html',
   '/style.css',
   '/app.js',
+  '/sfx.js',
   '/navbar.js',
   '/admin.js',
   '/commands.js',

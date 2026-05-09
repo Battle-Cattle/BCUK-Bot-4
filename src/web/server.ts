@@ -11,6 +11,7 @@ import authRouter from './routes/auth';
 import dashboardRouter from './routes/dashboard';
 import adminRouter from './routes/admin';
 import apiRouter from './routes/api';
+import sfxRouter from './routes/sfx';
 import streamsRouter from './routes/streams';
 import commandsRouter from './routes/commands';
 import countersRouter from './routes/counters';
@@ -86,6 +87,7 @@ app.use((req, res, next) => {
 // Routes
 app.use('/auth', authRouter);
 app.use('/api', requireAuth, apiRouter);
+app.use('/', requireAuth, sfxRouter);
 app.use('/admin', requireAuth, adminRouter);
 app.use('/admin', requireAuth, streamsRouter);
 app.use('/admin', requireAuth, commandsRouter);
