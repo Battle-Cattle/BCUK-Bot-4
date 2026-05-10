@@ -192,7 +192,9 @@ function registerTwitchCandidate(
     }
 
     console.warn(
-      `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}' already maps to command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner}); ignoring command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
+      `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}'.`,
+      `Already maps to command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner});`,
+      `ignoring command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
     );
     return;
   }
