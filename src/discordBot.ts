@@ -59,9 +59,6 @@ export function startDiscordBot(): void {
     try {
       const guild = await getConfiguredGuild();
       setDiscordReady(c.user.tag, guild.name);
-      // Small delay to ensure gateway is fully ready before joining voice
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      await connect(c);
     } catch (err) {
       console.error('[Discord] Failed to initialise:', err);
     }
