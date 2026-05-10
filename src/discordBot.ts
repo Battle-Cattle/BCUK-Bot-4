@@ -1,6 +1,5 @@
 import { Client, GatewayIntentBits, Guild } from 'discord.js';
 import { DISCORD_TOKEN, DISCORD_GUILD_ID } from './config';
-import { connect } from './audioPlayer';
 import { handleCommand } from './commandRouter';
 import { executeCustomCommandForDiscord } from './customCommandHandler';
 import { executeCounterCommandForDiscord } from './counterHandler';
