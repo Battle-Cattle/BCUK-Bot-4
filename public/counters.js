@@ -23,21 +23,10 @@ document.addEventListener('click', function (event) {
 });
 
 document.addEventListener('submit', function (event) {
-  var target = event.target;
-  if (!(target instanceof HTMLFormElement)) return;
-
-  if (target.classList.contains('js-confirm-remove-counter')) {
-    var triggerString = target.dataset.counterTrigger || 'this counter';
-    if (!window.confirm('Remove counter ' + triggerString + '?')) {
-      event.preventDefault();
-    }
-    return;
-  }
-
-  if (target.classList.contains('js-confirm-reset-counter')) {
-    var resetTriggerString = target.dataset.counterTrigger || 'this counter';
-    if (!window.confirm('Reset current value for ' + resetTriggerString + ' to 0?')) {
-      event.preventDefault();
-    }
-  }
+  if (confirmSubmit(event, 'js-confirm-remove-counter', function (t) {
+    return 'Remove counter ' + (t.dataset.counterTrigger || 'this counter') + '?';
+  })) return;
+  confirmSubmit(event, 'js-confirm-reset-counter', function (t) {
+    return 'Reset current value for ' + (t.dataset.counterTrigger || 'this counter') + ' to 0?';
+  });
 });
