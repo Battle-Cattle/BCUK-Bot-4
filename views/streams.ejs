@@ -22,23 +22,23 @@
       </div>
       <% } %>
 
-      <!-- Discord posts toggle -->
+      <!-- Go Live toggle -->
       <div class="card card-spaced">
         <div class="card-header">
-          <span class="card-icon">📡</span>
-          <span class="card-label">Discord Announcements</span>
+          <span class="card-icon"><%= monitorEnabled ? '🟢' : '🔴' %></span>
+          <span class="card-label">Bot Live Mode</span>
           <span class="badge ml-auto <%= monitorEnabled ? 'badge-active' : 'badge-offline' %>">
-            <%= monitorEnabled ? 'Enabled' : 'Disabled' %>
+            <%= monitorEnabled ? 'Live' : 'Shadow Mode' %>
           </span>
         </div>
         <div class="card-body card-body-row">
           <form method="POST" action="/admin/streams/toggle">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
             <button type="submit" class="btn <%= monitorEnabled ? 'btn-danger' : '' %>">
-              <%= monitorEnabled ? '⏹ Disable Discord Posts' : '▶ Enable Discord Posts' %>
+              <%= monitorEnabled ? '⏹ Disable Live Mode' : '▶ Go Live' %>
             </button>
           </form>
-          <span class="text-muted-sm">Stream tracking always runs — use <strong>Live Now</strong> below to verify data before enabling posts.</span>
+          <span class="text-muted-sm">Enables Discord announcements, Twitch chat replies, and counter writes. Use <strong>Live Now</strong> below to verify data first.</span>
         </div>
       </div>
     </section>

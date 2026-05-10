@@ -53,8 +53,3 @@ export const DISCORD_CLIENT_ID = require_env('DISCORD_CLIENT_ID');
 export const DISCORD_CLIENT_SECRET = require_env('DISCORD_CLIENT_SECRET');
 export const DISCORD_CALLBACK_URL = require_env('DISCORD_CALLBACK_URL');
 
-// Default false (shadow mode). Set to 'true' only when ready to send live replies.
-export const CUSTOM_COMMANDS_LIVE_REPLIES = process.env.CUSTOM_COMMANDS_LIVE_REPLIES === 'true';
-
-// Default false (shadow mode). Set to 'true' only when ready to write live counter increments.
-export const COUNTER_LIVE_WRITES = process.env.COUNTER_LIVE_WRITES === 'true';

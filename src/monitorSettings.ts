@@ -5,17 +5,17 @@ const SETTINGS_FILE = path.join(process.cwd(), 'monitor-settings.json');
 
 interface MonitorSettings {
   twitchMonitorEnabled: boolean;
+  customCommandsLiveReplies: boolean;
+  counterLiveWrites: boolean;
 }
+
+const DEFAULTS: MonitorSettings = {
+  twitchMonitorEnabled: false,
+  customCommandsLiveReplies: false,
+  counterLiveWrites: false,
+};
 
 let cachedSettings: MonitorSettings | null = null;
-
-function isValidMonitorSettings(v: unknown): v is MonitorSettings {
-  return (
-    typeof v === 'object' &&
-    v !== null &&
-    typeof (v as Record<string, unknown>).twitchMonitorEnabled === 'boolean'
-  );
-}
 
 function readSettings(): MonitorSettings {
   if (cachedSettings) {
@@ -24,16 +24,19 @@ function readSettings(): MonitorSettings {
 
   try {
     const content = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-    const parsed: unknown = JSON.parse(content);
-    if (isValidMonitorSettings(parsed)) {
-      cachedSettings = parsed;
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    if (typeof parsed.twitchMonitorEnabled === 'boolean') {
+      cachedSettings = {
+        twitchMonitorEnabled: parsed.twitchMonitorEnabled,
+        customCommandsLiveReplies: typeof parsed.customCommandsLiveReplies === 'boolean' ? parsed.customCommandsLiveReplies : false,
+        counterLiveWrites: typeof parsed.counterLiveWrites === 'boolean' ? parsed.counterLiveWrites : false,
+      };
     } else {
       console.warn('[MonitorSettings] Settings file has unexpected shape — using defaults');
-      cachedSettings = { twitchMonitorEnabled: true };
+      cachedSettings = { ...DEFAULTS };
     }
-  } catch (err) {
-    console.warn(`[MonitorSettings] Failed to read ${SETTINGS_FILE}:`, err);
-    cachedSettings = { twitchMonitorEnabled: true };
+  } catch {
+    cachedSettings = { ...DEFAULTS };
   }
 
   return cachedSettings;
@@ -59,7 +62,14 @@ export function getMonitorEnabled(): boolean {
   return readSettings().twitchMonitorEnabled;
 }
 
-export function setMonitorEnabled(enabled: boolean): void {
-  const current = readSettings();
-  writeSettings({ ...current, twitchMonitorEnabled: enabled });
+export function getCustomCommandsLiveReplies(): boolean {
+  return readSettings().customCommandsLiveReplies;
+}
+
+export function getCounterLiveWrites(): boolean {
+  return readSettings().counterLiveWrites;
+}
+
+export function setAllLive(enabled: boolean): void {
+  writeSettings({ twitchMonitorEnabled: enabled, customCommandsLiveReplies: enabled, counterLiveWrites: enabled });
 }

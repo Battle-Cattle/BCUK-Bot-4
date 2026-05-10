@@ -1,5 +1,5 @@
 import type { Message } from 'discord.js';
-import { CUSTOM_COMMANDS_LIVE_REPLIES } from './config';
+import { getCustomCommandsLiveReplies } from './monitorSettings';
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './db';
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { getSharedChatSession } from './twitchApi';
@@ -141,7 +141,7 @@ export async function executeCustomCommandForDiscord(
     user: username ?? null,
   });
 
-  if (CUSTOM_COMMANDS_LIVE_REPLIES) {
+  if (getCustomCommandsLiveReplies()) {
     try {
       await message.reply(result.response);
       console.log(`[Discord] Sent custom command '${command}' (recorded for monitoring).`);
@@ -173,7 +173,7 @@ export async function executeCustomCommandForTwitch(
   });
 
   const runtime = _twitchRuntime;
-  if (CUSTOM_COMMANDS_LIVE_REPLIES && runtime) {
+  if (getCustomCommandsLiveReplies() && runtime) {
     if (result.isMultiTwitch) {
       try {
         const sent = await broadcastToActiveChannels(channel, command, result.response);
