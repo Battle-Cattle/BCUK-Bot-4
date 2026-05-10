@@ -40,7 +40,7 @@ export interface DbCustomCommandWithAssignments extends DbCustomCommand {
 // ─── Row mappers ─────────────────────────────────────────────────────────────
 
 function mapBool(value: unknown): boolean {
-  return Buffer.isBuffer(value) ? value[0] === 1 : value == 1;
+  return Buffer.isBuffer(value) ? value[0] === 1 : Number(value) === 1;
 }
 
 function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
