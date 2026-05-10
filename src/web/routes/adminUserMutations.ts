@@ -142,7 +142,7 @@ export async function addOrUpdateUserMutation({
     ? normalizeTwitchChannelName(committedUser.twitch_name)
     : null;
 
-  if (!existingUser?.is_twitch_bot_enabled || previousChannel === committedChannel) {
+  if ((existingUser && !existingUser.is_twitch_bot_enabled) || previousChannel === committedChannel) {
     return;
   }
 
