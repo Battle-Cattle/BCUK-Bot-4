@@ -1,0 +1,95 @@
+import { EmbedBuilder } from 'discord.js';
+import { TwitchStream } from './twitchApi';
+import { LiveState } from './twitchMonitorTypes';
+
+// ─── Public types ─────────────────────────────────────────────────────────────
+
+export interface DiscordEmbedPreview {
+  title: string;
+  url: string;
+  color: string;
+  fields: Array<{ name: string; value: string }>;
+  imageUrl: string;
+  footer: string | null;
+}
+
+export interface DiscordMessagePreview {
+  content: string;
+  embed: DiscordEmbedPreview;
+}
+
+// ─── Template helpers ─────────────────────────────────────────────────────────
+
+export function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
+}
+
+export function getStreamUrl(login: string): string {
+  return `https://www.twitch.tv/${login}`;
+}
+
+export function getThumbnailUrl(stream: TwitchStream): string {
+  return stream.thumbnail_url
+    .replace('{width}', '640')
+    .replace('{height}', '360');
+}
+
+export function buildEmbedPreview(stream: TwitchStream, footer?: string): DiscordEmbedPreview {
+  return {
+    title: stream.title,
+    url: getStreamUrl(stream.user_login),
+    color: '#9146FF',
+    fields: [{ name: 'Game', value: stream.game_name || 'Unknown' }],
+    imageUrl: getThumbnailUrl(stream),
+    footer: footer || null,
+  };
+}
+
+export function parseHexColor(color: string): number {
+  const normalized = color.trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return 0x9146ff;
+  return parseInt(normalized, 16);
+}
+
+export function buildEmbed(stream: TwitchStream, footer?: string): EmbedBuilder {
+  const preview = buildEmbedPreview(stream, footer);
+
+  const embed = new EmbedBuilder()
+    .setTitle(preview.title)
+    .setURL(preview.url)
+    .setColor(parseHexColor(preview.color))
+    .addFields(...preview.fields)
+    .setImage(preview.imageUrl);
+
+  if (preview.footer) embed.setFooter({ text: preview.footer });
+  return embed;
+}
+
+export function templateVars(login: string, stream: TwitchStream, multitwitch?: string): Record<string, string> {
+  return {
+    streamer: login,
+    game: stream.game_name || 'Unknown',
+    title: stream.title,
+    url: getStreamUrl(login),
+    multitwitch: multitwitch ?? '',
+  };
+}
+
+// ─── Message preview ──────────────────────────────────────────────────────────
+
+export function buildMessagePreview(
+  state: LiveState,
+  templateKey: 'live_message' | 'new_game_message',
+  multiTwitch: { renderedFooter: string | null },
+): DiscordMessagePreview {
+  const stream = state.currentStream;
+  const template = templateKey === 'new_game_message'
+    ? state.group.new_game_message
+    : state.group.live_message;
+  const vars = templateVars(state.login, stream);
+
+  return {
+    content: fillTemplate(template, vars),
+    embed: buildEmbedPreview(stream, multiTwitch.renderedFooter ?? undefined),
+  };
+}
