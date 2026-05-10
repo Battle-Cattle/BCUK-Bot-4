@@ -331,23 +331,12 @@ document.addEventListener('click', function (event) {
 });
 
 document.addEventListener('submit', function (event) {
-  var target = event.target;
-  if (!(target instanceof HTMLFormElement)) return;
-
-  if (target.classList.contains('js-confirm-remove-group')) {
-    var groupName = target.dataset.groupName || 'this group';
-    if (!window.confirm('Remove group "' + groupName + '" and all its streamers?')) {
-      event.preventDefault();
-    }
-    return;
-  }
-
-  if (target.classList.contains('js-confirm-remove-streamer')) {
-    var streamerName = target.dataset.streamerName || 'this streamer';
-    if (!window.confirm('Remove streamer "' + streamerName + '"?')) {
-      event.preventDefault();
-    }
-  }
+  if (confirmSubmit(event, 'js-confirm-remove-group', function (t) {
+    return 'Remove group "' + (t.dataset.groupName || 'this group') + '" and all its streamers?';
+  })) return;
+  confirmSubmit(event, 'js-confirm-remove-streamer', function (t) {
+    return 'Remove streamer "' + (t.dataset.streamerName || 'this streamer') + '"?';
+  });
 });
 
 var liveNowInflight = false;

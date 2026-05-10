@@ -2,15 +2,15 @@
 
 function relativeTime(isoString) {
   if (!isoString) return '—';
-  const diff = Date.now() - new Date(isoString).getTime();
-  const s = Math.floor(diff / 1000);
-  if (s < 5)  return 'just now';
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  const s = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+  const thresholds = [
+    [5,     'just now'],
+    [60,    `${s}s ago`],
+    [3600,  `${Math.floor(s / 60)}m ago`],
+    [86400, `${Math.floor(s / 3600)}h ago`],
+  ];
+  const match = thresholds.find(([limit]) => s < limit);
+  return match ? match[1] : `${Math.floor(s / 86400)}d ago`;
 }
 
 function setText(id, value) {
