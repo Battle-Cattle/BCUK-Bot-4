@@ -142,7 +142,10 @@ function buildMultiTwitchContext(states: Iterable<LiveState>): MultiTwitchContex
 
   const participantsByGroupAndGame = new Map<string, string[]>();
   for (const [key, participants] of participantSets.entries()) {
-    participantsByGroupAndGame.set(key, Array.from(participants).sort((left, right) => left.localeCompare(right)));
+    participantsByGroupAndGame.set(
+      key,
+      Array.from(participants).sort((participantA, participantB) => participantA.localeCompare(participantB)),
+    );
   }
 
   return { participantsByGroupAndGame };
