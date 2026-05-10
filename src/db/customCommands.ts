@@ -40,7 +40,7 @@ export interface DbCustomCommandWithAssignments extends DbCustomCommand {
 // ─── Row mappers ─────────────────────────────────────────────────────────────
 
 function mapBool(value: unknown): boolean {
-  return Buffer.isBuffer(value) ? value[0] === 1 : value == 1;
+  return Buffer.isBuffer(value) ? value[0] === 1 : Number(value) === 1;
 }
 
 function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
@@ -165,7 +165,10 @@ function registerDiscordCommand(
 
   const existingCommand = discordByTrigger.get(triggerString);
   if (existingCommand) {
-    console.warn(`[DB] Custom command Discord trigger collision: '${triggerString}' is already registered (command_id=${existingCommand.command_id}); ignoring duplicate from command_id=${command.command_id}.`);
+    console.warn(
+      `[DB] Custom command Discord trigger collision: '${triggerString}' is already registered ` +
+      `(command_id=${existingCommand.command_id}); ignoring duplicate from command_id=${command.command_id}.`,
+    );
     return;
   }
 
@@ -192,7 +195,9 @@ function registerTwitchCandidate(
     }
 
     console.warn(
-      `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}' already maps to command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner}); ignoring command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
+      `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}'.`,
+      `Already maps to command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner});`,
+      `ignoring command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
     );
     return;
   }
@@ -201,7 +206,13 @@ function registerTwitchCandidate(
     ? console.warn
     : console.info;
   logOverride(
-    `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}' remapped from command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner}) to command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
+    '[DB] Custom command Twitch trigger collision remapped.',
+    `trigger='${triggerString}'`,
+    `channel='${channelName}'`,
+    `from_command_id=${existingCandidate.command.command_id}`,
+    `from=${existingCandidate.source}:${existingCandidate.owner}`,
+    `to_command_id=${candidate.command.command_id}`,
+    `to=${candidate.source}:${candidate.owner}`,
   );
   context.candidateByCacheKey.set(cacheKey, preferredCandidate);
 }
