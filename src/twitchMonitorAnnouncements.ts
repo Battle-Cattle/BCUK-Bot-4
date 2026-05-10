@@ -4,7 +4,7 @@ import { isDiscordNotFoundError } from './discordUtils';
 import { getMonitorEnabled } from './monitorSettings';
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from './db';
 import { TwitchStream } from './twitchApi';
-import { LiveState } from './twitchMonitorTypes';
+import { LiveState, makeLiveState } from './twitchMonitorTypes';
 import { buildEmbed, fillTemplate, templateVars } from './twitchMonitorEmbed';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
 
@@ -15,23 +15,11 @@ export async function postAnnouncement(
 ): Promise<void> {
   // Key by DB row id so each streamer×group pair has independent state
   const key = String(streamerData.id);
-  const login = stream.user_login.toLowerCase();
   const group = streamerData.group;
 
   if (!getMonitorEnabled() || !discordClient) {
     // Track state without posting to Discord
-    liveStates.set(key, {
-      streamerId: streamerData.id,
-      groupId: group.id,
-      group,
-      login,
-      messageId: null,
-      channelId: null,
-      currentGame: stream.game_name,
-      title: stream.title,
-      currentStream: stream,
-      offlineTimer: null,
-    });
+    liveStates.set(key, makeLiveState(streamerData, stream, null, null));
     return;
   }
 
@@ -48,18 +36,7 @@ export async function postAnnouncement(
     const textChannel = channel as TextChannel;
     const msg = await textChannel.send({ content, embeds: [embed] });
 
-    liveStates.set(key, {
-      streamerId: streamerData.id,
-      groupId: group.id,
-      group,
-      login,
-      messageId: msg.id,
-      channelId: msg.channelId,
-      currentGame: stream.game_name,
-      title: stream.title,
-      currentStream: stream,
-      offlineTimer: null,
-    });
+    liveStates.set(key, makeLiveState(streamerData, stream, msg.id, msg.channelId));
 
     await setStreamerLive(streamerData.id, msg.id, msg.channelId, stream.game_name);
     await updateMultitwitch(group.id, liveStates);

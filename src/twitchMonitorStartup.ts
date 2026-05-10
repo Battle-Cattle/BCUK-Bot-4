@@ -3,7 +3,7 @@ import { isDiscordNotFoundError, tryDeleteDiscordMessage } from './discordUtils'
 import { getMonitorEnabled } from './monitorSettings';
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from './db';
 import { getStreams, TwitchStream } from './twitchApi';
-import { LiveState } from './twitchMonitorTypes';
+import { LiveState, makeLiveState } from './twitchMonitorTypes';
 import { buildEmbed, fillTemplate, templateVars } from './twitchMonitorEmbed';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
 import { postAnnouncement } from './twitchMonitorAnnouncements';
@@ -23,18 +23,7 @@ export async function tryEditStartupMessage(
     const embed = buildEmbed(liveStream);
     const message = await channel.messages.fetch(streamer.discord_message_id);
     await message.edit({ content, embeds: [embed] });
-    liveStates.set(String(streamer.id), {
-      streamerId: streamer.id,
-      groupId: streamer.group.id,
-      group: streamer.group,
-      login: streamer.name.toLowerCase(),
-      messageId: streamer.discord_message_id,
-      channelId: streamer.discord_channel_id,
-      currentGame: liveStream.game_name,
-      title: liveStream.title,
-      currentStream: liveStream,
-      offlineTimer: null,
-    });
+    liveStates.set(String(streamer.id), makeLiveState(streamer, liveStream, streamer.discord_message_id, streamer.discord_channel_id));
     await setStreamerLive(streamer.id, streamer.discord_message_id, streamer.discord_channel_id, liveStream.game_name);
     return true;
   } catch (err) {
@@ -53,18 +42,7 @@ export async function handleLiveStreamerOnStartup(
   if (streamer.discord_message_id && streamer.discord_channel_id) {
     if (!discordClient || !getMonitorEnabled()) {
       // Disabled or no client: restore stored IDs into liveStates without touching Discord
-      liveStates.set(String(streamer.id), {
-        streamerId: streamer.id,
-        groupId: streamer.group.id,
-        group: streamer.group,
-        login: streamer.name.toLowerCase(),
-        messageId: streamer.discord_message_id,
-        channelId: streamer.discord_channel_id,
-        currentGame: liveStream.game_name,
-        title: liveStream.title,
-        currentStream: liveStream,
-        offlineTimer: null,
-      });
+      liveStates.set(String(streamer.id), makeLiveState(streamer, liveStream, streamer.discord_message_id, streamer.discord_channel_id));
       return;
     }
     try {
