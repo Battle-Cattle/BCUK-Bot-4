@@ -163,9 +163,12 @@ export async function removeUserMutation(discordId: string): Promise<void> {
   }
 
   const normalizedChannel = normalizeTwitchChannelName(existingUser.twitch_name);
-  const enabledChannels = await getTwitchEnabledChannels();
+  if (!normalizedChannel) {
+    throw new Error('Removed user has an invalid Twitch channel');
+  }
 
-  if (!normalizedChannel || enabledChannels.includes(normalizedChannel)) {
+  const enabledChannels = await getTwitchEnabledChannels();
+  if (enabledChannels.includes(normalizedChannel)) {
     return;
   }
 
