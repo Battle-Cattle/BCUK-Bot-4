@@ -16,6 +16,7 @@
     <section class="section">
       <div class="section-header">
         <h2 class="section-title">SFX Commands (<span id="cmd-count"><%= triggers.length %></span>)</h2>
+        <label for="sfx-search" style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden;">Filter SFX commands</label>
         <input type="search" id="sfx-search" class="search-input" placeholder="Filter commands…">
       </div>
 
@@ -46,7 +47,7 @@
               </td>
               <td>
                 <% if (t.files.length > 0) { %>
-                <button type="button" class="btn btn-xs btn-toggle-files">▶ Files</button>
+                <button type="button" class="btn btn-xs btn-toggle-files" aria-label="Toggle file list">▶ Files</button>
                 <% } %>
               </td>
             </tr>
