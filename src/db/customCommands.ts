@@ -201,7 +201,13 @@ function registerTwitchCandidate(
     ? console.warn
     : console.info;
   logOverride(
-    `[DB] Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}' remapped from command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner}) to command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
+    '[DB] Custom command Twitch trigger collision remapped.',
+    `trigger='${triggerString}'`,
+    `channel='${channelName}'`,
+    `from_command_id=${existingCandidate.command.command_id}`,
+    `from=${existingCandidate.source}:${existingCandidate.owner}`,
+    `to_command_id=${candidate.command.command_id}`,
+    `to=${candidate.source}:${candidate.owner}`,
   );
   context.candidateByCacheKey.set(cacheKey, preferredCandidate);
 }
