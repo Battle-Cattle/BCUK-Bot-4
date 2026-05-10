@@ -11,7 +11,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
-import { getMonitorEnabled, setMonitorEnabled } from '../../monitorSettings';
+import { getMonitorEnabled, setAllLive } from '../../monitorSettings';
 import { restartTwitchMonitor, getLiveStates, catchUpDiscordPosts } from '../../twitchMonitor';
 
 const router = Router();
@@ -58,7 +58,7 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
 
 router.post('/streams/toggle', requireManager, csrfProtection, (req, res) => {
   const wasEnabled = getMonitorEnabled();
-  setMonitorEnabled(!wasEnabled);
+  setAllLive(!wasEnabled);
 
   if (!wasEnabled) {
     // Turning ON — post announcements for any currently tracked live streams
@@ -66,7 +66,7 @@ router.post('/streams/toggle', requireManager, csrfProtection, (req, res) => {
       console.error('[Web] TwitchMonitor catch-up error:', err),
     );
   }
-  // Turning OFF — nothing to do; monitor keeps running, Discord posts are silenced
+  // Turning OFF — nothing to do; monitor keeps running, all live outputs are silenced
 
   res.redirect('/admin/streams');
 });

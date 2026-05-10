@@ -1,4 +1,4 @@
-import { CUSTOM_COMMANDS_LIVE_REPLIES } from './config';
+import { getCustomCommandsLiveReplies } from './monitorSettings';
 import { getMultiTwitchDataForChannel } from './twitchMonitor';
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { resolveSharedChatSessionId } from './customCommandHandler';
@@ -84,7 +84,7 @@ export async function executeMultiCommandForTwitch(
   if (!groupInfo) return;
 
   const runtime = _runtime;
-  if (!CUSTOM_COMMANDS_LIVE_REPLIES || !runtime) {
+  if (!getCustomCommandsLiveReplies() || !runtime) {
     console.log(`[Twitch] Preview !multi in ${channel} — would post: ${groupInfo.url}`);
     return;
   }

@@ -1,5 +1,5 @@
 import type { Message } from 'discord.js';
-import { CUSTOM_COMMANDS_LIVE_REPLIES, COUNTER_LIVE_WRITES } from './config';
+import { getCustomCommandsLiveReplies, getCounterLiveWrites } from './monitorSettings';
 import { findCounterByCommand, incrementCounter } from './db';
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { extractCommand } from './commandUtils';
@@ -45,7 +45,7 @@ async function _buildCounterResponse(
   let displayValue = counter.current_value;
   let didIncrement = false;
 
-  if (isTrigger && COUNTER_LIVE_WRITES) {
+  if (isTrigger && getCounterLiveWrites()) {
     try {
       displayValue = await incrementCounter(counter.id);
       didIncrement = true;
@@ -94,7 +94,7 @@ export async function executeCounterCommandForDiscord(
 
   if (!result.canReply) return;
 
-  if (CUSTOM_COMMANDS_LIVE_REPLIES) {
+  if (getCustomCommandsLiveReplies()) {
     try {
       await message.reply(result.response);
       console.log(`[Discord] Sent ${result.label} '${command}' (recorded for monitoring).`);
@@ -128,7 +128,7 @@ export async function executeCounterCommandForTwitch(
   if (!result.canReply) return;
 
   const runtime = _twitchRuntime;
-  if (CUSTOM_COMMANDS_LIVE_REPLIES && runtime) {
+  if (getCustomCommandsLiveReplies() && runtime) {
     try {
       await runtime.send(channel, result.response);
       console.log(`[Twitch] Sent ${result.label} '${command}' in ${channel} (recorded for monitoring).`);
