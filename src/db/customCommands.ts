@@ -165,7 +165,10 @@ function registerDiscordCommand(
 
   const existingCommand = discordByTrigger.get(triggerString);
   if (existingCommand) {
-    console.warn(`[DB] Custom command Discord trigger collision: '${triggerString}' is already registered (command_id=${existingCommand.command_id}); ignoring duplicate from command_id=${command.command_id}.`);
+    console.warn(
+      `[DB] Custom command Discord trigger collision: '${triggerString}' is already registered ` +
+      `(command_id=${existingCommand.command_id}); ignoring duplicate from command_id=${command.command_id}.`,
+    );
     return;
   }
 
