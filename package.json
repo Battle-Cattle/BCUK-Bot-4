@@ -1,7 +1,7 @@
 {
   "name": "bcuk-bot-4",
   "version": "1.0.0",
-  "description": "Twitch & Discord SFX bot",
+  "description": "Community bot",
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc -p tsconfig.build.json",
