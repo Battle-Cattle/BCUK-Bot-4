@@ -147,11 +147,11 @@ export async function addOrUpdateUserMutation({
   }
 
   if (!committedChannel) {
-    await handleClearTwitchChannel(discordId, discordName, level, previousChannel, existingUser.is_twitch_bot_enabled);
+    await handleClearTwitchChannel(discordId, discordName, level, previousChannel, existingUser?.is_twitch_bot_enabled ?? false);
     return;
   }
 
-  await handleChangeTwitchChannel({ discordId, discordName, level, previousChannel, committedChannel, wasBotEnabled: existingUser.is_twitch_bot_enabled });
+  await handleChangeTwitchChannel({ discordId, discordName, level, previousChannel, committedChannel, wasBotEnabled: existingUser?.is_twitch_bot_enabled ?? false });
 }
 
 export async function removeUserMutation(discordId: string): Promise<void> {
