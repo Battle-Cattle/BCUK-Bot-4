@@ -36,7 +36,7 @@
     "@types/express": "^5.0.6",
     "@types/express-mysql-session": "^3.0.8",
     "@types/express-session": "^1.19.0",
-    "@types/node": "^24.12.3",
+    "@types/node": "^24.12.4",
     "@types/tmi.js": "^1.8.6",
     "@types/ws": "^8.18.1",
     "ts-node": "^10.9.2",
