@@ -51,8 +51,8 @@ export function parseHexColor(color: string): number {
   return parseInt(normalized, 16);
 }
 
-export function buildEmbed(stream: TwitchStream, footer?: string): EmbedBuilder {
-  const preview = buildEmbedPreview(stream, footer);
+export function buildEmbed(stream: TwitchStream, multitwitchUrl?: string): EmbedBuilder {
+  const preview = buildEmbedPreview(stream);
 
   const embed = new EmbedBuilder()
     .setTitle(preview.title)
@@ -61,7 +61,7 @@ export function buildEmbed(stream: TwitchStream, footer?: string): EmbedBuilder 
     .addFields(...preview.fields)
     .setImage(preview.imageUrl);
 
-  if (preview.footer) embed.setFooter({ text: preview.footer });
+  if (multitwitchUrl) embed.addFields({ name: 'MultiTwitch', value: multitwitchUrl });
   return embed;
 }
 

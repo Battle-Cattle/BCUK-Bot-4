@@ -1,7 +1,6 @@
-import { EmbedBuilder } from 'discord.js';
 import { discordClient } from './discordBot';
 import { getMonitorEnabled } from './monitorSettings';
-import { fillTemplate } from './twitchMonitorEmbed';
+import { buildEmbed, fillTemplate } from './twitchMonitorEmbed';
 import { LiveState } from './twitchMonitorTypes';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -100,21 +99,13 @@ export async function updateMultitwitch(groupId: number, liveStates: ReadonlyMap
   for (const state of groupLive) {
     if (!state.messageId || !state.channelId) continue;
     const multiTwitch = getMultitwitchPreview(state, context);
-    const footer = multiTwitch.renderedFooter ?? undefined;
+    const multitwitchUrl = multiTwitch.url ?? undefined;
 
     try {
       const channel = await discordClient.channels.fetch(state.channelId);
       if (!channel || !channel.isTextBased()) continue;
       const message = await channel.messages.fetch(state.messageId);
-      const existing = message.embeds[0];
-      if (!existing) continue;
-
-      const updated = EmbedBuilder.from(existing);
-      if (footer) {
-        updated.setFooter({ text: footer });
-      } else {
-        updated.setFooter(null);
-      }
+      const updated = buildEmbed(state.currentStream, multitwitchUrl);
       await message.edit({ embeds: [updated] });
     } catch (err) {
       console.error(`[TwitchMonitor] Failed to update multitwitch for ${state.login}:`, err);
