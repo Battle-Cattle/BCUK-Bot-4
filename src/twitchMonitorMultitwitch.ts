@@ -1,6 +1,6 @@
 import { discordClient } from './discordBot';
 import { getMonitorEnabled } from './monitorSettings';
-import { buildEmbed, fillTemplate } from './twitchMonitorEmbed';
+import { buildEmbed } from './twitchMonitorEmbed';
 import { LiveState } from './twitchMonitorTypes';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -10,7 +10,6 @@ export interface MultiTwitchPreview {
   applicable: boolean;
   participants: string[];
   url: string | null;
-  renderedFooter: string | null;
 }
 
 export interface MultiTwitchGroupInfo {
@@ -64,7 +63,6 @@ export function getMultitwitchPreview(state: LiveState, context: MultiTwitchCont
       applicable: false,
       participants: [state.login],
       url: null,
-      renderedFooter: null,
     };
   }
 
@@ -74,19 +72,16 @@ export function getMultitwitchPreview(state: LiveState, context: MultiTwitchCont
       applicable: true,
       participants,
       url: null,
-      renderedFooter: null,
     };
   }
 
   const url = `https://www.multitwitch.tv/${participants.join('/')}`;
-  const renderedFooter = fillTemplate(state.group.multi_twitch_message, { multitwitch: url }) || null;
 
   return {
     enabled: true,
     applicable: true,
     participants,
     url,
-    renderedFooter,
   };
 }
 
