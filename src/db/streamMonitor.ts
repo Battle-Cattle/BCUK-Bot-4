@@ -8,7 +8,6 @@ export interface DbStreamGroup {
   live_message: string;
   new_game_message: string;
   multi_twitch: boolean;
-  multi_twitch_message: string;
   delete_old_posts: boolean;
 }
 
@@ -18,7 +17,6 @@ export interface AddStreamGroupInput {
   liveMessage: string;
   newGameMessage: string;
   multiTwitch: boolean;
-  multiTwitchMessage: string;
   deleteOldPosts: boolean;
 }
 
@@ -56,7 +54,6 @@ function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
     live_message: r.live_message,
     new_game_message: r.new_game_message,
     multi_twitch: mapBool(r.multi_twitch),
-    multi_twitch_message: r.multi_twitch_message ?? '',
     delete_old_posts: mapBool(r.delete_old_posts),
   };
 }
@@ -68,14 +65,14 @@ function streamGroupParams(input: AddStreamGroupInput): Array<string | number> {
     input.liveMessage,
     input.newGameMessage,
     input.multiTwitch ? 1 : 0,
-    input.multiTwitchMessage,
+    '',
     input.deleteOldPosts ? 1 : 0,
   ];
 }
 
 export async function getAllStreamGroups(): Promise<DbStreamGroup[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT id, name, discord_channel, live_message, new_game_message, multi_twitch, multi_twitch_message, delete_old_posts
+    `SELECT id, name, discord_channel, live_message, new_game_message, multi_twitch, delete_old_posts
      FROM stream_group ORDER BY name`,
   );
   return rows.map(mapStreamGroup);
@@ -121,7 +118,7 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
     `SELECT s.id, s.name, s.group_id,
             s.discord_message_id, s.discord_channel_id, s.live_game,
             g.name AS group_name, g.discord_channel, g.live_message, g.new_game_message,
-            g.multi_twitch, g.multi_twitch_message, g.delete_old_posts
+            g.multi_twitch, g.delete_old_posts
      FROM streamer s
      JOIN stream_group g ON s.group_id = g.id
      ORDER BY g.id, s.name`,
@@ -139,7 +136,6 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
       live_message: r.live_message,
       new_game_message: r.new_game_message,
       multi_twitch: mapBool(r.multi_twitch),
-      multi_twitch_message: r.multi_twitch_message ?? '',
       delete_old_posts: mapBool(r.delete_old_posts),
     },
   }));

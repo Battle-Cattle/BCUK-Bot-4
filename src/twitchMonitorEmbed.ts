@@ -62,13 +62,12 @@ export function buildEmbed(stream: TwitchStream, multitwitchUrl?: string): Embed
     .setImage(preview.imageUrl);
 }
 
-export function templateVars(login: string, stream: TwitchStream, multitwitch?: string): Record<string, string> {
+export function templateVars(login: string, stream: TwitchStream): Record<string, string> {
   return {
     streamer: login,
     game: stream.game_name || 'Unknown',
     title: stream.title,
     url: getStreamUrl(login),
-    multitwitch: multitwitch ?? '',
   };
 }
 
