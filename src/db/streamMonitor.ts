@@ -65,7 +65,6 @@ function streamGroupParams(input: AddStreamGroupInput): Array<string | number> {
     input.liveMessage,
     input.newGameMessage,
     input.multiTwitch ? 1 : 0,
-    '',
     input.deleteOldPosts ? 1 : 0,
   ];
 }
@@ -80,15 +79,15 @@ export async function getAllStreamGroups(): Promise<DbStreamGroup[]> {
 
 export async function addStreamGroup(input: AddStreamGroupInput): Promise<void> {
   await getPool().execute(
-    `INSERT INTO stream_group (name, discord_channel, live_message, new_game_message, multi_twitch, multi_twitch_message, delete_old_posts)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO stream_group (name, discord_channel, live_message, new_game_message, multi_twitch, delete_old_posts)
+     VALUES (?, ?, ?, ?, ?, ?)`,
     streamGroupParams(input),
   );
 }
 
 export async function updateStreamGroup(input: UpdateStreamGroupInput): Promise<void> {
   await getPool().execute(
-    `UPDATE stream_group SET name=?, discord_channel=?, live_message=?, new_game_message=?, multi_twitch=?, multi_twitch_message=?, delete_old_posts=?
+    `UPDATE stream_group SET name=?, discord_channel=?, live_message=?, new_game_message=?, multi_twitch=?, delete_old_posts=?
      WHERE id=?`,
     [...streamGroupParams(input), input.id],
   );
