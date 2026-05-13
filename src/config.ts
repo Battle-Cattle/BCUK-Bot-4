@@ -49,6 +49,9 @@ export const SESSION_SECRET = require_env('SESSION_SECRET');
 if (SESSION_SECRET === '__REQUIRED_GENERATE_LONG_RANDOM_SECRET__') {
   throw new Error('SESSION_SECRET has not been set — replace the placeholder in .env with a long random string');
 }
+if (SESSION_SECRET.length < 32) {
+  throw new Error('SESSION_SECRET must be at least 32 characters long');
+}
 export const DISCORD_CLIENT_ID = require_env('DISCORD_CLIENT_ID');
 export const DISCORD_CLIENT_SECRET = require_env('DISCORD_CLIENT_SECRET');
 export const DISCORD_CALLBACK_URL = require_env('DISCORD_CALLBACK_URL');

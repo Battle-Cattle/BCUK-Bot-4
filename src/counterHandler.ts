@@ -48,9 +48,10 @@ async function _buildCounterResponse(
       displayValue = await incrementCounter(counter.id);
     } catch (err) {
       console.error(`${errorPrefix} Failed to increment counter ${counter.id} for command '${command}':`, err);
-      const response = formatCounterMessage(counter.increment_message, displayValue);
+      // Invariant: canReply must be false here so the stale pre-increment
+      // displayValue is never sent to chat.
       return {
-        response,
+        response: formatCounterMessage(counter.increment_message, displayValue),
         label,
         canReply: false,
       };

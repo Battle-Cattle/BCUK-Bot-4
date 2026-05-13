@@ -49,14 +49,16 @@ async function resolveShoutoutData(
   };
 }
 
-async function dispatchShoutout(channel: string, message: string): Promise<void> {
+async function dispatchShoutout(channel: string, message: string): Promise<boolean> {
   const runtime = _runtime;
-  if (!runtime) return;
+  if (!runtime) return false;
   try {
     await runtime.send(channel, message);
     console.log(`[Twitch] Sent !so in ${channel} — ${message}`);
+    return true;
   } catch (err) {
     console.error(`[Twitch] Failed to send !so in ${channel}:`, err);
+    return false;
   }
 }
 
@@ -79,9 +81,16 @@ export async function executeShoutoutForTwitch(
     ? formatShoutoutMessage(data.login, data.gameName, data.isLive)
     : `(unknown user: ${target})`;
 
-  recordCommandTestEntry({ source: 'twitch', command: SO_COMMAND, response, channel, user: username });
-
   if (data) {
-    await dispatchShoutout(channel, response);
+    const sent = await dispatchShoutout(channel, response);
+    recordCommandTestEntry({
+      source: 'twitch',
+      command: SO_COMMAND,
+      response: sent ? response : `[SEND FAILED] ${response}`,
+      channel,
+      user: username,
+    });
+  } else {
+    recordCommandTestEntry({ source: 'twitch', command: SO_COMMAND, response, channel, user: username });
   }
 }

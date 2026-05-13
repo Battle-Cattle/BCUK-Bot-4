@@ -129,9 +129,19 @@ export async function startTwitchMonitor(): Promise<void> {
   // Startup live-check: sync with any streams that went live/offline while bot was down
   await performStartupLiveCheck(liveStates, loginToUserId, streamersData);
 
-  // Begin polling every 60 s
-  pollTimer = setInterval(() => {
-    pollStreams().catch((err) => console.error('[TwitchMonitor] Poll error:', err));
+  // Begin polling every 60 s. The in-flight guard prevents a slow poll from
+  // stacking with the next tick if the interval fires before it completes.
+  let polling = false;
+  pollTimer = setInterval(async () => {
+    if (polling) return;
+    polling = true;
+    try {
+      await pollStreams();
+    } catch (err) {
+      console.error('[TwitchMonitor] Poll error:', err);
+    } finally {
+      polling = false;
+    }
   }, POLL_INTERVAL_MS);
   console.log(`[TwitchMonitor] Polling ${loginToUserId.size} streamer(s) every ${POLL_INTERVAL_MS / 1000}s`);
 }

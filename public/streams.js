@@ -52,12 +52,18 @@ function renderBadge(label, className) {
   return '<span class="badge ' + className + '">' + escapeHtml(label) + '</span>';
 }
 
-function renderMetadataItem(label, value, extraClass) {
-  return '' +
-    '<div class="live-meta-item">' +
-      '<span class="live-meta-label">' + escapeHtml(label) + '</span>' +
-      '<span class="live-meta-value' + (extraClass ? ' ' + extraClass : '') + '">' + escapeHtml(formatValue(value)) + '</span>' +
-    '</div>';
+function createMetadataItem(label, value, extraClass) {
+  var item = document.createElement('div');
+  item.className = 'live-meta-item';
+  var labelSpan = document.createElement('span');
+  labelSpan.className = 'live-meta-label';
+  labelSpan.textContent = label;
+  var valueSpan = document.createElement('span');
+  valueSpan.className = 'live-meta-value' + (extraClass ? ' ' + extraClass : '');
+  valueSpan.textContent = formatValue(value);
+  item.appendChild(labelSpan);
+  item.appendChild(valueSpan);
+  return item;
 }
 
 function sanitizeUrl(url, options) {
@@ -87,79 +93,189 @@ function sanitizeUrl(url, options) {
   return null;
 }
 
-function renderLink(url, label) {
+function createLink(url, label) {
   var safeUrl = sanitizeUrl(url);
-  if (!safeUrl) return '<span class="muted">—</span>';
-  return '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(label || safeUrl) + '</a>';
+  if (!safeUrl) {
+    var muted = document.createElement('span');
+    muted.className = 'muted';
+    muted.textContent = '—';
+    return muted;
+  }
+  var a = document.createElement('a');
+  a.href = safeUrl;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.textContent = label || safeUrl;
+  return a;
 }
 
-function renderEmbedFields(fields) {
-  if (!Array.isArray(fields) || fields.length === 0) {
-    return '<div class="discord-embed-field"><span class="muted">No embed fields</span></div>';
+function createMessageContent(content) {
+  var div = document.createElement('div');
+  div.className = 'discord-message-content';
+  if (content) {
+    div.textContent = content;
+  } else {
+    var muted = document.createElement('span');
+    muted.className = 'muted';
+    muted.textContent = 'No message content';
+    div.appendChild(muted);
+  }
+  return div;
+}
+
+function createEmbedTitle(embed, safeEmbedUrl) {
+  var div = document.createElement('div');
+  div.className = 'discord-embed-title';
+  if (safeEmbedUrl) {
+    var a = document.createElement('a');
+    a.href = safeEmbedUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = formatValue(embed.title);
+    div.appendChild(a);
+  } else {
+    div.textContent = formatValue(embed.title);
+  }
+  return div;
+}
+
+function createEmbedFields(fields) {
+  var div = document.createElement('div');
+  div.className = 'discord-embed-fields';
+  var list = Array.isArray(fields) ? fields.filter(Boolean) : [];
+  if (list.length) {
+    list.forEach(function(field) {
+      var fieldDiv = document.createElement('div');
+      fieldDiv.className = 'discord-embed-field';
+      var nameDiv = document.createElement('div');
+      nameDiv.className = 'discord-embed-field-name';
+      nameDiv.textContent = formatValue(field.name);
+      var valueDiv = document.createElement('div');
+      valueDiv.className = 'discord-embed-field-value';
+      valueDiv.textContent = formatValue(field.value);
+      fieldDiv.appendChild(nameDiv);
+      fieldDiv.appendChild(valueDiv);
+      div.appendChild(fieldDiv);
+    });
+  } else {
+    var noFields = document.createElement('div');
+    noFields.className = 'discord-embed-field';
+    var muted = document.createElement('span');
+    muted.className = 'muted';
+    muted.textContent = 'No embed fields';
+    noFields.appendChild(muted);
+    div.appendChild(noFields);
+  }
+  return div;
+}
+
+function createEmbedImage(safeImageUrl) {
+  var div = document.createElement('div');
+  div.className = 'discord-embed-image';
+  if (safeImageUrl) {
+    var img = document.createElement('img');
+    img.src = safeImageUrl;
+    img.alt = 'Stream thumbnail preview';
+    img.loading = 'lazy';
+    img.referrerPolicy = 'no-referrer';
+    div.appendChild(img);
+  } else {
+    var muted = document.createElement('span');
+    muted.className = 'muted';
+    muted.textContent = 'Thumbnail unavailable';
+    div.appendChild(muted);
+  }
+  return div;
+}
+
+function createDiscordEmbed(embed, safeEmbedUrl, safeImageUrl) {
+  var preview = document.createElement('div');
+  preview.className = 'discord-embed-preview';
+
+  var accent = document.createElement('div');
+  accent.className = 'discord-embed-accent';
+  preview.appendChild(accent);
+
+  var body = document.createElement('div');
+  body.className = 'discord-embed-body';
+  body.appendChild(createEmbedTitle(embed, safeEmbedUrl));
+  body.appendChild(createEmbedFields(embed.fields));
+  body.appendChild(createEmbedImage(safeImageUrl));
+
+  if (safeImageUrl) {
+    var footer = document.createElement('div');
+    footer.className = 'discord-embed-footer';
+    footer.textContent = 'Image: ';
+    footer.appendChild(createLink(safeImageUrl, 'open thumbnail'));
+    body.appendChild(footer);
   }
 
-  return fields.map(function(field) {
-    return '' +
-      '<div class="discord-embed-field">' +
-        '<div class="discord-embed-field-name">' + escapeHtml(formatValue(field.name)) + '</div>' +
-        '<div class="discord-embed-field-value">' + escapeHtml(formatValue(field.value)) + '</div>' +
-      '</div>';
-  }).join('');
+  preview.appendChild(body);
+  return preview;
 }
 
-function renderMessagePreview(title, preview) {
+function createMessagePreview(title, preview) {
   var embed = preview && preview.embed ? preview.embed : null;
   var content = preview ? formatValue(preview.content, '') : '';
   var safeEmbedUrl = embed ? sanitizeUrl(embed.url) : null;
   var safeImageUrl = embed ? sanitizeUrl(embed.imageUrl, { requireHttps: true }) : null;
 
-  return '' +
-    '<section class="live-message-preview">' +
-      '<h4 class="live-message-title">' + escapeHtml(title) + '</h4>' +
-      '<div class="discord-message-box">' +
-        '<div class="discord-message-content">' + (content ? escapeHtml(content) : '<span class="muted">No message content</span>') + '</div>' +
-        (embed ? '' +
-          '<div class="discord-embed-preview">' +
-            '<div class="discord-embed-accent"></div>' +
-            '<div class="discord-embed-body">' +
-              '<div class="discord-embed-title">' + (safeEmbedUrl
-                ? '<a href="' + escapeHtml(safeEmbedUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(formatValue(embed.title)) + '</a>'
-                : escapeHtml(formatValue(embed.title))) + '</div>' +
-              '<div class="discord-embed-fields">' + renderEmbedFields(embed.fields) + '</div>' +
-              '<div class="discord-embed-image">' + (safeImageUrl
-                ? '<img src="' + escapeHtml(safeImageUrl) + '" alt="Stream thumbnail preview" loading="lazy" referrerpolicy="no-referrer">'
-                : '<span class="muted">Thumbnail unavailable</span>') + '</div>' +
-              (safeImageUrl
-                ? '<div class="discord-embed-footer">Image: ' + renderLink(safeImageUrl, 'open thumbnail') + '</div>'
-                : '') +
-            '</div>' +
-          '</div>' : '') +
-      '</div>' +
-    '</section>';
+  var section = document.createElement('section');
+  section.className = 'live-message-preview';
+
+  var h4 = document.createElement('h4');
+  h4.className = 'live-message-title';
+  h4.textContent = title;
+  section.appendChild(h4);
+
+  var msgBox = document.createElement('div');
+  msgBox.className = 'discord-message-box';
+  msgBox.appendChild(createMessageContent(content));
+  if (embed) {
+    msgBox.appendChild(createDiscordEmbed(embed, safeEmbedUrl, safeImageUrl));
+  }
+
+  section.appendChild(msgBox);
+  return section;
 }
 
 function getLiveRowKey(item) {
   return String(item.streamerId || '') + ':' + String(item.groupId || '');
 }
 
-function renderMultiTwitchDetails(multiTwitch) {
+function createMultiTwitchSection(multiTwitch) {
   var participants = multiTwitch && multiTwitch.participants && multiTwitch.participants.length
     ? multiTwitch.participants.join(', ')
     : '—';
 
-  return '' +
-    '<section class="live-detail-section">' +
-      '<h4 class="live-message-title">Multi-Twitch</h4>' +
-      '<div class="live-meta-grid">' +
-        renderMetadataItem('Setting', multiTwitch && multiTwitch.enabled ? 'Enabled' : 'Disabled') +
-        renderMetadataItem('Applicable Now', multiTwitch && multiTwitch.applicable ? 'Yes' : 'No') +
-        renderMetadataItem('Participants', participants, 'mono') +
-      '</div>' +
-      '<div class="live-link-row">' +
-        '<span class="live-meta-label">Computed link</span>' +
-        '<span class="live-meta-value mono">' + renderLink(multiTwitch ? multiTwitch.url : null, multiTwitch && multiTwitch.url ? multiTwitch.url : '—') + '</span>' +
-      '</div>' +
-    '</section>';
+  var section = document.createElement('section');
+  section.className = 'live-detail-section';
+
+  var title = document.createElement('h4');
+  title.className = 'live-message-title';
+  title.textContent = 'Multi-Twitch';
+  section.appendChild(title);
+
+  var metaGrid = document.createElement('div');
+  metaGrid.className = 'live-meta-grid';
+  metaGrid.appendChild(createMetadataItem('Setting', multiTwitch && multiTwitch.enabled ? 'Enabled' : 'Disabled'));
+  metaGrid.appendChild(createMetadataItem('Applicable Now', multiTwitch && multiTwitch.applicable ? 'Yes' : 'No'));
+  metaGrid.appendChild(createMetadataItem('Participants', participants, 'mono'));
+  section.appendChild(metaGrid);
+
+  var linkRow = document.createElement('div');
+  linkRow.className = 'live-link-row';
+  var linkLabel = document.createElement('span');
+  linkLabel.className = 'live-meta-label';
+  linkLabel.textContent = 'Computed link';
+  var linkValue = document.createElement('span');
+  linkValue.className = 'live-meta-value mono';
+  linkValue.appendChild(createLink(multiTwitch ? multiTwitch.url : null, multiTwitch && multiTwitch.url ? multiTwitch.url : '—'));
+  linkRow.appendChild(linkLabel);
+  linkRow.appendChild(linkValue);
+  section.appendChild(linkRow);
+
+  return section;
 }
 
 function createDetailRow(item) {
@@ -171,30 +287,56 @@ function createDetailRow(item) {
 
   var detailTd = document.createElement('td');
   detailTd.colSpan = getLiveTableColumns();
-  detailTd.innerHTML = '' +
-    '<div class="live-detail-shell">' +
-      '<div class="live-detail-grid">' +
-        '<section class="live-detail-section">' +
-          '<h4 class="live-message-title">Current Details</h4>' +
-          '<div class="live-meta-grid">' +
-            renderMetadataItem('Streamer ID', item.streamerId, 'mono') +
-            renderMetadataItem('Group ID', item.groupId, 'mono') +
-            renderMetadataItem('Group', item.groupName) +
-            renderMetadataItem('Target Discord Channel', item.groupDiscordChannelId, 'mono') +
-            renderMetadataItem('Posted Channel', item.channelId, 'mono') +
-            renderMetadataItem('Discord Message ID', item.messageId, 'mono') +
-            renderMetadataItem('Delete Old Posts', item.deleteOldPosts ? 'Yes' : 'No') +
-            renderMetadataItem('Current Game', item.currentGame) +
-          '</div>' +
-          '<div class="live-link-row">' +
-            '<span class="live-meta-label">Twitch</span>' +
-            '<span class="live-meta-value mono">' + renderLink(item.twitchUrl, item.twitchUrl) + '</span>' +
-          '</div>' +
-        '</section>' +
-        renderMultiTwitchDetails(item.multiTwitch) +
-      '</div>' +
-      '<div class="live-preview-grid" data-live-key="' + escapeHtml(key) + '" data-hydrated="false"></div>' +
-    '</div>';
+
+  var shell = document.createElement('div');
+  shell.className = 'live-detail-shell';
+
+  var grid = document.createElement('div');
+  grid.className = 'live-detail-grid';
+
+  var detailsSection = document.createElement('section');
+  detailsSection.className = 'live-detail-section';
+
+  var detailTitle = document.createElement('h4');
+  detailTitle.className = 'live-message-title';
+  detailTitle.textContent = 'Current Details';
+  detailsSection.appendChild(detailTitle);
+
+  var metaGrid = document.createElement('div');
+  metaGrid.className = 'live-meta-grid';
+  metaGrid.appendChild(createMetadataItem('Streamer ID', item.streamerId, 'mono'));
+  metaGrid.appendChild(createMetadataItem('Group ID', item.groupId, 'mono'));
+  metaGrid.appendChild(createMetadataItem('Group', item.groupName));
+  metaGrid.appendChild(createMetadataItem('Target Discord Channel', item.groupDiscordChannelId, 'mono'));
+  metaGrid.appendChild(createMetadataItem('Posted Channel', item.channelId, 'mono'));
+  metaGrid.appendChild(createMetadataItem('Discord Message ID', item.messageId, 'mono'));
+  metaGrid.appendChild(createMetadataItem('Delete Old Posts', item.deleteOldPosts ? 'Yes' : 'No'));
+  metaGrid.appendChild(createMetadataItem('Current Game', item.currentGame));
+  detailsSection.appendChild(metaGrid);
+
+  var twitchLinkRow = document.createElement('div');
+  twitchLinkRow.className = 'live-link-row';
+  var twitchLabel = document.createElement('span');
+  twitchLabel.className = 'live-meta-label';
+  twitchLabel.textContent = 'Twitch';
+  var twitchValue = document.createElement('span');
+  twitchValue.className = 'live-meta-value mono';
+  twitchValue.appendChild(createLink(item.twitchUrl, item.twitchUrl));
+  twitchLinkRow.appendChild(twitchLabel);
+  twitchLinkRow.appendChild(twitchValue);
+  detailsSection.appendChild(twitchLinkRow);
+
+  grid.appendChild(detailsSection);
+  grid.appendChild(createMultiTwitchSection(item.multiTwitch));
+  shell.appendChild(grid);
+
+  var previewGrid = document.createElement('div');
+  previewGrid.className = 'live-preview-grid';
+  previewGrid.dataset.liveKey = key;
+  previewGrid.dataset.hydrated = 'false';
+  shell.appendChild(previewGrid);
+
+  detailTd.appendChild(shell);
   detailTr.appendChild(detailTd);
   return detailTr;
 }
@@ -210,9 +352,9 @@ function hydrateLivePreviewGrid(liveKey) {
   var item = liveItemsByKey[liveKey];
   if (!item) return;
 
-  grid.innerHTML = '' +
-    renderMessagePreview('Live Announcement Preview', item.liveMessagePreview) +
-    renderMessagePreview('Game Change Preview', item.gameChangePreview);
+  clearChildren(grid);
+  grid.appendChild(createMessagePreview('Live Announcement Preview', item.liveMessagePreview));
+  grid.appendChild(createMessagePreview('Game Change Preview', item.gameChangePreview));
   grid.dataset.hydrated = 'true';
 }
 
