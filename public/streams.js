@@ -109,6 +109,111 @@ function createLink(url, label) {
   return a;
 }
 
+function createMessageContent(content) {
+  var div = document.createElement('div');
+  div.className = 'discord-message-content';
+  if (content) {
+    div.textContent = content;
+  } else {
+    var muted = document.createElement('span');
+    muted.className = 'muted';
+    muted.textContent = 'No message content';
+    div.appendChild(muted);
+  }
+  return div;
+}
+
+function createEmbedTitle(embed, safeEmbedUrl) {
+  var div = document.createElement('div');
+  div.className = 'discord-embed-title';
+  if (safeEmbedUrl) {
+    var a = document.createElement('a');
+    a.href = safeEmbedUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = formatValue(embed.title);
+    div.appendChild(a);
+  } else {
+    div.textContent = formatValue(embed.title);
+  }
+  return div;
+}
+
+function createEmbedFields(fields) {
+  var div = document.createElement('div');
+  div.className = 'discord-embed-fields';
+  var list = Array.isArray(fields) && fields.length ? fields : null;
+  if (list) {
+    list.forEach(function(field) {
+      var fieldDiv = document.createElement('div');
+      fieldDiv.className = 'discord-embed-field';
+      var nameDiv = document.createElement('div');
+      nameDiv.className = 'discord-embed-field-name';
+      nameDiv.textContent = formatValue(field.name);
+      var valueDiv = document.createElement('div');
+      valueDiv.className = 'discord-embed-field-value';
+      valueDiv.textContent = formatValue(field.value);
+      fieldDiv.appendChild(nameDiv);
+      fieldDiv.appendChild(valueDiv);
+      div.appendChild(fieldDiv);
+    });
+  } else {
+    var noFields = document.createElement('div');
+    noFields.className = 'discord-embed-field';
+    var muted = document.createElement('span');
+    muted.className = 'muted';
+    muted.textContent = 'No embed fields';
+    noFields.appendChild(muted);
+    div.appendChild(noFields);
+  }
+  return div;
+}
+
+function createEmbedImage(safeImageUrl) {
+  var div = document.createElement('div');
+  div.className = 'discord-embed-image';
+  if (safeImageUrl) {
+    var img = document.createElement('img');
+    img.src = safeImageUrl;
+    img.alt = 'Stream thumbnail preview';
+    img.loading = 'lazy';
+    img.referrerPolicy = 'no-referrer';
+    div.appendChild(img);
+  } else {
+    var muted = document.createElement('span');
+    muted.className = 'muted';
+    muted.textContent = 'Thumbnail unavailable';
+    div.appendChild(muted);
+  }
+  return div;
+}
+
+function createDiscordEmbed(embed, safeEmbedUrl, safeImageUrl) {
+  var preview = document.createElement('div');
+  preview.className = 'discord-embed-preview';
+
+  var accent = document.createElement('div');
+  accent.className = 'discord-embed-accent';
+  preview.appendChild(accent);
+
+  var body = document.createElement('div');
+  body.className = 'discord-embed-body';
+  body.appendChild(createEmbedTitle(embed, safeEmbedUrl));
+  body.appendChild(createEmbedFields(embed.fields));
+  body.appendChild(createEmbedImage(safeImageUrl));
+
+  if (safeImageUrl) {
+    var footer = document.createElement('div');
+    footer.className = 'discord-embed-footer';
+    footer.textContent = 'Image: ';
+    footer.appendChild(createLink(safeImageUrl, 'open thumbnail'));
+    body.appendChild(footer);
+  }
+
+  preview.appendChild(body);
+  return preview;
+}
+
 function createMessagePreview(title, preview) {
   var embed = preview && preview.embed ? preview.embed : null;
   var content = preview ? formatValue(preview.content, '') : '';
@@ -125,99 +230,9 @@ function createMessagePreview(title, preview) {
 
   var msgBox = document.createElement('div');
   msgBox.className = 'discord-message-box';
-
-  var msgContent = document.createElement('div');
-  msgContent.className = 'discord-message-content';
-  if (content) {
-    msgContent.textContent = content;
-  } else {
-    var noContent = document.createElement('span');
-    noContent.className = 'muted';
-    noContent.textContent = 'No message content';
-    msgContent.appendChild(noContent);
-  }
-  msgBox.appendChild(msgContent);
-
+  msgBox.appendChild(createMessageContent(content));
   if (embed) {
-    var embedPreview = document.createElement('div');
-    embedPreview.className = 'discord-embed-preview';
-
-    var accent = document.createElement('div');
-    accent.className = 'discord-embed-accent';
-    embedPreview.appendChild(accent);
-
-    var body = document.createElement('div');
-    body.className = 'discord-embed-body';
-
-    var embedTitle = document.createElement('div');
-    embedTitle.className = 'discord-embed-title';
-    if (safeEmbedUrl) {
-      var titleLink = document.createElement('a');
-      titleLink.href = safeEmbedUrl;
-      titleLink.target = '_blank';
-      titleLink.rel = 'noopener noreferrer';
-      titleLink.textContent = formatValue(embed.title);
-      embedTitle.appendChild(titleLink);
-    } else {
-      embedTitle.textContent = formatValue(embed.title);
-    }
-    body.appendChild(embedTitle);
-
-    var fieldsDiv = document.createElement('div');
-    fieldsDiv.className = 'discord-embed-fields';
-    var fields = Array.isArray(embed.fields) && embed.fields.length ? embed.fields : null;
-    if (fields) {
-      fields.forEach(function(field) {
-        var fieldDiv = document.createElement('div');
-        fieldDiv.className = 'discord-embed-field';
-        var fieldName = document.createElement('div');
-        fieldName.className = 'discord-embed-field-name';
-        fieldName.textContent = formatValue(field.name);
-        var fieldValue = document.createElement('div');
-        fieldValue.className = 'discord-embed-field-value';
-        fieldValue.textContent = formatValue(field.value);
-        fieldDiv.appendChild(fieldName);
-        fieldDiv.appendChild(fieldValue);
-        fieldsDiv.appendChild(fieldDiv);
-      });
-    } else {
-      var noFields = document.createElement('div');
-      noFields.className = 'discord-embed-field';
-      var noFieldsMuted = document.createElement('span');
-      noFieldsMuted.className = 'muted';
-      noFieldsMuted.textContent = 'No embed fields';
-      noFields.appendChild(noFieldsMuted);
-      fieldsDiv.appendChild(noFields);
-    }
-    body.appendChild(fieldsDiv);
-
-    var imgDiv = document.createElement('div');
-    imgDiv.className = 'discord-embed-image';
-    if (safeImageUrl) {
-      var img = document.createElement('img');
-      img.src = safeImageUrl;
-      img.alt = 'Stream thumbnail preview';
-      img.loading = 'lazy';
-      img.referrerPolicy = 'no-referrer';
-      imgDiv.appendChild(img);
-    } else {
-      var noImg = document.createElement('span');
-      noImg.className = 'muted';
-      noImg.textContent = 'Thumbnail unavailable';
-      imgDiv.appendChild(noImg);
-    }
-    body.appendChild(imgDiv);
-
-    if (safeImageUrl) {
-      var footer = document.createElement('div');
-      footer.className = 'discord-embed-footer';
-      footer.textContent = 'Image: ';
-      footer.appendChild(createLink(safeImageUrl, 'open thumbnail'));
-      body.appendChild(footer);
-    }
-
-    embedPreview.appendChild(body);
-    msgBox.appendChild(embedPreview);
+    msgBox.appendChild(createDiscordEmbed(embed, safeEmbedUrl, safeImageUrl));
   }
 
   section.appendChild(msgBox);
