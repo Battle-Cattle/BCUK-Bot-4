@@ -2,6 +2,7 @@ import type { Message } from 'discord.js';
 import { findCounterByCommand, incrementCounter } from './db';
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { extractCommand } from './commandUtils';
+import { isDiscordNotFoundError } from './discordUtils';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
@@ -89,7 +90,9 @@ export async function executeCounterCommandForDiscord(
     await message.reply(result.response);
     console.log(`[Discord] Sent ${result.label} '${command}' (recorded for monitoring).`);
   } catch (err) {
-    console.error(`[Discord] Failed to reply to message ${message.id} for ${result.label} '${command}':`, err);
+    if (!isDiscordNotFoundError(err)) {
+      console.error(`[Discord] Failed to reply to message ${message.id} for ${result.label} '${command}':`, err);
+    }
   }
 }
 

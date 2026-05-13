@@ -3,6 +3,7 @@ import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { getSharedChatSession } from './twitchApi';
 import { extractCommand } from './commandUtils';
+import { isDiscordNotFoundError } from './discordUtils';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
@@ -144,7 +145,9 @@ export async function executeCustomCommandForDiscord(
     await message.reply(result.response);
     console.log(`[Discord] Sent custom command '${command}' (recorded for monitoring).`);
   } catch (err) {
-    console.error(`[Discord] Failed to reply to message ${message.id} for command '${command}':`, err);
+    if (!isDiscordNotFoundError(err)) {
+      console.error(`[Discord] Failed to reply to message ${message.id} for command '${command}':`, err);
+    }
   }
 }
 

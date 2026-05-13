@@ -34,6 +34,20 @@ const KNOWN_ERRORS = new Set([
   'add_streamer_failed', 'remove_streamer_failed',
 ]);
 
+const ERROR_MESSAGES: Record<string, string> = {
+  missing_fields:       'All required fields must be filled in.',
+  invalid_id:           'Invalid ID — please try again.',
+  add_group_failed:     'Failed to add stream group. Please try again.',
+  update_group_failed:  'Failed to update stream group. Please try again.',
+  remove_group_failed:  'Failed to remove stream group. Please try again.',
+  add_streamer_failed:  'Failed to add streamer. Please try again.',
+  remove_streamer_failed: 'Failed to remove streamer. Please try again.',
+};
+
+function getFriendlyError(key: string): string {
+  return ERROR_MESSAGES[key] ?? `An error occurred (${key}).`;
+}
+
 // ─── View ─────────────────────────────────────────────────────────────────────
 
 router.get('/streams', requireManager, csrfProtection, async (req, res) => {
@@ -45,6 +59,7 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
       streamers,
       csrfToken: req.csrfToken(),
       error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
+      getFriendlyError,
     });
   } catch (err) {
     console.error('[Web] Streams page error:', err);
