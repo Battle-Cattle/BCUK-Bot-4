@@ -1,4 +1,3 @@
-import { getCustomCommandsLiveReplies } from './monitorSettings';
 import { getUsers, getChannelInfo, getStreams, TwitchChannelInfo, TwitchStream } from './twitchApi';
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { extractCommand } from './commandUtils';
@@ -52,10 +51,7 @@ async function resolveShoutoutData(
 
 async function dispatchShoutout(channel: string, message: string): Promise<void> {
   const runtime = _runtime;
-  if (!getCustomCommandsLiveReplies() || !runtime) {
-    console.log(`[Twitch] Preview !so in ${channel} — would post: ${message}`);
-    return;
-  }
+  if (!runtime) return;
   try {
     await runtime.send(channel, message);
     console.log(`[Twitch] Sent !so in ${channel} — ${message}`);

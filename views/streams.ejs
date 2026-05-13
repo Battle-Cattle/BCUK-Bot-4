@@ -12,36 +12,9 @@
 
   <main class="container">
 
-    <!-- ── Monitor toggle ──────────────────────────────────────────── -->
-    <section class="section">
-      <h2 class="section-title">Stream Monitor</h2>
-
-      <% if (error) { %>
-      <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
-        <span class="text-danger">&#9888; Operation failed: <%= error.replace(/_/g, ' ') %></span>
-      </div>
-      <% } %>
-
-      <!-- Go Live toggle -->
-      <div class="card card-spaced">
-        <div class="card-header">
-          <span class="card-icon"><%= monitorEnabled ? '🟢' : '🔴' %></span>
-          <span class="card-label">Bot Live Mode</span>
-          <span class="badge ml-auto <%= monitorEnabled ? 'badge-active' : 'badge-offline' %>">
-            <%= monitorEnabled ? 'Live' : 'Shadow Mode' %>
-          </span>
-        </div>
-        <div class="card-body card-body-row">
-          <form method="POST" action="/admin/streams/toggle">
-            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-            <button type="submit" class="btn <%= monitorEnabled ? 'btn-danger' : '' %>">
-              <%= monitorEnabled ? '⏹ Disable Live Mode' : '▶ Go Live' %>
-            </button>
-          </form>
-          <span class="text-muted-sm">Enables Discord announcements, Twitch chat replies, and counter writes. Use <strong>Live Now</strong> below to verify data first.</span>
-        </div>
-      </div>
-    </section>
+    <% if (error) { %>
+    <div class="alert alert-error"><%= error %></div>
+    <% } %>
 
     <!-- ── Live Now ─────────────────────────────────────────────────── -->
     <section class="section">

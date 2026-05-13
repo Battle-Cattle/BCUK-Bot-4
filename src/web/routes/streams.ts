@@ -11,8 +11,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
-import { getMonitorEnabled, setAllLive } from '../../monitorSettings';
-import { restartTwitchMonitor, getLiveStates, catchUpDiscordPosts } from '../../twitchMonitor';
+import { restartTwitchMonitor, getLiveStates } from '../../twitchMonitor';
 
 const router = Router();
 
@@ -45,7 +44,6 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
       groups,
       streamers,
       csrfToken: req.csrfToken(),
-      monitorEnabled: getMonitorEnabled(),
       error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
     });
   } catch (err) {
@@ -54,27 +52,10 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
   }
 });
 
-// ─── Toggle ───────────────────────────────────────────────────────────────────
-
-router.post('/streams/toggle', requireManager, csrfProtection, (req, res) => {
-  const wasEnabled = getMonitorEnabled();
-  setAllLive(!wasEnabled);
-
-  if (!wasEnabled) {
-    // Turning ON — post announcements for any currently tracked live streams
-    catchUpDiscordPosts().catch((err) =>
-      console.error('[Web] TwitchMonitor catch-up error:', err),
-    );
-  }
-  // Turning OFF — nothing to do; monitor keeps running, all live outputs are silenced
-
-  res.redirect('/admin/streams');
-});
-
 // ─── Live state snapshot ──────────────────────────────────────────────────────
 
 router.get('/streams/live', requireManager, (_req, res) => {
-  res.json({ enabled: getMonitorEnabled(), streams: getLiveStates() });
+  res.json({ streams: getLiveStates() });
 });
 
 // ─── Groups ───────────────────────────────────────────────────────────────────
