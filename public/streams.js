@@ -142,8 +142,8 @@ function createEmbedTitle(embed, safeEmbedUrl) {
 function createEmbedFields(fields) {
   var div = document.createElement('div');
   div.className = 'discord-embed-fields';
-  var list = Array.isArray(fields) && fields.length ? fields : null;
-  if (list) {
+  var list = Array.isArray(fields) ? fields.filter(Boolean) : [];
+  if (list.length) {
     list.forEach(function(field) {
       var fieldDiv = document.createElement('div');
       fieldDiv.className = 'discord-embed-field';
