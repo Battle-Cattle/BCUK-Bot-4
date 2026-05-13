@@ -1,6 +1,5 @@
 import { discordClient } from './discordBot';
 import { isDiscordNotFoundError, tryDeleteDiscordMessage } from './discordUtils';
-import { getMonitorEnabled } from './monitorSettings';
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from './db';
 import { getStreams, TwitchStream } from './twitchApi';
 import { LiveState, makeLiveState } from './twitchMonitorTypes';
@@ -40,8 +39,7 @@ export async function handleLiveStreamerOnStartup(
   groupsWithChanges: Set<number>,
 ): Promise<void> {
   if (streamer.discord_message_id && streamer.discord_channel_id) {
-    if (!discordClient || !getMonitorEnabled()) {
-      // Disabled or no client: restore stored IDs into liveStates without touching Discord
+    if (!discordClient) {
       liveStates.set(String(streamer.id), makeLiveState(streamer, liveStream, streamer.discord_message_id, streamer.discord_channel_id));
       return;
     }

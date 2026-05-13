@@ -1,5 +1,4 @@
 import { discordClient } from './discordBot';
-import { getMonitorEnabled } from './monitorSettings';
 import { buildEmbed } from './twitchMonitorEmbed';
 import { LiveState } from './twitchMonitorTypes';
 
@@ -86,7 +85,7 @@ export function getMultitwitchPreview(state: LiveState, context: MultiTwitchCont
 }
 
 export async function updateMultitwitch(groupId: number, liveStates: ReadonlyMap<string, LiveState>): Promise<void> {
-  if (!getMonitorEnabled() || !discordClient) return;
+  if (!discordClient) return;
 
   const groupLive = Array.from(liveStates.values()).filter((s) => s.groupId === groupId);
   const context = buildMultiTwitchContext(groupLive);

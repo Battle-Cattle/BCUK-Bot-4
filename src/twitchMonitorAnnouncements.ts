@@ -1,7 +1,6 @@
 import { TextChannel } from 'discord.js';
 import { discordClient } from './discordBot';
 import { isDiscordNotFoundError } from './discordUtils';
-import { getMonitorEnabled } from './monitorSettings';
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from './db';
 import { TwitchStream } from './twitchApi';
 import { LiveState, makeLiveState } from './twitchMonitorTypes';
@@ -17,8 +16,7 @@ export async function postAnnouncement(
   const key = String(streamerData.id);
   const group = streamerData.group;
 
-  if (!getMonitorEnabled() || !discordClient) {
-    // Track state without posting to Discord
+  if (!discordClient) {
     liveStates.set(key, makeLiveState(streamerData, stream, null, null));
     return;
   }
@@ -51,12 +49,11 @@ export async function editAnnouncement(
   stream: TwitchStream,
   templateKey: 'live_message' | 'new_game_message',
 ): Promise<void> {
-  // Always update in-memory state so liveStates stays current even when posts are disabled
   state.currentGame = stream.game_name;
   state.title = stream.title;
   state.currentStream = stream;
 
-  if (!getMonitorEnabled() || !discordClient || !state.messageId || !state.channelId) return;
+  if (!discordClient || !state.messageId || !state.channelId) return;
 
   const group = state.group;
   const vars = templateVars(state.login, stream);

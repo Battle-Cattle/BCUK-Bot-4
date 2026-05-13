@@ -1,9 +1,9 @@
 import type { Message } from 'discord.js';
-import { getCustomCommandsLiveReplies } from './monitorSettings';
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './db';
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { getSharedChatSession } from './twitchApi';
 import { extractCommand } from './commandUtils';
+import { isDiscordNotFoundError } from './discordUtils';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
@@ -141,15 +141,13 @@ export async function executeCustomCommandForDiscord(
     user: username ?? null,
   });
 
-  if (getCustomCommandsLiveReplies()) {
-    try {
-      await message.reply(result.response);
-      console.log(`[Discord] Sent custom command '${command}' (recorded for monitoring).`);
-    } catch (err) {
+  try {
+    await message.reply(result.response);
+    console.log(`[Discord] Sent custom command '${command}' (recorded for monitoring).`);
+  } catch (err) {
+    if (!isDiscordNotFoundError(err)) {
       console.error(`[Discord] Failed to reply to message ${message.id} for command '${command}':`, err);
     }
-  } else {
-    console.log(`[Discord] Preview custom command '${command}' (recorded for monitoring).`);
   }
 }
 
@@ -173,7 +171,7 @@ export async function executeCustomCommandForTwitch(
   });
 
   const runtime = _twitchRuntime;
-  if (getCustomCommandsLiveReplies() && runtime) {
+  if (runtime) {
     if (result.isMultiTwitch) {
       try {
         const sent = await broadcastToActiveChannels(channel, command, result.response);
@@ -193,7 +191,5 @@ export async function executeCustomCommandForTwitch(
         console.error(`[Twitch] Failed to send custom command '${command}' in ${channel}:`, err);
       }
     }
-  } else {
-    console.log(`[Twitch] Preview custom command '${command}' in ${channel} (recorded for monitoring).`);
   }
 }

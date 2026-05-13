@@ -229,7 +229,7 @@ function setLiveTableMessage(text) {
   tbody.appendChild(tr);
 }
 
-function renderLiveRows(enabled, streams) {
+function renderLiveRows(streams) {
   var tbody = document.getElementById('live-tbody');
   if (!tbody) return;
   clearChildren(tbody);
@@ -265,12 +265,7 @@ function renderLiveRows(enabled, streams) {
     tr.appendChild(makeCell(String(item.title || '—')));
 
     var postTd = document.createElement('td');
-    if (!enabled) {
-      var disabledSpan = document.createElement('span');
-      disabledSpan.style.color = 'var(--muted)';
-      disabledSpan.textContent = '— disabled';
-      postTd.appendChild(disabledSpan);
-    } else if (item.messageId) {
+    if (item.messageId) {
       var postedBadge = document.createElement('span');
       postedBadge.className = 'badge badge-active';
       postedBadge.textContent = '✓ posted';
@@ -345,14 +340,13 @@ function refreshLiveNow() {
     })
     .then(function(data) {
       liveNowInflight = false;
-      var enabled = data.enabled;
       var streams = data.streams;
       if (!streams || !streams.length) {
         expandedLiveRows = Object.create(null);
         liveItemsByKey = Object.create(null);
         setLiveTableMessage('No streamers currently live.');
       } else {
-        renderLiveRows(enabled, streams);
+        renderLiveRows(streams);
       }
       var el = document.getElementById('live-updated');
       if (el) el.textContent = 'Updated ' + new Date().toLocaleTimeString();

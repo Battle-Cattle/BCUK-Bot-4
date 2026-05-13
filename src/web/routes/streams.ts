@@ -11,8 +11,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
-import { getMonitorEnabled, setAllLive } from '../../monitorSettings';
-import { restartTwitchMonitor, getLiveStates, catchUpDiscordPosts } from '../../twitchMonitor';
+import { restartTwitchMonitor, getLiveStates } from '../../twitchMonitor';
 
 const router = Router();
 
@@ -35,6 +34,20 @@ const KNOWN_ERRORS = new Set([
   'add_streamer_failed', 'remove_streamer_failed',
 ]);
 
+const ERROR_MESSAGES: Record<string, string> = {
+  missing_fields:       'All required fields must be filled in.',
+  invalid_id:           'Invalid ID — please try again.',
+  add_group_failed:     'Failed to add stream group. Please try again.',
+  update_group_failed:  'Failed to update stream group. Please try again.',
+  remove_group_failed:  'Failed to remove stream group. Please try again.',
+  add_streamer_failed:  'Failed to add streamer. Please try again.',
+  remove_streamer_failed: 'Failed to remove streamer. Please try again.',
+};
+
+function getFriendlyError(key: string): string {
+  return ERROR_MESSAGES[key] ?? `An error occurred (${key}).`;
+}
+
 // ─── View ─────────────────────────────────────────────────────────────────────
 
 router.get('/streams', requireManager, csrfProtection, async (req, res) => {
@@ -45,8 +58,8 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
       groups,
       streamers,
       csrfToken: req.csrfToken(),
-      monitorEnabled: getMonitorEnabled(),
       error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
+      getFriendlyError,
     });
   } catch (err) {
     console.error('[Web] Streams page error:', err);
@@ -54,27 +67,10 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
   }
 });
 
-// ─── Toggle ───────────────────────────────────────────────────────────────────
-
-router.post('/streams/toggle', requireManager, csrfProtection, (req, res) => {
-  const wasEnabled = getMonitorEnabled();
-  setAllLive(!wasEnabled);
-
-  if (!wasEnabled) {
-    // Turning ON — post announcements for any currently tracked live streams
-    catchUpDiscordPosts().catch((err) =>
-      console.error('[Web] TwitchMonitor catch-up error:', err),
-    );
-  }
-  // Turning OFF — nothing to do; monitor keeps running, all live outputs are silenced
-
-  res.redirect('/admin/streams');
-});
-
 // ─── Live state snapshot ──────────────────────────────────────────────────────
 
 router.get('/streams/live', requireManager, (_req, res) => {
-  res.json({ enabled: getMonitorEnabled(), streams: getLiveStates() });
+  res.json({ streams: getLiveStates() });
 });
 
 // ─── Groups ───────────────────────────────────────────────────────────────────

@@ -1,8 +1,8 @@
 import type { Message } from 'discord.js';
-import { getCustomCommandsLiveReplies, getCounterLiveWrites } from './monitorSettings';
 import { findCounterByCommand, incrementCounter } from './db';
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { extractCommand } from './commandUtils';
+import { isDiscordNotFoundError } from './discordUtils';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
@@ -27,7 +27,6 @@ function formatCounterMessage(template: string, value: number): string {
 
 interface CounterResult {
   response: string;
-  monitorResponse: string;
   label: string;
   canReply: boolean;
 }
@@ -43,18 +42,15 @@ async function _buildCounterResponse(
   const label = isTrigger ? 'counter command' : 'counter check';
 
   let displayValue = counter.current_value;
-  let didIncrement = false;
 
-  if (isTrigger && getCounterLiveWrites()) {
+  if (isTrigger) {
     try {
       displayValue = await incrementCounter(counter.id);
-      didIncrement = true;
     } catch (err) {
       console.error(`${errorPrefix} Failed to increment counter ${counter.id} for command '${command}':`, err);
       const response = formatCounterMessage(counter.increment_message, displayValue);
       return {
         response,
-        monitorResponse: `${response} (write error — counter not incremented)`,
         label,
         canReply: false,
       };
@@ -65,11 +61,7 @@ async function _buildCounterResponse(
     ? formatCounterMessage(counter.increment_message, displayValue)
     : formatCounterMessage(counter.message, displayValue);
 
-  const monitorResponse = isTrigger && !didIncrement
-    ? `${response} (preview only — counter not incremented)`
-    : response;
-
-  return { response, monitorResponse, label, canReply: true };
+  return { response, label, canReply: true };
 }
 
 // ─── Execute functions ────────────────────────────────────────────────────────
@@ -87,22 +79,20 @@ export async function executeCounterCommandForDiscord(
   recordCommandTestEntry({
     source: 'discord',
     command,
-    response: result.monitorResponse,
+    response: result.response,
     channel: null,
     user: username ?? null,
   });
 
   if (!result.canReply) return;
 
-  if (getCustomCommandsLiveReplies()) {
-    try {
-      await message.reply(result.response);
-      console.log(`[Discord] Sent ${result.label} '${command}' (recorded for monitoring).`);
-    } catch (err) {
+  try {
+    await message.reply(result.response);
+    console.log(`[Discord] Sent ${result.label} '${command}' (recorded for monitoring).`);
+  } catch (err) {
+    if (!isDiscordNotFoundError(err)) {
       console.error(`[Discord] Failed to reply to message ${message.id} for ${result.label} '${command}':`, err);
     }
-  } else {
-    console.log(`[Discord] Preview ${result.label} '${command}' (recorded for monitoring).`);
   }
 }
 
@@ -120,7 +110,7 @@ export async function executeCounterCommandForTwitch(
   recordCommandTestEntry({
     source: 'twitch',
     command,
-    response: result.monitorResponse,
+    response: result.response,
     channel,
     user: username ?? null,
   });
@@ -128,14 +118,12 @@ export async function executeCounterCommandForTwitch(
   if (!result.canReply) return;
 
   const runtime = _twitchRuntime;
-  if (getCustomCommandsLiveReplies() && runtime) {
+  if (runtime) {
     try {
       await runtime.send(channel, result.response);
       console.log(`[Twitch] Sent ${result.label} '${command}' in ${channel} (recorded for monitoring).`);
     } catch (err) {
       console.error(`[Twitch] Failed to send ${result.label} '${command}' in ${channel}:`, err);
     }
-  } else {
-    console.log(`[Twitch] Preview ${result.label} '${command}' in ${channel} (recorded for monitoring).`);
   }
 }
