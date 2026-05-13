@@ -194,7 +194,13 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
   await membershipMutationQueue.run(normalized, async () => {
     // Check inside the mutex so no concurrent join can race between the check
     // and the actual client.join() call.
-    if (isChannelJoined(normalized)) return;
+    if (isChannelJoined(normalized)) {
+      // Already joined — sync local tracking so status store and activeChannels
+      // agree with the live tmi.js state.
+      activeChannels.add(normalized);
+      setTwitchChannel(normalized, true);
+      return;
+    }
 
     if (!client || !connected) {
       // Queue the desired membership locally so reconnect reconciliation can join

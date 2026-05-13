@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ensureSessionCsrfToken } from './csrf';
+import { AccessLevel } from '../db';
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   if (req.session.user) {
@@ -10,7 +11,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 }
 
 export function requireManager(req: Request, res: Response, next: NextFunction): void {
-  if (req.session.user && req.session.user.accessLevel >= 2) {
+  if (req.session.user && req.session.user.accessLevel >= AccessLevel.MANAGER) {
     next();
   } else {
     res
@@ -24,7 +25,7 @@ export function requireManager(req: Request, res: Response, next: NextFunction):
 }
 
 export function requireMod(req: Request, res: Response, next: NextFunction): void {
-  if (req.session.user && req.session.user.accessLevel >= 1) {
+  if (req.session.user && req.session.user.accessLevel >= AccessLevel.MOD) {
     next();
   } else {
     res
@@ -38,7 +39,7 @@ export function requireMod(req: Request, res: Response, next: NextFunction): voi
 }
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  if (req.session.user && req.session.user.accessLevel >= 3) {
+  if (req.session.user && req.session.user.accessLevel >= AccessLevel.ADMIN) {
     next();
   } else {
     res

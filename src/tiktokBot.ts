@@ -45,9 +45,15 @@ export async function startTikTokBot(): Promise<void> {
     function scheduleReconnect(): void {
       if (reconnectScheduled) return;
       reconnectScheduled = true;
-      activeConnections.delete(username);
       connection.disconnect().catch(() => { /* already disconnected */ });
-      setTimeout(() => connectToChannel(username), RECONNECT_DELAY_MS);
+      // Only take ownership of the map entry and schedule a reconnect when this
+      // connection is still the active one — a newer connection may have already
+      // replaced it, in which case we must not clobber the map or queue a
+      // redundant reconnect.
+      if (activeConnections.get(username) === connection) {
+        activeConnections.delete(username);
+        setTimeout(() => connectToChannel(username), RECONNECT_DELAY_MS);
+      }
     }
 
     connection.on(ControlEvent.CONNECTED, () => {

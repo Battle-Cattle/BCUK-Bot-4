@@ -217,7 +217,7 @@ CREATE INDEX idx_counter_trigger ON counter(trigger_command);
 CREATE INDEX idx_counter_check   ON counter(check_command);
 ```
 
-The two indexes accelerate per-message trigger lookups that scan both command columns on every incoming chat message. Use `TEMP/migrate_indexes.sql` for a re-runnable script that skips creation when an index already exists.
+The two indexes accelerate per-message trigger lookups that scan both command columns on every incoming chat message. Use `migrations/migrate_indexes.sql` for a re-runnable script that skips creation when an index already exists.
 
 Deployment note:
 
