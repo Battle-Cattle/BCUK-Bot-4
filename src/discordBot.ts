@@ -61,23 +61,23 @@ export function startDiscordBot(): void {
     } catch (err) {
       console.error('[Discord] Failed to initialise:', err);
     }
-  });
 
-  client.on('messageCreate', (message) => {
-    if (message.author.bot) return;
-    if (message.guildId !== DISCORD_GUILD_ID) return;
+    c.on('messageCreate', (message) => {
+      if (message.author.bot) return;
+      if (message.guildId !== DISCORD_GUILD_ID) return;
 
-    executeCustomCommandForDiscord(message, message.member?.displayName ?? message.author.username).catch((err) =>
-      console.error('[Discord] Custom command error:', err),
-    );
+      executeCustomCommandForDiscord(message, message.member?.displayName ?? message.author.username).catch((err) =>
+        console.error('[Discord] Custom command error:', err),
+      );
 
-    executeCounterCommandForDiscord(message, message.member?.displayName ?? message.author.username).catch((err) =>
-      console.error('[Discord] Counter command error:', err),
-    );
+      executeCounterCommandForDiscord(message, message.member?.displayName ?? message.author.username).catch((err) =>
+        console.error('[Discord] Counter command error:', err),
+      );
 
-    handleCommand(message.content, 'discord').catch((err) =>
-      console.error('[Discord] Command handler error:', err),
-    );
+      handleCommand(message.content, 'discord').catch((err) =>
+        console.error('[Discord] Command handler error:', err),
+      );
+    });
   });
 
   client.on('error', (err) => {

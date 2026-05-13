@@ -192,11 +192,9 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
   }
 
   await membershipMutationQueue.run(normalized, async () => {
-    if (activeChannels.has(normalized)) {
-      // When the desired membership is already queued offline we should still no-op,
-      // but if a previous live join failed we need to retry once the client is connected.
-      if (!client || !connected || isChannelJoined(normalized)) return;
-    }
+    // Check inside the mutex so no concurrent join can race between the check
+    // and the actual client.join() call.
+    if (isChannelJoined(normalized)) return;
 
     if (!client || !connected) {
       // Queue the desired membership locally so reconnect reconciliation can join
@@ -209,17 +207,17 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       return;
     }
 
+    activeChannels.add(normalized);
+    setTwitchChannel(normalized, false);
     try {
-      activeChannels.add(normalized);
-      setTwitchChannel(normalized, false);
       await client.join(normalized);
       setTwitchChannel(normalized, true);
       getUsers([normalized])
         .then(([u]) => { if (u) activeChannelUserIds.set(normalized, u.id); })
         .catch(() => { /* best-effort */ });
     } catch (err) {
-      // Keep the desired membership queued so reconnect reconciliation can retry
-      // instead of permanently desyncing runtime state from the DB.
+      // Roll back local state; reconnect reconciliation will retry via activeChannels.
+      activeChannels.delete(normalized);
       setTwitchChannel(normalized, false);
       console.error(`[Twitch] Failed to join channel ${normalized}:`, err);
       throw err;

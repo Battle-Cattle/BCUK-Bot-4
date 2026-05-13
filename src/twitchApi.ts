@@ -52,6 +52,17 @@ function chunks<T>(arr: T[], size: number): T[][] {
   return result;
 }
 
+async function fetchHelixWithRetry(url: string, headers: Record<string, string>): Promise<Response> {
+  const res = await twitchFetch(url, { headers });
+  if (res.status !== 429) return res;
+  const resetHeader = res.headers.get('ratelimit-reset');
+  const resetAt = resetHeader ? Number(resetHeader) * 1000 : Date.now() + 5000;
+  const wait = Math.max(0, resetAt - Date.now());
+  console.warn(`[TwitchAPI] Rate limited. Retrying after ${wait}ms`);
+  await new Promise<void>((r) => setTimeout(r, wait));
+  return twitchFetch(url, { headers });
+}
+
 export interface TwitchUser {
   login: string;
   id: string;
@@ -63,9 +74,7 @@ export async function getUsers(logins: string[]): Promise<TwitchUser[]> {
   const results: TwitchUser[] = [];
   for (const batch of chunks(logins, 100)) {
     const params = batch.map((l) => `login=${encodeURIComponent(l)}`).join('&');
-    const res = await twitchFetch(`https://api.twitch.tv/helix/users?${params}`, {
-      headers: authHeaders(token),
-    });
+    const res = await fetchHelixWithRetry(`https://api.twitch.tv/helix/users?${params}`, authHeaders(token));
     if (!res.ok) {
       // Clear the cached token on 401 so the next call re-fetches rather than
       // reusing an invalidated token until appTokenExpiry.
@@ -94,9 +103,7 @@ export async function getStreams(userIds: string[]): Promise<TwitchStream[]> {
   const results: TwitchStream[] = [];
   for (const batch of chunks(userIds, 100)) {
     const params = batch.map((id) => `user_id=${encodeURIComponent(id)}`).join('&');
-    const res = await twitchFetch(`https://api.twitch.tv/helix/streams?${params}&first=100`, {
-      headers: authHeaders(token),
-    });
+    const res = await fetchHelixWithRetry(`https://api.twitch.tv/helix/streams?${params}&first=100`, authHeaders(token));
     if (!res.ok) {
       if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
       throw new Error(`[TwitchAPI] getStreams failed: ${res.status}`);
@@ -120,9 +127,7 @@ export async function getChannelInfo(broadcasterIds: string[]): Promise<TwitchCh
   const results: TwitchChannelInfo[] = [];
   for (const batch of chunks(broadcasterIds, 100)) {
     const params = batch.map((id) => `broadcaster_id=${encodeURIComponent(id)}`).join('&');
-    const res = await twitchFetch(`https://api.twitch.tv/helix/channels?${params}`, {
-      headers: authHeaders(token),
-    });
+    const res = await fetchHelixWithRetry(`https://api.twitch.tv/helix/channels?${params}`, authHeaders(token));
     if (!res.ok) {
       if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
       throw new Error(`[TwitchAPI] getChannelInfo failed: ${res.status}`);

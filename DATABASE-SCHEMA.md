@@ -143,6 +143,14 @@ Stores custom text commands managed through the admin panel.
 | `is_discord_enabled` | `TINYINT(1)` | Whether the command is enabled for Discord-side usage |
 | `is_multi_twitch` | `TINYINT(1)` | Whether the command is treated as a multi-Twitch broadcast command |
 
+Recommended index (run once):
+
+```sql
+CREATE INDEX idx_cc_trigger ON custom_command(trigger_string);
+```
+
+This index accelerates the per-message trigger lookups that scan `trigger_string` on every incoming chat message. Use `migrations/migrate_indexes.sql` for a re-runnable script that skips creation when the index already exists.
+
 Expected constraints and behavior:
 
 - `trigger_string` is **not** globally unique by design; the same trigger can exist on different Twitch channels.
@@ -204,7 +212,12 @@ Recommended migrations (run once) for DB-level protection:
 ALTER TABLE counter
     ADD CONSTRAINT uq_counter_trigger_command UNIQUE (trigger_command),
     ADD CONSTRAINT uq_counter_check_command UNIQUE (check_command);
+
+CREATE INDEX idx_counter_trigger ON counter(trigger_command);
+CREATE INDEX idx_counter_check   ON counter(check_command);
 ```
+
+The two indexes accelerate per-message trigger lookups that scan both command columns on every incoming chat message. Use `TEMP/migrate_indexes.sql` for a re-runnable script that skips creation when an index already exists.
 
 Deployment note:
 
@@ -215,8 +228,8 @@ Deployment note:
 
 **Runtime protection:** The application layer mitigates this risk via `isAnyCommandTakenAcrossTables()` in `src/db.ts`. This function is called within `runSerializedCommandWrite()`, which acquires MySQL advisory locks and queries both `trigger_command` and `check_command` (as well as `custom_command.trigger_string`) in a single atomic check before writing. This prevents concurrent collisions across the entire command namespace. The DB-level UNIQUE constraints provide an additional fallback in case of application-layer bugs or direct DB access.
 
-
 **Optional DB-level enforcement:** For additional safety at the database level, you can:
+
 1. Add a database trigger that validates both `trigger_command` and `check_command` against the union of all command columns, or
 2. Create a separate `command_registry` table with a `UNIQUE KEY` on the command string, then add foreign keys from both `trigger_command` and `check_command` to that table, or
 3. Use a generated column approach (MySQL 8.0.13+): add a generated column that represents the command token and enforce uniqueness on it.

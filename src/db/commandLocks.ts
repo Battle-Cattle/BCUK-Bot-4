@@ -458,9 +458,10 @@ export async function runSerializedCommandWrite<T>(
 ): Promise<T> {
   const normalizedCommands = normalizeCommandInputs(commandOrCommands);
   const lockNames = getSortedCommandLockNames(normalizedCommands);
-  const connection = await getPool().getConnection();
+  let connection: mysql.PoolConnection | null = null;
 
   try {
+    connection = await getPool().getConnection();
     await acquireNamedLocks(connection, lockNames);
 
     await connection.beginTransaction();
@@ -478,7 +479,9 @@ export async function runSerializedCommandWrite<T>(
       throw error;
     }
   } finally {
-    await releaseNamedLocks(connection, lockNames);
-    connection.release();
+    if (connection) {
+      try { await releaseNamedLocks(connection, lockNames); } catch (_) {}
+      connection.release();
+    }
   }
 }
