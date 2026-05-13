@@ -133,7 +133,6 @@ Tables in the existing MySQL 8 database:
 | `live_message`       | text       | Template for go-live message               |
 | `new_game_message`   | text       | Template for game-change message           |
 | `multi_twitch`       | bit(1)     | Enable multitwitch links                   |
-| `multi_twitch_message`| text      | Footer template when multitwitch applies   |
 | `delete_old_posts`   | bit(1)     | Delete old embed on game change instead of edit |
 
 ### `streamer`
@@ -331,7 +330,7 @@ When a stream appears offline in a poll, `handleStreamOffline()` starts a 5-minu
 On `startTwitchMonitor()`, after loading streamers from DB, `performStartupLiveCheck()` is called. It queries Helix for all monitored user IDs and reconciles against the stored `discord_message_id`/`live_game` columns: live + has message → edit; live + no message → post fresh; offline + has message → delete and clear DB; offline + no message → no-op.
 
 ### Twitch stream monitor — multitwitch
-When ≥2 streamers in the same group are live on the same game, each matching Discord embed gets a footer built from `group.multi_twitch_message` with `{multitwitch}` replaced by `https://www.multitwitch.tv/login1/login2/...`. `updateMultitwitch(groupId)` is called after any live-state change (go-live, game-change, go-offline).
+When ≥2 streamers in the same group are live on the same game, each matching Discord embed gets a `MultiTwitch` field added containing `https://www.multitwitch.tv/login1/login2/...`. `updateMultitwitch(groupId)` is called after any live-state change (go-live, game-change, go-offline).
 
 ### Twitch stream monitor — hot reload
 Any CRUD change to groups or streamers via the web panel calls `restartTwitchMonitor()` which tears down the poll timer, clears in-memory state, and re-runs `startTwitchMonitor()` (including startup live-check). Existing Discord messages are NOT deleted on restart; the live-check will re-sync them.

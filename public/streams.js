@@ -132,7 +132,6 @@ function renderMessagePreview(title, preview) {
               (safeImageUrl
                 ? '<div class="discord-embed-footer">Image: ' + renderLink(safeImageUrl, 'open thumbnail') + '</div>'
                 : '') +
-              (embed.footer ? '<div class="discord-embed-footer">' + escapeHtml(embed.footer) + '</div>' : '<div class="discord-embed-footer muted">No footer</div>') +
             '</div>' +
           '</div>' : '') +
       '</div>' +
@@ -147,9 +146,6 @@ function renderMultiTwitchDetails(multiTwitch) {
   var participants = multiTwitch && multiTwitch.participants && multiTwitch.participants.length
     ? multiTwitch.participants.join(', ')
     : '—';
-  var footerState = multiTwitch && multiTwitch.renderedFooter
-    ? renderBadge('Footer active', 'badge-active')
-    : '<span class="muted">No footer rendered</span>';
 
   return '' +
     '<section class="live-detail-section">' +
@@ -158,13 +154,11 @@ function renderMultiTwitchDetails(multiTwitch) {
         renderMetadataItem('Setting', multiTwitch && multiTwitch.enabled ? 'Enabled' : 'Disabled') +
         renderMetadataItem('Applicable Now', multiTwitch && multiTwitch.applicable ? 'Yes' : 'No') +
         renderMetadataItem('Participants', participants, 'mono') +
-        renderMetadataItem('Footer', multiTwitch && multiTwitch.renderedFooter ? multiTwitch.renderedFooter : '—', 'mono') +
       '</div>' +
       '<div class="live-link-row">' +
         '<span class="live-meta-label">Computed link</span>' +
         '<span class="live-meta-value mono">' + renderLink(multiTwitch ? multiTwitch.url : null, multiTwitch && multiTwitch.url ? multiTwitch.url : '—') + '</span>' +
       '</div>' +
-      '<div class="live-footer-state">' + footerState + '</div>' +
     '</section>';
 }
 

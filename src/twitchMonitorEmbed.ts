@@ -10,7 +10,6 @@ export interface DiscordEmbedPreview {
   color: string;
   fields: Array<{ name: string; value: string }>;
   imageUrl: string;
-  footer: string | null;
 }
 
 export interface DiscordMessagePreview {
@@ -34,14 +33,15 @@ export function getThumbnailUrl(stream: TwitchStream): string {
     .replace('{height}', '360');
 }
 
-export function buildEmbedPreview(stream: TwitchStream, footer?: string): DiscordEmbedPreview {
+export function buildEmbedPreview(stream: TwitchStream, multitwitchUrl?: string): DiscordEmbedPreview {
+  const fields: Array<{ name: string; value: string }> = [{ name: 'Game', value: stream.game_name || 'Unknown' }];
+  if (multitwitchUrl) fields.push({ name: 'MultiTwitch', value: multitwitchUrl });
   return {
     title: stream.title,
     url: getStreamUrl(stream.user_login),
     color: '#9146FF',
-    fields: [{ name: 'Game', value: stream.game_name || 'Unknown' }],
+    fields,
     imageUrl: getThumbnailUrl(stream),
-    footer: footer || null,
   };
 }
 
@@ -51,27 +51,23 @@ export function parseHexColor(color: string): number {
   return parseInt(normalized, 16);
 }
 
-export function buildEmbed(stream: TwitchStream, footer?: string): EmbedBuilder {
-  const preview = buildEmbedPreview(stream, footer);
+export function buildEmbed(stream: TwitchStream, multitwitchUrl?: string): EmbedBuilder {
+  const preview = buildEmbedPreview(stream, multitwitchUrl);
 
-  const embed = new EmbedBuilder()
+  return new EmbedBuilder()
     .setTitle(preview.title)
     .setURL(preview.url)
     .setColor(parseHexColor(preview.color))
     .addFields(...preview.fields)
     .setImage(preview.imageUrl);
-
-  if (preview.footer) embed.setFooter({ text: preview.footer });
-  return embed;
 }
 
-export function templateVars(login: string, stream: TwitchStream, multitwitch?: string): Record<string, string> {
+export function templateVars(login: string, stream: TwitchStream): Record<string, string> {
   return {
     streamer: login,
     game: stream.game_name || 'Unknown',
     title: stream.title,
     url: getStreamUrl(login),
-    multitwitch: multitwitch ?? '',
   };
 }
 
@@ -80,7 +76,7 @@ export function templateVars(login: string, stream: TwitchStream, multitwitch?: 
 export function buildMessagePreview(
   state: LiveState,
   templateKey: 'live_message' | 'new_game_message',
-  multiTwitch: { renderedFooter: string | null },
+  multiTwitch: { url: string | null },
 ): DiscordMessagePreview {
   const stream = state.currentStream;
   const template = templateKey === 'new_game_message'
@@ -90,6 +86,6 @@ export function buildMessagePreview(
 
   return {
     content: fillTemplate(template, vars),
-    embed: buildEmbedPreview(stream, multiTwitch.renderedFooter ?? undefined),
+    embed: buildEmbedPreview(stream, multiTwitch.url ?? undefined),
   };
 }

@@ -80,7 +80,7 @@ router.get('/streams/live', requireManager, (_req, res) => {
 // ─── Groups ───────────────────────────────────────────────────────────────────
 
 router.post('/streams/groups/add', requireManager, csrfProtection, async (req, res) => {
-  const { name, discord_channel, live_message, new_game_message, multi_twitch_message } = req.body as Record<string, string | undefined>;
+  const { name, discord_channel, live_message, new_game_message } = req.body as Record<string, string | undefined>;
   const multi_twitch = req.body.multi_twitch === 'on';
   const delete_old_posts = req.body.delete_old_posts === 'on';
 
@@ -100,7 +100,6 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
       liveMessage: normalizedLiveMessage,
       newGameMessage: normalizedNewGameMessage,
       multiTwitch: multi_twitch,
-      multiTwitchMessage: typeof multi_twitch_message === 'string' ? multi_twitch_message.trim() : '',
       deleteOldPosts: delete_old_posts,
     });
     triggerRestart();
@@ -112,7 +111,7 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
 });
 
 router.post('/streams/groups/update', requireManager, csrfProtection, async (req, res) => {
-  const { group_id, name, discord_channel, live_message, new_game_message, multi_twitch_message } = req.body as Record<string, string | undefined>;
+  const { group_id, name, discord_channel, live_message, new_game_message } = req.body as Record<string, string | undefined>;
   const multi_twitch = req.body.multi_twitch === 'on';
   const delete_old_posts = req.body.delete_old_posts === 'on';
 
@@ -136,7 +135,6 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
       liveMessage: normalizedLiveMessage,
       newGameMessage: normalizedNewGameMessage,
       multiTwitch: multi_twitch,
-      multiTwitchMessage: typeof multi_twitch_message === 'string' ? multi_twitch_message.trim() : '',
       deleteOldPosts: delete_old_posts,
     });
     triggerRestart();

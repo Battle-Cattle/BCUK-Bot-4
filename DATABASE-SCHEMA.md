@@ -115,8 +115,7 @@ Stores configuration for Twitch announcement groups.
 | `discord_channel` | `BIGINT` | Channel ID for announcements |
 | `live_message` | `TEXT` | Go-live message template |
 | `new_game_message` | `TEXT` | Game-change message template |
-| `multi_twitch` | `BIT(1)` or `TINYINT(1)` | Enables multitwitch footer generation |
-| `multi_twitch_message` | `TEXT` | Footer template containing `{multitwitch}` |
+| `multi_twitch` | `BIT(1)` or `TINYINT(1)` | Enables multitwitch URL field in embeds |
 | `delete_old_posts` | `BIT(1)` or `TINYINT(1)` | Delete old announcement on game change instead of editing |
 
 ## `streamer`

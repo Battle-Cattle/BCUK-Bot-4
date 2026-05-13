@@ -99,10 +99,6 @@
               <p class="hint hint-compact">Game change message — shown when the streamer switches games. Same variables.</p>
               <textarea class="input stream-textarea" name="new_game_message" rows="2" placeholder="{streamer} switched to {game}! {url}" required></textarea>
             </div>
-            <div class="form-section-gap">
-              <p class="hint hint-compact">Multi-Twitch footer (optional) — appended to embeds when 2+ group members play the same game. Variable: <code>{multitwitch}</code></p>
-              <textarea class="input stream-textarea" name="multi_twitch_message" rows="1" placeholder="Watch together: {multitwitch}"></textarea>
-            </div>
             <button type="submit" class="btn">Add Group</button>
           </form>
         </div>
@@ -161,10 +157,6 @@
                     <div class="form-subsection-gap">
                       <p class="hint hint-compact">Game change message</p>
                       <textarea class="input stream-textarea" name="new_game_message" rows="2" required><%= g.new_game_message %></textarea>
-                    </div>
-                    <div class="form-section-gap">
-                      <p class="hint hint-compact">Multi-Twitch footer</p>
-                      <textarea class="input stream-textarea" name="multi_twitch_message" rows="1"><%= g.multi_twitch_message %></textarea>
                     </div>
                     <div class="button-row-wrap">
                       <button type="submit" class="btn">Save Changes</button>

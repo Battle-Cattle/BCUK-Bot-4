@@ -1,7 +1,6 @@
-import { EmbedBuilder } from 'discord.js';
 import { discordClient } from './discordBot';
 import { getMonitorEnabled } from './monitorSettings';
-import { fillTemplate } from './twitchMonitorEmbed';
+import { buildEmbed } from './twitchMonitorEmbed';
 import { LiveState } from './twitchMonitorTypes';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -11,7 +10,6 @@ export interface MultiTwitchPreview {
   applicable: boolean;
   participants: string[];
   url: string | null;
-  renderedFooter: string | null;
 }
 
 export interface MultiTwitchGroupInfo {
@@ -65,7 +63,6 @@ export function getMultitwitchPreview(state: LiveState, context: MultiTwitchCont
       applicable: false,
       participants: [state.login],
       url: null,
-      renderedFooter: null,
     };
   }
 
@@ -75,19 +72,16 @@ export function getMultitwitchPreview(state: LiveState, context: MultiTwitchCont
       applicable: true,
       participants,
       url: null,
-      renderedFooter: null,
     };
   }
 
   const url = `https://www.multitwitch.tv/${participants.join('/')}`;
-  const renderedFooter = fillTemplate(state.group.multi_twitch_message, { multitwitch: url }) || null;
 
   return {
     enabled: true,
     applicable: true,
     participants,
     url,
-    renderedFooter,
   };
 }
 
@@ -100,21 +94,13 @@ export async function updateMultitwitch(groupId: number, liveStates: ReadonlyMap
   for (const state of groupLive) {
     if (!state.messageId || !state.channelId) continue;
     const multiTwitch = getMultitwitchPreview(state, context);
-    const footer = multiTwitch.renderedFooter ?? undefined;
+    const multitwitchUrl = multiTwitch.url ?? undefined;
 
     try {
       const channel = await discordClient.channels.fetch(state.channelId);
       if (!channel || !channel.isTextBased()) continue;
       const message = await channel.messages.fetch(state.messageId);
-      const existing = message.embeds[0];
-      if (!existing) continue;
-
-      const updated = EmbedBuilder.from(existing);
-      if (footer) {
-        updated.setFooter({ text: footer });
-      } else {
-        updated.setFooter(null);
-      }
+      const updated = buildEmbed(state.currentStream, multitwitchUrl);
       await message.edit({ embeds: [updated] });
     } catch (err) {
       console.error(`[TwitchMonitor] Failed to update multitwitch for ${state.login}:`, err);
