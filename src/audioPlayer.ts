@@ -241,7 +241,11 @@ export async function connect(client: Client): Promise<void> {
     setVoiceConnected(channel.name);
     console.log(`[AudioPlayer] Joined voice channel: ${channel.name}`);
   } catch (err) {
-    cleanupFailedConnect(previousConnection, nextConnection);
+    if (attemptId === currentAttemptId) {
+      cleanupFailedConnect(previousConnection, nextConnection);
+    } else {
+      nextConnection?.destroy();
+    }
 
     if (attemptId === currentAttemptId && shouldAutoReconnect && !isPermanentMisconfigurationError(err)) {
       scheduleReconnect('connect failed');
