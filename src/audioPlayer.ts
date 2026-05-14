@@ -13,6 +13,7 @@ import { Client, ChannelType } from 'discord.js';
 import { DISCORD_GUILD_ID, DISCORD_VOICE_CHANNEL_ID } from './config';
 import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from './statusStore';
 import { buildAdapter } from './voiceAdapter';
+import { isDiscordNotFoundError } from './discordUtils';
 
 let connection: VoiceConnection | null = null;
 let player: DjsAudioPlayer;
@@ -33,20 +34,16 @@ function isPermanentMisconfigurationError(err: unknown): boolean {
   }
 
   const { message } = err;
-  const apiErr = err as Error & { status?: number; code?: number | string; rawError?: { message?: string } };
+  const apiErr = err as Error & { status?: number; code?: number | string };
   const status = apiErr.status;
   const code = typeof apiErr.code === 'string' ? Number(apiErr.code) : apiErr.code;
-  const rawMessage = apiErr.rawError?.message ?? '';
 
   const isConfigError =
     message.includes('Missing DISCORD_GUILD_ID or DISCORD_VOICE_CHANNEL_ID') ||
     message.includes('is not a voice channel');
-  const isForbiddenOrMissing = status === 403 || status === 404;
-  const isKnownApiCode = code === 10003 || code === 10004 || code === 50001;
-  const isUnknownResource =
-    rawMessage.includes('Unknown Guild') || rawMessage.includes('Unknown Channel');
-
-  return isConfigError || isForbiddenOrMissing || isKnownApiCode || isUnknownResource;
+  const isForbidden = status === 403 || code === 50001;
+  const isNotFound = isDiscordNotFoundError(err);
+  return isConfigError || isForbidden || isNotFound;
 }
 
 function clearReconnectTimer(): void {
