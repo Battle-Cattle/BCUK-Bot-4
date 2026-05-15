@@ -9,6 +9,19 @@ export function isDiscordNotFoundError(err: unknown): boolean {
   );
 }
 
+export function isPermanentVoiceMisconfigurationError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const { message } = err;
+  const apiErr = err as Error & { status?: number; code?: number | string };
+  const status = apiErr.status;
+  const code = typeof apiErr.code === 'string' ? Number(apiErr.code) : apiErr.code;
+  const isConfigError =
+    message.includes('Missing DISCORD_GUILD_ID or DISCORD_VOICE_CHANNEL_ID') ||
+    message.includes('is not a voice channel');
+  const isForbidden = status === 403 || code === 50001;
+  return isConfigError || isForbidden || isDiscordNotFoundError(err);
+}
+
 export async function tryDeleteDiscordMessage(channelId: string, messageId: string): Promise<void> {
   if (!discordClient) return;
   try {
