@@ -1,7 +1,8 @@
 import path from 'path';
 import { findTrigger, findSoundFiles } from './db';
 import { pickWeightedRandom } from './soundSelector';
-import { isPlaying, playFile } from './audioPlayer';
+import { isPlaying } from './audioPlayer';
+import { playFile } from './sfxPlayer';
 import { SFX_FOLDER, GLOBAL_COOLDOWN_MS } from './config';
 import { setVoicePlaying } from './statusStore';
 
