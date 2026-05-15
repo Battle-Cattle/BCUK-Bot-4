@@ -72,9 +72,14 @@ export function cleanupFailedConnect(
   deps: ConnectionHandlerDeps,
 ): void {
   nextConnection?.destroy();
-  // If the new attempt failed before promoting, previousConnection was never torn down.
-  // Destroy it now so scheduleReconnect is not blocked by a stale non-null connection.
-  if (previousConnection && deps.getConnection() === previousConnection) {
+  const current = deps.getConnection();
+  if (nextConnection && current === nextConnection) {
+    // Promotion already occurred before the failure; nextConnection is now destroyed so
+    // clear it to allow scheduleReconnect to fire.
+    deps.setConnection(null);
+    deps.tearDown();
+  } else if (previousConnection && current === previousConnection) {
+    // Failed before promoting; previousConnection was never released.
     previousConnection.destroy();
     deps.setConnection(null);
     deps.tearDown();

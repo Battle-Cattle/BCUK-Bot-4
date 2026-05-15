@@ -18,7 +18,7 @@ export function isPermanentVoiceMisconfigurationError(err: unknown): boolean {
   const isConfigError =
     message.includes('Missing DISCORD_GUILD_ID or DISCORD_VOICE_CHANNEL_ID') ||
     message.includes('is not a voice channel');
-  const isForbidden = status === 403 || code === 50001;
+  const isForbidden = status === 403 || code === RESTJSONErrorCodes.MissingAccess;
   return isConfigError || isForbidden || isDiscordNotFoundError(err);
 }
 
