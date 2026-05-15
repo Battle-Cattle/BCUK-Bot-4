@@ -149,6 +149,8 @@ export async function getUserTwitchEligibility(executor: SqlExecutor, discordId:
   const twitchName = userRows[0].twitch_name ? String(userRows[0].twitch_name) : null;
   return {
     normalizedTwitchName: twitchName ? normalizeTwitchChannelName(twitchName) : null,
+    // MySQL BIT(1) columns arrive as a single-byte Buffer on some driver configurations
+    // and as a numeric 0/1 on others; check byte 0 in the Buffer path, loose-equality for numeric.
     isTwitchBotEnabled: Buffer.isBuffer(userRows[0].is_twitch_bot_enabled)
       ? userRows[0].is_twitch_bot_enabled[0] === 1
       : userRows[0].is_twitch_bot_enabled == 1,
