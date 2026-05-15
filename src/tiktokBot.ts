@@ -41,9 +41,10 @@ export async function startTikTokBot(): Promise<void> {
     }) as unknown as Connection;
     activeConnections.set(username, connection);
     let reconnectScheduled = false;
+    let permanentFailure = false;
 
     function scheduleReconnect(): void {
-      if (reconnectScheduled) return;
+      if (reconnectScheduled || permanentFailure) return;
       reconnectScheduled = true;
       connection.disconnect().catch(() => { /* already disconnected */ });
       // Only take ownership of the map entry and schedule a reconnect when this
@@ -81,6 +82,15 @@ export async function startTikTokBot(): Promise<void> {
 
     connection.on(ControlEvent.ERROR, (err: unknown) => {
       console.error(`[TikTok] Error on @${username}:`, err);
+      // Treat errors that indicate the channel is permanently unavailable as
+      // fatal so that the reconnect loop does not spin forever on a bad username
+      // or a banned/suspended account.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/not found|does not exist|banned|suspended|unauthorized|forbidden/i.test(msg)) {
+        console.error(`[TikTok] Permanent failure for @${username} — reconnect disabled.`);
+        permanentFailure = true;
+        activeConnections.delete(username);
+      }
     });
 
     connection
