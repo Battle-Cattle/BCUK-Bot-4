@@ -26,6 +26,7 @@ let currentAttemptId = 0;
 
 const RECONNECT_BASE_DELAY_MS = 5_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
+const VOICE_CONNECT_TIMEOUT_MS = 30_000;
 
 
 function isPermanentMisconfigurationError(err: unknown): boolean {
@@ -137,6 +138,11 @@ async function handleDisconnected(joinedConnection: VoiceConnection, attemptId: 
       return;
     }
 
+    // Guard against a concurrent handleDisconnected call that already destroyed this connection.
+    if (joinedConnection.state.status === VoiceConnectionStatus.Destroyed) {
+      return;
+    }
+
     // Truly disconnected - clean up
     joinedConnection.destroy();
     if (connection === joinedConnection) {
@@ -223,7 +229,7 @@ export async function connect(client: Client): Promise<void> {
     const joinedConnection = nextConnection;
     setupConnectionHandlers(joinedConnection, attemptId);
 
-    await entersState(joinedConnection, VoiceConnectionStatus.Ready, 30_000);
+    await entersState(joinedConnection, VoiceConnectionStatus.Ready, VOICE_CONNECT_TIMEOUT_MS);
 
     if (attemptId !== currentAttemptId) {
       joinedConnection.destroy();
