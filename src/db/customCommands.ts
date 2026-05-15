@@ -5,14 +5,12 @@ import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCa
 import { AccessLevel, getTwitchEnabledChannels } from './users';
 import type { AccessLevelValue } from './users';
 import { assertNotReservedCommand } from './reservedCommands';
+import { requireTrimmedString, CommandNotFoundError, type SqlExecutor } from './commandStringUtils';
+import { acquireNamedLock, releaseNamedLock, commandExists, runSerializedCommandWrite } from './commandLocks';
 import {
-  requireTrimmedString,
   assertDiscordTriggerAvailable, assertMultiTwitchTriggerAvailable, assertNoSingleTwitchAssignmentOverlap,
-  acquireNamedLock, releaseNamedLock,
-  assignUserToCommandWithinTransaction, commandExists, runSerializedCommandWrite,
-  CommandNotFoundError,
-} from './commandLocks';
-import type { SqlExecutor } from './commandLocks';
+  assignUserToCommandWithinTransaction,
+} from './commandConflicts';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
