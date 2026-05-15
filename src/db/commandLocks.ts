@@ -92,6 +92,15 @@ async function releaseNamedLocks(connection: mysql.PoolConnection, lockNames: st
   }
 }
 
+// ─── Deadlock retry ──────────────────────────────────────────────────────────
+
+const MAX_DEADLOCK_RETRIES = 3;
+
+function isDeadlockError(error: unknown): boolean {
+  const err = error as { code?: string; errno?: number };
+  return err.code === 'ER_LOCK_DEADLOCK' || err.errno === 1213;
+}
+
 // ─── Error types ─────────────────────────────────────────────────────────────
 
 export class CommandNotFoundError extends Error {
@@ -403,35 +412,49 @@ export async function assignUserToCommandWithinTransaction(
   commandId: number,
   discordId: string,
 ): Promise<void> {
-  await connection.beginTransaction();
+  // The named lock is session-scoped: acquire it once and release it in the outer finally,
+  // so deadlock retries on the inner transaction still hold the lock between attempts.
   let lockNameByTrigger: string | null = null;
 
   try {
-    // Re-read the current trigger_string inside the transaction.
-    // This read comes from the transaction snapshot. If another transaction updates
-    // the same command's trigger in a tiny concurrent window, the conflict check
-    // below can be conservative until the next cache rebuild.
-    const normalizedTriggerString = await getCommandTriggerStringById(connection, commandId);
-    lockNameByTrigger = getCommandWriteLockName(normalizedTriggerString);
+    for (let attempt = 0; attempt < MAX_DEADLOCK_RETRIES; attempt++) {
+      await connection.beginTransaction();
+      try {
+        // Re-read the current trigger_string inside the transaction.
+        // This read comes from the transaction snapshot. If another transaction updates
+        // the same command's trigger in a tiny concurrent window, the conflict check
+        // below can be conservative until the next cache rebuild.
+        const normalizedTriggerString = await getCommandTriggerStringById(connection, commandId);
 
-    // Named locks are session-scoped (not transaction-scoped), so this must be released explicitly.
-    await acquireNamedLock(connection, lockNameByTrigger);
+        if (!lockNameByTrigger) {
+          lockNameByTrigger = getCommandWriteLockName(normalizedTriggerString);
+          await acquireNamedLock(connection, lockNameByTrigger);
+        }
 
-    const userEligibility = await getUserTwitchEligibility(connection, discordId);
-    if (userEligibility.normalizedTwitchName && userEligibility.isTwitchBotEnabled) {
-      await assertNoTwitchChannelTriggerConflict(
-        connection,
-        commandId,
-        normalizedTriggerString,
-        userEligibility.normalizedTwitchName,
-      );
+        const userEligibility = await getUserTwitchEligibility(connection, discordId);
+        if (userEligibility.normalizedTwitchName && userEligibility.isTwitchBotEnabled) {
+          await assertNoTwitchChannelTriggerConflict(
+            connection,
+            commandId,
+            normalizedTriggerString,
+            userEligibility.normalizedTwitchName,
+          );
+        }
+
+        await insertUserCommandAssignment(connection, commandId, discordId);
+        await connection.commit();
+        return;
+      } catch (error) {
+        await connection.rollback();
+        if (isDeadlockError(error) && attempt < MAX_DEADLOCK_RETRIES - 1) {
+          console.warn(`[DB] Deadlock in assignUserToCommand, retrying (attempt ${attempt + 1}/${MAX_DEADLOCK_RETRIES}).`);
+          continue;
+        }
+        throw error;
+      }
     }
 
-    await insertUserCommandAssignment(connection, commandId, discordId);
-    await connection.commit();
-  } catch (error) {
-    await connection.rollback();
-    throw error;
+    throw new Error('[DB] Deadlock retry limit reached in assignUserToCommandWithinTransaction.');
   } finally {
     if (lockNameByTrigger) {
       await releaseNamedLock(connection, lockNameByTrigger);
@@ -464,20 +487,27 @@ export async function runSerializedCommandWrite<T>(
     connection = await getPool().getConnection();
     await acquireNamedLocks(connection, lockNames);
 
-    await connection.beginTransaction();
+    for (let attempt = 0; attempt < MAX_DEADLOCK_RETRIES; attempt++) {
+      await connection.beginTransaction();
+      try {
+        if (await isAnyCommandTakenAcrossTables(normalizedCommands, options, connection, checks)) {
+          throw new CommandConflictError(normalizedCommands);
+        }
 
-    try {
-      if (await isAnyCommandTakenAcrossTables(normalizedCommands, options, connection, checks)) {
-        throw new CommandConflictError(normalizedCommands);
+        const result = await writeOperation(connection);
+        await connection.commit();
+        return result;
+      } catch (error) {
+        await connection.rollback();
+        if (isDeadlockError(error) && attempt < MAX_DEADLOCK_RETRIES - 1) {
+          console.warn(`[DB] Deadlock detected, retrying transaction (attempt ${attempt + 1}/${MAX_DEADLOCK_RETRIES}).`);
+          continue;
+        }
+        throw error;
       }
-
-      const result = await writeOperation(connection);
-      await connection.commit();
-      return result;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
     }
+
+    throw new Error('[DB] Deadlock retry limit reached without success.');
   } finally {
     if (connection) {
       try { await releaseNamedLocks(connection, lockNames); } catch (_) {}
