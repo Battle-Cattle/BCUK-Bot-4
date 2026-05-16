@@ -4,6 +4,16 @@ import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCa
 import { requireTrimmedString, normalizeCommandList, type SqlExecutor } from './commandStringUtils';
 import { isAnyCommandTakenAcrossTables, runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
+import { fromBit } from './utils';
+
+// ─── Archive column allowlist ─────────────────────────────────────────────────
+// MySQL does not support parameterised column names. Rather than building the
+// name dynamically from a validated integer at call-time, we pre-compute every
+// valid mapping here so the string that reaches the SQL template is always
+// drawn from a fixed, auditable set.
+const ARCHIVE_YEAR_COLUMNS = new Map<number, string>(
+  Array.from({ length: 2100 - 2020 + 1 }, (_, i) => [2020 + i, `value${2020 + i}`] as [number, string]),
+);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -48,7 +58,7 @@ function mapCounter(row: mysql.RowDataPacket): DbCounter {
     check_command: row.check_command,
     message: row.message,
     increment_message: row.increment_message,
-    reset_yearly: Buffer.isBuffer(row.reset_yearly) ? row.reset_yearly[0] === 1 : row.reset_yearly == 1,
+    reset_yearly: fromBit(row.reset_yearly),
     current_value: row.current_value,
   };
 }
@@ -321,12 +331,10 @@ export async function incrementCounter(id: number): Promise<number> {
 }
 
 export async function archiveAndResetYearlyCounters(year: number): Promise<number> {
-  if (!Number.isInteger(year) || year < 2020 || year > 2100) {
+  const columnName = ARCHIVE_YEAR_COLUMNS.get(year);
+  if (!columnName) {
     throw new Error(`[DB] Invalid archive year: ${year}`);
   }
-  // MySQL doesn't support parameterised column names, so the name is built from
-  // `year` which is validated to a safe integer in [2020, 2100] above.
-  const columnName = `value${year}`;
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `UPDATE counter SET \`${columnName}\` = current_value, current_value = 0 WHERE reset_yearly = 1 AND \`${columnName}\` IS NULL`,
   );
