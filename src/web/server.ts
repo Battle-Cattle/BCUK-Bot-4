@@ -16,6 +16,8 @@ import streamsRouter from './routes/streams';
 import commandsRouter from './routes/commands';
 import countersRouter from './routes/counters';
 import commandMonitorRouter from './routes/commandMonitor';
+import streamdeckRouter from './routes/streamdeck';
+import streamdeckKeysRouter from './routes/streamdeckKeys';
 import { requireAuth } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
 
@@ -86,7 +88,9 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/auth', authRouter);
+app.use('/api/streamdeck', streamdeckRouter);
 app.use('/api', requireAuth, apiRouter);
+app.use('/', requireAuth, streamdeckKeysRouter);
 app.use('/', requireAuth, sfxRouter);
 app.use('/admin', requireAuth, adminRouter);
 app.use('/admin', requireAuth, streamsRouter);

@@ -1,6 +1,7 @@
+import { createHash } from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { ensureSessionCsrfToken } from './csrf';
-import { AccessLevel } from '../db';
+import { AccessLevel, findApprovedKeyByHash } from '../db';
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   if (req.session.user) {
@@ -35,6 +36,27 @@ export function requireMod(req: Request, res: Response, next: NextFunction): voi
         user: req.session.user ?? null,
         csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
       });
+  }
+}
+
+export async function requireApiKey(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Unauthorized' });
+    return;
+  }
+  const hash = createHash('sha256').update(token).digest('hex');
+  try {
+    const row = await findApprovedKeyByHash(hash);
+    if (!row) {
+      res.status(401).json({ ok: false, error: 'Unauthorized' });
+      return;
+    }
+    req.apiKeyOwner = row.discord_id;
+    next();
+  } catch {
+    res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 }
 
