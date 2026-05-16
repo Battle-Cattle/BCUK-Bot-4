@@ -37,13 +37,13 @@ export async function requestApiKey(
   await getPool().execute(
     `INSERT INTO streamdeck_api_keys
        (discord_id, key_hash, status, requested_at, approved_at, approved_by)
-     VALUES (?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE
-       key_hash     = VALUES(key_hash),
-       status       = VALUES(status),
-       requested_at = VALUES(requested_at),
-       approved_at  = VALUES(approved_at),
-       approved_by  = VALUES(approved_by)`,
+       key_hash     = new_row.key_hash,
+       status       = new_row.status,
+       requested_at = new_row.requested_at,
+       approved_at  = new_row.approved_at,
+       approved_by  = new_row.approved_by`,
     [discordId, hash, status, now, approvedAt, approvedBy],
   );
 

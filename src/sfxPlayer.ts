@@ -5,6 +5,13 @@ import ffmpegPath from 'ffmpeg-static';
 import { SFX_FOLDER } from './config';
 import { isConnected, startPlayback } from './audioPlayer';
 
+export class VoiceNotConnectedError extends Error {
+  constructor() {
+    super('Not connected to a voice channel');
+    this.name = 'VoiceNotConnectedError';
+  }
+}
+
 // Tell @discordjs/voice where the ffmpeg binary is
 if (ffmpegPath) {
   process.env.FFMPEG_PATH = ffmpegPath;
@@ -35,7 +42,7 @@ function getRealSfxRoot(): string {
  */
 export function playFile(filePath: string): void {
   if (!isConnected()) {
-    throw new Error('Not connected to a voice channel');
+    throw new VoiceNotConnectedError();
   }
 
   const candidatePath = path.resolve(filePath);

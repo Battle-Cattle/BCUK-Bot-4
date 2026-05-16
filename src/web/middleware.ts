@@ -53,6 +53,7 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
       res.status(401).json({ ok: false, error: 'Unauthorized' });
       return;
     }
+    req.apiKeyOwner = row.discord_id;
     next();
   } catch {
     res.status(500).json({ ok: false, error: 'Internal server error' });

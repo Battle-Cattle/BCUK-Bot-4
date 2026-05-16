@@ -2,7 +2,7 @@ import path from 'path';
 import { Router } from 'express';
 import { findTrigger, findSoundFiles, getAllSfxTriggers } from '../../db';
 import { pickWeightedRandom } from '../../soundSelector';
-import { playFile } from '../../sfxPlayer';
+import { playFile, VoiceNotConnectedError } from '../../sfxPlayer';
 import { setVoicePlaying } from '../../statusStore';
 import { SFX_FOLDER } from '../../config';
 import { requireApiKey } from '../middleware';
@@ -60,11 +60,10 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   try {
     playFile(fullPath);
     setVoicePlaying(filename, normalizedCommand, 'streamdeck');
-    console.log(`[Streamdeck] Playing '${filename}' for trigger '${normalizedCommand}'`);
+    console.log(`[Streamdeck] Playing '${filename}' for trigger '${normalizedCommand}' (owner: ${req.apiKeyOwner})`);
     res.json({ ok: true, file: filename });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('Not connected')) {
+    if (err instanceof VoiceNotConnectedError) {
       res.status(503).json({ ok: false, error: 'Bot is not connected to a voice channel' });
     } else {
       console.error(`[Streamdeck] Failed to play ${fullPath}:`, err);
