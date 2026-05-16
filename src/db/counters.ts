@@ -1,11 +1,8 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
 import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
-import {
-  requireTrimmedString, normalizeCommandList,
-  isAnyCommandTakenAcrossTables, runSerializedCommandWrite,
-} from './commandLocks';
-import type { SqlExecutor } from './commandLocks';
+import { requireTrimmedString, normalizeCommandList, type SqlExecutor } from './commandStringUtils';
+import { isAnyCommandTakenAcrossTables, runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
