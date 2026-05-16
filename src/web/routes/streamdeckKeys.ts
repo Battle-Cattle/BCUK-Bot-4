@@ -10,6 +10,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
+import { WEB_PORT } from '../../config';
 
 const router = Router();
 
@@ -24,6 +25,7 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
       keyRow,
       newKey: null,
       error: null,
+      webPort: WEB_PORT,
     });
   } catch (err) {
     console.error('[Web] Streamdeck key page error:', err);
@@ -48,6 +50,7 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
       keyRow,
       newKey: plain,
       error: null,
+      webPort: WEB_PORT,
     });
   } catch (err) {
     console.error('[Web] Streamdeck key request error:', err);

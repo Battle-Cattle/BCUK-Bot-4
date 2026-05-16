@@ -7,4 +7,6 @@ monitor-settings.json
 commit-msg.txt
 sfx/*
 !sfx/.gitkeep
+public/downloads/*
+!public/downloads/.gitkeep
 .vscode/settings.json
