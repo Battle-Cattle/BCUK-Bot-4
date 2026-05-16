@@ -25,16 +25,6 @@
         <p style="margin-top:.75rem;" class="muted">Your key is pending admin approval. It will become active once an Admin approves your request.</p>
         <% } %>
       </div>
-      <script>
-        function copyKey(event) {
-          const key = document.getElementById('new-key').textContent;
-          navigator.clipboard.writeText(key).then(() => {
-            const btn = event.currentTarget;
-            btn.textContent = 'Copied!';
-            setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
-          }).catch(() => { alert('Could not copy automatically — please copy the key manually.'); });
-        }
-      </script>
       <% } %>
 
       <div class="card card-spaced">
@@ -131,9 +121,6 @@
             <td style="padding:.35rem 0;">Paste your key from the Key Status section above</td>
           </tr>
         </table>
-        <script>
-          document.getElementById('sd-host-cell').textContent = window.location.hostname;
-        </script>
         <p class="muted">These settings are shared across all your BCUK Bot Streamdeck buttons — you only need to enter them once.</p>
 
         <p style="margin-top:1.25rem;"><strong>3. Load your commands</strong></p>
@@ -147,5 +134,6 @@
     </section>
   </main>
   <%- include('partials/pwa-register') %>
+  <script src="/streamdeck-keys.js"></script>
 </body>
 </html>
