@@ -19,17 +19,17 @@
         <p><strong>&#10003; Your API key has been generated.</strong> Copy it now — it will not be shown again.</p>
         <div style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
           <code class="mono" id="new-key" style="font-size:.85rem;word-break:break-all;flex:1;min-width:0;"><%= newKey %></code>
-          <button type="button" class="btn btn-sm" onclick="copyKey()">Copy</button>
+          <button type="button" class="btn btn-sm" onclick="copyKey(event)">Copy</button>
         </div>
         <% if (keyRow && keyRow.status === 'pending') { %>
         <p style="margin-top:.75rem;" class="muted">Your key is pending admin approval. It will become active once an Admin approves your request.</p>
         <% } %>
       </div>
       <script>
-        function copyKey() {
+        function copyKey(event) {
           const key = document.getElementById('new-key').textContent;
           navigator.clipboard.writeText(key).then(() => {
-            const btn = event.target;
+            const btn = event.currentTarget;
             btn.textContent = 'Copied!';
             setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
           }).catch(() => { alert('Could not copy automatically — please copy the key manually.'); });
@@ -60,7 +60,7 @@
           <span class="badge badge-hidden">Pending Approval</span>
           <span class="muted" style="font-size:.85rem;">Requested <%= keyRow.requested_at.toLocaleDateString() %></span>
         </div>
-        <p>Your key is waiting for Admin approval. You will need to come back to this page after it is approved to see no further action is needed — the key you already copied will become active.</p>
+        <p>Your key is awaiting Admin approval. No further action is needed — the key you already copied will become active automatically once an Admin approves your request. Refresh this page to check the current status.</p>
         <p class="muted" style="margin-top:.5rem;">Want to cancel and start over? Requesting a new key will replace the pending one.</p>
         <form method="POST" action="/streamdeck-key/request" style="margin-top:1rem;">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
