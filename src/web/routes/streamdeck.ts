@@ -60,7 +60,7 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   try {
     playFile(fullPath);
     setVoicePlaying(filename, normalizedCommand, 'streamdeck');
-    console.log(`[Streamdeck] Playing '${filename}' for trigger '${normalizedCommand}' (owner: ${req.apiKeyOwner})`);
+    console.log(`[Streamdeck] Playing '${filename}' for trigger '${normalizedCommand}'`);
     res.json({ ok: true, file: filename });
   } catch (err: unknown) {
     if (err instanceof VoiceNotConnectedError) {
