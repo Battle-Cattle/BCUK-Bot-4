@@ -5,12 +5,16 @@
     <div class="navbar-menu">
       <a href="/" class="nav-item">Dashboard</a>
       <a href="/sfx" class="nav-item">SFX</a>
+      <a href="/streamdeck-key" class="nav-item">Streamdeck Key</a>
       <% if (user && user.accessLevel >= 2) { %>
       <a href="/admin/commands" class="nav-item">Commands</a>
       <a href="/admin/counters" class="nav-item">Counters</a>
       <a href="/admin/command-monitor" class="nav-item">Command Monitor</a>
       <a href="/admin/streams" class="nav-item">Streams</a>
       <a href="/admin/users" class="nav-item">Users</a>
+      <% } %>
+      <% if (user && user.accessLevel >= 3) { %>
+      <a href="/admin/streamdeck-keys" class="nav-item">Streamdeck Keys</a>
       <% } %>
     </div>
     <div class="navbar-end">

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Streamdeck Keys</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body>
+  <%- include('partials/nav') %>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Streamdeck API Keys</h2>
+
+      <% if (error) { %>
+      <div class="card card-alert-danger" role="alert" aria-live="assertive">
+        <span class="text-danger">&#9888; Operation failed. Please try again.</span>
+      </div>
+      <% } %>
+
+      <!-- Pending requests -->
+      <div class="card card-spaced">
+        <div class="card-header">
+          <span class="card-icon">&#9203;</span>
+          <span class="card-label">Pending Requests (<%= pending.length %>)</span>
+        </div>
+
+        <% if (pending.length === 0) { %>
+        <p class="muted">No pending requests.</p>
+        <% } else { %>
+        <div class="table-scroll">
+          <table class="table" aria-label="Pending API key requests">
+            <thead>
+              <tr>
+                <th scope="col">Discord ID</th>
+                <th scope="col">Requested</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% pending.forEach(function(row) { %>
+              <tr>
+                <td class="mono"><%= row.discord_id %></td>
+                <td><%= row.requested_at.toLocaleString() %></td>
+                <td>
+                  <div style="display:flex;gap:.4rem;flex-wrap:wrap;">
+                    <form method="POST" action="/admin/streamdeck-keys/approve" class="inline-form-sm">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
+                      <button type="submit" class="btn btn-sm">Approve</button>
+                    </form>
+                    <form method="POST" action="/admin/streamdeck-keys/deny" class="inline-form-sm">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
+                      <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Deny this request? The user will need to request again.')">Deny</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+              <% }); %>
+            </tbody>
+          </table>
+        </div>
+        <% } %>
+      </div>
+
+      <!-- All keys -->
+      <div class="card card-spaced">
+        <div class="card-header">
+          <span class="card-icon">&#128273;</span>
+          <span class="card-label">All Keys (<%= all.length %>)</span>
+        </div>
+
+        <% if (all.length === 0) { %>
+        <p class="muted">No keys have been requested yet.</p>
+        <% } else { %>
+        <div class="table-scroll">
+          <table class="table" aria-label="All Streamdeck API keys">
+            <thead>
+              <tr>
+                <th scope="col">Discord ID</th>
+                <th scope="col">Status</th>
+                <th scope="col">Requested</th>
+                <th scope="col">Approved By</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% all.forEach(function(row) { %>
+              <tr>
+                <td class="mono"><%= row.discord_id %></td>
+                <td>
+                  <% if (row.status === 'approved') { %>
+                  <span class="badge badge-active">Active</span>
+                  <% } else if (row.status === 'pending') { %>
+                  <span class="badge badge-hidden">Pending</span>
+                  <% } else { %>
+                  <span class="badge badge-offline">Revoked</span>
+                  <% } %>
+                </td>
+                <td><%= row.requested_at.toLocaleDateString() %></td>
+                <td>
+                  <% if (row.approved_by) { %>
+                  <span class="mono muted" style="font-size:.8rem;"><%= row.approved_by %></span>
+                  <% } else { %>
+                  <em class="muted">—</em>
+                  <% } %>
+                </td>
+                <td>
+                  <% if (row.status === 'pending') { %>
+                  <div style="display:flex;gap:.4rem;flex-wrap:wrap;">
+                    <form method="POST" action="/admin/streamdeck-keys/approve" class="inline-form-sm">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
+                      <button type="submit" class="btn btn-sm">Approve</button>
+                    </form>
+                    <form method="POST" action="/admin/streamdeck-keys/deny" class="inline-form-sm">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
+                      <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Deny this request?')">Deny</button>
+                    </form>
+                  </div>
+                  <% } else if (row.status === 'approved') { %>
+                  <form method="POST" action="/admin/streamdeck-keys/revoke" class="inline-form-sm">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
+                    <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Revoke this key? It will stop working immediately.')">Revoke</button>
+                  </form>
+                  <% } else { %>
+                  <em class="muted">—</em>
+                  <% } %>
+                </td>
+              </tr>
+              <% }); %>
+            </tbody>
+          </table>
+        </div>
+        <% } %>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

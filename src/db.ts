@@ -83,3 +83,17 @@ export type {
 
 export type { SfxTrigger, SfxFile, SfxTriggerRow } from './db/sfx';
 export { findTrigger, findSoundFiles, getAllSfxTriggers } from './db/sfx';
+
+// ─── Streamdeck API keys ─────────────────────────────────────────────────────
+
+export type { StreamdeckKeyRow } from './db/streamdeckKeys';
+export {
+  requestApiKey,
+  findApprovedKeyByHash,
+  getApiKeyStatus,
+  approveApiKey,
+  denyApiKey,
+  revokeApiKey,
+  getPendingRequests,
+  getAllApiKeys,
+} from './db/streamdeckKeys';
