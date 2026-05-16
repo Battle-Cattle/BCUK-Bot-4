@@ -102,7 +102,7 @@ export async function getPendingRequests(): Promise<StreamdeckKeyRow[]> {
     `SELECT k.discord_id, k.key_hash, k.status, k.requested_at, k.approved_at, k.approved_by,
             u.discord_name AS user_name, NULL AS approver_name
      FROM streamdeck_api_keys k
-     LEFT JOIN users u ON u.discord_id = k.discord_id
+     LEFT JOIN \`user\` u ON u.discord_id = k.discord_id
      WHERE k.status = 'pending'
      ORDER BY k.requested_at ASC`,
   );
@@ -114,8 +114,8 @@ export async function getAllApiKeys(): Promise<StreamdeckKeyRow[]> {
     `SELECT k.discord_id, k.key_hash, k.status, k.requested_at, k.approved_at, k.approved_by,
             u.discord_name AS user_name, a.discord_name AS approver_name
      FROM streamdeck_api_keys k
-     LEFT JOIN users u ON u.discord_id = k.discord_id
-     LEFT JOIN users a ON a.discord_id = k.approved_by
+     LEFT JOIN \`user\` u ON u.discord_id = k.discord_id
+     LEFT JOIN \`user\` a ON a.discord_id = k.approved_by
      ORDER BY k.status ASC, k.requested_at ASC`,
   );
   return rows.map(mapRow);
