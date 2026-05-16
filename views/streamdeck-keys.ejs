@@ -62,8 +62,7 @@
           <span class="badge badge-active">Active</span>
           <span class="muted" style="font-size:.85rem;">Approved <%= keyRow.approved_at ? keyRow.approved_at.toLocaleDateString() : '' %></span>
         </div>
-        <p>Your API key is active. Use it in your Streamdeck configuration with the header:</p>
-        <pre style="background:var(--surface);padding:.75rem 1rem;border-radius:6px;font-size:.82rem;overflow-x:auto;margin:.75rem 0;">Authorization: Bearer &lt;your-key&gt;</pre>
+        <p>Your API key is active. See the <strong>How to Use</strong> section below for setup instructions.</p>
         <p class="muted">If you have lost your key, you can generate a new one. The old key will immediately stop working.</p>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:1rem;">
           <form method="POST" action="/streamdeck-key/request">
