@@ -108,16 +108,41 @@
           <span class="card-icon">&#128221;</span>
           <span class="card-label">How to Use</span>
         </div>
-        <p>Send HTTP requests to the bot to trigger sound effects:</p>
-        <pre style="background:var(--surface);padding:.75rem 1rem;border-radius:6px;font-size:.82rem;overflow-x:auto;margin:.75rem 0;">POST /api/streamdeck/sfx
-Authorization: Bearer &lt;your-key&gt;
-Content-Type: application/json
 
-{ "command": "!boom" }</pre>
-        <p>You can also list all available commands:</p>
-        <pre style="background:var(--surface);padding:.75rem 1rem;border-radius:6px;font-size:.82rem;overflow-x:auto;margin:.75rem 0;">GET /api/streamdeck/sfx
-Authorization: Bearer &lt;your-key&gt;</pre>
-        <p class="muted">Streamdeck triggers are not subject to the chat cooldown and will interrupt any currently playing sound.</p>
+        <p><strong>1. Download &amp; install the plugin</strong></p>
+        <p>Download the plugin file and double-click it to install it in the Streamdeck software:</p>
+        <p style="margin:.75rem 0;">
+          <a href="/downloads/BCUK-SFX.streamDeckPlugin" class="btn" download>&#11015;&nbsp;Download Plugin</a>
+        </p>
+
+        <p style="margin-top:1.25rem;"><strong>2. Add a Play SFX action</strong></p>
+        <p>Drag the <strong>Play SFX</strong> action from the BCUK Bot category onto a key, then open its Property Inspector and enter:</p>
+        <table style="margin:.75rem 0;border-collapse:collapse;font-size:.85rem;width:100%;">
+          <tr>
+            <td style="padding:.35rem .75rem .35rem 0;white-space:nowrap;font-weight:600;vertical-align:top;width:5rem;">Host</td>
+            <td style="padding:.35rem 0;font-family:monospace;" id="sd-host-cell">–</td>
+          </tr>
+          <tr>
+            <td style="padding:.35rem .75rem .35rem 0;white-space:nowrap;font-weight:600;vertical-align:top;">Port</td>
+            <td style="padding:.35rem 0;font-family:monospace;"><%= webPort %></td>
+          </tr>
+          <tr>
+            <td style="padding:.35rem .75rem .35rem 0;white-space:nowrap;font-weight:600;vertical-align:top;">API Key</td>
+            <td style="padding:.35rem 0;">Paste your key from the Key Status section above</td>
+          </tr>
+        </table>
+        <script>
+          document.getElementById('sd-host-cell').textContent = window.location.hostname;
+        </script>
+        <p class="muted">These settings are shared across all your BCUK Bot Streamdeck buttons — you only need to enter them once.</p>
+
+        <p style="margin-top:1.25rem;"><strong>3. Load your commands</strong></p>
+        <p>Press <strong>Refresh Commands</strong> in the Property Inspector. This connects to the bot and populates the command dropdown with all available sound effects. Then select the command you want this key to trigger.</p>
+
+        <p style="margin-top:1.25rem;"><strong>4. Press the key</strong></p>
+        <p>If your API key is active the bot will play the sound effect in the Discord voice channel immediately.</p>
+
+        <p class="muted" style="margin-top:1.25rem;">Streamdeck triggers bypass the chat cooldown and will interrupt any currently playing sound.</p>
       </div>
     </section>
   </main>
