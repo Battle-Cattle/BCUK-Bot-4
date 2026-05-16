@@ -37,7 +37,7 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
 
 router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
   try {
-    const { plain, status } = await requestApiKey(
+    const { plain } = await requestApiKey(
       req.session.user!.discordId,
       req.session.user!.accessLevel,
     );
