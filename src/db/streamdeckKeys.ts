@@ -10,6 +10,8 @@ export interface StreamdeckKeyRow {
   requested_at: Date;
   approved_at: Date | null;
   approved_by: string | null;
+  user_name: string | null;
+  approver_name: string | null;
 }
 
 function mapRow(r: mysql.RowDataPacket): StreamdeckKeyRow {
@@ -20,6 +22,8 @@ function mapRow(r: mysql.RowDataPacket): StreamdeckKeyRow {
     requested_at: r.requested_at,
     approved_at: r.approved_at ?? null,
     approved_by: r.approved_by ?? null,
+    user_name: r.user_name ?? null,
+    approver_name: r.approver_name ?? null,
   };
 }
 
@@ -95,19 +99,24 @@ export async function revokeApiKey(discordId: string): Promise<void> {
 
 export async function getPendingRequests(): Promise<StreamdeckKeyRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT discord_id, key_hash, status, requested_at, approved_at, approved_by
-     FROM streamdeck_api_keys
-     WHERE status = 'pending'
-     ORDER BY requested_at ASC`,
+    `SELECT k.discord_id, k.key_hash, k.status, k.requested_at, k.approved_at, k.approved_by,
+            u.discord_name AS user_name, NULL AS approver_name
+     FROM streamdeck_api_keys k
+     LEFT JOIN users u ON u.discord_id = k.discord_id
+     WHERE k.status = 'pending'
+     ORDER BY k.requested_at ASC`,
   );
   return rows.map(mapRow);
 }
 
 export async function getAllApiKeys(): Promise<StreamdeckKeyRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT discord_id, key_hash, status, requested_at, approved_at, approved_by
-     FROM streamdeck_api_keys
-     ORDER BY status ASC, requested_at ASC`,
+    `SELECT k.discord_id, k.key_hash, k.status, k.requested_at, k.approved_at, k.approved_by,
+            u.discord_name AS user_name, a.discord_name AS approver_name
+     FROM streamdeck_api_keys k
+     LEFT JOIN users u ON u.discord_id = k.discord_id
+     LEFT JOIN users a ON a.discord_id = k.approved_by
+     ORDER BY k.status ASC, k.requested_at ASC`,
   );
   return rows.map(mapRow);
 }

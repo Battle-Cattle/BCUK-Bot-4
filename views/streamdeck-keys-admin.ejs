@@ -34,7 +34,7 @@
           <table class="table" aria-label="Pending API key requests">
             <thead>
               <tr>
-                <th scope="col">Discord ID</th>
+                <th scope="col">User</th>
                 <th scope="col">Requested</th>
                 <th scope="col">Actions</th>
               </tr>
@@ -42,7 +42,10 @@
             <tbody>
               <% pending.forEach(function(row) { %>
               <tr>
-                <td class="mono"><%= row.discord_id %></td>
+                <td>
+                  <%= row.user_name || row.discord_id %>
+                  <% if (row.user_name) { %><br><span class="mono muted" style="font-size:.75rem;"><%= row.discord_id %></span><% } %>
+                </td>
                 <td><%= row.requested_at.toLocaleString() %></td>
                 <td>
                   <div style="display:flex;gap:.4rem;flex-wrap:wrap;">
@@ -80,7 +83,7 @@
           <table class="table" aria-label="All Streamdeck API keys">
             <thead>
               <tr>
-                <th scope="col">Discord ID</th>
+                <th scope="col">User</th>
                 <th scope="col">Status</th>
                 <th scope="col">Requested</th>
                 <th scope="col">Approved By</th>
@@ -90,7 +93,10 @@
             <tbody>
               <% all.forEach(function(row) { %>
               <tr>
-                <td class="mono"><%= row.discord_id %></td>
+                <td>
+                  <%= row.user_name || row.discord_id %>
+                  <% if (row.user_name) { %><br><span class="mono muted" style="font-size:.75rem;"><%= row.discord_id %></span><% } %>
+                </td>
                 <td>
                   <% if (row.status === 'approved') { %>
                   <span class="badge badge-active">Active</span>
@@ -103,7 +109,8 @@
                 <td><%= row.requested_at.toLocaleDateString() %></td>
                 <td>
                   <% if (row.approved_by) { %>
-                  <span class="mono muted" style="font-size:.8rem;"><%= row.approved_by %></span>
+                  <%= row.approver_name || row.approved_by %>
+                  <% if (row.approver_name) { %><br><span class="mono muted" style="font-size:.75rem;"><%= row.approved_by %></span><% } %>
                   <% } else { %>
                   <em class="muted">—</em>
                   <% } %>
