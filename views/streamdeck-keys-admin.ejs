@@ -102,6 +102,8 @@
                   <span class="badge badge-active">Active</span>
                   <% } else if (row.status === 'pending') { %>
                   <span class="badge badge-hidden">Pending</span>
+                  <% } else if (row.status === 'denied') { %>
+                  <span class="badge badge-offline">Denied</span>
                   <% } else { %>
                   <span class="badge badge-offline">Revoked</span>
                   <% } %>
