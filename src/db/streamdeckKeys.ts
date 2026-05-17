@@ -29,6 +29,11 @@ export async function requestApiKey(
   discordId: string,
   accessLevel: number,
 ): Promise<{ plain: string; status: 'pending' | 'approved' }> {
+  const existing = await getApiKeyStatus(discordId);
+  if (existing?.status === 'denied') {
+    throw new Error('API key request rejected: previous request was denied');
+  }
+
   const plain = randomBytes(32).toString('hex');
   const hash = createHash('sha256').update(plain).digest('hex');
   const status = accessLevel >= AccessLevel.MANAGER ? 'approved' : 'pending';
