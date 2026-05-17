@@ -15,7 +15,7 @@
       <h2 class="section-title">Streamdeck API Keys</h2>
 
       <% if (error) { %>
-      <div class="card card-alert-danger" role="alert" aria-live="assertive">
+      <div class="card card-alert-danger" role="alert" aria-live="polite">
         <span class="text-danger">&#9888; Operation failed. Please try again.</span>
       </div>
       <% } %>
@@ -57,7 +57,7 @@
                     <form method="POST" action="/admin/streamdeck-keys/deny" class="inline-form-sm">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
-                      <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Deny this request? The user will need to request again.')">Deny</button>
+                      <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Are you sure you want to deny this request?')">Deny</button>
                     </form>
                   </div>
                 </td>
@@ -108,7 +108,7 @@
                   <span class="badge badge-offline">Revoked</span>
                   <% } %>
                 </td>
-                <td><%= row.requested_at.toLocaleDateString() %></td>
+                <td><%= row.requested_at.toLocaleString() %></td>
                 <td>
                   <% if (row.approved_by) { %>
                   <%= row.approver_name || row.approved_by %>
@@ -128,7 +128,7 @@
                     <form method="POST" action="/admin/streamdeck-keys/deny" class="inline-form-sm">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
-                      <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Deny this request?')">Deny</button>
+                      <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Are you sure you want to deny this request?')">Deny</button>
                     </form>
                   </div>
                   <% } else if (row.status === 'approved') { %>
