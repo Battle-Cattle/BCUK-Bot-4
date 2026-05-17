@@ -52,6 +52,25 @@ export function startDiscordBot(): void {
     ],
   });
 
+  client.on('messageCreate', (message) => {
+    if (message.author.bot) return;
+    if (message.guildId !== DISCORD_GUILD_ID) return;
+
+    const displayName = message.member?.displayName ?? message.author.username;
+
+    executeCustomCommandForDiscord(message, displayName).catch((err) =>
+      console.error('[Discord] Custom command error:', err),
+    );
+
+    executeCounterCommandForDiscord(message, displayName).catch((err) =>
+      console.error('[Discord] Counter command error:', err),
+    );
+
+    handleCommand(message.content, 'discord').catch((err) =>
+      console.error('[Discord] Command handler error:', err),
+    );
+  });
+
   client.once('clientReady', async (c) => {
     try {
       console.log(`[Discord] Logged in as ${c.user.tag}`);
@@ -62,25 +81,6 @@ export function startDiscordBot(): void {
       } catch (err) {
         console.error('[Discord] Failed to initialise:', err);
       }
-
-      c.on('messageCreate', (message) => {
-        if (message.author.bot) return;
-        if (message.guildId !== DISCORD_GUILD_ID) return;
-
-        const displayName = message.member?.displayName ?? message.author.username;
-
-        executeCustomCommandForDiscord(message, displayName).catch((err) =>
-          console.error('[Discord] Custom command error:', err),
-        );
-
-        executeCounterCommandForDiscord(message, displayName).catch((err) =>
-          console.error('[Discord] Counter command error:', err),
-        );
-
-        handleCommand(message.content, 'discord').catch((err) =>
-          console.error('[Discord] Command handler error:', err),
-        );
-      });
     } catch (err) {
       console.error('[Discord] Unexpected error in clientReady handler:', err);
     }
