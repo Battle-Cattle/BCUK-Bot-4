@@ -1,0 +1,273 @@
+{
+  "repo_notes": [
+    {
+      "content": "A multi-platform community bot connecting Twitch, Discord, and TikTok Live. Features custom commands, soundboard effects, counters, and a web control panel."
+    }
+  ],
+  "pages": [
+    {
+      "title": "BCUK Bot — Project Overview",
+      "purpose": "High-level introduction to BCUK Bot 4: what it does, its multi-platform architecture (Twitch, Discord, TikTok Live), key subsystems, and how the major components relate to each other. Links to all child sections for deeper reading.",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Getting Started — Setup and Configuration",
+      "purpose": "Step-by-step guide for setting up the bot: cloning the repo, installing dependencies, configuring environment variables via .env, setting up the MySQL database, and running in development vs. production mode.",
+      "parent": "BCUK Bot — Project Overview",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Project Structure and Build System",
+      "purpose": "Explains the repository layout (src/, public/, views/, sfx/), the TypeScript compilation pipeline (tsconfig.json, ts-node for dev, tsc for prod), and the npm scripts available.",
+      "parent": "BCUK Bot — Project Overview",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Core Bot Architecture",
+      "purpose": "Overview of how the bot's core runtime is structured: the main entry point, startup sequence, graceful shutdown, and how the platform bots (Discord, Twitch, TikTok) and the web panel are wired together. Links to child pages for each subsystem.",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "SFX Command Pipeline",
+      "purpose": "Deep dive into how sound effect commands are processed: the commandRouter receiving raw chat messages from any platform, trigger lookup in the database, weighted-random file selection via soundSelector, and playback via audioPlayer using the Opus codec through mediaplex.",
+      "parent": "Core Bot Architecture",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Discord Bot and Voice Audio",
+      "purpose": "Covers the Discord.js client setup, gateway intents, message handling, voice channel connection lifecycle (Signalling → Connecting → Ready), audio playback via ffmpeg and mediaplex (Opus codec), exponential backoff reconnection logic, and the custom voice adapter.",
+      "parent": "Core Bot Architecture",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Twitch Chat Bot",
+      "purpose": "Explains the tmi.js-based Twitch IRC client: connecting to enabled channels from the database, handling chat messages, join/part lifecycle, per-channel mutation locking to prevent race conditions, and reconnect reconciliation. Also covers the custom command, counter, multi-command (!multi), and shoutout (!so) handlers that process Twitch messages, including shared-chat session deduplication for multi-twitch broadcasts.",
+      "parent": "Core Bot Architecture",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "TikTok Live Bot",
+      "purpose": "Describes the TikTok Live connector integration: connecting to configured TikTok channels, handling CHAT events, stream-end and disconnect reconnection with 30-second delay, and optional Euler sign API key configuration.",
+      "parent": "Core Bot Architecture",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Status Store",
+      "purpose": "Documents the centralized in-memory status store (statusStore.ts): what state it tracks (Discord readiness, voice connection, playing state, Twitch/TikTok channel maps), the setter/getter API, and how the web dashboard polls it.",
+      "parent": "Core Bot Architecture",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Twitch Stream Monitor",
+      "purpose": "Overview of the stream announcement subsystem: polling the Twitch Helix API, detecting go-live/game-change/offline events, posting Discord embeds, and the monitor enable/disable toggle. Links to child pages for the API client and settings persistence.",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Twitch Helix API Client",
+      "purpose": "Documents twitchApi.ts: client-credentials OAuth token caching, getUsers(), getStreams(), getChannelInfo(), and getSharedChatSession() with batching in chunks of 100, timeout handling, rate-limit retry logic, and 401 token invalidation. Also covers how getSharedChatSession is used for shared-chat deduplication in multi-twitch broadcasts.",
+      "parent": "Twitch Stream Monitor",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Monitor Settings and Persistence",
+      "purpose": "Explains how the monitor enabled/disabled state is persisted to monitor-settings.json (gitignored, local to the host) using atomic file writes (write-then-rename), the in-memory cache, and how the web panel toggles this setting and triggers catch-up Discord posts.",
+      "parent": "Twitch Stream Monitor",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Database Layer",
+      "purpose": "Overview of the MySQL persistence layer: connection pool management, the full schema contract, and the major query patterns used across the application. Links to the schema reference child page.",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Database Schema Reference",
+      "purpose": "Complete reference for all database tables: sfxtrigger, sfx, sfxcategory, user, stream_group, streamer, custom_command, twitch_user_commands, streamdeck_api_keys, and sessions. Includes column types, constraints, and important notes on BIGINT snowflake handling and utf8mb4 collation.",
+      "parent": "Database Layer",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Data Access Patterns",
+      "purpose": "Documents the key query patterns in db.ts: singleton pool with getPool()/closePool(), the SFX aggregate join pattern (one query for triggers+files), transactional command removal, streamer state machine (setStreamerLive/clearStreamerLive), the AccessLevel permission hierarchy, and the managed lookup cache with exponential backoff used for custom commands.",
+      "parent": "Database Layer",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Web Management Panel",
+      "purpose": "Overview of the Express-based admin web panel: server setup, session management, routing structure, authentication flow, and the Progressive Web App shell. Links to child pages for each major section.",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Authentication — Discord OAuth2",
+      "purpose": "Explains the Discord OAuth2 login flow: redirect to Discord, callback code exchange, user whitelist check against the database, session creation with discordId/accessLevel, and logout. Also covers the CSRF protection middleware.",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Access Control Middleware",
+      "purpose": "Documents the five Express middleware guards (requireAuth, requireMod, requireManager, requireAdmin, requireApiKey) and how they map to the AccessLevel integer (0=USER, 1=MOD, 2=MANAGER, 3=ADMIN). Covers the session user type, CSRF token injection, and the Bearer-token API key middleware used by the Streamdeck API.",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Dashboard — Bot Status and SFX Listing",
+      "purpose": "Covers the main dashboard page: real-time status polling via /api/status every 5 seconds, the status card grid (Discord bot, voice channel, last played), Twitch/TikTok channel status display, SFX command table with client-side search and file expansion, and the Rejoin/Leave Voice button.",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Admin Panel — User Management",
+      "purpose": "Documents the user management interface: adding/updating/removing users, linking Discord IDs to Twitch names, toggling the Twitch bot per user, the per-user mutation lock to prevent race conditions, Discord name refresh background task, and rollback-on-failure logic.",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Admin Panel — Stream Monitor Management",
+      "purpose": "Covers the streams admin page: creating/editing/removing stream groups and streamers, toggling Discord announcements, the Live Now table with real-time polling every 15 seconds, Discord embed preview rendering, and the fire-and-forget monitor restart chain.",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Admin Panel — Custom Commands",
+      "purpose": "Documents the custom commands management interface: CRUD operations for trigger/output pairs, user assignment via the twitch_user_commands join table, input normalization (lowercase single-token trigger_string), and the inline edit panel UI.",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Admin Panel — Counters",
+      "purpose": "Documents the counter commands management interface: CRUD operations for trigger/check command pairs, the %d placeholder for current value in messages, optional yearly reset, manual value reset, conflict checking against custom commands, and the inline edit panel UI.",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Admin Panel — Command Monitor",
+      "purpose": "Explains the command monitor page: the in-memory CommandMonitorStore (up to 30 entries), how executeCustomCommandForDiscord and executeCustomCommandForTwitch record matched commands after sending live replies, the auto-refreshing table (every 5 seconds), and the distinction between the monitor display and the actual command execution.",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Progressive Web App (PWA) Shell",
+      "purpose": "Explains the PWA configuration: manifest.json with BCUK branding, service worker for offline support, pwa-head and pwa-register EJS partials, and the icons set (192px and 512px SVG/PNG).",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Streamdeck Integration",
+      "purpose": "Documents the Elgato Streamdeck plugin integration: the API key lifecycle (request → pending/auto-approve → approved → revoked/denied), the Bearer-token-authenticated REST API endpoints (GET /api/streamdeck/sfx and POST /api/streamdeck/sfx) that bypass chat cooldown, the user-facing key management page, and the admin key approval dashboard.",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Glossary",
+      "purpose": "Definitions of all codebase-specific terms, abbreviations, and domain concepts that an onboarding engineer needs to know, with code pointers to relevant files and functions.",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    }
+  ]
+}
