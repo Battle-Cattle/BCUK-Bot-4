@@ -1,3 +1,5 @@
+/* global expandedLiveRows, liveItemsByKey, getLiveRowKey, getLiveTableColumns, createDetailRow, clearChildren, makeCell, createMessagePreview */
+
 function hydrateLivePreviewGrid(liveKey) {
   var detailRow = document.querySelector('tr.live-detail-row[data-live-key="' + liveKey + '"]');
   if (!(detailRow instanceof HTMLElement)) return;

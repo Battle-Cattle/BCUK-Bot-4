@@ -1,3 +1,5 @@
+/* global createMetadataItem, createLink */
+
 var expandedLiveRows = Object.create(null);
 var liveItemsByKey = Object.create(null);
 

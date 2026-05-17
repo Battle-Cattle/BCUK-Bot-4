@@ -1,3 +1,5 @@
+/* global expandedLiveRows, liveItemsByKey, hydrateLivePreviewGrid, setLiveTableMessage, renderLiveRows, toggleGroupEdit, confirmSubmit */
+
 document.addEventListener('click', function (event) {
   var target = event.target;
   if (!(target instanceof Element)) return;

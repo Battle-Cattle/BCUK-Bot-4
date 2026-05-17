@@ -1,3 +1,5 @@
+/* global formatValue, sanitizeUrl, createLink */
+
 function createMessageContent(content) {
   var div = document.createElement('div');
   div.className = 'discord-message-content';
