@@ -1,12 +1,11 @@
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, createHash, timingSafeEqual } from 'crypto';
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
 import { AccessLevel } from './users';
 
 export interface StreamdeckKeyRow {
   discord_id: string;
-  key_hash: string;
-  status: 'pending' | 'approved' | 'revoked';
+  status: 'pending' | 'approved' | 'revoked' | 'denied';
   requested_at: Date;
   approved_at: Date | null;
   approved_by: string | null;
@@ -17,8 +16,7 @@ export interface StreamdeckKeyRow {
 function mapRow(r: mysql.RowDataPacket): StreamdeckKeyRow {
   return {
     discord_id: String(r.discord_id),
-    key_hash: String(r.key_hash),
-    status: r.status as 'pending' | 'approved' | 'revoked',
+    status: r.status as StreamdeckKeyRow['status'],
     requested_at: r.requested_at,
     approved_at: r.approved_at ?? null,
     approved_by: r.approved_by ?? null,
@@ -61,12 +59,16 @@ export async function findApprovedKeyByHash(hash: string): Promise<StreamdeckKey
      WHERE key_hash = ? AND status = 'approved'`,
     [hash],
   );
-  return rows.length === 0 ? null : mapRow(rows[0]);
+  if (rows.length === 0) return null;
+  const stored = Buffer.from(String(rows[0].key_hash), 'hex');
+  const incoming = Buffer.from(hash, 'hex');
+  if (stored.length !== incoming.length || !timingSafeEqual(stored, incoming)) return null;
+  return mapRow(rows[0]);
 }
 
 export async function getApiKeyStatus(discordId: string): Promise<StreamdeckKeyRow | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT discord_id, key_hash, status, requested_at, approved_at, approved_by
+    `SELECT discord_id, status, requested_at, approved_at, approved_by
      FROM streamdeck_api_keys
      WHERE discord_id = ?`,
     [discordId],
@@ -85,7 +87,7 @@ export async function approveApiKey(discordId: string, approvedBy: string): Prom
 
 export async function denyApiKey(discordId: string): Promise<void> {
   await getPool().execute(
-    'DELETE FROM streamdeck_api_keys WHERE discord_id = ? AND status = \'pending\'',
+    `UPDATE streamdeck_api_keys SET status = 'denied' WHERE discord_id = ? AND status = 'pending'`,
     [discordId],
   );
 }
@@ -99,7 +101,7 @@ export async function revokeApiKey(discordId: string): Promise<void> {
 
 export async function getPendingRequests(): Promise<StreamdeckKeyRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT k.discord_id, k.key_hash, k.status, k.requested_at, k.approved_at, k.approved_by,
+    `SELECT k.discord_id, k.status, k.requested_at, k.approved_at, k.approved_by,
             u.discord_name AS user_name, NULL AS approver_name
      FROM streamdeck_api_keys k
      LEFT JOIN \`user\` u ON u.discord_id = k.discord_id
@@ -111,7 +113,7 @@ export async function getPendingRequests(): Promise<StreamdeckKeyRow[]> {
 
 export async function getAllApiKeys(): Promise<StreamdeckKeyRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT k.discord_id, k.key_hash, k.status, k.requested_at, k.approved_at, k.approved_by,
+    `SELECT k.discord_id, k.status, k.requested_at, k.approved_at, k.approved_by,
             u.discord_name AS user_name, a.discord_name AS approver_name
      FROM streamdeck_api_keys k
      LEFT JOIN \`user\` u ON u.discord_id = k.discord_id
