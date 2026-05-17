@@ -53,31 +53,37 @@ export function startDiscordBot(): void {
   });
 
   client.once('clientReady', async (c) => {
-    console.log(`[Discord] Logged in as ${c.user.tag}`);
-    discordClient = c;
     try {
-      const guild = await getConfiguredGuild();
-      setDiscordReady(c.user.tag, guild.name);
+      console.log(`[Discord] Logged in as ${c.user.tag}`);
+      discordClient = c;
+      try {
+        const guild = await getConfiguredGuild();
+        setDiscordReady(c.user.tag, guild.name);
+      } catch (err) {
+        console.error('[Discord] Failed to initialise:', err);
+      }
+
+      c.on('messageCreate', (message) => {
+        if (message.author.bot) return;
+        if (message.guildId !== DISCORD_GUILD_ID) return;
+
+        const displayName = message.member?.displayName ?? message.author.username;
+
+        executeCustomCommandForDiscord(message, displayName).catch((err) =>
+          console.error('[Discord] Custom command error:', err),
+        );
+
+        executeCounterCommandForDiscord(message, displayName).catch((err) =>
+          console.error('[Discord] Counter command error:', err),
+        );
+
+        handleCommand(message.content, 'discord').catch((err) =>
+          console.error('[Discord] Command handler error:', err),
+        );
+      });
     } catch (err) {
-      console.error('[Discord] Failed to initialise:', err);
+      console.error('[Discord] Unexpected error in clientReady handler:', err);
     }
-
-    c.on('messageCreate', (message) => {
-      if (message.author.bot) return;
-      if (message.guildId !== DISCORD_GUILD_ID) return;
-
-      executeCustomCommandForDiscord(message, message.member?.displayName ?? message.author.username).catch((err) =>
-        console.error('[Discord] Custom command error:', err),
-      );
-
-      executeCounterCommandForDiscord(message, message.member?.displayName ?? message.author.username).catch((err) =>
-        console.error('[Discord] Counter command error:', err),
-      );
-
-      handleCommand(message.content, 'discord').catch((err) =>
-        console.error('[Discord] Command handler error:', err),
-      );
-    });
   });
 
   client.on('error', (err) => {
