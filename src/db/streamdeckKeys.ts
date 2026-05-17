@@ -46,13 +46,18 @@ export async function requestApiKey(
        (discord_id, key_hash, status, requested_at, approved_at, approved_by)
      VALUES (?, ?, ?, ?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE
-       key_hash     = new_row.key_hash,
-       status       = new_row.status,
-       requested_at = new_row.requested_at,
-       approved_at  = new_row.approved_at,
-       approved_by  = new_row.approved_by`,
+       key_hash     = IF(status = 'denied', key_hash,     new_row.key_hash),
+       status       = IF(status = 'denied', status,       new_row.status),
+       requested_at = IF(status = 'denied', requested_at, new_row.requested_at),
+       approved_at  = IF(status = 'denied', approved_at,  new_row.approved_at),
+       approved_by  = IF(status = 'denied', approved_by,  new_row.approved_by)`,
     [discordId, hash, status, now, approvedAt, approvedBy],
   );
+
+  const after = await getApiKeyStatus(discordId);
+  if (after?.status === 'denied') {
+    throw new Error('API key request rejected: previous request was denied');
+  }
 
   return { plain, status };
 }
