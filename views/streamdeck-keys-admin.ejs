@@ -57,7 +57,7 @@
                     <form method="POST" action="/admin/streamdeck-keys/deny" class="inline-form-sm">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
-                      <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Deny this request? The user will need to request again.')">Deny</button>
+                      <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Are you sure you want to deny this request?')">Deny</button>
                     </form>
                   </div>
                 </td>
