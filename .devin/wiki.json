@@ -1,16 +1,19 @@
 {
   "repo_notes": [
     {
-      "content": "A multi-platform community bot connecting Twitch, Discord, and TikTok Live. Features custom commands, soundboard effects, counters, and a web control panel."
+      "content": "A multi-platform community bot connecting Twitch, Discord, and TikTok Live. Features custom commands, soundboard effects, counters, and a web control panel.",
+      "author": null
     }
   ],
   "pages": [
     {
       "title": "BCUK Bot — Project Overview",
       "purpose": "High-level introduction to BCUK Bot 4: what it does, its multi-platform architecture (Twitch, Discord, TikTok Live), key subsystems, and how the major components relate to each other. Links to all child sections for deeper reading.",
+      "parent": null,
       "page_notes": [
         {
-          "content": ""
+          "content": "not a sound effect (SFX) engine, a community bot",
+          "author": null
         }
       ]
     },
@@ -20,7 +23,8 @@
       "parent": "BCUK Bot — Project Overview",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -30,16 +34,19 @@
       "parent": "BCUK Bot — Project Overview",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
     {
       "title": "Core Bot Architecture",
       "purpose": "Overview of how the bot's core runtime is structured: the main entry point, startup sequence, graceful shutdown, and how the platform bots (Discord, Twitch, TikTok) and the web panel are wired together. Links to child pages for each subsystem.",
+      "parent": null,
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -49,7 +56,8 @@
       "parent": "Core Bot Architecture",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -59,7 +67,8 @@
       "parent": "Core Bot Architecture",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -69,7 +78,8 @@
       "parent": "Core Bot Architecture",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -79,7 +89,8 @@
       "parent": "Core Bot Architecture",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -89,16 +100,19 @@
       "parent": "Core Bot Architecture",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
     {
       "title": "Twitch Stream Monitor",
       "purpose": "Overview of the stream announcement subsystem: polling the Twitch Helix API, detecting go-live/game-change/offline events, posting Discord embeds, and the monitor enable/disable toggle. Links to child pages for the API client and settings persistence.",
+      "parent": null,
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -108,7 +122,8 @@
       "parent": "Twitch Stream Monitor",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -118,16 +133,19 @@
       "parent": "Twitch Stream Monitor",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
     {
       "title": "Database Layer",
       "purpose": "Overview of the MySQL persistence layer: connection pool management, the full schema contract, and the major query patterns used across the application. Links to the schema reference child page.",
+      "parent": null,
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -137,7 +155,8 @@
       "parent": "Database Layer",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -147,16 +166,19 @@
       "parent": "Database Layer",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
     {
       "title": "Web Management Panel",
       "purpose": "Overview of the Express-based admin web panel: server setup, session management, routing structure, authentication flow, and the Progressive Web App shell. Links to child pages for each major section.",
+      "parent": null,
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -166,7 +188,8 @@
       "parent": "Web Management Panel",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -176,7 +199,8 @@
       "parent": "Web Management Panel",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -186,7 +210,8 @@
       "parent": "Web Management Panel",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -196,7 +221,8 @@
       "parent": "Web Management Panel",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -206,7 +232,8 @@
       "parent": "Web Management Panel",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -216,7 +243,8 @@
       "parent": "Web Management Panel",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -226,7 +254,8 @@
       "parent": "Web Management Panel",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -236,7 +265,8 @@
       "parent": "Web Management Panel",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -246,7 +276,8 @@
       "parent": "Web Management Panel",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
@@ -256,18 +287,22 @@
       "parent": "Web Management Panel",
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     },
     {
       "title": "Glossary",
       "purpose": "Definitions of all codebase-specific terms, abbreviations, and domain concepts that an onboarding engineer needs to know, with code pointers to relevant files and functions.",
+      "parent": null,
       "page_notes": [
         {
-          "content": ""
+          "content": "",
+          "author": null
         }
       ]
     }
-  ]
+  ],
+  "include_patterns": []
 }
