@@ -45,13 +45,14 @@ var liveNowInflight = false;
 function refreshLiveNow() {
   if (liveNowInflight) return;
   liveNowInflight = true;
-  fetch('/admin/streams/live')
+  var controller = new AbortController();
+  var timeoutId = setTimeout(function() { controller.abort(); }, 10000);
+  fetch('/admin/streams/live', { signal: controller.signal })
     .then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     })
     .then(function(data) {
-      liveNowInflight = false;
       var streams = data.streams;
       if (!streams || !streams.length) {
         expandedLiveRows = Object.create(null);
@@ -64,8 +65,11 @@ function refreshLiveNow() {
       if (el) el.textContent = 'Updated ' + new Date().toLocaleTimeString();
     })
     .catch(function() {
-      liveNowInflight = false;
       setLiveTableMessage('Failed to load live data.');
+    })
+    .then(function() {
+      clearTimeout(timeoutId);
+      liveNowInflight = false;
     });
 }
 
