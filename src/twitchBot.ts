@@ -122,40 +122,44 @@ export async function startTwitchBot(): Promise<void> {
   });
 
   client.on('message', (channel, tags, message, self) => {
-    // Don't respond to own messages
-    if (self) return;
-    const normalizedChannel = normalizeChannel(channel);
-    if (!normalizedChannel) return;
-    if (!activeChannels.has(normalizedChannel)) return;
+    try {
+      // Don't respond to own messages
+      if (self) return;
+      const normalizedChannel = normalizeChannel(channel);
+      if (!normalizedChannel) return;
+      if (!activeChannels.has(normalizedChannel)) return;
 
-    // In Twitch shared chat, source-room-id differs from room-id when a message
-    // originated in a partner channel and was shared into this one. Skip it entirely
-    // (including SFX command handling) so each message is only processed once, in
-    // its source channel.
-    if (tags['source-room-id'] && tags['source-room-id'] !== tags['room-id']) return;
+      // In Twitch shared chat, source-room-id differs from room-id when a message
+      // originated in a partner channel and was shared into this one. Skip it entirely
+      // (including SFX command handling) so each message is only processed once, in
+      // its source channel.
+      if (tags['source-room-id'] && tags['source-room-id'] !== tags['room-id']) return;
 
-    const displayName = tags['display-name'] ?? tags.username ?? null;
-    const isMod = tags.mod === true || !!(tags.badges as Record<string, string> | null | undefined)?.broadcaster;
+      const displayName = tags['display-name'] ?? tags.username ?? null;
+      const isMod = tags.mod === true || !!(tags.badges as Record<string, string> | null | undefined)?.broadcaster;
 
-    executeCustomCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
-      console.error('[Twitch] Custom command error:', err),
-    );
+      executeCustomCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
+        console.error('[Twitch] Custom command error:', err),
+      );
 
-    executeCounterCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
-      console.error('[Twitch] Counter command error:', err),
-    );
+      executeCounterCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
+        console.error('[Twitch] Counter command error:', err),
+      );
 
-    executeMultiCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
-      console.error('[Twitch] Multi command error:', err),
-    );
+      executeMultiCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
+        console.error('[Twitch] Multi command error:', err),
+      );
 
-    executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod).catch((err) =>
-      console.error('[Twitch] Shoutout error:', err),
-    );
+      executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod).catch((err) =>
+        console.error('[Twitch] Shoutout error:', err),
+      );
 
-    handleCommand(message, 'twitch').catch((err) =>
-      console.error('[Twitch] Command handler error:', err),
-    );
+      handleCommand(message, 'twitch').catch((err) =>
+        console.error('[Twitch] Command handler error:', err),
+      );
+    } catch (err) {
+      console.error('[Twitch] Unexpected error in message handler:', err);
+    }
   });
 
   client.on('connected', (addr, port) => {
