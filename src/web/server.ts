@@ -3,6 +3,7 @@ import type { ErrorRequestHandler } from 'express';
 import session from 'express-session';
 import MySQLStore from 'express-mysql-session';
 import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { WEB_PORT, SESSION_SECRET, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../config';
 
@@ -54,6 +55,23 @@ app.set('views', path.join(__dirname, '../../views'));
 // Static assets
 app.use(express.static(path.join(__dirname, '../../public')));
 
+// Rate limiting — applied after static assets so file downloads aren't counted
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 100,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+});
+// Tighter limit for auth endpoints to protect against OAuth quota exhaustion
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: 'Too many requests, please try again shortly.',
+});
+app.use(generalLimiter);
+
 // Body parsers
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
@@ -87,7 +105,7 @@ app.use((req, res, next) => {
 });
 
 // Routes
-app.use('/auth', authRouter);
+app.use('/auth', authLimiter, authRouter);
 app.use('/api/streamdeck', streamdeckRouter);
 app.use('/api', requireAuth, apiRouter);
 app.use('/', requireAuth, streamdeckKeysRouter);
