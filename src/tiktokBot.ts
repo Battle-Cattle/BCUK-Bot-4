@@ -42,6 +42,7 @@ export async function startTikTokBot(): Promise<void> {
     activeConnections.set(username, connection);
     let reconnectScheduled = false;
     let permanentFailure = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     function scheduleReconnect(): void {
       if (reconnectScheduled || permanentFailure) return;
@@ -53,7 +54,7 @@ export async function startTikTokBot(): Promise<void> {
       // redundant reconnect.
       if (activeConnections.get(username) === connection) {
         activeConnections.delete(username);
-        setTimeout(() => connectToChannel(username), RECONNECT_DELAY_MS);
+        reconnectTimer = setTimeout(() => connectToChannel(username), RECONNECT_DELAY_MS);
       }
     }
 
@@ -90,6 +91,10 @@ export async function startTikTokBot(): Promise<void> {
         console.error(`[TikTok] Permanent failure for @${username} — reconnect disabled.`);
         permanentFailure = true;
         activeConnections.delete(username);
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
       }
     });
 
