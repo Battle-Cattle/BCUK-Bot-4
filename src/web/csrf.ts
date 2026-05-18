@@ -42,10 +42,14 @@ export const csrfProtection: RequestHandler = (req, _res, next) => {
 
   const submittedBuffer = Buffer.from(submittedToken);
   const sessionBuffer = Buffer.from(sessionToken);
-  if (
-    submittedBuffer.length !== sessionBuffer.length
-    || !crypto.timingSafeEqual(submittedBuffer, sessionBuffer)
-  ) {
+  const sameLength = submittedBuffer.length === sessionBuffer.length;
+  const len = Math.max(submittedBuffer.length, sessionBuffer.length);
+  const a = Buffer.alloc(len);
+  const b = Buffer.alloc(len);
+  submittedBuffer.copy(a);
+  sessionBuffer.copy(b);
+  const sameValue = crypto.timingSafeEqual(a, b);
+  if (!sameLength || !sameValue) {
     next(createCsrfError());
     return;
   }
