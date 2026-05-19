@@ -2,22 +2,15 @@ import { TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET } from './config';
 
 const FETCH_TIMEOUT_MS = 10_000;
 
-async function twitchFetch(url: string, init?: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
+function twitchFetch(url: string, init?: RequestInit): Promise<Response> {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 }
 
 let cachedAppToken: string | null = null;
 let appTokenExpiry = 0;
+let tokenRefreshPromise: Promise<string> | null = null;
 
-async function getAppToken(): Promise<string> {
-  if (cachedAppToken && Date.now() < appTokenExpiry) return cachedAppToken;
-
+async function fetchNewAppToken(): Promise<string> {
   const body = new URLSearchParams({
     client_id: TWITCH_CLIENT_ID,
     client_secret: TWITCH_CLIENT_SECRET,
@@ -37,6 +30,14 @@ async function getAppToken(): Promise<string> {
   // Expire 60 s early to avoid edge cases
   appTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
   return cachedAppToken;
+}
+
+async function getAppToken(): Promise<string> {
+  if (cachedAppToken && Date.now() < appTokenExpiry) return cachedAppToken;
+  if (!tokenRefreshPromise) {
+    tokenRefreshPromise = fetchNewAppToken().finally(() => { tokenRefreshPromise = null; });
+  }
+  return tokenRefreshPromise;
 }
 
 function authHeaders(token: string): Record<string, string> {
