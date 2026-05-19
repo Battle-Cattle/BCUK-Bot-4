@@ -3,7 +3,7 @@
 var liveItemsByKey = Object.create(null);
 
 function hydrateLivePreviewGrid(liveKey) {
-  var detailRow = document.querySelector('tr.live-detail-row[data-live-key="' + liveKey + '"]');
+  var detailRow = document.querySelector('tr.live-detail-row[data-live-key="' + CSS.escape(liveKey) + '"]');
   if (!(detailRow instanceof HTMLElement)) return;
 
   var grid = detailRow.querySelector('.live-preview-grid');

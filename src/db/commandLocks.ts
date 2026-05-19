@@ -214,7 +214,7 @@ export async function runSerializedCommandWrite<T>(
     throw new Error('[DB] Deadlock retry limit reached without success.');
   } finally {
     if (connection) {
-      try { await releaseNamedLocks(connection, lockNames); } catch (_) {}
+      try { await releaseNamedLocks(connection, lockNames); } catch (err) { console.warn('[DB] Failed to release named locks:', err); }
       connection.release();
     }
   }

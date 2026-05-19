@@ -98,9 +98,11 @@ router.get('/admin/streamdeck-keys', requireAdmin, csrfProtection, async (req, r
   }
 });
 
+const DISCORD_ID_RE = /^\d{17,20}$/;
+
 router.post('/admin/streamdeck-keys/approve', requireAdmin, csrfProtection, async (req, res) => {
   const { discord_id } = req.body as { discord_id?: string };
-  if (!discord_id?.trim()) return res.redirect('/admin/streamdeck-keys');
+  if (!discord_id?.trim() || !DISCORD_ID_RE.test(discord_id.trim())) return res.redirect('/admin/streamdeck-keys');
   try {
     await approveApiKey(discord_id.trim(), req.session.user!.discordId);
     res.redirect('/admin/streamdeck-keys');
@@ -112,7 +114,7 @@ router.post('/admin/streamdeck-keys/approve', requireAdmin, csrfProtection, asyn
 
 router.post('/admin/streamdeck-keys/deny', requireAdmin, csrfProtection, async (req, res) => {
   const { discord_id } = req.body as { discord_id?: string };
-  if (!discord_id?.trim()) return res.redirect('/admin/streamdeck-keys');
+  if (!discord_id?.trim() || !DISCORD_ID_RE.test(discord_id.trim())) return res.redirect('/admin/streamdeck-keys');
   try {
     await denyApiKey(discord_id.trim());
     res.redirect('/admin/streamdeck-keys');
@@ -124,7 +126,7 @@ router.post('/admin/streamdeck-keys/deny', requireAdmin, csrfProtection, async (
 
 router.post('/admin/streamdeck-keys/revoke', requireAdmin, csrfProtection, async (req, res) => {
   const { discord_id } = req.body as { discord_id?: string };
-  if (!discord_id?.trim()) return res.redirect('/admin/streamdeck-keys');
+  if (!discord_id?.trim() || !DISCORD_ID_RE.test(discord_id.trim())) return res.redirect('/admin/streamdeck-keys');
   try {
     await revokeApiKey(discord_id.trim());
     res.redirect('/admin/streamdeck-keys');
