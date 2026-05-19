@@ -61,11 +61,20 @@ const generalLimiter = rateLimit({
   limit: 100,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
+  skip: (req) => req.path.startsWith('/api/streamdeck'),
 });
 // Tighter limit for auth endpoints to protect against OAuth quota exhaustion
 const authLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: 'Too many requests, please try again shortly.',
+});
+// Generous limit for the Streamdeck API — authenticated by API key, used for live button presses
+const streamdeckLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 120,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   message: 'Too many requests, please try again shortly.',
@@ -106,7 +115,7 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/auth', authLimiter, authRouter);
-app.use('/api/streamdeck', streamdeckRouter);
+app.use('/api/streamdeck', streamdeckLimiter, streamdeckRouter);
 app.use('/api', requireAuth, apiRouter);
 app.use('/', requireAuth, streamdeckKeysRouter);
 app.use('/', requireAuth, sfxRouter);
