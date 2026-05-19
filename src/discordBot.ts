@@ -92,3 +92,14 @@ export function startDiscordBot(): void {
 
   client.login(DISCORD_TOKEN).catch((err) => console.error('[Discord] Login failed:', err));
 }
+
+export function stopDiscordBot(): void {
+  discordClient = null;
+  cachedGuild = null;
+  try {
+    client?.destroy();
+  } catch (err) {
+    console.error('[Discord] Error destroying client:', err);
+  }
+  console.log('[Discord] Client destroyed.');
+}
