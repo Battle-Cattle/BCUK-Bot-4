@@ -26,6 +26,9 @@ const RECONNECT_DELAY_MS = 30_000;
 
 // Tracks the active connection object per channel to prevent duplicate connections.
 const activeConnections = new Map<string, Connection>();
+// Tracks all pending reconnect timers so stopTikTokBot() can cancel them.
+const pendingReconnectTimers = new Set<ReturnType<typeof setTimeout>>();
+let stopped = false;
 
 function connectToChannel(username: string, modules: TikTokModules): void {
   const { TikTokLiveConnection, WebcastEvent, ControlEvent } = modules;
@@ -45,7 +48,7 @@ function connectToChannel(username: string, modules: TikTokModules): void {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   function scheduleReconnect(): void {
-    if (reconnectScheduled || permanentFailure) return;
+    if (stopped || reconnectScheduled || permanentFailure) return;
     reconnectScheduled = true;
     connection.disconnect().catch(() => { /* already disconnected */ });
     // Only take ownership of the map entry and schedule a reconnect when this
@@ -54,7 +57,11 @@ function connectToChannel(username: string, modules: TikTokModules): void {
     // redundant reconnect.
     if (activeConnections.get(username) === connection) {
       activeConnections.delete(username);
-      reconnectTimer = setTimeout(() => connectToChannel(username, modules), RECONNECT_DELAY_MS);
+      reconnectTimer = setTimeout(() => {
+        pendingReconnectTimers.delete(reconnectTimer!);
+        connectToChannel(username, modules);
+      }, RECONNECT_DELAY_MS);
+      pendingReconnectTimers.add(reconnectTimer);
     }
   }
 
@@ -92,6 +99,7 @@ function connectToChannel(username: string, modules: TikTokModules): void {
       permanentFailure = true;
       activeConnections.delete(username);
       if (reconnectTimer) {
+        pendingReconnectTimers.delete(reconnectTimer);
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
@@ -110,6 +118,7 @@ function connectToChannel(username: string, modules: TikTokModules): void {
 }
 
 export async function startTikTokBot(): Promise<void> {
+  stopped = false;
   if (TIKTOK_CHANNELS.length === 0) {
     console.log('[TikTok] No TIKTOK_CHANNELS configured — TikTok listener not started.');
     return;
@@ -124,4 +133,18 @@ export async function startTikTokBot(): Promise<void> {
   for (const username of TIKTOK_CHANNELS) {
     connectToChannel(username, modules);
   }
+}
+
+export function stopTikTokBot(): void {
+  stopped = true;
+  for (const [username, conn] of activeConnections) {
+    setTikTokChannel(username, false);
+    conn.disconnect().catch(() => { /* already disconnected */ });
+  }
+  activeConnections.clear();
+  for (const timer of pendingReconnectTimers) {
+    clearTimeout(timer);
+  }
+  pendingReconnectTimers.clear();
+  console.log('[TikTok] Stopped.');
 }
