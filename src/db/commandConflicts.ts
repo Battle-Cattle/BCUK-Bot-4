@@ -256,7 +256,7 @@ export async function assignUserToCommandWithinTransaction(
     throw new Error('[DB] Deadlock retry limit reached in assignUserToCommandWithinTransaction.');
   } finally {
     if (lockNameByTrigger) {
-      try { await releaseNamedLock(connection, lockNameByTrigger); } catch (_) {}
+      try { await releaseNamedLock(connection, lockNameByTrigger); } catch (err) { console.warn('[DB] Failed to release named lock:', err); }
     }
   }
 }

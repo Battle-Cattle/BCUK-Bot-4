@@ -17,7 +17,7 @@ document.addEventListener('click', function (event) {
     if (!liveKey) return;
     expandedLiveRows[liveKey] = !expandedLiveRows[liveKey];
 
-    var detailRow = document.querySelector('tr.live-detail-row[data-live-key="' + liveKey + '"]');
+    var detailRow = document.querySelector('tr.live-detail-row[data-live-key="' + CSS.escape(liveKey) + '"]');
     if (detailRow instanceof HTMLElement) {
       detailRow.style.display = expandedLiveRows[liveKey] ? 'table-row' : 'none';
     }
