@@ -42,7 +42,7 @@ async function handleClearTwitchChannel(
     }
   } catch (err) {
     try {
-      await upsertUser(discordId, discordName, level, previousChannel ?? '');
+      await upsertUser(discordId, discordName, level, previousChannel ?? null);
       await updateTwitchBotEnabled(discordId, wasBotEnabled);
     } catch (rollbackErr) {
       console.error('[Web] Add user clear Twitch rollback failed:', rollbackErr);
@@ -83,7 +83,7 @@ async function handleChangeTwitchChannel({
     }
   } catch (err) {
     try {
-      await upsertUser(discordId, discordName, level, previousChannel ?? '');
+      await upsertUser(discordId, discordName, level, previousChannel ?? null);
       await updateTwitchBotEnabled(discordId, wasBotEnabled);
 
       const rollbackEnabledChannels = await getTwitchEnabledChannels();
@@ -180,7 +180,7 @@ export async function removeUserMutation(discordId: string): Promise<void> {
         existingUser.discord_id,
         existingUser.discord_name?.trim() ?? '',
         existingUser.access_level as AccessLevelValue,
-        existingUser.twitch_name,
+        existingUser.twitch_name ?? null,
       );
       await updateTwitchBotEnabled(existingUser.discord_id, existingUser.is_twitch_bot_enabled);
     } catch (rollbackErr) {
