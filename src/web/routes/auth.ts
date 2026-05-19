@@ -89,12 +89,13 @@ router.get('/discord/callback', async (req, res) => {
     }
 
     // 4. Save to session — regenerate the session ID first to prevent session fixation.
+    const rawAvatar = profile.avatar
+      ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
+      : null;
     const userData = {
       discordId: profile.id,
       discordName: syncedDiscordName,
-      discordAvatar: profile.avatar
-        ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
-        : null,
+      discordAvatar: rawAvatar?.startsWith('https://cdn.discordapp.com/') ? rawAvatar : null,
       accessLevel: dbUser.access_level as 0 | 1 | 2 | 3,
     };
 
