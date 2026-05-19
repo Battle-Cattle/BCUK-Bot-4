@@ -125,7 +125,7 @@ export async function addOrUpdateUserMutation({
     ? normalizeTwitchChannelName(existingUser.twitch_name)
     : null;
   const nextTwitchName = shouldClearTwitchName
-    ? ''
+    ? null
     : normalizedTwitchName ?? undefined;
 
   if (normalizedTwitchName) {
