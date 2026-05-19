@@ -32,7 +32,6 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
     res.status(500).render('error', {
       message: 'Failed to load Streamdeck key status.',
       user: req.session.user ?? null,
-      csrfToken: '',
     });
   }
 });
@@ -57,7 +56,6 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
     res.status(500).render('error', {
       message: 'Failed to generate API key.',
       user: req.session.user ?? null,
-      csrfToken: '',
     });
   }
 });
@@ -71,7 +69,6 @@ router.post('/streamdeck-key/revoke', csrfProtection, async (req, res) => {
     res.status(500).render('error', {
       message: 'Failed to revoke API key.',
       user: req.session.user ?? null,
-      csrfToken: '',
     });
   }
 });

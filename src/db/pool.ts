@@ -19,7 +19,7 @@ export function getPool(): mysql.Pool {
       connectTimeout: 10_000,
     });
   }
-  return pool!;
+  return pool;
 }
 
 export async function closePool(): Promise<void> {

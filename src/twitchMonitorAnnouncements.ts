@@ -1,5 +1,5 @@
 import { TextChannel } from 'discord.js';
-import { discordClient } from './discordBot';
+import { getDiscordClient } from './discordBot';
 import { isDiscordNotFoundError } from './discordUtils';
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from './db';
 import { TwitchStream } from './twitchApi';
@@ -16,6 +16,7 @@ export async function postAnnouncement(
   const key = String(streamerData.id);
   const group = streamerData.group;
 
+  const discordClient = getDiscordClient();
   if (!discordClient) {
     liveStates.set(key, makeLiveState(streamerData, stream, null, null));
     return;
@@ -53,6 +54,7 @@ export async function editAnnouncement(
   state.title = stream.title;
   state.currentStream = stream;
 
+  const discordClient = getDiscordClient();
   if (!discordClient || !state.messageId || !state.channelId) return;
 
   const group = state.group;
@@ -100,6 +102,7 @@ export async function deleteAnnouncement(
     return;
   }
 
+  const discordClient = getDiscordClient();
   if (discordClient) {
     try {
       const channel = await discordClient.channels.fetch(state.channelId);

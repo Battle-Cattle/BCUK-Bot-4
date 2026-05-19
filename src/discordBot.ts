@@ -7,16 +7,17 @@ import { setDiscordReady } from './statusStore';
 
 let client: Client;
 let cachedGuild: Guild | null = null;
+let _discordClient: Client | null = null;
 
-/** The Discord.js Client instance once it has fired `clientReady`, or null before then. */
-export let discordClient: Client | null = null;
+/** Returns the Discord.js Client once it has fired `clientReady`, or null before then. */
+export function getDiscordClient(): Client | null { return _discordClient; }
 
 async function getConfiguredGuild(): Promise<Guild> {
-  if (!discordClient) {
+  if (!_discordClient) {
     throw new Error('Discord client is not ready');
   }
 
-  const guildFromCache = discordClient.guilds.cache.get(DISCORD_GUILD_ID);
+  const guildFromCache = _discordClient!.guilds.cache.get(DISCORD_GUILD_ID);
   if (guildFromCache) {
     cachedGuild = guildFromCache;
     return guildFromCache;
@@ -26,12 +27,12 @@ async function getConfiguredGuild(): Promise<Guild> {
     return cachedGuild;
   }
 
-  cachedGuild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
+  cachedGuild = await _discordClient!.guilds.fetch(DISCORD_GUILD_ID);
   return cachedGuild;
 }
 
 export async function fetchMemberDisplayName(discordId: string, force = false): Promise<string | null> {
-  if (!discordClient) return null;
+  if (!_discordClient) return null;
   try {
     const guild = await getConfiguredGuild();
     const member = await guild.members.fetch({ user: discordId, force });
@@ -74,7 +75,7 @@ export function startDiscordBot(): void {
   client.once('clientReady', async (c) => {
     try {
       console.log(`[Discord] Logged in as ${c.user.tag}`);
-      discordClient = c;
+      _discordClient = c;
       try {
         const guild = await getConfiguredGuild();
         setDiscordReady(c.user.tag, guild.name);

@@ -1,4 +1,4 @@
-import { discordClient } from './discordBot';
+import { getDiscordClient } from './discordBot';
 import { isDiscordNotFoundError, tryDeleteDiscordMessage } from './discordUtils';
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from './db';
 import { getStreams, TwitchStream } from './twitchApi';
@@ -12,6 +12,7 @@ export async function tryEditStartupMessage(
   streamer: DbStreamerFull,
   liveStream: TwitchStream,
 ): Promise<boolean> {
+  const discordClient = getDiscordClient();
   if (!discordClient) return false;
   if (!streamer.discord_channel_id || !streamer.discord_message_id) return false;
   try {
@@ -39,7 +40,7 @@ export async function handleLiveStreamerOnStartup(
   groupsWithChanges: Set<number>,
 ): Promise<void> {
   if (streamer.discord_message_id && streamer.discord_channel_id) {
-    if (!discordClient) {
+    if (!getDiscordClient()) {
       liveStates.set(String(streamer.id), makeLiveState(streamer, liveStream, streamer.discord_message_id, streamer.discord_channel_id));
       return;
     }
