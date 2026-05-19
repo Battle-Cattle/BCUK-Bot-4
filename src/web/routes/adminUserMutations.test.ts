@@ -25,7 +25,6 @@ import {
 } from './adminUserMutations';
 import {
   findUser,
-  findUserByTwitchName,
   upsertUser,
   removeUser,
   updateTwitchBotEnabled,
