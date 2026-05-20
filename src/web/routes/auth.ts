@@ -115,6 +115,7 @@ router.get('/discord/callback', async (req, res) => {
     res.status(500).render('error', {
       message: 'Authentication failed — please try again.',
       user: null,
+      csrfToken: '',
     });
   }
 });

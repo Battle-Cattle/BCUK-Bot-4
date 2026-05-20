@@ -2,11 +2,12 @@ import path from 'path';
 import { findTrigger, findSoundFiles } from './db';
 import { pickWeightedRandom } from './soundSelector';
 import { isPlaying } from './audioPlayer';
-import { playFile } from './sfxPlayer';
+import { playFile, VoiceNotConnectedError } from './sfxPlayer';
 import { SFX_FOLDER, GLOBAL_COOLDOWN_MS } from './config';
 import { setVoicePlaying } from './statusStore';
 
 let lastPlayedAt = 0;
+let inFlight = false;
 
 /**
  * Handle a raw chat message from either Twitch or Discord.
@@ -30,37 +31,47 @@ export async function handleCommand(rawMessage: string, source: 'twitch' | 'disc
     return;
   }
 
-  // Ignore if already playing
-  if (isPlaying()) {
+  // Ignore if already playing or another handler is mid-lookup
+  if (isPlaying() || inFlight) {
     console.log(`[${source}] Already playing, ignoring '${command}'`);
     return;
   }
 
-  // Look up trigger in DB
-  const trigger = await findTrigger(command);
-  if (!trigger) {
-    // Not a recognised SFX command — silently ignore
-    return;
-  }
-
-  // Find associated sound files
-  const files = await findSoundFiles(trigger.id);
-  if (files.length === 0) {
-    console.warn(`[${source}] Trigger '${command}' has no sound files in DB`);
-    return;
-  }
-
-  // Pick a file (weighted random)
-  const filename = pickWeightedRandom(files);
-  const fullPath = path.join(SFX_FOLDER, filename);
-
-  console.log(`[${source}] Playing '${filename}' for trigger '${command}'`);
-
+  // Claim the slot before any await so concurrent message handlers see the flag.
+  inFlight = true;
   try {
-    playFile(fullPath);
-    lastPlayedAt = Date.now();
-    setVoicePlaying(filename, command, source);
-  } catch (err) {
-    console.error(`[${source}] Failed to play ${fullPath}:`, err);
+    // Look up trigger in DB
+    const trigger = await findTrigger(command);
+    if (!trigger) {
+      // Not a recognised SFX command — silently ignore
+      return;
+    }
+
+    // Find associated sound files
+    const files = await findSoundFiles(trigger.id);
+    if (files.length === 0) {
+      console.warn(`[${source}] Trigger '${command}' has no sound files in DB`);
+      return;
+    }
+
+    // Pick a file (weighted random)
+    const filename = pickWeightedRandom(files);
+    const fullPath = path.join(SFX_FOLDER, filename);
+
+    console.log(`[${source}] Playing '${filename}' for trigger '${command}'`);
+
+    try {
+      playFile(fullPath);
+      lastPlayedAt = Date.now();
+      setVoicePlaying(filename, command, source);
+    } catch (err) {
+      if (err instanceof VoiceNotConnectedError) {
+        console.log(`[${source}] Skipping '${command}' — not connected to voice channel`);
+      } else {
+        console.error(`[${source}] Failed to play ${fullPath}:`, err);
+      }
+    }
+  } finally {
+    inFlight = false;
   }
 }
