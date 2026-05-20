@@ -5,6 +5,7 @@ import { executeCustomCommandForTwitch } from './customCommandHandler';
 import { executeCounterCommandForTwitch } from './counterHandler';
 import { executeMultiCommandForTwitch } from './multiCommandHandler';
 import { executeShoutoutForTwitch } from './shoutoutHandler';
+import { executeCountdownForTwitch } from './countdownHandler';
 import { setTwitchChannel } from './statusStore';
 import { getTwitchEnabledChannels } from './db';
 import { normalizeTwitchChannelName } from './twitchChannelName';
@@ -156,6 +157,10 @@ export async function startTwitchBot(): Promise<void> {
 
       handleCommand(message, 'twitch').catch((err) =>
         console.error('[Twitch] Command handler error:', err),
+      );
+
+      executeCountdownForTwitch(normalizedChannel, message).catch((err) =>
+        console.error('[Twitch] Countdown error:', err),
       );
     } catch (err) {
       console.error('[Twitch] Unexpected error in message handler:', err);
