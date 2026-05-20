@@ -95,7 +95,7 @@ export function startDiscordBot(): void {
 }
 
 export function stopDiscordBot(): void {
-  discordClient = null;
+  _discordClient = null;
   cachedGuild = null;
   try {
     client?.destroy();
