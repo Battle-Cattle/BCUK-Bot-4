@@ -6,7 +6,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { SFX_FOLDER } from './config';
 import { isConnected, startPlayback } from './audioPlayer';
 
-const log = createLogger('AudioPlayer');
+const log = createLogger('SFXPlayer');
 
 export class VoiceNotConnectedError extends Error {
   constructor() {

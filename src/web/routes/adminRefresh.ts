@@ -24,6 +24,8 @@ export const refreshState: {
   finishedAt: null,
 };
 
+const log = createLogger('Web');
+
 async function runDiscordNameRefresh(): Promise<void> {
   refreshState.outcome = 'running';
   refreshState.updatedCount = 0;
@@ -79,7 +81,6 @@ async function runDiscordNameRefresh(): Promise<void> {
   }
 }
 
-const log = createLogger('Web');
 const router = Router();
 
 router.get('/users/refresh-status', requireManager, (_req, res) => {

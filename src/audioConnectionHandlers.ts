@@ -5,7 +5,7 @@ import {
   type VoiceConnection,
 } from '@discordjs/voice';
 
-const log = createLogger('AudioPlayer');
+const log = createLogger('AudioConn');
 
 export interface ConnectionHandlerDeps {
   getAttemptId: () => number;
