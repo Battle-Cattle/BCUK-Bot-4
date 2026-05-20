@@ -91,18 +91,20 @@ async function dispatchStreamerPolls(
     else byLogin.set(key, [streamer]);
   }
 
-  const results = await Promise.allSettled(
+  await Promise.allSettled(
     Array.from(byLogin.values()).map(async (group) => {
       for (const streamer of group) {
-        await handlePollStreamer(streamer, liveByUserId);
+        try {
+          await handlePollStreamer(streamer, liveByUserId);
+        } catch (err) {
+          console.error(
+            `[TwitchMonitor] Error handling streamer poll for ${streamer.name} in group ${streamer.group.name}:`,
+            err,
+          );
+        }
       }
     }),
   );
-  for (const result of results) {
-    if (result.status === 'rejected') {
-      console.error('[TwitchMonitor] Error handling streamer poll:', result.reason);
-    }
-  }
 }
 
 async function pollStreams(): Promise<void> {
