@@ -77,6 +77,36 @@ async function handlePollStreamer(
   }
 }
 
+async function dispatchStreamerPolls(
+  streamers: DbStreamerFull[],
+  liveByUserId: Map<string, TwitchStream>,
+): Promise<void> {
+  // Group rows by login so same-login rows are serialized (shared offline-timer
+  // state); different logins run in parallel via Promise.allSettled.
+  const byLogin = new Map<string, DbStreamerFull[]>();
+  for (const streamer of streamers) {
+    const key = streamer.name.toLowerCase();
+    const existing = byLogin.get(key);
+    if (existing) existing.push(streamer);
+    else byLogin.set(key, [streamer]);
+  }
+
+  await Promise.allSettled(
+    Array.from(byLogin.values()).map(async (group) => {
+      for (const streamer of group) {
+        try {
+          await handlePollStreamer(streamer, liveByUserId);
+        } catch (err) {
+          console.error(
+            `[TwitchMonitor] Error handling streamer poll for ${streamer.name} in group ${streamer.group.name}:`,
+            err,
+          );
+        }
+      }
+    }),
+  );
+}
+
 async function pollStreams(): Promise<void> {
   if (pollRunning || streamersData.length === 0) return;
   pollRunning = true;
@@ -89,10 +119,7 @@ async function pollStreams(): Promise<void> {
       const liveByUserId = new Map(
         liveStreams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
       );
-
-      for (const streamer of streamersData) {
-        await handlePollStreamer(streamer, liveByUserId);
-      }
+      await dispatchStreamerPolls(streamersData, liveByUserId);
     } catch (err) {
       console.error('[TwitchMonitor] Poll error:', err);
     } finally {
