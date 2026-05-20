@@ -90,8 +90,23 @@ async function pollStreams(): Promise<void> {
         liveStreams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
       );
 
+      // Group streamer rows by login so that rows sharing a login (same streamer,
+      // different groups) are processed sequentially — avoiding races on the
+      // shared login-scoped offline-timer state. Different logins run in parallel.
+      const byLogin = new Map<string, DbStreamerFull[]>();
+      for (const streamer of streamersData) {
+        const key = streamer.name.toLowerCase();
+        const group = byLogin.get(key);
+        if (group) group.push(streamer);
+        else byLogin.set(key, [streamer]);
+      }
+
       const results = await Promise.allSettled(
-        streamersData.map((streamer) => handlePollStreamer(streamer, liveByUserId)),
+        Array.from(byLogin.values()).map(async (group) => {
+          for (const streamer of group) {
+            await handlePollStreamer(streamer, liveByUserId);
+          }
+        }),
       );
       for (const result of results) {
         if (result.status === 'rejected') {

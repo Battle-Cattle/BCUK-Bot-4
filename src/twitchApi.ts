@@ -58,11 +58,12 @@ const HELIX_MAX_RETRIES = 3;
 async function fetchHelixWithRetry(url: string, headers: Record<string, string>): Promise<Response> {
   let res = await twitchFetch(url, { headers });
 
-  for (let attempt = 1; attempt < HELIX_MAX_RETRIES && res.status === 429; attempt++) {
+  for (let attempt = 1; attempt <= HELIX_MAX_RETRIES && res.status === 429; attempt++) {
     const resetHeader = res.headers.get('ratelimit-reset');
-    const resetAt = resetHeader ? Number(resetHeader) * 1000 : Date.now() + 5_000;
+    const parsedReset = resetHeader ? Number(resetHeader) : NaN;
+    const resetAt = Number.isFinite(parsedReset) ? parsedReset * 1000 : Date.now() + 5_000;
     const wait = Math.max(0, resetAt - Date.now());
-    console.warn(`[TwitchAPI] Rate limited (attempt ${attempt}/${HELIX_MAX_RETRIES - 1}). Retrying after ${wait}ms`);
+    console.warn(`[TwitchAPI] Rate limited (attempt ${attempt}/${HELIX_MAX_RETRIES}). Retrying after ${wait}ms`);
     await new Promise<void>((r) => setTimeout(r, wait));
     res = await twitchFetch(url, { headers });
   }
