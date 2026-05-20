@@ -90,8 +90,13 @@ async function pollStreams(): Promise<void> {
         liveStreams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
       );
 
-      for (const streamer of streamersData) {
-        await handlePollStreamer(streamer, liveByUserId);
+      const results = await Promise.allSettled(
+        streamersData.map((streamer) => handlePollStreamer(streamer, liveByUserId)),
+      );
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          console.error('[TwitchMonitor] Error handling streamer poll:', result.reason);
+        }
       }
     } catch (err) {
       console.error('[TwitchMonitor] Poll error:', err);
