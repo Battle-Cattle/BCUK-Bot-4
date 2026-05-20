@@ -16,6 +16,9 @@ vi.mock('./audioPlayer', () => ({
 
 vi.mock('./sfxPlayer', () => ({
   playFile: vi.fn(),
+  VoiceNotConnectedError: class VoiceNotConnectedError extends Error {
+    constructor() { super('Not connected to a voice channel'); this.name = 'VoiceNotConnectedError'; }
+  },
 }));
 
 vi.mock('./soundSelector', () => ({
@@ -29,7 +32,7 @@ vi.mock('./statusStore', () => ({
 import { handleCommand } from './commandRouter';
 import { findTrigger, findSoundFiles } from './db';
 import { isPlaying } from './audioPlayer';
-import { playFile } from './sfxPlayer';
+import { playFile, VoiceNotConnectedError } from './sfxPlayer';
 import { pickWeightedRandom } from './soundSelector';
 import { setVoicePlaying } from './statusStore';
 
@@ -40,13 +43,12 @@ let mockNow = 1_000_000_000_000;
 
 beforeEach(() => {
   mockNow += COOLDOWN_MS + 1_000;
-  vi.spyOn(Date, 'now').mockReturnValue(mockNow);
   vi.clearAllMocks();
   vi.spyOn(Date, 'now').mockReturnValue(mockNow);
 });
 
 const TRIGGER = { id: 42, trigger_command: '!ding' };
-const FILES = [{ filename: 'ding.mp3', weight: 1 }];
+const FILES = [{ file: 'ding.mp3', weight: 1 }];
 
 describe('handleCommand', () => {
   it('does nothing for an unrecognised command', async () => {
@@ -98,5 +100,45 @@ describe('handleCommand', () => {
     expect(vi.mocked(findTrigger)).toHaveBeenCalledWith('!ding');
     expect(vi.mocked(playFile)).toHaveBeenCalledWith('/sfx/ding.mp3');
     expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('ding.mp3', '!ding', 'discord');
+  });
+
+  it('blocks a second concurrent call via the inFlight flag', async () => {
+    vi.mocked(isPlaying).mockReturnValue(false);
+
+    // findTrigger resolves immediately for the first call, but the second call
+    // arrives while the first is still awaiting — simulate by running both
+    // handleCommand calls concurrently without awaiting the first.
+    let resolveFirst!: (value: typeof TRIGGER) => void;
+    const firstTriggerPromise = new Promise<typeof TRIGGER>((resolve) => { resolveFirst = resolve; });
+    vi.mocked(findTrigger).mockReturnValueOnce(firstTriggerPromise as ReturnType<typeof findTrigger>);
+
+    const first = handleCommand('!ding', 'twitch');
+
+    // Second call arrives while first is suspended inside findTrigger
+    await handleCommand('!ding', 'twitch');
+    expect(vi.mocked(findTrigger)).toHaveBeenCalledTimes(1); // second was blocked
+
+    // Let the first call complete
+    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
+    resolveFirst(TRIGGER);
+    await first;
+
+    expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not log an error when not connected to a voice channel', async () => {
+    vi.mocked(isPlaying).mockReturnValue(false);
+    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
+    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
+    vi.mocked(playFile).mockImplementation(() => { throw new VoiceNotConnectedError(); });
+
+    const errorSpy = vi.spyOn(console, 'error');
+
+    await handleCommand('!ding', 'twitch');
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
   });
 });
