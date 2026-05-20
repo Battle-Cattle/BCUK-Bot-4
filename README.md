@@ -10,6 +10,8 @@ A multi-platform community bot connecting Twitch, Discord, and TikTok Live. Feat
 - Node.js, MySQL
 - `.env` file with credentials for each platform
 
+> **Dev environment note:** The `.env` file is the single source of truth for local configuration. dotenv only fills variables that are not already set in the environment — it does **not** override them. If you have any of the bot's variables exported in your shell profile (e.g. `~/.bashrc`, `~/.zshrc`), un-export or remove those entries so the `.env` values are used instead.
+
 ## Usage
 
 ```bash
