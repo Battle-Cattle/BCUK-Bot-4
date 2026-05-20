@@ -32,6 +32,7 @@ router.get('/discord/callback', async (req, res) => {
     return res.status(400).render('error', {
       message: 'Invalid OAuth2 state — please try logging in again.',
       user: null,
+      csrfToken: '',
     });
   }
   delete req.session.oauthState;
@@ -71,6 +72,7 @@ router.get('/discord/callback', async (req, res) => {
       return res.status(403).render('error', {
         message: 'You are not on the whitelist. Contact an admin to be added.',
         user: null,
+        csrfToken: '',
       });
     }
 

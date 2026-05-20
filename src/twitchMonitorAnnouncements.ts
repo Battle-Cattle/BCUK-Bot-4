@@ -1,6 +1,6 @@
 import { TextChannel } from 'discord.js';
-import { discordClient } from './discordBot';
-import { isDiscordNotFoundError } from './discordUtils';
+import { getDiscordClient } from './discordBot';
+import { isDiscordNotFoundError, tryDeleteDiscordMessage } from './discordUtils';
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from './db';
 import { TwitchStream } from './twitchApi';
 import { LiveState, makeLiveState } from './twitchMonitorTypes';
@@ -16,6 +16,7 @@ export async function postAnnouncement(
   const key = String(streamerData.id);
   const group = streamerData.group;
 
+  const discordClient = getDiscordClient();
   if (!discordClient) {
     liveStates.set(key, makeLiveState(streamerData, stream, null, null));
     return;
@@ -53,6 +54,7 @@ export async function editAnnouncement(
   state.title = stream.title;
   state.currentStream = stream;
 
+  const discordClient = getDiscordClient();
   if (!discordClient || !state.messageId || !state.channelId) return;
 
   const group = state.group;
@@ -100,18 +102,7 @@ export async function deleteAnnouncement(
     return;
   }
 
-  if (discordClient) {
-    try {
-      const channel = await discordClient.channels.fetch(state.channelId);
-      if (channel && channel.isTextBased()) {
-        const msg = await channel.messages.fetch(state.messageId);
-        await msg.delete();
-      }
-    } catch (err) {
-      if (!isDiscordNotFoundError(err)) throw err;
-      // not-found: message already gone — fall through to clear DB state
-    }
-  }
+  await tryDeleteDiscordMessage(state.channelId, state.messageId);
 
   await clearStreamerLive(state.streamerId);
   const groupId = state.groupId;

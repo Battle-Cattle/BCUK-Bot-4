@@ -1,5 +1,5 @@
 import { DiscordAPIError, RESTJSONErrorCodes } from 'discord.js';
-import { discordClient } from './discordBot';
+import { getDiscordClient } from './discordBot';
 
 export function isDiscordNotFoundError(err: unknown): boolean {
   return err instanceof DiscordAPIError && (
@@ -23,6 +23,7 @@ export function isPermanentVoiceMisconfigurationError(err: unknown): boolean {
 }
 
 export async function tryDeleteDiscordMessage(channelId: string, messageId: string): Promise<void> {
+  const discordClient = getDiscordClient();
   if (!discordClient) return;
   try {
     const ch = await discordClient.channels.fetch(channelId);

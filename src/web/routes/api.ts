@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getStatus } from '../../statusStore';
 import { requireMod } from '../middleware';
 import { connect, disconnect } from '../../audioPlayer';
-import { discordClient } from '../../discordBot';
+import { getDiscordClient } from '../../discordBot';
 import { csrfProtection } from '../csrf';
 
 const router = Router();
@@ -14,6 +14,7 @@ router.get('/status', (_req, res) => {
 
 // Rejoin the configured voice channel — Mod and above
 router.post('/voice/join', requireMod, csrfProtection, async (_req, res) => {
+  const discordClient = getDiscordClient();
   if (!discordClient) {
     res.status(503).json({ ok: false, error: 'Discord client not ready' });
     return;

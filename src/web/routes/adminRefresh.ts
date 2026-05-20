@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getAllUsers, updateDiscordName } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
-import { discordClient, fetchMemberDisplayName } from '../../discordBot';
+import { getDiscordClient, fetchMemberDisplayName } from '../../discordBot';
 
 export type RefreshOutcome = 'idle' | 'running' | 'success' | 'partial' | 'noop' | 'error';
 
@@ -31,7 +31,7 @@ async function runDiscordNameRefresh(): Promise<void> {
   refreshState.finishedAt = null;
 
   try {
-    if (!discordClient) {
+    if (!getDiscordClient()) {
       throw new Error('Discord client is not ready');
     }
 
