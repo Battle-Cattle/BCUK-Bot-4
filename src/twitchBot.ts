@@ -281,3 +281,18 @@ export async function partTwitchChannel(channel: string): Promise<void> {
     }
   });
 }
+
+export async function stopTwitchBot(): Promise<void> {
+  connected = false;
+  activeChannels.clear();
+  activeChannelUserIds.clear();
+  if (client) {
+    try {
+      await client.disconnect();
+    } catch (err) {
+      console.warn('[Twitch] Error during disconnect:', err);
+    }
+    client = null;
+  }
+  console.log('[Twitch] Disconnected.');
+}
