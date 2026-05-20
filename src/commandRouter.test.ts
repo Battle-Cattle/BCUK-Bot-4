@@ -40,13 +40,12 @@ let mockNow = 1_000_000_000_000;
 
 beforeEach(() => {
   mockNow += COOLDOWN_MS + 1_000;
-  vi.spyOn(Date, 'now').mockReturnValue(mockNow);
   vi.clearAllMocks();
   vi.spyOn(Date, 'now').mockReturnValue(mockNow);
 });
 
 const TRIGGER = { id: 42, trigger_command: '!ding' };
-const FILES = [{ filename: 'ding.mp3', weight: 1 }];
+const FILES = [{ file: 'ding.mp3', weight: 1 }];
 
 describe('handleCommand', () => {
   it('does nothing for an unrecognised command', async () => {
