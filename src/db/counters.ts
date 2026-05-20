@@ -1,5 +1,8 @@
+import { createLogger } from '../logger';
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
+
+const log = createLogger('DB');
 import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
 import { requireTrimmedString, normalizeCommandList, type SqlExecutor } from './commandStringUtils';
 import { isAnyCommandTakenAcrossTables, runSerializedCommandWrite } from './commandLocks';
@@ -115,7 +118,7 @@ function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
 
     const existingCounter = byCommand.get(normalizedCommand);
     if (existingCounter) {
-      console.warn(`[DB] Counter ${commandFieldLabel} collision: '${normalizedCommand}' is already registered (counter id=${existingCounter.id}); ignoring duplicate from counter id=${counter.id}.`);
+      log.warn(`Counter ${commandFieldLabel} collision: '${normalizedCommand}' is already registered (counter id=${existingCounter.id}); ignoring duplicate from counter id=${counter.id}.`);
       return;
     }
 

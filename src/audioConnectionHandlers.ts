@@ -1,8 +1,11 @@
+import { createLogger } from './logger';
 import {
   VoiceConnectionStatus,
   entersState,
   type VoiceConnection,
 } from '@discordjs/voice';
+
+const log = createLogger('AudioPlayer');
 
 export interface ConnectionHandlerDeps {
   getAttemptId: () => number;
@@ -18,10 +21,10 @@ function handleConnectionError(err: Error, attemptId: number, deps: ConnectionHa
   const netErr = err as NodeJS.ErrnoException & { hostname?: string };
   if (netErr.code === 'EAI_AGAIN') {
     const host = netErr.hostname ? ` (${netErr.hostname})` : '';
-    console.warn(`[AudioPlayer] Voice DNS lookup failed temporarily${host}; connection will retry via state handler.`);
+    log.warn(`Voice DNS lookup failed temporarily${host}; connection will retry via state handler.`);
     return;
   }
-  console.error('[AudioPlayer] Voice connection error:', err);
+  log.error('Voice connection error:', err);
 }
 
 async function handleDisconnected(
@@ -51,7 +54,7 @@ async function handleDisconnected(
     joinedConnection.destroy();
     if (deps.getConnection() === joinedConnection) deps.setConnection(null);
     deps.tearDown();
-    console.warn('[AudioPlayer] Voice connection lost.');
+    log.warn('Voice connection lost.');
     deps.scheduleReconnect('disconnected');
   }
 }

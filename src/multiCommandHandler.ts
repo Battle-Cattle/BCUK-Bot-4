@@ -1,4 +1,7 @@
+import { createLogger } from './logger';
 import { getMultiTwitchDataForChannel } from './twitchMonitor';
+
+const log = createLogger('MultiCmd');
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { resolveSharedChatSessionId } from './customCommandHandler';
 import { extractCommand } from './commandUtils';
@@ -55,7 +58,7 @@ async function broadcastToGroupChannels(
       await send(channel, message);
       if (sessionId) repliedSessionIds.add(sessionId);
     } catch (err) {
-      console.error(`[MultiCmd] Failed to send to ${channel}:`, err);
+      log.error(`Failed to send to ${channel}:`, err);
     }
   }
 }
@@ -87,8 +90,8 @@ export async function executeMultiCommandForTwitch(
 
   try {
     await broadcastToGroupChannels(channel, groupInfo.participants, groupInfo.url, runtime);
-    console.log(`[Twitch] Sent !multi in ${channel} — ${groupInfo.url}`);
+    log.info(`[Twitch] Sent !multi in ${channel} — ${groupInfo.url}`);
   } catch (err) {
-    console.error(`[Twitch] Failed to broadcast !multi in ${channel}:`, err);
+    log.error(`[Twitch] Failed to broadcast !multi in ${channel}:`, err);
   }
 }

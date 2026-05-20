@@ -1,3 +1,4 @@
+import { createLogger } from './logger';
 import { getAllStreamersWithGroups, DbStreamerFull } from './db';
 import { getUsers, getStreams, TwitchStream } from './twitchApi';
 import { LiveState } from './twitchMonitorTypes';
@@ -22,6 +23,8 @@ import {
   handleStreamOffline,
 } from './twitchMonitorOffline';
 import { performStartupLiveCheck } from './twitchMonitorStartup';
+
+const log = createLogger('TwitchMonitor');
 
 // ─── Module-level state ──────────────────────────────────────────────────────
 
@@ -54,17 +57,17 @@ async function handlePollStreamer(
     if (existing?.offlineTimer) {
       // Came back during grace period — cancel offline timers for all groups this login belongs to
       cancelOfflineTimersForLogin(liveStates, loginKey);
-      console.log(`[TwitchMonitor] ${loginKey} came back — offline timer(s) cancelled`);
+      log.info(`${loginKey} came back — offline timer(s) cancelled`);
     }
     const isNew = !liveStates.has(stateKey);
     if (isNew || (existing && !existing.messageId)) {
       // Went live, or state exists with no Discord message (e.g. Discord wasn't ready at startup)
       await postAnnouncement(liveStates, streamer, pollStream);
-      if (isNew) console.log(`[TwitchMonitor] ${loginKey} went live in group ${streamer.group.name}`);
+      if (isNew) log.info(`${loginKey} went live in group ${streamer.group.name}`);
     } else if (existing && existing.currentGame !== pollStream.game_name) {
       // Game changed
       await editAnnouncement(liveStates, existing, pollStream, 'new_game_message');
-      console.log(`[TwitchMonitor] ${loginKey} game changed to ${pollStream.game_name}`);
+      log.info(`${loginKey} game changed to ${pollStream.game_name}`);
     } else if (existing) {
       // Still live — keep title in sync
       existing.currentGame = pollStream.game_name;
@@ -97,10 +100,7 @@ async function dispatchStreamerPolls(
         try {
           await handlePollStreamer(streamer, liveByUserId);
         } catch (err) {
-          console.error(
-            `[TwitchMonitor] Error handling streamer poll for ${streamer.name} in group ${streamer.group.name}:`,
-            err,
-          );
+          log.error(`Error handling streamer poll for ${streamer.name} in group ${streamer.group.name}:`, err);
         }
       }
     }),
@@ -121,7 +121,7 @@ async function pollStreams(): Promise<void> {
       );
       await dispatchStreamerPolls(streamersData, liveByUserId);
     } catch (err) {
-      console.error('[TwitchMonitor] Poll error:', err);
+      log.error('Poll error:', err);
     } finally {
       pollRunning = false;
     }
@@ -145,7 +145,7 @@ async function teardown(): Promise<void> {
 export async function startTwitchMonitor(): Promise<void> {
   streamersData = await getAllStreamersWithGroups();
   if (streamersData.length === 0) {
-    console.warn('[TwitchMonitor] No streamers configured in DB — nothing to monitor');
+    log.warn('No streamers configured in DB — nothing to monitor');
   }
 
   const logins = streamersData.map((s) => s.name);
@@ -156,9 +156,9 @@ export async function startTwitchMonitor(): Promise<void> {
   await performStartupLiveCheck(liveStates, loginToUserId, streamersData);
 
   pollTimer = setInterval(() => {
-    pollStreams().catch((err) => console.error('[TwitchMonitor] Poll error:', err));
+    pollStreams().catch((err) => log.error('Poll error:', err));
   }, POLL_INTERVAL_MS);
-  console.log(`[TwitchMonitor] Polling ${loginToUserId.size} streamer(s) every ${POLL_INTERVAL_MS / 1000}s`);
+  log.info(`Polling ${loginToUserId.size} streamer(s) every ${POLL_INTERVAL_MS / 1000}s`);
 }
 
 /**
@@ -170,7 +170,7 @@ export async function stopTwitchMonitor(): Promise<void> {
   liveStates.clear();
   loginToUserId.clear();
   streamersData = [];
-  console.log('[TwitchMonitor] Stopped — Discord messages preserved for restart sync');
+  log.info('Stopped — Discord messages preserved for restart sync');
 }
 
 /**
@@ -188,7 +188,7 @@ export async function shutdownTwitchMonitor(): Promise<void> {
       await deleteAnnouncement(liveStates, key);
     } catch (err) {
       failedDeletes++;
-      console.error('[TwitchMonitor] Shutdown: failed to delete announcement:', err);
+      log.error('Shutdown: failed to delete announcement:', err);
     }
   }
 
@@ -196,9 +196,9 @@ export async function shutdownTwitchMonitor(): Promise<void> {
   loginToUserId.clear();
   streamersData = [];
   if (failedDeletes === 0) {
-    console.log('[TwitchMonitor] Shutdown complete — all live messages deleted');
+    log.info('Shutdown complete — all live messages deleted');
   } else {
-    console.warn(`[TwitchMonitor] Shutdown complete with ${failedDeletes} failed delete(s) — some announcements may remain`);
+    log.warn(`Shutdown complete with ${failedDeletes} failed delete(s) — some announcements may remain`);
   }
 }
 
@@ -207,7 +207,7 @@ export async function shutdownTwitchMonitor(): Promise<void> {
  * The startup live-check will re-sync with any posts made before the restart.
  */
 export async function restartTwitchMonitor(): Promise<void> {
-  console.log('[TwitchMonitor] Restarting...');
+  log.info('Restarting...');
   await teardown();
 
   // Don't delete messages — startup live-check handles re-syncing

@@ -1,3 +1,4 @@
+import { createLogger } from './logger';
 import type TypedEmitter from 'typed-emitter';
 import type {
   ClientEventMap,
@@ -8,6 +9,8 @@ import type {
 import { TIKTOK_CHANNELS, TIKTOK_SIGN_API_KEY } from './config';
 import { handleCommand } from './commandRouter';
 import { setTikTokChannel } from './statusStore';
+
+const log = createLogger('TikTok');
 
 // TypedEventEmitter<ClientEventMap> is the base of TikTokLiveConnection but TypeScript
 // can't resolve it through the library's declaration chain; cast explicitly.
@@ -67,36 +70,36 @@ function connectToChannel(username: string, modules: TikTokModules): void {
   }
 
   connection.on(ControlEvent.CONNECTED, () => {
-    console.log(`[TikTok] Connected to @${username}`);
+    log.info(`Connected to @${username}`);
     setTikTokChannel(username, true);
   });
 
   connection.on(WebcastEvent.CHAT, (data) => {
     handleCommand(data.content, 'tiktok').catch((err) =>
-      console.error(`[TikTok] Command handler error (${username}):`, err),
+      log.error(`Command handler error (${username}):`, err),
     );
   });
 
   connection.on(WebcastEvent.STREAM_END, () => {
-    console.log(`[TikTok] Stream ended for @${username}. Will retry in ${RECONNECT_DELAY_MS / 1000}s`);
+    log.info(`Stream ended for @${username}. Will retry in ${RECONNECT_DELAY_MS / 1000}s`);
     setTikTokChannel(username, false);
     scheduleReconnect();
   });
 
   connection.on(ControlEvent.DISCONNECTED, () => {
-    console.warn(`[TikTok] Disconnected from @${username}. Will retry in ${RECONNECT_DELAY_MS / 1000}s`);
+    log.warn(`Disconnected from @${username}. Will retry in ${RECONNECT_DELAY_MS / 1000}s`);
     setTikTokChannel(username, false);
     scheduleReconnect();
   });
 
   connection.on(ControlEvent.ERROR, (err: unknown) => {
-    console.error(`[TikTok] Error on @${username}:`, err);
+    log.error(`Error on @${username}:`, err);
     // Treat errors that indicate the channel is permanently unavailable as
     // fatal so that the reconnect loop does not spin forever on a bad username
     // or a banned/suspended account.
     const msg = err instanceof Error ? err.message : String(err);
     if (/not found|does not exist|banned|suspended|unauthorized|forbidden/i.test(msg)) {
-      console.error(`[TikTok] Permanent failure for @${username} — reconnect disabled.`);
+      log.error(`Permanent failure for @${username} — reconnect disabled.`);
       permanentFailure = true;
       activeConnections.delete(username);
       if (reconnectTimer) {
@@ -110,10 +113,10 @@ function connectToChannel(username: string, modules: TikTokModules): void {
   connection
     .connect()
     .then((state) => {
-      console.log(`[TikTok] Joined roomId ${state.roomId} for @${username}`);
+      log.info(`Joined roomId ${state.roomId} for @${username}`);
     })
     .catch((err: Error) => {
-      console.warn(`[TikTok] Could not connect to @${username} (${err.message}). Will retry in ${RECONNECT_DELAY_MS / 1000}s`);
+      log.warn(`Could not connect to @${username} (${err.message}). Will retry in ${RECONNECT_DELAY_MS / 1000}s`);
       scheduleReconnect();
     });
 }
@@ -121,12 +124,12 @@ function connectToChannel(username: string, modules: TikTokModules): void {
 export async function startTikTokBot(): Promise<void> {
   stopped = false;
   if (TIKTOK_CHANNELS.length === 0) {
-    console.log('[TikTok] No TIKTOK_CHANNELS configured — TikTok listener not started.');
+    log.info('No TIKTOK_CHANNELS configured — TikTok listener not started.');
     return;
   }
 
   TIKTOK_CHANNELS.forEach((ch) => setTikTokChannel(ch, false));
-  console.log(`[TikTok] Connecting to channels: ${TIKTOK_CHANNELS.join(', ')}`);
+  log.info(`Connecting to channels: ${TIKTOK_CHANNELS.join(', ')}`);
 
   // Dynamic import required because tiktok-live-connector 2.3+ is ESM-only
   const modules = await import('tiktok-live-connector') as unknown as TikTokModules;
@@ -147,5 +150,5 @@ export function stopTikTokBot(): void {
     clearTimeout(timer);
   }
   pendingReconnectTimers.clear();
-  console.log('[TikTok] Stopped.');
+  log.info('Stopped.');
 }

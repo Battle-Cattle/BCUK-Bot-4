@@ -1,4 +1,7 @@
+import { createLogger } from './logger';
 import { getDiscordClient } from './discordBot';
+
+const log = createLogger('TwitchMonitor');
 import { buildEmbed } from './twitchMonitorEmbed';
 import { LiveState } from './twitchMonitorTypes';
 
@@ -103,7 +106,7 @@ export async function updateMultitwitch(groupId: number, liveStates: ReadonlyMap
       const updated = buildEmbed(state.currentStream, multitwitchUrl);
       await message.edit({ embeds: [updated] });
     } catch (err) {
-      console.error(`[TwitchMonitor] Failed to update multitwitch for ${state.login}:`, err);
+      log.error(`Failed to update multitwitch for ${state.login}:`, err);
     }
   }
 }

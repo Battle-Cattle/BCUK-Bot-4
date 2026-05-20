@@ -1,3 +1,4 @@
+import { createLogger } from '../../logger';
 import path from 'path';
 import { Router } from 'express';
 import { findTrigger, findSoundFiles, getAllSfxTriggers } from '../../db';
@@ -7,6 +8,7 @@ import { setVoicePlaying } from '../../statusStore';
 import { SFX_FOLDER } from '../../config';
 import { requireApiKey } from '../middleware';
 
+const log = createLogger('Streamdeck');
 const router = Router();
 
 router.get('/sfx', requireApiKey, async (_req, res) => {
@@ -14,7 +16,7 @@ router.get('/sfx', requireApiKey, async (_req, res) => {
     const triggers = await getAllSfxTriggers();
     res.json({ ok: true, triggers });
   } catch (err) {
-    console.error('[Streamdeck] Failed to list triggers:', err);
+    log.error('Failed to list triggers:', err);
     res.status(500).json({ ok: false, error: 'Failed to fetch triggers' });
   }
 });
@@ -32,7 +34,7 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   try {
     trigger = await findTrigger(normalizedCommand);
   } catch (err) {
-    console.error('[Streamdeck] DB error looking up trigger:', err);
+    log.error('DB error looking up trigger:', err);
     res.status(500).json({ ok: false, error: 'Database error' });
     return;
   }
@@ -45,7 +47,7 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   try {
     files = await findSoundFiles(trigger.id);
   } catch (err) {
-    console.error('[Streamdeck] DB error fetching sound files:', err);
+    log.error('DB error fetching sound files:', err);
     res.status(500).json({ ok: false, error: 'Database error' });
     return;
   }
@@ -60,13 +62,13 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   try {
     playFile(fullPath);
     setVoicePlaying(filename, normalizedCommand, 'streamdeck');
-    console.log(`[Streamdeck] Playing '${filename}' for trigger '${normalizedCommand}'`);
+    log.info(`Playing '${filename}' for trigger '${normalizedCommand}'`);
     res.json({ ok: true, file: filename });
   } catch (err: unknown) {
     if (err instanceof VoiceNotConnectedError) {
       res.status(503).json({ ok: false, error: 'Bot is not connected to a voice channel' });
     } else {
-      console.error(`[Streamdeck] Failed to play ${fullPath}:`, err);
+      log.error(`Failed to play ${fullPath}:`, err);
       res.status(500).json({ ok: false, error: 'Failed to play sound' });
     }
   }

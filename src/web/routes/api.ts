@@ -1,3 +1,4 @@
+import { createLogger } from '../../logger';
 import { Router } from 'express';
 import { getStatus } from '../../statusStore';
 import { requireMod } from '../middleware';
@@ -5,6 +6,7 @@ import { connect, disconnect } from '../../audioPlayer';
 import { getDiscordClient } from '../../discordBot';
 import { csrfProtection } from '../csrf';
 
+const log = createLogger('API');
 const router = Router();
 
 // Live status JSON — polled by the dashboard frontend every few seconds
@@ -24,7 +26,7 @@ router.post('/voice/join', requireMod, csrfProtection, async (_req, res) => {
     await connect(discordClient);
     res.json({ ok: true });
   } catch (err) {
-    console.error('[API] Voice rejoin failed:', err);
+    log.error('Voice rejoin failed:', err);
     res.status(500).json({ ok: false, error: 'Failed to join voice channel' });
   }
 });

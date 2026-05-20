@@ -1,4 +1,7 @@
+import { createLogger } from '../logger';
 import mysql from 'mysql2/promise';
+
+const log = createLogger('DB');
 import { normalizeTwitchChannelName } from '../twitchChannelName';
 import { type SqlExecutor, CommandConflictError } from './commandStringUtils';
 import {
@@ -246,7 +249,7 @@ export async function assignUserToCommandWithinTransaction(
       } catch (error) {
         await connection.rollback();
         if (isDeadlockError(error) && attempt < MAX_DEADLOCK_RETRIES - 1) {
-          console.warn(`[DB] Deadlock in assignUserToCommand, retrying (attempt ${attempt + 1}/${MAX_DEADLOCK_RETRIES}).`);
+          log.warn(`Deadlock in assignUserToCommand, retrying (attempt ${attempt + 1}/${MAX_DEADLOCK_RETRIES}).`);
           continue;
         }
         throw error;
@@ -256,7 +259,7 @@ export async function assignUserToCommandWithinTransaction(
     throw new Error('[DB] Deadlock retry limit reached in assignUserToCommandWithinTransaction.');
   } finally {
     if (lockNameByTrigger) {
-      try { await releaseNamedLock(connection, lockNameByTrigger); } catch (err) { console.warn('[DB] Failed to release named lock:', err); }
+      try { await releaseNamedLock(connection, lockNameByTrigger); } catch (err) { log.warn('Failed to release named lock:', err); }
     }
   }
 }

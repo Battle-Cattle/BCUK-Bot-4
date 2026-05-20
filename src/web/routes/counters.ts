@@ -1,3 +1,4 @@
+import { createLogger } from '../../logger';
 import { Router } from 'express';
 import {
   addCounter,
@@ -14,6 +15,7 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 
+const log = createLogger('Web');
 const router = Router();
 
 const KNOWN_ERRORS = new Set([
@@ -105,7 +107,7 @@ router.get('/counters', requireManager, csrfProtection, async (req, res) => {
       reset: req.query.reset === '1',
     });
   } catch (err) {
-    console.error('[Web] Counters page error:', err);
+    log.error('Counters page error:', err);
     res.status(500).render('error', { message: 'Failed to load counters page.', user: req.session.user ?? null });
   }
 });
@@ -141,7 +143,7 @@ router.post('/counters/add', requireManager, csrfProtection, async (req, res) =>
       return res.redirect('/admin/counters?error=duplicate_command');
     }
 
-    console.error('[Web] Add counter error:', err);
+    log.error('Add counter error:', err);
     return res.redirect('/admin/counters?error=add_failed');
   }
 
@@ -191,7 +193,7 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
       return res.redirect('/admin/counters?error=duplicate_command');
     }
 
-    console.error('[Web] Update counter error:', err);
+    log.error('Update counter error:', err);
     return res.redirect('/admin/counters?error=update_failed');
   }
 
@@ -213,7 +215,7 @@ router.post('/counters/remove', requireManager, csrfProtection, async (req, res)
       return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
     }
 
-    console.error('[Web] Remove counter error:', err);
+    log.error('Remove counter error:', err);
     return res.redirect('/admin/counters?error=remove_failed');
   }
 
@@ -234,7 +236,7 @@ router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, r
       return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
     }
 
-    console.error('[Web] Reset counter error:', err);
+    log.error('Reset counter error:', err);
     return res.redirect('/admin/counters?error=reset_failed');
   }
 

@@ -1,3 +1,4 @@
+import { createLogger } from '../../logger';
 import { Router } from 'express';
 import {
   getAllStreamGroups,
@@ -13,6 +14,7 @@ import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { restartTwitchMonitor, getLiveStates } from '../../twitchMonitor';
 
+const log = createLogger('Web');
 const router = Router();
 
 function parsePositiveIntId(value: string | undefined): number | null {
@@ -62,7 +64,7 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
       getFriendlyError,
     });
   } catch (err) {
-    console.error('[Web] Streams page error:', err);
+    log.error('Streams page error:', err);
     res.status(500).render('error', { message: 'Failed to load streams page.', user: req.session.user ?? null });
   }
 });
@@ -100,7 +102,7 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
     });
     triggerRestart();
   } catch (err) {
-    console.error('[Web] Add stream group error:', err);
+    log.error('Add stream group error:', err);
     return res.redirect('/admin/streams?error=add_group_failed');
   }
   res.redirect('/admin/streams');
@@ -135,7 +137,7 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
     });
     triggerRestart();
   } catch (err) {
-    console.error('[Web] Update stream group error:', err);
+    log.error('Update stream group error:', err);
     return res.redirect('/admin/streams?error=update_group_failed');
   }
   res.redirect('/admin/streams');
@@ -153,7 +155,7 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
     await removeStreamGroup(parsedGroupId);
     triggerRestart();
   } catch (err) {
-    console.error('[Web] Remove stream group error:', err);
+    log.error('Remove stream group error:', err);
     return res.redirect('/admin/streams?error=remove_group_failed');
   }
   res.redirect('/admin/streams');
@@ -171,7 +173,7 @@ router.post('/streams/streamers/add', requireManager, csrfProtection, async (req
     await addStreamer(name.trim(), parsedGroupId);
     triggerRestart();
   } catch (err) {
-    console.error('[Web] Add streamer error:', err);
+    log.error('Add streamer error:', err);
     return res.redirect('/admin/streams?error=add_streamer_failed');
   }
   res.redirect('/admin/streams');
@@ -187,7 +189,7 @@ router.post('/streams/streamers/remove', requireManager, csrfProtection, async (
     await removeStreamer(parsedStreamerId);
     triggerRestart();
   } catch (err) {
-    console.error('[Web] Remove streamer error:', err);
+    log.error('Remove streamer error:', err);
     return res.redirect('/admin/streams?error=remove_streamer_failed');
   }
   res.redirect('/admin/streams');
@@ -202,7 +204,7 @@ let restartChain: Promise<void> = Promise.resolve();
 function triggerRestart(): void {
   restartChain = restartChain
     .then(() => restartTwitchMonitor())
-    .catch((err) => console.error('[Web] TwitchMonitor restart error:', err));
+    .catch((err) => { log.error('TwitchMonitor restart error:', err); });
 }
 
 export default router;

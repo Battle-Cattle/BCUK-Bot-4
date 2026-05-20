@@ -1,7 +1,9 @@
+import { createLogger } from '../../logger';
 import { Router } from 'express';
 import { getStatus } from '../../statusStore';
 import { csrfProtection } from '../csrf';
 
+const log = createLogger('Web');
 const router = Router();
 
 router.get('/', csrfProtection, async (req, res) => {
@@ -13,7 +15,7 @@ router.get('/', csrfProtection, async (req, res) => {
       csrfToken: req.csrfToken(),
     });
   } catch (err) {
-    console.error('[Web] Dashboard error:', err);
+    log.error('Dashboard error:', err);
     res.status(500).render('error', {
       message: 'Failed to load dashboard data.',
       user: req.session.user ?? null,

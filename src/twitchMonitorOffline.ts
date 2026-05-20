@@ -1,4 +1,7 @@
+import { createLogger } from './logger';
 import { getStreams } from './twitchApi';
+
+const log = createLogger('TwitchMonitor');
 import { LiveState } from './twitchMonitorTypes';
 import { deleteAnnouncement } from './twitchMonitorAnnouncements';
 
@@ -35,7 +38,7 @@ export async function runOfflineCheck(
     const isLive = streams.some((s) => s.user_id === userId && s.type === 'live');
     if (!isLive) {
       await deleteAnnouncement(liveStates, stateKey);
-      console.log(`[TwitchMonitor] ${login} confirmed offline — announcement removed`);
+      log.info(`${login} confirmed offline — announcement removed`);
     }
   } finally {
     currentState.offlineTimer = null;
@@ -58,10 +61,10 @@ export async function handleStreamOffline(
       try {
         await runOfflineCheck(liveStates, loginToUserId, stateKey, key, login);
       } catch (err) {
-        console.error(`[TwitchMonitor] Offline-check failed for ${key} (${stateKey}):`, err);
+        log.error(`Offline-check failed for ${key} (${stateKey}):`, err);
       }
     }, OFFLINE_GRACE_MS);
   }
 
-  console.log(`[TwitchMonitor] ${login} went offline — grace period started`);
+  log.info(`${login} went offline — grace period started`);
 }

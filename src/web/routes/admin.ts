@@ -1,3 +1,4 @@
+import { createLogger } from '../../logger';
 import { Router } from 'express';
 import {
   getAllUsers,
@@ -19,6 +20,7 @@ import {
   toggleTwitchMutation,
 } from './adminUserMutations';
 
+const log = createLogger('Web');
 const router = Router();
 router.use(adminRefreshRouter);
 
@@ -41,7 +43,7 @@ router.get('/users', requireManager, csrfProtection, async (req, res) => {
       refreshState,
     });
   } catch (err) {
-    console.error('[Web] Admin users error:', err);
+    log.error('Admin users error:', err);
     res.status(500).render('error', { message: 'Failed to load users.', user: req.session.user ?? null });
   }
 });
@@ -82,7 +84,7 @@ router.post('/users/add', requireAdmin, csrfProtection, async (req, res) => {
       shouldClearTwitchName,
     }));
   } catch (err) {
-    console.error('[Web] Add user error:', err);
+    log.error('Add user error:', err);
     if (err instanceof DuplicateTwitchNameError || isDuplicateTwitchNameDbError(err)) {
       return res.redirect('/admin/users?error=duplicate_twitch_name');
     }
@@ -109,7 +111,7 @@ router.post('/users/update', requireAdmin, csrfProtection, async (req, res) => {
   try {
     await userMutationQueue.run(trimmedDiscordId, () => updateAccessLevel(trimmedDiscordId, level));
   } catch (err) {
-    console.error('[Web] Update access level error:', err);
+    log.error('Update access level error:', err);
     return res.redirect('/admin/users?error=update_failed');
   }
   res.redirect('/admin/users');
@@ -130,7 +132,7 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
   try {
     await userMutationQueue.run(trimmedDiscordId, () => removeUserMutation(trimmedDiscordId));
   } catch (err) {
-    console.error('[Web] Remove user error:', err);
+    log.error('Remove user error:', err);
     return res.redirect('/admin/users?error=remove_failed');
   }
   res.redirect('/admin/users');
@@ -160,7 +162,7 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   try {
     await userMutationQueue.run(trimmedDiscordId, () => toggleTwitchMutation(trimmedDiscordId, nextEnabled));
   } catch (err) {
-    console.error('[Web] Toggle twitch user error:', err);
+    log.error('Toggle twitch user error:', err);
     return res.redirect('/admin/users?error=toggle_failed');
   }
   res.redirect('/admin/users');

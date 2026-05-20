@@ -1,3 +1,4 @@
+import { createLogger } from '../../logger';
 import {
   getTwitchEnabledChannels,
   findUser,
@@ -9,6 +10,8 @@ import {
 } from '../../db';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitchBot';
 import { normalizeTwitchChannelName } from '../../twitchChannelName';
+
+const log = createLogger('Web');
 
 export class DuplicateTwitchNameError extends Error {
   constructor(twitchChannel: string) {
@@ -45,7 +48,7 @@ async function handleClearTwitchChannel(
       await upsertUser(discordId, discordName, level, previousChannel ?? null);
       await updateTwitchBotEnabled(discordId, wasBotEnabled);
     } catch (rollbackErr) {
-      console.error('[Web] Add user clear Twitch rollback failed:', rollbackErr);
+      log.error('Add user clear Twitch rollback failed:', rollbackErr);
     }
     throw err;
   }
@@ -99,7 +102,7 @@ async function handleChangeTwitchChannel({
         await partTwitchChannel(committedChannel);
       }
     } catch (rollbackErr) {
-      console.error('[Web] Add user DB rollback failed:', rollbackErr);
+      log.error('Add user DB rollback failed:', rollbackErr);
     }
     throw err;
   }
@@ -184,11 +187,7 @@ export async function removeUserMutation(discordId: string): Promise<void> {
       );
       await updateTwitchBotEnabled(existingUser.discord_id, existingUser.is_twitch_bot_enabled);
     } catch (rollbackErr) {
-      console.error(
-        '[Web] Failed to restore user after Twitch part failed during removal:',
-        discordId,
-        rollbackErr,
-      );
+      log.error(`Failed to restore user after Twitch part failed during removal: ${discordId}`, rollbackErr);
     }
     throw partErr;
   }
@@ -230,7 +229,7 @@ export async function toggleTwitchMutation(discordId: string, nextEnabled: boole
     try {
       await updateTwitchBotEnabled(discordId, currentEnabled);
     } catch (rollbackErr) {
-      console.error('[Web] Toggle twitch user rollback failed:', rollbackErr);
+      log.error('Toggle twitch user rollback failed:', rollbackErr);
     }
     throw err;
   }

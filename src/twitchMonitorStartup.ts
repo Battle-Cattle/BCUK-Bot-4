@@ -1,4 +1,7 @@
+import { createLogger } from './logger';
 import { getDiscordClient } from './discordBot';
+
+const log = createLogger('TwitchMonitor');
 import { isDiscordNotFoundError, tryDeleteDiscordMessage } from './discordUtils';
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from './db';
 import { getStreams, TwitchStream } from './twitchApi';
@@ -28,7 +31,7 @@ export async function tryEditStartupMessage(
     return true;
   } catch (err) {
     if (isDiscordNotFoundError(err)) return false;
-    console.error(`[TwitchMonitor] Failed to edit startup message for ${streamer.name}:`, err);
+    log.error(`Failed to edit startup message for ${streamer.name}:`, err);
     throw err;
   }
 }
@@ -87,7 +90,7 @@ export async function performStartupLiveCheck(
   try {
     liveStreams = await getStreams(userIds);
   } catch (err) {
-    console.error('[TwitchMonitor] Startup live-check failed:', err);
+    log.error('Startup live-check failed:', err);
     return;
   }
 
