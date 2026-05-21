@@ -169,10 +169,6 @@ export function dispatchNotification(type: string, event: Record<string, unknown
     log.warn(`Unsupported EventSub notification type: ${type}`);
     return;
   }
-  if (typeof handler !== 'function') {
-    log.warn(`Invalid EventSub handler for type: ${type}`);
-    return;
-  }
   handler(info.login, event, info.config)
     .catch((err) => log.error(`${type} handler error:`, err));
 }
