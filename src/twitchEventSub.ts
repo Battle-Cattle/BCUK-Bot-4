@@ -16,7 +16,7 @@ interface EventSubMetadata {
 interface EventSubMessage {
   metadata: EventSubMetadata;
   payload: {
-    session?: { id: string; keepalive_timeout_seconds: number };
+    session?: { id: string; keepalive_timeout_seconds: number; reconnect_url?: string | null };
     subscription?: { type: string; status: string; condition: Record<string, string> };
     event?: Record<string, unknown>;
   };
@@ -47,6 +47,7 @@ let keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let stopped = false;
+let isReconnecting = false;
 
 // Serialise subscription reloads so concurrent calls don't interleave
 let reloadChain: Promise<void> = Promise.resolve();
@@ -77,10 +78,10 @@ export function reloadEventSubSubscriptions(): void {
 
 // ─── WebSocket connection ─────────────────────────────────────────────────────
 
-function connect(): void {
+function connect(url: string = EVENTSUB_WS_URL): void {
   if (stopped) return;
 
-  const socket = new WebSocket(EVENTSUB_WS_URL);
+  const socket = new WebSocket(url);
 
   socket.addEventListener('open', () => {
     log.info('WebSocket connected');
@@ -100,7 +101,7 @@ function connect(): void {
   socket.addEventListener('close', (ev: CloseEvent) => {
     log.warn(`WebSocket closed: ${ev.code} ${ev.reason}`);
     clearKeepaliveTimer();
-    if (!stopped) scheduleReconnect();
+    if (!stopped && !isReconnecting) scheduleReconnect();
   });
 
   socket.addEventListener('error', () => {
@@ -139,12 +140,16 @@ function handleMessage(msg: EventSubMessage): void {
     sessionId = session.id;
     keepaliveTimeoutSecs = session.keepalive_timeout_seconds;
     resetKeepaliveTimer();
-    log.info(`Session established: ${sessionId}`);
-    subscribeAll(sessionId).catch((err) => log.error('Subscribe error:', err));
+    if (isReconnecting) {
+      isReconnecting = false;
+      log.info(`Reconnected — session ${sessionId}`);
+    } else {
+      log.info(`Session established: ${sessionId}`);
+      subscribeAll(sessionId).catch((err) => log.error('Subscribe error:', err));
+    }
   } else if (message_type === 'session_reconnect') {
-    // Close current socket; the close handler will reconnect and re-subscribe
-    log.info('Session reconnect requested — cycling connection');
-    ws?.close(1000, 'reconnect');
+    const reconnectUrl = msg.payload.session?.reconnect_url;
+    if (reconnectUrl) handleSessionReconnect(reconnectUrl);
   } else if (message_type === 'notification') {
     const sub = msg.payload.subscription;
     const event = msg.payload.event;
@@ -154,6 +159,41 @@ function handleMessage(msg: EventSubMessage): void {
     if (sub) handleRevocation(sub);
   }
   // session_keepalive: timer already reset above
+}
+
+/** Validates the Twitch-supplied reconnect URL and returns a safe version.
+ *  Only the query string (which contains the session_id for sub migration) is
+ *  taken from the external input; the protocol/host/path come from our constant,
+ *  so the connection cannot be redirected to an arbitrary server. */
+function buildReconnectUrl(reconnectUrl: string): string | null {
+  let parsed: URL;
+  try { parsed = new URL(reconnectUrl); } catch { return null; }
+  const validPorts = new Set(['', '443']);
+  const checks = [
+    parsed.protocol === 'wss:',
+    parsed.hostname === 'eventsub.wss.twitch.tv',
+    !parsed.username,
+    !parsed.password,
+    validPorts.has(parsed.port),
+    parsed.pathname === '/ws',
+  ];
+  if (!checks.every(Boolean)) return null;
+  const safe = new URL(EVENTSUB_WS_URL);
+  safe.search = parsed.search;
+  return safe.toString();
+}
+
+function handleSessionReconnect(reconnectUrl: string): void {
+  const safeUrl = buildReconnectUrl(reconnectUrl);
+  if (!safeUrl) {
+    log.error('Invalid reconnect URL — ignoring');
+    return;
+  }
+  isReconnecting = true;
+  log.info('Session reconnect — connecting to new session');
+  connect(safeUrl);
+  // Close the old socket after the new one has time to establish
+  setTimeout(() => { ws?.close(1000, 'reconnect'); }, 5_000);
 }
 
 function resetKeepaliveTimer(): void {

@@ -17,17 +17,17 @@ export interface SubSpec { type: string; version: string; condition: Record<stri
 export interface StreamerInfo { login: string; streamerId: number; config: EventSubConfig | null }
 const streamerMap = new Map<string, StreamerInfo>();
 
-async function cleanupSubscriptions(uid: string, userToken: string | null): Promise<void> {
+async function deleteStaleSubscriptions(uid: string, desired: Set<string>, userToken: string | null): Promise<void> {
   try {
     if (userToken) {
       const existing = await listEventSubSubscriptions(userToken);
       for (const sub of existing) {
-        await deleteEventSubSubscription(sub.id, userToken);
+        if (!desired.has(sub.type)) await deleteEventSubSubscription(sub.id, userToken);
       }
     }
     const appToken = await getAppToken();
     const raidSubs = await listEventSubSubscriptions(appToken, uid);
-    for (const sub of raidSubs.filter((s) => s.type === 'channel.raid')) {
+    for (const sub of raidSubs.filter((s) => s.type === 'channel.raid' && !desired.has('channel.raid'))) {
       await deleteEventSubSubscription(sub.id, appToken);
     }
   } catch (err) {
@@ -44,29 +44,34 @@ export async function subscribeAll(sid: string): Promise<void> {
 
     const token = await maybeRefreshToken(streamer);
     const uid = streamer.twitch_user_id;
-
-    await cleanupSubscriptions(uid, token);
-
-    streamerMap.set(streamer.twitch_user_id, {
-      login: streamer.name,
-      streamerId: streamer.id,
-      config: streamer.config,
-    });
-
     const config = streamer.config;
 
+    streamerMap.set(uid, {
+      login: streamer.name,
+      streamerId: streamer.id,
+      config,
+    });
+
+    // Track which types we want active so we can delete stale ones afterwards
+    const desired = new Set<string>();
+
     if (config?.follow_enabled && token) {
+      desired.add('channel.follow');
       await subscribe(sid, { type: 'channel.follow', version: '2',
         condition: { broadcaster_user_id: uid, moderator_user_id: uid } }, token, streamer.name);
     }
 
     if (config?.sub_enabled && token) {
+      desired.add('channel.subscribe');
+      desired.add('channel.subscription.message');
+      desired.add('channel.subscription.gift');
       await subscribe(sid, { type: 'channel.subscribe', version: '1', condition: { broadcaster_user_id: uid } }, token, streamer.name);
       await subscribe(sid, { type: 'channel.subscription.message', version: '1', condition: { broadcaster_user_id: uid } }, token, streamer.name);
       await subscribe(sid, { type: 'channel.subscription.gift', version: '1', condition: { broadcaster_user_id: uid } }, token, streamer.name);
     }
 
     if (config?.raid_enabled) {
+      desired.add('channel.raid');
       try {
         const appToken = await getAppToken();
         await subscribe(sid, { type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }, appToken, streamer.name);
@@ -74,6 +79,10 @@ export async function subscribeAll(sid: string): Promise<void> {
         log.error(`Failed to get app token for raid sub (${streamer.name}):`, err);
       }
     }
+
+    // Delete subscriptions that are no longer desired — done after creation so
+    // there is no window where zero subscriptions are active
+    await deleteStaleSubscriptions(uid, desired, token);
   }
 }
 
