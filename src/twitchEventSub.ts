@@ -16,7 +16,7 @@ const BUFFER_MS = 5 * 60 * 1000;
 interface EventSubMessage {
   metadata: { message_type: string };
   payload: {
-    session?: { id: string; keepalive_timeout_seconds: number; reconnect_url?: string | null };
+    session?: { id: string; keepalive_timeout_seconds: number };
     subscription?: { type: string; status: string; condition: Record<string, string> };
     event?: Record<string, unknown>;
   };
@@ -33,7 +33,6 @@ let keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let stopped = false;
-let isReconnecting = false;
 
 // Serialise subscription reloads so concurrent calls don't interleave
 let reloadChain: Promise<void> = Promise.resolve();
@@ -64,10 +63,10 @@ export function reloadEventSubSubscriptions(): void {
 
 // ─── WebSocket connection ─────────────────────────────────────────────────────
 
-function connect(url: string = EVENTSUB_WS_URL): void {
+function connect(): void {
   if (stopped) return;
 
-  const socket = new WebSocket(url);
+  const socket = new WebSocket(EVENTSUB_WS_URL);
 
   socket.addEventListener('open', () => {
     log.info('WebSocket connected');
@@ -87,7 +86,7 @@ function connect(url: string = EVENTSUB_WS_URL): void {
   socket.addEventListener('close', (ev: CloseEvent) => {
     log.warn(`WebSocket closed: ${ev.code} ${ev.reason}`);
     clearKeepaliveTimer();
-    if (!stopped && !isReconnecting) scheduleReconnect();
+    if (!stopped) scheduleReconnect();
   });
 
   socket.addEventListener('error', () => {
@@ -116,17 +115,12 @@ function handleMessage(socket: WebSocket, msg: EventSubMessage): void {
     sessionId = session.id;
     keepaliveTimeoutSecs = session.keepalive_timeout_seconds;
     resetKeepaliveTimer();
-
-    if (isReconnecting) {
-      isReconnecting = false;
-      log.info(`Reconnected — session ${sessionId}`);
-    } else {
-      log.info(`Session established: ${sessionId}`);
-      subscribeAll(sessionId).catch((err) => log.error('Subscribe error:', err));
-    }
+    log.info(`Session established: ${sessionId}`);
+    subscribeAll(sessionId).catch((err) => log.error('Subscribe error:', err));
   } else if (type === 'session_reconnect') {
-    const reconnectUrl = msg.payload.session?.reconnect_url;
-    if (reconnectUrl) handleSessionReconnect(socket, reconnectUrl);
+    // Close current socket — the close handler will reconnect to the hardcoded URL
+    log.info('Session reconnect requested — cycling connection');
+    socket.close(1000, 'reconnect');
   } else if (type === 'notification') {
     const sub = msg.payload.subscription;
     const event = msg.payload.event;
@@ -136,24 +130,6 @@ function handleMessage(socket: WebSocket, msg: EventSubMessage): void {
     if (sub) handleRevocation(sub);
   }
   // session_keepalive: timer already reset above
-}
-
-function handleSessionReconnect(oldSocket: WebSocket, reconnectUrl: string): void {
-  // Validate URL is Twitch's EventSub domain before connecting (prevents SSRF)
-  let parsed: URL;
-  try { parsed = new URL(reconnectUrl); } catch {
-    log.error(`Invalid reconnect URL (unparseable) — ignoring`);
-    return;
-  }
-  if (parsed.protocol !== 'wss:' || parsed.hostname !== 'eventsub.wss.twitch.tv') {
-    log.error(`Invalid reconnect URL (unexpected host) — ignoring`);
-    return;
-  }
-  isReconnecting = true;
-  log.info(`Session reconnect to ${reconnectUrl}`);
-  connect(reconnectUrl);
-  // Close the old socket after the new one has had time to establish
-  setTimeout(() => { oldSocket.close(1000, 'reconnect'); }, 5_000);
 }
 
 function resetKeepaliveTimer(): void {
