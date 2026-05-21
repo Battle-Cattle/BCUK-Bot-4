@@ -28,7 +28,7 @@ router.get('/streams/twitch-oauth/:streamerId', requireAdmin, async (req, res) =
   if (!streamer) return res.redirect('/admin/streams?error=invalid_id');
 
   const botEnabled = await getTwitchEnabledChannels().catch(() => [] as string[]);
-  if (!botEnabled.includes(streamer.name)) {
+  if (!botEnabled.includes(streamer.name.toLowerCase())) {
     return res.redirect('/admin/streams?error=eventsub_not_bot_enabled');
   }
 
@@ -74,7 +74,7 @@ router.post('/streams/event-config/:streamerId', requireAdmin, csrfProtection, a
   const botEnabled = await getTwitchEnabledChannels().catch(() => [] as string[]);
   const streamers = await getAllEventSubStreamers().catch(() => null);
   const streamer = streamers?.find((s) => s.id === streamerId);
-  if (!streamer || !botEnabled.includes(streamer.name)) {
+  if (!streamer || !botEnabled.includes(streamer.name.toLowerCase())) {
     return res.redirect('/admin/streams?error=eventsub_not_bot_enabled');
   }
 
