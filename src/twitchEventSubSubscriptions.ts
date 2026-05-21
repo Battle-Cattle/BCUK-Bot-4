@@ -1,6 +1,7 @@
 import { createLogger } from './logger';
 import { getAllEventSubStreamers, saveStreamerToken, clearStreamerToken, DbStreamerEventSub, EventSubConfig } from './db/eventSub';
-import { getAppToken, refreshUserToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription } from './twitchApi';
+import { getAppToken } from './twitchApi';
+import { refreshUserToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription } from './twitchApiEventSub';
 import { getActiveChannels } from './twitchBot';
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid,

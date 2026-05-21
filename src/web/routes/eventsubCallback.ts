@@ -1,7 +1,7 @@
 import { createLogger } from '../../logger';
 import { Router } from 'express';
 import { getAllEventSubStreamers, saveStreamerToken } from '../../db';
-import { exchangeCode, getUserFromToken } from '../../twitchApi';
+import { exchangeCode, getUserFromToken } from '../../twitchApiEventSub';
 import { TWITCH_EVENTSUB_REDIRECT_URI } from '../../config';
 import { reloadEventSubSubscriptions } from '../../twitchEventSub';
 
