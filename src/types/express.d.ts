@@ -13,6 +13,8 @@ declare module 'express-session' {
     user?: SessionUser;
     oauthState?: string;
     csrfToken?: string;
+    eventsubOAuthState?: string;
+    eventsubStreamerId?: number;
   }
 }
 

@@ -5,7 +5,7 @@ const log = createLogger('TwitchAPI');
 
 const FETCH_TIMEOUT_MS = 10_000;
 
-function twitchFetch(url: string, init?: RequestInit): Promise<Response> {
+export function twitchFetch(url: string, init?: RequestInit): Promise<Response> {
   return fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 }
 
@@ -35,7 +35,7 @@ async function fetchNewAppToken(): Promise<string> {
   return cachedAppToken;
 }
 
-async function getAppToken(): Promise<string> {
+export async function getAppToken(): Promise<string> {
   if (cachedAppToken && Date.now() < appTokenExpiry) return cachedAppToken;
   if (!tokenRefreshPromise) {
     tokenRefreshPromise = fetchNewAppToken().finally(() => { tokenRefreshPromise = null; });
@@ -43,7 +43,7 @@ async function getAppToken(): Promise<string> {
   return tokenRefreshPromise;
 }
 
-function authHeaders(token: string): Record<string, string> {
+export function authHeaders(token: string): Record<string, string> {
   return {
     Authorization: `Bearer ${token}`,
     'Client-Id': TWITCH_CLIENT_ID,
@@ -184,3 +184,4 @@ export async function getSharedChatSession(broadcasterId: string): Promise<Share
   const data = await res.json() as { data: SharedChatSession[] };
   return data.data[0] ?? null;
 }
+

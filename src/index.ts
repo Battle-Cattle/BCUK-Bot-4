@@ -4,6 +4,7 @@ import { startTwitchBot, stopTwitchBot, sayInChannel, getActiveChannels, getActi
 import { startDiscordBot, stopDiscordBot } from './discordBot';
 import { startTikTokBot, stopTikTokBot } from './tiktokBot';
 import { startTwitchMonitor, stopTwitchMonitor } from './twitchMonitor';
+import { startEventSub, stopEventSub } from './twitchEventSub';
 import { startWebPanel } from './web/server';
 import { disconnect } from './audioPlayer';
 import { registerTwitchChatRuntime } from './customCommandHandler';
@@ -19,6 +20,7 @@ const log = createLogger('Bot');
 async function shutdown(signal: string): Promise<void> {
   log.info(`${signal} received — disconnecting from voice and shutting down.`);
   stopCounterScheduler();
+  stopEventSub();
   await stopTwitchMonitor();
   stopTikTokBot();
   await stopTwitchBot();
@@ -64,6 +66,7 @@ async function main(): Promise<void> {
   startWebPanel();
   startCounterScheduler();
   startTwitchMonitor().catch((err) => log.error('TwitchMonitor startup error:', err));
+  startEventSub();
 }
 
 main().catch((err) => {
