@@ -4,9 +4,10 @@ const ALGORITHM = 'aes-256-gcm';
 const ENC_PREFIX = 'enc:';
 
 function parseKey(secret: string): Buffer {
-  const buf = Buffer.from(secret, 'hex');
-  if (buf.length !== 32) throw new Error('EVENTSUB_TOKEN_SECRET must be exactly 64 hex characters (32 bytes)');
-  return buf;
+  if (!/^[0-9a-fA-F]{64}$/.test(secret)) {
+    throw new Error('EVENTSUB_TOKEN_SECRET must be exactly 64 hex characters (32 bytes)');
+  }
+  return Buffer.from(secret, 'hex');
 }
 
 /** Encrypts a plaintext string and returns a prefixed `enc:iv.tag.data` token. */

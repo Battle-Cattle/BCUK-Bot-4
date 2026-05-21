@@ -81,8 +81,9 @@ export async function saveStreamerToken(
   refreshToken: string,
   expiryMs: number,
 ): Promise<void> {
-  const storedAccess = EVENTSUB_TOKEN_SECRET ? encryptToken(accessToken, EVENTSUB_TOKEN_SECRET) : accessToken;
-  const storedRefresh = EVENTSUB_TOKEN_SECRET ? encryptToken(refreshToken, EVENTSUB_TOKEN_SECRET) : refreshToken;
+  if (!EVENTSUB_TOKEN_SECRET) throw new Error('EVENTSUB_TOKEN_SECRET is not configured — refusing to persist plaintext OAuth tokens');
+  const storedAccess = encryptToken(accessToken, EVENTSUB_TOKEN_SECRET);
+  const storedRefresh = encryptToken(refreshToken, EVENTSUB_TOKEN_SECRET);
   await getPool().execute(
     `UPDATE streamer
      SET twitch_user_id=?, eventsub_access_token=?, eventsub_refresh_token=?, eventsub_token_expiry=?
