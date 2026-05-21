@@ -1,4 +1,7 @@
+import { createLogger } from './logger';
 import { TextChannel } from 'discord.js';
+
+const log = createLogger('TwitchMonitor');
 import { getDiscordClient } from './discordBot';
 import { isDiscordNotFoundError, tryDeleteDiscordMessage } from './discordUtils';
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from './db';
@@ -29,7 +32,7 @@ export async function postAnnouncement(
   try {
     const channel = await discordClient.channels.fetch(group.discord_channel);
     if (!channel || !channel.isTextBased()) {
-      console.error(`[TwitchMonitor] Channel ${group.discord_channel} not found or not text-based`);
+      log.error(`Channel ${group.discord_channel} not found or not text-based`);
       return;
     }
     const textChannel = channel as TextChannel;
@@ -40,7 +43,7 @@ export async function postAnnouncement(
     await setStreamerLive(streamerData.id, msg.id, msg.channelId, stream.game_name);
     await updateMultitwitch(group.id, liveStates);
   } catch (err) {
-    console.error(`[TwitchMonitor] Failed to post announcement for ${stream.user_login}:`, err);
+    log.error(`Failed to post announcement for ${stream.user_login}:`, err);
   }
 }
 
@@ -88,7 +91,7 @@ export async function editAnnouncement(
     await setStreamerLive(state.streamerId, state.messageId!, state.channelId!, stream.game_name);
     await updateMultitwitch(group.id, liveStates);
   } catch (err) {
-    console.error(`[TwitchMonitor] Failed to edit announcement for ${state.login}:`, err);
+    log.error(`Failed to edit announcement for ${state.login}:`, err);
   }
 }
 

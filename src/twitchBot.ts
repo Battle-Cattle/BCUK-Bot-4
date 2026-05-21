@@ -11,6 +11,9 @@ import { getTwitchEnabledChannels } from './db';
 import { normalizeTwitchChannelName } from './twitchChannelName';
 import { getUsers } from './twitchApi';
 import { createMutationQueue } from './mutationQueue';
+import { createLogger } from './logger';
+
+const log = createLogger('Twitch');
 
 let client: tmi.Client | null = null;
 let connected = false;
@@ -39,7 +42,7 @@ async function partStaleChannel(channel: string): Promise<void> {
   }
   await client.part(channel);
   setTwitchChannel(channel, false);
-  console.log(`[Twitch] Parted stale channel after reconnect: ${channel}`);
+  log.info(`Parted stale channel after reconnect: ${channel}`);
 }
 
 async function joinMissingChannel(channel: string): Promise<void> {
@@ -54,7 +57,7 @@ async function joinMissingChannel(channel: string): Promise<void> {
   }
   await client.join(channel);
   setTwitchChannel(channel, true);
-  console.log(`[Twitch] Joined queued channel after reconnect: ${channel}`);
+  log.info(`Joined queued channel after reconnect: ${channel}`);
 }
 
 async function reconcileJoinedChannels(): Promise<void> {
@@ -69,7 +72,7 @@ async function reconcileJoinedChannels(): Promise<void> {
     try {
       await membershipMutationQueue.run(channel, () => partStaleChannel(channel));
     } catch (err) {
-      console.error(`[Twitch] Failed to part stale channel ${channel}:`, err);
+      log.error(`Failed to part stale channel ${channel}:`, err);
     }
   }
 
@@ -79,7 +82,7 @@ async function reconcileJoinedChannels(): Promise<void> {
       await membershipMutationQueue.run(channel, () => joinMissingChannel(channel));
     } catch (err) {
       setTwitchChannel(channel, false);
-      console.error(`[Twitch] Failed to join queued channel ${channel}:`, err);
+      log.error(`Failed to join queued channel ${channel}:`, err);
     }
   }
 }
@@ -89,7 +92,7 @@ export async function startTwitchBot(): Promise<void> {
   for (const ch of configuredChannels) {
     const normalized = normalizeChannel(ch);
     if (!normalized) {
-      console.error(`[Twitch] Skipping invalid enabled channel in DB: ${ch}`);
+      log.error(`Skipping invalid enabled channel in DB: ${ch}`);
       continue;
     }
     activeChannels.add(normalized);
@@ -97,7 +100,7 @@ export async function startTwitchBot(): Promise<void> {
   }
 
   if (activeChannels.size === 0) {
-    console.warn('[Twitch] No enabled Twitch channels found in DB; connecting with no joined channels.');
+    log.warn('No enabled Twitch channels found in DB; connecting with no joined channels.');
   }
 
   if (activeChannels.size > 0) {
@@ -105,7 +108,7 @@ export async function startTwitchBot(): Promise<void> {
       const users = await getUsers([...activeChannels]);
       for (const u of users) activeChannelUserIds.set(u.login.toLowerCase(), u.id);
     } catch (err) {
-      console.error('[Twitch] Failed to resolve channel user IDs (shared-chat dedup unavailable):', err);
+      log.error('Failed to resolve channel user IDs (shared-chat dedup unavailable):', err);
     }
   }
 
@@ -140,56 +143,56 @@ export async function startTwitchBot(): Promise<void> {
       const isMod = tags.mod === true || !!(tags.badges as Record<string, string> | null | undefined)?.broadcaster;
 
       executeCustomCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
-        console.error('[Twitch] Custom command error:', err),
+        log.error('Custom command error:', err),
       );
 
       executeCounterCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
-        console.error('[Twitch] Counter command error:', err),
+        log.error('Counter command error:', err),
       );
 
       executeMultiCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
-        console.error('[Twitch] Multi command error:', err),
+        log.error('Multi command error:', err),
       );
 
       executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod).catch((err) =>
-        console.error('[Twitch] Shoutout error:', err),
+        log.error('Shoutout error:', err),
       );
 
       handleCommand(message, 'twitch').catch((err) =>
-        console.error('[Twitch] Command handler error:', err),
+        log.error('Command handler error:', err),
       );
 
       executeCountdownForTwitch(normalizedChannel, message).catch((err) =>
-        console.error('[Twitch] Countdown error:', err),
+        log.error('Countdown error:', err),
       );
     } catch (err) {
-      console.error('[Twitch] Unexpected error in message handler:', err);
+      log.error('Unexpected error in message handler:', err);
     }
   });
 
   client.on('connected', (addr, port) => {
     connected = true;
-    console.log(`[Twitch] Connected to ${addr}:${port}`);
-    console.log(`[Twitch] Listening on: ${[...activeChannels].join(', ') || '(none)'}`);
+    log.info(`Connected to ${addr}:${port}`);
+    log.info(`Listening on: ${[...activeChannels].join(', ') || '(none)'}`);
     // Reset every activeChannels entry via setTwitchChannel to a pessimistic
     // disconnected state until reconcileJoinedChannels() asynchronously
     // rechecks the actual joined memberships and corrects the status.
     activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
     void reconcileJoinedChannels().catch((err) => {
-      console.error('[Twitch] Failed to reconcile joined channels:', err);
+      log.error('Failed to reconcile joined channels:', err);
     });
   });
 
   client.on('disconnected', (reason) => {
     connected = false;
-    console.warn(`[Twitch] Disconnected: ${reason}`);
+    log.warn(`Disconnected: ${reason}`);
     activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
   });
 
   try {
     await client.connect();
   } catch (err) {
-    console.error('[Twitch] Failed to connect:', err);
+    log.error('Failed to connect:', err);
     throw err;
   }
 }
@@ -234,7 +237,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       // Roll back local state; reconnect reconciliation will retry via activeChannels.
       activeChannels.delete(normalized);
       setTwitchChannel(normalized, false);
-      console.error(`[Twitch] Failed to join channel ${normalized}:`, err);
+      log.error(`Failed to join channel ${normalized}:`, err);
       throw err;
     }
   });
@@ -281,7 +284,7 @@ export async function partTwitchChannel(channel: string): Promise<void> {
     } catch (err) {
       // Keep desired membership removed so later reconciliation can retry
       // parting any stale runtime join without restoring admin intent here.
-      console.error(`[Twitch] Failed to part channel ${normalized}:`, err);
+      log.error(`Failed to part channel ${normalized}:`, err);
       throw err;
     }
   });
@@ -295,9 +298,9 @@ export async function stopTwitchBot(): Promise<void> {
     try {
       await client.disconnect();
     } catch (err) {
-      console.warn('[Twitch] Error during disconnect:', err);
+      log.warn('Error during disconnect:', err);
     }
     client = null;
   }
-  console.log('[Twitch] Disconnected.');
+  log.info('Disconnected.');
 }

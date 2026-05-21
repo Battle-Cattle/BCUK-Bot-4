@@ -1,4 +1,7 @@
+import { createLogger } from './logger';
 import { extractCommand } from './commandUtils';
+
+const log = createLogger('Twitch');
 
 const COUNTDOWN_COMMAND = '!321';
 const STEPS = ['3', '2', '1', 'Go!'];
@@ -26,7 +29,7 @@ export async function executeCountdownForTwitch(channel: string, rawMessage: str
     try {
       await runtime.send(channel, STEPS[i]!);
     } catch (err) {
-      console.error(`[Twitch] Countdown failed at '${STEPS[i]}' in ${channel}:`, err);
+      log.error(`Countdown failed at '${STEPS[i]}' in ${channel}:`, err);
       return;
     }
   }

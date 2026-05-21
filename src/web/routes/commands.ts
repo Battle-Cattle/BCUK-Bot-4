@@ -1,3 +1,4 @@
+import { createLogger } from '../../logger';
 import { Router } from 'express';
 import {
   addCustomCommand,
@@ -18,6 +19,7 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 
+const log = createLogger('Web');
 const router = Router();
 
 const KNOWN_ERRORS = new Set([
@@ -95,7 +97,7 @@ router.get('/commands', requireManager, csrfProtection, async (req, res) => {
       error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
     });
   } catch (err) {
-    console.error('[Web] Commands page error:', err);
+    log.error('Commands page error:', err);
     res.status(500).render('error', { message: 'Failed to load commands page.', user: req.session.user ?? null });
   }
 });
@@ -122,7 +124,7 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
       return res.redirect('/admin/commands?error=command_taken');
     }
 
-    console.error('[Web] Add custom command error:', err);
+    log.error('Add custom command error:', err);
     return res.redirect('/admin/commands?error=add_failed');
   }
 
@@ -160,7 +162,7 @@ router.post('/commands/update', requireManager, csrfProtection, async (req, res)
       return res.redirect('/admin/commands?error=command_taken');
     }
 
-    console.error('[Web] Update custom command error:', err);
+    log.error('Update custom command error:', err);
     return res.redirect('/admin/commands?error=update_failed');
   }
 
@@ -179,7 +181,7 @@ router.post('/commands/remove', requireManager, csrfProtection, async (req, res)
   try {
     await removeCustomCommand(parsedCommandId);
   } catch (err) {
-    console.error('[Web] Remove custom command error:', err);
+    log.error('Remove custom command error:', err);
     return res.redirect('/admin/commands?error=remove_failed');
   }
 
@@ -211,7 +213,7 @@ router.post('/commands/assign', requireManager, csrfProtection, async (req, res)
       return res.redirect('/admin/commands?error=command_taken');
     }
 
-    console.error('[Web] Assign user to command error:', err);
+    log.error('Assign user to command error:', err);
     return res.redirect('/admin/commands?error=assign_failed');
   }
 
@@ -234,7 +236,7 @@ router.post('/commands/unassign', requireManager, csrfProtection, async (req, re
   try {
     await unassignUserFromCommand(parsedCommandId, normalizedDiscordId);
   } catch (err) {
-    console.error('[Web] Unassign user from command error:', err);
+    log.error('Unassign user from command error:', err);
     return res.redirect('/admin/commands?error=unassign_failed');
   }
 

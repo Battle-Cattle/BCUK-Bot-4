@@ -1,9 +1,12 @@
+import { createLogger } from './logger';
 import { createAudioResource } from '@discordjs/voice';
 import path from 'path';
 import fs from 'fs';
 import ffmpegPath from 'ffmpeg-static';
 import { SFX_FOLDER } from './config';
 import { isConnected, startPlayback } from './audioPlayer';
+
+const log = createLogger('SFXPlayer');
 
 export class VoiceNotConnectedError extends Error {
   constructor() {
@@ -16,7 +19,7 @@ export class VoiceNotConnectedError extends Error {
 if (ffmpegPath) {
   process.env.FFMPEG_PATH = ffmpegPath;
 } else {
-  console.warn('[AudioPlayer] ffmpeg-static returned no path!');
+  log.warn('ffmpeg-static returned no path!');
 }
 
 const sfxRoot = path.resolve(SFX_FOLDER);

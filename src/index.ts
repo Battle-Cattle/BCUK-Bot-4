@@ -12,9 +12,12 @@ import { registerMultiTwitchRuntime } from './multiCommandHandler';
 import { registerShoutoutRuntime } from './shoutoutHandler';
 import { registerCountdownTwitchRuntime } from './countdownHandler';
 import { startCounterScheduler, stopCounterScheduler } from './counterScheduler';
+import { createLogger } from './logger';
+
+const log = createLogger('Bot');
 
 async function shutdown(signal: string): Promise<void> {
-  console.log(`[Bot] ${signal} received — disconnecting from voice and shutting down.`);
+  log.info(`${signal} received — disconnecting from voice and shutting down.`);
   stopCounterScheduler();
   await stopTwitchMonitor();
   stopTikTokBot();
@@ -25,11 +28,11 @@ async function shutdown(signal: string): Promise<void> {
   process.exit(0);
 }
 
-process.on('SIGINT',  () => { shutdown('SIGINT').catch((err)  => { console.error('[Bot] Shutdown error:', err); process.exit(1); }); });
-process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err) => { console.error('[Bot] Shutdown error:', err); process.exit(1); }); });
+process.on('SIGINT',  () => { shutdown('SIGINT').catch((err)  => { log.error('Shutdown error:', err); process.exit(1); }); });
+process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err) => { log.error('Shutdown error:', err); process.exit(1); }); });
 
 async function main(): Promise<void> {
-  console.log('[Bot] Starting BCUK SFX Bot...');
+  log.info('Starting BCUK SFX Bot...');
 
   // Verify DB connection early
   try {
@@ -37,9 +40,9 @@ async function main(): Promise<void> {
     const conn = await pool.getConnection();
     await conn.ping();
     conn.release();
-    console.log('[Bot] Database connection OK');
+    log.info('Database connection OK');
   } catch (err) {
-    console.error('[Bot] Cannot connect to database:', err);
+    log.error('Cannot connect to database:', err);
     process.exit(1);
   }
 
@@ -60,10 +63,10 @@ async function main(): Promise<void> {
   await startTikTokBot();
   startWebPanel();
   startCounterScheduler();
-  startTwitchMonitor().catch((err) => console.error('[Bot] TwitchMonitor startup error:', err));
+  startTwitchMonitor().catch((err) => log.error('TwitchMonitor startup error:', err));
 }
 
 main().catch((err) => {
-  console.error('[Bot] Fatal startup error:', err);
+  log.error('Fatal startup error:', err);
   process.exit(1);
 });

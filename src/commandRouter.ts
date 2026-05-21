@@ -1,10 +1,13 @@
 import path from 'path';
+import { createLogger } from './logger';
 import { findTrigger, findSoundFiles } from './db';
 import { pickWeightedRandom } from './soundSelector';
 import { isPlaying } from './audioPlayer';
 import { playFile, VoiceNotConnectedError } from './sfxPlayer';
 import { SFX_FOLDER, GLOBAL_COOLDOWN_MS } from './config';
 import { setVoicePlaying } from './statusStore';
+
+const log = createLogger('CommandRouter');
 
 let lastPlayedAt = 0;
 let inFlight = false;
@@ -27,13 +30,13 @@ export async function handleCommand(rawMessage: string, source: 'twitch' | 'disc
   // Global cooldown check
   const now = Date.now();
   if (now - lastPlayedAt < GLOBAL_COOLDOWN_MS) {
-    console.log(`[${source}] Cooldown active, ignoring '${command}'`);
+    log.info(`[${source}] Cooldown active, ignoring '${command}'`);
     return;
   }
 
   // Ignore if already playing or another handler is mid-lookup
   if (isPlaying() || inFlight) {
-    console.log(`[${source}] Already playing, ignoring '${command}'`);
+    log.info(`[${source}] Already playing, ignoring '${command}'`);
     return;
   }
 
@@ -50,7 +53,7 @@ export async function handleCommand(rawMessage: string, source: 'twitch' | 'disc
     // Find associated sound files
     const files = await findSoundFiles(trigger.id);
     if (files.length === 0) {
-      console.warn(`[${source}] Trigger '${command}' has no sound files in DB`);
+      log.warn(`[${source}] Trigger '${command}' has no sound files in DB`);
       return;
     }
 
@@ -58,7 +61,7 @@ export async function handleCommand(rawMessage: string, source: 'twitch' | 'disc
     const filename = pickWeightedRandom(files);
     const fullPath = path.join(SFX_FOLDER, filename);
 
-    console.log(`[${source}] Playing '${filename}' for trigger '${command}'`);
+    log.info(`[${source}] Playing '${filename}' for trigger '${command}'`);
 
     try {
       playFile(fullPath);
@@ -66,9 +69,9 @@ export async function handleCommand(rawMessage: string, source: 'twitch' | 'disc
       setVoicePlaying(filename, command, source);
     } catch (err) {
       if (err instanceof VoiceNotConnectedError) {
-        console.log(`[${source}] Skipping '${command}' — not connected to voice channel`);
+        log.info(`[${source}] Skipping '${command}' — not connected to voice channel`);
       } else {
-        console.error(`[${source}] Failed to play ${fullPath}:`, err);
+        log.error(`[${source}] Failed to play ${fullPath}:`, err);
       }
     }
   } finally {

@@ -1,4 +1,7 @@
+import { createLogger } from './logger';
 import { TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET } from './config';
+
+const log = createLogger('TwitchAPI');
 
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -63,7 +66,7 @@ async function fetchHelixWithRetry(url: string, headers: Record<string, string>)
     const parsedReset = resetHeader ? Number(resetHeader) : NaN;
     const resetAt = Number.isFinite(parsedReset) ? parsedReset * 1000 : Date.now() + 5_000;
     const wait = Math.max(0, resetAt - Date.now());
-    console.warn(`[TwitchAPI] Rate limited (attempt ${attempt}/${HELIX_MAX_RETRIES}). Retrying after ${wait}ms`);
+    log.warn(`Rate limited (attempt ${attempt}/${HELIX_MAX_RETRIES}). Retrying after ${wait}ms`);
     await new Promise<void>((r) => setTimeout(r, wait));
     res = await twitchFetch(url, { headers });
   }

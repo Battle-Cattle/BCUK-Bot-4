@@ -1,4 +1,7 @@
+import { createLogger } from './logger';
 import { getUsers, getChannelInfo, getStreams, TwitchChannelInfo, TwitchStream } from './twitchApi';
+
+const log = createLogger('Shoutout');
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { extractCommand } from './commandUtils';
 
@@ -54,10 +57,10 @@ async function dispatchShoutout(channel: string, message: string): Promise<boole
   if (!runtime) return false;
   try {
     await runtime.send(channel, message);
-    console.log(`[Twitch] Sent !so in ${channel} — ${message}`);
+    log.info(`[Twitch] Sent !so in ${channel} — ${message}`);
     return true;
   } catch (err) {
-    console.error(`[Twitch] Failed to send !so in ${channel}:`, err);
+    log.error(`[Twitch] Failed to send !so in ${channel}:`, err);
     return false;
   }
 }

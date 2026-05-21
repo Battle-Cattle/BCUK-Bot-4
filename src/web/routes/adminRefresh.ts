@@ -1,3 +1,4 @@
+import { createLogger } from '../../logger';
 import { Router } from 'express';
 import { getAllUsers, updateDiscordName } from '../../db';
 import { csrfProtection } from '../csrf';
@@ -23,6 +24,8 @@ export const refreshState: {
   finishedAt: null,
 };
 
+const log = createLogger('Web');
+
 async function runDiscordNameRefresh(): Promise<void> {
   refreshState.outcome = 'running';
   refreshState.updatedCount = 0;
@@ -45,7 +48,7 @@ async function runDiscordNameRefresh(): Promise<void> {
         if (name == null) {
           failureCount++;
           refreshState.failureCount = failureCount;
-          console.error('[Web] Failed to refresh Discord name for ' + user.discord_id + ': Discord lookup returned no display name');
+          log.error(`Failed to refresh Discord name for ${user.discord_id}: Discord lookup returned no display name`);
           await new Promise((resolve) => setTimeout(resolve, 200));
           continue;
         }
@@ -59,7 +62,7 @@ async function runDiscordNameRefresh(): Promise<void> {
       } catch (err) {
         failureCount++;
         refreshState.failureCount = failureCount;
-        console.error('[Web] Failed to refresh Discord name for', user.discord_id, err);
+        log.error(`Failed to refresh Discord name for ${user.discord_id}:`, err);
       }
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
@@ -72,7 +75,7 @@ async function runDiscordNameRefresh(): Promise<void> {
   } catch (err) {
     refreshState.failureCount = Math.max(refreshState.failureCount, 1);
     refreshState.outcome = 'error';
-    console.error('[Web] Refresh Discord names failed:', err);
+    log.error('Refresh Discord names failed:', err);
   } finally {
     refreshState.finishedAt = Date.now();
   }

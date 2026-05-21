@@ -1,5 +1,8 @@
+import { createLogger } from './logger';
 import { DiscordAPIError, RESTJSONErrorCodes } from 'discord.js';
 import { getDiscordClient } from './discordBot';
+
+const log = createLogger('Discord');
 
 export function isDiscordNotFoundError(err: unknown): boolean {
   return err instanceof DiscordAPIError && (
@@ -32,7 +35,7 @@ export async function tryDeleteDiscordMessage(channelId: string, messageId: stri
     await msg.delete();
   } catch (err) {
     if (isDiscordNotFoundError(err)) return;
-    console.error(`[discordUtils] Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
+    log.error(`Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
     throw err;
   }
 }

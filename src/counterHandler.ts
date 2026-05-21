@@ -1,5 +1,8 @@
+import { createLogger } from './logger';
 import type { Message } from 'discord.js';
 import { findCounterByCommand, incrementCounter } from './db';
+
+const log = createLogger('Counter');
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { extractCommand } from './commandUtils';
 import { isDiscordNotFoundError } from './discordUtils';
@@ -47,7 +50,7 @@ async function _buildCounterResponse(
     try {
       displayValue = await incrementCounter(counter.id);
     } catch (err) {
-      console.error(`${errorPrefix} Failed to increment counter ${counter.id} for command '${command}':`, err);
+      log.error(`[${errorPrefix}] Failed to increment counter ${counter.id} for command '${command}':`, err);
       // Invariant: canReply must be false here so the stale pre-increment
       // displayValue is never sent to chat.
       return {
@@ -89,10 +92,10 @@ export async function executeCounterCommandForDiscord(
 
   try {
     await message.reply(result.response);
-    console.log(`[Discord] Sent ${result.label} '${command}' (recorded for monitoring).`);
+    log.info(`[Discord] Sent ${result.label} '${command}' (recorded for monitoring).`);
   } catch (err) {
     if (!isDiscordNotFoundError(err)) {
-      console.error(`[Discord] Failed to reply to message ${message.id} for ${result.label} '${command}':`, err);
+      log.error(`[Discord] Failed to reply to message ${message.id} for ${result.label} '${command}':`, err);
     }
   }
 }
@@ -122,9 +125,9 @@ export async function executeCounterCommandForTwitch(
   if (runtime) {
     try {
       await runtime.send(channel, result.response);
-      console.log(`[Twitch] Sent ${result.label} '${command}' in ${channel} (recorded for monitoring).`);
+      log.info(`[Twitch] Sent ${result.label} '${command}' in ${channel} (recorded for monitoring).`);
     } catch (err) {
-      console.error(`[Twitch] Failed to send ${result.label} '${command}' in ${channel}:`, err);
+      log.error(`[Twitch] Failed to send ${result.label} '${command}' in ${channel}:`, err);
     }
   }
 }

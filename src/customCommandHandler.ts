@@ -1,5 +1,8 @@
+import { createLogger } from './logger';
 import type { Message } from 'discord.js';
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './db';
+
+const log = createLogger('CustomCmd');
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { getSharedChatSession } from './twitchApi';
 import { extractCommand } from './commandUtils';
@@ -115,7 +118,7 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
       if (sessionId) repliedSessionIds.add(sessionId);
       anySent = true;
     } catch (err) {
-      console.error(`[CustomCmd] Failed to send to ${channel}:`, err);
+      log.error(`Failed to send to ${channel}:`, err);
     }
   }
   return anySent;
@@ -143,10 +146,10 @@ export async function executeCustomCommandForDiscord(
 
   try {
     await message.reply(result.response);
-    console.log(`[Discord] Sent custom command '${command}' (recorded for monitoring).`);
+    log.info(`[Discord] Sent custom command '${command}' (recorded for monitoring).`);
   } catch (err) {
     if (!isDiscordNotFoundError(err)) {
-      console.error(`[Discord] Failed to reply to message ${message.id} for command '${command}':`, err);
+      log.error(`[Discord] Failed to reply to message ${message.id} for command '${command}':`, err);
     }
   }
 }
@@ -176,19 +179,19 @@ export async function executeCustomCommandForTwitch(
       try {
         const sent = await broadcastToActiveChannels(channel, command, result.response);
         if (sent) {
-          console.log(`[Twitch] Sent custom command '${command}' in ${channel} (recorded for monitoring).`);
+          log.info(`[Twitch] Sent custom command '${command}' in ${channel} (recorded for monitoring).`);
         } else {
-          console.log(`[Twitch] Broadcast custom command '${command}' in ${channel} reached no channels (recorded for monitoring).`);
+          log.info(`[Twitch] Broadcast custom command '${command}' in ${channel} reached no channels (recorded for monitoring).`);
         }
       } catch (err) {
-        console.error(`[Twitch] Failed to broadcast custom command '${command}' in ${channel}:`, err);
+        log.error(`[Twitch] Failed to broadcast custom command '${command}' in ${channel}:`, err);
       }
     } else {
       try {
         await runtime.send(channel, result.response);
-        console.log(`[Twitch] Sent custom command '${command}' in ${channel} (recorded for monitoring).`);
+        log.info(`[Twitch] Sent custom command '${command}' in ${channel} (recorded for monitoring).`);
       } catch (err) {
-        console.error(`[Twitch] Failed to send custom command '${command}' in ${channel}:`, err);
+        log.error(`[Twitch] Failed to send custom command '${command}' in ${channel}:`, err);
       }
     }
   }

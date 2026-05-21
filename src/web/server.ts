@@ -1,3 +1,4 @@
+import { createLogger } from '../logger';
 import express from 'express';
 import type { ErrorRequestHandler } from 'express';
 import session from 'express-session';
@@ -6,6 +7,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { WEB_PORT, SESSION_SECRET, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../config';
+
+const log = createLogger('Web');
 
 const isProduction = process.env.NODE_ENV === 'production';
 import authRouter from './routes/auth';
@@ -141,7 +144,7 @@ const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
     return;
   }
 
-  console.error('[Web] Invalid CSRF token:', err);
+  log.error('Invalid CSRF token:', err);
 
   if (req.originalUrl === '/api' || req.originalUrl.startsWith('/api/')) {
     res.status(403).json({
@@ -162,7 +165,7 @@ app.use(csrfErrorHandler);
 
 // Centralised error handler
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('[Web] Unhandled error:', err);
+  log.error('Unhandled error:', err);
   res.status(500).render('error', {
     message: 'An unexpected error occurred.',
     user: req.session.user ?? null,
@@ -172,6 +175,6 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
 
 export function startWebPanel(): void {
   app.listen(WEB_PORT, () => {
-    console.log(`[Web] Panel available at http://localhost:${WEB_PORT}`);
+    log.info(`Panel available at http://localhost:${WEB_PORT}`);
   });
 }

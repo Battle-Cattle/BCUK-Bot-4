@@ -1,3 +1,4 @@
+import { createLogger } from '../../logger';
 import { Router } from 'express';
 import {
   requestApiKey,
@@ -12,6 +13,7 @@ import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
 import { WEB_PORT } from '../../config';
 
+const log = createLogger('Web');
 const router = Router();
 
 // ─── User routes (any authenticated user) ────────────────────────────────────
@@ -28,7 +30,7 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
       webPort: WEB_PORT,
     });
   } catch (err) {
-    console.error('[Web] Streamdeck key page error:', err);
+    log.error('Streamdeck key page error:', err);
     res.status(500).render('error', {
       message: 'Failed to load Streamdeck key status.',
       user: req.session.user ?? null,
@@ -52,7 +54,7 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
       webPort: WEB_PORT,
     });
   } catch (err) {
-    console.error('[Web] Streamdeck key request error:', err);
+    log.error('Streamdeck key request error:', err);
     res.status(500).render('error', {
       message: 'Failed to generate API key.',
       user: req.session.user ?? null,
@@ -65,7 +67,7 @@ router.post('/streamdeck-key/revoke', csrfProtection, async (req, res) => {
     await revokeApiKey(req.session.user!.discordId);
     res.redirect('/streamdeck-key');
   } catch (err) {
-    console.error('[Web] Streamdeck key revoke error:', err);
+    log.error('Streamdeck key revoke error:', err);
     res.status(500).render('error', {
       message: 'Failed to revoke API key.',
       user: req.session.user ?? null,
@@ -96,7 +98,7 @@ router.get('/admin/streamdeck-keys', requireAdmin, csrfProtection, async (req, r
       error: ADMIN_KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
     });
   } catch (err) {
-    console.error('[Web] Streamdeck admin keys error:', err);
+    log.error('Streamdeck admin keys error:', err);
     res.status(500).render('error', {
       message: 'Failed to load Streamdeck key management.',
       user: req.session.user ?? null,
@@ -112,7 +114,7 @@ router.post('/admin/streamdeck-keys/approve', requireAdmin, csrfProtection, asyn
     await approveApiKey(validId, req.session.user!.discordId);
     res.redirect('/admin/streamdeck-keys');
   } catch (err) {
-    console.error('[Web] Streamdeck key approve error:', err);
+    log.error('Streamdeck key approve error:', err);
     res.redirect('/admin/streamdeck-keys?error=approve_failed');
   }
 });
@@ -124,7 +126,7 @@ router.post('/admin/streamdeck-keys/deny', requireAdmin, csrfProtection, async (
     await denyApiKey(validId);
     res.redirect('/admin/streamdeck-keys');
   } catch (err) {
-    console.error('[Web] Streamdeck key deny error:', err);
+    log.error('Streamdeck key deny error:', err);
     res.redirect('/admin/streamdeck-keys?error=deny_failed');
   }
 });
@@ -136,7 +138,7 @@ router.post('/admin/streamdeck-keys/revoke', requireAdmin, csrfProtection, async
     await revokeApiKey(validId);
     res.redirect('/admin/streamdeck-keys');
   } catch (err) {
-    console.error('[Web] Streamdeck key admin revoke error:', err);
+    log.error('Streamdeck key admin revoke error:', err);
     res.redirect('/admin/streamdeck-keys?error=revoke_failed');
   }
 });

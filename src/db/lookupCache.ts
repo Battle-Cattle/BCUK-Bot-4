@@ -1,3 +1,7 @@
+import { createLogger } from '../logger';
+
+const log = createLogger('DB');
+
 export interface RefreshingLookupCache {
   loadedAt: number;
 }
@@ -64,11 +68,11 @@ export function createManagedLookupCache<TCache extends RefreshingLookupCache>(
   function handleRefreshFailureFallback(err: unknown, retryDelayMs: number): void {
     if (!cache) {
       cache = options.createEmptyCache();
-      console.error(`[DB] Background ${options.cacheName} refresh failed; serving an empty cache and retrying after ${retryDelayMs}ms.`, err);
+      log.error(`Background ${options.cacheName} refresh failed; serving an empty cache and retrying after ${retryDelayMs}ms.`, err);
       return;
     }
 
-    console.error(`[DB] Background ${options.cacheName} refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
+    log.error(`Background ${options.cacheName} refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
   }
 
   function clearInFlightIfCurrent(promiseForFinally: Promise<TCache>): void {

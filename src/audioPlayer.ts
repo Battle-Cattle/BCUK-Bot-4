@@ -1,3 +1,4 @@
+import { createLogger } from './logger';
 import {
   createAudioPlayer,
   joinVoiceChannel,
@@ -12,6 +13,8 @@ import {
 import { Client, ChannelType } from 'discord.js';
 import { DISCORD_GUILD_ID, DISCORD_VOICE_CHANNEL_ID } from './config';
 import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from './statusStore';
+
+const log = createLogger('AudioPlayer');
 import { buildAdapter } from './voiceAdapter';
 import { isPermanentVoiceMisconfigurationError } from './discordUtils';
 import {
@@ -48,13 +51,13 @@ function scheduleReconnect(reason: string): void {
   const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts, RECONNECT_MAX_DELAY_MS);
   reconnectAttempts += 1;
 
-  console.warn(`[AudioPlayer] Scheduling voice rejoin in ${delay}ms (${reason}).`);
+  log.warn(`Scheduling voice rejoin in ${delay}ms (${reason}).`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     if (scheduledAttemptId !== currentAttemptId) return;
     if (!shouldAutoReconnect || !activeClient || connection) return;
     connect(activeClient).catch((err) => {
-      console.error('[AudioPlayer] Voice rejoin failed:', err);
+      log.error('Voice rejoin failed:', err);
     });
   }, delay);
 }
@@ -69,7 +72,7 @@ function getPlayer(): DjsAudioPlayer {
       setVoiceIdle();
     });
     player.on('error', (err) => {
-      console.error('[AudioPlayer] Error:', err.message, err);
+      log.error(`Error: ${err.message}`, err);
       playing = false;
     });
   }
@@ -153,12 +156,12 @@ export async function connect(client: Client): Promise<void> {
     connection = joinedConnection;
 
     clearReconnectTimer();
-    console.log('[AudioPlayer] Voice connection ready.');
+    log.info('Voice connection ready.');
     reconnectAttempts = 0;
 
     joinedConnection.subscribe(getPlayer());
     setVoiceConnected(channel.name);
-    console.log(`[AudioPlayer] Joined voice channel: ${channel.name}`);
+    log.info(`Joined voice channel: ${channel.name}`);
   } catch (err) {
     if (attemptId === currentAttemptId) {
       cleanupFailedConnect(previousConnection, nextConnection, deps);
@@ -196,7 +199,7 @@ export function disconnect(): void {
     }
     playing = false;
     setVoiceDisconnected();
-    console.log('[AudioPlayer] Disconnected from voice channel.');
+    log.info('Disconnected from voice channel.');
   }
 }
 

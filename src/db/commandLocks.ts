@@ -1,4 +1,7 @@
+import { createLogger } from '../logger';
 import { createHash } from 'node:crypto';
+
+const log = createLogger('DB');
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
 import {
@@ -69,7 +72,7 @@ export async function releaseNamedLock(connection: mysql.PoolConnection, lockNam
   try {
     await connection.execute('SELECT RELEASE_LOCK(?)', [lockName]);
   } catch (error) {
-    console.warn(`[DB] Failed to release command write lock '${lockName}':`, error);
+    log.warn(`Failed to release command write lock '${lockName}':`, error);
   }
 }
 
@@ -204,7 +207,7 @@ export async function runSerializedCommandWrite<T>(
       } catch (error) {
         await connection.rollback();
         if (isDeadlockError(error) && attempt < MAX_DEADLOCK_RETRIES - 1) {
-          console.warn(`[DB] Deadlock detected, retrying transaction (attempt ${attempt + 1}/${MAX_DEADLOCK_RETRIES}).`);
+          log.warn(`Deadlock detected, retrying transaction (attempt ${attempt + 1}/${MAX_DEADLOCK_RETRIES}).`);
           continue;
         }
         throw error;
@@ -214,7 +217,7 @@ export async function runSerializedCommandWrite<T>(
     throw new Error('[DB] Deadlock retry limit reached without success.');
   } finally {
     if (connection) {
-      try { await releaseNamedLocks(connection, lockNames); } catch (err) { console.warn('[DB] Failed to release named locks:', err); }
+      try { await releaseNamedLocks(connection, lockNames); } catch (err) { log.warn('Failed to release named locks:', err); }
       connection.release();
     }
   }

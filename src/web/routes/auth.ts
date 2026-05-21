@@ -1,3 +1,4 @@
+import { createLogger } from '../../logger';
 import { Router } from 'express';
 import crypto from 'crypto';
 import { DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_CALLBACK_URL } from '../../config';
@@ -6,6 +7,7 @@ import { fetchMemberDisplayName } from '../../discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 
+const log = createLogger('Web');
 const router = Router();
 
 // ─── Redirect to Discord OAuth2 ─────────────────────────────────────────────
@@ -87,7 +89,7 @@ router.get('/discord/callback', async (req, res) => {
         await updateDiscordName(profile.id, syncedDiscordName);
       }
     } catch (syncErr) {
-      console.warn('[Web] Non-blocking discord_name sync failed:', syncErr);
+      log.warn('Non-blocking discord_name sync failed:', syncErr);
     }
 
     // 4. Save to session — regenerate the session ID first to prevent session fixation.
@@ -111,7 +113,7 @@ router.get('/discord/callback', async (req, res) => {
 
     res.redirect('/');
   } catch (err) {
-    console.error('[Web] Auth error:', err);
+    log.error('Auth error:', err);
     res.status(500).render('error', {
       message: 'Authentication failed — please try again.',
       user: null,
