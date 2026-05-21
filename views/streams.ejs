@@ -300,17 +300,9 @@
   </main>
 
   <%- include('partials/pwa-register') %>
-  <script>
-    document.querySelectorAll('.btn-toggle-eventsub').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        var id = btn.getAttribute('data-streamer-id');
-        var row = document.getElementById('eventsub-' + id);
-        if (row) row.classList.toggle('is-hidden');
-      });
-    });
-  </script>
   <script src="/utils.js"></script>
   <script src="/streams-utils.js"></script>
+  <script src="/streams-eventsub.js"></script>
   <script src="/streams-discord.js"></script>
   <script src="/streams-live-detail.js"></script>
   <script src="/streams-live-table.js"></script>
