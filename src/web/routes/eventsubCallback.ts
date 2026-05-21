@@ -26,7 +26,10 @@ router.get('/twitch/eventsub/callback', async (req, res) => {
   delete req.session.eventsubOAuthState;
   delete req.session.eventsubStreamerId;
 
-  if (!code || !state || !expectedState || state !== expectedState || !streamerId) {
+  if (!code || !state || !expectedState || !streamerId) {
+    return res.redirect('/admin/streams?error=eventsub_oauth_state_mismatch');
+  }
+  if (state !== expectedState) {
     return res.redirect('/admin/streams?error=eventsub_oauth_state_mismatch');
   }
 

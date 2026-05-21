@@ -196,20 +196,20 @@ async function subscribeAll(sid: string): Promise<void> {
     const config = streamer.config;
 
     if (config?.follow_enabled && token) {
-      await subscribe(sid, 'channel.follow', '2',
-        { broadcaster_user_id: uid, moderator_user_id: uid }, token, streamer.name);
+      await subscribe(sid, { type: 'channel.follow', version: '2',
+        condition: { broadcaster_user_id: uid, moderator_user_id: uid } }, token, streamer.name);
     }
 
     if (config?.sub_enabled && token) {
-      await subscribe(sid, 'channel.subscribe', '1', { broadcaster_user_id: uid }, token, streamer.name);
-      await subscribe(sid, 'channel.subscription.message', '1', { broadcaster_user_id: uid }, token, streamer.name);
-      await subscribe(sid, 'channel.subscription.gift', '1', { broadcaster_user_id: uid }, token, streamer.name);
+      await subscribe(sid, { type: 'channel.subscribe', version: '1', condition: { broadcaster_user_id: uid } }, token, streamer.name);
+      await subscribe(sid, { type: 'channel.subscription.message', version: '1', condition: { broadcaster_user_id: uid } }, token, streamer.name);
+      await subscribe(sid, { type: 'channel.subscription.gift', version: '1', condition: { broadcaster_user_id: uid } }, token, streamer.name);
     }
 
     if (config?.raid_enabled) {
       try {
         const appToken = await getAppToken();
-        await subscribe(sid, 'channel.raid', '1', { to_broadcaster_user_id: uid }, appToken, streamer.name);
+        await subscribe(sid, { type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }, appToken, streamer.name);
       } catch (err) {
         log.error(`Failed to get app token for raid sub (${streamer.name}):`, err);
       }
@@ -217,19 +217,14 @@ async function subscribeAll(sid: string): Promise<void> {
   }
 }
 
-async function subscribe(
-  sessionId: string,
-  type: string,
-  version: string,
-  condition: Record<string, string>,
-  token: string,
-  login: string,
-): Promise<void> {
+interface SubSpec { type: string; version: string; condition: Record<string, string> }
+
+async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<void> {
   try {
-    const id = await createEventSubSubscription(type, version, condition, sessionId, token);
-    if (id !== null) log.info(`Subscribed to ${type} for ${login}`);
+    const id = await createEventSubSubscription(spec.type, spec.version, spec.condition, sessionId, token);
+    if (id !== null) log.info(`Subscribed to ${spec.type} for ${login}`);
   } catch (err) {
-    log.error(`Failed to subscribe to ${type} for ${login}:`, err);
+    log.error(`Failed to subscribe to ${spec.type} for ${login}:`, err);
   }
 }
 
