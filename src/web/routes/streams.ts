@@ -16,16 +16,10 @@ import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { restartTwitchMonitor, getLiveStates } from '../../twitchMonitor';
 import { AccessLevel } from '../../db/users';
+import { parsePositiveIntId } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
-
-function parsePositiveIntId(value: string | string[] | undefined): number | null {
-  const str = Array.isArray(value) ? value[0] : value;
-  if (typeof str !== 'string' || !/^\d+$/.test(str)) return null;
-  const parsed = Number(str);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-}
 
 function hasMissingValues(...values: Array<string | undefined>): boolean {
   return values.some((value) => typeof value !== 'string' || value.trim().length === 0);
@@ -87,7 +81,10 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
       csrfToken: req.csrfToken(),
       error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
       success: req.query.success as string | undefined,
-      successExpectedAccount: req.query.expected as string | undefined,
+      successExpectedAccount: (() => {
+        const expected = req.query.expected as string | undefined;
+        return expected && botEnabledSet.has(expected) ? expected : undefined;
+      })(),
       getFriendlyError,
     });
   } catch (err) {

@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   startWebPanel();
   startCounterScheduler();
   startTwitchMonitor().catch((err) => log.error('TwitchMonitor startup error:', err));
-  startEventSub().catch((err) => log.error('EventSub startup error:', err));
+  startEventSub();
 }
 
 main().catch((err) => {

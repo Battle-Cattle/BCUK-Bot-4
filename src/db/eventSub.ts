@@ -47,6 +47,7 @@ export async function getAllEventSubStreamers(): Promise<DbStreamerEventSub[]> {
             c.sub_enabled, c.sub_message, c.resub_message, c.giftsub_message,
             c.raid_enabled, c.raid_message
      FROM streamer s
+     INNER JOIN \`user\` u ON LOWER(u.twitch_name) = LOWER(s.name) AND u.is_twitch_bot_enabled = 1
      LEFT JOIN streamer_event_config c ON c.streamer_id = s.id
      ORDER BY s.name`,
   );
@@ -79,7 +80,7 @@ export async function saveStreamerToken(
 export async function clearStreamerToken(streamerId: number): Promise<void> {
   await getPool().execute(
     `UPDATE streamer
-     SET eventsub_access_token=NULL, eventsub_refresh_token=NULL, eventsub_token_expiry=NULL
+     SET twitch_user_id=NULL, eventsub_access_token=NULL, eventsub_refresh_token=NULL, eventsub_token_expiry=NULL
      WHERE id=?`,
     [streamerId],
   );

@@ -1,6 +1,6 @@
 import { createLogger } from './logger';
 import { getAllEventSubStreamers, saveStreamerToken, clearStreamerToken, DbStreamerEventSub, EventSubConfig } from './db/eventSub';
-import { getAppToken, refreshUserToken, createEventSubSubscription } from './twitchApi';
+import { getAppToken, refreshUserToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription } from './twitchApi';
 import { getActiveChannels } from './twitchBot';
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid,
@@ -15,7 +15,25 @@ export interface SubSpec { type: string; version: string; condition: Record<stri
 
 // In-memory lookup keyed by Twitch broadcaster user ID
 export interface StreamerInfo { login: string; streamerId: number; config: EventSubConfig | null }
-export const streamerMap = new Map<string, StreamerInfo>();
+const streamerMap = new Map<string, StreamerInfo>();
+
+async function cleanupSubscriptions(uid: string, userToken: string | null): Promise<void> {
+  try {
+    if (userToken) {
+      const existing = await listEventSubSubscriptions(userToken);
+      for (const sub of existing) {
+        await deleteEventSubSubscription(sub.id, userToken);
+      }
+    }
+    const appToken = await getAppToken();
+    const raidSubs = await listEventSubSubscriptions(appToken, uid);
+    for (const sub of raidSubs.filter((s) => s.type === 'channel.raid')) {
+      await deleteEventSubSubscription(sub.id, appToken);
+    }
+  } catch (err) {
+    log.error(`Subscription cleanup failed for uid ${uid}:`, err);
+  }
+}
 
 export async function subscribeAll(sid: string): Promise<void> {
   const streamers = await getAllEventSubStreamers();
@@ -25,6 +43,9 @@ export async function subscribeAll(sid: string): Promise<void> {
     if (!streamer.twitch_user_id) continue;
 
     const token = await maybeRefreshToken(streamer);
+    const uid = streamer.twitch_user_id;
+
+    await cleanupSubscriptions(uid, token);
 
     streamerMap.set(streamer.twitch_user_id, {
       login: streamer.name,
@@ -32,7 +53,6 @@ export async function subscribeAll(sid: string): Promise<void> {
       config: streamer.config,
     });
 
-    const uid = streamer.twitch_user_id;
     const config = streamer.config;
 
     if (config?.follow_enabled && token) {

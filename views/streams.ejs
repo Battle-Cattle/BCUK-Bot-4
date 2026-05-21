@@ -245,7 +245,7 @@
                         Follow notifications <% if (!isConnected) { %><span class="hint">(requires Twitch connection)</span><% } %>
                       </label>
                       <p class="hint hint-compact">Variables: <code>{username} {display_name}</code></p>
-                      <textarea class="input stream-textarea" name="follow_message" rows="1" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.follow_message) ? cfg.follow_message : 'Thanks {display_name} for the follow!' %></textarea>
+                      <textarea class="input stream-textarea" name="follow_message" rows="1" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.follow_message) ? cfg.follow_message : 'Thanks {display_name} for the follow!' %></textarea>
                     </div>
 
                     <div class="form-subsection-gap">
@@ -254,11 +254,11 @@
                         Sub/resub/gift notifications <% if (!isConnected) { %><span class="hint">(requires Twitch connection)</span><% } %>
                       </label>
                       <p class="hint hint-compact">New sub — variables: <code>{username} {display_name} {tier} {tier_name}</code></p>
-                      <textarea class="input stream-textarea" name="sub_message" rows="1" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.sub_message) ? cfg.sub_message : 'Thanks {display_name} for subscribing! (Tier {tier_name})' %></textarea>
+                      <textarea class="input stream-textarea" name="sub_message" rows="1" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.sub_message) ? cfg.sub_message : 'Thanks {display_name} for subscribing! (Tier {tier_name})' %></textarea>
                       <p class="hint hint-compact" style="margin-top:0.4rem;">Resub — variables: <code>{username} {display_name} {tier} {tier_name} {months} {streak}</code></p>
-                      <textarea class="input stream-textarea" name="resub_message" rows="1" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.resub_message) ? cfg.resub_message : 'Thanks {display_name} for {months} months! (Tier {tier_name})' %></textarea>
+                      <textarea class="input stream-textarea" name="resub_message" rows="1" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.resub_message) ? cfg.resub_message : 'Thanks {display_name} for {months} months! (Tier {tier_name})' %></textarea>
                       <p class="hint hint-compact" style="margin-top:0.4rem;">Gift sub — variables: <code>{gifter} {gifter_display} {count} {tier} {tier_name}</code></p>
-                      <textarea class="input stream-textarea" name="giftsub_message" rows="1" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.giftsub_message) ? cfg.giftsub_message : '{gifter_display} gifted {count} sub(s) to the community!' %></textarea>
+                      <textarea class="input stream-textarea" name="giftsub_message" rows="1" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.giftsub_message) ? cfg.giftsub_message : '{gifter_display} gifted {count} sub(s) to the community!' %></textarea>
                     </div>
 
                     <div class="form-subsection-gap">
@@ -267,7 +267,7 @@
                         Raid notifications
                       </label>
                       <p class="hint hint-compact">Variables: <code>{from_channel} {from_display} {viewers}</code></p>
-                      <textarea class="input stream-textarea" name="raid_message" rows="1"><%= (cfg && cfg.raid_message) ? cfg.raid_message : 'Welcome raiders from {from_channel}! Thank you for the {viewers} person raid!' %></textarea>
+                      <textarea class="input stream-textarea" name="raid_message" rows="1" maxlength="500"><%= (cfg && cfg.raid_message) ? cfg.raid_message : 'Welcome raiders from {from_channel}! Thank you for the {viewers} person raid!' %></textarea>
                     </div>
 
                     <div class="button-row-wrap">

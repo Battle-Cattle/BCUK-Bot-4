@@ -12,18 +12,12 @@ import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
 import { reloadEventSubSubscriptions } from '../../twitchEventSub';
 import { TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI } from '../../config';
+import { parsePositiveIntId } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
 
 const TWITCH_OAUTH_SCOPE = 'moderator:read:followers channel:read:subscriptions';
-
-function parsePositiveIntId(value: string | string[] | undefined): number | null {
-  const str = Array.isArray(value) ? value[0] : value;
-  if (typeof str !== 'string' || !/^\d+$/.test(str)) return null;
-  const parsed = Number(str);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-}
 
 router.get('/streams/twitch-oauth/:streamerId', requireAdmin, async (req, res) => {
   const streamerId = parsePositiveIntId(req.params['streamerId']);
@@ -80,6 +74,16 @@ router.post('/streams/event-config/:streamerId', requireAdmin, csrfProtection, a
   }
 
   const body = req.body as Record<string, string | undefined>;
+
+  const MESSAGE_MAX_LENGTH = 500;
+  const messageFields = ['follow_message', 'sub_message', 'resub_message', 'giftsub_message', 'raid_message'] as const;
+  for (const field of messageFields) {
+    const value = (body[field] ?? '').trim();
+    if (value.length > MESSAGE_MAX_LENGTH) {
+      return res.redirect('/admin/streams?error=eventsub_config_failed');
+    }
+  }
+
   const config: EventSubConfig = {
     follow_enabled: body.follow_enabled === 'on',
     follow_message: (body.follow_message ?? '').trim() || 'Thanks {display_name} for the follow!',

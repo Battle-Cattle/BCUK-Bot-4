@@ -260,3 +260,33 @@ export async function createEventSubSubscription(
   const data = await res.json() as { data: Array<{ id: string }> };
   return data.data[0].id;
 }
+
+/** Lists EventSub subscriptions. With a user token returns the broadcaster's subscriptions;
+ *  with an app token and userId returns subscriptions matching that user in any condition. */
+export async function listEventSubSubscriptions(
+  token: string,
+  userId?: string,
+): Promise<Array<{ id: string; type: string }>> {
+  const url = new URL('https://api.twitch.tv/helix/eventsub/subscriptions');
+  if (userId) url.searchParams.set('user_id', userId);
+  const results: Array<{ id: string; type: string }> = [];
+  let cursor: string | undefined;
+  do {
+    if (cursor) url.searchParams.set('after', cursor);
+    const res = await twitchFetch(url.toString(), { headers: authHeaders(token) });
+    if (!res.ok) throw new Error(`[TwitchAPI] listEventSubSubscriptions failed: ${res.status}`);
+    const data = await res.json() as { data: Array<{ id: string; type: string }>; pagination?: { cursor?: string } };
+    results.push(...data.data);
+    cursor = data.pagination?.cursor;
+  } while (cursor);
+  return results;
+}
+
+export async function deleteEventSubSubscription(id: string, token: string): Promise<void> {
+  const res = await twitchFetch(
+    `https://api.twitch.tv/helix/eventsub/subscriptions?id=${encodeURIComponent(id)}`,
+    { method: 'DELETE', headers: authHeaders(token) },
+  );
+  if (res.ok || res.status === 404) return;
+  throw new Error(`[TwitchAPI] deleteEventSubSubscription failed: ${res.status}`);
+}
