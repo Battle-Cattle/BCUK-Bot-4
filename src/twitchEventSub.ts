@@ -139,6 +139,16 @@ function handleMessage(socket: WebSocket, msg: EventSubMessage): void {
 }
 
 function handleSessionReconnect(oldSocket: WebSocket, reconnectUrl: string): void {
+  // Validate URL is Twitch's EventSub domain before connecting (prevents SSRF)
+  let parsed: URL;
+  try { parsed = new URL(reconnectUrl); } catch {
+    log.error(`Invalid reconnect URL (unparseable) — ignoring`);
+    return;
+  }
+  if (parsed.protocol !== 'wss:' || parsed.hostname !== 'eventsub.wss.twitch.tv') {
+    log.error(`Invalid reconnect URL (unexpected host) — ignoring`);
+    return;
+  }
   isReconnecting = true;
   log.info(`Session reconnect to ${reconnectUrl}`);
   connect(reconnectUrl);
