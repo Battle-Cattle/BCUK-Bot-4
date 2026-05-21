@@ -30,17 +30,11 @@ const notificationHandlers = new Map<string, NotificationHandler>([
 ]);
 
 async function deleteStaleSubscriptions(uid: string, desired: Set<string>, userToken: string | null): Promise<void> {
+  if (!userToken) return;
   try {
-    if (userToken) {
-      const existing = await listEventSubSubscriptions(userToken);
-      for (const sub of existing) {
-        if (!desired.has(sub.type)) await deleteEventSubSubscription(sub.id, userToken);
-      }
-    }
-    const appToken = await getAppToken();
-    const raidSubs = await listEventSubSubscriptions(appToken, uid);
-    for (const sub of raidSubs.filter((s) => s.type === 'channel.raid' && !desired.has('channel.raid'))) {
-      await deleteEventSubSubscription(sub.id, appToken);
+    const existing = await listEventSubSubscriptions(userToken);
+    for (const sub of existing) {
+      if (!desired.has(sub.type)) await deleteEventSubSubscription(sub.id, userToken);
     }
   } catch (err) {
     log.error(`Subscription cleanup failed for uid ${uid}:`, err);
