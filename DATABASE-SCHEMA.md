@@ -120,16 +120,46 @@ Stores configuration for Twitch announcement groups.
 
 ## `streamer`
 
-Stores monitored Twitch streamers and their current Discord post state.
+Stores monitored Twitch streamers and their current Discord post state. Each row maps a Discord user to a stream announcement group. The Twitch channel name is read from the linked `user` row (`user.twitch_name`) rather than stored redundantly.
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | `INT` PK | Streamer row identifier |
-| `name` | `VARCHAR(...)` | Lowercase Twitch username |
+| `discord_id` | `BIGINT` UNIQUE | FK to `user.discord_id`; one row per user |
 | `group_id` | `INT` | FK to `stream_group.id` |
 | `discord_message_id` | `VARCHAR(20)` nullable | ID of the last announcement message |
 | `discord_channel_id` | `BIGINT` nullable | Channel where the last message was posted |
 | `live_game` | `VARCHAR(255)` nullable | Last seen live game |
+| `twitch_user_id` | `VARCHAR(50)` nullable | Twitch numeric user ID (used for EventSub) |
+| `eventsub_access_token` | `TEXT` nullable | AES-256-GCM encrypted Twitch broadcaster OAuth access token |
+| `eventsub_refresh_token` | `TEXT` nullable | AES-256-GCM encrypted refresh token |
+| `eventsub_token_expiry` | `BIGINT` nullable | Token expiry as Unix milliseconds |
+
+Expected constraints:
+
+- `UNIQUE KEY uq_streamer_discord_id (discord_id)` — enforces one stream group per user.
+- `FOREIGN KEY (discord_id) REFERENCES user(discord_id) ON DELETE CASCADE` — removing a user automatically removes their streamer row.
+- `FOREIGN KEY (group_id) REFERENCES stream_group(id)` — group must exist.
+
+Apply `migrations/consolidate_streamer_user.sql` to migrate from the previous schema (which stored `name VARCHAR` instead of `discord_id BIGINT`).
+
+## `streamer_event_config`
+
+Per-streamer EventSub notification message configuration. Applied once the streamer has connected their Twitch OAuth token.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `streamer_id` | `INT` PK | FK to `streamer.id` ON DELETE CASCADE |
+| `follow_enabled` | `TINYINT(1)` | Whether follow notifications are sent |
+| `follow_message` | `VARCHAR(500)` | Message template for follows |
+| `sub_enabled` | `TINYINT(1)` | Whether sub/resub/giftsub notifications are sent |
+| `sub_message` | `VARCHAR(500)` | New sub message template |
+| `resub_message` | `VARCHAR(500)` | Resub message template |
+| `giftsub_message` | `VARCHAR(500)` | Gift sub message template |
+| `raid_enabled` | `TINYINT(1)` | Whether raid notifications are sent |
+| `raid_message` | `VARCHAR(500)` | Raid message template |
+
+Created by `migrations/twitch_eventsub.sql`.
 
 ## `custom_command`
 

@@ -21,7 +21,7 @@ export async function tryEditStartupMessage(
   try {
     const channel = await discordClient.channels.fetch(streamer.discord_channel_id);
     if (!channel || !channel.isTextBased()) return false;
-    const vars = templateVars(streamer.name, liveStream);
+    const vars = templateVars(liveStream.user_login, liveStream);
     const content = fillTemplate(streamer.group.live_message, vars);
     const embed = buildEmbed(liveStream);
     const message = await channel.messages.fetch(streamer.discord_message_id);
@@ -31,7 +31,7 @@ export async function tryEditStartupMessage(
     return true;
   } catch (err) {
     if (isDiscordNotFoundError(err)) return false;
-    log.error(`Failed to edit startup message for ${streamer.name}:`, err);
+    log.error(`Failed to edit startup message for ${streamer.twitch_name ?? 'unknown'}:`, err);
     throw err;
   }
 }
@@ -101,7 +101,8 @@ export async function performStartupLiveCheck(
   const groupsWithChanges = new Set<number>();
 
   for (const streamer of streamersData) {
-    const userId = loginToUserId.get(streamer.name.toLowerCase());
+    const loginKey = streamer.twitch_name?.toLowerCase();
+    const userId = loginKey ? loginToUserId.get(loginKey) : undefined;
     if (!userId) continue;
 
     const liveStream = liveByUserId.get(userId);

@@ -46,11 +46,12 @@ async function deleteStaleSubscriptions(uid: string, desired: Set<string>, userT
 async function resolveBroadcasterId(streamer: DbStreamerEventSub, config: EventSubConfig | null): Promise<string | null> {
   if (streamer.twitch_user_id) return streamer.twitch_user_id;
   if (!config?.raid_enabled) return null;
+  if (!streamer.twitch_name) return null;
   try {
-    const users = await getUsers([streamer.name]);
+    const users = await getUsers([streamer.twitch_name]);
     return users[0]?.id ?? null;
   } catch (err) {
-    log.error(`Failed to resolve Twitch user ID for ${streamer.name}:`, err);
+    log.error(`Failed to resolve Twitch user ID for ${streamer.twitch_name}:`, err);
     return null;
   }
 }
@@ -99,10 +100,10 @@ export async function subscribeAll(sid: string): Promise<number> {
     const uid = await resolveBroadcasterId(streamer, config);
     if (!uid) continue;
 
-    nextMap.set(uid, { login: streamer.name, streamerId: streamer.id, config });
+    nextMap.set(uid, { login: streamer.twitch_name ?? '', streamerId: streamer.id, config });
 
     // Create desired subscriptions first so there is never a gap where zero are active
-    const desired = await createSubscriptionsForStreamer(sid, uid, token, config, streamer.name);
+    const desired = await createSubscriptionsForStreamer(sid, uid, token, config, streamer.twitch_name ?? '');
     await deleteStaleSubscriptions(uid, desired, token);
   }
 
@@ -130,7 +131,7 @@ async function maybeRefreshToken(streamer: DbStreamerEventSub): Promise<string |
   if (!needsRefresh) return streamer.eventsub_access_token;
 
   if (!streamer.eventsub_refresh_token) {
-    log.warn(`No refresh token for ${streamer.name}`);
+    log.warn(`No refresh token for ${streamer.twitch_name ?? 'unknown'}`);
     return null;
   }
 
@@ -138,14 +139,14 @@ async function maybeRefreshToken(streamer: DbStreamerEventSub): Promise<string |
     const tokens = await refreshUserToken(streamer.eventsub_refresh_token);
     const expiryMs = Date.now() + tokens.expires_in * 1000 - 60_000;
     await saveStreamerToken(streamer.id, streamer.twitch_user_id!, tokens.access_token, tokens.refresh_token, expiryMs);
-    log.info(`Token refreshed for ${streamer.name}`);
+    log.info(`Token refreshed for ${streamer.twitch_name ?? 'unknown'}`);
     return tokens.access_token;
   } catch (err) {
     if (err instanceof TwitchAuthError) {
       await clearStreamerToken(streamer.id);
-      log.error(`Token refresh failed for ${streamer.name} — re-authorization required:`, err);
+      log.error(`Token refresh failed for ${streamer.twitch_name ?? 'unknown'} — re-authorization required:`, err);
     } else {
-      log.error(`Token refresh failed for ${streamer.name} — transient error, will retry on next reload:`, err);
+      log.error(`Token refresh failed for ${streamer.twitch_name ?? 'unknown'} — transient error, will retry on next reload:`, err);
     }
     return null;
   }

@@ -10,7 +10,7 @@ import {
   removeStreamer,
   removeStreamersByGroup,
   getAllEventSubStreamers,
-  getTwitchEnabledChannels,
+  getAllUsers,
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
@@ -29,26 +29,18 @@ const KNOWN_ERRORS = new Set([
   'missing_fields', 'invalid_id',
   'add_group_failed', 'update_group_failed', 'remove_group_failed',
   'add_streamer_failed', 'remove_streamer_failed',
-  'eventsub_not_bot_enabled', 'eventsub_config_failed', 'eventsub_disconnect_failed',
-  'eventsub_oauth_denied', 'eventsub_oauth_state_mismatch', 'eventsub_token_invalid',
-  'eventsub_wrong_account',
+  'eventsub_disconnect_failed',
 ]);
 
 export const ERROR_MESSAGES: Record<string, string> = {
-  missing_fields:                'All required fields must be filled in.',
-  invalid_id:                    'Invalid ID — please try again.',
-  add_group_failed:              'Failed to add stream group. Please try again.',
-  update_group_failed:           'Failed to update stream group. Please try again.',
-  remove_group_failed:           'Failed to remove stream group. Please try again.',
-  add_streamer_failed:           'Failed to add streamer. Please try again.',
-  remove_streamer_failed:        'Failed to remove streamer. Please try again.',
-  eventsub_not_bot_enabled:      'Notifications can only be configured for channels with the Twitch bot enabled.',
-  eventsub_config_failed:        'Failed to save notification config. Please try again.',
-  eventsub_disconnect_failed:    'Failed to disconnect Twitch account. Please try again.',
-  eventsub_oauth_denied:         'Twitch authorization was denied.',
-  eventsub_oauth_state_mismatch: 'Authorization failed — please try connecting again.',
-  eventsub_token_invalid:        'Could not verify the Twitch account. Please try again.',
-  eventsub_wrong_account:        'Wrong Twitch account — please authorize with the correct broadcaster account.',
+  missing_fields:             'All required fields must be filled in.',
+  invalid_id:                 'Invalid ID — please try again.',
+  add_group_failed:           'Failed to add stream group. Please try again.',
+  update_group_failed:        'Failed to update stream group. Please try again.',
+  remove_group_failed:        'Failed to remove stream group. Please try again.',
+  add_streamer_failed:        'Failed to add streamer. Please try again.',
+  remove_streamer_failed:     'Failed to remove streamer. Please try again.',
+  eventsub_disconnect_failed: 'Failed to disconnect Twitch account. Please try again.',
 };
 
 function getFriendlyError(key: string): string {
@@ -60,16 +52,22 @@ function getFriendlyError(key: string): string {
 router.get('/streams', requireManager, csrfProtection, async (req, res) => {
   try {
     const isAdmin = (req.session.user?.accessLevel ?? 0) >= AccessLevel.ADMIN;
-    const [groups, streamers, eventSubStreamers, botEnabledChannels] = await Promise.all([
+    const [groups, streamers, eventSubStreamers, allUsers] = await Promise.all([
       getAllStreamGroups(),
       getAllStreamers(),
       isAdmin ? getAllEventSubStreamers() : Promise.resolve([]),
-      isAdmin ? getTwitchEnabledChannels() : Promise.resolve([]),
+      getAllUsers(),
     ]);
 
+    // EventSub status keyed by streamer row id — admin only
     const eventSubById: Record<number, (typeof eventSubStreamers)[0]> = {};
     for (const s of eventSubStreamers) eventSubById[s.id] = s;
-    const botEnabledSet = new Set(botEnabledChannels);
+
+    // Users eligible to be added as streamers: have a Twitch name, not already a streamer
+    const existingStreamerIds = new Set(streamers.map((s) => s.discord_id));
+    const eligibleUsers = allUsers.filter(
+      (u) => u.twitch_name && !existingStreamerIds.has(u.discord_id),
+    );
 
     res.render('streams', {
       user: req.session.user,
@@ -77,14 +75,10 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
       streamers,
       isAdmin,
       eventSubById,
-      botEnabledSet,
+      eligibleUsers,
       csrfToken: req.csrfToken(),
       error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
       success: req.query.success as string | undefined,
-      successExpectedAccount: (() => {
-        const expected = req.query.expected as string | undefined;
-        return expected && botEnabledSet.has(expected) ? expected : undefined;
-      })(),
       getFriendlyError,
     });
   } catch (err) {
@@ -110,17 +104,12 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
     return res.redirect('/admin/streams?error=missing_fields');
   }
 
-  const normalizedName = name!.trim();
-  const normalizedDiscordChannel = discord_channel!.trim();
-  const normalizedLiveMessage = live_message!.trim();
-  const normalizedNewGameMessage = new_game_message!.trim();
-
   try {
     await addStreamGroup({
-      name: normalizedName,
-      discordChannel: normalizedDiscordChannel,
-      liveMessage: normalizedLiveMessage,
-      newGameMessage: normalizedNewGameMessage,
+      name: name!.trim(),
+      discordChannel: discord_channel!.trim(),
+      liveMessage: live_message!.trim(),
+      newGameMessage: new_game_message!.trim(),
       multiTwitch: multi_twitch,
       deleteOldPosts: delete_old_posts,
     });
@@ -141,21 +130,16 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
     return res.redirect('/admin/streams?error=missing_fields');
   }
 
-  const normalizedName = name!.trim();
-  const normalizedDiscordChannel = discord_channel!.trim();
-  const normalizedLiveMessage = live_message!.trim();
-  const normalizedNewGameMessage = new_game_message!.trim();
-
   const parsedGroupId = parsePositiveIntId(group_id);
   if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
     await updateStreamGroup({
       id: parsedGroupId,
-      name: normalizedName,
-      discordChannel: normalizedDiscordChannel,
-      liveMessage: normalizedLiveMessage,
-      newGameMessage: normalizedNewGameMessage,
+      name: name!.trim(),
+      discordChannel: discord_channel!.trim(),
+      liveMessage: live_message!.trim(),
+      newGameMessage: new_game_message!.trim(),
       multiTwitch: multi_twitch,
       deleteOldPosts: delete_old_posts,
     });
@@ -188,13 +172,13 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
 // ─── Streamers ────────────────────────────────────────────────────────────────
 
 router.post('/streams/streamers/add', requireManager, csrfProtection, async (req, res) => {
-  const { name, group_id } = req.body as { name?: string; group_id?: string };
-  if (!name || !group_id) return res.redirect('/admin/streams');
+  const { discord_id, group_id } = req.body as { discord_id?: string; group_id?: string };
+  if (!discord_id || !group_id) return res.redirect('/admin/streams?error=missing_fields');
   const parsedGroupId = parsePositiveIntId(group_id);
   if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
-    await addStreamer(name.trim(), parsedGroupId);
+    await addStreamer(discord_id.trim(), parsedGroupId);
     triggerRestart();
   } catch (err) {
     log.error('Add streamer error:', err);

@@ -16,7 +16,8 @@ export interface EventSubConfig {
 
 export interface DbStreamerEventSub {
   id: number;
-  name: string;
+  discord_id: string;
+  twitch_name: string | null;
   twitch_user_id: string | null;
   eventsub_access_token: string | null;
   eventsub_refresh_token: string | null;
@@ -51,27 +52,49 @@ function maybeDecrypt(value: string | null): string | null {
   }
 }
 
-export async function getAllEventSubStreamers(): Promise<DbStreamerEventSub[]> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT s.id, s.name, s.twitch_user_id,
-            s.eventsub_access_token, s.eventsub_refresh_token, s.eventsub_token_expiry,
-            c.follow_enabled, c.follow_message,
-            c.sub_enabled, c.sub_message, c.resub_message, c.giftsub_message,
-            c.raid_enabled, c.raid_message
-     FROM streamer s
-     INNER JOIN \`user\` u ON u.twitch_name = s.name AND u.is_twitch_bot_enabled = 1
-     LEFT JOIN streamer_event_config c ON c.streamer_id = s.id
-     ORDER BY s.name`,
-  );
-  return rows.map((r) => ({
+function mapStreamerEventSub(r: mysql.RowDataPacket): DbStreamerEventSub {
+  return {
     id: r.id,
-    name: r.name,
+    discord_id: String(r.discord_id),
+    twitch_name: r.twitch_name ?? null,
     twitch_user_id: r.twitch_user_id ?? null,
     eventsub_access_token: maybeDecrypt(r.eventsub_access_token ?? null),
     eventsub_refresh_token: maybeDecrypt(r.eventsub_refresh_token ?? null),
     eventsub_token_expiry: r.eventsub_token_expiry != null ? Number(r.eventsub_token_expiry) : null,
     config: r.follow_enabled != null ? mapConfig(r) : null,
-  }));
+  };
+}
+
+const EVENT_SUB_SELECT = `
+  s.id, s.discord_id, u.twitch_name,
+  s.twitch_user_id,
+  s.eventsub_access_token, s.eventsub_refresh_token, s.eventsub_token_expiry,
+  c.follow_enabled, c.follow_message,
+  c.sub_enabled, c.sub_message, c.resub_message, c.giftsub_message,
+  c.raid_enabled, c.raid_message`;
+
+export async function getAllEventSubStreamers(): Promise<DbStreamerEventSub[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT ${EVENT_SUB_SELECT}
+     FROM streamer s
+     JOIN \`user\` u ON u.discord_id = s.discord_id
+     LEFT JOIN streamer_event_config c ON c.streamer_id = s.id
+     WHERE u.is_twitch_bot_enabled = 1
+     ORDER BY u.twitch_name`,
+  );
+  return rows.map(mapStreamerEventSub);
+}
+
+export async function getStreamerByDiscordId(discordId: string): Promise<DbStreamerEventSub | null> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT ${EVENT_SUB_SELECT}
+     FROM streamer s
+     JOIN \`user\` u ON u.discord_id = s.discord_id
+     LEFT JOIN streamer_event_config c ON c.streamer_id = s.id
+     WHERE s.discord_id = ?`,
+    [discordId],
+  );
+  return rows.length === 0 ? null : mapStreamerEventSub(rows[0]);
 }
 
 export async function saveStreamerToken(
