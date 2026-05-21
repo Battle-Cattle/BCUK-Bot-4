@@ -164,7 +164,12 @@ export function dispatchNotification(type: string, event: Record<string, unknown
     return;
   }
 
-  notificationHandlers.get(type)?.(info.login, event, info.config)
+  const handler = notificationHandlers.get(type);
+  if (!handler) {
+    log.warn(`Unsupported EventSub notification type: ${type}`);
+    return;
+  }
+  handler(info.login, event, info.config)
     .catch((err) => log.error(`${type} handler error:`, err));
 }
 
