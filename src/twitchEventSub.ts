@@ -102,7 +102,12 @@ function connect(url: string = EVENTSUB_WS_URL): void {
     if (ws !== socket) return; // old socket closed during session migration — ignore
     log.warn(`WebSocket closed: ${ev.code} ${ev.reason}`);
     clearKeepaliveTimer();
-    if (!stopped && !isReconnecting) scheduleReconnect();
+    if (!stopped) {
+      // Clear isReconnecting so the next connect() performs a full subscribeAll().
+      // This handles the case where the replacement socket dies before session_welcome.
+      isReconnecting = false;
+      scheduleReconnect();
+    }
   });
 
   socket.addEventListener('error', () => {

@@ -32,6 +32,11 @@ router.get('/streams/twitch-oauth/:streamerId', requireAdmin, async (req, res) =
     return res.redirect('/admin/streams?error=eventsub_not_bot_enabled');
   }
 
+  if (!TWITCH_EVENTSUB_REDIRECT_URI) {
+    log.error('TWITCH_EVENTSUB_REDIRECT_URI is not configured');
+    return res.redirect('/admin/streams?error=eventsub_config_failed');
+  }
+
   const state = randomBytes(16).toString('hex');
   req.session.eventsubOAuthState = state;
   req.session.eventsubStreamerId = streamerId;

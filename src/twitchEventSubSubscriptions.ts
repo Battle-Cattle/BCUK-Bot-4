@@ -1,6 +1,6 @@
 import { createLogger } from './logger';
 import { getAllEventSubStreamers, saveStreamerToken, clearStreamerToken, DbStreamerEventSub, EventSubConfig } from './db/eventSub';
-import { getAppToken } from './twitchApi';
+import { getAppToken, getUsers } from './twitchApi';
 import { TwitchAuthError, refreshUserToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription } from './twitchApiEventSub';
 import { getActiveChannels } from './twitchBot';
 import {
@@ -41,11 +41,21 @@ export async function subscribeAll(sid: string): Promise<void> {
   streamerMap.clear();
 
   for (const streamer of streamers) {
-    if (!streamer.twitch_user_id) continue;
-
     const token = await maybeRefreshToken(streamer);
-    const uid = streamer.twitch_user_id;
     const config = streamer.config;
+
+    // Resolve the broadcaster ID — stored after OAuth, or fetched via app token for raid-only streamers
+    let uid = streamer.twitch_user_id;
+    if (!uid && config?.raid_enabled) {
+      try {
+        const users = await getUsers([streamer.name]);
+        uid = users[0]?.id ?? null;
+      } catch (err) {
+        log.error(`Failed to resolve Twitch user ID for ${streamer.name}:`, err);
+      }
+    }
+
+    if (!uid) continue;
 
     streamerMap.set(uid, {
       login: streamer.name,
