@@ -92,12 +92,12 @@ export async function saveEventConfig(streamerId: number, config: EventSubConfig
        (streamer_id, follow_enabled, follow_message,
         sub_enabled, sub_message, resub_message, giftsub_message,
         raid_enabled, raid_message)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE
-       follow_enabled=VALUES(follow_enabled), follow_message=VALUES(follow_message),
-       sub_enabled=VALUES(sub_enabled), sub_message=VALUES(sub_message),
-       resub_message=VALUES(resub_message), giftsub_message=VALUES(giftsub_message),
-       raid_enabled=VALUES(raid_enabled), raid_message=VALUES(raid_message)`,
+       follow_enabled=new_row.follow_enabled, follow_message=new_row.follow_message,
+       sub_enabled=new_row.sub_enabled, sub_message=new_row.sub_message,
+       resub_message=new_row.resub_message, giftsub_message=new_row.giftsub_message,
+       raid_enabled=new_row.raid_enabled, raid_message=new_row.raid_message`,
     [
       streamerId,
       config.follow_enabled ? 1 : 0, config.follow_message,

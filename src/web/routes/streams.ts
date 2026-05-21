@@ -15,7 +15,7 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { restartTwitchMonitor, getLiveStates } from '../../twitchMonitor';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { parsePositiveIntId } from './shared';
 
 const log = createLogger('Web');

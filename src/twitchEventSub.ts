@@ -162,10 +162,10 @@ function handleMessage(msg: EventSubMessage): void {
   // session_keepalive: timer already reset above
 }
 
-/** Validates the Twitch-supplied reconnect URL and returns a safe version.
- *  Only the query string (which contains the session_id for sub migration) is
- *  taken from the external input; the protocol/host/path come from our constant,
- *  so the connection cannot be redirected to an arbitrary server. */
+/** Validates the Twitch-supplied reconnect URL against a strict allowlist and
+ *  returns the original URL if valid, or null if any component is unexpected.
+ *  The allowlist (protocol, hostname, port, pathname) ensures the connection
+ *  cannot be redirected to an arbitrary server. */
 function buildReconnectUrl(reconnectUrl: string): string | null {
   let parsed: URL;
   try { parsed = new URL(reconnectUrl); } catch { return null; }
