@@ -263,11 +263,11 @@
 
                     <div class="form-subsection-gap">
                       <label class="input checkbox-input-label">
-                        <input type="checkbox" name="raid_enabled" <%= (cfg && cfg.raid_enabled) ? 'checked' : '' %>>
-                        Raid notifications
+                        <input type="checkbox" name="raid_enabled" <%= (cfg && cfg.raid_enabled) ? 'checked' : '' %> <%= !isConnected ? 'disabled' : '' %>>
+                        Raid notifications <% if (!isConnected) { %><span class="hint">(requires Twitch connection)</span><% } %>
                       </label>
                       <p class="hint hint-compact">Variables: <code>{from_channel} {from_display} {viewers}</code></p>
-                      <textarea class="input stream-textarea" name="raid_message" rows="1" maxlength="500"><%= (cfg && cfg.raid_message) ? cfg.raid_message : 'Welcome raiders from {from_channel}! Thank you for the {viewers} person raid!' %></textarea>
+                      <textarea class="input stream-textarea" name="raid_message" rows="1" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.raid_message) ? cfg.raid_message : 'Welcome raiders from {from_channel}! Thank you for the {viewers} person raid!' %></textarea>
                     </div>
 
                     <div class="button-row-wrap">

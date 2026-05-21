@@ -80,7 +80,10 @@ export async function createEventSubSubscription(
     }),
   });
   if (res.status === 409) return null;
-  if (!res.ok) throw new Error(`[TwitchAPI] createEventSubSubscription (${type}) failed: ${res.status}`);
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    throw new Error(`[TwitchAPI] createEventSubSubscription (${type}) failed: ${res.status} ${errBody}`);
+  }
   const data = await res.json() as { data: Array<{ id: string }> };
   if (!Array.isArray(data.data) || data.data.length === 0) {
     throw new Error(`[TwitchAPI] createEventSubSubscription (${type}) returned empty data`);
