@@ -146,8 +146,8 @@ function sanitizeReconnectUrl(reconnectUrl: string): string | null {
   if (parsed.username || parsed.password) return null;
   if (parsed.port && parsed.port !== '443') return null;
   if (parsed.pathname !== '/ws') return null;
-  // Canonicalized safe URL
-  return parsed.toString();
+  // Return trusted constant to avoid propagating untrusted URL data
+  return EVENTSUB_WS_URL;
 }
 
 function handleSessionReconnect(oldSocket: WebSocket, reconnectUrl: string): void {
