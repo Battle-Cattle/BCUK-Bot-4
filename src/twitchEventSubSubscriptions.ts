@@ -1,7 +1,7 @@
 import { createLogger } from './logger';
 import { getAllEventSubStreamers, saveStreamerToken, clearStreamerToken, DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 import { getAppToken } from './twitchApi';
-import { refreshUserToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription } from './twitchApiEventSub';
+import { TwitchAuthError, refreshUserToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription } from './twitchApiEventSub';
 import { getActiveChannels } from './twitchBot';
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid,
@@ -116,8 +116,12 @@ async function maybeRefreshToken(streamer: DbStreamerEventSub): Promise<string |
     log.info(`Token refreshed for ${streamer.name}`);
     return tokens.access_token;
   } catch (err) {
-    await clearStreamerToken(streamer.id);
-    log.error(`Token refresh failed for ${streamer.name} — re-authorization required:`, err);
+    if (err instanceof TwitchAuthError) {
+      await clearStreamerToken(streamer.id);
+      log.error(`Token refresh failed for ${streamer.name} — re-authorization required:`, err);
+    } else {
+      log.error(`Token refresh failed for ${streamer.name} — transient error, will retry on next reload:`, err);
+    }
     return null;
   }
 }
