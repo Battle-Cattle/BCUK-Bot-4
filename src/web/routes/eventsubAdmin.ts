@@ -11,7 +11,7 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
 import { reloadEventSubSubscriptions } from '../../twitchEventSub';
-import { TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI } from '../../config';
+import { TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, EVENTSUB_TOKEN_SECRET } from '../../config';
 import { parsePositiveIntId } from './shared';
 
 const log = createLogger('Web');
@@ -32,8 +32,8 @@ router.get('/streams/twitch-oauth/:streamerId', requireAdmin, async (req, res) =
     return res.redirect('/admin/streams?error=eventsub_not_bot_enabled');
   }
 
-  if (!TWITCH_EVENTSUB_REDIRECT_URI) {
-    log.error('TWITCH_EVENTSUB_REDIRECT_URI is not configured');
+  if (!TWITCH_EVENTSUB_REDIRECT_URI || !EVENTSUB_TOKEN_SECRET) {
+    log.error('TWITCH_EVENTSUB_REDIRECT_URI or EVENTSUB_TOKEN_SECRET is not configured');
     return res.redirect('/admin/streams?error=eventsub_config_failed');
   }
 
@@ -89,15 +89,21 @@ router.post('/streams/event-config/:streamerId', requireAdmin, csrfProtection, a
     }
   }
 
+  // Follow/sub inputs are disabled in the UI when the streamer is disconnected, so those
+  // keys are absent from the POST body. Fall back to existing config to avoid wiping saved settings.
+  const current = streamer.config;
+  function bodyMsg(key: string, fallback: string): string {
+    return key in body ? ((body[key] ?? '').trim() || fallback) : (current?.[key as keyof EventSubConfig] as string | undefined ?? fallback);
+  }
   const config: EventSubConfig = {
-    follow_enabled: body.follow_enabled === 'on',
-    follow_message: (body.follow_message ?? '').trim() || 'Thanks {display_name} for the follow!',
-    sub_enabled: body.sub_enabled === 'on',
-    sub_message: (body.sub_message ?? '').trim() || 'Thanks {display_name} for subscribing! (Tier {tier_name})',
-    resub_message: (body.resub_message ?? '').trim() || 'Thanks {display_name} for {months} months! (Tier {tier_name})',
-    giftsub_message: (body.giftsub_message ?? '').trim() || '{gifter_display} gifted {count} sub(s) to the community!',
+    follow_enabled: 'follow_enabled' in body ? body.follow_enabled === 'on' : (current?.follow_enabled ?? false),
+    follow_message: bodyMsg('follow_message', 'Thanks {display_name} for the follow!'),
+    sub_enabled: 'sub_enabled' in body ? body.sub_enabled === 'on' : (current?.sub_enabled ?? false),
+    sub_message: bodyMsg('sub_message', 'Thanks {display_name} for subscribing! (Tier {tier_name})'),
+    resub_message: bodyMsg('resub_message', 'Thanks {display_name} for {months} months! (Tier {tier_name})'),
+    giftsub_message: bodyMsg('giftsub_message', '{gifter_display} gifted {count} sub(s) to the community!'),
     raid_enabled: body.raid_enabled === 'on',
-    raid_message: (body.raid_message ?? '').trim() || 'Welcome raiders from {from_channel}! Thank you for the {viewers} person raid!',
+    raid_message: bodyMsg('raid_message', 'Welcome raiders from {from_channel}! Thank you for the {viewers} person raid!'),
   };
 
   try {

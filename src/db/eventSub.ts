@@ -1,5 +1,7 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
+import { EVENTSUB_TOKEN_SECRET } from '../config';
+import { encryptToken, decryptToken } from '../crypto';
 
 export interface EventSubConfig {
   follow_enabled: boolean;
@@ -39,6 +41,16 @@ function mapConfig(r: mysql.RowDataPacket): EventSubConfig {
   };
 }
 
+function maybeDecrypt(value: string | null): string | null {
+  if (!value) return null;
+  if (!EVENTSUB_TOKEN_SECRET) return value;
+  try {
+    return decryptToken(value, EVENTSUB_TOKEN_SECRET);
+  } catch {
+    return null; // corrupted or wrong key — treat as missing
+  }
+}
+
 export async function getAllEventSubStreamers(): Promise<DbStreamerEventSub[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT s.id, s.name, s.twitch_user_id,
@@ -55,8 +67,8 @@ export async function getAllEventSubStreamers(): Promise<DbStreamerEventSub[]> {
     id: r.id,
     name: r.name,
     twitch_user_id: r.twitch_user_id ?? null,
-    eventsub_access_token: r.eventsub_access_token ?? null,
-    eventsub_refresh_token: r.eventsub_refresh_token ?? null,
+    eventsub_access_token: maybeDecrypt(r.eventsub_access_token ?? null),
+    eventsub_refresh_token: maybeDecrypt(r.eventsub_refresh_token ?? null),
     eventsub_token_expiry: r.eventsub_token_expiry != null ? Number(r.eventsub_token_expiry) : null,
     config: r.follow_enabled != null ? mapConfig(r) : null,
   }));
@@ -69,11 +81,13 @@ export async function saveStreamerToken(
   refreshToken: string,
   expiryMs: number,
 ): Promise<void> {
+  const storedAccess = EVENTSUB_TOKEN_SECRET ? encryptToken(accessToken, EVENTSUB_TOKEN_SECRET) : accessToken;
+  const storedRefresh = EVENTSUB_TOKEN_SECRET ? encryptToken(refreshToken, EVENTSUB_TOKEN_SECRET) : refreshToken;
   await getPool().execute(
     `UPDATE streamer
      SET twitch_user_id=?, eventsub_access_token=?, eventsub_refresh_token=?, eventsub_token_expiry=?
      WHERE id=?`,
-    [twitchUserId, accessToken, refreshToken, expiryMs, streamerId],
+    [twitchUserId, storedAccess, storedRefresh, expiryMs, streamerId],
   );
 }
 

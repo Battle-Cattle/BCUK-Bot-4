@@ -18,6 +18,16 @@ export interface SubSpec { type: string; version: string; condition: Record<stri
 export interface StreamerInfo { login: string; streamerId: number; config: EventSubConfig | null }
 const streamerMap = new Map<string, StreamerInfo>();
 
+// Maps EventSub notification types to their handler functions
+type NotificationHandler = (login: string, event: unknown, config: EventSubConfig) => Promise<void>;
+const notificationHandlers: Record<string, NotificationHandler> = {
+  'channel.follow':               (l, e, c) => handleFollow(l, e as FollowEvent, c),
+  'channel.subscribe':            (l, e, c) => handleSub(l, e as SubEvent, c),
+  'channel.subscription.message': (l, e, c) => handleResub(l, e as ResubEvent, c),
+  'channel.subscription.gift':    (l, e, c) => handleGiftSub(l, e as GiftSubEvent, c),
+  'channel.raid':                 (l, e, c) => handleRaid(l, e as RaidEvent, c),
+};
+
 async function deleteStaleSubscriptions(uid: string, desired: Set<string>, userToken: string | null): Promise<void> {
   try {
     if (userToken) {
@@ -36,6 +46,54 @@ async function deleteStaleSubscriptions(uid: string, desired: Set<string>, userT
   }
 }
 
+/** Resolves the broadcaster's Twitch user ID. Uses the stored OAuth ID if available;
+ *  falls back to a Helix lookup for raid-only streamers who haven't connected OAuth. */
+async function resolveBroadcasterId(streamer: DbStreamerEventSub, config: EventSubConfig | null): Promise<string | null> {
+  if (streamer.twitch_user_id) return streamer.twitch_user_id;
+  if (!config?.raid_enabled) return null;
+  try {
+    const users = await getUsers([streamer.name]);
+    return users[0]?.id ?? null;
+  } catch (err) {
+    log.error(`Failed to resolve Twitch user ID for ${streamer.name}:`, err);
+    return null;
+  }
+}
+
+/** Creates all desired EventSub subscriptions for a single streamer and returns the desired-types set. */
+async function createSubscriptionsForStreamer(
+  sid: string, uid: string, token: string | null, config: EventSubConfig | null, name: string,
+): Promise<Set<string>> {
+  const desired = new Set<string>();
+
+  if (config?.follow_enabled && token) {
+    desired.add('channel.follow');
+    await subscribe(sid, { type: 'channel.follow', version: '2',
+      condition: { broadcaster_user_id: uid, moderator_user_id: uid } }, token, name);
+  }
+
+  if (config?.sub_enabled && token) {
+    desired.add('channel.subscribe');
+    desired.add('channel.subscription.message');
+    desired.add('channel.subscription.gift');
+    await subscribe(sid, { type: 'channel.subscribe', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
+    await subscribe(sid, { type: 'channel.subscription.message', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
+    await subscribe(sid, { type: 'channel.subscription.gift', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
+  }
+
+  if (config?.raid_enabled) {
+    desired.add('channel.raid');
+    try {
+      const appToken = await getAppToken();
+      await subscribe(sid, { type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }, appToken, name);
+    } catch (err) {
+      log.error(`Failed to get app token for raid sub (${name}):`, err);
+    }
+  }
+
+  return desired;
+}
+
 export async function subscribeAll(sid: string): Promise<void> {
   const streamers = await getAllEventSubStreamers();
   streamerMap.clear();
@@ -43,56 +101,13 @@ export async function subscribeAll(sid: string): Promise<void> {
   for (const streamer of streamers) {
     const token = await maybeRefreshToken(streamer);
     const config = streamer.config;
-
-    // Resolve the broadcaster ID — stored after OAuth, or fetched via app token for raid-only streamers
-    let uid = streamer.twitch_user_id;
-    if (!uid && config?.raid_enabled) {
-      try {
-        const users = await getUsers([streamer.name]);
-        uid = users[0]?.id ?? null;
-      } catch (err) {
-        log.error(`Failed to resolve Twitch user ID for ${streamer.name}:`, err);
-      }
-    }
-
+    const uid = await resolveBroadcasterId(streamer, config);
     if (!uid) continue;
 
-    streamerMap.set(uid, {
-      login: streamer.name,
-      streamerId: streamer.id,
-      config,
-    });
+    streamerMap.set(uid, { login: streamer.name, streamerId: streamer.id, config });
 
-    // Track which types we want active so we can delete stale ones afterwards
-    const desired = new Set<string>();
-
-    if (config?.follow_enabled && token) {
-      desired.add('channel.follow');
-      await subscribe(sid, { type: 'channel.follow', version: '2',
-        condition: { broadcaster_user_id: uid, moderator_user_id: uid } }, token, streamer.name);
-    }
-
-    if (config?.sub_enabled && token) {
-      desired.add('channel.subscribe');
-      desired.add('channel.subscription.message');
-      desired.add('channel.subscription.gift');
-      await subscribe(sid, { type: 'channel.subscribe', version: '1', condition: { broadcaster_user_id: uid } }, token, streamer.name);
-      await subscribe(sid, { type: 'channel.subscription.message', version: '1', condition: { broadcaster_user_id: uid } }, token, streamer.name);
-      await subscribe(sid, { type: 'channel.subscription.gift', version: '1', condition: { broadcaster_user_id: uid } }, token, streamer.name);
-    }
-
-    if (config?.raid_enabled) {
-      desired.add('channel.raid');
-      try {
-        const appToken = await getAppToken();
-        await subscribe(sid, { type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }, appToken, streamer.name);
-      } catch (err) {
-        log.error(`Failed to get app token for raid sub (${streamer.name}):`, err);
-      }
-    }
-
-    // Delete subscriptions that are no longer desired — done after creation so
-    // there is no window where zero subscriptions are active
+    // Create desired subscriptions first so there is never a gap where zero are active
+    const desired = await createSubscriptionsForStreamer(sid, uid, token, config, streamer.name);
     await deleteStaleSubscriptions(uid, desired, token);
   }
 }
@@ -148,30 +163,9 @@ export function dispatchNotification(type: string, event: Record<string, unknown
     return;
   }
 
-  const { login, config } = info;
-
-  switch (type) {
-    case 'channel.follow':
-      handleFollow(login, event as unknown as FollowEvent, config)
-        .catch((err) => log.error('Follow handler error:', err));
-      break;
-    case 'channel.subscribe':
-      handleSub(login, event as unknown as SubEvent, config)
-        .catch((err) => log.error('Sub handler error:', err));
-      break;
-    case 'channel.subscription.message':
-      handleResub(login, event as unknown as ResubEvent, config)
-        .catch((err) => log.error('Resub handler error:', err));
-      break;
-    case 'channel.subscription.gift':
-      handleGiftSub(login, event as unknown as GiftSubEvent, config)
-        .catch((err) => log.error('GiftSub handler error:', err));
-      break;
-    case 'channel.raid':
-      handleRaid(login, event as unknown as RaidEvent, config)
-        .catch((err) => log.error('Raid handler error:', err));
-      break;
-  }
+  const handler = notificationHandlers[type];
+  handler?.(info.login, event, info.config)
+    .catch((err) => log.error(`${type} handler error:`, err));
 }
 
 export function handleRevocation(sub: { type: string; status: string; condition: Record<string, string> }): void {

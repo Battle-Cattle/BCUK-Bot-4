@@ -59,3 +59,8 @@ export const DISCORD_CALLBACK_URL = require_env('DISCORD_CALLBACK_URL');
 // Twitch EventSub OAuth callback URL — required when any channel enables follow/sub notifications.
 // Must be registered in the Twitch developer console for the same app as TWITCH_CLIENT_ID.
 export const TWITCH_EVENTSUB_REDIRECT_URI = process.env.TWITCH_EVENTSUB_REDIRECT_URI ?? '';
+
+// AES-256-GCM key for encrypting broadcaster OAuth tokens at rest.
+// Must be exactly 64 hex characters (32 bytes). Generate with: openssl rand -hex 32
+// Required to use the Twitch OAuth connect flow for follow/sub notifications.
+export const EVENTSUB_TOKEN_SECRET = process.env.EVENTSUB_TOKEN_SECRET ?? '';
