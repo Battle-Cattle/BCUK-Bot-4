@@ -99,6 +99,7 @@ function connect(url: string = EVENTSUB_WS_URL): void {
   });
 
   socket.addEventListener('close', (ev: CloseEvent) => {
+    if (ws !== socket) return; // old socket closed during session migration — ignore
     log.warn(`WebSocket closed: ${ev.code} ${ev.reason}`);
     clearKeepaliveTimer();
     if (!stopped && !isReconnecting) scheduleReconnect();
