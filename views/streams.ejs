@@ -190,7 +190,7 @@
           <tbody>
             <% streamers.forEach(function(s) {
               const esData = isAdmin ? (eventSubById[s.id] || null) : null;
-              const isBotEnabled = isAdmin && botEnabledSet.has(s.name);
+              const isBotEnabled = isAdmin && botEnabledSet.has(s.name.toLowerCase());
               const isConnected = !!(esData && esData.eventsub_access_token);
               const cfg = esData && esData.config;
             %>
