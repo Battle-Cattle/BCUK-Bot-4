@@ -69,11 +69,26 @@ export function stopEventSub(): void {
   ws = null;
 }
 
+/** Closes the connection without setting stopped=true, so reloadEventSubSubscriptions can restart. */
+function disconnectNoSubscriptions(): void {
+  log.info('No EventSub subscriptions configured — disconnecting until next reload');
+  clearKeepaliveTimer();
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  ws?.close(1000, 'no subscriptions');
+  ws = null;
+  sessionId = null;
+}
+
 export function reloadEventSubSubscriptions(): void {
   reloadChain = reloadChain
     .then(async () => {
-      if (!ws || !sessionId) return;
-      await subscribeAll(sessionId);
+      if (!ws || !sessionId) {
+        // Not connected — may have auto-disconnected due to no subscriptions; restart if not user-stopped
+        if (!stopped) startEventSub();
+        return;
+      }
+      const count = await subscribeAll(sessionId);
+      if (count === 0) disconnectNoSubscriptions();
     })
     .catch((err) => { log.error('EventSub reload error:', err); });
 }
@@ -153,7 +168,9 @@ function handleMessage(msg: EventSubMessage): void {
       log.info(`Reconnected — session ${sessionId}`);
     } else {
       log.info(`Session established: ${sessionId}`);
-      subscribeAll(sessionId).catch((err) => log.error('Subscribe error:', err));
+      subscribeAll(sessionId)
+        .then((count) => { if (count === 0) disconnectNoSubscriptions(); })
+        .catch((err) => log.error('Subscribe error:', err));
     }
   } else if (message_type === 'session_reconnect') {
     const reconnectUrl = msg.payload.session?.reconnect_url;

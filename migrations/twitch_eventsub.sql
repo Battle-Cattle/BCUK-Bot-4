@@ -11,14 +11,14 @@ CREATE TABLE streamer_event_config (
   streamer_id         INT PRIMARY KEY,
   -- Follows (requires broadcaster OAuth)
   follow_enabled      TINYINT(1) NOT NULL DEFAULT 0,
-  follow_message      TEXT NOT NULL DEFAULT 'Thanks {display_name} for the follow!',
+  follow_message      VARCHAR(500) NOT NULL DEFAULT 'Thanks {display_name} for the follow!',
   -- Subs/resubs/gifts (requires broadcaster OAuth)
   sub_enabled         TINYINT(1) NOT NULL DEFAULT 0,
-  sub_message         TEXT NOT NULL DEFAULT 'Thanks {display_name} for subscribing! (Tier {tier_name})',
-  resub_message       TEXT NOT NULL DEFAULT 'Thanks {display_name} for {months} months! (Tier {tier_name})',
-  giftsub_message     TEXT NOT NULL DEFAULT '{gifter_display} gifted {count} sub(s) to the community!',
+  sub_message         VARCHAR(500) NOT NULL DEFAULT 'Thanks {display_name} for subscribing! (Tier {tier_name})',
+  resub_message       VARCHAR(500) NOT NULL DEFAULT 'Thanks {display_name} for {months} months! (Tier {tier_name})',
+  giftsub_message     VARCHAR(500) NOT NULL DEFAULT '{gifter_display} gifted {count} sub(s) to the community!',
   -- Raids (app token — no OAuth needed)
   raid_enabled        TINYINT(1) NOT NULL DEFAULT 0,
-  raid_message        TEXT NOT NULL DEFAULT 'Welcome raiders from {from_channel}! Thank you for the {viewers} person raid!',
+  raid_message        VARCHAR(500) NOT NULL DEFAULT 'Welcome raiders from {from_channel}! Thank you for the {viewers} person raid!',
   FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE
 );
