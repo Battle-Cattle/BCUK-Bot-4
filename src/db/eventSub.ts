@@ -43,7 +43,7 @@ function mapConfig(r: mysql.RowDataPacket): EventSubConfig {
 
 function maybeDecrypt(value: string | null): string | null {
   if (!value) return null;
-  if (!EVENTSUB_TOKEN_SECRET) return value;
+  if (!EVENTSUB_TOKEN_SECRET) return null; // secret absent — treat stored value as unusable
   try {
     return decryptToken(value, EVENTSUB_TOKEN_SECRET);
   } catch {
@@ -59,7 +59,7 @@ export async function getAllEventSubStreamers(): Promise<DbStreamerEventSub[]> {
             c.sub_enabled, c.sub_message, c.resub_message, c.giftsub_message,
             c.raid_enabled, c.raid_message
      FROM streamer s
-     INNER JOIN \`user\` u ON LOWER(u.twitch_name) = LOWER(s.name) AND u.is_twitch_bot_enabled = 1
+     INNER JOIN \`user\` u ON u.twitch_name = s.name AND u.is_twitch_bot_enabled = 1
      LEFT JOIN streamer_event_config c ON c.streamer_id = s.id
      ORDER BY s.name`,
   );

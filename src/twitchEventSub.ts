@@ -61,6 +61,8 @@ export function startEventSub(): void {
 
 export function stopEventSub(): void {
   stopped = true;
+  isReconnecting = false;
+  sessionId = null;
   clearKeepaliveTimer();
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   ws?.close(1000, 'shutdown');
