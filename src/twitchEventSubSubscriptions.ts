@@ -95,7 +95,7 @@ async function createSubscriptionsForStreamer(
   return desired;
 }
 
-export async function subscribeAll(sid: string): Promise<void> {
+export async function subscribeAll(sid: string): Promise<number> {
   const streamers = await getAllEventSubStreamers();
 
   // Build into a temporary map so dispatchNotification/handleRevocation see a
@@ -118,6 +118,7 @@ export async function subscribeAll(sid: string): Promise<void> {
   // Atomic swap — old map stays readable until all subscriptions are ready
   streamerMap.clear();
   for (const [uid, info] of nextMap) streamerMap.set(uid, info);
+  return streamerMap.size;
 }
 
 async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<void> {
