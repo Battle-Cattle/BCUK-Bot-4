@@ -178,9 +178,7 @@ function buildReconnectUrl(reconnectUrl: string): string | null {
     parsed.pathname === '/ws',
   ];
   if (!checks.every(Boolean)) return null;
-  const safe = new URL(EVENTSUB_WS_URL);
-  safe.search = parsed.search;
-  return safe.toString();
+  return reconnectUrl;
 }
 
 function handleSessionReconnect(reconnectUrl: string): void {
