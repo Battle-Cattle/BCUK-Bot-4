@@ -138,16 +138,19 @@ function handleMessage(socket: WebSocket, msg: EventSubMessage): void {
 }
 
 function sanitizeReconnectUrl(reconnectUrl: string): string | null {
-  let parsed: URL;
-  try { parsed = new URL(reconnectUrl); } catch { return null; }
-  // Strict allowlist for Twitch EventSub websocket endpoint
-  if (parsed.protocol !== 'wss:') return null;
-  if (parsed.hostname !== 'eventsub.wss.twitch.tv') return null;
-  if (parsed.username || parsed.password) return null;
-  if (parsed.port && parsed.port !== '443') return null;
-  if (parsed.pathname !== '/ws') return null;
-  // Return trusted constant to avoid propagating untrusted URL data
-  return EVENTSUB_WS_URL;
+  try {
+    const parsed = new URL(reconnectUrl);
+    // Strict allowlist for Twitch EventSub websocket endpoint
+    const valid = parsed.protocol === 'wss:'
+      && parsed.hostname === 'eventsub.wss.twitch.tv'
+      && !parsed.username && !parsed.password
+      && (!parsed.port || parsed.port === '443')
+      && parsed.pathname === '/ws';
+    // Return trusted constant to avoid propagating untrusted URL data
+    return valid ? EVENTSUB_WS_URL : null;
+  } catch {
+    return null;
+  }
 }
 
 function handleSessionReconnect(oldSocket: WebSocket, reconnectUrl: string): void {
