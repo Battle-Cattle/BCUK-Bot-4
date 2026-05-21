@@ -153,11 +153,11 @@ router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) =>
     follow_enabled:  'follow_enabled'  in body ? body.follow_enabled  === 'on' : (current?.follow_enabled  ?? false),
     follow_message:  bodyMsg('follow_message',  'Thanks {display_name} for the follow!'),
     sub_enabled:     'sub_enabled'     in body ? body.sub_enabled     === 'on' : (current?.sub_enabled     ?? false),
-    sub_message:     bodyMsg('sub_message',     'Thanks {display_name} for subscribing! (Tier {tier_name})'),
-    resub_message:   bodyMsg('resub_message',   'Thanks {display_name} for {months} months! (Tier {tier_name})'),
+    sub_message:     bodyMsg('sub_message',     'Thanks {display_name} for subscribing! (Tier {tier})'),
+    resub_message:   bodyMsg('resub_message',   'Thanks {display_name} for {months} months! (Tier {tier})'),
     giftsub_message: bodyMsg('giftsub_message', '{gifter_display} gifted {count} sub(s) to the community!'),
     raid_enabled:    body.raid_enabled === 'on',
-    raid_message:    bodyMsg('raid_message',    'Welcome raiders from {from_channel}! Thank you for the {viewers} person raid!'),
+    raid_message:    bodyMsg('raid_message',    'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!'),
   };
 
   try {
