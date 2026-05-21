@@ -1,5 +1,6 @@
 import { createLogger } from '../../logger';
 import { Router } from 'express';
+import { randomBytes } from 'crypto';
 import {
   getAllStreamGroups,
   addStreamGroup,
@@ -9,20 +10,26 @@ import {
   addStreamer,
   removeStreamer,
   removeStreamersByGroup,
+  getAllEventSubStreamers,
+  saveEventConfig,
+  clearStreamerToken,
+  getTwitchEnabledChannels,
+  EventSubConfig,
 } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireManager } from '../middleware';
+import { requireManager, requireAdmin } from '../middleware';
 import { restartTwitchMonitor, getLiveStates } from '../../twitchMonitor';
+import { reloadEventSubSubscriptions } from '../../twitchEventSub';
+import { TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI } from '../../config';
+import { AccessLevel } from '../../db/users';
 
 const log = createLogger('Web');
 const router = Router();
 
-function parsePositiveIntId(value: string | undefined): number | null {
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
-    return null;
-  }
-
-  const parsed = Number(value);
+function parsePositiveIntId(value: string | string[] | undefined): number | null {
+  const str = Array.isArray(value) ? value[0] : value;
+  if (typeof str !== 'string' || !/^\d+$/.test(str)) return null;
+  const parsed = Number(str);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
@@ -34,16 +41,26 @@ const KNOWN_ERRORS = new Set([
   'missing_fields', 'invalid_id',
   'add_group_failed', 'update_group_failed', 'remove_group_failed',
   'add_streamer_failed', 'remove_streamer_failed',
+  'eventsub_not_bot_enabled', 'eventsub_config_failed', 'eventsub_disconnect_failed',
+  'eventsub_oauth_denied', 'eventsub_oauth_state_mismatch', 'eventsub_token_invalid',
+  'eventsub_wrong_account',
 ]);
 
 const ERROR_MESSAGES: Record<string, string> = {
-  missing_fields:       'All required fields must be filled in.',
-  invalid_id:           'Invalid ID — please try again.',
-  add_group_failed:     'Failed to add stream group. Please try again.',
-  update_group_failed:  'Failed to update stream group. Please try again.',
-  remove_group_failed:  'Failed to remove stream group. Please try again.',
-  add_streamer_failed:  'Failed to add streamer. Please try again.',
-  remove_streamer_failed: 'Failed to remove streamer. Please try again.',
+  missing_fields:                'All required fields must be filled in.',
+  invalid_id:                    'Invalid ID — please try again.',
+  add_group_failed:              'Failed to add stream group. Please try again.',
+  update_group_failed:           'Failed to update stream group. Please try again.',
+  remove_group_failed:           'Failed to remove stream group. Please try again.',
+  add_streamer_failed:           'Failed to add streamer. Please try again.',
+  remove_streamer_failed:        'Failed to remove streamer. Please try again.',
+  eventsub_not_bot_enabled:      'Notifications can only be configured for channels with the Twitch bot enabled.',
+  eventsub_config_failed:        'Failed to save notification config. Please try again.',
+  eventsub_disconnect_failed:    'Failed to disconnect Twitch account. Please try again.',
+  eventsub_oauth_denied:         'Twitch authorization was denied.',
+  eventsub_oauth_state_mismatch: 'Authorization failed — please try connecting again.',
+  eventsub_token_invalid:        'Could not verify the Twitch account. Please try again.',
+  eventsub_wrong_account:        'Wrong Twitch account — please authorize with the correct broadcaster account.',
 };
 
 function getFriendlyError(key: string): string {
@@ -54,13 +71,29 @@ function getFriendlyError(key: string): string {
 
 router.get('/streams', requireManager, csrfProtection, async (req, res) => {
   try {
-    const [groups, streamers] = await Promise.all([getAllStreamGroups(), getAllStreamers()]);
+    const isAdmin = (req.session.user?.accessLevel ?? 0) >= AccessLevel.ADMIN;
+    const [groups, streamers, eventSubStreamers, botEnabledChannels] = await Promise.all([
+      getAllStreamGroups(),
+      getAllStreamers(),
+      isAdmin ? getAllEventSubStreamers() : Promise.resolve([]),
+      isAdmin ? getTwitchEnabledChannels() : Promise.resolve([]),
+    ]);
+
+    const eventSubById: Record<number, (typeof eventSubStreamers)[0]> = {};
+    for (const s of eventSubStreamers) eventSubById[s.id] = s;
+    const botEnabledSet = new Set(botEnabledChannels);
+
     res.render('streams', {
       user: req.session.user,
       groups,
       streamers,
+      isAdmin,
+      eventSubById,
+      botEnabledSet,
       csrfToken: req.csrfToken(),
       error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
+      success: req.query.success as string | undefined,
+      successExpectedAccount: req.query.expected as string | undefined,
       getFriendlyError,
     });
   } catch (err) {
@@ -192,6 +225,89 @@ router.post('/streams/streamers/remove', requireManager, csrfProtection, async (
     log.error('Remove streamer error:', err);
     return res.redirect('/admin/streams?error=remove_streamer_failed');
   }
+  res.redirect('/admin/streams');
+});
+
+// ─── EventSub OAuth & config ──────────────────────────────────────────────────
+
+const TWITCH_OAUTH_SCOPE = 'moderator:read:followers channel:read:subscriptions';
+
+router.get('/streams/twitch-oauth/:streamerId', requireAdmin, async (req, res) => {
+  const streamerId = parsePositiveIntId(req.params['streamerId']);
+  if (streamerId === null) return res.redirect('/admin/streams?error=invalid_id');
+
+  const streamers = await getAllEventSubStreamers().catch(() => null);
+  const streamer = streamers?.find((s) => s.id === streamerId);
+  if (!streamer) return res.redirect('/admin/streams?error=invalid_id');
+
+  const botEnabled = await getTwitchEnabledChannels().catch(() => [] as string[]);
+  if (!botEnabled.includes(streamer.name)) {
+    return res.redirect('/admin/streams?error=eventsub_not_bot_enabled');
+  }
+
+  const state = randomBytes(16).toString('hex');
+  req.session.eventsubOAuthState = state;
+  req.session.eventsubStreamerId = streamerId;
+
+  const params = new URLSearchParams({
+    client_id: TWITCH_CLIENT_ID,
+    redirect_uri: TWITCH_EVENTSUB_REDIRECT_URI,
+    response_type: 'code',
+    scope: TWITCH_OAUTH_SCOPE,
+    state,
+    force_verify: 'true',
+  });
+
+  res.redirect(`https://id.twitch.tv/oauth2/authorize?${params.toString()}`);
+});
+
+router.post('/streams/twitch-disconnect/:streamerId', requireAdmin, csrfProtection, async (req, res) => {
+  const streamerId = parsePositiveIntId(req.params.streamerId);
+  if (streamerId === null) return res.redirect('/admin/streams?error=invalid_id');
+
+  try {
+    await clearStreamerToken(streamerId);
+    reloadEventSubSubscriptions();
+  } catch (err) {
+    log.error('EventSub disconnect error:', err);
+    return res.redirect('/admin/streams?error=eventsub_disconnect_failed');
+  }
+  res.redirect('/admin/streams');
+});
+
+// ─── EventSub notification config ────────────────────────────────────────────
+
+router.post('/streams/event-config/:streamerId', requireAdmin, csrfProtection, async (req, res) => {
+  const streamerId = parsePositiveIntId(req.params.streamerId);
+  if (streamerId === null) return res.redirect('/admin/streams?error=invalid_id');
+
+  const botEnabled = await getTwitchEnabledChannels().catch(() => [] as string[]);
+  const streamers = await getAllEventSubStreamers().catch(() => null);
+  const streamer = streamers?.find((s) => s.id === streamerId);
+  if (!streamer || !botEnabled.includes(streamer.name)) {
+    return res.redirect('/admin/streams?error=eventsub_not_bot_enabled');
+  }
+
+  const body = req.body as Record<string, string | undefined>;
+  const config: EventSubConfig = {
+    follow_enabled: body.follow_enabled === 'on',
+    follow_message: (body.follow_message ?? '').trim() || 'Thanks {display_name} for the follow!',
+    sub_enabled: body.sub_enabled === 'on',
+    sub_message: (body.sub_message ?? '').trim() || 'Thanks {display_name} for subscribing! (Tier {tier_name})',
+    resub_message: (body.resub_message ?? '').trim() || 'Thanks {display_name} for {months} months! (Tier {tier_name})',
+    giftsub_message: (body.giftsub_message ?? '').trim() || '{gifter_display} gifted {count} sub(s) to the community!',
+    raid_enabled: body.raid_enabled === 'on',
+    raid_message: (body.raid_message ?? '').trim() || 'Welcome raiders from {from_channel}! Thank you for the {viewers} person raid!',
+  };
+
+  try {
+    await saveEventConfig(streamerId, config);
+    reloadEventSubSubscriptions();
+  } catch (err) {
+    log.error('EventSub config save error:', err);
+    return res.redirect('/admin/streams?error=eventsub_config_failed');
+  }
+
   res.redirect('/admin/streams');
 });
 

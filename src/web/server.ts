@@ -12,6 +12,7 @@ const log = createLogger('Web');
 
 const isProduction = process.env.NODE_ENV === 'production';
 import authRouter from './routes/auth';
+import eventsubCallbackRouter from './routes/eventsubCallback';
 import dashboardRouter from './routes/dashboard';
 import adminRouter from './routes/admin';
 import apiRouter from './routes/api';
@@ -118,6 +119,8 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/auth', authLimiter, authRouter);
+// EventSub OAuth callback — must be outside requireAuth (Twitch redirects here without session)
+app.use('/auth', authLimiter, eventsubCallbackRouter);
 app.use('/api/streamdeck', streamdeckLimiter, streamdeckRouter);
 app.use('/api', requireAuth, apiRouter);
 app.use('/', requireAuth, streamdeckKeysRouter);

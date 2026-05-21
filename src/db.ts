@@ -79,6 +79,13 @@ export type {
   DbStreamer, DbStreamerFull,
 } from './db/streamMonitor';
 
+// ─── EventSub ────────────────────────────────────────────────────────────────
+
+export {
+  getAllEventSubStreamers, saveStreamerToken, clearStreamerToken, saveEventConfig,
+} from './db/eventSub';
+export type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
+
 // ─── SFX ────────────────────────────────────────────────────────────────────
 
 export type { SfxTrigger, SfxFile, SfxTriggerRow } from './db/sfx';

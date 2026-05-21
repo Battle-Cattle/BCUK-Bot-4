@@ -56,3 +56,6 @@ export const DISCORD_CLIENT_ID = require_env('DISCORD_CLIENT_ID');
 export const DISCORD_CLIENT_SECRET = require_env('DISCORD_CLIENT_SECRET');
 export const DISCORD_CALLBACK_URL = require_env('DISCORD_CALLBACK_URL');
 
+// Twitch EventSub OAuth callback URL — required when any channel enables follow/sub notifications.
+// Must be registered in the Twitch developer console for the same app as TWITCH_CLIENT_ID.
+export const TWITCH_EVENTSUB_REDIRECT_URI = process.env.TWITCH_EVENTSUB_REDIRECT_URI ?? '';
