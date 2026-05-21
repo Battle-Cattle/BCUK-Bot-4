@@ -18,15 +18,16 @@ export interface SubSpec { type: string; version: string; condition: Record<stri
 export interface StreamerInfo { login: string; streamerId: number; config: EventSubConfig | null }
 const streamerMap = new Map<string, StreamerInfo>();
 
-// Maps EventSub notification types to their handler functions
+// Maps EventSub notification types to their handler functions.
+// Using Map instead of a plain object prevents prototype-chain lookup on user-controlled keys.
 type NotificationHandler = (login: string, event: unknown, config: EventSubConfig) => Promise<void>;
-const notificationHandlers: Record<string, NotificationHandler> = {
-  'channel.follow':               (l, e, c) => handleFollow(l, e as FollowEvent, c),
-  'channel.subscribe':            (l, e, c) => handleSub(l, e as SubEvent, c),
-  'channel.subscription.message': (l, e, c) => handleResub(l, e as ResubEvent, c),
-  'channel.subscription.gift':    (l, e, c) => handleGiftSub(l, e as GiftSubEvent, c),
-  'channel.raid':                 (l, e, c) => handleRaid(l, e as RaidEvent, c),
-};
+const notificationHandlers = new Map<string, NotificationHandler>([
+  ['channel.follow',               (l, e, c) => handleFollow(l, e as FollowEvent, c)],
+  ['channel.subscribe',            (l, e, c) => handleSub(l, e as SubEvent, c)],
+  ['channel.subscription.message', (l, e, c) => handleResub(l, e as ResubEvent, c)],
+  ['channel.subscription.gift',    (l, e, c) => handleGiftSub(l, e as GiftSubEvent, c)],
+  ['channel.raid',                 (l, e, c) => handleRaid(l, e as RaidEvent, c)],
+]);
 
 async function deleteStaleSubscriptions(uid: string, desired: Set<string>, userToken: string | null): Promise<void> {
   try {
@@ -163,8 +164,7 @@ export function dispatchNotification(type: string, event: Record<string, unknown
     return;
   }
 
-  const handler = notificationHandlers[type];
-  handler?.(info.login, event, info.config)
+  notificationHandlers.get(type)?.(info.login, event, info.config)
     .catch((err) => log.error(`${type} handler error:`, err));
 }
 
