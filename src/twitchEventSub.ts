@@ -140,14 +140,18 @@ function handleMessage(socket: WebSocket, msg: EventSubMessage): void {
 function sanitizeReconnectUrl(reconnectUrl: string): string | null {
   try {
     const parsed = new URL(reconnectUrl);
+    const validPorts = new Set(['', '443']);
     // Strict allowlist for Twitch EventSub websocket endpoint
-    const valid = parsed.protocol === 'wss:'
-      && parsed.hostname === 'eventsub.wss.twitch.tv'
-      && !parsed.username && !parsed.password
-      && (!parsed.port || parsed.port === '443')
-      && parsed.pathname === '/ws';
+    const checks = [
+      parsed.protocol === 'wss:',
+      parsed.hostname === 'eventsub.wss.twitch.tv',
+      !parsed.username,
+      !parsed.password,
+      validPorts.has(parsed.port),
+      parsed.pathname === '/ws',
+    ];
     // Return trusted constant to avoid propagating untrusted URL data
-    return valid ? EVENTSUB_WS_URL : null;
+    return checks.every(Boolean) ? EVENTSUB_WS_URL : null;
   } catch {
     return null;
   }
