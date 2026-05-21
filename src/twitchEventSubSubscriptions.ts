@@ -1,6 +1,6 @@
 import { createLogger } from './logger';
 import { getAllEventSubStreamers, saveStreamerToken, clearStreamerToken, DbStreamerEventSub, EventSubConfig } from './db/eventSub';
-import { getAppToken, getUsers } from './twitchApi';
+import { getUsers } from './twitchApi';
 import { TwitchAuthError, refreshUserToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription } from './twitchApiEventSub';
 import { getActiveChannels } from './twitchBot';
 import {
@@ -82,14 +82,11 @@ async function createSubscriptionsForStreamer(
     await subscribe(sid, { type: 'channel.subscription.gift', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
   }
 
-  if (config?.raid_enabled) {
+  // WebSocket transport requires a user token — app tokens only work with webhook transport.
+  // Raids therefore also require the broadcaster's OAuth token.
+  if (config?.raid_enabled && token) {
     desired.add('channel.raid');
-    try {
-      const appToken = await getAppToken();
-      await subscribe(sid, { type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }, appToken, name);
-    } catch (err) {
-      log.error(`Failed to get app token for raid sub (${name}):`, err);
-    }
+    await subscribe(sid, { type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }, token, name);
   }
 
   return desired;
