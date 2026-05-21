@@ -187,11 +187,12 @@ function handleSessionReconnect(reconnectUrl: string): void {
     log.error('Invalid reconnect URL — ignoring');
     return;
   }
+  const oldSocket = ws;
   isReconnecting = true;
   log.info('Session reconnect — connecting to new session');
   connect(safeUrl);
   // Close the old socket after the new one has time to establish
-  setTimeout(() => { ws?.close(1000, 'reconnect'); }, 5_000);
+  setTimeout(() => { oldSocket?.close(1000, 'reconnect'); }, 5_000);
 }
 
 function resetKeepaliveTimer(): void {
