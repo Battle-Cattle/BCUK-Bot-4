@@ -61,11 +61,14 @@ app.set('views', path.join(__dirname, '../../views'));
 app.use(express.static(path.join(__dirname, '../../public')));
 
 // Rate limiting — applied after static assets so file downloads aren't counted
+const ipKey = (req: express.Request) => req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 100,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
+  keyGenerator: ipKey,
   skip: (req) => req.path.startsWith('/api/streamdeck'),
 });
 // Tighter limit for auth endpoints to protect against OAuth quota exhaustion
@@ -74,6 +77,7 @@ const authLimiter = rateLimit({
   limit: 10,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
+  keyGenerator: ipKey,
   message: 'Too many requests, please try again shortly.',
 });
 // Generous limit for the Streamdeck API — authenticated by API key, used for live button presses
@@ -82,6 +86,7 @@ const streamdeckLimiter = rateLimit({
   limit: 120,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
+  keyGenerator: ipKey,
   message: 'Too many requests, please try again shortly.',
 });
 app.use(generalLimiter);
