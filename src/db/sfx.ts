@@ -76,6 +76,25 @@ export async function findSoundFiles(triggerId: bigint): Promise<SfxFile[]> {
   }));
 }
 
+export interface PublicSfxTrigger {
+  triggerCommand: string;
+  categoryName: string | null;
+}
+
+export async function getPublicSfxTriggers(): Promise<PublicSfxTrigger[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT t.trigger_command AS triggerCommand, c.name AS categoryName
+     FROM sfxtrigger t
+     LEFT JOIN sfxcategory c ON t.category_id = c.id
+     WHERE t.hidden = 0
+     ORDER BY c.name, t.trigger_command`,
+  );
+  return rows.map((r) => ({
+    triggerCommand: r.triggerCommand,
+    categoryName: r.categoryName ?? null,
+  }));
+}
+
 export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT

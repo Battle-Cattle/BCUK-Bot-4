@@ -18,6 +18,7 @@ import dashboardRouter from './routes/dashboard';
 import adminRouter from './routes/admin';
 import apiRouter from './routes/api';
 import sfxRouter from './routes/sfx';
+import sfxPublicRouter from './routes/sfxPublic';
 import streamsRouter from './routes/streams';
 import commandsRouter from './routes/commands';
 import countersRouter from './routes/counters';
@@ -129,6 +130,7 @@ app.use('/auth', authLimiter, authRouter);
 // EventSub OAuth callback — must be outside requireAuth (Twitch redirects here without session)
 app.use('/auth', authLimiter, eventsubCallbackRouter);
 app.use('/api/streamdeck', streamdeckLimiter, streamdeckRouter);
+app.use('/', sfxPublicRouter);
 app.use('/api', requireAuth, apiRouter);
 app.use('/', requireAuth, streamdeckKeysRouter);
 app.use('/', requireAuth, sfxRouter);

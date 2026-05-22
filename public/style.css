@@ -132,6 +132,9 @@ a:hover { text-decoration: underline; }
 .table td { padding: .6rem 1rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .table tr:last-child td { border-bottom: none; }
 .table tr.row-hidden td { opacity: .5; }
+.th-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.th-sortable:hover { color: var(--text); }
+.sort-icon { font-size: .7em; margin-left: .3em; opacity: .6; }
 .table tr.sfx-row:hover td { background: var(--bg-hover); }
 .table tr.live-detail-row td { background: rgba(7, 10, 22, .92); }
 

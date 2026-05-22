@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — SFX Commands</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/sfx-list" class="navbar-brand">🤖 BCUK Bot</a>
+  </nav>
+
+  <main class="container">
+
+    <section class="section">
+      <div class="section-header">
+        <h2 class="section-title">SFX Commands (<span id="cmd-count"><%= triggers.length %></span>)</h2>
+        <label for="sfx-search" style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden;">Filter SFX commands</label>
+        <input type="search" id="sfx-search" class="search-input" placeholder="Search commands…">
+      </div>
+
+      <div class="card">
+        <div class="table-scroll">
+          <table class="table" id="sfx-table" aria-label="SFX commands">
+            <thead>
+              <tr>
+                <th scope="col" class="th-sortable" data-col="command" aria-sort="none">
+                  Command <span class="sort-icon" aria-hidden="true">⇅</span>
+                </th>
+                <th scope="col" class="th-sortable" data-col="category" aria-sort="none">
+                  Category <span class="sort-icon" aria-hidden="true">⇅</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="sfx-tbody">
+              <% triggers.forEach(function(t) { %>
+              <tr data-command="<%= t.triggerCommand.toLowerCase() %>" data-category="<%= (t.categoryName || '').toLowerCase() %>">
+                <td class="mono"><%= t.triggerCommand %></td>
+                <td><% if (t.categoryName) { %><%= t.categoryName %><% } else { %><em class="muted">—</em><% } %></td>
+              </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+        <div id="no-results" class="empty-msg empty-msg-padded is-hidden">No commands match your search.</div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/sfx-public.js"></script>
+</body>
+</html>
