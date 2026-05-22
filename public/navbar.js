@@ -20,6 +20,7 @@
     var open = nav.classList.toggle('nav-open');
     toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     collapse.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (!open) closeAllGroups();
   });
 
   document.addEventListener('click', function (e) {
