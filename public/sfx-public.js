@@ -57,18 +57,27 @@ function updateSortHeaders() {
   });
 }
 
+function activateSort(th) {
+  const col = th.dataset.col;
+  if (sortCol === col) {
+    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortCol = col;
+    sortDir = 'asc';
+  }
+  updateSortHeaders();
+  applySort(sortCol);
+  applyFilter();
+}
+
 headers.forEach((th) => {
-  th.addEventListener('click', () => {
-    const col = th.dataset.col;
-    if (sortCol === col) {
-      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-    } else {
-      sortCol = col;
-      sortDir = 'asc';
+  th.setAttribute('tabindex', '0');
+  th.addEventListener('click', () => activateSort(th));
+  th.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      activateSort(th);
     }
-    updateSortHeaders();
-    applySort(sortCol);
-    applyFilter();
   });
 });
 
