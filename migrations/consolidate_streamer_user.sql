@@ -28,6 +28,7 @@ DELIMITER ;
 -- Steps 2–4 are DML and run inside a transaction so a partial failure is
 -- cleanly recoverable. (ALTER TABLE in steps 5–6 auto-commits and cannot
 -- be made transactional in MySQL.)
+SET SQL_SAFE_UPDATES = 0;
 START TRANSACTION;
 
 -- Step 2: Backfill discord_id via the Twitch name match
@@ -95,6 +96,7 @@ DROP TEMPORARY TABLE _survivor;
 
 COMMIT;
 
+SET SQL_SAFE_UPDATES = 1;
 DROP PROCEDURE IF EXISTS _migration_check_nulls;
 
 -- Step 5: Apply NOT NULL, UNIQUE and FK constraints
