@@ -70,7 +70,9 @@ const generalLimiter = rateLimit({
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   keyGenerator: ipKey,
-  skip: (req) => req.path.startsWith('/api/streamdeck'),
+  // Skip authenticated users (session already proves identity) and the Streamdeck API
+  // which has its own limiter. This prevents panel pollers from exhausting the budget.
+  skip: (req) => req.path.startsWith('/api/streamdeck') || !!req.session?.user,
 });
 // Tighter limit for auth endpoints to protect against OAuth quota exhaustion
 const authLimiter = rateLimit({
@@ -90,8 +92,6 @@ const streamdeckLimiter = rateLimit({
   keyGenerator: ipKey,
   message: 'Too many requests, please try again shortly.',
 });
-app.use(generalLimiter);
-
 // Body parsers
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
@@ -117,6 +117,9 @@ app.use(
     cookie: { secure: isProduction, httpOnly: true, sameSite: 'lax', maxAge: 24 * 60 * 60 * 1000 },
   }),
 );
+
+// General rate limiter — placed after session so authenticated users can be skipped
+app.use(generalLimiter);
 
 app.use((req, res, next) => {
   res.locals.user = req.session.user ?? null;
