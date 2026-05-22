@@ -6,6 +6,9 @@
       <a href="/" class="nav-item">Dashboard</a>
       <a href="/sfx" class="nav-item">SFX</a>
       <a href="/streamdeck-key" class="nav-item">Streamdeck Key</a>
+      <% if (user) { %>
+      <a href="/user/settings" class="nav-item">Settings</a>
+      <% } %>
       <% if (user && user.accessLevel >= 2) { %>
       <a href="/admin/commands" class="nav-item">Commands</a>
       <a href="/admin/counters" class="nav-item">Counters</a>

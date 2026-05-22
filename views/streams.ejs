@@ -15,13 +15,7 @@
     <% if (error) { %>
     <div class="card card-alert-danger">
       <%= getFriendlyError(error) %>
-      <% if (error === 'eventsub_wrong_account' && successExpectedAccount) { %>
-        Expected account: <strong><%= successExpectedAccount %></strong>
-      <% } %>
     </div>
-    <% } %>
-    <% if (success === 'twitch_connected') { %>
-    <div class="card card-alert-success">Twitch account connected successfully.</div>
     <% } %>
 
     <!-- ── Live Now ─────────────────────────────────────────────────── -->
@@ -161,12 +155,17 @@
     <section class="section">
       <h2 class="section-title">Streamers</h2>
 
-      <% if (groups.length > 0) { %>
+      <% if (groups.length > 0 && eligibleUsers.length > 0) { %>
       <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add Streamer</span></div>
         <form method="POST" action="/admin/streams/streamers/add" class="inline-form">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-          <input class="input" type="text" name="name" placeholder="Twitch username (lowercase)" required>
+          <select class="input" name="discord_id" required>
+            <option value="" disabled selected>Select user…</option>
+            <% eligibleUsers.forEach(function(u) { %>
+            <option value="<%= u.discord_id %>"><%= u.discord_name || u.discord_id %> (<%= u.twitch_name %>)</option>
+            <% }) %>
+          </select>
           <select class="input" name="group_id">
             <% groups.forEach(function(g) { %>
             <option value="<%= g.id %>"><%= g.name %></option>
@@ -175,6 +174,12 @@
           <button type="submit" class="btn">Add Streamer</button>
         </form>
       </div>
+      <% } else if (groups.length > 0) { %>
+      <div class="card card-spaced">
+        <div class="card-body">
+          <p class="hint">All users with a Twitch name are already configured as streamers, or no users have a Twitch name set.</p>
+        </div>
+      </div>
       <% } %>
 
       <div class="card">
@@ -182,7 +187,7 @@
         <table class="table" aria-label="Streamers">
           <thead>
             <tr>
-              <th scope="col">Username</th>
+              <th scope="col">Streamer</th>
               <th scope="col">Group</th>
               <th scope="col">Actions</th>
             </tr>
@@ -190,28 +195,30 @@
           <tbody>
             <% streamers.forEach(function(s) {
               const esData = isAdmin ? (eventSubById[s.id] || null) : null;
-              const isBotEnabled = isAdmin && botEnabledSet.has(s.name.toLowerCase());
               const isConnected = !!(esData && esData.eventsub_access_token);
-              const cfg = esData && esData.config;
             %>
             <tr>
               <td class="mono">
-                <%= s.name %>
-                <% if (isAdmin && isBotEnabled) { %>
+                <%= s.twitch_name ?? '–' %>
+                <% if (s.discord_name) { %><br><small class="hint"><%= s.discord_name %></small><% } %>
+                <% if (isAdmin && esData) { %>
                   <% if (isConnected) { %>
-                  <span class="badge badge-active" title="Twitch account connected for notifications">🔔</span>
+                  <span class="badge badge-active" title="EventSub connected">🔔</span>
                   <% } else { %>
-                  <span class="badge" title="Notifications not connected">🔕</span>
+                  <span class="badge" title="EventSub not connected">🔕</span>
                   <% } %>
                 <% } %>
               </td>
               <td><%= s.group_name %></td>
               <td>
                 <div class="actions">
-                  <% if (isAdmin && isBotEnabled) { %>
-                  <button type="button" class="btn btn-sm btn-ghost btn-toggle-eventsub" data-streamer-id="<%= s.id %>">🔔 Notifications</button>
+                  <% if (isAdmin && isConnected) { %>
+                  <form method="POST" action="/admin/streams/twitch-disconnect/<%= s.id %>" class="inline-form-sm">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button type="submit" class="btn btn-ghost btn-sm" onclick="return confirm('Disconnect Twitch for <%= s.twitch_name %>?')">Disconnect</button>
+                  </form>
                   <% } %>
-                  <form method="POST" action="/admin/streams/streamers/remove" class="inline-form-sm js-confirm-remove-streamer" data-streamer-name="<%= s.name %>">
+                  <form method="POST" action="/admin/streams/streamers/remove" class="inline-form-sm js-confirm-remove-streamer" data-streamer-name="<%= s.twitch_name ?? s.discord_id %>">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <input type="hidden" name="streamer_id" value="<%= s.id %>">
                     <button type="submit" class="btn btn-danger btn-sm">Remove</button>
@@ -219,66 +226,6 @@
                 </div>
               </td>
             </tr>
-            <% if (isAdmin && isBotEnabled) { %>
-            <tr class="files-row is-hidden" id="eventsub-<%= s.id %>">
-              <td colspan="3">
-                <div class="edit-panel">
-                  <div class="form-row-wrap form-section-gap" style="align-items:center;margin-bottom:0.75rem;">
-                    <strong>Twitch Notifications — <%= s.name %></strong>
-                    <% if (isConnected) { %>
-                    <span class="badge badge-active">✓ Connected</span>
-                    <form method="POST" action="/admin/streams/twitch-disconnect/<%= s.id %>" class="inline-form-sm">
-                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                      <button type="submit" class="btn btn-ghost btn-sm">Disconnect</button>
-                    </form>
-                    <% } else { %>
-                    <span class="badge">⚠ Not connected</span>
-                    <a href="/admin/streams/twitch-oauth/<%= s.id %>" class="btn btn-sm">Connect Twitch</a>
-                    <% } %>
-                  </div>
-                  <form method="POST" action="/admin/streams/event-config/<%= s.id %>">
-                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-
-                    <div class="form-subsection-gap">
-                      <label class="input checkbox-input-label">
-                        <input type="checkbox" name="follow_enabled" <%= (cfg && cfg.follow_enabled) ? 'checked' : '' %> <%= !isConnected ? 'disabled' : '' %>>
-                        Follow notifications <% if (!isConnected) { %><span class="hint">(requires Twitch connection)</span><% } %>
-                      </label>
-                      <p class="hint hint-compact">Variables: <code>{username} {display_name}</code></p>
-                      <textarea class="input stream-textarea" name="follow_message" rows="1" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.follow_message) ? cfg.follow_message : 'Thanks {display_name} for the follow!' %></textarea>
-                    </div>
-
-                    <div class="form-subsection-gap">
-                      <label class="input checkbox-input-label">
-                        <input type="checkbox" name="sub_enabled" <%= (cfg && cfg.sub_enabled) ? 'checked' : '' %> <%= !isConnected ? 'disabled' : '' %>>
-                        Sub/resub/gift notifications <% if (!isConnected) { %><span class="hint">(requires Twitch connection)</span><% } %>
-                      </label>
-                      <p class="hint hint-compact">New sub — variables: <code>{username} {display_name} {tier} {tier_name}</code></p>
-                      <textarea class="input stream-textarea" name="sub_message" rows="1" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.sub_message) ? cfg.sub_message : 'Thanks {display_name} for subscribing! (Tier {tier_name})' %></textarea>
-                      <p class="hint hint-compact" style="margin-top:0.4rem;">Resub — variables: <code>{username} {display_name} {tier} {tier_name} {months} {streak}</code></p>
-                      <textarea class="input stream-textarea" name="resub_message" rows="1" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.resub_message) ? cfg.resub_message : 'Thanks {display_name} for {months} months! (Tier {tier_name})' %></textarea>
-                      <p class="hint hint-compact" style="margin-top:0.4rem;">Gift sub — variables: <code>{gifter} {gifter_display} {count} {tier} {tier_name}</code></p>
-                      <textarea class="input stream-textarea" name="giftsub_message" rows="1" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.giftsub_message) ? cfg.giftsub_message : '{gifter_display} gifted {count} sub(s) to the community!' %></textarea>
-                    </div>
-
-                    <div class="form-subsection-gap">
-                      <label class="input checkbox-input-label">
-                        <input type="checkbox" name="raid_enabled" <%= (cfg && cfg.raid_enabled) ? 'checked' : '' %> <%= !isConnected ? 'disabled' : '' %>>
-                        Raid notifications <% if (!isConnected) { %><span class="hint">(requires Twitch connection)</span><% } %>
-                      </label>
-                      <p class="hint hint-compact">Variables: <code>{from_channel} {from_display} {viewers}</code></p>
-                      <textarea class="input stream-textarea" name="raid_message" rows="1" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.raid_message) ? cfg.raid_message : 'Welcome raiders from {from_channel}! Thank you for the {viewers} person raid!' %></textarea>
-                    </div>
-
-                    <div class="button-row-wrap">
-                      <button type="submit" class="btn">Save</button>
-                      <button type="button" class="btn btn-ghost btn-toggle-eventsub" data-streamer-id="<%= s.id %>">Cancel</button>
-                    </div>
-                  </form>
-                </div>
-              </td>
-            </tr>
-            <% } %>
             <% }) %>
             <% if (streamers.length === 0) { %>
             <tr>
@@ -302,7 +249,6 @@
   <%- include('partials/pwa-register') %>
   <script src="/utils.js"></script>
   <script src="/streams-utils.js"></script>
-  <script src="/streams-eventsub.js"></script>
   <script src="/streams-discord.js"></script>
   <script src="/streams-live-detail.js"></script>
   <script src="/streams-live-table.js"></script>

@@ -24,6 +24,7 @@ import countersRouter from './routes/counters';
 import commandMonitorRouter from './routes/commandMonitor';
 import streamdeckRouter from './routes/streamdeck';
 import streamdeckKeysRouter from './routes/streamdeckKeys';
+import userSettingsRouter from './routes/userSettings';
 import { requireAuth } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
 
@@ -134,6 +135,7 @@ app.use('/', requireAuth, sfxRouter);
 app.use('/admin', requireAuth, adminRouter);
 app.use('/admin', requireAuth, streamsRouter);
 app.use('/admin', requireAuth, eventsubAdminRouter);
+app.use('/user/settings', requireAuth, userSettingsRouter);
 app.use('/admin', requireAuth, commandsRouter);
 app.use('/admin', requireAuth, countersRouter);
 app.use('/admin', requireAuth, commandMonitorRouter);

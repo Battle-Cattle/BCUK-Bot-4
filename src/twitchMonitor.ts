@@ -45,7 +45,8 @@ async function handlePollStreamer(
   streamer: DbStreamerFull,
   liveByUserId: Map<string, TwitchStream>,
 ): Promise<void> {
-  const loginKey = streamer.name.toLowerCase();
+  const loginKey = streamer.twitch_name?.toLowerCase();
+  if (!loginKey) return;
   const stateKey = String(streamer.id);
   const userId = loginToUserId.get(loginKey);
   if (!userId) return;
@@ -88,7 +89,8 @@ async function dispatchStreamerPolls(
   // state); different logins run in parallel via Promise.allSettled.
   const byLogin = new Map<string, DbStreamerFull[]>();
   for (const streamer of streamers) {
-    const key = streamer.name.toLowerCase();
+    const key = streamer.twitch_name?.toLowerCase() ?? '';
+    if (!key) continue;
     const existing = byLogin.get(key);
     if (existing) existing.push(streamer);
     else byLogin.set(key, [streamer]);
@@ -100,7 +102,7 @@ async function dispatchStreamerPolls(
         try {
           await handlePollStreamer(streamer, liveByUserId);
         } catch (err) {
-          log.error(`Error handling streamer poll for ${streamer.name} in group ${streamer.group.name}:`, err);
+          log.error(`Error handling streamer poll for ${streamer.twitch_name ?? 'unknown'} in group ${streamer.group.name}:`, err);
         }
       }
     }),
@@ -148,7 +150,7 @@ export async function startTwitchMonitor(): Promise<void> {
     log.warn('No streamers configured in DB — nothing to monitor');
   }
 
-  const logins = streamersData.map((s) => s.name);
+  const logins = streamersData.map((s) => s.twitch_name).filter((n): n is string => n !== null);
   const users = await getUsers(logins);
   loginToUserId = new Map(users.map((u) => [u.login.toLowerCase(), u.id]));
 

@@ -27,7 +27,9 @@ export interface UpdateStreamGroupInput extends AddStreamGroupInput {
 /** Flat view used by the admin web panel (streamer + group name only). */
 export interface DbStreamer {
   id: number;
-  name: string;
+  discord_id: string;
+  twitch_name: string | null;
+  discord_name: string | null;
   group_id: number;
   group_name: string;
 }
@@ -35,7 +37,8 @@ export interface DbStreamer {
 /** Full view used by twitchMonitor — includes DB-persisted live state. */
 export interface DbStreamerFull {
   id: number;
-  name: string;
+  discord_id: string;
+  twitch_name: string | null;
   discord_message_id: string | null;
   discord_channel_id: string | null;
   live_game: string | null;
@@ -99,14 +102,19 @@ export async function removeStreamGroup(id: number): Promise<void> {
 
 export async function getAllStreamers(): Promise<DbStreamer[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT s.id, s.name, s.group_id, g.name AS group_name
+    `SELECT s.id, s.discord_id, s.group_id,
+            u.twitch_name, u.discord_name,
+            g.name AS group_name
      FROM streamer s
+     JOIN \`user\` u ON u.discord_id = s.discord_id
      JOIN stream_group g ON s.group_id = g.id
-     ORDER BY g.name, s.name`,
+     ORDER BY g.name, u.twitch_name`,
   );
   return rows.map((r) => ({
     id: r.id,
-    name: r.name,
+    discord_id: String(r.discord_id),
+    twitch_name: r.twitch_name ?? null,
+    discord_name: r.discord_name ?? null,
     group_id: r.group_id,
     group_name: r.group_name,
   }));
@@ -114,17 +122,20 @@ export async function getAllStreamers(): Promise<DbStreamer[]> {
 
 export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT s.id, s.name, s.group_id,
+    `SELECT s.id, s.discord_id, s.group_id,
+            u.twitch_name,
             s.discord_message_id, s.discord_channel_id, s.live_game,
             g.name AS group_name, g.discord_channel, g.live_message, g.new_game_message,
             g.multi_twitch, g.delete_old_posts
      FROM streamer s
+     JOIN \`user\` u ON u.discord_id = s.discord_id
      JOIN stream_group g ON s.group_id = g.id
-     ORDER BY g.id, s.name`,
+     ORDER BY g.id, u.twitch_name`,
   );
   return rows.map((r) => ({
     id: r.id,
-    name: r.name,
+    discord_id: String(r.discord_id),
+    twitch_name: r.twitch_name ?? null,
     discord_message_id: r.discord_message_id ?? null,
     discord_channel_id: r.discord_channel_id !== null && r.discord_channel_id !== undefined ? String(r.discord_channel_id) : null,
     live_game: r.live_game ?? null,
@@ -140,10 +151,10 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
   }));
 }
 
-export async function addStreamer(name: string, groupId: number): Promise<void> {
+export async function addStreamer(discordId: string, groupId: number): Promise<void> {
   await getPool().execute(
-    'INSERT INTO streamer (name, group_id) VALUES (?, ?)',
-    [name.toLowerCase().trim(), groupId],
+    'INSERT INTO streamer (discord_id, group_id) VALUES (?, ?)',
+    [discordId, groupId],
   );
 }
 
