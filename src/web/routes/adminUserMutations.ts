@@ -20,6 +20,12 @@ export class DuplicateTwitchNameError extends Error {
   }
 }
 
+export function isLockWaitTimeoutDbError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const dbError = error as { errno?: number; code?: string };
+  return dbError.errno === 1205 || dbError.code === 'ER_LOCK_WAIT_TIMEOUT';
+}
+
 export function isDuplicateTwitchNameDbError(error: unknown): boolean {
   if (!error || typeof error !== 'object') {
     return false;

@@ -15,6 +15,7 @@ import adminRefreshRouter, { refreshState } from './adminRefresh';
 import {
   DuplicateTwitchNameError,
   isDuplicateTwitchNameDbError,
+  isLockWaitTimeoutDbError,
   addOrUpdateUserMutation,
   removeUserMutation,
   toggleTwitchMutation,
@@ -24,7 +25,7 @@ const log = createLogger('Web');
 const router = Router();
 router.use(adminRefreshRouter);
 
-const KNOWN_ERRORS = new Set(['add_failed', 'duplicate_twitch_name', 'update_failed', 'remove_failed', 'toggle_failed']);
+const KNOWN_ERRORS = new Set(['add_failed', 'duplicate_twitch_name', 'db_busy', 'update_failed', 'remove_failed', 'toggle_failed']);
 // Twitch membership changes are serialized per user in-process because this bot
 // currently runs as a single web instance. If that changes, move this lock into
 // shared storage or a DB transaction/row lock before scaling out.
@@ -84,6 +85,10 @@ router.post('/users/add', requireAdmin, csrfProtection, async (req, res) => {
       shouldClearTwitchName,
     }));
   } catch (err) {
+    if (isLockWaitTimeoutDbError(err)) {
+      log.warn('Add user DB lock timeout', err);
+      return res.redirect('/admin/users?error=db_busy');
+    }
     log.error('Add user error:', err);
     if (err instanceof DuplicateTwitchNameError || isDuplicateTwitchNameDbError(err)) {
       return res.redirect('/admin/users?error=duplicate_twitch_name');
@@ -111,6 +116,10 @@ router.post('/users/update', requireAdmin, csrfProtection, async (req, res) => {
   try {
     await userMutationQueue.run(trimmedDiscordId, () => updateAccessLevel(trimmedDiscordId, level));
   } catch (err) {
+    if (isLockWaitTimeoutDbError(err)) {
+      log.warn('Update access level DB lock timeout', err);
+      return res.redirect('/admin/users?error=db_busy');
+    }
     log.error('Update access level error:', err);
     return res.redirect('/admin/users?error=update_failed');
   }
@@ -132,6 +141,10 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
   try {
     await userMutationQueue.run(trimmedDiscordId, () => removeUserMutation(trimmedDiscordId));
   } catch (err) {
+    if (isLockWaitTimeoutDbError(err)) {
+      log.warn('Remove user DB lock timeout', err);
+      return res.redirect('/admin/users?error=db_busy');
+    }
     log.error('Remove user error:', err);
     return res.redirect('/admin/users?error=remove_failed');
   }
@@ -162,6 +175,10 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   try {
     await userMutationQueue.run(trimmedDiscordId, () => toggleTwitchMutation(trimmedDiscordId, nextEnabled));
   } catch (err) {
+    if (isLockWaitTimeoutDbError(err)) {
+      log.warn('Toggle Twitch DB lock timeout', err);
+      return res.redirect('/admin/users?error=db_busy');
+    }
     log.error('Toggle twitch user error:', err);
     return res.redirect('/admin/users?error=toggle_failed');
   }
