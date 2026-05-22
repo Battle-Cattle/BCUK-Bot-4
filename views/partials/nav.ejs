@@ -4,20 +4,32 @@
   <div class="navbar-collapse" id="navbar-collapse" aria-hidden="false">
     <div class="navbar-menu">
       <a href="/" class="nav-item">Dashboard</a>
-      <a href="/sfx" class="nav-item">SFX</a>
+      <div class="nav-group">
+        <button class="nav-group-label" aria-haspopup="true" aria-expanded="false">Bot Commands <span class="nav-caret">▾</span></button>
+        <div class="nav-group-items">
+          <a href="/sfx" class="nav-item">SFX</a>
+          <% if (user && user.accessLevel >= 2) { %>
+          <a href="/admin/commands" class="nav-item">Commands</a>
+          <a href="/admin/counters" class="nav-item">Counters</a>
+          <a href="/admin/command-monitor" class="nav-item">Command Monitor</a>
+          <% } %>
+        </div>
+      </div>
       <a href="/streamdeck-key" class="nav-item">Streamdeck Key</a>
+      <% if (user && user.accessLevel >= 2) { %>
+      <div class="nav-group">
+        <button class="nav-group-label" aria-haspopup="true" aria-expanded="false">Admin <span class="nav-caret">▾</span></button>
+        <div class="nav-group-items">
+          <a href="/admin/streams" class="nav-item">Streams</a>
+          <a href="/admin/users" class="nav-item">Users</a>
+          <% if (user.accessLevel >= 3) { %>
+          <a href="/admin/streamdeck-keys" class="nav-item">Streamdeck Keys</a>
+          <% } %>
+        </div>
+      </div>
+      <% } %>
       <% if (user) { %>
       <a href="/user/settings" class="nav-item">Settings</a>
-      <% } %>
-      <% if (user && user.accessLevel >= 2) { %>
-      <a href="/admin/commands" class="nav-item">Commands</a>
-      <a href="/admin/counters" class="nav-item">Counters</a>
-      <a href="/admin/command-monitor" class="nav-item">Command Monitor</a>
-      <a href="/admin/streams" class="nav-item">Streams</a>
-      <a href="/admin/users" class="nav-item">Users</a>
-      <% } %>
-      <% if (user && user.accessLevel >= 3) { %>
-      <a href="/admin/streamdeck-keys" class="nav-item">Streamdeck Keys</a>
       <% } %>
     </div>
     <div class="navbar-end">

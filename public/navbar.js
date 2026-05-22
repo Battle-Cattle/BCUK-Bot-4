@@ -20,6 +20,7 @@
     var open = nav.classList.toggle('nav-open');
     toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     collapse.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (!open) closeAllGroups();
   });
 
   document.addEventListener('click', function (e) {
@@ -31,15 +32,49 @@
   });
 
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && nav.classList.contains('nav-open')) {
-      nav.classList.remove('nav-open');
-      toggle.setAttribute('aria-expanded', 'false');
-      collapse.setAttribute('aria-hidden', 'true');
-      toggle.focus();
+    if (e.key === 'Escape') {
+      if (nav.classList.contains('nav-open')) {
+        nav.classList.remove('nav-open');
+        toggle.setAttribute('aria-expanded', 'false');
+        collapse.setAttribute('aria-hidden', 'true');
+        toggle.focus();
+      }
+      closeAllGroups();
     }
   });
 
   mql.addEventListener('change', function (e) {
     syncToViewport(e.matches);
+  });
+
+  /* ── Nav group dropdowns ────────────────────────────────── */
+  var groups = Array.prototype.slice.call(document.querySelectorAll('.nav-group'));
+
+  function closeAllGroups(except) {
+    groups.forEach(function (g) {
+      if (g !== except) {
+        g.classList.remove('open');
+        var lbl = g.querySelector('.nav-group-label');
+        if (lbl) lbl.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
+  groups.forEach(function (group) {
+    var label = group.querySelector('.nav-group-label');
+    if (!label) return;
+
+    label.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var opening = !group.classList.contains('open');
+      closeAllGroups(opening ? group : null);
+      group.classList.toggle('open', opening);
+      label.setAttribute('aria-expanded', opening ? 'true' : 'false');
+    });
+  });
+
+  /* Close open groups when clicking outside the navbar. */
+  document.addEventListener('click', function (e) {
+    if (!nav.contains(e.target)) closeAllGroups();
   });
 }());
