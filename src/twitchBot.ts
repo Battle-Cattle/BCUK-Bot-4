@@ -118,7 +118,14 @@ export async function startTwitchBot(): Promise<void> {
       password: TWITCH_OAUTH_TOKEN,
     },
     channels: [...activeChannels],
-    options: { debug: false },
+    options: {
+      debug: false,
+      logger: {
+        info: (msg: string) => log.info(msg),
+        warn: (msg: string) => log.warn(msg),
+        error: (msg: string) => log.error(msg),
+      },
+    },
     connection: {
       reconnect: true,
       secure: true,
