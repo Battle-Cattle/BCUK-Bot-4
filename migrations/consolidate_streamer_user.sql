@@ -68,15 +68,23 @@ WHERE rn = 1
     SELECT discord_id FROM streamer GROUP BY discord_id HAVING COUNT(*) > 1
   );
 
--- 4b: Reassociate streamer_event_config from a non-survivor to the survivor
---     when the survivor has no existing config (ON DELETE CASCADE removes the rest).
+-- 4b: Reassociate one non-survivor streamer_event_config to the survivor when
+--     the survivor has no config of its own. Using a derived table with MIN()
+--     and GROUP BY survivor_id ensures exactly one source row is selected per
+--     survivor, preventing a PRIMARY KEY conflict if multiple non-survivors
+--     each have a config. The CASCADE in step 4c drops the rest.
 UPDATE streamer_event_config sec
-JOIN streamer s ON s.id = sec.streamer_id
-JOIN _survivor sv ON sv.discord_id = s.discord_id AND s.id != sv.survivor_id
-SET sec.streamer_id = sv.survivor_id
-WHERE NOT EXISTS (
-  SELECT 1 FROM streamer_event_config e WHERE e.streamer_id = sv.survivor_id
-);
+JOIN (
+  SELECT MIN(sec2.streamer_id) AS src_id, sv.survivor_id
+  FROM streamer_event_config sec2
+  JOIN streamer s ON s.id = sec2.streamer_id
+  JOIN _survivor sv ON sv.discord_id = s.discord_id AND s.id != sv.survivor_id
+  WHERE NOT EXISTS (
+    SELECT 1 FROM streamer_event_config e WHERE e.streamer_id = sv.survivor_id
+  )
+  GROUP BY sv.survivor_id
+) chosen ON chosen.src_id = sec.streamer_id
+SET sec.streamer_id = chosen.survivor_id;
 
 -- 4c: Delete non-survivor rows; cascade removes any remaining orphan configs.
 DELETE s FROM streamer s
