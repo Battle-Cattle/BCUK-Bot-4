@@ -97,7 +97,9 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
 // Session
-if (isProduction) app.set('trust proxy', 1);
+// Always trust exactly one proxy hop (Caddy). Without this, req.ip resolves to
+// Caddy's loopback address and all users share a single rate-limit bucket.
+app.set('trust proxy', 1);
 const sessionStore = new (MySQLStore(session))({
   host: DB_HOST,
   port: DB_PORT,
