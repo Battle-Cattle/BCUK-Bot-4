@@ -85,12 +85,13 @@ router.post('/users/add', requireAdmin, csrfProtection, async (req, res) => {
       shouldClearTwitchName,
     }));
   } catch (err) {
+    if (isLockWaitTimeoutDbError(err)) {
+      log.warn('Add user DB lock timeout');
+      return res.redirect('/admin/users?error=db_busy');
+    }
     log.error('Add user error:', err);
     if (err instanceof DuplicateTwitchNameError || isDuplicateTwitchNameDbError(err)) {
       return res.redirect('/admin/users?error=duplicate_twitch_name');
-    }
-    if (isLockWaitTimeoutDbError(err)) {
-      return res.redirect('/admin/users?error=db_busy');
     }
     return res.redirect('/admin/users?error=add_failed');
   }
@@ -115,8 +116,11 @@ router.post('/users/update', requireAdmin, csrfProtection, async (req, res) => {
   try {
     await userMutationQueue.run(trimmedDiscordId, () => updateAccessLevel(trimmedDiscordId, level));
   } catch (err) {
+    if (isLockWaitTimeoutDbError(err)) {
+      log.warn('Update access level DB lock timeout');
+      return res.redirect('/admin/users?error=db_busy');
+    }
     log.error('Update access level error:', err);
-    if (isLockWaitTimeoutDbError(err)) return res.redirect('/admin/users?error=db_busy');
     return res.redirect('/admin/users?error=update_failed');
   }
   res.redirect('/admin/users');
@@ -137,8 +141,11 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
   try {
     await userMutationQueue.run(trimmedDiscordId, () => removeUserMutation(trimmedDiscordId));
   } catch (err) {
+    if (isLockWaitTimeoutDbError(err)) {
+      log.warn('Remove user DB lock timeout');
+      return res.redirect('/admin/users?error=db_busy');
+    }
     log.error('Remove user error:', err);
-    if (isLockWaitTimeoutDbError(err)) return res.redirect('/admin/users?error=db_busy');
     return res.redirect('/admin/users?error=remove_failed');
   }
   res.redirect('/admin/users');
@@ -168,8 +175,11 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   try {
     await userMutationQueue.run(trimmedDiscordId, () => toggleTwitchMutation(trimmedDiscordId, nextEnabled));
   } catch (err) {
+    if (isLockWaitTimeoutDbError(err)) {
+      log.warn('Toggle Twitch DB lock timeout');
+      return res.redirect('/admin/users?error=db_busy');
+    }
     log.error('Toggle twitch user error:', err);
-    if (isLockWaitTimeoutDbError(err)) return res.redirect('/admin/users?error=db_busy');
     return res.redirect('/admin/users?error=toggle_failed');
   }
   res.redirect('/admin/users');

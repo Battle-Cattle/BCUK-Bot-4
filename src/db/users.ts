@@ -74,6 +74,18 @@ export async function getAllUsers(): Promise<DbUser[]> {
   return rows.map(mapUser);
 }
 
+// Short timeout so callers fail fast instead of hanging 50s under lock contention.
+async function withShortLockTimeout<T>(fn: (conn: mysql.PoolConnection) => Promise<T>): Promise<T> {
+  const connection = await getPool().getConnection();
+  try {
+    await connection.execute('SET SESSION innodb_lock_wait_timeout = 5');
+    return await fn(connection);
+  } finally {
+    try { await connection.execute('SET SESSION innodb_lock_wait_timeout = DEFAULT'); } catch {}
+    connection.release();
+  }
+}
+
 /**
  * Upserts a user record. Returns true when the twitchName field was included in the
  * call (even if null), so the caller can decide whether to invalidate any caches that
@@ -105,23 +117,12 @@ export async function upsertUserRecord(
           }
           return normalizedChannelName;
         })();
-  // Use a dedicated connection with a short lock-wait timeout so callers see a
-  // fast error rather than a 50-second browser hang when row-level lock contention
-  // occurs (e.g. a concurrent command-assignment transaction holding an FK share
-  // lock on the same user row).
-  const connection = await getPool().getConnection();
-  try {
-    await connection.execute('SET SESSION innodb_lock_wait_timeout = 5');
-    await connection.execute(
-      `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
-       VALUES (?, ?, ?, ?, 0) AS new_user
-       ON DUPLICATE KEY UPDATE discord_name = new_user.discord_name, access_level = new_user.access_level, twitch_name = IF(?, new_user.twitch_name, \`user\`.twitch_name)`,
-      [discordId, trimmedDiscordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
-    );
-  } finally {
-    try { await connection.execute('SET SESSION innodb_lock_wait_timeout = DEFAULT'); } catch { /* best-effort reset */ }
-    connection.release();
-  }
+  await withShortLockTimeout((conn) => conn.execute(
+    `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
+     VALUES (?, ?, ?, ?, 0) AS new_user
+     ON DUPLICATE KEY UPDATE discord_name = new_user.discord_name, access_level = new_user.access_level, twitch_name = IF(?, new_user.twitch_name, \`user\`.twitch_name)`,
+    [discordId, trimmedDiscordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
+  ));
   return twitchNameProvided;
 }
 
@@ -147,22 +148,25 @@ export async function getTwitchEnabledChannels(): Promise<string[]> {
 }
 
 export async function setTwitchBotEnabledRecord(discordId: string, enabled: boolean): Promise<void> {
-  await getPool().execute(
+  await withShortLockTimeout((conn) => conn.execute(
     'UPDATE `user` SET is_twitch_bot_enabled = ? WHERE discord_id = ?',
     [enabled ? 1 : 0, discordId],
-  );
+  ));
 }
 
 export async function updateAccessLevel(discordId: string, accessLevel: number): Promise<void> {
   if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
     throw new Error(`Invalid accessLevel: ${accessLevel}`);
   }
-  await getPool().execute(
+  await withShortLockTimeout((conn) => conn.execute(
     'UPDATE `user` SET access_level = ? WHERE discord_id = ?',
     [accessLevel, discordId],
-  );
+  ));
 }
 
 export async function removeUserRecord(discordId: string): Promise<void> {
-  await getPool().execute('DELETE FROM `user` WHERE discord_id = ?', [discordId]);
+  await withShortLockTimeout((conn) => conn.execute(
+    'DELETE FROM `user` WHERE discord_id = ?',
+    [discordId],
+  ));
 }
