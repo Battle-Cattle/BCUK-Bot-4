@@ -56,10 +56,17 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       return expected && streamer?.twitch_name?.toLowerCase() === expected.toLowerCase() ? expected : undefined;
     })();
 
+    // Strip decrypted OAuth tokens — the template only needs a boolean.
+    const isConnected = !!(streamer?.eventsub_access_token);
+    const safeStreamer = streamer
+      ? { ...streamer, eventsub_access_token: null, eventsub_refresh_token: null }
+      : null;
+
     res.render('userSettings', {
       user: req.session.user,
       dbUser,
-      streamer,
+      streamer: safeStreamer,
+      isConnected,
       csrfToken: req.csrfToken(),
       error: errorKey,
       success: req.query.success as string | undefined,

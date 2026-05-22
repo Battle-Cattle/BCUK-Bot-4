@@ -1,6 +1,6 @@
 import { createLogger } from '../../logger';
 import { Router } from 'express';
-import { getAllEventSubStreamers, saveStreamerToken } from '../../db';
+import { getStreamerById, saveStreamerToken } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitchApiEventSub';
 import { TWITCH_EVENTSUB_REDIRECT_URI } from '../../config';
 import { reloadEventSubSubscriptions } from '../../twitchEventSub';
@@ -43,8 +43,7 @@ router.get('/twitch/eventsub/callback', async (req, res) => {
     const twitchUser = await getUserFromToken(tokens.access_token);
     if (!twitchUser) return res.redirect('/user/settings?error=eventsub_token_invalid');
 
-    const streamers = await getAllEventSubStreamers();
-    const streamer = streamers.find((s) => s.id === streamerId);
+    const streamer = await getStreamerById(streamerId);
     if (!streamer) return res.redirect('/user/settings?error=invalid_id');
 
     const expectedLogin = streamer.twitch_name?.toLowerCase();

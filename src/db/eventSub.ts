@@ -97,6 +97,18 @@ export async function getStreamerByDiscordId(discordId: string): Promise<DbStrea
   return rows.length === 0 ? null : mapStreamerEventSub(rows[0]);
 }
 
+export async function getStreamerById(id: number): Promise<DbStreamerEventSub | null> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT ${EVENT_SUB_SELECT}
+     FROM streamer s
+     JOIN \`user\` u ON u.discord_id = s.discord_id
+     LEFT JOIN streamer_event_config c ON c.streamer_id = s.id
+     WHERE s.id = ?`,
+    [id],
+  );
+  return rows.length === 0 ? null : mapStreamerEventSub(rows[0]);
+}
+
 export async function saveStreamerToken(
   streamerId: number,
   twitchUserId: string,

@@ -11,6 +11,7 @@ import {
   removeStreamersByGroup,
   getAllEventSubStreamers,
   getAllUsers,
+  findUser,
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
@@ -176,6 +177,9 @@ router.post('/streams/streamers/add', requireManager, csrfProtection, async (req
   if (!discord_id || !group_id) return res.redirect('/admin/streams?error=missing_fields');
   const parsedGroupId = parsePositiveIntId(group_id);
   if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
+
+  const user = await findUser(discord_id.trim()).catch(() => null);
+  if (!user?.twitch_name) return res.redirect('/admin/streams?error=missing_fields');
 
   try {
     await addStreamer(discord_id.trim(), parsedGroupId);

@@ -9,12 +9,18 @@
 -- Step 1: Add discord_id column (nullable while backfilling)
 ALTER TABLE streamer ADD COLUMN discord_id BIGINT NULL;
 
+-- Steps 2–4 are DML and run inside a transaction so a partial failure is
+-- cleanly recoverable. (ALTER TABLE in steps 5–6 auto-commits and cannot
+-- be made transactional in MySQL.)
+START TRANSACTION;
+
 -- Step 2: Backfill discord_id via the Twitch name match
 UPDATE streamer s
 JOIN `user` u ON LOWER(u.twitch_name) = LOWER(s.name)
 SET s.discord_id = u.discord_id;
 
--- Step 3: Verify — the following query must return 0 rows before proceeding
+-- Step 3: Verify — the following query must return 0 rows before proceeding.
+--         If it returns rows, ROLLBACK and resolve missing users first.
 -- SELECT name FROM streamer WHERE discord_id IS NULL;
 
 -- Step 4: Deduplicate rows for any streamer that appears in multiple groups.
@@ -23,6 +29,8 @@ SET s.discord_id = u.discord_id;
 --   FROM streamer GROUP BY discord_id HAVING COUNT(*) > 1;
 DELETE s1 FROM streamer s1
 INNER JOIN streamer s2 ON s2.discord_id = s1.discord_id AND s2.id < s1.id;
+
+COMMIT;
 
 -- Step 5: Apply NOT NULL, UNIQUE and FK constraints
 ALTER TABLE streamer MODIFY COLUMN discord_id BIGINT NOT NULL;

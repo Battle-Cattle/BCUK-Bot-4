@@ -51,7 +51,6 @@
 
     <% if (streamer) { %>
     <%
-      const isConnected = !!(streamer && streamer.eventsub_access_token);
       const isBotEnabled = !!(dbUser && dbUser.is_twitch_bot_enabled);
       const cfg = streamer.config;
     %>
