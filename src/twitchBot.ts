@@ -119,6 +119,11 @@ export async function startTwitchBot(): Promise<void> {
     },
     channels: [...activeChannels],
     options: { debug: false },
+    logger: {
+      info: (msg: string) => log.info(msg),
+      warn: (msg: string) => log.warn(msg),
+      error: (msg: string) => log.error(msg),
+    },
     connection: {
       reconnect: true,
       secure: true,
