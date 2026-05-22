@@ -84,8 +84,8 @@ router.get('/twitch-connect', requireAuth, async (req, res) => {
   if (!streamer) return res.redirect('/user/settings?error=no_streamer_record');
   if (!dbUser?.is_twitch_bot_enabled) return res.redirect('/user/settings?error=eventsub_not_bot_enabled');
 
-  if (!TWITCH_EVENTSUB_REDIRECT_URI || !EVENTSUB_TOKEN_SECRET) {
-    log.error('TWITCH_EVENTSUB_REDIRECT_URI or EVENTSUB_TOKEN_SECRET is not configured');
+  if (!TWITCH_CLIENT_ID || !TWITCH_EVENTSUB_REDIRECT_URI || !EVENTSUB_TOKEN_SECRET) {
+    log.error('TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, or EVENTSUB_TOKEN_SECRET is not configured');
     return res.redirect('/user/settings?error=eventsub_config_failed');
   }
 
@@ -156,7 +156,7 @@ router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) =>
     sub_message:     bodyMsg('sub_message',     'Thanks {display_name} for subscribing! (Tier {tier})'),
     resub_message:   bodyMsg('resub_message',   'Thanks {display_name} for {months} months! (Tier {tier})'),
     giftsub_message: bodyMsg('giftsub_message', '{gifter_display} gifted {count} sub(s) to the community!'),
-    raid_enabled:    body.raid_enabled === 'on',
+    raid_enabled:    'raid_enabled' in body ? body.raid_enabled === 'on' : (current?.raid_enabled ?? false),
     raid_message:    bodyMsg('raid_message',    'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!'),
   };
 
