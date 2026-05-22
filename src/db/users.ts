@@ -105,12 +105,23 @@ export async function upsertUserRecord(
           }
           return normalizedChannelName;
         })();
-  await getPool().execute(
-    `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
-     VALUES (?, ?, ?, ?, 0) AS new_user
-     ON DUPLICATE KEY UPDATE discord_name = new_user.discord_name, access_level = new_user.access_level, twitch_name = IF(?, new_user.twitch_name, \`user\`.twitch_name)`,
-    [discordId, trimmedDiscordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
-  );
+  // Use a dedicated connection with a short lock-wait timeout so callers see a
+  // fast error rather than a 50-second browser hang when row-level lock contention
+  // occurs (e.g. a concurrent command-assignment transaction holding an FK share
+  // lock on the same user row).
+  const connection = await getPool().getConnection();
+  try {
+    await connection.execute('SET SESSION innodb_lock_wait_timeout = 5');
+    await connection.execute(
+      `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
+       VALUES (?, ?, ?, ?, 0) AS new_user
+       ON DUPLICATE KEY UPDATE discord_name = new_user.discord_name, access_level = new_user.access_level, twitch_name = IF(?, new_user.twitch_name, \`user\`.twitch_name)`,
+      [discordId, trimmedDiscordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
+    );
+  } finally {
+    try { await connection.execute('SET SESSION innodb_lock_wait_timeout = DEFAULT'); } catch { /* best-effort reset */ }
+    connection.release();
+  }
   return twitchNameProvided;
 }
 

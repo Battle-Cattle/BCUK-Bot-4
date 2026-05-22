@@ -16,7 +16,11 @@
 
       <% if (error) { %>
       <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
-        <span class="text-danger">&#9888; <%= error === 'duplicate_twitch_name' ? 'Twitch name is already assigned to another user.' : 'Operation failed: ' + error.replace(/_/g, ' ') %></span>
+        <span class="text-danger">&#9888; <%=
+          error === 'duplicate_twitch_name' ? 'Twitch name is already assigned to another user.' :
+          error === 'db_busy' ? 'Database is busy — please try again in a moment.' :
+          'Operation failed: ' + error.replace(/_/g, ' ')
+        %></span>
       </div>
       <% } %>
 
