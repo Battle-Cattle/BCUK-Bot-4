@@ -20,7 +20,7 @@ BEGIN
   SELECT COUNT(*) INTO cnt FROM streamer WHERE discord_id IS NULL;
   IF cnt > 0 THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'Migration aborted: some streamer rows have no matching user. Run: SELECT name FROM streamer WHERE discord_id IS NULL — resolve the missing users, then re-run from START TRANSACTION.';
+      SET MESSAGE_TEXT = 'Aborted: unmatched streamer rows. Check: SELECT name FROM streamer WHERE discord_id IS NULL then re-run from START TRANSACTION.';
   END IF;
 END//
 DELIMITER ;
