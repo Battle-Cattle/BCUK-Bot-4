@@ -1,6 +1,9 @@
 import mysql from 'mysql2/promise';
 import { normalizeTwitchChannelName } from '../twitchChannelName';
 import { getPool } from './pool';
+import { createLogger } from '../logger';
+
+const log = createLogger('DB');
 
 export const AccessLevel = {
   USER: 0,
@@ -81,7 +84,9 @@ async function withShortLockTimeout<T>(fn: (conn: mysql.PoolConnection) => Promi
     await connection.execute('SET SESSION innodb_lock_wait_timeout = 5');
     return await fn(connection);
   } finally {
-    try { await connection.execute('SET SESSION innodb_lock_wait_timeout = DEFAULT'); } catch {}
+    try { await connection.execute('SET SESSION innodb_lock_wait_timeout = DEFAULT'); } catch (e) {
+      log.warn('connection.execute: failed to reset innodb_lock_wait_timeout to DEFAULT:', e);
+    }
     connection.release();
   }
 }

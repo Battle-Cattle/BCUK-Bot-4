@@ -86,7 +86,7 @@ router.post('/users/add', requireAdmin, csrfProtection, async (req, res) => {
     }));
   } catch (err) {
     if (isLockWaitTimeoutDbError(err)) {
-      log.warn('Add user DB lock timeout');
+      log.warn('Add user DB lock timeout', err);
       return res.redirect('/admin/users?error=db_busy');
     }
     log.error('Add user error:', err);
@@ -117,7 +117,7 @@ router.post('/users/update', requireAdmin, csrfProtection, async (req, res) => {
     await userMutationQueue.run(trimmedDiscordId, () => updateAccessLevel(trimmedDiscordId, level));
   } catch (err) {
     if (isLockWaitTimeoutDbError(err)) {
-      log.warn('Update access level DB lock timeout');
+      log.warn('Update access level DB lock timeout', err);
       return res.redirect('/admin/users?error=db_busy');
     }
     log.error('Update access level error:', err);
@@ -142,7 +142,7 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
     await userMutationQueue.run(trimmedDiscordId, () => removeUserMutation(trimmedDiscordId));
   } catch (err) {
     if (isLockWaitTimeoutDbError(err)) {
-      log.warn('Remove user DB lock timeout');
+      log.warn('Remove user DB lock timeout', err);
       return res.redirect('/admin/users?error=db_busy');
     }
     log.error('Remove user error:', err);
@@ -176,7 +176,7 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
     await userMutationQueue.run(trimmedDiscordId, () => toggleTwitchMutation(trimmedDiscordId, nextEnabled));
   } catch (err) {
     if (isLockWaitTimeoutDbError(err)) {
-      log.warn('Toggle Twitch DB lock timeout');
+      log.warn('Toggle Twitch DB lock timeout', err);
       return res.redirect('/admin/users?error=db_busy');
     }
     log.error('Toggle twitch user error:', err);
