@@ -4,10 +4,26 @@
 -- name-based join (streamer.name = user.twitch_name) with an explicit FK
 -- (streamer.discord_id → user.discord_id) and enforces one group per streamer.
 --
--- Run in order; check the verification query between steps 3 and 4.
+-- Run in order. If an error occurs inside the transaction, issue ROLLBACK
+-- before resolving the issue and re-running from START TRANSACTION.
 
 -- Step 1: Add discord_id column (nullable while backfilling)
 ALTER TABLE streamer ADD COLUMN discord_id BIGINT NULL;
+
+-- Temporary guard procedure — SIGNALs an error if any streamer rows have no
+-- matching user after the backfill. Dropped after use.
+DROP PROCEDURE IF EXISTS _migration_check_nulls;
+DELIMITER //
+CREATE PROCEDURE _migration_check_nulls()
+BEGIN
+  DECLARE cnt INT;
+  SELECT COUNT(*) INTO cnt FROM streamer WHERE discord_id IS NULL;
+  IF cnt > 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Migration aborted: some streamer rows have no matching user. Run: SELECT name FROM streamer WHERE discord_id IS NULL — resolve the missing users, then re-run from START TRANSACTION.';
+  END IF;
+END//
+DELIMITER ;
 
 -- Steps 2–4 are DML and run inside a transaction so a partial failure is
 -- cleanly recoverable. (ALTER TABLE in steps 5–6 auto-commits and cannot
@@ -19,18 +35,59 @@ UPDATE streamer s
 JOIN `user` u ON LOWER(u.twitch_name) = LOWER(s.name)
 SET s.discord_id = u.discord_id;
 
--- Step 3: Verify — the following query must return 0 rows before proceeding.
---         If it returns rows, ROLLBACK and resolve missing users first.
--- SELECT name FROM streamer WHERE discord_id IS NULL;
+-- Step 3: Guard — abort if any rows were not matched.
+--         If this signals, issue ROLLBACK before resolving the missing users.
+CALL _migration_check_nulls();
 
--- Step 4: Deduplicate rows for any streamer that appears in multiple groups.
---         This keeps the row with the lowest id. Audit duplicates first:
---   SELECT discord_id, COUNT(*), GROUP_CONCAT(group_id) AS groups
+-- Step 4: Deduplicate rows for any discord_id that appears in multiple groups,
+--         preserving EventSub credentials and config.
+--
+--         Survivor selection (via window function):
+--           • Credentialed rows (twitch_user_id IS NOT NULL) rank first.
+--           • Among ties, the lower group_id wins (more senior group assignment).
+--
+--         Audit before running:
+--   SELECT discord_id, COUNT(*), GROUP_CONCAT(id ORDER BY id) AS ids,
+--          GROUP_CONCAT(group_id ORDER BY id) AS groups
 --   FROM streamer GROUP BY discord_id HAVING COUNT(*) > 1;
-DELETE s1 FROM streamer s1
-INNER JOIN streamer s2 ON s2.discord_id = s1.discord_id AND s2.id < s1.id;
+
+-- 4a: Identify the survivor id per duplicate discord_id.
+CREATE TEMPORARY TABLE _survivor AS
+WITH ranked AS (
+  SELECT id, discord_id,
+    ROW_NUMBER() OVER (
+      PARTITION BY discord_id
+      ORDER BY (twitch_user_id IS NULL), group_id ASC
+    ) AS rn
+  FROM streamer
+)
+SELECT discord_id, id AS survivor_id
+FROM ranked
+WHERE rn = 1
+  AND discord_id IN (
+    SELECT discord_id FROM streamer GROUP BY discord_id HAVING COUNT(*) > 1
+  );
+
+-- 4b: Reassociate streamer_event_config from a non-survivor to the survivor
+--     when the survivor has no existing config (ON DELETE CASCADE removes the rest).
+UPDATE streamer_event_config sec
+JOIN streamer s ON s.id = sec.streamer_id
+JOIN _survivor sv ON sv.discord_id = s.discord_id AND s.id != sv.survivor_id
+SET sec.streamer_id = sv.survivor_id
+WHERE NOT EXISTS (
+  SELECT 1 FROM streamer_event_config e WHERE e.streamer_id = sv.survivor_id
+);
+
+-- 4c: Delete non-survivor rows; cascade removes any remaining orphan configs.
+DELETE s FROM streamer s
+JOIN _survivor sv ON sv.discord_id = s.discord_id
+WHERE s.id != sv.survivor_id;
+
+DROP TEMPORARY TABLE _survivor;
 
 COMMIT;
+
+DROP PROCEDURE IF EXISTS _migration_check_nulls;
 
 -- Step 5: Apply NOT NULL, UNIQUE and FK constraints
 ALTER TABLE streamer MODIFY COLUMN discord_id BIGINT NOT NULL;
