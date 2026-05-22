@@ -78,12 +78,12 @@
               <% } %>
             </div>
             <% if (isConnected) { %>
-            <form method="POST" action="/user/twitch-disconnect" class="inline-form-sm">
+            <form method="POST" action="/user/settings/twitch-disconnect" class="inline-form-sm">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button type="submit" class="btn btn-ghost btn-sm">Disconnect Twitch</button>
             </form>
             <% } else { %>
-            <a href="/user/twitch-connect" class="btn btn-sm">Connect Twitch</a>
+            <a href="/user/settings/twitch-connect" class="btn btn-sm">Connect Twitch</a>
             <% } %>
           </div>
         </div>
@@ -91,7 +91,7 @@
 
       <div class="card">
         <div class="card-body">
-          <form method="POST" action="/user/eventsub-config">
+          <form method="POST" action="/user/settings/eventsub-config">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
 
             <div class="form-subsection-gap">
