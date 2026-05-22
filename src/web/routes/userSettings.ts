@@ -81,100 +81,105 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
 
 // GET /user/twitch-connect — initiates Twitch OAuth for the logged-in user
 router.get('/twitch-connect', requireAuth, async (req, res) => {
-  const discordId = req.session.user!.discordId;
+  try {
+    const discordId = req.session.user!.discordId;
 
-  const [dbUser, streamer] = await Promise.all([
-    findUser(discordId).catch(() => null),
-    getStreamerByDiscordId(discordId).catch(() => null),
-  ]);
+    const [dbUser, streamer] = await Promise.all([
+      findUser(discordId),
+      getStreamerByDiscordId(discordId),
+    ]);
 
-  if (!streamer) return res.redirect('/user/settings?error=no_streamer_record');
-  if (!dbUser?.is_twitch_bot_enabled) return res.redirect('/user/settings?error=eventsub_not_bot_enabled');
+    if (!streamer) return res.redirect('/user/settings?error=no_streamer_record');
+    if (!dbUser?.is_twitch_bot_enabled) return res.redirect('/user/settings?error=eventsub_not_bot_enabled');
 
-  if (!TWITCH_CLIENT_ID || !TWITCH_EVENTSUB_REDIRECT_URI || !EVENTSUB_TOKEN_SECRET) {
-    log.error('TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, or EVENTSUB_TOKEN_SECRET is not configured');
-    return res.redirect('/user/settings?error=eventsub_config_failed');
+    if (!TWITCH_CLIENT_ID || !TWITCH_EVENTSUB_REDIRECT_URI || !EVENTSUB_TOKEN_SECRET) {
+      log.error('TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, or EVENTSUB_TOKEN_SECRET is not configured');
+      return res.redirect('/user/settings?error=eventsub_config_failed');
+    }
+
+    const state = randomBytes(16).toString('hex');
+    req.session.eventsubOAuthState = state;
+    req.session.eventsubStreamerId = streamer.id;
+
+    const params = new URLSearchParams({
+      client_id: TWITCH_CLIENT_ID,
+      redirect_uri: TWITCH_EVENTSUB_REDIRECT_URI,
+      response_type: 'code',
+      scope: TWITCH_OAUTH_SCOPE,
+      state,
+      force_verify: 'true',
+    });
+
+    res.redirect(`https://id.twitch.tv/oauth2/authorize?${params.toString()}`);
+  } catch (err) {
+    log.error('Twitch connect error:', err);
+    res.redirect('/user/settings?error=eventsub_config_failed');
   }
-
-  const state = randomBytes(16).toString('hex');
-  req.session.eventsubOAuthState = state;
-  req.session.eventsubStreamerId = streamer.id;
-
-  const params = new URLSearchParams({
-    client_id: TWITCH_CLIENT_ID,
-    redirect_uri: TWITCH_EVENTSUB_REDIRECT_URI,
-    response_type: 'code',
-    scope: TWITCH_OAUTH_SCOPE,
-    state,
-    force_verify: 'true',
-  });
-
-  res.redirect(`https://id.twitch.tv/oauth2/authorize?${params.toString()}`);
 });
 
 // POST /user/twitch-disconnect
 router.post('/twitch-disconnect', requireAuth, csrfProtection, async (req, res) => {
-  const discordId = req.session.user!.discordId;
-  const streamer = await getStreamerByDiscordId(discordId).catch(() => null);
-  if (!streamer) return res.redirect('/user/settings?error=no_streamer_record');
-
   try {
+    const discordId = req.session.user!.discordId;
+    const streamer = await getStreamerByDiscordId(discordId);
+    if (!streamer) return res.redirect('/user/settings?error=no_streamer_record');
+
     await clearStreamerToken(streamer.id);
     reloadEventSubSubscriptions();
+    res.redirect('/user/settings');
   } catch (err) {
     log.error('EventSub disconnect error:', err);
-    return res.redirect('/user/settings?error=eventsub_disconnect_failed');
+    res.redirect('/user/settings?error=eventsub_disconnect_failed');
   }
-  res.redirect('/user/settings');
 });
 
 // POST /user/eventsub-config
 router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) => {
-  const discordId = req.session.user!.discordId;
-
-  const [dbUser, streamer] = await Promise.all([
-    findUser(discordId).catch(() => null),
-    getStreamerByDiscordId(discordId).catch(() => null),
-  ]);
-
-  if (!streamer) return res.redirect('/user/settings?error=no_streamer_record');
-  if (!dbUser?.is_twitch_bot_enabled) return res.redirect('/user/settings?error=eventsub_not_bot_enabled');
-
-  const body = req.body as Record<string, string | undefined>;
-
-  const MESSAGE_MAX_LENGTH = 500;
-  const messageFields = ['follow_message', 'sub_message', 'resub_message', 'giftsub_message', 'raid_message'] as const;
-  for (const field of messageFields) {
-    if ((body[field] ?? '').trim().length > MESSAGE_MAX_LENGTH) {
-      return res.redirect('/user/settings?error=eventsub_config_failed');
-    }
-  }
-
-  // Inputs are disabled in the UI when disconnected, so those keys are absent from
-  // the POST body. Fall back to existing config to avoid wiping saved settings.
-  const current = streamer.config;
-  function bodyMsg(key: string, fallback: string): string {
-    return key in body ? ((body[key] ?? '').trim() || fallback) : (current?.[key as keyof EventSubConfig] as string | undefined ?? fallback);
-  }
-  const config: EventSubConfig = {
-    follow_enabled:  'follow_enabled'  in body ? body.follow_enabled  === 'on' : (current?.follow_enabled  ?? false),
-    follow_message:  bodyMsg('follow_message',  'Thanks {display_name} for the follow!'),
-    sub_enabled:     'sub_enabled'     in body ? body.sub_enabled     === 'on' : (current?.sub_enabled     ?? false),
-    sub_message:     bodyMsg('sub_message',     'Thanks {display_name} for subscribing! (Tier {tier})'),
-    resub_message:   bodyMsg('resub_message',   'Thanks {display_name} for {months} months! (Tier {tier})'),
-    giftsub_message: bodyMsg('giftsub_message', '{gifter_display} gifted {count} sub(s) to the community!'),
-    raid_enabled:    'raid_enabled' in body ? body.raid_enabled === 'on' : (current?.raid_enabled ?? false),
-    raid_message:    bodyMsg('raid_message',    'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!'),
-  };
-
   try {
+    const discordId = req.session.user!.discordId;
+
+    const [dbUser, streamer] = await Promise.all([
+      findUser(discordId),
+      getStreamerByDiscordId(discordId),
+    ]);
+
+    if (!streamer) return res.redirect('/user/settings?error=no_streamer_record');
+    if (!dbUser?.is_twitch_bot_enabled) return res.redirect('/user/settings?error=eventsub_not_bot_enabled');
+
+    const body = req.body as Record<string, string | undefined>;
+
+    const MESSAGE_MAX_LENGTH = 500;
+    const messageFields = ['follow_message', 'sub_message', 'resub_message', 'giftsub_message', 'raid_message'] as const;
+    for (const field of messageFields) {
+      if ((body[field] ?? '').trim().length > MESSAGE_MAX_LENGTH) {
+        return res.redirect('/user/settings?error=eventsub_config_failed');
+      }
+    }
+
+    // Inputs are disabled in the UI when disconnected, so those keys are absent from
+    // the POST body. Fall back to existing config to avoid wiping saved settings.
+    const current = streamer.config;
+    function bodyMsg(key: string, fallback: string): string {
+      return key in body ? ((body[key] ?? '').trim() || fallback) : (current?.[key as keyof EventSubConfig] as string | undefined ?? fallback);
+    }
+    const config: EventSubConfig = {
+      follow_enabled:  'follow_enabled'  in body ? body.follow_enabled  === 'on' : (current?.follow_enabled  ?? false),
+      follow_message:  bodyMsg('follow_message',  'Thanks {display_name} for the follow!'),
+      sub_enabled:     'sub_enabled'     in body ? body.sub_enabled     === 'on' : (current?.sub_enabled     ?? false),
+      sub_message:     bodyMsg('sub_message',     'Thanks {display_name} for subscribing! (Tier {tier})'),
+      resub_message:   bodyMsg('resub_message',   'Thanks {display_name} for {months} months! (Tier {tier})'),
+      giftsub_message: bodyMsg('giftsub_message', '{gifter_display} gifted {count} sub(s) to the community!'),
+      raid_enabled:    'raid_enabled' in body ? body.raid_enabled === 'on' : (current?.raid_enabled ?? false),
+      raid_message:    bodyMsg('raid_message',    'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!'),
+    };
+
     await saveEventConfig(streamer.id, config);
     reloadEventSubSubscriptions();
+    res.redirect('/user/settings');
   } catch (err) {
     log.error('EventSub config save error:', err);
-    return res.redirect('/user/settings?error=eventsub_config_failed');
+    res.redirect('/user/settings?error=eventsub_config_failed');
   }
-  res.redirect('/user/settings');
 });
 
 export default router;
