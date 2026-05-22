@@ -31,6 +31,7 @@ vi.mock('./statusStore', () => ({
 
 import { handleCommand } from './commandRouter';
 import { findTrigger, findSoundFiles } from './db';
+import type { SfxTrigger, SfxFile } from './db';
 import { isPlaying } from './audioPlayer';
 import { playFile, VoiceNotConnectedError } from './sfxPlayer';
 import { pickWeightedRandom } from './soundSelector';
@@ -47,8 +48,8 @@ beforeEach(() => {
   vi.spyOn(Date, 'now').mockReturnValue(mockNow);
 });
 
-const TRIGGER = { id: 42, trigger_command: '!ding' };
-const FILES = [{ file: 'ding.mp3', weight: 1 }];
+const TRIGGER: SfxTrigger = { id: BigInt(42), trigger_command: '!ding', category_id: null, hidden: false, description: null };
+const FILES: SfxFile[] = [{ id: 1, trigger_id: BigInt(42), file: 'ding.mp3', trigger_command: null, weight: 1, hidden: false, category_id: null }];
 
 describe('handleCommand', () => {
   it('does nothing for an unrecognised command', async () => {
