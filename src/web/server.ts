@@ -73,7 +73,7 @@ const generalLimiter = rateLimit({
   keyGenerator: ipKey,
   // Skip authenticated users (session already proves identity) and the Streamdeck API
   // which has its own limiter. This prevents panel pollers from exhausting the budget.
-  skip: (req) => req.path.startsWith('/api/streamdeck') || !!req.session?.user,
+  skip: (req) => req.path.startsWith('/api/streamdeck') || req.path.startsWith('/streamdeck') || !!req.session?.user,
 });
 // Tighter limit for auth endpoints to protect against OAuth quota exhaustion
 const authLimiter = rateLimit({
@@ -140,6 +140,7 @@ app.use('/auth', authLimiter, authRouter);
 // EventSub OAuth callback — must be outside requireAuth (Twitch redirects here without session)
 app.use('/auth', authLimiter, eventsubCallbackRouter);
 app.use('/api/streamdeck', streamdeckLimiter, streamdeckRouter);
+app.use('/streamdeck', streamdeckLimiter, streamdeckRouter);
 app.use('/', sfxPublicRouter);
 app.use('/api', requireAuth, apiRouter);
 app.use('/', requireAuth, streamdeckKeysRouter);
