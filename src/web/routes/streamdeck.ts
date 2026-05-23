@@ -77,7 +77,7 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   }
 });
 
-router.get('/voice/channels', requireApiKey, async (_req, res) => {
+router.get('/voice/channels', async (_req, res) => {
   try {
     const channels = await getAvailableVoiceChannels(DISCORD_GUILD_ID);
     res.json({ ok: true, channels });
