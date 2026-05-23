@@ -124,6 +124,52 @@ function applyStatus(status) {
 let consecutiveFailures = 0;
 const STALE_THRESHOLD = 3;
 
+async function loadVoiceChannels() {
+  const select = document.getElementById('voice-channel-select');
+  if (!select) return;
+
+  try {
+    const res = await fetch('/api/voice/channels');
+    if (!res.ok) return;
+
+    const data = await res.json();
+    if (!data.ok || !Array.isArray(data.channels)) return;
+
+    const currentSelected = select.value;
+    select.innerHTML = '';
+
+    if (data.channels.length === 0) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No voice channels available';
+      option.disabled = true;
+      select.appendChild(option);
+      select.disabled = true;
+      return;
+    }
+
+    select.disabled = false;
+    for (const channel of data.channels) {
+      const option = document.createElement('option');
+      option.value = channel.id;
+      option.textContent = channel.name;
+      select.appendChild(option);
+    }
+
+    if (currentSelected) {
+      select.value = currentSelected;
+    } else if (data.channels.length > 0) {
+      select.value = data.channels[0].id;
+    }
+  } catch (_) {
+    const select = document.getElementById('voice-channel-select');
+    if (select) {
+      select.innerHTML = '<option value="">Failed to load channels</option>';
+      select.disabled = true;
+    }
+  }
+}
+
 async function fetchStatus() {
   try {
     const res = await fetch('/api/status');
@@ -156,7 +202,9 @@ if (initialStatusRaw) {
 
 // Refresh immediately then poll every 5 seconds.
 fetchStatus();
+loadVoiceChannels();
 setInterval(fetchStatus, 5000);
+setInterval(loadVoiceChannels, 30000);
 
 /* ── Rejoin Voice button ─────────────────────────────────── */
 
@@ -164,25 +212,33 @@ const rejoinBtn = document.getElementById('btn-rejoin-voice');
 if (rejoinBtn) {
   rejoinBtn.addEventListener('click', async () => {
     const leaving = rejoinBtn.textContent === 'Leave Voice';
+    const channelSelect = document.getElementById('voice-channel-select');
+    const selectedChannelId = channelSelect ? channelSelect.value : '';
+
     rejoinBtn.disabled = true;
     rejoinBtn.textContent = leaving ? 'Leaving…' : 'Joining…';
     try {
       const endpoint = leaving ? '/api/voice/leave' : '/api/voice/join';
+      const body = { _csrf: csrfToken };
+      if (!leaving && selectedChannelId) {
+        body.channelId = selectedChannelId;
+      }
+
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ _csrf: csrfToken }),
+        body: JSON.stringify(body),
       });
       if (res.ok) {
-        // Refresh status immediately so the dot and button update
         await fetchStatus();
+        await loadVoiceChannels();
       } else {
         rejoinBtn.textContent = 'Failed';
-        setTimeout(() => { rejoinBtn.textContent = leaving ? 'Leave Voice' : 'Rejoin Voice'; }, 3000);
+        setTimeout(() => { rejoinBtn.textContent = leaving ? 'Leave Voice' : 'Join Voice'; }, 3000);
       }
     } catch (_) {
       rejoinBtn.textContent = 'Failed';
-      setTimeout(() => { rejoinBtn.textContent = leaving ? 'Leave Voice' : 'Rejoin Voice'; }, 3000);
+      setTimeout(() => { rejoinBtn.textContent = leaving ? 'Leave Voice' : 'Join Voice'; }, 3000);
     } finally {
       rejoinBtn.disabled = false;
     }

@@ -1,5 +1,5 @@
 import { createLogger } from './logger';
-import { DiscordAPIError, RESTJSONErrorCodes } from 'discord.js';
+import { DiscordAPIError, RESTJSONErrorCodes, ChannelType } from 'discord.js';
 import { getDiscordClient } from './discordBot';
 
 const log = createLogger('Discord');
@@ -37,5 +37,31 @@ export async function tryDeleteDiscordMessage(channelId: string, messageId: stri
     if (isDiscordNotFoundError(err)) return;
     log.error(`Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
     throw err;
+  }
+}
+
+export interface VoiceChannelInfo {
+  id: string;
+  name: string;
+}
+
+export async function getAvailableVoiceChannels(guildId: string): Promise<VoiceChannelInfo[]> {
+  const discordClient = getDiscordClient();
+  if (!discordClient) return [];
+
+  try {
+    const guild = await discordClient.guilds.fetch(guildId);
+    const channels = await guild.channels.fetch();
+    return channels
+      .filter((ch) => ch?.type === ChannelType.GuildVoice)
+      .map((ch) => ({ id: ch!.id, name: ch!.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch (err) {
+    if (isDiscordNotFoundError(err)) {
+      log.warn(`Guild ${guildId} not found when fetching voice channels`);
+    } else {
+      log.error(`Failed to fetch voice channels for guild ${guildId}:`, err);
+    }
+    return [];
   }
 }
