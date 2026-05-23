@@ -104,7 +104,7 @@ function applyStatus(status) {
 
   // Keep the rejoin/leave button label in sync with connection state
   const voiceBtn = document.getElementById('btn-rejoin-voice');
-  if (voiceBtn) {
+  if (voiceBtn && !voiceBtn.disabled) {
     voiceBtn.textContent = voiceOn ? 'Leave Voice' : 'Join Voice';
   }
 
