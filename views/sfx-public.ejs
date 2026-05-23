@@ -32,13 +32,15 @@
                 <th scope="col" class="th-sortable" data-col="category" aria-sort="none">
                   Category <span class="sort-icon" aria-hidden="true">⇅</span>
                 </th>
+                <th scope="col">Description</th>
               </tr>
             </thead>
             <tbody id="sfx-tbody">
               <% triggers.forEach(function(t) { %>
-              <tr data-command="<%= t.triggerCommand.toLowerCase() %>" data-category="<%= (t.categoryName || '').toLowerCase() %>">
+              <tr data-command="<%= t.triggerCommand.toLowerCase() %>" data-category="<%= (t.categoryName || '').toLowerCase() %>" data-description="<%= (t.description || '').toLowerCase() %>">
                 <td class="mono"><%= t.triggerCommand %></td>
                 <td><% if (t.categoryName) { %><%= t.categoryName %><% } else { %><em class="muted">—</em><% } %></td>
+                <td><% if (t.description) { %><%= t.description %><% } else { %><em class="muted">—</em><% } %></td>
               </tr>
               <% }) %>
             </tbody>

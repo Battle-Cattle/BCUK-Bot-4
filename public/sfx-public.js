@@ -19,9 +19,10 @@ function applyFilter() {
   let visible = 0;
 
   rows.forEach((row) => {
-    const cmd = row.dataset.command || '';
-    const cat = row.dataset.category || '';
-    const match = !query || cmd.includes(query) || cat.includes(query);
+    const cmd  = row.dataset.command || '';
+    const cat  = row.dataset.category || '';
+    const desc = row.dataset.description || '';
+    const match = !query || cmd.includes(query) || cat.includes(query) || desc.includes(query);
     row.style.display = match ? '' : 'none';
     if (match) visible++;
   });

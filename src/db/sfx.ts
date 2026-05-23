@@ -79,11 +79,12 @@ export async function findSoundFiles(triggerId: bigint): Promise<SfxFile[]> {
 export interface PublicSfxTrigger {
   triggerCommand: string;
   categoryName: string | null;
+  description: string | null;
 }
 
 export async function getPublicSfxTriggers(): Promise<PublicSfxTrigger[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT t.trigger_command AS triggerCommand, c.name AS categoryName
+    `SELECT t.trigger_command AS triggerCommand, c.name AS categoryName, t.description
      FROM sfxtrigger t
      LEFT JOIN sfxcategory c ON t.category_id = c.id
      WHERE t.hidden = 0
@@ -92,6 +93,7 @@ export async function getPublicSfxTriggers(): Promise<PublicSfxTrigger[]> {
   return rows.map((r) => ({
     triggerCommand: r.triggerCommand,
     categoryName: r.categoryName ?? null,
+    description: r.description ?? null,
   }));
 }
 
