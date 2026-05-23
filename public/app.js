@@ -124,60 +124,61 @@ function applyStatus(status) {
 let consecutiveFailures = 0;
 const STALE_THRESHOLD = 3;
 
+let voiceChannelPollTimer = null;
+
 async function loadVoiceChannels() {
+  clearTimeout(voiceChannelPollTimer);
   const select = document.getElementById('voice-channel-select');
   if (!select) return;
 
+  let nextPollMs = 30000;
   try {
     const res = await fetch('/api/voice/channels');
     if (!res.ok) {
       select.innerHTML = '<option value="">Failed to load channels</option>';
       select.disabled = true;
-      return;
-    }
+    } else {
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.channels)) {
+        const currentSelected = select.value;
+        select.innerHTML = '';
 
-    const data = await res.json();
-    if (!data.ok || !Array.isArray(data.channels)) return;
+        if (data.channels.length === 0) {
+          const option = document.createElement('option');
+          option.value = '';
+          option.textContent = 'No voice channels available';
+          option.disabled = true;
+          select.appendChild(option);
+          select.disabled = true;
+          nextPollMs = 5000;
+        } else {
+          select.disabled = false;
+          for (const channel of data.channels) {
+            const option = document.createElement('option');
+            option.value = channel.id;
+            option.textContent = channel.name;
+            select.appendChild(option);
+          }
 
-    const currentSelected = select.value;
-    select.innerHTML = '';
-
-    if (data.channels.length === 0) {
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = 'No voice channels available';
-      option.disabled = true;
-      select.appendChild(option);
-      select.disabled = true;
-      return;
-    }
-
-    select.disabled = false;
-    for (const channel of data.channels) {
-      const option = document.createElement('option');
-      option.value = channel.id;
-      option.textContent = channel.name;
-      select.appendChild(option);
-    }
-
-    if (currentSelected) {
-      select.value = currentSelected;
-    }
-    const restored = currentSelected && select.value === currentSelected;
-    if (!restored) {
-      if (data.currentChannelId) {
-        select.value = data.currentChannelId;
-      } else if (data.defaultChannelId) {
-        select.value = data.defaultChannelId;
+          if (currentSelected) {
+            select.value = currentSelected;
+          }
+          const restored = currentSelected && select.value === currentSelected;
+          if (!restored) {
+            if (data.currentChannelId) {
+              select.value = data.currentChannelId;
+            } else if (data.defaultChannelId) {
+              select.value = data.defaultChannelId;
+            }
+          }
+        }
       }
     }
   } catch (_) {
-    const select = document.getElementById('voice-channel-select');
-    if (select) {
-      select.innerHTML = '<option value="">Failed to load channels</option>';
-      select.disabled = true;
-    }
+    select.innerHTML = '<option value="">Failed to load channels</option>';
+    select.disabled = true;
   }
+  voiceChannelPollTimer = setTimeout(loadVoiceChannels, nextPollMs);
 }
 
 async function fetchStatus() {
@@ -214,7 +215,6 @@ if (initialStatusRaw) {
 fetchStatus();
 loadVoiceChannels();
 setInterval(fetchStatus, 5000);
-setInterval(loadVoiceChannels, 30000);
 
 /* ── Rejoin Voice button ─────────────────────────────────── */
 
