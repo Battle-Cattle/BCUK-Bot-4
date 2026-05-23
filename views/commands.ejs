@@ -53,6 +53,17 @@
               <p class="hint hint-compact">Reply text to send when the trigger matches.</p>
               <textarea id="output" class="input stream-textarea" name="output" rows="3" placeholder="Hello chat!" required></textarea>
             </div>
+            <% if (assignableUsers.length > 0) { %>
+            <div class="form-section-gap">
+              <label for="add-discord-ids" class="form-label">Assign Twitch Users <span class="muted">(optional)</span></label>
+              <select id="add-discord-ids" class="input" name="discord_ids" multiple size="<%= Math.min(assignableUsers.length, 5) %>">
+                <% assignableUsers.forEach(function(u) { %>
+                  <option value="<%= u.discord_id %>"><%= u.discord_name || u.discord_id %> (<%= u.twitch_name %>)</option>
+                <% }) %>
+              </select>
+              <p class="hint hint-compact">Hold Ctrl / Cmd to select multiple users.</p>
+            </div>
+            <% } %>
             <button type="submit" class="btn">Add Command</button>
           </form>
         </div>
