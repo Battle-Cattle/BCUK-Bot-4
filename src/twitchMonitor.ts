@@ -22,6 +22,7 @@ import {
   cancelOfflineTimersForLogin,
   handleStreamOffline,
 } from './twitchMonitorOffline';
+import { setTwitchChannelLive } from './statusStore';
 import { performStartupLiveCheck } from './twitchMonitorStartup';
 
 const log = createLogger('TwitchMonitor');
@@ -60,6 +61,7 @@ async function handlePollStreamer(
       cancelOfflineTimersForLogin(liveStates, loginKey);
       log.info(`${loginKey} came back — offline timer(s) cancelled`);
     }
+    setTwitchChannelLive(loginKey, true);
     const isNew = !liveStates.has(stateKey);
     if (isNew || (existing && !existing.messageId)) {
       // Went live, or state exists with no Discord message (e.g. Discord wasn't ready at startup)

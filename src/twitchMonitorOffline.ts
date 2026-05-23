@@ -4,6 +4,7 @@ import { getStreams } from './twitchApi';
 const log = createLogger('TwitchMonitor');
 import { LiveState } from './twitchMonitorTypes';
 import { deleteAnnouncement } from './twitchMonitorAnnouncements';
+import { setTwitchChannelLive } from './statusStore';
 
 const OFFLINE_GRACE_MS = 5 * 60 * 1000;
 
@@ -38,6 +39,7 @@ export async function runOfflineCheck(
     const isLive = streams.some((s) => s.user_id === userId && s.type === 'live');
     if (!isLive) {
       await deleteAnnouncement(liveStates, stateKey);
+      setTwitchChannelLive(key, false);
       log.info(`${login} confirmed offline — announcement removed`);
     }
   } finally {

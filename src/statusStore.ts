@@ -2,6 +2,7 @@ export interface ChannelStatus {
   connected: boolean;
   lastConnectedAt: Date | null;
   lastDisconnectedAt: Date | null;
+  isLive: boolean;
 }
 
 const state = {
@@ -59,6 +60,7 @@ function updateChannel(map: Map<string, ChannelStatus>, key: string, connected: 
     connected: false,
     lastConnectedAt: null,
     lastDisconnectedAt: null,
+    isLive: false,
   };
   if (connected && !existing.connected) existing.lastConnectedAt = new Date();
   if (!connected && existing.connected) existing.lastDisconnectedAt = new Date();
@@ -72,6 +74,12 @@ export function setTwitchChannel(channel: string, connected: boolean): void {
 
 export function setTikTokChannel(username: string, connected: boolean): void {
   updateChannel(state.tiktok, username, connected);
+}
+
+export function setTwitchChannelLive(login: string, isLive: boolean): void {
+  const key = login.toLowerCase().replace(/^#/, '');
+  const existing = state.twitch.get(key);
+  if (existing) existing.isLive = isLive;
 }
 
 export function getStatus() {
