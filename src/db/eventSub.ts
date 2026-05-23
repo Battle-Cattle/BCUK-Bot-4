@@ -136,6 +136,34 @@ export async function clearStreamerToken(streamerId: number): Promise<void> {
   );
 }
 
+const DEFAULT_EVENT_CONFIG: EventSubConfig = {
+  follow_enabled: false,
+  follow_message: 'Thanks {display_name} for the follow!',
+  sub_enabled: false,
+  sub_message: 'Thanks {display_name} for subscribing! (Tier {tier})',
+  resub_message: 'Thanks {display_name} for {months} months! (Tier {tier})',
+  giftsub_message: '{gifter_display} gifted {count} sub(s) to the community!',
+  raid_enabled: false,
+  raid_message: 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!',
+};
+
+export async function initEventConfig(streamerId: number): Promise<void> {
+  const c = DEFAULT_EVENT_CONFIG;
+  await getPool().execute(
+    `INSERT IGNORE INTO streamer_event_config
+       (streamer_id, follow_enabled, follow_message,
+        sub_enabled, sub_message, resub_message, giftsub_message,
+        raid_enabled, raid_message)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      streamerId,
+      c.follow_enabled ? 1 : 0, c.follow_message,
+      c.sub_enabled ? 1 : 0, c.sub_message, c.resub_message, c.giftsub_message,
+      c.raid_enabled ? 1 : 0, c.raid_message,
+    ],
+  );
+}
+
 export async function saveEventConfig(streamerId: number, config: EventSubConfig): Promise<void> {
   await getPool().execute(
     `INSERT INTO streamer_event_config
