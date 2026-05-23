@@ -7,6 +7,7 @@ import { recordCommandTestEntry } from './commandMonitorStore';
 import { getSharedChatSession } from './twitchApi';
 import { extractCommand } from './commandUtils';
 import { isDiscordNotFoundError } from './discordUtils';
+import { getMultiTwitchDataForChannel } from './twitchMonitor';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
@@ -99,7 +100,16 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
 
   // Only send to channels where the command is registered (in-memory cache lookup)
   const registrationResults = await Promise.all(candidates.map((ch) => getCustomCommandForTwitchChannel(ch, command)));
-  const targets = candidates.filter((_, i) => registrationResults[i] !== null);
+  const registered = candidates.filter((_, i) => registrationResults[i] !== null);
+
+  // Restrict to the active multi-twitch group. When the source channel is not in an
+  // active group (e.g. offline), fall back to the source channel only so the command
+  // does not broadcast to unrelated channels.
+  const groupInfo = getMultiTwitchDataForChannel(sourceChannel);
+  const groupParticipantSet = groupInfo ? new Set(groupInfo.participants) : null;
+  const targets = registered.filter((ch) =>
+    ch === sourceChannel || (groupParticipantSet !== null && groupParticipantSet.has(ch)),
+  );
 
   // Pre-resolve all session IDs in parallel to avoid serial Helix calls per channel
   const userIds = [...new Set(targets.map((ch) => loginUserIds.get(ch)).filter((id): id is string => id !== undefined))];
