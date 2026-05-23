@@ -113,8 +113,9 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
     return res.redirect('/admin/commands?error=missing_fields');
   }
 
+  let commandId: number;
   try {
-    await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
+    commandId = await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
     if (err instanceof ReservedCommandError) {
       return res.redirect('/admin/commands?error=reserved_command');
@@ -126,6 +127,25 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
 
     log.error('Add custom command error:', err);
     return res.redirect('/admin/commands?error=add_failed');
+  }
+
+  const rawDiscordIds = req.body.discord_ids;
+  const discordIds: string[] = (Array.isArray(rawDiscordIds) ? rawDiscordIds : rawDiscordIds ? [rawDiscordIds] : [])
+    .map((id: string) => normalizeDiscordId(id))
+    .filter((id): id is string => id !== null);
+
+  for (const discordId of discordIds) {
+    try {
+      const user = await findUser(discordId);
+      if (!user || !user.twitch_name) continue;
+      await assignUserToCommand(commandId, discordId);
+    } catch (err) {
+      if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
+        return res.redirect('/admin/commands?error=command_taken');
+      }
+      log.error('Assign user during command creation error:', err);
+      return res.redirect('/admin/commands?error=assign_failed');
+    }
   }
 
   res.redirect('/admin/commands');

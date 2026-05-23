@@ -369,13 +369,13 @@ export async function addCustomCommand(
   output: string,
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
-): Promise<void> {
+): Promise<number> {
   const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string').toLowerCase();
   const normalizedOutput = requireTrimmedString(output, 'output');
 
   assertNotReservedCommand(normalizedTriggerString);
 
-  await runSerializedCommandWrite(
+  const commandId = await runSerializedCommandWrite(
     normalizedTriggerString,
     undefined,
     async (connection) => {
@@ -387,16 +387,20 @@ export async function addCustomCommand(
         await assertMultiTwitchTriggerAvailable(connection, normalizedTriggerString);
       }
 
-      await connection.execute(
+      const [result] = await connection.execute<mysql.ResultSetHeader>(
         `INSERT INTO custom_command (trigger_string, output, is_discord_enabled, is_multi_twitch)
          VALUES (?, ?, ?, ?)`,
         [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0],
       );
+
+      return result.insertId;
     },
     { includeCustomCommandTable: false, includeCounterTable: true },
   );
 
   invalidateCustomCommandLookupCache();
+
+  return commandId;
 }
 
 export async function updateCustomCommand(
