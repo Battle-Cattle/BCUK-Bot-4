@@ -163,13 +163,12 @@ async function loadVoiceChannels() {
     if (currentSelected) {
       select.value = currentSelected;
     }
-    if (!select.value) {
+    const restored = currentSelected && select.value === currentSelected;
+    if (!restored) {
       if (data.currentChannelId) {
         select.value = data.currentChannelId;
       } else if (data.defaultChannelId) {
         select.value = data.defaultChannelId;
-      } else if (data.channels.length > 0) {
-        select.value = data.channels[0].id;
       }
     }
   } catch (_) {
