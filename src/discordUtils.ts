@@ -1,5 +1,5 @@
 import { createLogger } from './logger';
-import { DiscordAPIError, RESTJSONErrorCodes } from 'discord.js';
+import { DiscordAPIError, RESTJSONErrorCodes, ChannelType } from 'discord.js';
 import { getDiscordClient } from './discordBot';
 
 const log = createLogger('Discord');
@@ -20,6 +20,7 @@ export function isPermanentVoiceMisconfigurationError(err: unknown): boolean {
   const code = typeof apiErr.code === 'string' ? Number(apiErr.code) : apiErr.code;
   const isConfigError =
     message.includes('Missing DISCORD_GUILD_ID or DISCORD_VOICE_CHANNEL_ID') ||
+    message.includes('Missing DISCORD_GUILD_ID or voice channel ID') ||
     message.includes('is not a voice channel');
   const isForbidden = status === 403 || code === RESTJSONErrorCodes.MissingAccess;
   return isConfigError || isForbidden || isDiscordNotFoundError(err);
@@ -36,6 +37,32 @@ export async function tryDeleteDiscordMessage(channelId: string, messageId: stri
   } catch (err) {
     if (isDiscordNotFoundError(err)) return;
     log.error(`Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
+    throw err;
+  }
+}
+
+export interface VoiceChannelInfo {
+  id: string;
+  name: string;
+}
+
+export async function getAvailableVoiceChannels(guildId: string): Promise<VoiceChannelInfo[]> {
+  const discordClient = getDiscordClient();
+  if (!discordClient) return [];
+
+  try {
+    const guild = await discordClient.guilds.fetch(guildId);
+    const channels = await guild.channels.fetch();
+    return channels
+      .filter((ch): ch is Exclude<typeof ch, null> => ch !== null && ch.type === ChannelType.GuildVoice)
+      .map((ch) => ({ id: ch.id, name: ch.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch (err) {
+    if (isDiscordNotFoundError(err)) {
+      log.warn(`Guild ${guildId} not found when fetching voice channels`);
+    } else {
+      log.error(`Failed to fetch voice channels for guild ${guildId}:`, err);
+    }
     throw err;
   }
 }

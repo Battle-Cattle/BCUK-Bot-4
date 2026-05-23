@@ -5,8 +5,11 @@ import { findTrigger, findSoundFiles, getAllSfxTriggers } from '../../db';
 import { pickWeightedRandom } from '../../soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../sfxPlayer';
 import { setVoicePlaying } from '../../statusStore';
-import { SFX_FOLDER } from '../../config';
+import { SFX_FOLDER, DISCORD_GUILD_ID } from '../../config';
 import { requireApiKey } from '../middleware';
+import { getAvailableVoiceChannels } from '../../discordUtils';
+import { connect, disconnect } from '../../audioPlayer';
+import { getDiscordClient } from '../../discordBot';
 
 const log = createLogger('Streamdeck');
 const router = Router();
@@ -71,6 +74,39 @@ router.post('/sfx', requireApiKey, async (req, res) => {
       log.error(`Failed to play ${fullPath}:`, err);
       res.status(500).json({ ok: false, error: 'Failed to play sound' });
     }
+  }
+});
+
+router.get('/voice/channels', requireApiKey, async (_req, res) => {
+  try {
+    const channels = await getAvailableVoiceChannels(DISCORD_GUILD_ID);
+    res.json({ ok: true, channels });
+  } catch (err) {
+    log.error('Failed to list voice channels:', err);
+    res.status(500).json({ ok: false, error: 'Failed to fetch voice channels' });
+  }
+});
+
+router.post('/voice/join', requireApiKey, async (req, res) => {
+  const { channelId } = req.body as { channelId?: unknown };
+  if (typeof channelId !== 'string' || !channelId.trim()) {
+    res.status(400).json({ ok: false, error: 'Missing or invalid "channelId" field' });
+    return;
+  }
+
+  const discordClient = getDiscordClient();
+  if (!discordClient) {
+    res.status(503).json({ ok: false, error: 'Discord client not ready' });
+    return;
+  }
+
+  try {
+    disconnect();
+    await connect(discordClient, channelId.trim());
+    res.json({ ok: true });
+  } catch (err) {
+    log.error('Voice join failed:', err);
+    res.status(500).json({ ok: false, error: 'Failed to join voice channel' });
   }
 });
 

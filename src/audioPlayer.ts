@@ -32,6 +32,8 @@ let reconnectTimer: NodeJS.Timeout | null = null;
 let reconnectAttempts = 0;
 let shouldAutoReconnect = false;
 let currentAttemptId = 0;
+let currentChannelId: string | null = null;
+let targetChannelId: string | undefined = undefined;
 
 const RECONNECT_BASE_DELAY_MS = 5_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
@@ -56,7 +58,7 @@ function scheduleReconnect(reason: string): void {
     reconnectTimer = null;
     if (scheduledAttemptId !== currentAttemptId) return;
     if (!shouldAutoReconnect || !activeClient || connection) return;
-    connect(activeClient).catch((err) => {
+    connect(activeClient, targetChannelId).catch((err) => {
       log.error('Voice rejoin failed:', err);
     });
   }, delay);
@@ -86,6 +88,7 @@ function tearDownPlayer(): void {
     // Ignore audio stop errors during disconnect cleanup.
   }
   playing = false;
+  currentChannelId = null;
   setVoiceDisconnected();
 }
 
@@ -100,33 +103,36 @@ function makeDeps(): ConnectionHandlerDeps {
 }
 
 /**
- * Join the configured voice channel and subscribe the audio player.
+ * Join the specified voice channel or the configured one and subscribe the audio player.
  * Should be called once the Discord client is ready.
  */
-export async function connect(client: Client): Promise<void> {
+export async function connect(client: Client, channelId?: string): Promise<void> {
   clearReconnectTimer();
   const attemptId = ++currentAttemptId;
   let nextConnection: VoiceConnection | null = null;
 
   activeClient = client;
+  targetChannelId = channelId;
   shouldAutoReconnect = true;
 
   const previousConnection = connection;
   const deps = makeDeps();
 
   try {
-    if (!DISCORD_GUILD_ID || !DISCORD_VOICE_CHANNEL_ID) {
-      throw new Error('Missing DISCORD_GUILD_ID or DISCORD_VOICE_CHANNEL_ID');
+    const resolvedChannelId = channelId || DISCORD_VOICE_CHANNEL_ID;
+
+    if (!DISCORD_GUILD_ID || !resolvedChannelId) {
+      throw new Error('Missing DISCORD_GUILD_ID or voice channel ID');
     }
 
     const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
     if (attemptId !== currentAttemptId) return;
 
-    const channel = await guild.channels.fetch(DISCORD_VOICE_CHANNEL_ID);
+    const channel = await guild.channels.fetch(resolvedChannelId);
     if (attemptId !== currentAttemptId) return;
 
     if (!channel || channel.type !== ChannelType.GuildVoice) {
-      throw new Error(`Channel ${DISCORD_VOICE_CHANNEL_ID} is not a voice channel`);
+      throw new Error(`Channel ${resolvedChannelId} is not a voice channel`);
     }
 
     nextConnection = joinVoiceChannel({
@@ -154,6 +160,7 @@ export async function connect(client: Client): Promise<void> {
 
     releasePreviousConnection(previousConnection, joinedConnection, deps);
     connection = joinedConnection;
+    currentChannelId = channel.id;
 
     clearReconnectTimer();
     log.info('Voice connection ready.');
@@ -185,8 +192,10 @@ export function disconnect(): void {
   currentAttemptId += 1;
   shouldAutoReconnect = false;
   activeClient = null;
+  targetChannelId = undefined;
   clearReconnectTimer();
   reconnectAttempts = 0;
+  currentChannelId = null;
 
   const existingConnection = connection;
   if (existingConnection) {
@@ -211,6 +220,11 @@ export function isPlaying(): boolean {
 /** Returns true if the bot is currently joined to a voice channel. */
 export function isConnected(): boolean {
   return connection !== null;
+}
+
+/** Returns the current voice channel ID if connected, null otherwise. */
+export function getCurrentChannelId(): string | null {
+  return currentChannelId;
 }
 
 /** Marks playback as active and sends the resource to the audio player. */
