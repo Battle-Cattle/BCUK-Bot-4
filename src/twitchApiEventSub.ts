@@ -12,7 +12,7 @@ export class TwitchAuthError extends Error {
 export interface OAuthTokens {
   access_token: string;
   refresh_token: string;
-  expires_in: number;
+  expires_in?: number;
 }
 
 export async function exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {

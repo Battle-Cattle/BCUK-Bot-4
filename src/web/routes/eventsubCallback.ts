@@ -52,8 +52,7 @@ router.get('/twitch/eventsub/callback', async (req, res) => {
       return res.redirect(`/user/settings?error=eventsub_wrong_account&expected=${encodeURIComponent(streamer.twitch_name ?? '')}`);
     }
 
-    const expiryMs = Date.now() + tokens.expires_in * 1000 - 60_000;
-    log.info(`EventSub token expiry debug — expires_in=${tokens.expires_in} Date.now()=${Date.now()} expiryMs=${expiryMs}`);
+    const expiryMs = tokens.expires_in != null ? Date.now() + tokens.expires_in * 1000 - 60_000 : null;
     await saveStreamerToken(streamerId, twitchUser.id, tokens.access_token, tokens.refresh_token, expiryMs);
     await initEventConfig(streamerId);
     reloadEventSubSubscriptions();

@@ -114,7 +114,7 @@ export async function saveStreamerToken(
   twitchUserId: string,
   accessToken: string,
   refreshToken: string,
-  expiryMs: number,
+  expiryMs: number | null,
 ): Promise<void> {
   if (!EVENTSUB_TOKEN_SECRET) throw new Error('EVENTSUB_TOKEN_SECRET is not configured — refusing to persist plaintext OAuth tokens');
   const storedAccess = encryptToken(accessToken, EVENTSUB_TOKEN_SECRET);

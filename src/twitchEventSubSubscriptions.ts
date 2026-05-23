@@ -125,8 +125,8 @@ async function subscribe(sessionId: string, spec: SubSpec, token: string, login:
 async function maybeRefreshToken(streamer: DbStreamerEventSub): Promise<string | null> {
   if (!streamer.eventsub_access_token) return null;
 
-  const needsRefresh = !streamer.eventsub_token_expiry
-    || Date.now() > streamer.eventsub_token_expiry - BUFFER_MS;
+  const needsRefresh = streamer.eventsub_token_expiry != null
+    && Date.now() > streamer.eventsub_token_expiry - BUFFER_MS;
 
   if (!needsRefresh) return streamer.eventsub_access_token;
 
@@ -137,7 +137,7 @@ async function maybeRefreshToken(streamer: DbStreamerEventSub): Promise<string |
 
   try {
     const tokens = await refreshUserToken(streamer.eventsub_refresh_token);
-    const expiryMs = Date.now() + tokens.expires_in * 1000 - 60_000;
+    const expiryMs = tokens.expires_in != null ? Date.now() + tokens.expires_in * 1000 - 60_000 : null;
     await saveStreamerToken(streamer.id, streamer.twitch_user_id!, tokens.access_token, tokens.refresh_token, expiryMs);
     log.info(`Token refreshed for ${streamer.twitch_name ?? 'unknown'}`);
     return tokens.access_token;
