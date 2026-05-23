@@ -4,10 +4,13 @@ export type SqlExecutor = mysql.Pool | mysql.PoolConnection;
 
 // ─── String normalisation ────────────────────────────────────────────────────
 
-export function requireTrimmedString(value: string, fieldName: string): string {
+export function requireTrimmedString(value: string, fieldName: string, maxLength?: number): string {
   const normalizedValue = value.trim();
   if (!normalizedValue) {
     throw new Error(`Missing ${fieldName}`);
+  }
+  if (maxLength !== undefined && normalizedValue.length > maxLength) {
+    throw new Error(`${fieldName} exceeds maximum length of ${maxLength}`);
   }
   return normalizedValue;
 }

@@ -76,17 +76,13 @@ export function startDiscordBot(): void {
   });
 
   client.once('clientReady', async (c) => {
+    log.info(`Logged in as ${c.user.tag}`);
+    _discordClient = c;
     try {
-      log.info(`Logged in as ${c.user.tag}`);
-      _discordClient = c;
-      try {
-        const guild = await getConfiguredGuild();
-        setDiscordReady(c.user.tag, guild.name);
-      } catch (err) {
-        log.error('Failed to initialise:', err);
-      }
+      const guild = await getConfiguredGuild();
+      setDiscordReady(c.user.tag, guild.name);
     } catch (err) {
-      log.error('Unexpected error in clientReady handler:', err);
+      log.error('Failed to initialise:', err);
     }
   });
 

@@ -82,10 +82,10 @@ function normalizeCounterFields(
   incrementMessage: string,
 ): NormalizedCounterFields {
   return {
-    triggerCommand: requireTrimmedString(triggerCommand, 'trigger_command').toLowerCase(),
-    checkCommand: requireTrimmedString(checkCommand, 'check_command').toLowerCase(),
-    message: requireTrimmedString(message, 'message'),
-    incrementMessage: requireTrimmedString(incrementMessage, 'increment_message'),
+    triggerCommand: requireTrimmedString(triggerCommand, 'trigger_command', 255).toLowerCase(),
+    checkCommand: requireTrimmedString(checkCommand, 'check_command', 255).toLowerCase(),
+    message: requireTrimmedString(message, 'message', 2000),
+    incrementMessage: requireTrimmedString(incrementMessage, 'increment_message', 2000),
   };
 }
 

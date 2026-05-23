@@ -196,6 +196,9 @@ export async function startTwitchBot(): Promise<void> {
     // Clear tmi.js's confirmed-channel list so it doesn't replay those
     // channels in its auto-rejoin queue on the next connect. All joining
     // is handled by reconcileJoinedChannels after 'connected' fires.
+    // tmi.js doesn't expose `channels` in its public types, but it is a real
+    // internal array. Clearing it prevents tmi.js from auto-rejoining stale
+    // channels on the next connect — all joins are handled by reconcileJoinedChannels.
     (client as any).channels = [];
     log.warn(`Disconnected: ${reason}`);
     activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
@@ -233,7 +236,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       setTwitchChannel(normalized, false);
       getUsers([normalized])
         .then(([u]) => { if (u) activeChannelUserIds.set(normalized, u.id); })
-        .catch(() => { /* best-effort */ });
+        .catch((err) => { log.warn(`Failed to cache user ID for channel ${normalized}:`, err); });
       return;
     }
 
@@ -244,7 +247,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       setTwitchChannel(normalized, true);
       getUsers([normalized])
         .then(([u]) => { if (u) activeChannelUserIds.set(normalized, u.id); })
-        .catch(() => { /* best-effort */ });
+        .catch((err) => { log.warn(`Failed to cache user ID for channel ${normalized}:`, err); });
     } catch (err) {
       // Roll back local state; reconnect reconciliation will retry via activeChannels.
       activeChannels.delete(normalized);

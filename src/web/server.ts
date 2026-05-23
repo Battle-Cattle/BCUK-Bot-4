@@ -84,13 +84,18 @@ const authLimiter = rateLimit({
   keyGenerator: ipKey,
   message: 'Too many requests, please try again shortly.',
 });
-// Generous limit for the Streamdeck API — authenticated by API key, used for live button presses
+// Generous limit for the Streamdeck API — keyed by Bearer token so each API key gets
+// its own bucket regardless of which IP the request originates from.
 const streamdeckLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 120,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  keyGenerator: ipKey,
+  keyGenerator: (req) => {
+    const auth = req.headers['authorization'];
+    const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+    return token ?? (req.ip ?? req.socket?.remoteAddress ?? 'unknown');
+  },
   message: 'Too many requests, please try again shortly.',
 });
 // Body parsers

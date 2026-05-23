@@ -25,6 +25,7 @@ const log = createLogger('Web');
 const router = Router();
 router.use(adminRefreshRouter);
 
+const DISCORD_ID_RE = /^\d{17,20}$/;
 const KNOWN_ERRORS = new Set(['add_failed', 'duplicate_twitch_name', 'db_busy', 'update_failed', 'remove_failed', 'toggle_failed']);
 // Twitch membership changes are serialized per user in-process because this bot
 // currently runs as a single web instance. If that changes, move this lock into
@@ -60,6 +61,7 @@ router.post('/users/add', requireAdmin, csrfProtection, async (req, res) => {
   };
   const trimmedDiscordId = (discord_id ?? '').trim();
   if (!trimmedDiscordId || !access_level) return res.redirect('/admin/users');
+  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.status(400).render('error', { message: 'Invalid Discord ID.', user: req.session.user ?? null });
   const submittedTwitchName = (twitch_name ?? '').trim();
   const shouldClearTwitchName = clear_twitch_name === '1';
   const normalizedTwitchName = submittedTwitchName ? normalizeTwitchChannelName(submittedTwitchName) : null;
@@ -103,6 +105,7 @@ router.post('/users/update', requireAdmin, csrfProtection, async (req, res) => {
   const { discord_id, access_level } = req.body as { discord_id?: string; access_level?: string };
   const trimmedDiscordId = (discord_id ?? '').trim();
   if (!trimmedDiscordId || access_level === undefined) return res.redirect('/admin/users');
+  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.status(400).render('error', { message: 'Invalid Discord ID.', user: req.session.user ?? null });
   const level = parseInt(access_level, 10);
   if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
@@ -131,6 +134,7 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
   const { discord_id } = req.body as { discord_id?: string };
   const trimmedDiscordId = (discord_id ?? '').trim();
   if (!trimmedDiscordId) return res.redirect('/admin/users');
+  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.status(400).render('error', { message: 'Invalid Discord ID.', user: req.session.user ?? null });
 
   if (trimmedDiscordId === req.session.user!.discordId) {
     return res.status(400).render('error', {
@@ -159,6 +163,7 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   };
   const trimmedDiscordId = (discord_id ?? '').trim();
   if (!trimmedDiscordId) return res.redirect('/admin/users');
+  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.status(400).render('error', { message: 'Invalid Discord ID.', user: req.session.user ?? null });
 
   let nextEnabled: boolean;
   if (is_twitch_bot_enabled === 'true' || is_twitch_bot_enabled === '1') {

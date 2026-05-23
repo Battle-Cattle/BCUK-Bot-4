@@ -370,8 +370,8 @@ export async function addCustomCommand(
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
 ): Promise<number> {
-  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string').toLowerCase();
-  const normalizedOutput = requireTrimmedString(output, 'output');
+  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string', 255).toLowerCase();
+  const normalizedOutput = requireTrimmedString(output, 'output', 2000);
 
   assertNotReservedCommand(normalizedTriggerString);
 
@@ -410,8 +410,8 @@ export async function updateCustomCommand(
   isDiscordEnabled: boolean,
   isMultiTwitch: boolean,
 ): Promise<void> {
-  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string').toLowerCase();
-  const normalizedOutput = requireTrimmedString(output, 'output');
+  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string', 255).toLowerCase();
+  const normalizedOutput = requireTrimmedString(output, 'output', 2000);
 
   assertNotReservedCommand(normalizedTriggerString);
 
