@@ -15,7 +15,7 @@ export function getPool(): mysql.Pool {
       bigNumberStrings: true,
       waitForConnections: true,
       connectionLimit: 15,
-      queueLimit: 0,
+      queueLimit: 100,
       connectTimeout: 10_000,
     });
   }
