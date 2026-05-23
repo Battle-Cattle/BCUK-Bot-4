@@ -117,7 +117,7 @@ export async function startTwitchBot(): Promise<void> {
       username: TWITCH_USERNAME,
       password: TWITCH_OAUTH_TOKEN,
     },
-    channels: [...activeChannels],
+    channels: [],
     options: { debug: false },
     logger: {
       info: (msg: string) => log.info(msg),
@@ -190,6 +190,10 @@ export async function startTwitchBot(): Promise<void> {
 
   client.on('disconnected', (reason) => {
     connected = false;
+    // Clear tmi.js's confirmed-channel list so it doesn't replay those
+    // channels in its auto-rejoin queue on the next connect. All joining
+    // is handled by reconcileJoinedChannels after 'connected' fires.
+    (client as any).channels = [];
     log.warn(`Disconnected: ${reason}`);
     activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
   });
