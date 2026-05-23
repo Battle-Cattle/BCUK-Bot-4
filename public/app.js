@@ -172,7 +172,7 @@ async function loadVoiceChannels() {
   clearTimeout(voiceChannelPollTimer);
   const select = document.getElementById('voice-channel-select');
   if (!select) return;
-  let nextPollMs = 30000;
+  let nextPollMs;
   try {
     const res = await fetch('/api/voice/channels');
     if (!res.ok) {
