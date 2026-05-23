@@ -20,6 +20,8 @@ let connected = false;
 const activeChannels = new Set<string>();
 const activeChannelUserIds = new Map<string, string>();
 const membershipMutationQueue = createMutationQueue();
+// Twitch rate-limits JOIN to 20 per 10 s (2/s). 600 ms ≈ 1.67/s, ~83% of the ceiling.
+const JOIN_THROTTLE_MS = 600;
 
 function normalizeChannel(channel: string): string | null {
   return normalizeTwitchChannelName(channel);
@@ -56,6 +58,7 @@ async function joinMissingChannel(channel: string): Promise<void> {
     return;
   }
   await client.join(channel);
+  await new Promise<void>((resolve) => { setTimeout(resolve, JOIN_THROTTLE_MS); });
   setTwitchChannel(channel, true);
   log.info(`Joined queued channel after reconnect: ${channel}`);
 }
@@ -117,7 +120,7 @@ export async function startTwitchBot(): Promise<void> {
       username: TWITCH_USERNAME,
       password: TWITCH_OAUTH_TOKEN,
     },
-    channels: [...activeChannels],
+    channels: [],
     options: { debug: false },
     logger: {
       info: (msg: string) => log.info(msg),
@@ -190,6 +193,10 @@ export async function startTwitchBot(): Promise<void> {
 
   client.on('disconnected', (reason) => {
     connected = false;
+    // Clear tmi.js's confirmed-channel list so it doesn't replay those
+    // channels in its auto-rejoin queue on the next connect. All joining
+    // is handled by reconcileJoinedChannels after 'connected' fires.
+    (client as any).channels = [];
     log.warn(`Disconnected: ${reason}`);
     activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
   });
