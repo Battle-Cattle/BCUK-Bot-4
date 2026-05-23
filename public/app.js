@@ -104,7 +104,7 @@ function applyStatus(status) {
 
   // Keep the rejoin/leave button label in sync with connection state
   const voiceBtn = document.getElementById('btn-rejoin-voice');
-  if (voiceBtn) {
+  if (voiceBtn && !voiceBtn.disabled) {
     voiceBtn.textContent = voiceOn ? 'Leave Voice' : 'Join Voice';
   }
 
@@ -130,7 +130,11 @@ async function loadVoiceChannels() {
 
   try {
     const res = await fetch('/api/voice/channels');
-    if (!res.ok) return;
+    if (!res.ok) {
+      select.innerHTML = '<option value="">Failed to load channels</option>';
+      select.disabled = true;
+      return;
+    }
 
     const data = await res.json();
     if (!data.ok || !Array.isArray(data.channels)) return;
@@ -239,6 +243,7 @@ if (rejoinBtn) {
       if (res.ok) {
         await fetchStatus();
         await loadVoiceChannels();
+        rejoinBtn.textContent = leaving ? 'Join Voice' : 'Leave Voice';
       } else {
         rejoinBtn.textContent = 'Failed';
         setTimeout(() => { rejoinBtn.textContent = leaving ? 'Leave Voice' : 'Join Voice'; }, 3000);

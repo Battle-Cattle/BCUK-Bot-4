@@ -63,6 +63,6 @@ export async function getAvailableVoiceChannels(guildId: string): Promise<VoiceC
     } else {
       log.error(`Failed to fetch voice channels for guild ${guildId}:`, err);
     }
-    return [];
+    throw err;
   }
 }
