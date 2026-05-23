@@ -140,7 +140,10 @@ function restoreVoiceSelection(select, previousValue, data) {
 }
 
 function applyVoiceChannelData(select, data) {
-  if (!data.ok || !Array.isArray(data.channels)) return 30000;
+  if (!data.ok || !Array.isArray(data.channels)) {
+    setSelectError(select);
+    return 5000;
+  }
   const previousValue = select.value;
   select.innerHTML = '';
 
@@ -174,11 +177,13 @@ async function loadVoiceChannels() {
     const res = await fetch('/api/voice/channels');
     if (!res.ok) {
       setSelectError(select);
+      nextPollMs = 5000;
     } else {
       nextPollMs = applyVoiceChannelData(select, await res.json());
     }
   } catch (_) {
     setSelectError(select);
+    nextPollMs = 5000;
   }
   voiceChannelPollTimer = setTimeout(loadVoiceChannels, nextPollMs);
 }
