@@ -126,57 +126,59 @@ const STALE_THRESHOLD = 3;
 
 let voiceChannelPollTimer = null;
 
+function setSelectError(select) {
+  select.innerHTML = '<option value="">Failed to load channels</option>';
+  select.disabled = true;
+}
+
+function restoreVoiceSelection(select, previousValue, data) {
+  if (previousValue) select.value = previousValue;
+  const restored = previousValue && select.value === previousValue;
+  if (restored) return;
+  if (data.currentChannelId) select.value = data.currentChannelId;
+  else if (data.defaultChannelId) select.value = data.defaultChannelId;
+}
+
+function applyVoiceChannelData(select, data) {
+  if (!data.ok || !Array.isArray(data.channels)) return 30000;
+  const previousValue = select.value;
+  select.innerHTML = '';
+
+  if (data.channels.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No voice channels available';
+    opt.disabled = true;
+    select.appendChild(opt);
+    select.disabled = true;
+    return 5000;
+  }
+
+  select.disabled = false;
+  for (const ch of data.channels) {
+    const opt = document.createElement('option');
+    opt.value = ch.id;
+    opt.textContent = ch.name;
+    select.appendChild(opt);
+  }
+  restoreVoiceSelection(select, previousValue, data);
+  return 30000;
+}
+
 async function loadVoiceChannels() {
   clearTimeout(voiceChannelPollTimer);
   const select = document.getElementById('voice-channel-select');
   if (!select) return;
-
   let nextPollMs = 30000;
   try {
     const res = await fetch('/api/voice/channels');
     if (!res.ok) {
-      select.innerHTML = '<option value="">Failed to load channels</option>';
-      select.disabled = true;
+      setSelectError(select);
     } else {
-      const data = await res.json();
-      if (data.ok && Array.isArray(data.channels)) {
-        const currentSelected = select.value;
-        select.innerHTML = '';
-
-        if (data.channels.length === 0) {
-          const option = document.createElement('option');
-          option.value = '';
-          option.textContent = 'No voice channels available';
-          option.disabled = true;
-          select.appendChild(option);
-          select.disabled = true;
-          nextPollMs = 5000;
-        } else {
-          select.disabled = false;
-          for (const channel of data.channels) {
-            const option = document.createElement('option');
-            option.value = channel.id;
-            option.textContent = channel.name;
-            select.appendChild(option);
-          }
-
-          if (currentSelected) {
-            select.value = currentSelected;
-          }
-          const restored = currentSelected && select.value === currentSelected;
-          if (!restored) {
-            if (data.currentChannelId) {
-              select.value = data.currentChannelId;
-            } else if (data.defaultChannelId) {
-              select.value = data.defaultChannelId;
-            }
-          }
-        }
-      }
+      nextPollMs = applyVoiceChannelData(select, await res.json());
     }
   } catch (_) {
-    select.innerHTML = '<option value="">Failed to load channels</option>';
-    select.disabled = true;
+    setSelectError(select);
   }
   voiceChannelPollTimer = setTimeout(loadVoiceChannels, nextPollMs);
 }
