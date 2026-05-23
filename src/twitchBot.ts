@@ -20,6 +20,8 @@ let connected = false;
 const activeChannels = new Set<string>();
 const activeChannelUserIds = new Map<string, string>();
 const membershipMutationQueue = createMutationQueue();
+// Twitch IRC rate-limits JOIN to 20/10 s for unverified bots; pace reconcile joins safely below that.
+const JOIN_THROTTLE_MS = 300;
 
 function normalizeChannel(channel: string): string | null {
   return normalizeTwitchChannelName(channel);
@@ -56,6 +58,7 @@ async function joinMissingChannel(channel: string): Promise<void> {
     return;
   }
   await client.join(channel);
+  await new Promise<void>((resolve) => { setTimeout(resolve, JOIN_THROTTLE_MS); });
   setTwitchChannel(channel, true);
   log.info(`Joined queued channel after reconnect: ${channel}`);
 }
