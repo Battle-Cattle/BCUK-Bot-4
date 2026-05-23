@@ -33,6 +33,7 @@ let reconnectAttempts = 0;
 let shouldAutoReconnect = false;
 let currentAttemptId = 0;
 let currentChannelId: string | null = null;
+let targetChannelId: string | undefined = undefined;
 
 const RECONNECT_BASE_DELAY_MS = 5_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
@@ -57,7 +58,7 @@ function scheduleReconnect(reason: string): void {
     reconnectTimer = null;
     if (scheduledAttemptId !== currentAttemptId) return;
     if (!shouldAutoReconnect || !activeClient || connection) return;
-    connect(activeClient).catch((err) => {
+    connect(activeClient, targetChannelId).catch((err) => {
       log.error('Voice rejoin failed:', err);
     });
   }, delay);
@@ -111,6 +112,7 @@ export async function connect(client: Client, channelId?: string): Promise<void>
   let nextConnection: VoiceConnection | null = null;
 
   activeClient = client;
+  targetChannelId = channelId;
   shouldAutoReconnect = true;
 
   const previousConnection = connection;
@@ -190,6 +192,7 @@ export function disconnect(): void {
   currentAttemptId += 1;
   shouldAutoReconnect = false;
   activeClient = null;
+  targetChannelId = undefined;
   clearReconnectTimer();
   reconnectAttempts = 0;
   currentChannelId = null;

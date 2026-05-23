@@ -105,7 +105,7 @@ function applyStatus(status) {
   // Keep the rejoin/leave button label in sync with connection state
   const voiceBtn = document.getElementById('btn-rejoin-voice');
   if (voiceBtn && !voiceBtn.disabled) {
-    voiceBtn.textContent = voiceOn ? 'Leave Voice' : 'Rejoin Voice';
+    voiceBtn.textContent = voiceOn ? 'Leave Voice' : 'Join Voice';
   }
 
   // Last played
@@ -158,12 +158,15 @@ async function loadVoiceChannels() {
 
     if (currentSelected) {
       select.value = currentSelected;
-    } else if (data.currentChannelId) {
-      select.value = data.currentChannelId;
-    } else if (data.defaultChannelId) {
-      select.value = data.defaultChannelId;
-    } else if (data.channels.length > 0) {
-      select.value = data.channels[0].id;
+    }
+    if (!select.value) {
+      if (data.currentChannelId) {
+        select.value = data.currentChannelId;
+      } else if (data.defaultChannelId) {
+        select.value = data.defaultChannelId;
+      } else if (data.channels.length > 0) {
+        select.value = data.channels[0].id;
+      }
     }
   } catch (_) {
     const select = document.getElementById('voice-channel-select');

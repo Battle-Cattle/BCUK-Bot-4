@@ -20,6 +20,7 @@ export function isPermanentVoiceMisconfigurationError(err: unknown): boolean {
   const code = typeof apiErr.code === 'string' ? Number(apiErr.code) : apiErr.code;
   const isConfigError =
     message.includes('Missing DISCORD_GUILD_ID or DISCORD_VOICE_CHANNEL_ID') ||
+    message.includes('Missing DISCORD_GUILD_ID or voice channel ID') ||
     message.includes('is not a voice channel');
   const isForbidden = status === 403 || code === RESTJSONErrorCodes.MissingAccess;
   return isConfigError || isForbidden || isDiscordNotFoundError(err);
@@ -53,8 +54,8 @@ export async function getAvailableVoiceChannels(guildId: string): Promise<VoiceC
     const guild = await discordClient.guilds.fetch(guildId);
     const channels = await guild.channels.fetch();
     return channels
-      .filter((ch) => ch?.type === ChannelType.GuildVoice)
-      .map((ch) => ({ id: ch!.id, name: ch!.name }))
+      .filter((ch): ch is Exclude<typeof ch, null> => ch !== null && ch.type === ChannelType.GuildVoice)
+      .map((ch) => ({ id: ch.id, name: ch.name }))
       .sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
     if (isDiscordNotFoundError(err)) {
