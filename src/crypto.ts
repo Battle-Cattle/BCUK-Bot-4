@@ -1,4 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createLogger } from './logger';
+
+const log = createLogger('Crypto');
 
 const ALGORITHM = 'aes-256-gcm';
 const ENC_PREFIX = 'enc:';
@@ -22,7 +25,10 @@ export function encryptToken(plaintext: string, secret: string): string {
 
 /** Decrypts a token produced by encryptToken. Returns plaintext values unchanged (migration path). */
 export function decryptToken(stored: string, secret: string): string {
-  if (!stored.startsWith(ENC_PREFIX)) return stored;
+  if (!stored.startsWith(ENC_PREFIX)) {
+    log.warn('Decrypting a plaintext (unencrypted) token — re-run the EventSub OAuth flow to re-encrypt it');
+    return stored;
+  }
   const key = parseKey(secret);
   const [ivB64, tagB64, dataB64] = stored.slice(ENC_PREFIX.length).split('.');
   if (!ivB64 || !tagB64 || !dataB64) throw new Error('Invalid encrypted token format');

@@ -60,12 +60,13 @@ function connectToChannel(username: string, modules: TikTokModules): void {
     // redundant reconnect.
     if (activeConnections.get(username) === connection) {
       activeConnections.delete(username);
-      reconnectTimer = setTimeout(() => {
-        pendingReconnectTimers.delete(reconnectTimer!);
+      const timer = setTimeout(() => {
+        pendingReconnectTimers.delete(timer);
         if (stopped) return;
         connectToChannel(username, modules);
       }, RECONNECT_DELAY_MS);
-      pendingReconnectTimers.add(reconnectTimer);
+      reconnectTimer = timer;
+      pendingReconnectTimers.add(timer);
     }
   }
 
