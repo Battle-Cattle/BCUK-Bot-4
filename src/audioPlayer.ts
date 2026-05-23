@@ -87,6 +87,7 @@ function tearDownPlayer(): void {
     // Ignore audio stop errors during disconnect cleanup.
   }
   playing = false;
+  currentChannelId = null;
   setVoiceDisconnected();
 }
 
@@ -191,6 +192,7 @@ export function disconnect(): void {
   activeClient = null;
   clearReconnectTimer();
   reconnectAttempts = 0;
+  currentChannelId = null;
 
   const existingConnection = connection;
   if (existingConnection) {

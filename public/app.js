@@ -158,6 +158,10 @@ async function loadVoiceChannels() {
 
     if (currentSelected) {
       select.value = currentSelected;
+    } else if (data.currentChannelId) {
+      select.value = data.currentChannelId;
+    } else if (data.defaultChannelId) {
+      select.value = data.defaultChannelId;
     } else if (data.channels.length > 0) {
       select.value = data.channels[0].id;
     }

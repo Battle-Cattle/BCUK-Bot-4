@@ -2,11 +2,11 @@ import { createLogger } from '../../logger';
 import { Router } from 'express';
 import { getStatus } from '../../statusStore';
 import { requireMod } from '../middleware';
-import { connect, disconnect } from '../../audioPlayer';
+import { connect, disconnect, getCurrentChannelId } from '../../audioPlayer';
 import { getDiscordClient } from '../../discordBot';
 import { csrfProtection } from '../csrf';
 import { getAvailableVoiceChannels } from '../../discordUtils';
-import { DISCORD_GUILD_ID } from '../../config';
+import { DISCORD_GUILD_ID, DISCORD_VOICE_CHANNEL_ID } from '../../config';
 
 const log = createLogger('API');
 const router = Router();
@@ -20,7 +20,12 @@ router.get('/status', (_req, res) => {
 router.get('/voice/channels', requireMod, async (_req, res) => {
   try {
     const channels = await getAvailableVoiceChannels(DISCORD_GUILD_ID);
-    res.json({ ok: true, channels });
+    res.json({
+      ok: true,
+      channels,
+      defaultChannelId: DISCORD_VOICE_CHANNEL_ID,
+      currentChannelId: getCurrentChannelId(),
+    });
   } catch (err) {
     log.error('Failed to list voice channels:', err);
     res.status(500).json({ ok: false, error: 'Failed to fetch voice channels' });
@@ -36,7 +41,8 @@ router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
   }
   try {
     const { channelId } = req.body as { channelId?: unknown };
-    const resolvedChannelId = typeof channelId === 'string' ? channelId : undefined;
+    const trimmedChannelId = typeof channelId === 'string' ? channelId.trim() : '';
+    const resolvedChannelId = trimmedChannelId ? trimmedChannelId : undefined;
 
     disconnect();
     await connect(discordClient, resolvedChannelId);
