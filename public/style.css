@@ -328,6 +328,9 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
   .table-scroll .table td.command-output-cell {
     white-space: normal; overflow-wrap: anywhere; max-width: 180px;
   }
+  .table-scroll .table td.assigned-users-cell {
+    white-space: normal; max-width: 160px;
+  }
 
   /* Section header: stack title + search vertically */
   .section-header { flex-wrap: wrap; gap: .5rem; }
