@@ -20,8 +20,8 @@ let connected = false;
 const activeChannels = new Set<string>();
 const activeChannelUserIds = new Map<string, string>();
 const membershipMutationQueue = createMutationQueue();
-// Twitch IRC rate-limits JOIN to 50/15 s; 400 ms gives ~37 joins/15 s (~75% of the limit).
-const JOIN_THROTTLE_MS = 400;
+// Conservative throttle between JOIN commands to avoid Twitch IRC rate limits.
+const JOIN_THROTTLE_MS = 300;
 
 function normalizeChannel(channel: string): string | null {
   return normalizeTwitchChannelName(channel);
