@@ -69,7 +69,7 @@ function updateChannel(map: Map<string, ChannelStatus>, key: string, connected: 
 }
 
 export function setTwitchChannel(channel: string, connected: boolean): void {
-  updateChannel(state.twitch, channel.replace(/^#/, ''), connected);
+  updateChannel(state.twitch, channel.toLowerCase().replace(/^#/, ''), connected);
 }
 
 export function setTikTokChannel(username: string, connected: boolean): void {

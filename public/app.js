@@ -45,7 +45,7 @@ function renderChannels(container, channelMap) {
   for (const [name, info] of entries) {
     const online = info.connected;
     const ts = online ? info.lastConnectedAt : info.lastDisconnectedAt;
-    const label = online ? 'Connected' : 'Offline';
+    const label = online ? 'Connected' : 'Disconnected';
     const cls = online ? 'badge-online' : 'badge-offline';
     const meta = ts ? relativeTime(ts) : 'Never seen';
 
@@ -68,7 +68,7 @@ function renderChannels(container, channelMap) {
     const right = document.createElement('div');
     right.className = 'channel-badges';
 
-    if (info.isLive) {
+    if (online && info.isLive) {
       const liveBadge = document.createElement('span');
       liveBadge.className = 'badge badge-live';
       liveBadge.textContent = 'LIVE';

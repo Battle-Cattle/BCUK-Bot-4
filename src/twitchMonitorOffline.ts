@@ -38,8 +38,8 @@ export async function runOfflineCheck(
     const streams = await getStreams([userId]);
     const isLive = streams.some((s) => s.user_id === userId && s.type === 'live');
     if (!isLive) {
-      await deleteAnnouncement(liveStates, stateKey);
       setTwitchChannelLive(key, false);
+      await deleteAnnouncement(liveStates, stateKey);
       log.info(`${login} confirmed offline — announcement removed`);
     }
   } finally {
