@@ -110,4 +110,9 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
   }
 });
 
+router.post('/voice/leave', requireApiKey, (_req, res) => {
+  disconnect();
+  res.json({ ok: true });
+});
+
 export default router;
