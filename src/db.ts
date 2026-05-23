@@ -89,8 +89,8 @@ export type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 
 // ─── SFX ────────────────────────────────────────────────────────────────────
 
-export type { SfxTrigger, SfxFile, SfxTriggerRow } from './db/sfx';
-export { findTrigger, findSoundFiles, getAllSfxTriggers } from './db/sfx';
+export type { SfxTrigger, SfxFile, SfxTriggerRow, PublicSfxTrigger } from './db/sfx';
+export { findTrigger, findSoundFiles, getAllSfxTriggers, getPublicSfxTriggers } from './db/sfx';
 
 // ─── Streamdeck API keys ─────────────────────────────────────────────────────
 
