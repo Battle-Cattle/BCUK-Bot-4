@@ -3,7 +3,6 @@ import { EventSubConfig } from './db/eventSub';
 import { getVideosForReward } from './db/overlayVideos';
 import { pushOverlayEvent } from './web/routes/overlaySource';
 import { pickWeightedRandom } from './soundSelector';
-import { OVERLAY_FOLDER } from './config';
 import { createLogger } from './logger';
 
 const log = createLogger('EventSubHandler');
