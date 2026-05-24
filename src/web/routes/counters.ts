@@ -13,7 +13,7 @@ import {
   updateCounter,
 } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireManager } from '../middleware';
+import { requireAuth, requireMod, requireManager } from '../middleware';
 
 const log = createLogger('Web');
 const router = Router();
@@ -95,7 +95,7 @@ function validateAndNormalizeCounterForm(
   };
 }
 
-router.get('/counters', requireManager, csrfProtection, async (req, res) => {
+router.get('/counters', requireAuth, csrfProtection, async (req, res) => {
   try {
     const counters = await getAllCounters();
 
@@ -112,7 +112,7 @@ router.get('/counters', requireManager, csrfProtection, async (req, res) => {
   }
 });
 
-router.post('/counters/add', requireManager, csrfProtection, async (req, res) => {
+router.post('/counters/add', requireMod, csrfProtection, async (req, res) => {
   const form = validateAndNormalizeCounterForm(req.body as Record<string, string | undefined>);
   if (form.error) {
     return res.redirect(`/admin/counters?error=${form.error}`);
@@ -150,7 +150,7 @@ router.post('/counters/add', requireManager, csrfProtection, async (req, res) =>
   res.redirect('/admin/counters');
 });
 
-router.post('/counters/update', requireManager, csrfProtection, async (req, res) => {
+router.post('/counters/update', requireMod, csrfProtection, async (req, res) => {
   const { id } = req.body as Record<string, string | undefined>;
 
   const parsedId = parseCounterId(id);
@@ -200,7 +200,7 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
   res.redirect('/admin/counters');
 });
 
-router.post('/counters/remove', requireManager, csrfProtection, async (req, res) => {
+router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => {
   const { id } = req.body as { id?: string };
   const parsedId = parseCounterId(id);
 

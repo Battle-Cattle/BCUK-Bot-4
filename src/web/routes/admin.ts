@@ -1,6 +1,7 @@
 import { createLogger } from '../../logger';
 import { Router } from 'express';
 import {
+  findUser,
   getAllUsers,
   updateAccessLevel,
   ACCESS_LEVEL_LABELS,
@@ -50,8 +51,8 @@ router.get('/users', requireManager, csrfProtection, async (req, res) => {
   }
 });
 
-// Add or update a user (Admin only)
-router.post('/users/add', requireAdmin, csrfProtection, async (req, res) => {
+// Add or update a user (Manager+; managers may only assign levels below their own)
+router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
   const { discord_id, discord_name, access_level, twitch_name, clear_twitch_name } = req.body as {
     discord_id?: string;
     discord_name?: string;
@@ -68,6 +69,9 @@ router.post('/users/add', requireAdmin, csrfProtection, async (req, res) => {
   const level = parseInt(access_level, 10);
   if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
   if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
+  if (req.session.user!.accessLevel < AccessLevel.ADMIN && level >= req.session.user!.accessLevel) {
+    return res.status(403).render('error', { message: 'You cannot assign an access level equal to or above your own.', user: req.session.user ?? null });
+  }
   if (!shouldClearTwitchName && submittedTwitchName && !normalizedTwitchName) {
     return res.status(400).render('error', { message: 'Invalid Twitch name.', user: req.session.user ?? null });
   }
@@ -76,6 +80,12 @@ router.post('/users/add', requireAdmin, csrfProtection, async (req, res) => {
       message: 'You cannot update your own account from this form.',
       user: req.session.user ?? null,
     });
+  }
+  if (req.session.user!.accessLevel < AccessLevel.ADMIN) {
+    const existingUser = await findUser(trimmedDiscordId);
+    if (existingUser && existingUser.access_level >= req.session.user!.accessLevel) {
+      return res.status(403).render('error', { message: 'You cannot modify a user at or above your own access level.', user: req.session.user ?? null });
+    }
   }
   try {
     const trimmedDiscordName = (discord_name ?? '').trim();
@@ -100,8 +110,8 @@ router.post('/users/add', requireAdmin, csrfProtection, async (req, res) => {
   res.redirect('/admin/users');
 });
 
-// Update access level (Admin only)
-router.post('/users/update', requireAdmin, csrfProtection, async (req, res) => {
+// Update access level (Manager+; managers may only set levels below their own and cannot modify users at their level or above)
+router.post('/users/update', requireManager, csrfProtection, async (req, res) => {
   const { discord_id, access_level } = req.body as { discord_id?: string; access_level?: string };
   const trimmedDiscordId = (discord_id ?? '').trim();
   if (!trimmedDiscordId || access_level === undefined) return res.redirect('/admin/users');
@@ -115,6 +125,15 @@ router.post('/users/update', requireAdmin, csrfProtection, async (req, res) => {
       message: 'You cannot change your own access level.',
       user: req.session.user ?? null,
     });
+  }
+  if (req.session.user!.accessLevel < AccessLevel.ADMIN && level >= req.session.user!.accessLevel) {
+    return res.status(403).render('error', { message: 'You cannot assign an access level equal to or above your own.', user: req.session.user ?? null });
+  }
+  if (req.session.user!.accessLevel < AccessLevel.ADMIN) {
+    const targetUser = await findUser(trimmedDiscordId);
+    if (targetUser && targetUser.access_level >= req.session.user!.accessLevel) {
+      return res.status(403).render('error', { message: 'You cannot modify a user at or above your own access level.', user: req.session.user ?? null });
+    }
   }
   try {
     await userMutationQueue.run(trimmedDiscordId, () => updateAccessLevel(trimmedDiscordId, level));
