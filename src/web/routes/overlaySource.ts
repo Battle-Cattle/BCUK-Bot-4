@@ -9,36 +9,42 @@ const router = Router();
 
 const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
 const FILENAME_RE = /^[\w-]+\.(webm|mp4)$/i;
+// Words reserved for admin routes — must not be treated as channel logins.
+const RESERVED_LOGINS = new Set(['settings', 'videos']);
 
 // In-memory map of active SSE connections keyed by Twitch channel login (lowercase).
 const connections = new Map<string, Set<import('express').Response>>();
 
 /** Push a video URL to all browser sources connected for this channel. */
 export function pushOverlayEvent(login: string, videoPath: string): void {
-  const clients = connections.get(login.toLowerCase());
+  const key = login.toLowerCase();
+  const clients = connections.get(key);
   if (!clients || clients.size === 0) return;
   const payload = JSON.stringify({ video: videoPath });
+  const dead: import('express').Response[] = [];
   for (const res of clients) {
     try {
       res.write(`data: ${payload}\n\n`);
     } catch {
-      // Client disconnected — will be cleaned up by the close handler
+      dead.push(res);
     }
   }
+  for (const res of dead) clients.delete(res);
+  if (clients.size === 0) connections.delete(key);
   log.info(`Pushed overlay event to ${clients.size} client(s) for ${login}`);
 }
 
 // GET /overlay/:login — browser source HTML page (no auth, opened by OBS)
-router.get('/:login', (req, res) => {
+router.get('/:login', (req, res, next) => {
   const { login } = req.params;
-  if (!LOGIN_RE.test(login)) { res.status(400).end(); return; }
+  if (!LOGIN_RE.test(login) || RESERVED_LOGINS.has(login.toLowerCase())) { next(); return; }
   res.render('overlaySource', { login: login.toLowerCase() });
 });
 
 // GET /overlay/:login/events — SSE endpoint
-router.get('/:login/events', (req, res) => {
+router.get('/:login/events', (req, res, next) => {
   const { login } = req.params;
-  if (!LOGIN_RE.test(login)) { res.status(400).end(); return; }
+  if (!LOGIN_RE.test(login) || RESERVED_LOGINS.has(login.toLowerCase())) { next(); return; }
   const key = login.toLowerCase();
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -62,7 +68,10 @@ router.get('/:login/events', (req, res) => {
 
   req.on('close', () => {
     clearInterval(keepalive);
-    connections.get(key)?.delete(res);
+    const clients = connections.get(key);
+    if (!clients) return;
+    clients.delete(res);
+    if (clients.size === 0) connections.delete(key);
   });
 });
 

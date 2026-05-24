@@ -97,10 +97,15 @@ router.post('/settings/videos/upload', requireAuth, upload.single('video'), csrf
     const filename = `${randomUUID()}.${ext}`;
 
     const dir = path.join(OVERLAY_FOLDER, String(streamer.id));
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, filename), req.file.buffer);
-
-    await addVideo(streamer.id, name, filename);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const fullPath = path.join(dir, filename);
+    await fs.promises.writeFile(fullPath, req.file.buffer);
+    try {
+      await addVideo(streamer.id, name, filename);
+    } catch (e) {
+      await fs.promises.rm(fullPath, { force: true });
+      throw e;
+    }
     log.info(`Overlay video uploaded for ${streamer.twitch_name}: ${filename}`);
     res.redirect('/overlay/settings?success=video_uploaded');
   } catch (err) {
@@ -145,7 +150,6 @@ router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) =
     }
 
     const videoIds = toStringArray(body.video_ids).map(Number).filter((n) => Number.isInteger(n) && n > 0);
-    const weights  = toStringArray(body.weights).map(Number).map((n) => (Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1));
 
     if (videoIds.length === 0) return res.redirect('/overlay/settings?error=no_videos_selected');
 
@@ -153,7 +157,11 @@ router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) =
     await setRewardVideos(
       rewardId,
       streamer.id,
-      videoIds.map((videoId, i) => ({ videoId, weight: weights[i] ?? 1 })),
+      videoIds.map((videoId) => {
+        const raw = body[`weight_${videoId}`];
+        const n = Number(Array.isArray(raw) ? raw[0] : raw);
+        return { videoId, weight: Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1 };
+      }),
     );
 
     res.redirect('/overlay/settings?success=reward_saved');

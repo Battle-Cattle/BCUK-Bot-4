@@ -149,10 +149,16 @@ export async function setRewardVideos(
     }
     await conn.execute(`DELETE FROM overlay_reward_video WHERE reward_id = ?`, [rewardId]);
     for (const v of videos) {
-      await conn.execute(
-        `INSERT INTO overlay_reward_video (reward_id, video_id, weight) VALUES (?, ?, ?)`,
-        [rewardId, v.videoId, Math.max(1, v.weight)],
+      const [insert] = await conn.execute<mysql.ResultSetHeader>(
+        `INSERT INTO overlay_reward_video (reward_id, video_id, weight)
+         SELECT ?, ov.id, ?
+         FROM overlay_video ov
+         WHERE ov.id = ? AND ov.streamer_id = ?`,
+        [rewardId, Math.max(1, v.weight), v.videoId, streamerId],
       );
+      if (insert.affectedRows !== 1) {
+        throw new Error(`Video ${v.videoId} does not belong to streamer ${streamerId}`);
+      }
     }
     await conn.commit();
   } catch (err) {

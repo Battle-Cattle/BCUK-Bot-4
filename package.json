@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
-    "@types/multer": "^2.1.0",
     "discord.js": "^14.26.4",
     "dotenv": "^17.4.2",
     "ejs": "^5.0.2",
@@ -35,6 +34,7 @@
   },
   "devDependencies": {
     "@types/ejs": "^3.1.5",
+    "@types/multer": "^2.1.0",
     "@types/express": "^5.0.6",
     "@types/express-mysql-session": "^3.0.8",
     "@types/express-session": "^1.19.0",
