@@ -1,0 +1,56 @@
+Section,Feature,Route,Method,Access Level,Notes
+Public,Login page,/auth/login,GET,Public,
+Public,Discord OAuth,/auth/discord,GET,Public,
+Public,Public SFX list,/sfx-list,GET,Public,Cached with 5-min TTL
+Public,Bot status (API),/api/status,GET,Public,Polled by dashboard frontend
+Public,Twitch EventSub OAuth callback,/auth/twitch/eventsub/callback,GET,Public,State-based CSRF protection
+Authenticated,Dashboard,/,GET,Authenticated,
+Authenticated,SFX list view,/sfx,GET,Authenticated,
+Authenticated,Personal settings,/user/settings,GET,Authenticated,Twitch EventSub connection & config
+Authenticated,Connect Twitch account,/user/twitch-connect,GET,Authenticated,Initiates Twitch OAuth
+Authenticated,Disconnect Twitch account,/user/twitch-disconnect,POST,Authenticated,
+Authenticated,Save EventSub notification messages,/user/eventsub-config,POST,Authenticated,Follow/sub/raid message templates
+Authenticated,View StreamDeck key status,/streamdeck-key,GET,Authenticated,
+Authenticated,Request StreamDeck API key,/streamdeck-key/request,POST,Authenticated,Requires admin approval
+Authenticated,Revoke own StreamDeck key,/streamdeck-key/revoke,POST,Authenticated,
+Authenticated,Logout,/auth/logout,POST,Authenticated,
+MOD+,List voice channels (dashboard API),/api/voice/channels,GET,MOD+,
+MOD+,Join voice channel (dashboard),/api/voice/join,POST,MOD+,
+MOD+,Leave voice channel (dashboard),/api/voice/leave,POST,MOD+,
+MANAGER+,View all users,/admin/users,GET,MANAGER+,Can view but not modify user records
+MANAGER+,Toggle Twitch bot for user,/admin/users/toggle-twitch,POST,MANAGER+,
+MANAGER+,Refresh Discord display names,/admin/users/refresh-names,POST,MANAGER+,Bulk refresh from Discord API
+MANAGER+,Refresh name status (API),/admin/users/refresh-status,GET,MANAGER+,JSON status of ongoing refresh
+MANAGER+,View custom commands,/admin/commands,GET,MANAGER+,
+MANAGER+,Add command,/admin/commands/add,POST,MANAGER+,
+MANAGER+,Update command,/admin/commands/update,POST,MANAGER+,
+MANAGER+,Remove command,/admin/commands/remove,POST,MANAGER+,
+MANAGER+,Assign command to user,/admin/commands/assign,POST,MANAGER+,
+MANAGER+,Unassign command from user,/admin/commands/unassign,POST,MANAGER+,
+MANAGER+,View counters,/admin/counters,GET,MANAGER+,
+MANAGER+,Add counter,/admin/counters/add,POST,MANAGER+,
+MANAGER+,Update counter,/admin/counters/update,POST,MANAGER+,
+MANAGER+,Remove counter,/admin/counters/remove,POST,MANAGER+,
+MANAGER+,Reset counter,/admin/counters/reset/:id,POST,MANAGER+,Resets value to 0
+MANAGER+,View stream groups & streamers,/admin/streams,GET,MANAGER+,Extra EventSub status info shown to ADMIN only
+MANAGER+,Live stream state (API),/admin/streams/live,GET,MANAGER+,JSON live status of all streams
+MANAGER+,Add stream group,/admin/streams/groups/add,POST,MANAGER+,
+MANAGER+,Update stream group,/admin/streams/groups/update,POST,MANAGER+,
+MANAGER+,Remove stream group,/admin/streams/groups/remove,POST,MANAGER+,Removes associated streamers too
+MANAGER+,Add monitored streamer,/admin/streams/streamers/add,POST,MANAGER+,
+MANAGER+,Remove monitored streamer,/admin/streams/streamers/remove,POST,MANAGER+,
+MANAGER+,Command monitor view,/admin/command-monitor,GET,MANAGER+,Real-time command execution monitoring
+MANAGER+,Recent command monitor entries,/admin/command-monitor/recent,GET,MANAGER+,
+ADMIN,Add or update user record,/admin/users/add,POST,ADMIN,
+ADMIN,Change user access level,/admin/users/update,POST,ADMIN,Cannot modify own account
+ADMIN,Remove user,/admin/users/remove,POST,ADMIN,Cannot remove own account
+ADMIN,Emergency Twitch OAuth disconnect,/admin/streams/twitch-disconnect/:id,POST,ADMIN,Disconnects any user's Twitch token
+ADMIN,Manage StreamDeck key requests,/admin/streamdeck-keys,GET,ADMIN,View pending & approved keys
+ADMIN,Approve StreamDeck key,/admin/streamdeck-keys/approve,POST,ADMIN,
+ADMIN,Deny StreamDeck key,/admin/streamdeck-keys/deny,POST,ADMIN,
+ADMIN,Revoke any StreamDeck key,/admin/streamdeck-keys/revoke,POST,ADMIN,Can revoke any user's key
+StreamDeck API,List SFX,/api/streamdeck/sfx,GET,API Key,Bearer token auth; 120 req/min limit
+StreamDeck API,Play SFX,/api/streamdeck/sfx,POST,API Key,Trigger sound effect by command name
+StreamDeck API,List voice channels,/api/streamdeck/voice/channels,GET,API Key,
+StreamDeck API,Join voice channel,/api/streamdeck/voice/join,POST,API Key,
+StreamDeck API,Leave voice channel,/api/streamdeck/voice/leave,POST,API Key,
