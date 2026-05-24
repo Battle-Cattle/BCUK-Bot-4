@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { SfxTrigger, SfxFile } from './db';
 
 vi.mock('./config', () => ({
   SFX_FOLDER: '/sfx',
@@ -47,8 +48,8 @@ beforeEach(() => {
   vi.spyOn(Date, 'now').mockReturnValue(mockNow);
 });
 
-const TRIGGER = { id: 42, trigger_command: '!ding' };
-const FILES = [{ file: 'ding.mp3', weight: 1 }];
+const TRIGGER: SfxTrigger = { id: 42n, trigger_command: '!ding', category_id: null, hidden: false, description: null };
+const FILES: SfxFile[] = [{ id: 1, trigger_id: 42n, file: 'ding.mp3', trigger_command: null, weight: 1, hidden: false, category_id: null }];
 
 describe('handleCommand', () => {
   it('does nothing for an unrecognised command', async () => {

@@ -26,6 +26,8 @@ import commandMonitorRouter from './routes/commandMonitor';
 import streamdeckRouter from './routes/streamdeck';
 import streamdeckKeysRouter from './routes/streamdeckKeys';
 import userSettingsRouter from './routes/userSettings';
+import overlaySourceRouter from './routes/overlaySource';
+import overlayAdminRouter from './routes/overlayAdmin';
 import { requireAuth } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
 
@@ -44,6 +46,7 @@ app.use(
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'https://cdn.discordapp.com', 'https://static-cdn.jtvnw.net'],
         connectSrc: ["'self'"],
+        mediaSrc: ["'self'"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         frameAncestors: ["'none'"],
@@ -148,6 +151,8 @@ app.use('/admin', requireAuth, adminRouter);
 app.use('/admin', requireAuth, streamsRouter);
 app.use('/admin', requireAuth, eventsubAdminRouter);
 app.use('/user/settings', requireAuth, userSettingsRouter);
+app.use('/overlay', overlaySourceRouter);
+app.use('/overlay', requireAuth, overlayAdminRouter);
 app.use('/admin', requireAuth, commandsRouter);
 app.use('/admin', requireAuth, countersRouter);
 app.use('/admin', requireAuth, commandMonitorRouter);

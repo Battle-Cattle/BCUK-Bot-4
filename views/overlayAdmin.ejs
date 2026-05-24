@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Overlay</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body>
+  <%- include('partials/nav') %>
+
+  <main class="container">
+
+    <% if (error) { %>
+    <div class="card card-alert-danger">
+      <% const errorMessages = {
+        not_a_streamer:   'You are not configured as a monitored streamer.',
+        invalid_file:     'No valid file was uploaded. Accepted formats: WebM, MP4.',
+        upload_failed:    'Upload failed — please try again.',
+        delete_failed:    'Delete failed — please try again.',
+        invalid_reward_id:'Invalid reward ID format. Paste the UUID from your Twitch dashboard.',
+        no_videos_selected:'Select at least one video to assign to the reward.',
+        save_failed:      'Failed to save — please try again.',
+        invalid_id:       'Invalid request.',
+      }; %>
+      <%= errorMessages[error] ?? `An error occurred (${error}).` %>
+    </div>
+    <% } %>
+
+    <% if (success) { %>
+    <div class="card card-alert-success">
+      <% const successMessages = {
+        video_uploaded: 'Video uploaded successfully.',
+        video_deleted:  'Video deleted.',
+        reward_saved:   'Reward assignment saved.',
+        reward_deleted: 'Reward assignment removed.',
+      }; %>
+      <%= successMessages[success] ?? 'Done.' %>
+    </div>
+    <% } %>
+
+    <% if (!streamer) { %>
+    <section class="section">
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">You are not configured as a monitored streamer. Contact a Manager or Admin.</p>
+        </div>
+      </div>
+    </section>
+    <% } else { %>
+
+    <!-- ── Browser Source URL ──────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">OBS Browser Source</h2>
+      <div class="card">
+        <div class="card-body">
+          <p class="hint hint-compact">Add this URL as a Browser Source in OBS (1920×1080, transparent background):</p>
+          <% const login = streamer.twitch_name ? streamer.twitch_name.toLowerCase() : ''; %>
+          <code class="mono" style="display:block;margin-top:0.4rem;user-select:all;">/overlay/<%= login %></code>
+          <p class="hint" style="margin-top:0.5rem;">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the full URL including your domain.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Video Library ──────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Video Library</h2>
+
+      <div class="card card-spaced">
+        <div class="card-body">
+          <form method="POST" action="/overlay/settings/videos/upload" enctype="multipart/form-data">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="form-row-wrap" style="align-items:flex-end;">
+              <div style="flex:1;">
+                <label class="hint hint-compact" for="video-name">Name</label>
+                <input id="video-name" class="input" type="text" name="name" maxlength="100" placeholder="e.g. Confetti Explosion">
+              </div>
+              <div style="flex:1;">
+                <label class="hint hint-compact" for="video-file">Video file (WebM or MP4)</label>
+                <input id="video-file" class="input" type="file" name="video" accept="video/webm,video/mp4" required>
+              </div>
+              <div>
+                <button type="submit" class="btn">Upload</button>
+              </div>
+            </div>
+            <p class="hint" style="margin-top:0.4rem;">WebM with alpha channel recommended for transparent overlays. Max <%= process.env.OVERLAY_MAX_FILE_MB || '100' %> MB.</p>
+          </form>
+        </div>
+      </div>
+
+      <% if (videos.length === 0) { %>
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">No videos uploaded yet.</p>
+        </div>
+      </div>
+      <% } else { %>
+      <div class="card">
+        <div class="card-body">
+          <table class="table" style="width:100%;">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>File</th>
+                <th>Uploaded</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <% for (const v of videos) { %>
+              <tr>
+                <td><%= v.name %></td>
+                <td class="mono" style="font-size:0.8em;"><%= v.filename %></td>
+                <td><%= new Date(v.created_at).toLocaleDateString() %></td>
+                <td>
+                  <form method="POST" action="/overlay/settings/videos/<%= v.id %>/delete" style="margin:0;">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button type="submit" class="btn btn-ghost btn-sm"
+                      onclick="return confirm('Delete this video? Any reward assignments using it will be removed.')">
+                      Delete
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <% } %>
+    </section>
+
+    <!-- ── Reward Assignments ─────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Reward Assignments</h2>
+      <p class="hint" style="margin-bottom:0.75rem;">
+        Find your reward ID in your Twitch dashboard under <strong>Channel Points → Manage Rewards</strong>.
+        Each reward can have multiple videos assigned — one will be picked at random (weighted) when redeemed.
+      </p>
+
+      <% if (videos.length === 0) { %>
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">Upload at least one video before creating a reward assignment.</p>
+        </div>
+      </div>
+      <% } else { %>
+
+      <div class="card card-spaced">
+        <div class="card-body">
+          <form method="POST" action="/overlay/settings/rewards" id="reward-form">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div style="margin-bottom:0.75rem;">
+              <label class="hint hint-compact" for="reward-id">Twitch Reward ID (UUID)</label>
+              <input id="reward-id" class="input" type="text" name="twitch_reward_id"
+                pattern="[0-9a-fA-F\-]{36}" maxlength="36" required
+                placeholder="e.g. 12345678-abcd-1234-abcd-1234567890ab">
+            </div>
+            <p class="hint hint-compact">Videos &amp; weights (higher weight = more likely):</p>
+            <div id="video-assignments" style="margin-top:0.4rem;">
+              <% for (const v of videos) { %>
+              <div class="form-row-wrap" style="margin-bottom:0.4rem;align-items:center;">
+                <label style="flex:3;display:flex;align-items:center;gap:0.5rem;">
+                  <input type="checkbox" name="video_ids" value="<%= v.id %>">
+                  <%= v.name %>
+                </label>
+                <div style="flex:1;display:flex;align-items:center;gap:0.4rem;">
+                  <span class="hint hint-compact" style="white-space:nowrap;">Weight</span>
+                  <input class="input" type="number" name="weights" value="1" min="1" max="100" style="width:5rem;">
+                </div>
+              </div>
+              <% } %>
+            </div>
+            <div class="button-row-wrap" style="margin-top:0.75rem;">
+              <button type="submit" class="btn">Save Assignment</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <% } %>
+
+      <!-- Existing assignments -->
+      <% if (rewards.length > 0) { %>
+      <% for (const r of rewards) { %>
+      <div class="card card-spaced">
+        <div class="card-body">
+          <div class="form-row-wrap" style="align-items:center;justify-content:space-between;">
+            <div>
+              <p class="hint hint-compact">Reward ID</p>
+              <code class="mono"><%= r.twitch_reward_id %></code>
+            </div>
+            <form method="POST" action="/overlay/settings/rewards/<%= r.id %>/delete" style="margin:0;">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="btn btn-ghost btn-sm"
+                onclick="return confirm('Remove this reward assignment?')">
+                Remove
+              </button>
+            </form>
+          </div>
+          <% if (r.videos.length > 0) { %>
+          <table class="table" style="width:100%;margin-top:0.75rem;">
+            <thead>
+              <tr><th>Video</th><th>Weight</th></tr>
+            </thead>
+            <tbody>
+              <% for (const v of r.videos) { %>
+              <tr>
+                <td><%= v.name %></td>
+                <td><%= v.weight %></td>
+              </tr>
+              <% } %>
+            </tbody>
+          </table>
+          <% } else { %>
+          <p class="hint" style="margin-top:0.5rem;">No videos assigned.</p>
+          <% } %>
+        </div>
+      </div>
+      <% } %>
+      <% } %>
+    </section>
+
+    <% } %>
+
+  </main>
+
+  <%- include('partials/pwa-register') %>
+</body>
+</html>

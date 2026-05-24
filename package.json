@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
+    "@types/multer": "^2.1.0",
     "discord.js": "^14.26.4",
     "dotenv": "^17.4.2",
     "ejs": "^5.0.2",
@@ -22,6 +23,7 @@
     "helmet": "^8.2.0",
     "libsodium-wrappers": "^0.8.4",
     "mediaplex": "^1.0.0",
+    "multer": "^2.1.1",
     "mysql2": "^3.22.3",
     "tiktok-live-connector": "2.3.0-beta1",
     "tmi.js": "^1.8.5",
