@@ -1,8 +1,7 @@
 import { createLogger } from './logger';
-import { getAllEventSubStreamers, saveStreamerToken, clearStreamerToken, DbStreamerEventSub, EventSubConfig } from './db/eventSub';
+import { getAllEventSubStreamers, clearStreamerToken, DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 import { getUsers } from './twitchApi';
-import { TwitchAuthError, refreshUserToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription } from './twitchApiEventSub';
-import { getActiveChannels } from './twitchBot';
+import { createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, getValidToken } from './twitchApiEventSub';
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
   FollowEvent, SubEvent, ResubEvent, GiftSubEvent, RaidEvent, RedemptionEvent,
@@ -10,7 +9,6 @@ import {
 
 const log = createLogger('EventSub');
 
-const BUFFER_MS = 5 * 60 * 1000;
 
 export interface SubSpec { type: string; version: string; condition: Record<string, string> }
 
@@ -107,7 +105,7 @@ export async function subscribeAll(sid: string): Promise<number> {
   const nextMap = new Map<string, StreamerInfo>();
 
   for (const streamer of streamers) {
-    const token = await maybeRefreshToken(streamer);
+    const token = await getValidToken(streamer);
     const config = streamer.config;
     const uid = await resolveBroadcasterId(streamer, config);
     if (!uid) continue;
@@ -134,35 +132,6 @@ async function subscribe(sessionId: string, spec: SubSpec, token: string, login:
   }
 }
 
-async function maybeRefreshToken(streamer: DbStreamerEventSub): Promise<string | null> {
-  if (!streamer.eventsub_access_token) return null;
-
-  const needsRefresh = streamer.eventsub_token_expiry != null
-    && Date.now() > streamer.eventsub_token_expiry - BUFFER_MS;
-
-  if (!needsRefresh) return streamer.eventsub_access_token;
-
-  if (!streamer.eventsub_refresh_token) {
-    log.warn(`No refresh token for ${streamer.twitch_name ?? 'unknown'}`);
-    return null;
-  }
-
-  try {
-    const tokens = await refreshUserToken(streamer.eventsub_refresh_token);
-    const expiryMs = tokens.expires_in != null ? Date.now() + tokens.expires_in * 1000 - 60_000 : null;
-    await saveStreamerToken(streamer.id, streamer.twitch_user_id!, tokens.access_token, tokens.refresh_token, expiryMs);
-    log.info(`Token refreshed for ${streamer.twitch_name ?? 'unknown'}`);
-    return tokens.access_token;
-  } catch (err) {
-    if (err instanceof TwitchAuthError) {
-      await clearStreamerToken(streamer.id);
-      log.error(`Token refresh failed for ${streamer.twitch_name ?? 'unknown'} — re-authorization required:`, err);
-    } else {
-      log.error(`Token refresh failed for ${streamer.twitch_name ?? 'unknown'} — transient error, will retry on next reload:`, err);
-    }
-    return null;
-  }
-}
 
 export function dispatchNotification(type: string, event: Record<string, unknown>, condition: Record<string, string>): void {
   const broadcasterId = condition.broadcaster_user_id ?? condition.to_broadcaster_user_id;
@@ -170,11 +139,6 @@ export function dispatchNotification(type: string, event: Record<string, unknown
 
   const info = streamerMap.get(broadcasterId);
   if (!info?.config) return;
-
-  if (!getActiveChannels().has(info.login)) {
-    log.warn(`Bot not in channel ${info.login} — skipping ${type} notification`);
-    return;
-  }
 
   const handler = notificationHandlers.get(type);
   if (!handler) {

@@ -149,6 +149,24 @@ export async function getChannelInfo(broadcasterIds: string[]): Promise<TwitchCh
   return results;
 }
 
+export interface TwitchCustomReward {
+  id: string;
+  title: string;
+  cost: number;
+  is_enabled: boolean;
+}
+
+export async function getCustomRewards(broadcasterId: string, userToken: string): Promise<TwitchCustomReward[]> {
+  const res = await twitchFetch(
+    `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(broadcasterId)}`,
+    { headers: authHeaders(userToken) },
+  );
+  if (res.status === 403) return [];
+  if (!res.ok) throw new Error(`[TwitchAPI] getCustomRewards failed: ${res.status}`);
+  const data = await res.json() as { data: TwitchCustomReward[] };
+  return data.data;
+}
+
 export interface SharedChatParticipant {
   broadcaster_id: string;
   broadcaster_login: string;
