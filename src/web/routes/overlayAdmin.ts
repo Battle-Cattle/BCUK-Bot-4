@@ -7,14 +7,35 @@ import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { getStreamerByDiscordId } from '../../db';
+import { getStreamerByDiscordId, saveStreamerToken, clearStreamerToken } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import {
   getVideosForStreamer, addVideo, deleteVideo,
   getRewardsForStreamer, upsertReward, setRewardVideos, deleteReward,
 } from '../../db';
 import { OVERLAY_FOLDER, PUBLIC_URL } from '../../config';
+import { getCustomRewards, TwitchCustomReward } from '../../twitchApi';
+import { refreshUserToken, TwitchAuthError } from '../../twitchApiEventSub';
 import { parsePositiveIntId } from './shared';
+
+const TOKEN_BUFFER_MS = 5 * 60 * 1000;
+
+async function getValidToken(streamer: DbStreamerEventSub): Promise<string | null> {
+  if (!streamer.eventsub_access_token) return null;
+  const needsRefresh = streamer.eventsub_token_expiry != null
+    && Date.now() > streamer.eventsub_token_expiry - TOKEN_BUFFER_MS;
+  if (!needsRefresh) return streamer.eventsub_access_token;
+  if (!streamer.eventsub_refresh_token) return null;
+  try {
+    const tokens = await refreshUserToken(streamer.eventsub_refresh_token);
+    const expiryMs = tokens.expires_in != null ? Date.now() + tokens.expires_in * 1000 - 60_000 : null;
+    await saveStreamerToken(streamer.id, streamer.twitch_user_id!, tokens.access_token, tokens.refresh_token, expiryMs);
+    return tokens.access_token;
+  } catch (err) {
+    if (err instanceof TwitchAuthError) await clearStreamerToken(streamer.id);
+    return null;
+  }
+}
 
 const log = createLogger('OverlayAdmin');
 const router = Router();
@@ -59,6 +80,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
         streamer: null,
         videos: [],
         rewards: [],
+        twitchRewards: [],
         baseUrl: PUBLIC_URL,
         error: req.query.error as string | undefined ?? null,
         success: req.query.success as string | undefined ?? null,
@@ -70,13 +92,26 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       getRewardsForStreamer(streamer.id),
     ]);
 
+    let twitchRewards: TwitchCustomReward[] = [];
+    if (streamer.twitch_user_id) {
+      const token = await getValidToken(streamer);
+      if (token) {
+        try {
+          twitchRewards = await getCustomRewards(streamer.twitch_user_id, token);
+        } catch (err) {
+          log.warn('Failed to fetch Twitch custom rewards:', err);
+        }
+      }
+    }
+
     res.render('overlayAdmin', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
       streamer,
       videos,
       rewards,
-      baseUrl: `${req.protocol}://${req.get('host')}`,
+      twitchRewards,
+      baseUrl: PUBLIC_URL,
       error: req.query.error as string | undefined ?? null,
       success: req.query.success as string | undefined ?? null,
     });

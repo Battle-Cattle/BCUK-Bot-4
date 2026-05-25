@@ -135,8 +135,7 @@
     <section class="section">
       <h2 class="section-title">Reward Assignments</h2>
       <p class="hint" style="margin-bottom:0.75rem;">
-        Find your reward ID in your Twitch dashboard under <strong>Channel Points → Manage Rewards</strong>.
-        Each reward can have multiple videos assigned — one will be picked at random (weighted) when redeemed.
+        Assign channel point rewards to overlay videos. Each reward can have multiple videos — one is picked at random (weighted) when redeemed.
       </p>
 
       <% if (videos.length === 0) { %>
@@ -152,10 +151,20 @@
           <form method="POST" action="/overlay/settings/rewards" id="reward-form">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
             <div style="margin-bottom:0.75rem;">
-              <label class="hint hint-compact" for="reward-id">Twitch Reward ID (UUID)</label>
+              <label class="hint hint-compact" for="reward-id">Twitch Reward</label>
+              <% if (twitchRewards.length > 0) { %>
+              <select id="reward-id" class="input" name="twitch_reward_id" required>
+                <option value="" disabled selected>— select a reward —</option>
+                <% for (const tr of twitchRewards) { %>
+                <option value="<%= tr.id %>"><%= tr.title %> (<%= tr.cost.toLocaleString() %> pts<%= tr.is_enabled ? '' : ' · disabled' %>)</option>
+                <% } %>
+              </select>
+              <% } else { %>
               <input id="reward-id" class="input" type="text" name="twitch_reward_id"
                 pattern="[0-9a-fA-F\-]{36}" maxlength="36" required
                 placeholder="e.g. 12345678-abcd-1234-abcd-1234567890ab">
+              <p class="hint" style="margin-top:0.25rem;">Connect your Twitch account in <a href="/user/settings">User Settings</a> to pick rewards by name.</p>
+              <% } %>
             </div>
             <p class="hint hint-compact">Videos &amp; weights (higher weight = more likely):</p>
             <div id="video-assignments" style="margin-top:0.4rem;">
