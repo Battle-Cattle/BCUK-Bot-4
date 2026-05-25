@@ -59,6 +59,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
         streamer: null,
         videos: [],
         rewards: [],
+        baseUrl: `${req.protocol}://${req.get('host')}`,
         error: req.query.error as string | undefined ?? null,
         success: req.query.success as string | undefined ?? null,
       });
@@ -75,6 +76,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       streamer,
       videos,
       rewards,
+      baseUrl: `${req.protocol}://${req.get('host')}`,
       error: req.query.error as string | undefined ?? null,
       success: req.query.success as string | undefined ?? null,
     });

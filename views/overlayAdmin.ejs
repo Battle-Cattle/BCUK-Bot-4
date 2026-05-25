@@ -57,8 +57,8 @@
         <div class="card-body">
           <p class="hint hint-compact">Add this URL as a Browser Source in OBS (1920×1080, transparent background):</p>
           <% const login = streamer.twitch_name ? streamer.twitch_name.toLowerCase() : ''; %>
-          <code class="mono" style="display:block;margin-top:0.4rem;user-select:all;">/overlay/<%= login %></code>
-          <p class="hint" style="margin-top:0.5rem;">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the full URL including your domain.</p>
+          <code class="mono" style="display:block;margin-top:0.4rem;user-select:all;"><%= baseUrl %>/overlay/<%= login %></code>
+          <p class="hint" style="margin-top:0.5rem;">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the URL above.</p>
         </div>
       </div>
     </section>
