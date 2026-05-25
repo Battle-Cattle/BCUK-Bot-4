@@ -1,5 +1,36 @@
+import { createLogger } from './logger';
 import { TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET } from './config';
 import { twitchFetch, authHeaders } from './twitchApi';
+import { DbStreamerEventSub, saveStreamerToken, clearStreamerToken } from './db/eventSub';
+
+const log = createLogger('TwitchToken');
+const TOKEN_BUFFER_MS = 5 * 60 * 1000;
+
+export async function getValidToken(streamer: DbStreamerEventSub): Promise<string | null> {
+  if (!streamer.eventsub_access_token) return null;
+  const needsRefresh = streamer.eventsub_token_expiry != null
+    && Date.now() > streamer.eventsub_token_expiry - TOKEN_BUFFER_MS;
+  if (!needsRefresh) return streamer.eventsub_access_token;
+  if (!streamer.eventsub_refresh_token) {
+    log.warn(`No refresh token for ${streamer.twitch_name ?? 'unknown'}`);
+    return null;
+  }
+  try {
+    const tokens = await refreshUserToken(streamer.eventsub_refresh_token);
+    const expiryMs = tokens.expires_in != null ? Date.now() + tokens.expires_in * 1000 - 60_000 : null;
+    await saveStreamerToken(streamer.id, streamer.twitch_user_id!, tokens.access_token, tokens.refresh_token, expiryMs);
+    log.info(`Token refreshed for ${streamer.twitch_name ?? 'unknown'}`);
+    return tokens.access_token;
+  } catch (err) {
+    if (err instanceof TwitchAuthError) {
+      await clearStreamerToken(streamer.id);
+      log.error(`Token refresh failed for ${streamer.twitch_name ?? 'unknown'} — re-authorization required:`, err);
+    } else {
+      log.error(`Token refresh failed for ${streamer.twitch_name ?? 'unknown'} — transient error, will retry on next reload:`, err);
+    }
+    return null;
+  }
+}
 
 /** Thrown when Twitch returns 400/401 — indicates invalid or expired credentials that require re-authorization. */
 export class TwitchAuthError extends Error {
