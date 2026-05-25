@@ -171,7 +171,8 @@ export function dispatchNotification(type: string, event: Record<string, unknown
   const info = streamerMap.get(broadcasterId);
   if (!info?.config) return;
 
-  if (!getActiveChannels().has(info.login)) {
+  const requiresChannel = type !== 'channel.channel_points_custom_reward_redemption.add';
+  if (requiresChannel && !getActiveChannels().has(info.login)) {
     log.warn(`Bot not in channel ${info.login} — skipping ${type} notification`);
     return;
   }
