@@ -13,7 +13,7 @@ import {
   getVideosForStreamer, addVideo, deleteVideo,
   getRewardsForStreamer, upsertReward, setRewardVideos, deleteReward,
 } from '../../db';
-import { OVERLAY_FOLDER } from '../../config';
+import { OVERLAY_FOLDER, PUBLIC_URL } from '../../config';
 import { parsePositiveIntId } from './shared';
 
 const log = createLogger('OverlayAdmin');
@@ -59,7 +59,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
         streamer: null,
         videos: [],
         rewards: [],
-        baseUrl: `${req.protocol}://${req.get('host')}`,
+        baseUrl: PUBLIC_URL,
         error: req.query.error as string | undefined ?? null,
         success: req.query.success as string | undefined ?? null,
       });
