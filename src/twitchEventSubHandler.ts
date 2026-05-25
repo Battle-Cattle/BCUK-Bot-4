@@ -1,5 +1,11 @@
 import { sayInChannel } from './twitchBot';
 import { EventSubConfig } from './db/eventSub';
+import { getVideosForReward } from './db/overlayVideos';
+import { pushOverlayEvent } from './web/routes/overlaySource';
+import { pickWeightedRandom } from './soundSelector';
+import { createLogger } from './logger';
+
+const log = createLogger('EventSubHandler');
 
 export interface FollowEvent {
   user_login: string;
@@ -38,6 +44,15 @@ export interface RaidEvent {
   from_broadcaster_user_name: string;
   to_broadcaster_user_login: string;
   viewers: number;
+}
+
+export interface RedemptionEvent {
+  id: string;
+  user_login: string;
+  user_name: string;
+  broadcaster_user_login: string;
+  reward: { id: string; title: string };
+  user_input: string;
 }
 
 function fill(template: string, vars: Record<string, string>): string {
@@ -103,4 +118,19 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
     viewers: String(event.viewers),
   });
   await sayInChannel(login, msg);
+}
+
+export async function handleRedemption(
+  login: string,
+  event: RedemptionEvent,
+  _config: EventSubConfig,
+  streamerId: number,
+): Promise<void> {
+  const videos = await getVideosForReward(event.reward.id, streamerId);
+  if (videos.length === 0) return;
+
+  const filename = pickWeightedRandom(videos);
+  const videoPath = `/overlay/videos/${streamerId}/${filename}`;
+  pushOverlayEvent(login, videoPath);
+  log.info(`Overlay triggered for ${login}: reward="${event.reward.title}" video=${filename}`);
 }

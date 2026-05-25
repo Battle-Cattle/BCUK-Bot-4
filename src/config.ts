@@ -37,6 +37,7 @@ export const DB_PASSWORD = require_env('DB_PASSWORD');
 export const DB_NAME = require_env('DB_NAME');
 
 export const SFX_FOLDER = process.env.SFX_FOLDER ?? './sfx';
+export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER ?? './overlay-videos';
 const _COOLDOWN = parseInt(process.env.GLOBAL_COOLDOWN_MS ?? '3000', 10);
 if (Number.isNaN(_COOLDOWN)) throw new Error('Invalid GLOBAL_COOLDOWN_MS: must be a number');
 export const GLOBAL_COOLDOWN_MS = _COOLDOWN;
