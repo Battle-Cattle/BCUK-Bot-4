@@ -17,7 +17,7 @@ import {
   updateCustomCommand,
 } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireManager } from '../middleware';
+import { requireAuth, requireMod } from '../middleware';
 
 const log = createLogger('Web');
 const router = Router();
@@ -73,7 +73,7 @@ function normalizeDiscordId(value: string | undefined): string | null {
   return /^\d+$/.test(trimmedValue) ? trimmedValue : null;
 }
 
-router.get('/commands', requireManager, csrfProtection, async (req, res) => {
+router.get('/commands', requireAuth, csrfProtection, async (req, res) => {
   try {
     const [commands, users] = await Promise.all([
       getAllCustomCommandsWithAssignments(),
@@ -102,7 +102,7 @@ router.get('/commands', requireManager, csrfProtection, async (req, res) => {
   }
 });
 
-router.post('/commands/add', requireManager, csrfProtection, async (req, res) => {
+router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
   const { trigger_string, output } = req.body as Record<string, string | undefined>;
   const isDiscordEnabled = req.body.is_discord_enabled === 'on';
   const isMultiTwitch = req.body.is_multi_twitch === 'on';
@@ -110,7 +110,7 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
   const normalizedOutput = normalizeRequiredText(output);
 
   if (!normalizedTriggerString || !normalizedOutput) {
-    return res.redirect('/admin/commands?error=missing_fields');
+    return res.redirect('/commands?error=missing_fields');
   }
 
   let commandId: number;
@@ -118,15 +118,15 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
     commandId = await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
     if (err instanceof ReservedCommandError) {
-      return res.redirect('/admin/commands?error=reserved_command');
+      return res.redirect('/commands?error=reserved_command');
     }
 
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-      return res.redirect('/admin/commands?error=command_taken');
+      return res.redirect('/commands?error=command_taken');
     }
 
     log.error('Add custom command error:', err);
-    return res.redirect('/admin/commands?error=add_failed');
+    return res.redirect('/commands?error=add_failed');
   }
 
   const rawDiscordIds = req.body.discord_ids;
@@ -141,17 +141,17 @@ router.post('/commands/add', requireManager, csrfProtection, async (req, res) =>
       await assignUserToCommand(commandId, discordId);
     } catch (err) {
       if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-        return res.redirect('/admin/commands?error=command_taken');
+        return res.redirect('/commands?error=command_taken');
       }
       log.error('Assign user during command creation error:', err);
-      return res.redirect('/admin/commands?error=assign_failed');
+      return res.redirect('/commands?error=assign_failed');
     }
   }
 
-  res.redirect('/admin/commands');
+  res.redirect('/commands');
 });
 
-router.post('/commands/update', requireManager, csrfProtection, async (req, res) => {
+router.post('/commands/update', requireMod, csrfProtection, async (req, res) => {
   const { command_id, trigger_string, output } = req.body as Record<string, string | undefined>;
   const isDiscordEnabled = req.body.is_discord_enabled === 'on';
   const isMultiTwitch = req.body.is_multi_twitch === 'on';
@@ -160,11 +160,11 @@ router.post('/commands/update', requireManager, csrfProtection, async (req, res)
   const parsedCommandId = parseCommandId(command_id);
 
   if (!normalizedTriggerString || !normalizedOutput) {
-    return res.redirect('/admin/commands?error=missing_fields');
+    return res.redirect('/commands?error=missing_fields');
   }
 
   if (parsedCommandId === null) {
-    return res.redirect('/admin/commands?error=invalid_id');
+    return res.redirect('/commands?error=invalid_id');
   }
 
   try {
@@ -175,92 +175,92 @@ router.post('/commands/update', requireManager, csrfProtection, async (req, res)
     }
 
     if (err instanceof ReservedCommandError) {
-      return res.redirect('/admin/commands?error=reserved_command');
+      return res.redirect('/commands?error=reserved_command');
     }
 
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-      return res.redirect('/admin/commands?error=command_taken');
+      return res.redirect('/commands?error=command_taken');
     }
 
     log.error('Update custom command error:', err);
-    return res.redirect('/admin/commands?error=update_failed');
+    return res.redirect('/commands?error=update_failed');
   }
 
-  res.redirect('/admin/commands');
+  res.redirect('/commands');
 });
 
-router.post('/commands/remove', requireManager, csrfProtection, async (req, res) => {
+router.post('/commands/remove', requireMod, csrfProtection, async (req, res) => {
   const { command_id } = req.body as { command_id?: string };
-  if (!command_id) return res.redirect('/admin/commands');
+  if (!command_id) return res.redirect('/commands');
 
   const parsedCommandId = parseCommandId(command_id);
   if (parsedCommandId === null) {
-    return res.redirect('/admin/commands?error=invalid_id');
+    return res.redirect('/commands?error=invalid_id');
   }
 
   try {
     await removeCustomCommand(parsedCommandId);
   } catch (err) {
     log.error('Remove custom command error:', err);
-    return res.redirect('/admin/commands?error=remove_failed');
+    return res.redirect('/commands?error=remove_failed');
   }
 
-  res.redirect('/admin/commands');
+  res.redirect('/commands');
 });
 
-router.post('/commands/assign', requireManager, csrfProtection, async (req, res) => {
+router.post('/commands/assign', requireMod, csrfProtection, async (req, res) => {
   const { command_id, discord_id } = req.body as { command_id?: string; discord_id?: string };
   if (!command_id || !discord_id) {
-    return res.redirect('/admin/commands?error=missing_fields');
+    return res.redirect('/commands?error=missing_fields');
   }
 
   const parsedCommandId = parseCommandId(command_id);
   const normalizedDiscordId = normalizeDiscordId(discord_id);
 
   if (parsedCommandId === null || normalizedDiscordId === null) {
-    return res.redirect('/admin/commands?error=invalid_id');
+    return res.redirect('/commands?error=invalid_id');
   }
 
   try {
     const user = await findUser(normalizedDiscordId);
     if (!user || !user.twitch_name) {
-      return res.redirect('/admin/commands?error=invalid_assignment_user');
+      return res.redirect('/commands?error=invalid_assignment_user');
     }
 
     await assignUserToCommand(parsedCommandId, normalizedDiscordId);
   } catch (err) {
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-      return res.redirect('/admin/commands?error=command_taken');
+      return res.redirect('/commands?error=command_taken');
     }
 
     log.error('Assign user to command error:', err);
-    return res.redirect('/admin/commands?error=assign_failed');
+    return res.redirect('/commands?error=assign_failed');
   }
 
-  res.redirect('/admin/commands');
+  res.redirect('/commands');
 });
 
-router.post('/commands/unassign', requireManager, csrfProtection, async (req, res) => {
+router.post('/commands/unassign', requireMod, csrfProtection, async (req, res) => {
   const { command_id, discord_id } = req.body as { command_id?: string; discord_id?: string };
   if (!command_id || !discord_id) {
-    return res.redirect('/admin/commands?error=missing_fields');
+    return res.redirect('/commands?error=missing_fields');
   }
 
   const parsedCommandId = parseCommandId(command_id);
   const normalizedDiscordId = normalizeDiscordId(discord_id);
 
   if (parsedCommandId === null || normalizedDiscordId === null) {
-    return res.redirect('/admin/commands?error=invalid_id');
+    return res.redirect('/commands?error=invalid_id');
   }
 
   try {
     await unassignUserFromCommand(parsedCommandId, normalizedDiscordId);
   } catch (err) {
     log.error('Unassign user from command error:', err);
-    return res.redirect('/admin/commands?error=unassign_failed');
+    return res.redirect('/commands?error=unassign_failed');
   }
 
-  res.redirect('/admin/commands');
+  res.redirect('/commands');
 });
 
 export default router;

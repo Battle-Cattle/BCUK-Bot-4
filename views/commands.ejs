@@ -34,7 +34,7 @@
       <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add Command</span></div>
         <div class="card-body">
-          <form method="POST" action="/admin/commands/add">
+          <form method="POST" action="/commands/add">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
             <div class="form-row-wrap form-section-gap">
               <div class="form-col-grow">
@@ -123,7 +123,7 @@
                 <td>
                   <div class="actions">
                     <button type="button" class="btn btn-sm btn-ghost btn-toggle-command-edit" data-command-id="<%= command.command_id %>" aria-controls="command-edit-<%= command.command_id %>" aria-expanded="false">✏️ Edit</button>
-                    <form method="POST" action="/admin/commands/remove" class="inline-form-sm js-confirm-remove-command" data-command-trigger="<%= command.trigger_string %>">
+                    <form method="POST" action="/commands/remove" class="inline-form-sm js-confirm-remove-command" data-command-trigger="<%= command.trigger_string %>">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="command_id" value="<%= command.command_id %>">
                       <button type="submit" class="btn btn-danger btn-sm">Remove</button>
@@ -134,7 +134,7 @@
               <tr class="files-row is-hidden" id="command-edit-<%= command.command_id %>">
                 <td colspan="6">
                   <div class="command-edit-panel">
-                    <form method="POST" action="/admin/commands/update" class="stack-gap-md">
+                    <form method="POST" action="/commands/update" class="stack-gap-md">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="command_id" value="<%= command.command_id %>">
                       <div class="form-row-wrap form-section-gap">
@@ -162,7 +162,7 @@
                     <div class="command-assignment-shell">
                       <h3 class="command-assignment-title">Twitch Assignments</h3>
                       <% if (command.unassigned_users.length > 0) { %>
-                      <form method="POST" action="/admin/commands/assign" class="inline-form inline-form-compact">
+                      <form method="POST" action="/commands/assign" class="inline-form inline-form-compact">
                         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                         <input type="hidden" name="command_id" value="<%= command.command_id %>">
                         <label for="assign-discord-<%= command.command_id %>" class="form-label">Assign user</label>
@@ -185,7 +185,7 @@
                             <div><strong><%= assignedUser.discord_name || assignedUser.discord_id %></strong></div>
                             <div class="mono muted"><%= assignedUser.twitch_name || (assignedUser.is_orphaned_user ? 'Missing user record' : 'No Twitch name') %></div>
                           </div>
-                          <form method="POST" action="/admin/commands/unassign" class="inline-form-sm">
+                          <form method="POST" action="/commands/unassign" class="inline-form-sm">
                             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                             <input type="hidden" name="command_id" value="<%= command.command_id %>">
                             <input type="hidden" name="discord_id" value="<%= assignedUser.discord_id %>">

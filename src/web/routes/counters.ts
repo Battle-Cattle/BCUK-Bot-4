@@ -13,7 +13,7 @@ import {
   updateCounter,
 } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireManager } from '../middleware';
+import { requireAuth, requireMod, requireManager } from '../middleware';
 
 const log = createLogger('Web');
 const router = Router();
@@ -95,7 +95,7 @@ function validateAndNormalizeCounterForm(
   };
 }
 
-router.get('/counters', requireManager, csrfProtection, async (req, res) => {
+router.get('/counters', requireAuth, csrfProtection, async (req, res) => {
   try {
     const counters = await getAllCounters();
 
@@ -112,10 +112,10 @@ router.get('/counters', requireManager, csrfProtection, async (req, res) => {
   }
 });
 
-router.post('/counters/add', requireManager, csrfProtection, async (req, res) => {
+router.post('/counters/add', requireMod, csrfProtection, async (req, res) => {
   const form = validateAndNormalizeCounterForm(req.body as Record<string, string | undefined>);
   if (form.error) {
-    return res.redirect(`/admin/counters?error=${form.error}`);
+    return res.redirect(`/counters?error=${form.error}`);
   }
 
   try {
@@ -124,7 +124,7 @@ router.post('/counters/add', requireManager, csrfProtection, async (req, res) =>
       form.checkCommand,
     ]);
     if (hasDuplicateCommand) {
-      return res.redirect('/admin/counters?error=duplicate_command');
+      return res.redirect('/counters?error=duplicate_command');
     }
 
     await addCounter(
@@ -136,31 +136,31 @@ router.post('/counters/add', requireManager, csrfProtection, async (req, res) =>
     );
   } catch (err) {
     if (err instanceof ReservedCommandError) {
-      return res.redirect('/admin/counters?error=reserved_command');
+      return res.redirect('/counters?error=reserved_command');
     }
 
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-      return res.redirect('/admin/counters?error=duplicate_command');
+      return res.redirect('/counters?error=duplicate_command');
     }
 
     log.error('Add counter error:', err);
-    return res.redirect('/admin/counters?error=add_failed');
+    return res.redirect('/counters?error=add_failed');
   }
 
-  res.redirect('/admin/counters');
+  res.redirect('/counters');
 });
 
-router.post('/counters/update', requireManager, csrfProtection, async (req, res) => {
+router.post('/counters/update', requireMod, csrfProtection, async (req, res) => {
   const { id } = req.body as Record<string, string | undefined>;
 
   const parsedId = parseCounterId(id);
   const form = validateAndNormalizeCounterForm(req.body as Record<string, string | undefined>);
   if (form.error) {
-    return res.redirect(`/admin/counters?error=${form.error}`);
+    return res.redirect(`/counters?error=${form.error}`);
   }
 
   if (parsedId === null) {
-    return res.redirect('/admin/counters?error=invalid_id');
+    return res.redirect('/counters?error=invalid_id');
   }
 
   try {
@@ -169,7 +169,7 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
       parsedId,
     );
     if (hasDuplicateCommand) {
-      return res.redirect('/admin/counters?error=duplicate_command');
+      return res.redirect('/counters?error=duplicate_command');
     }
 
     await updateCounter({
@@ -186,26 +186,26 @@ router.post('/counters/update', requireManager, csrfProtection, async (req, res)
     }
 
     if (err instanceof ReservedCommandError) {
-      return res.redirect('/admin/counters?error=reserved_command');
+      return res.redirect('/counters?error=reserved_command');
     }
 
     if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-      return res.redirect('/admin/counters?error=duplicate_command');
+      return res.redirect('/counters?error=duplicate_command');
     }
 
     log.error('Update counter error:', err);
-    return res.redirect('/admin/counters?error=update_failed');
+    return res.redirect('/counters?error=update_failed');
   }
 
-  res.redirect('/admin/counters');
+  res.redirect('/counters');
 });
 
-router.post('/counters/remove', requireManager, csrfProtection, async (req, res) => {
+router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => {
   const { id } = req.body as { id?: string };
   const parsedId = parseCounterId(id);
 
   if (parsedId === null) {
-    return res.redirect('/admin/counters?error=invalid_id');
+    return res.redirect('/counters?error=invalid_id');
   }
 
   try {
@@ -216,17 +216,17 @@ router.post('/counters/remove', requireManager, csrfProtection, async (req, res)
     }
 
     log.error('Remove counter error:', err);
-    return res.redirect('/admin/counters?error=remove_failed');
+    return res.redirect('/counters?error=remove_failed');
   }
 
-  res.redirect('/admin/counters');
+  res.redirect('/counters');
 });
 
 router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, res) => {
   const rawId = req.params.id;
   const parsedId = parseCounterId(typeof rawId === 'string' ? rawId : undefined);
   if (parsedId === null) {
-    return res.redirect('/admin/counters?error=invalid_id');
+    return res.redirect('/counters?error=invalid_id');
   }
 
   try {
@@ -237,10 +237,10 @@ router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, r
     }
 
     log.error('Reset counter error:', err);
-    return res.redirect('/admin/counters?error=reset_failed');
+    return res.redirect('/counters?error=reset_failed');
   }
 
-  res.redirect('/admin/counters?reset=1');
+  res.redirect('/counters?reset=1');
 });
 
 export default router;

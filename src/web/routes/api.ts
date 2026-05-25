@@ -1,7 +1,7 @@
 import { createLogger } from '../../logger';
 import { Router } from 'express';
 import { getStatus } from '../../statusStore';
-import { requireMod } from '../middleware';
+import { requireAuth, requireMod } from '../middleware';
 import { connect, disconnect, getCurrentChannelId } from '../../audioPlayer';
 import { getDiscordClient } from '../../discordBot';
 import { csrfProtection } from '../csrf';
@@ -12,7 +12,7 @@ const log = createLogger('API');
 const router = Router();
 
 // Live status JSON — polled by the dashboard frontend every few seconds
-router.get('/status', (_req, res) => {
+router.get('/status', requireAuth, (_req, res) => {
   res.json(getStatus());
 });
 

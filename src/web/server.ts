@@ -153,9 +153,9 @@ app.use('/admin', requireAuth, eventsubAdminRouter);
 app.use('/user/settings', requireAuth, userSettingsRouter);
 app.use('/overlay', overlaySourceRouter);
 app.use('/overlay', requireAuth, overlayAdminRouter);
-app.use('/admin', requireAuth, commandsRouter);
-app.use('/admin', requireAuth, countersRouter);
-app.use('/admin', requireAuth, commandMonitorRouter);
+app.use('/', requireAuth, commandsRouter);
+app.use('/', requireAuth, countersRouter);
+app.use('/', requireAuth, commandMonitorRouter);
 app.use('/', requireAuth, dashboardRouter);
 
 // 404 handler
