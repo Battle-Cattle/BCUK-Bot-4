@@ -66,7 +66,7 @@ function renderEntries(entries) {
 
 async function fetchRecentEntries() {
   try {
-    var response = await fetch('/admin/command-monitor/recent', { credentials: 'same-origin' });
+    var response = await fetch('/command-monitor/recent', { credentials: 'same-origin' });
     if (!response.ok) return;
     var data = await response.json();
     renderEntries(data.entries || []);

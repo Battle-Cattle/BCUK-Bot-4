@@ -40,7 +40,7 @@
       <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add Counter</span></div>
         <div class="card-body">
-          <form method="POST" action="/admin/counters/add">
+          <form method="POST" action="/counters/add">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
             <div class="form-row-wrap form-section-gap">
               <div class="form-col-grow">
@@ -96,11 +96,11 @@
                 <td>
                   <div class="actions">
                     <button type="button" class="btn btn-sm btn-ghost btn-toggle-counter-edit" data-counter-id="<%= counter.id %>" aria-controls="counter-edit-<%= counter.id %>" aria-expanded="false">✏️ Edit</button>
-                    <form method="POST" action="/admin/counters/reset/<%= counter.id %>" class="inline-form-sm js-confirm-reset-counter" data-counter-trigger="<%= counter.trigger_command %>">
+                    <form method="POST" action="/counters/reset/<%= counter.id %>" class="inline-form-sm js-confirm-reset-counter" data-counter-trigger="<%= counter.trigger_command %>">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <button type="submit" class="btn btn-sm">Reset</button>
                     </form>
-                    <form method="POST" action="/admin/counters/remove" class="inline-form-sm js-confirm-remove-counter" data-counter-trigger="<%= counter.trigger_command %>">
+                    <form method="POST" action="/counters/remove" class="inline-form-sm js-confirm-remove-counter" data-counter-trigger="<%= counter.trigger_command %>">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="id" value="<%= counter.id %>">
                       <button type="submit" class="btn btn-danger btn-sm">Remove</button>
@@ -111,7 +111,7 @@
               <tr class="files-row is-hidden" id="counter-edit-<%= counter.id %>">
                 <td colspan="7">
                   <div class="command-edit-panel">
-                    <form method="POST" action="/admin/counters/update" class="stack-gap-md">
+                    <form method="POST" action="/counters/update" class="stack-gap-md">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="id" value="<%= counter.id %>">
                       <div class="form-row-wrap form-section-gap">
