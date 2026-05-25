@@ -2,7 +2,6 @@ import { createLogger } from './logger';
 import { getAllEventSubStreamers, saveStreamerToken, clearStreamerToken, DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 import { getUsers } from './twitchApi';
 import { TwitchAuthError, refreshUserToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription } from './twitchApiEventSub';
-import { getActiveChannels } from './twitchBot';
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
   FollowEvent, SubEvent, ResubEvent, GiftSubEvent, RaidEvent, RedemptionEvent,
@@ -170,12 +169,6 @@ export function dispatchNotification(type: string, event: Record<string, unknown
 
   const info = streamerMap.get(broadcasterId);
   if (!info?.config) return;
-
-  const requiresChannel = type !== 'channel.channel_points_custom_reward_redemption.add';
-  if (requiresChannel && !getActiveChannels().has(info.login)) {
-    log.warn(`Bot not in channel ${info.login} — skipping ${type} notification`);
-    return;
-  }
 
   const handler = notificationHandlers.get(type);
   if (!handler) {
