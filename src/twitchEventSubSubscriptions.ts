@@ -85,9 +85,9 @@ async function createSubscriptionsForStreamer(
     await subscribe(sid, { type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }, token, name);
   }
 
-  // Always subscribe to channel points redemptions when a broadcaster token is available.
-  // The handler filters by reward ID against configured overlay assignments.
-  if (token) {
+  // Subscribe to channel points redemptions when a broadcaster token and config are available.
+  // Gated on config to keep subscription and dispatch aligned (dispatchNotification early-exits without config).
+  if (config && token) {
     desired.add('channel.channel_points_custom_reward_redemption');
     await subscribe(sid, {
       type: 'channel.channel_points_custom_reward_redemption',

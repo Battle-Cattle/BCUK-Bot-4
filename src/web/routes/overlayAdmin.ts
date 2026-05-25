@@ -59,8 +59,8 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
         streamer: null,
         videos: [],
         rewards: [],
-        error: null,
-        success: null,
+        error: req.query.error as string | undefined ?? null,
+        success: req.query.success as string | undefined ?? null,
       });
     }
 
@@ -126,7 +126,7 @@ router.post('/settings/videos/:id/delete', requireAuth, csrfProtection, async (r
     const filename = await deleteVideo(videoId, streamer.id);
     if (filename) {
       const filePath = path.join(OVERLAY_FOLDER, String(streamer.id), filename);
-      fs.rmSync(filePath, { force: true });
+      await fs.promises.rm(filePath, { force: true });
     }
 
     res.redirect('/overlay/settings?success=video_deleted');

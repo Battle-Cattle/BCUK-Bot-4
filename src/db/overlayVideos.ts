@@ -76,7 +76,13 @@ export async function deleteVideo(videoId: number, streamerId: number): Promise<
       return null;
     }
     const filename: string = rows[0].filename;
-    await conn.execute(`DELETE FROM overlay_video WHERE id = ? AND streamer_id = ?`, [videoId, streamerId]);
+    const [del] = await conn.execute<mysql.ResultSetHeader>(
+      `DELETE FROM overlay_video WHERE id = ? AND streamer_id = ?`, [videoId, streamerId],
+    );
+    if (del.affectedRows === 0) {
+      await conn.rollback();
+      return null;
+    }
     await conn.commit();
     return filename;
   } catch (err) {
