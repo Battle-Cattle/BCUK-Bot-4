@@ -48,47 +48,39 @@ function toStringArray(value: string | string[] | undefined): string[] {
   return value ? [value] : [];
 }
 
+async function fetchTwitchRewards(streamer: DbStreamerEventSub): Promise<TwitchCustomReward[]> {
+  if (!streamer.twitch_user_id) return [];
+  const token = await getValidToken(streamer);
+  if (!token) return [];
+  try {
+    return await getCustomRewards(streamer.twitch_user_id, token);
+  } catch (err) {
+    log.warn('Failed to fetch Twitch custom rewards:', err);
+    return [];
+  }
+}
+
+function parseWeight(raw: string | string[] | undefined): number {
+  const n = Number(Array.isArray(raw) ? raw[0] : raw);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+}
+
 // GET /overlay/settings
 router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const discordId = req.session.user!.discordId;
-    const streamer = await getStreamerByDiscordId(discordId);
-
-    if (!streamer) {
-      return res.render('overlayAdmin', {
-        user: req.session.user,
-        csrfToken: req.csrfToken(),
-        streamer: null,
-        videos: [],
-        rewards: [],
-        twitchRewards: [],
-        baseUrl: PUBLIC_URL,
-        error: req.query.error as string | undefined ?? null,
-        success: req.query.success as string | undefined ?? null,
-      });
-    }
-
-    const [videos, rewards] = await Promise.all([
-      getVideosForStreamer(streamer.id),
-      getRewardsForStreamer(streamer.id),
-    ]);
-
-    let twitchRewards: TwitchCustomReward[] = [];
-    if (streamer.twitch_user_id) {
-      const token = await getValidToken(streamer);
-      if (token) {
-        try {
-          twitchRewards = await getCustomRewards(streamer.twitch_user_id, token);
-        } catch (err) {
-          log.warn('Failed to fetch Twitch custom rewards:', err);
-        }
-      }
-    }
+    const streamer = await getStreamerByDiscordId(req.session.user!.discordId);
+    const [videos, rewards, twitchRewards] = streamer
+      ? await Promise.all([
+          getVideosForStreamer(streamer.id),
+          getRewardsForStreamer(streamer.id),
+          fetchTwitchRewards(streamer),
+        ])
+      : [[], [], []];
 
     res.render('overlayAdmin', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
-      streamer,
+      streamer: streamer ?? null,
       videos,
       rewards,
       twitchRewards,
@@ -175,11 +167,7 @@ router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) =
     await setRewardVideos(
       rewardId,
       streamer.id,
-      videoIds.map((videoId) => {
-        const raw = body[`weight_${videoId}`];
-        const n = Number(Array.isArray(raw) ? raw[0] : raw);
-        return { videoId, weight: Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1 };
-      }),
+      videoIds.map((videoId) => ({ videoId, weight: parseWeight(body[`weight_${videoId}`]) })),
     );
 
     res.redirect('/overlay/settings?success=reward_saved');
