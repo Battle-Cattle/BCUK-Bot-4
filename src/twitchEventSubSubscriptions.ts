@@ -27,7 +27,7 @@ const notificationHandlers = new Map<string, NotificationHandler>([
   ['channel.subscription.message',                     (l, e, c) => handleResub(l, e as ResubEvent, c)],
   ['channel.subscription.gift',                        (l, e, c) => handleGiftSub(l, e as GiftSubEvent, c)],
   ['channel.raid',                                     (l, e, c) => handleRaid(l, e as RaidEvent, c)],
-  ['channel.channel_points_custom_reward_redemption',  (l, e, c, sid) => handleRedemption(l, e as RedemptionEvent, c, sid)],
+  ['channel.channel_points_custom_reward_redemption.add',  (l, e, c, sid) => handleRedemption(l, e as RedemptionEvent, c, sid)],
 ]);
 
 async function deleteStaleSubscriptions(uid: string, desired: Set<string>, userToken: string | null): Promise<void> {
@@ -88,9 +88,9 @@ async function createSubscriptionsForStreamer(
   // Subscribe to channel points redemptions when a broadcaster token and config are available.
   // Gated on config to keep subscription and dispatch aligned (dispatchNotification early-exits without config).
   if (config && token) {
-    desired.add('channel.channel_points_custom_reward_redemption');
+    desired.add('channel.channel_points_custom_reward_redemption.add');
     await subscribe(sid, {
-      type: 'channel.channel_points_custom_reward_redemption',
+      type: 'channel.channel_points_custom_reward_redemption.add',
       version: '1',
       condition: { broadcaster_user_id: uid },
     }, token, name);
