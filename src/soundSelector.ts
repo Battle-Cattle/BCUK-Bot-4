@@ -1,11 +1,6 @@
-import { SfxFile } from './db';
+export interface WeightedFile { file: string; weight: number }
 
-/**
- * Pick a sound file using weighted-random selection.
- * Files with a higher `weight` value are more likely to be chosen.
- * Falls back to uniform random if all weights are 0 or equal.
- */
-export function pickWeightedRandom(files: SfxFile[]): string {
+export function pickWeightedRandom(files: WeightedFile[]): string {
   if (files.length === 0) throw new Error('No files to pick from');
   if (files.length === 1) return files[0].file;
 

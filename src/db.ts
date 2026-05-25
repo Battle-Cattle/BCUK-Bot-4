@@ -92,6 +92,15 @@ export type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 export type { SfxTrigger, SfxFile, SfxTriggerRow, PublicSfxTrigger } from './db/sfx';
 export { findTrigger, findSoundFiles, getAllSfxTriggers, getPublicSfxTriggers } from './db/sfx';
 
+// ─── Overlay videos ─────────────────────────────────────────────────────────
+
+export type { OverlayVideo, OverlayReward, OverlayRewardWithVideos, OverlayWeightedVideo } from './db/overlayVideos';
+export {
+  getVideosForStreamer, addVideo, getVideoById, deleteVideo,
+  getRewardsForStreamer, upsertReward, setRewardVideos, deleteReward,
+  getVideosForReward,
+} from './db/overlayVideos';
+
 // ─── Streamdeck API keys ─────────────────────────────────────────────────────
 
 export type { StreamdeckKeyRow } from './db/streamdeckKeys';
