@@ -22,6 +22,7 @@ const activeChannelUserIds = new Map<string, string>();
 const membershipMutationQueue = createMutationQueue();
 // Twitch rate-limits JOIN to 20 per 10 s (2/s). 600 ms ≈ 1.67/s, ~83% of the ceiling.
 const JOIN_THROTTLE_MS = 600;
+const TWITCH_CHAT_MESSAGE_PATTERN = /^\[#[^\]]+\] <[^>]+>: /;
 
 function normalizeChannel(channel: string): string | null {
   return normalizeTwitchChannelName(channel);
@@ -123,7 +124,7 @@ export async function startTwitchBot(): Promise<void> {
     channels: [],
     options: { debug: false },
     logger: {
-      info: (msg: string) => { if (!/^\[#[^\]]+\] <[^>]+>: /.test(msg)) log.info(msg); },
+      info: (msg: string) => { if (!TWITCH_CHAT_MESSAGE_PATTERN.test(msg)) log.info(msg); },
       warn: (msg: string) => log.warn(msg),
       error: (msg: string) => log.error(msg),
     },
