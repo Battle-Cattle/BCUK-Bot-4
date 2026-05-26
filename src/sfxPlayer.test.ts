@@ -63,4 +63,19 @@ describe('playFile', () => {
     expect(vi.mocked(createAudioResource)).toHaveBeenCalledWith('/sfx/ding.mp3');
     expect(vi.mocked(startPlayback)).toHaveBeenCalledOnce();
   });
+
+  it('throws when the sound file does not exist on disk', () => {
+    vi.mocked(isConnected).mockReturnValue(true);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    expect(() => playFile('/sfx/missing.mp3')).toThrow('Sound file not found');
+  });
+
+  it('throws when the resolved path is a directory, not a file', () => {
+    vi.mocked(isConnected).mockReturnValue(true);
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.statSync).mockReturnValue({ isFile: () => false } as ReturnType<typeof fs.statSync>);
+
+    expect(() => playFile('/sfx/notafile')).toThrow('Sound path is not a file');
+  });
 });
