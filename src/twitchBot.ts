@@ -123,7 +123,7 @@ export async function startTwitchBot(): Promise<void> {
     channels: [],
     options: { debug: false },
     logger: {
-      info: (msg: string) => log.info(msg),
+      info: (msg: string) => { if (!/^\[#[^\]]+\] <[^>]+>: /.test(msg)) log.info(msg); },
       warn: (msg: string) => log.warn(msg),
       error: (msg: string) => log.error(msg),
     },
