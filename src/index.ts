@@ -1,10 +1,10 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
 import { getPool, closePool } from './db';
-import { startTwitchBot, stopTwitchBot, sayInChannel, getActiveChannels, getActiveChannelUserIds } from './twitchBot';
+import { startTwitchBot, stopTwitchBot, sayInChannel, getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitchBot';
 import { startDiscordBot, stopDiscordBot } from './discordBot';
 import { startTikTokBot, stopTikTokBot } from './tiktokBot';
 import { startTwitchMonitor, stopTwitchMonitor } from './twitchMonitor';
-import { startEventSub, stopEventSub } from './twitchEventSub';
+import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitchEventSub';
 import { startWebPanel } from './web/server';
 import { disconnect } from './audioPlayer';
 import { registerTwitchChatRuntime } from './customCommandHandler';
@@ -62,6 +62,7 @@ async function main(): Promise<void> {
 
   startDiscordBot();
   await startTwitchBot();
+  setChannelJoinedHook(() => reloadEventSubSubscriptions());
   await startTikTokBot();
   startWebPanel();
   startCounterScheduler();
