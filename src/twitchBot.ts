@@ -252,6 +252,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
     try {
       await client.join(normalized);
       setTwitchChannel(normalized, true);
+      _onChannelJoined?.(normalized);
       getUsers([normalized])
         .then(([u]) => { if (u) activeChannelUserIds.set(normalized, u.id); })
         .catch((err) => { log.warn(`Failed to cache user ID for channel ${normalized}:`, err); });

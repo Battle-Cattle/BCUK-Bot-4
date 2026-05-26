@@ -2,6 +2,7 @@ import { createLogger } from './logger';
 import { getAllEventSubStreamers, clearStreamerToken, DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 import { getUsers } from './twitchApi';
 import { getActiveChannels } from './twitchBot';
+import { normalizeTwitchChannelName } from './twitchChannelName';
 import { createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, getValidToken } from './twitchApiEventSub';
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
@@ -60,7 +61,8 @@ async function resolveBroadcasterId(streamer: DbStreamerEventSub, config: EventS
 async function createSubscriptionsForStreamer(
   sid: string, uid: string, token: string | null, config: EventSubConfig | null, name: string,
 ): Promise<Set<string>> {
-  if (!getActiveChannels().has(name)) {
+  const normalizedName = normalizeTwitchChannelName(name) ?? name.toLowerCase();
+  if (!getActiveChannels().has(normalizedName)) {
     log.info(`Skipping EventSub subscriptions for ${name} — bot not in channel`);
     return new Set();
   }

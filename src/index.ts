@@ -60,9 +60,9 @@ async function main(): Promise<void> {
   registerShoutoutRuntime({ send: sayInChannel });
   registerCountdownTwitchRuntime({ send: sayInChannel });
 
+  setChannelJoinedHook(() => reloadEventSubSubscriptions());
   startDiscordBot();
   await startTwitchBot();
-  setChannelJoinedHook(() => reloadEventSubSubscriptions());
   await startTikTokBot();
   startWebPanel();
   startCounterScheduler();
