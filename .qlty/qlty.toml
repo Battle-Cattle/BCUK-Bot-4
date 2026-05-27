@@ -67,5 +67,6 @@ name = "osv-scanner"
 name = "ripgrep"
 mode = "comment"
 
-[[plugin]]
-name = "trufflehog"
+# trufflehog disabled — GitHub API 403 prevents install in this environment
+# [[plugin]]
+# name = "trufflehog"
