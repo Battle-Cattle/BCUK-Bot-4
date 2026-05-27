@@ -9,13 +9,14 @@ import {
   type AudioResource,
   type VoiceConnection,
   type AudioPlayer as DjsAudioPlayer,
+  type DiscordGatewayAdapterCreator,
+  type DiscordGatewayAdapterLibraryMethods,
 } from '@discordjs/voice';
-import { Client, ChannelType } from 'discord.js';
+import { Client, ChannelType, type VoiceBasedChannel } from 'discord.js';
 import { DISCORD_GUILD_ID, DISCORD_VOICE_CHANNEL_ID } from './config';
 import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from './statusStore';
 
 const log = createLogger('AudioPlayer');
-import { buildAdapter } from './voiceAdapter';
 import { isPermanentVoiceMisconfigurationError } from './discordUtils';
 import {
   type ConnectionHandlerDeps,
@@ -34,6 +35,72 @@ let shouldAutoReconnect = false;
 let currentAttemptId = 0;
 let currentChannelId: string | null = null;
 let targetChannelId: string | undefined = undefined;
+
+// ─── Voice adapter ────────────────────────────────────────────────────────────
+// Bypasses discord.js's built-in voiceAdapterCreator to avoid type/version
+// incompatibilities with discord.js v14. Listens to raw gateway events instead.
+
+// Tracks the cleanup function for the currently active adapter so it can be
+// removed before a new one is registered, preventing listener accumulation.
+let activeAdapterCleanup: (() => void) | null = null;
+
+type RawPacket = { t: string; d: Record<string, unknown> };
+
+function makeOnRaw(methods: DiscordGatewayAdapterLibraryMethods): (packet: RawPacket) => void {
+  return function onRaw(packet: RawPacket): void {
+    if (packet.t === 'VOICE_STATE_UPDATE') {
+      methods.onVoiceStateUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceStateUpdate>[0]);
+    }
+    if (packet.t === 'VOICE_SERVER_UPDATE') {
+      methods.onVoiceServerUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceServerUpdate>[0]);
+    }
+  };
+}
+
+function makeAdapterCleanup(
+  channel: VoiceBasedChannel,
+  onRaw: (packet: RawPacket) => void,
+  originalMax: number,
+): () => void {
+  let cleanedUp = false;
+  return function cleanup(): void {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    channel.client.off('raw', onRaw);
+    if (originalMax !== 0) channel.client.setMaxListeners(originalMax);
+    activeAdapterCleanup = null;
+  };
+}
+
+function buildAdapter(channel: VoiceBasedChannel): DiscordGatewayAdapterCreator {
+  return (methods: DiscordGatewayAdapterLibraryMethods) => {
+    if (activeAdapterCleanup) activeAdapterCleanup();
+
+    const onRaw = makeOnRaw(methods);
+    const originalMax = channel.client.getMaxListeners();
+    // 0 means unlimited — don't touch it.
+    if (originalMax !== 0) channel.client.setMaxListeners(originalMax + 1);
+    channel.client.on('raw', onRaw);
+
+    const cleanup = makeAdapterCleanup(channel, onRaw, originalMax);
+    activeAdapterCleanup = cleanup;
+
+    return {
+      sendPayload: (payload: unknown) => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          channel.guild.shard.send(payload as any);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      destroy: cleanup,
+    };
+  };
+}
+
+// ─── Reconnect ────────────────────────────────────────────────────────────────
 
 const RECONNECT_BASE_DELAY_MS = 5_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
