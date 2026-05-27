@@ -111,6 +111,7 @@ export async function subscribeAll(sid: string): Promise<number> {
   // Build into a temporary map so dispatchNotification/handleRevocation see a
   // consistent snapshot throughout the async loop, not an empty map mid-reload.
   const nextMap = new Map<string, StreamerInfo>();
+  let totalSubscriptions = 0;
 
   for (const streamer of streamers) {
     const token = await getValidToken(streamer);
@@ -122,13 +123,14 @@ export async function subscribeAll(sid: string): Promise<number> {
 
     // Create desired subscriptions first so there is never a gap where zero are active
     const desired = await createSubscriptionsForStreamer(sid, uid, token, config, streamer.twitch_name ?? '');
+    totalSubscriptions += desired.size;
     await deleteStaleSubscriptions(uid, desired, token);
   }
 
   // Atomic swap — old map stays readable until all subscriptions are ready
   streamerMap.clear();
   for (const [uid, info] of nextMap) streamerMap.set(uid, info);
-  return streamerMap.size;
+  return totalSubscriptions;
 }
 
 async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<void> {
