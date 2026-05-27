@@ -1,0 +1,5 @@
+path_filters:
+  - "!graphify-out/**"
+  - "!.claude/**"
+  - "!CLAUDE.md"
+  - "!AGENTS.md"
