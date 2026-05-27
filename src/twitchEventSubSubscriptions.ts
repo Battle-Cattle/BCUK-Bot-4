@@ -122,7 +122,18 @@ export async function subscribeAll(sid: string): Promise<number> {
     nextMap.set(uid, { login: streamer.twitch_name ?? '', streamerId: streamer.id, config });
 
     // Create desired subscriptions first so there is never a gap where zero are active
-    const desired = await createSubscriptionsForStreamer(sid, uid, token, config, streamer.twitch_name ?? '');
+    let desired: Set<string>;
+    try {
+      desired = await createSubscriptionsForStreamer(sid, uid, token, config, streamer.twitch_name ?? '');
+    } catch (err) {
+      if (err instanceof TwitchAuthError) {
+        log.warn(`Clearing token for ${streamer.twitch_name ?? uid} — authorization missing, user must reconnect Twitch`);
+        await clearStreamerToken(streamer.id);
+      } else {
+        log.error(`createSubscriptionsForStreamer failed for ${streamer.twitch_name ?? uid}:`, err);
+      }
+      continue;
+    }
     totalSubscriptions += desired.size;
     await deleteStaleSubscriptions(uid, desired, token);
   }
@@ -138,11 +149,8 @@ async function subscribe(sessionId: string, spec: SubSpec, token: string, login:
     const id = await createEventSubSubscription(spec.type, spec.version, spec.condition, sessionId, token);
     if (id !== null) log.info(`Subscribed to ${spec.type} for ${login}`);
   } catch (err) {
-    if (err instanceof TwitchAuthError) {
-      log.warn(`Skipping ${spec.type} for ${login} — authorization missing, user may need to reconnect Twitch`);
-    } else {
-      log.error(`Failed to subscribe to ${spec.type} for ${login}:`, err);
-    }
+    if (err instanceof TwitchAuthError) throw err;
+    log.error(`Failed to subscribe to ${spec.type} for ${login}:`, err);
   }
 }
 
