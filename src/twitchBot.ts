@@ -18,6 +18,11 @@ const log = createLogger('Twitch');
 let client: tmi.Client | null = null;
 let connected = false;
 const activeChannels = new Set<string>();
+let _onChannelJoined: ((channel: string) => void) | null = null;
+
+export function setChannelJoinedHook(fn: (channel: string) => void): void {
+  _onChannelJoined = fn;
+}
 const activeChannelUserIds = new Map<string, string>();
 const membershipMutationQueue = createMutationQueue();
 // Twitch rate-limits JOIN to 20 per 10 s (2/s). 600 ms ≈ 1.67/s, ~83% of the ceiling.
@@ -61,6 +66,7 @@ async function joinMissingChannel(channel: string): Promise<void> {
   await client.join(channel);
   await new Promise<void>((resolve) => { setTimeout(resolve, JOIN_THROTTLE_MS); });
   setTwitchChannel(channel, true);
+  try { _onChannelJoined?.(channel); } catch (err) { log.error('Channel joined hook error:', err); }
   log.info(`Joined queued channel after reconnect: ${channel}`);
 }
 
@@ -256,6 +262,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       log.error(`Failed to join channel ${normalized}:`, err);
       throw err;
     }
+    try { _onChannelJoined?.(normalized); } catch (err) { log.error('Channel joined hook error:', err); }
   });
 }
 
