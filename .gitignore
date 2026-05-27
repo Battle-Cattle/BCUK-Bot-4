@@ -14,6 +14,7 @@ public/downloads/*
 !.claude/settings.json
 !.claude/hooks/
 !.claude/skills
+graphify-out/graph.html
 graphify-out/cache/
 graphify-out/.graphify_*.json
 graphify-out/.graphify_python
