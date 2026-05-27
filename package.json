@@ -8,6 +8,7 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "graphify:hook": "graphify hook install"
   },
   "dependencies": {
@@ -35,13 +36,14 @@
   },
   "devDependencies": {
     "@types/ejs": "^3.1.5",
-    "@types/multer": "^2.1.0",
     "@types/express": "^5.0.6",
     "@types/express-mysql-session": "^3.0.8",
     "@types/express-session": "^1.19.0",
+    "@types/multer": "^2.1.0",
     "@types/node": "^24.12.4",
     "@types/tmi.js": "^1.8.6",
     "@types/ws": "^8.18.1",
+    "@vitest/coverage-v8": "^4.1.7",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"

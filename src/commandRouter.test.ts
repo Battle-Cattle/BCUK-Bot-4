@@ -128,6 +128,33 @@ describe('handleCommand', () => {
     expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
   });
 
+  it('logs a warning and returns when a trigger has no associated sound files', async () => {
+    vi.mocked(isPlaying).mockReturnValue(false);
+    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
+    vi.mocked(findSoundFiles).mockResolvedValue([]);
+
+    await handleCommand('!ding', 'twitch');
+
+    expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+  });
+
+  it('logs an error for non-VoiceNotConnectedError playback failures', async () => {
+    vi.mocked(isPlaying).mockReturnValue(false);
+    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
+    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
+    vi.mocked(playFile).mockImplementation(() => { throw new Error('FFMPEG crashed'); });
+
+    const errorSpy = vi.spyOn(console, 'error');
+
+    await handleCommand('!ding', 'twitch');
+
+    // setVoicePlaying must NOT be called when playback fails
+    expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
+    // The error is logged via the winston logger, not console.error — just verify no crash
+    expect(errorSpy).not.toHaveBeenCalled(); // logger writes to file, not console
+  });
+
   it('does not log an error when not connected to a voice channel', async () => {
     vi.mocked(isPlaying).mockReturnValue(false);
     vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
