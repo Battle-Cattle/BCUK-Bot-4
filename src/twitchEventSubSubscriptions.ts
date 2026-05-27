@@ -21,6 +21,12 @@ const streamerMap = new Map<string, StreamerInfo>();
 // Tracks "login:type" pairs that failed with 403 — silently skipped until bot restarts
 const authFailedSubs = new Set<string>();
 
+export function hasAuthFailedSubs(login: string): boolean {
+  const prefix = `${login}:`;
+  for (const key of authFailedSubs) if (key.startsWith(prefix)) return true;
+  return false;
+}
+
 // Maps EventSub notification types to their handler functions.
 // Using Map instead of a plain object prevents prototype-chain lookup on user-controlled keys.
 type NotificationHandler = (login: string, event: unknown, config: EventSubConfig, streamerId: number) => Promise<void>;
