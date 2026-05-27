@@ -44,36 +44,45 @@ let targetChannelId: string | undefined = undefined;
 // removed before a new one is registered, preventing listener accumulation.
 let activeAdapterCleanup: (() => void) | null = null;
 
+type RawPacket = { t: string; d: Record<string, unknown> };
+
+function makeOnRaw(methods: DiscordGatewayAdapterLibraryMethods): (packet: RawPacket) => void {
+  return function onRaw(packet: RawPacket): void {
+    if (packet.t === 'VOICE_STATE_UPDATE') {
+      methods.onVoiceStateUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceStateUpdate>[0]);
+    }
+    if (packet.t === 'VOICE_SERVER_UPDATE') {
+      methods.onVoiceServerUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceServerUpdate>[0]);
+    }
+  };
+}
+
+function makeAdapterCleanup(
+  channel: VoiceBasedChannel,
+  onRaw: (packet: RawPacket) => void,
+  originalMax: number,
+): () => void {
+  let cleanedUp = false;
+  return function cleanup(): void {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    channel.client.off('raw', onRaw);
+    if (originalMax !== 0) channel.client.setMaxListeners(originalMax);
+    activeAdapterCleanup = null;
+  };
+}
+
 function buildAdapter(channel: VoiceBasedChannel): DiscordGatewayAdapterCreator {
   return (methods: DiscordGatewayAdapterLibraryMethods) => {
-    if (activeAdapterCleanup) {
-      activeAdapterCleanup();
-    }
+    if (activeAdapterCleanup) activeAdapterCleanup();
 
-    function onRaw(packet: { t: string; d: Record<string, unknown> }) {
-      if (packet.t === 'VOICE_STATE_UPDATE') {
-        methods.onVoiceStateUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceStateUpdate>[0]);
-      }
-      if (packet.t === 'VOICE_SERVER_UPDATE') {
-        methods.onVoiceServerUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceServerUpdate>[0]);
-      }
-    }
-
+    const onRaw = makeOnRaw(methods);
     const originalMax = channel.client.getMaxListeners();
     // 0 means unlimited — don't touch it.
     if (originalMax !== 0) channel.client.setMaxListeners(originalMax + 1);
     channel.client.on('raw', onRaw);
 
-    let cleanedUp = false;
-
-    function cleanup(): void {
-      if (cleanedUp) return;
-      cleanedUp = true;
-      channel.client.off('raw', onRaw);
-      if (originalMax !== 0) channel.client.setMaxListeners(originalMax);
-      activeAdapterCleanup = null;
-    }
-
+    const cleanup = makeAdapterCleanup(channel, onRaw, originalMax);
     activeAdapterCleanup = cleanup;
 
     return {
