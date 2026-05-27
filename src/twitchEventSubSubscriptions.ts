@@ -18,6 +18,9 @@ export interface SubSpec { type: string; version: string; condition: Record<stri
 export interface StreamerInfo { login: string; streamerId: number; config: EventSubConfig | null }
 const streamerMap = new Map<string, StreamerInfo>();
 
+// Tracks "login:type" pairs that failed with 403 — silently skipped until bot restarts
+const authFailedSubs = new Set<string>();
+
 // Maps EventSub notification types to their handler functions.
 // Using Map instead of a plain object prevents prototype-chain lookup on user-controlled keys.
 type NotificationHandler = (login: string, event: unknown, config: EventSubConfig, streamerId: number) => Promise<void>;
@@ -122,18 +125,7 @@ export async function subscribeAll(sid: string): Promise<number> {
     nextMap.set(uid, { login: streamer.twitch_name ?? '', streamerId: streamer.id, config });
 
     // Create desired subscriptions first so there is never a gap where zero are active
-    let desired: Set<string>;
-    try {
-      desired = await createSubscriptionsForStreamer(sid, uid, token, config, streamer.twitch_name ?? '');
-    } catch (err) {
-      if (err instanceof TwitchAuthError) {
-        log.warn(`Clearing token for ${streamer.twitch_name ?? uid} — authorization missing, user must reconnect Twitch`);
-        await clearStreamerToken(streamer.id);
-      } else {
-        log.error(`createSubscriptionsForStreamer failed for ${streamer.twitch_name ?? uid}:`, err);
-      }
-      continue;
-    }
+    const desired = await createSubscriptionsForStreamer(sid, uid, token, config, streamer.twitch_name ?? '');
     totalSubscriptions += desired.size;
     await deleteStaleSubscriptions(uid, desired, token);
   }
@@ -145,12 +137,18 @@ export async function subscribeAll(sid: string): Promise<number> {
 }
 
 async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<void> {
+  const skipKey = `${login}:${spec.type}`;
+  if (authFailedSubs.has(skipKey)) return;
   try {
     const id = await createEventSubSubscription(spec.type, spec.version, spec.condition, sessionId, token);
     if (id !== null) log.info(`Subscribed to ${spec.type} for ${login}`);
   } catch (err) {
-    if (err instanceof TwitchAuthError) throw err;
-    log.error(`Failed to subscribe to ${spec.type} for ${login}:`, err);
+    if (err instanceof TwitchAuthError) {
+      authFailedSubs.add(skipKey);
+      log.warn(`Skipping ${spec.type} for ${login} — authorization missing, user must reconnect Twitch`);
+    } else {
+      log.error(`Failed to subscribe to ${spec.type} for ${login}:`, err);
+    }
   }
 }
 
