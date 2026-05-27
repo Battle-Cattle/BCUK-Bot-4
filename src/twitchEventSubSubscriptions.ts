@@ -18,7 +18,7 @@ export interface SubSpec { type: string; version: string; condition: Record<stri
 export interface StreamerInfo { login: string; streamerId: number; config: EventSubConfig | null }
 const streamerMap = new Map<string, StreamerInfo>();
 
-// Tracks "login:type" pairs that failed with 403 — silently skipped until bot restarts
+// Tracks "login:type:token" triples that failed with 403 — skipped until bot restarts or token changes
 const authFailedSubs = new Set<string>();
 
 export function hasAuthFailedSubs(login: string): boolean {
@@ -143,11 +143,14 @@ export async function subscribeAll(sid: string): Promise<number> {
 }
 
 async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<void> {
-  const skipKey = `${login}:${spec.type}`;
+  const skipKey = `${login}:${spec.type}:${token}`;
   if (authFailedSubs.has(skipKey)) return;
   try {
     const id = await createEventSubSubscription(spec.type, spec.version, spec.condition, sessionId, token);
-    if (id !== null) log.info(`Subscribed to ${spec.type} for ${login}`);
+    if (id !== null) {
+      authFailedSubs.delete(skipKey);
+      log.info(`Subscribed to ${spec.type} for ${login}`);
+    }
   } catch (err) {
     if (err instanceof TwitchAuthError) {
       authFailedSubs.add(skipKey);
