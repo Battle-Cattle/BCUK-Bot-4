@@ -8,6 +8,39 @@ A multi-platform community bot for Twitch, Discord, and TikTok with a web contro
 
 ---
 
+## Development Workflow
+
+### Runtime requirement
+Node.js **22.x** (matches CI). Run with `nvm use 22` if needed.
+
+### Verify your changes
+After any code change, run both:
+```bash
+npx tsc --noEmit   # type-check (must produce no output)
+npm test           # unit tests via Vitest (must all pass)
+```
+CI runs `npm run build && npm test` — the build step uses `tsconfig.build.json` which excludes test files.
+
+### Testing
+```bash
+npm test           # run all tests once
+npm run test:watch # re-run on file change (dev)
+```
+Tests live alongside source as `*.test.ts` files (e.g. `src/commandRouter.test.ts`, `src/db/lookupCache.test.ts`).
+
+### No linter / formatter
+There is **no ESLint or Prettier** configured. `.qlty/` is a CI-only security/smell scanner — do not attempt to run `eslint` or `prettier` locally.
+
+### TypeScript / import style
+- `tsconfig.json` — used by `ts-node` (dev); includes test files
+- `tsconfig.build.json` — used by `npm run build`; excludes test files
+- Output is **CommonJS** (no `"type": "module"` in package.json). Relative imports do **not** need `.js` extensions.
+
+### Database migrations
+SQL migration scripts live in `migrations/`. They are applied **manually** against the MySQL database — there is no migration runner. Run them with `mysql -u <user> -p <db> < migrations/<file>.sql`.
+
+---
+
 ## Repository Structure
 
 ```text
