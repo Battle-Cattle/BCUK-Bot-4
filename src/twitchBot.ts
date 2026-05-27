@@ -66,7 +66,7 @@ async function joinMissingChannel(channel: string): Promise<void> {
   await client.join(channel);
   await new Promise<void>((resolve) => { setTimeout(resolve, JOIN_THROTTLE_MS); });
   setTwitchChannel(channel, true);
-  _onChannelJoined?.(channel);
+  try { _onChannelJoined?.(channel); } catch (err) { log.error('Channel joined hook error:', err); }
   log.info(`Joined queued channel after reconnect: ${channel}`);
 }
 
@@ -252,7 +252,6 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
     try {
       await client.join(normalized);
       setTwitchChannel(normalized, true);
-      _onChannelJoined?.(normalized);
       getUsers([normalized])
         .then(([u]) => { if (u) activeChannelUserIds.set(normalized, u.id); })
         .catch((err) => { log.warn(`Failed to cache user ID for channel ${normalized}:`, err); });
@@ -263,6 +262,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       log.error(`Failed to join channel ${normalized}:`, err);
       throw err;
     }
+    try { _onChannelJoined?.(normalized); } catch (err) { log.error('Channel joined hook error:', err); }
   });
 }
 
