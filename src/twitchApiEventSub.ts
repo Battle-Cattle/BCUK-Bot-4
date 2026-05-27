@@ -111,6 +111,10 @@ export async function createEventSubSubscription(
     }),
   });
   if (res.status === 409) return null;
+  if (res.status === 401 || res.status === 403) {
+    const errBody = await res.text().catch(() => '');
+    throw new TwitchAuthError(`[TwitchAPI] createEventSubSubscription (${type}) failed: ${res.status} ${errBody}`);
+  }
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
     throw new Error(`[TwitchAPI] createEventSubSubscription (${type}) failed: ${res.status} ${errBody}`);

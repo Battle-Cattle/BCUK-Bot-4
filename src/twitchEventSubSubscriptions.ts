@@ -3,7 +3,7 @@ import { getAllEventSubStreamers, clearStreamerToken, DbStreamerEventSub, EventS
 import { getUsers } from './twitchApi';
 import { getActiveChannels } from './twitchBot';
 import { normalizeTwitchChannelName } from './twitchChannelName';
-import { createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, getValidToken } from './twitchApiEventSub';
+import { createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, getValidToken, TwitchAuthError } from './twitchApiEventSub';
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
   FollowEvent, SubEvent, ResubEvent, GiftSubEvent, RaidEvent, RedemptionEvent,
@@ -138,7 +138,11 @@ async function subscribe(sessionId: string, spec: SubSpec, token: string, login:
     const id = await createEventSubSubscription(spec.type, spec.version, spec.condition, sessionId, token);
     if (id !== null) log.info(`Subscribed to ${spec.type} for ${login}`);
   } catch (err) {
-    log.error(`Failed to subscribe to ${spec.type} for ${login}:`, err);
+    if (err instanceof TwitchAuthError) {
+      log.warn(`Skipping ${spec.type} for ${login} — authorization missing, user may need to reconnect Twitch`);
+    } else {
+      log.error(`Failed to subscribe to ${spec.type} for ${login}:`, err);
+    }
   }
 }
 
