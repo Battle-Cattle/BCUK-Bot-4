@@ -1,14 +1,23 @@
 # BCUK Bot 4 — Claude Code Instructions
 
-## ALWAYS: Codebase Questions → Use Graphify First
+## ALWAYS: Use Graphify — Never Grep or Read to Explore
+
+**Before reading any file or running any search to answer a question about code structure, symbols, or relationships — run graphify query first. This is mandatory.**
 
 ```bash
-graphify query "<question>"
-graphify path "<A>" "<B>"
-graphify explain "<concept>"
+graphify query "where is X defined"           # replaces: grep -r "X" src/
+graphify query "what calls function Y"        # replaces: grep -rn "Y" src/
+graphify query "what does module Z import"    # replaces: reading Z.ts to check imports
+graphify path "src/index.ts" "src/db.ts"     # trace a dependency relationship
+graphify explain "<concept or subsystem>"     # understand how something works
 ```
 
-Use `graphify-out/GRAPH_REPORT.md` for broad architecture review. After changing code run `graphify update .`.
+Rules — no exceptions:
+- **Never run grep / find / rg to locate code** — use `graphify query` instead
+- **Never read a file just to discover what's in it** — query the graph first; read only to confirm or edit a known location
+- **Never read more than one file to answer a structural question** — if you need to read multiple files to understand something, use graphify instead
+- Use `graphify-out/GRAPH_REPORT.md` only for a full architecture overview (read once per session at most, never per question)
+- After changing code: `graphify update .`
 
 ---
 
