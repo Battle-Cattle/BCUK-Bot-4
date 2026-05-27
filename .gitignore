@@ -16,6 +16,8 @@ public/downloads/*
 !.claude/skills
 graphify-out/graph.html
 graphify-out/manifest.json
+graphify-out/cost.json
+graphify-out/memory/
 graphify-out/cache/
 graphify-out/.graphify_*.json
 graphify-out/.graphify_python
