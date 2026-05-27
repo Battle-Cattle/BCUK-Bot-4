@@ -10,6 +10,8 @@ sfx/*
 public/downloads/*
 !public/downloads/.gitkeep
 .vscode/settings.json
-.claude/
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 logs/*
 !logs/.gitkeep
