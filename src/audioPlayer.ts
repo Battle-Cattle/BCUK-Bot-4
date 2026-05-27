@@ -48,7 +48,6 @@ function buildAdapter(channel: VoiceBasedChannel): DiscordGatewayAdapterCreator 
   return (methods: DiscordGatewayAdapterLibraryMethods) => {
     if (activeAdapterCleanup) {
       activeAdapterCleanup();
-      activeAdapterCleanup = null;
     }
 
     function onRaw(packet: { t: string; d: Record<string, unknown> }) {
@@ -60,15 +59,19 @@ function buildAdapter(channel: VoiceBasedChannel): DiscordGatewayAdapterCreator 
       }
     }
 
-    channel.client.setMaxListeners(channel.client.getMaxListeners() + 1);
+    const originalMax = channel.client.getMaxListeners();
+    // 0 means unlimited — don't touch it.
+    if (originalMax !== 0) channel.client.setMaxListeners(originalMax + 1);
     channel.client.on('raw', onRaw);
 
+    let cleanedUp = false;
+
     function cleanup(): void {
+      if (cleanedUp) return;
+      cleanedUp = true;
       channel.client.off('raw', onRaw);
-      channel.client.setMaxListeners(Math.max(channel.client.getMaxListeners() - 1, 0));
-      if (activeAdapterCleanup === cleanup) {
-        activeAdapterCleanup = null;
-      }
+      if (originalMax !== 0) channel.client.setMaxListeners(originalMax);
+      activeAdapterCleanup = null;
     }
 
     activeAdapterCleanup = cleanup;
