@@ -21,10 +21,19 @@
       "Bash(git log*)",
       "Bash(git show*)",
       "Bash(find . *)",
-      "Bash(grep -rn *)",
-      "Bash(grep -r *)",
-      "Bash(grep -n *)",
-      "Bash(grep -l *)"
+      "Bash(grep -rn * src*)",
+      "Bash(grep -r * src*)",
+      "Bash(grep -n * src*)",
+      "Bash(grep -l * src*)",
+      "Bash(grep -rn * views*)",
+      "Bash(grep -r * views*)",
+      "Bash(grep -n * views*)",
+      "Bash(grep -rn * public*)",
+      "Bash(grep -r * public*)",
+      "Bash(grep -n * public*)",
+      "Bash(grep -rn * migrations*)",
+      "Bash(grep -r * migrations*)",
+      "Bash(grep -n * migrations*)"
     ]
   }
 }
