@@ -38,17 +38,19 @@ export async function removeUser(discordId: string): Promise<void> {
 
 // ─── Custom commands ────────────────────────────────────────────────────────
 
-import { invalidateCustomCommandLookupCache } from './db/customCommands';
+import { invalidateCustomCommandLookupCache } from './db/customCommandCache';
 export {
   getAllCustomCommandsWithAssignments,
-  invalidateCustomCommandLookupCache,
-  getCustomCommandForTwitchChannel, getCustomCommandForDiscord,
   addCustomCommand, updateCustomCommand, removeCustomCommand,
   assignUserToCommand, unassignUserFromCommand,
 } from './db/customCommands';
 export type {
   DbCustomCommand, DbCustomCommandAssignedUser, DbCustomCommandWithAssignments,
 } from './db/customCommands';
+export {
+  invalidateCustomCommandLookupCache,
+  getCustomCommandForTwitchChannel, getCustomCommandForDiscord,
+} from './db/customCommandCache';
 export {
   CommandNotFoundError, CommandConflictError, isMysqlDuplicateEntryError,
   isCustomCommandTriggerTaken,
@@ -59,12 +61,12 @@ export type { SqlExecutor } from './db/commandLocks';
 // ─── Counter commands ───────────────────────────────────────────────────────
 
 export {
-  CounterNotFoundError, invalidateCounterLookupCache,
-  getAllCounters, findCounterByCommand, isCounterCommandTaken,
-  addCounter, updateCounter, removeCounter, resetCounterCurrentValue,
-  incrementCounter, archiveAndResetYearlyCounters,
+  CounterNotFoundError,
+  getAllCounters, addCounter, updateCounter, removeCounter,
+  resetCounterCurrentValue, incrementCounter, archiveAndResetYearlyCounters,
 } from './db/counters';
 export type { DbCounter, CounterMatchType, DbMatchedCounter, UpdateCounterInput } from './db/counters';
+export { invalidateCounterLookupCache, findCounterByCommand, isCounterCommandTaken } from './db/counterCache';
 
 // ─── Stream monitor ──────────────────────────────────────────────────────────
 

@@ -1,13 +1,10 @@
-import { createLogger } from '../logger';
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
-
-const log = createLogger('DB');
-import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
-import { requireTrimmedString, normalizeCommandList, type SqlExecutor } from './commandStringUtils';
-import { isAnyCommandTakenAcrossTables, runSerializedCommandWrite } from './commandLocks';
+import { requireTrimmedString, type SqlExecutor } from './commandStringUtils';
+import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
 import { fromBit } from './utils';
+import { invalidateCounterLookupCache } from './counterCache';
 
 // ─── Archive column allowlist ─────────────────────────────────────────────────
 // MySQL does not support parameterised column names. Rather than building the
@@ -89,63 +86,6 @@ function normalizeCounterFields(
   };
 }
 
-// ─── Lookup cache ─────────────────────────────────────────────────────────────
-
-interface CounterLookupCache extends RefreshingLookupCache {
-  byCommand: Map<string, DbMatchedCounter>;
-}
-
-function createEmptyCounterLookupCache(): CounterLookupCache {
-  return {
-    // Keep the fallback cache immediately stale so a new refresh can start as soon
-    // as the backoff window expires rather than waiting for the normal TTL.
-    loadedAt: 0,
-    byCommand: new Map<string, DbMatchedCounter>(),
-  };
-}
-
-function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
-  const byCommand = new Map<string, DbMatchedCounter>();
-  const sortedCounters = [...counters].sort((left, right) => left.id - right.id);
-
-  const registerCounterCommand = (
-    normalizedCommand: string,
-    counter: DbCounter,
-    matchType: CounterMatchType,
-    commandFieldLabel: 'trigger_command' | 'check_command',
-  ): void => {
-    if (!normalizedCommand) return;
-
-    const existingCounter = byCommand.get(normalizedCommand);
-    if (existingCounter) {
-      log.warn(`Counter ${commandFieldLabel} collision: '${normalizedCommand}' is already registered (counter id=${existingCounter.id}); ignoring duplicate from counter id=${counter.id}.`);
-      return;
-    }
-
-    byCommand.set(normalizedCommand, { ...counter, matchType });
-  };
-
-  for (const counter of sortedCounters) {
-    registerCounterCommand(counter.trigger_command.trim().toLowerCase(), counter, 'trigger', 'trigger_command');
-    registerCounterCommand(counter.check_command.trim().toLowerCase(), counter, 'check', 'check_command');
-  }
-
-  return { loadedAt: Date.now(), byCommand };
-}
-
-const counterLookupCacheState = createManagedLookupCache<CounterLookupCache>({
-  cacheName: 'counter cache',
-  ttlMs: 300_000,
-  refreshFailureBackoffMs: 5_000,
-  refreshFailureMaxBackoffMs: 60_000,
-  createEmptyCache: createEmptyCounterLookupCache,
-  loadCache: async () => buildCounterLookupCache(await getAllCounters()),
-});
-
-export function invalidateCounterLookupCache(): void {
-  counterLookupCacheState.invalidate();
-}
-
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
 export async function getAllCounters(): Promise<DbCounter[]> {
@@ -155,26 +95,6 @@ export async function getAllCounters(): Promise<DbCounter[]> {
      ORDER BY trigger_command`,
   );
   return rows.map(mapCounter);
-}
-
-export async function findCounterByCommand(command: string): Promise<DbMatchedCounter | null> {
-  const normalizedCommand = command.trim().toLowerCase();
-  if (!normalizedCommand) return null;
-
-  const cache = await counterLookupCacheState.getCache();
-  const counter = cache.byCommand.get(normalizedCommand);
-  return counter ? { ...counter } : null;
-}
-
-export async function isCounterCommandTaken(commandOrCommands: string | string[], excludeCounterId?: number): Promise<boolean> {
-  if (Array.isArray(commandOrCommands)) {
-    const normalizedCommands = normalizeCommandList(commandOrCommands);
-    if (new Set(normalizedCommands).size !== normalizedCommands.length) {
-      return true;
-    }
-  }
-
-  return isAnyCommandTakenAcrossTables(commandOrCommands, { excludeCounterId });
 }
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
