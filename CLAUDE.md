@@ -201,7 +201,7 @@ Copy `.env.example` → `.env` and fill in all values.
 | `TWITCH_OAUTH_TOKEN`    | ✅ | Format: `oauth:xxxx` |
 | `TIKTOK_CHANNELS`       | ❌ | Comma-separated usernames (@ optional) |
 | `TIKTOK_SIGN_API_KEY`   | ❌ | From eulerstream.com, improves reliability |
-| `DB_HOST`               | ✅ | Default: localhost |
+| `DB_HOST`               | ❌ | Default: localhost |
 | `DB_PORT`               | ❌ | Default: 3306 |
 | `DB_USER`               | ✅ | |
 | `DB_PASSWORD`           | ✅ | |
@@ -282,8 +282,8 @@ Each `user.twitch_name` must belong to at most one user row. The database enforc
 ### Login-time Discord name sync
 During OAuth login, `auth.ts` treats Discord display-name sync as non-blocking: it prefers the current guild display name from `fetchMemberDisplayName(..., true)`, falls back to the stored `discord_name` (or OAuth username if none exists), and only updates the DB when the final value changed.
 
-### dotenv override
-`config.ts` uses `dotenv.config({ override: true })` to ensure `.env` values always take precedence over any system/user environment variables with the same name.
+### dotenv
+`config.ts` calls `dotenv.config()` (no `override` flag). System environment variables set before the process starts take precedence over `.env` values — this is the default dotenv behaviour.
 
 ### Session augmentation
 `src/types/express.d.ts` augments `express-session`'s `SessionData` interface (not the `Express` namespace) to add `user?: SessionUser` and `oauthState?: string`. `tsconfig.json` has `"ts-node": { "files": true }` so ts-node loads this ambient declaration.

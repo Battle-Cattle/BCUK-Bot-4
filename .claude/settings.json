@@ -21,7 +21,10 @@
       "Bash(git log*)",
       "Bash(git show*)",
       "Bash(find . *)",
-      "Bash(grep *)"
+      "Bash(grep -rn *)",
+      "Bash(grep -r *)",
+      "Bash(grep -n *)",
+      "Bash(grep -l *)"
     ]
   }
 }
