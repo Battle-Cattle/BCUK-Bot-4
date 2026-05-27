@@ -1,4 +1,4 @@
-# BCUK Bot 4 — Copilot Instructions
+# BCUK Bot 4 — Claude Code Instructions
 
 ## Project Overview
 
@@ -13,37 +13,93 @@ A multi-platform community bot for Twitch, Discord, and TikTok with a web contro
 ```text
 BCUK_Bot_4/
 ├── src/
-│   ├── index.ts              — Entry point: starts all services
-│   ├── config.ts             — Reads & validates all env vars
-│   ├── db.ts                 — MySQL pool + all query functions
-│   ├── commandRouter.ts      — Shared message → SFX handler
-│   ├── soundSelector.ts      — Weighted-random file picker
-│   ├── audioPlayer.ts        — @discordjs/voice connection + playback
-│   ├── statusStore.ts        — In-memory bot state (for web panel)
-│   ├── discordBot.ts         — discord.js client + message listener
-│   ├── discordUtils.ts       — Shared Discord error helpers (isDiscordNotFoundError, tryDeleteDiscordMessage)
-│   ├── twitchBot.ts          — tmi.js client + message listener
-│   ├── tiktokBot.ts          — tiktok-live-connector + auto-reconnect
-│   ├── twitchApi.ts          — Twitch Helix API wrapper (app token, getUsers, getStreams)
-│   ├── twitchMonitor.ts      — Polling-based stream monitor + Discord announcements
-│   ├── monitorSettings.ts    — Read/write monitor-settings.json (toggle only)
-│   ├── twitchChannelName.ts   — Twitch channel-name normalization helper
-│   ├── counterHandler.ts     — Counter command execution (increment/check, shadow mode)
-│   ├── counterScheduler.ts   — Yearly Jan 1 archive-and-reset scheduler
+│   ├── index.ts                      — Entry point: starts all services
+│   ├── config.ts                     — Reads & validates all env vars
+│   ├── db.ts                         — Public DB facade: re-exports from src/db/* with cache-invalidating wrappers
+│   ├── db/
+│   │   ├── pool.ts                   — MySQL connection pool
+│   │   ├── users.ts                  — User queries (find, upsert, access level, Twitch enablement)
+│   │   ├── sfx.ts                    — SFX trigger and file queries
+│   │   ├── customCommands.ts         — Custom command CRUD + assignment queries
+│   │   ├── counters.ts               — Counter CRUD and increment queries
+│   │   ├── streamMonitor.ts          — Stream group and streamer queries
+│   │   ├── streamdeckKeys.ts         — Streamdeck key binding queries
+│   │   ├── eventSub.ts               — Twitch EventSub subscription persistence
+│   │   ├── overlayVideos.ts          — Overlay video asset queries
+│   │   ├── lookupCache.ts            — Generic refresh-able in-memory lookup cache
+│   │   ├── lookupCache.test.ts
+│   │   ├── commandConflicts.ts       — Detect conflicting command trigger strings
+│   │   ├── commandLocks.ts           — DB-level command mutation locks
+│   │   ├── commandStringUtils.ts     — Shared command string normalization
+│   │   ├── reservedCommands.ts       — Built-in reserved command registry
+│   │   └── utils.ts                  — Shared DB helpers (bigint/buffer handling etc.)
+│   ├── commandRouter.ts              — Shared message → SFX/command handler
+│   ├── commandRouter.test.ts
+│   ├── commandUtils.ts               — Shared command matching utilities
+│   ├── soundSelector.ts              — Weighted-random file picker
+│   ├── sfxPlayer.ts                  — Creates audio resources from SFX files
+│   ├── sfxPlayer.test.ts
+│   ├── audioPlayer.ts                — @discordjs/voice connection + playback
+│   ├── voiceAdapter.ts               — Custom Discord gateway adapter for @discordjs/voice
+│   ├── audioConnectionHandlers.ts    — Voice state event management
+│   ├── statusStore.ts                — In-memory bot state (for web panel)
+│   ├── discordBot.ts                 — discord.js client + message listener
+│   ├── discordUtils.ts               — Shared Discord error helpers (isDiscordNotFoundError, tryDeleteDiscordMessage)
+│   ├── twitchBot.ts                  — tmi.js client + message listener
+│   ├── tiktokBot.ts                  — tiktok-live-connector + auto-reconnect
+│   ├── twitchApi.ts                  — Twitch Helix API wrapper (app token, getUsers, getStreams)
+│   ├── twitchApiEventSub.ts          — Twitch EventSub REST API wrapper
+│   ├── twitchEventSub.ts             — EventSub WebSocket client
+│   ├── twitchEventSubHandler.ts      — EventSub event dispatching
+│   ├── twitchEventSubSubscriptions.ts— EventSub subscription management
+│   ├── twitchMonitor.ts              — Polling-based stream monitor (coordinator)
+│   ├── twitchMonitorAnnouncements.ts — Discord embed posting/editing/deleting
+│   ├── twitchMonitorEmbed.ts         — Embed builder
+│   ├── twitchMonitorMultitwitch.ts   — MultiTwitch link generation and embed injection
+│   ├── twitchMonitorOffline.ts       — Offline grace-period timer logic
+│   ├── twitchMonitorStartup.ts       — Startup live-check and reconciliation
+│   ├── twitchMonitorTypes.ts         — Shared types for the monitor subsystem
+│   ├── twitchChannelName.ts          — Twitch channel-name normalization helper
+│   ├── customCommandHandler.ts       — Custom command runtime (match, record, reply)
+│   ├── multiCommandHandler.ts        — Multi-channel command broadcast handler
+│   ├── counterHandler.ts             — Counter command execution (increment/check, shadow mode)
+│   ├── counterScheduler.ts           — Yearly Jan 1 archive-and-reset scheduler
+│   ├── shoutoutHandler.ts            — Shoutout command handler
+│   ├── countdownHandler.ts           — Countdown display handler
+│   ├── commandMonitorStore.ts        — In-memory command audit log
+│   ├── mutationQueue.ts              — Serialised async mutation queue
+│   ├── mutationQueue.test.ts
+│   ├── crypto.ts                     — Cryptographic helpers
+│   ├── logger.ts                     — Winston logging setup
+│   ├── monitorSettings.ts            — Read/write monitor-settings.json (toggle only)
 │   ├── types/
-│   │   └── express.d.ts      — Augments express-session SessionData
+│   │   └── express.d.ts              — Augments express-session SessionData
 │   └── web/
-│       ├── server.ts         — Express app + startWebPanel()
-│       ├── csrf.ts           — CSRF token middleware for web forms
-│       ├── middleware.ts     — requireAuth / requireMod / requireManager / requireAdmin
+│       ├── server.ts                 — Express app + startWebPanel()
+│       ├── csrf.ts                   — CSRF token middleware for web forms
+│       ├── middleware.ts             — requireAuth / requireMod / requireManager / requireAdmin
 │       └── routes/
-│           ├── auth.ts       — Discord OAuth2 (manual, no passport)
-│           ├── dashboard.ts  — GET / → renders dashboard
-│           ├── admin.ts      — User CRUD (GET+POST /admin/users/*)
-│           ├── api.ts        — GET /api/status, POST /api/voice/join|leave
-│           ├── streams.ts    — Stream group/streamer CRUD + toggle
-│           ├── commands.ts   — Custom command CRUD + assignment management (web panel)
-│           └── counters.ts   — Counter CRUD + manual reset management (web panel)
+│           ├── shared.ts             — Shared route utilities
+│           ├── auth.ts               — Discord OAuth2 (manual, no passport)
+│           ├── dashboard.ts          — GET / → renders dashboard
+│           ├── admin.ts              — User list page (GET /admin/users)
+│           ├── adminRefresh.ts       — Bulk Discord-name background refresh
+│           ├── adminUserMutations.ts — User CRUD mutations (add/update/remove/toggle)
+│           ├── adminUserMutations.test.ts
+│           ├── api.ts                — GET /api/status, POST /api/voice/join|leave
+│           ├── streams.ts            — Stream group/streamer CRUD + toggle
+│           ├── commands.ts           — Custom command CRUD + assignment management
+│           ├── counters.ts           — Counter CRUD + manual reset management
+│           ├── sfx.ts                — SFX trigger/file management (Manager+)
+│           ├── sfxPublic.ts          — Public SFX listing endpoint
+│           ├── commandMonitor.ts     — Command audit log viewer
+│           ├── overlayAdmin.ts       — OBS overlay admin management
+│           ├── overlaySource.ts      — OBS overlay source endpoint
+│           ├── streamdeck.ts         — Streamdeck integration page
+│           ├── streamdeckKeys.ts     — Streamdeck key binding CRUD
+│           ├── userSettings.ts       — User preference management
+│           ├── eventsubAdmin.ts      — EventSub subscription admin page
+│           └── eventsubCallback.ts   — EventSub webhook callback handler
 ├── views/
 │   ├── partials/nav.ejs
 │   ├── partials/pwa-head.ejs
@@ -51,28 +107,29 @@ BCUK_Bot_4/
 │   ├── login.ejs
 │   ├── dashboard.ejs
 │   ├── admin.ejs
-│   ├── commands.ejs          — Custom command management page
-│   ├── counters.ejs          — Counter management page
-│   ├── streams.ejs           — Stream monitor management page
+│   ├── commands.ejs
+│   ├── counters.ejs
+│   ├── streams.ejs
 │   └── error.ejs
 ├── public/
-│   ├── style.css             — Shared dashboard styles
-│   ├── app.js                — Dashboard status polling + voice controls
-│   ├── navbar.js             — Mobile nav toggle behavior
-│   ├── admin.js              — Admin users page interactions
-│   ├── streams.js            — Stream monitor admin page interactions
-│   ├── commands.js           — Commands page interactions
-│   ├── counters.js           — Counters page interactions
-│   ├── pwa-register.js       — Service worker registration + update prompt
-│   ├── service-worker.js     — Offline cache + runtime caching strategy
-│   ├── manifest.json         — PWA metadata
-│   ├── offline.html          — Offline fallback page
-│   └── icons/                — PWA/app icons (PNG + SVG)
-├── sfx/                      — Sound files go here (not in git)
-├── monitor-settings.json     — Local settings (gitignored): toggle state only
+│   ├── style.css
+│   ├── app.js
+│   ├── navbar.js
+│   ├── admin.js
+│   ├── streams.js
+│   ├── commands.js
+│   ├── counters.js
+│   ├── pwa-register.js
+│   ├── service-worker.js
+│   ├── manifest.json
+│   ├── offline.html
+│   └── icons/
+├── sfx/                              — Sound files go here (not in git)
+├── migrations/                       — Database migration scripts
+├── DATABASE-SCHEMA.md                — Full database schema reference
+├── monitor-settings.json             — Local settings (gitignored): toggle state only
 ├── .env.example
 ├── .gitignore
-├── commit-msg.txt
 ├── package.json
 └── tsconfig.json
 ```
@@ -81,108 +138,20 @@ BCUK_Bot_4/
 
 ## Database Schema
 
-Tables in the existing MySQL 8 database:
+See **`DATABASE-SCHEMA.md`** for the full schema. Brief table summary:
 
-### `sfxtrigger`
-
-| Column           | Type         | Notes                                      |
-|------------------|--------------|--------------------------------------------|
-| `id`             | bigint PK    |                                            |
-| `trigger_command`| varchar      | Full command **including prefix** e.g. `!clap` |
-| `category_id`    | int FK→sfxcategory | nullable                            |
-| `hidden`         | tinyint(1)   | Excludes from public listing only — command still plays |
-| `description`    | varchar      | nullable                                   |
-
-### `sfx`
-
-| Column           | Type         | Notes                                      |
-|------------------|--------------|--------------------------------------------|
-| `id`             | int PK       |                                            |
-| `trigger_id`     | bigint FK→sfxtrigger |                                    |
-| `file`           | varchar      | Filename relative to `SFX_FOLDER`          |
-| `trigger_command`| varchar      | nullable (legacy, not used for routing)    |
-| `weight`         | int          | Higher = more likely to be picked          |
-| `hidden`         | tinyint(1)   | Excludes from public listing only — file still plays |
-| `category_id`    | int FK→sfxcategory | nullable                            |
-
-### `sfxcategory`
-
-| Column | Type    |
-|--------|---------|
-| `id`   | int PK  |
-| `name` | varchar |
-
-### `user`
-
-| Column                 | Type         | Notes                      |
-|------------------------|--------------|----------------------------|
-| `discord_id`           | bigint PK    | Discord numeric user ID    |
-| `discord_name`         | varchar      | nullable                   |
-| `is_twitch_bot_enabled`| bit(1)       |                            |
-| `twitch_name`          | varchar      | nullable, UNIQUE, case-insensitive (`utf8mb4_0900_ai_ci`) |
-| `twitchoauth`          | varchar      | nullable                   |
-| `access_level`         | int          | 0=USER 1=MOD 2=MANAGER 3=ADMIN |
-
-### `stream_group`
-
-| Column               | Type       | Notes                                      |
-|----------------------|------------|--------------------------------------------|
-| `id`                 | int PK     |                                            |
-| `name`               | varchar    | Display name                               |
-| `discord_channel`    | bigint     | Channel ID to post announcements in        |
-| `live_message`       | text       | Template for go-live message               |
-| `new_game_message`   | text       | Template for game-change message           |
-| `multi_twitch`       | bit(1)     | Enable multitwitch links                   |
-| `delete_old_posts`   | bit(1)     | Delete old embed on game change instead of edit |
-
-### `streamer`
-
-| Column                | Type        | Notes                                      |
-|-----------------------|-------------|--------------------------------------------|
-| `id`                  | int PK      |                                            |
-| `name`                | varchar     | Twitch username (lowercase)                |
-| `group_id`            | int FK→stream_group.id |                               |
-| `discord_message_id`  | varchar(20) | nullable — ID of live announcement message |
-| `discord_channel_id`  | bigint      | nullable — channel the announcement was posted in |
-| `live_game`           | varchar(255)| nullable — game at time of last announcement |
-
-### `custom_command`
-
-| Column              | Type         | Notes                                      |
-|---------------------|--------------|--------------------------------------------|
-| `command_id`        | int PK       |                                            |
-| `trigger_string`    | varchar      | Full command token including prefix        |
-| `output`            | text         | Reply text                                 |
-| `is_discord_enabled`| tinyint(1)   | Enables Discord-side execution             |
-| `is_multi_twitch`   | tinyint(1)   | Enables multi-channel Twitch broadcast mode |
-
-### `twitch_user_commands`
-
-| Column       | Type       | Notes                          |
-|--------------|------------|--------------------------------|
-| `command_id` | int FK→custom_command.command_id | |
-| `discord_id` | bigint FK→user.discord_id        | |
-
-### `counter`
-
-| Column              | Type         | Notes                                      |
-|---------------------|--------------|--------------------------------------------|
-| `id`                | int PK       |                                            |
-| `trigger_command`   | varchar      | Command that increments the counter        |
-| `check_command`     | varchar      | Command that reads current value           |
-| `message`           | text         | Check reply format (`%d` placeholder)      |
-| `increment_message` | text         | Increment reply format (`%d` placeholder)  |
-| `reset_yearly`      | tinyint(1)   | Whether current_value resets on yearly archive |
-| `current_value`     | int          | Live counter value                         |
-| `value2020`-`value2025` | int nullable | Yearly archived values (expanded over time) |
-
-> **DB migration** (run once before first use of stream monitoring):
-> ```sql
-> ALTER TABLE streamer
->   ADD COLUMN discord_message_id VARCHAR(20) DEFAULT NULL,
->   ADD COLUMN discord_channel_id BIGINT DEFAULT NULL,
->   ADD COLUMN live_game VARCHAR(255) DEFAULT NULL;
-> ```
+| Table | Purpose |
+|-------|---------|
+| `sfxtrigger` | SFX trigger commands (includes prefix, e.g. `!clap`) |
+| `sfx` | Individual sound files per trigger with weights |
+| `sfxcategory` | Category labels for SFX |
+| `user` | Bot users (Discord ID + Twitch name + access level) |
+| `stream_group` | Discord announcement channel configuration |
+| `streamer` | Twitch usernames monitored per group |
+| `custom_command` | Custom command text replies |
+| `twitch_user_commands` | User→command assignment (multi-Twitch broadcast) |
+| `counter` | Increment/check counters with yearly archiving |
+| `sessions` | Express sessions (auto-created by express-mysql-session) |
 
 ---
 
@@ -299,14 +268,14 @@ The web panel is PWA-enabled. `public/service-worker.js` pre-caches core static 
 `tiktokBot.ts` uses a per-connection `reconnectScheduled` boolean to prevent duplicate `setTimeout` calls when both `STREAM_END` and `DISCONNECTED` fire for the same connection.
 
 ### MySQL tinyint(1) / bit columns returned as Buffer
-Some MySQL configurations/drivers can return `tinyint(1)` or `bit` columns as a single-byte `Buffer` rather than `0`/`1`. All boolean reads in `db.ts` use the pattern:
+Some MySQL configurations/drivers can return `tinyint(1)` or `bit` columns as a single-byte `Buffer` rather than `0`/`1`. All boolean reads use the pattern in `src/db/utils.ts`:
 ```ts
 Buffer.isBuffer(row.hidden) ? row.hidden[0] === 1 : row.hidden == 1
 ```
 Apply this same pattern whenever reading any boolean/tinyint column.
 
 ### MySQL BIGINT IDs must stay as strings
-Discord IDs and other snowflake-style values in MySQL can exceed JavaScript's safe integer range. `db.ts` configures mysql2 with `supportBigNumbers: true` and `bigNumberStrings: true` so BIGINT values are returned as exact strings instead of rounded numbers. Preserve that behavior for any future pool or connection changes.
+Discord IDs and other snowflake-style values in MySQL can exceed JavaScript's safe integer range. `src/db/pool.ts` configures mysql2 with `supportBigNumbers: true` and `bigNumberStrings: true` so BIGINT values are returned as exact strings instead of rounded numbers. Preserve that behavior for any future pool or connection changes.
 
 ### Blank Twitch names should be stored as NULL
 Because `user.twitch_name` is protected by a unique index, blank values must not be stored as empty strings. `upsertUser()` normalizes blank Twitch names to `NULL`, which allows multiple users with no Twitch channel while still enforcing uniqueness for real channel names.
@@ -350,6 +319,9 @@ Local file (`monitor-settings.json` at `process.cwd()`) persists one value: `twi
 
 **Counter yearly scheduler** (`src/counterScheduler.ts`) runs once per year at midnight Jan 1. For all counters with `reset_yearly=true` it copies `current_value` to the `value{YYYY}` archive column (e.g. `value2024`) and resets `current_value` to 0. The `value{YYYY}` column must exist in the DB before the scheduler runs — add it manually each year (see DATABASE-SCHEMA.md).
 
+### Modular database layer (`src/db/`)
+Query functions live in focused modules under `src/db/` (users, sfx, customCommands, counters, streamMonitor, eventSub, etc.). `src/db.ts` is the **public facade** — it re-exports everything other modules need and wraps some functions with cache-invalidation side effects. Always import DB functions from `src/db.ts`, not directly from `src/db/*`.
+
 ---
 
 ## Scripts
@@ -377,42 +349,52 @@ npm start        # node dist/index.js (production)
 
 ## Web Panel Routes
 
-| Method | Path                    | Guard       | Description |
-|--------|-------------------------|-------------|-------------|
-| GET    | `/auth/login`           | —           | Login page  |
-| GET    | `/auth/discord`         | —           | Start OAuth2 flow |
-| GET    | `/auth/discord/callback`| —           | OAuth2 callback |
-| POST   | `/auth/logout`          | requireAuth + CSRF | Destroy session |
-| GET    | `/`                     | requireAuth | Dashboard |
-| GET    | `/api/status`           | requireAuth | JSON status snapshot |
-| POST   | `/api/voice/join`       | Mod+        | Join configured voice channel |
-| POST   | `/api/voice/leave`      | Mod+        | Leave voice channel |
-| GET    | `/admin/users`          | Manager+    | User list |
-| POST   | `/admin/users/refresh-names` | Manager+ | Start background Discord-name refresh |
-| GET    | `/admin/users/refresh-status` | Manager+ | JSON status for background Discord-name refresh |
-| POST   | `/admin/users/add`      | Admin       | Add/update user |
-| POST   | `/admin/users/toggle-twitch` | Manager+ | Enable/disable Twitch bot participation for one user |
-| POST   | `/admin/users/update`   | Admin       | Change access level |
-| POST   | `/admin/users/remove`   | Admin       | Remove user |
-| GET    | `/admin/streams`        | Manager+    | Stream monitor management page |
-| GET    | `/admin/streams/live`   | Manager+    | JSON snapshot of currently live streams |
-| POST   | `/admin/streams/toggle` | Manager+    | Enable/disable Discord announcements |
-| POST   | `/admin/streams/groups/add`    | Manager+ | Add stream group |
-| POST   | `/admin/streams/groups/update` | Manager+ | Update stream group |
-| POST   | `/admin/streams/groups/remove` | Manager+ | Remove stream group (and its streamers) |
-| POST   | `/admin/streams/streamers/add`    | Manager+ | Add streamer to group |
-| POST   | `/admin/streams/streamers/remove` | Manager+ | Remove streamer |
-| GET    | `/admin/commands`       | Manager+    | Custom command management page |
-| POST   | `/admin/commands/add`   | Manager+    | Add custom command |
-| POST   | `/admin/commands/update`| Manager+    | Update custom command |
-| POST   | `/admin/commands/remove`| Manager+    | Remove custom command |
-| POST   | `/admin/commands/assign`| Manager+    | Assign user to custom command |
-| POST   | `/admin/commands/unassign`| Manager+  | Remove user assignment from custom command |
-| GET    | `/admin/counters`       | Manager+    | Counter management page |
-| POST   | `/admin/counters/add`   | Manager+    | Add counter definition |
-| POST   | `/admin/counters/update`| Manager+    | Update counter definition |
-| POST   | `/admin/counters/remove`| Manager+    | Remove counter definition |
-| POST   | `/admin/counters/reset/:id`| Manager+ | Manually reset current_value to 0 |
+| Method | Path                                | Guard       | Description |
+|--------|-------------------------------------|-------------|-------------|
+| GET    | `/auth/login`                       | —           | Login page |
+| GET    | `/auth/discord`                     | —           | Start OAuth2 flow |
+| GET    | `/auth/discord/callback`            | —           | OAuth2 callback |
+| POST   | `/auth/logout`                      | requireAuth + CSRF | Destroy session |
+| GET    | `/`                                 | requireAuth | Dashboard |
+| GET    | `/api/status`                       | requireAuth | JSON status snapshot |
+| POST   | `/api/voice/join`                   | Mod+        | Join configured voice channel |
+| POST   | `/api/voice/leave`                  | Mod+        | Leave voice channel |
+| GET    | `/admin/users`                      | Manager+    | User list |
+| POST   | `/admin/users/refresh-names`        | Manager+    | Start background Discord-name refresh |
+| GET    | `/admin/users/refresh-status`       | Manager+    | JSON status for background Discord-name refresh |
+| POST   | `/admin/users/add`                  | Admin       | Add/update user |
+| POST   | `/admin/users/toggle-twitch`        | Manager+    | Enable/disable Twitch bot participation for one user |
+| POST   | `/admin/users/update`               | Admin       | Change access level |
+| POST   | `/admin/users/remove`               | Admin       | Remove user |
+| GET    | `/admin/streams`                    | Manager+    | Stream monitor management page |
+| GET    | `/admin/streams/live`               | Manager+    | JSON snapshot of currently live streams |
+| POST   | `/admin/streams/toggle`             | Manager+    | Enable/disable Discord announcements |
+| POST   | `/admin/streams/groups/add`         | Manager+    | Add stream group |
+| POST   | `/admin/streams/groups/update`      | Manager+    | Update stream group |
+| POST   | `/admin/streams/groups/remove`      | Manager+    | Remove stream group (and its streamers) |
+| POST   | `/admin/streams/streamers/add`      | Manager+    | Add streamer to group |
+| POST   | `/admin/streams/streamers/remove`   | Manager+    | Remove streamer |
+| GET    | `/admin/commands`                   | Manager+    | Custom command management page |
+| POST   | `/admin/commands/add`               | Manager+    | Add custom command |
+| POST   | `/admin/commands/update`            | Manager+    | Update custom command |
+| POST   | `/admin/commands/remove`            | Manager+    | Remove custom command |
+| POST   | `/admin/commands/assign`            | Manager+    | Assign user to custom command |
+| POST   | `/admin/commands/unassign`          | Manager+    | Remove user assignment from custom command |
+| GET    | `/admin/counters`                   | Manager+    | Counter management page |
+| POST   | `/admin/counters/add`               | Manager+    | Add counter definition |
+| POST   | `/admin/counters/update`            | Manager+    | Update counter definition |
+| POST   | `/admin/counters/remove`            | Manager+    | Remove counter definition |
+| POST   | `/admin/counters/reset/:id`         | Manager+    | Manually reset current_value to 0 |
+| GET    | `/admin/sfx`                        | Manager+    | SFX management page |
+| GET    | `/sfx`                              | —           | Public SFX listing |
+| GET    | `/admin/command-monitor`            | Manager+    | Command audit log viewer |
+| GET    | `/overlay`                          | —           | OBS overlay source |
+| GET    | `/admin/overlay`                    | Manager+    | Overlay admin page |
+| GET    | `/streamdeck`                       | requireAuth | Streamdeck integration page |
+| GET/POST | `/streamdeck/keys`               | requireAuth | Streamdeck key binding management |
+| GET/POST | `/settings`                      | requireAuth | User preferences |
+| GET    | `/admin/eventsub`                   | Admin       | EventSub subscription management |
+| POST   | `/eventsub/callback`                | —           | EventSub webhook callback (Twitch-signed) |
 
 ---
 
@@ -429,32 +411,21 @@ In-memory singleton. Functions:
 
 ---
 
-## `db.ts` Query Functions
+## Database Query Functions (`src/db/` + `src/db.ts`)
 
-- `findTrigger(command)` — looks up an `sfxtrigger` row by its full command string (case-insensitive); includes hidden triggers (hidden = listing-only flag, not a playback gate)
-- `findSoundFiles(triggerId)` — returns all `sfx` rows for a trigger including hidden ones; used by `commandRouter.ts`
-- `getAllSfxTriggers()` — **dashboard aggregate**: single JOIN query across `sfxtrigger`, `sfxcategory`, and `sfx`; returns `SfxTriggerRow[]` where each entry has a `files[]` array already grouped
-- `findUser(discordId)` / `findUserByTwitchName(twitchName, excludeDiscordId?)` / `getAllUsers()` — user lookups for auth and admin panel; duplicate Twitch-name assignments are pre-checked in the admin route and ultimately enforced by the DB unique index on `user.twitch_name`. `findUserByTwitchName()` uses `twitch_name = ?` against the case-insensitive column so the lookup stays index-friendly.
-- `upsertUser(discordId, discordName, accessLevel, twitchName?)` — INSERT … ON DUPLICATE KEY UPDATE using MySQL 8 alias syntax; validates `accessLevel`, preserves existing `twitch_name` when `twitchName` is `undefined`, and treats `null` or blank strings as an explicit update to `NULL` so the unique index allows multiple “no Twitch name” rows
-- `updateAccessLevel(discordId, accessLevel)` / `removeUser(discordId)` — admin mutations; `updateAccessLevel` validates `accessLevel` before executing SQL
-- `updateDiscordName(discordId, name)` — persists the resolved Discord display name after login sync or bulk refresh
-- `getTwitchEnabledChannels()` / `updateTwitchBotEnabled(discordId, enabled)` — DB-driven Twitch channel enablement used by startup and admin user management
-- `AccessLevel` const object (`USER=0 MOD=1 MANAGER=2 ADMIN=3`) and `AccessLevelValue` type are exported from `db.ts` — use these instead of raw numbers
-- `getAllStreamersWithGroups()` — JOIN query returning `DbStreamerFull[]` (each row includes full `DbStreamGroup` as `.group`); used by `twitchMonitor.ts`
-- `getAllStreamGroups()` — returns all `stream_group` rows as `DbStreamGroup[]`
-- `getAllStreamers()` — returns all streamers with `group_name` joined; used by web panel
-- `addStreamGroup()` / `updateStreamGroup()` / `removeStreamGroup()` — stream group CRUD
-- `addStreamer(name, groupId)` / `removeStreamer(id)` / `removeStreamersByGroup(groupId)` — streamer CRUD
-- `setStreamerLive(id, messageId, channelId, game)` — update `discord_message_id`, `discord_channel_id`, `live_game` on a streamer row
-- `clearStreamerLive(id)` — null out all three live columns on a streamer row
-- `DbStreamGroup` and `DbStreamerFull` interfaces exported from `db.ts`
-- `getAllCustomCommandsWithAssignments()` / `addCustomCommand()` / `updateCustomCommand()` / `removeCustomCommand()` — custom command management
-- `assignUserToCommand()` / `unassignUserFromCommand()` — custom command-to-user assignment management
-- `DbCustomCommand` / `DbCustomCommandAssignedUser` / `DbCustomCommandWithAssignments` interfaces exported from `db.ts`
-- `getAllCounters()` / `addCounter()` / `updateCounter()` / `removeCounter()` / `resetCounterCurrentValue()` — counter management for web panel
-- `DbCounter` interface exported from `db.ts`
+Query functions are split across focused modules in `src/db/`; import them via the public facade `src/db.ts`.
 
-> **Note:** State is lost on process restart. Sessions are stored in the `sessions` MySQL table via `express-mysql-session` (created automatically on first run).
+- **`src/db/sfx.ts`** — `findTrigger(command)`, `findSoundFiles(triggerId)`, `getAllSfxTriggers()`
+- **`src/db/users.ts`** — `findUser`, `findUserByTwitchName`, `getAllUsers`, `upsertUser` (cache-invalidating wrapper in `db.ts`), `updateAccessLevel`, `removeUser`, `updateDiscordName`, `getTwitchEnabledChannels`, `updateTwitchBotEnabled`; exports `AccessLevel` const (`USER=0 MOD=1 MANAGER=2 ADMIN=3`) and `AccessLevelValue` type — use these instead of raw numbers
+- **`src/db/streamMonitor.ts`** — `getAllStreamersWithGroups`, `getAllStreamGroups`, `getAllStreamers`, `addStreamGroup`, `updateStreamGroup`, `removeStreamGroup`, `addStreamer`, `removeStreamer`, `removeStreamersByGroup`, `setStreamerLive`, `clearStreamerLive`; exports `DbStreamGroup`, `DbStreamerFull`
+- **`src/db/customCommands.ts`** — `getAllCustomCommandsWithAssignments`, `addCustomCommand`, `updateCustomCommand`, `removeCustomCommand`, `assignUserToCommand`, `unassignUserFromCommand`; exports `DbCustomCommand`, `DbCustomCommandWithAssignments`
+- **`src/db/counters.ts`** — `getAllCounters`, `addCounter`, `updateCounter`, `removeCounter`, `resetCounterCurrentValue`; exports `DbCounter`
+- **`src/db/eventSub.ts`** — EventSub subscription persistence queries
+- **`src/db/lookupCache.ts`** — Generic `ManagedLookupCache` with TTL refresh
+- **`src/db/pool.ts`** — `getPool()`, `closePool()`; configures mysql2 with bigint-as-string
+- **`src/db/utils.ts`** — `boolFromDb(val)` and other shared DB value helpers
+
+> **Note:** In-memory state (statusStore, commandMonitorStore) is lost on process restart. Sessions are stored in the `sessions` MySQL table via `express-mysql-session` (created automatically on first run).
 
 ---
 
