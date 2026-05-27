@@ -35,7 +35,6 @@ npm test      # Vitest
 
 - **`mediaplex` must be the first import in `src/index.ts`** — registers the Opus provider. Never reorder.
 - **Import DB functions from `src/db.ts` only**, never `src/db/*` directly. The facade wraps some functions with cache-invalidation side effects (`upsertUser`, `removeUser`, `updateTwitchBotEnabled`).
-- **`boolFromDb()` from `src/db/utils.ts`** for all tinyint/bit columns — MySQL may return a `Buffer`.
 - **BIGINT columns are strings** (`bigNumberStrings: true` on the pool) — never coerce to `Number`.
 - **Blank Twitch names → `NULL`** — `user.twitch_name` has a unique index; empty strings collide.
 - **`mutationQueue`** for concurrent-unsafe DB writes — user mutations serialise through it.
@@ -52,13 +51,11 @@ npm test      # Vitest
 
 ## Design Decisions
 
-**Command matching:** `trigger_command` stores the full prefixed string (e.g. `!clap`). First word is lowercased and queried directly — **no prefix stripping**.
+**Command matching:** `trigger_string` stores the full prefixed string (e.g. `!clap`). First word is lowercased and queried directly — **no prefix stripping**.
 
 **Voice adapter:** `audioPlayer.ts` uses a custom `DiscordGatewayAdapterCreator` via `client.on('raw', ...)`. `guild.voiceAdapterCreator` is unused — discord.js v14 incompatibility.
 
-**Shadow mode:** `CUSTOM_COMMANDS_LIVE_REPLIES=true` enables live replies; `COUNTER_LIVE_WRITES=true` enables counter increments. Both default `false`.
-
-**`customCommands.ts` owns its cache:** Write functions call `invalidateLookupCache()` internally — don't add a second call in `db.ts`.
+**`customCommands.ts` owns its cache:** Write functions call `invalidateCustomCommandLookupCache()` internally — don't add a second call in `db.ts`.
 
 **MySQL 8 upsert:** Row-alias form only: `VALUES (...) AS new_row`. Deprecated `VALUES(col)` not used.
 
