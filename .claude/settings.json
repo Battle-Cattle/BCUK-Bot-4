@@ -10,5 +10,18 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm test*)",
+      "Bash(npm run build*)",
+      "Bash(npx tsc*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(find . *)",
+      "Bash(grep *)"
+    ]
   }
 }

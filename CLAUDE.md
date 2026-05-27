@@ -462,6 +462,49 @@ Query functions are split across focused modules in `src/db/`; import them via t
 
 ---
 
+## Common Pitfalls
+
+### Always import DB functions from `src/db.ts`, never from `src/db/*` directly
+`src/db.ts` is the public facade. Some functions (e.g. `upsertUser`, `updateTwitchBotEnabled`, `removeUser`) are **wrapped** in `db.ts` to add cache-invalidation side effects. Importing directly from `src/db/users.ts` bypasses those wrappers and leaves the lookup cache stale.
+
+### Use `mutationQueue` for concurrent-unsafe DB writes
+`src/mutationQueue.ts` serialises operations by key. Admin user mutations (`upsertUser`, `removeUser`, `updateAccessLevel`, `updateTwitchBotEnabled`) use it to prevent races when two web requests touch the same user record. Any new mutation flow that can race should use the same pattern.
+
+### `src/db/customCommands.ts` manages its own cache
+Unlike user mutations (which are wrapped in `db.ts`), the custom-command write functions (`addCustomCommand`, `updateCustomCommand`, etc.) call `invalidateLookupCache()` internally. Do not add a second invalidation call in `db.ts` wrappers — it would be a no-op but signals a misunderstanding of ownership.
+
+### Buffer/bigint on DB reads
+MySQL may return `tinyint(1)`/`bit` columns as a single-byte `Buffer`. Always use `boolFromDb()` from `src/db/utils.ts` (or the inline pattern) rather than a plain `=== 1` comparison. BIGINT columns are returned as strings — never coerce them to `Number`.
+
+### POST routes redirect, they don't render errors inline
+All mutation routes (add/update/remove) redirect back to the list page with an `?error=code` query param on failure. The GET handler reads that param and passes it to the EJS template. Do not try to render an error response directly from a POST handler.
+
+---
+
+## Patterns
+
+### Adding a new web route
+1. Create `src/web/routes/newroute.ts` — use `src/web/routes/commands.ts` as a reference
+2. Export an Express `Router`
+3. Mount it in `src/web/server.ts` with the appropriate path prefix
+4. Guard with `requireAuth` / `requireMod` / `requireManager` / `requireAdmin` from `src/web/middleware.ts`
+5. POST handlers: validate input, perform mutation, then `res.redirect('/path?error=code')` on failure or `res.redirect('/path')` on success
+6. GET handlers: load data, pass to `res.render('view', { data, error: req.query.error })`
+
+### Adding a new DB query function
+1. Find the right module in `src/db/` (or create a new focused file)
+2. Write the query function there — keep it as a pure DB call with no cache knowledge
+3. Re-export it from `src/db.ts`
+4. If the mutation affects cached data, wrap it in `db.ts` to add cache invalidation (see `upsertUser` for the pattern), or add invalidation inside the module if it owns the cache (see `customCommands.ts`)
+
+### Adding a new command handler
+1. Create `src/newCommandHandler.ts`
+2. Export a `registerXRuntime(runtime)` function that stores the platform client reference — this avoids circular imports between the bot entry point and the handler
+3. Call `registerXRuntime()` from `src/index.ts` after the bot client is ready
+4. Use `commandMonitorStore` to record matched commands for the audit log
+
+---
+
 ## Potential Future Work
 
 - Ability to create/edit/hide SFX triggers from the web panel
