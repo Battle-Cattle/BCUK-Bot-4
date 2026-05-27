@@ -29,7 +29,10 @@ npm run test:watch # re-run on file change (dev)
 Tests live alongside source as `*.test.ts` files (e.g. `src/commandRouter.test.ts`, `src/db/lookupCache.test.ts`).
 
 ### No linter / formatter
-There is **no ESLint or Prettier** configured. `.qlty/` is a CI-only security/smell scanner — do not attempt to run `eslint` or `prettier` locally.
+There is **no ESLint or Prettier** configured. Do not attempt to run `eslint` or `prettier` locally.
+
+### Code quality (qlty)
+`.qlty/qlty.toml` configures three plugins: **trufflehog** (secret detection), **ripgrep** (code smells), and **osv-scanner** (dependency vulnerabilities). A pre-commit hook (`.claude/hooks/pre-commit-quality-check.sh`) runs `qlty check` on staged files automatically before every `git commit`. If qlty finds issues the commit is **blocked** — fix the reported findings before retrying. The goal is to avoid introducing new smells. In cloud sessions, qlty is installed automatically by `.claude/hooks/session-start.sh` if not already available.
 
 ### TypeScript / import style
 - `tsconfig.json` — used by `ts-node` (dev); includes test files

@@ -7,3 +7,7 @@ fi
 
 cd "$CLAUDE_PROJECT_DIR"
 npm install
+
+if ! command -v qlty &>/dev/null; then
+  curl -fsSL https://qlty.sh/install.sh | bash
+fi
