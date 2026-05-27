@@ -5,6 +5,7 @@ import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, 
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { reloadEventSubSubscriptions } from '../../twitchEventSub';
+import { hasAuthFailedSubs } from '../../twitchEventSubSubscriptions';
 import { TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, EVENTSUB_TOKEN_SECRET } from '../../config';
 
 const log = createLogger('Web');
@@ -62,11 +63,14 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       ? { ...streamer, eventsub_access_token: null, eventsub_refresh_token: null }
       : null;
 
+    const needsReconnect = isConnected && !!(streamer?.twitch_name) && hasAuthFailedSubs(streamer.twitch_name);
+
     res.render('userSettings', {
       user: req.session.user,
       dbUser,
       streamer: safeStreamer,
       isConnected,
+      needsReconnect,
       csrfToken: req.csrfToken(),
       error: errorKey,
       success: req.query.success as string | undefined,

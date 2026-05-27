@@ -67,6 +67,13 @@
       </div>
       <% } else { %>
 
+      <% if (needsReconnect) { %>
+      <div class="card card-alert-danger" style="margin-bottom:0.75rem;">
+        Your Twitch connection is missing required permissions. Please reconnect your Twitch account to restore channel point redemption notifications.
+        <a href="/user/settings/twitch-connect" class="btn btn-sm" style="margin-left:1rem;">Reconnect Twitch</a>
+      </div>
+      <% } %>
+
       <div class="card card-spaced">
         <div class="card-body">
           <div class="form-row-wrap" style="align-items:center;">

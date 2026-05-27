@@ -86,5 +86,31 @@
 
   <%- include('partials/pwa-register') %>
   <script src="/app.js"></script>
+
+  <% if (needsReconnect) { %>
+  <div id="reconnect-modal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);padding:1.5rem;">
+    <div style="background:var(--bg-card);border:1px solid var(--danger);border-radius:var(--radius);max-width:480px;width:100%;padding:2rem;text-align:center;">
+      <div style="font-size:2.5rem;margin-bottom:0.75rem;">⚠️</div>
+      <h2 style="color:var(--danger);margin-bottom:0.75rem;font-size:1.25rem;">Twitch Reconnection Required</h2>
+      <p style="color:var(--text);margin-bottom:0.5rem;">Your Twitch connection is missing required permissions and some notifications are not working.</p>
+      <p style="color:var(--muted);font-size:0.875rem;margin-bottom:1.5rem;">Please reconnect your Twitch account to restore full functionality.</p>
+      <div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap;">
+        <a href="/user/settings/twitch-connect" class="btn">Reconnect Twitch</a>
+        <button onclick="dismissReconnectModal()" class="btn btn-ghost">Dismiss</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      if (sessionStorage.getItem('twitch_reconnect_dismissed')) {
+        document.getElementById('reconnect-modal').style.display = 'none';
+      }
+    })();
+    function dismissReconnectModal() {
+      sessionStorage.setItem('twitch_reconnect_dismissed', '1');
+      document.getElementById('reconnect-modal').style.display = 'none';
+    }
+  </script>
+  <% } %>
 </body>
 </html>
