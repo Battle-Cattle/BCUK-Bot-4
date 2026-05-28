@@ -1,5 +1,5 @@
 import { createLogger } from '../../logger';
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import {
   findUser,
   getAllUsers,
@@ -38,6 +38,31 @@ const KNOWN_ERRORS = new Set([
 // shared storage or a DB transaction/row lock before scaling out.
 const userMutationQueue = createMutationQueue();
 
+function discordIdError(id: string): string | null {
+  return DISCORD_ID_RE.test(id) ? null : 'invalid_discord_id';
+}
+
+function accessLevelError(levelStr: string): string | null {
+  if (!/^\d+$/.test(levelStr)) return 'invalid_access_level';
+  return (Object.values(AccessLevel) as number[]).includes(Number(levelStr)) ? null : 'invalid_access_level';
+}
+
+function parseTwitchEnabled(val: string | undefined): boolean | null {
+  if (val === 'true' || val === '1') return true;
+  if (val === 'false' || val === '0') return false;
+  return null;
+}
+
+function handleDbError(err: unknown, res: Response, failCode: string, context: string): void {
+  if (isLockWaitTimeoutDbError(err)) {
+    log.warn(`${context} DB lock timeout`, err);
+    res.redirect('/admin/users?error=db_busy');
+  } else {
+    log.error(`${context} error:`, err);
+    res.redirect(`/admin/users?error=${failCode}`);
+  }
+}
+
 // View user list (Manager+)
 router.get('/users', requireManager, csrfProtection, async (req, res) => {
   try {
@@ -67,21 +92,26 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
   };
   const trimmedDiscordId = trimField(discord_id);
   if (!trimmedDiscordId || !access_level) return res.redirect('/admin/users');
-  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.redirect('/admin/users?error=invalid_discord_id');
+
+  const idErr = discordIdError(trimmedDiscordId);
+  if (idErr) return res.redirect(`/admin/users?error=${idErr}`);
+
+  const levelErr = accessLevelError(access_level);
+  if (levelErr) return res.redirect(`/admin/users?error=${levelErr}`);
+
+  const level = Number(access_level) as AccessLevelValue;
   const submittedTwitchName = trimField(twitch_name);
   const shouldClearTwitchName = clear_twitch_name === '1';
   const normalizedTwitchName = submittedTwitchName ? normalizeTwitchChannelName(submittedTwitchName) : null;
-  if (!/^\d+$/.test(access_level)) return res.redirect('/admin/users?error=invalid_access_level');
-  const level = Number(access_level);
-  if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.redirect('/admin/users?error=invalid_access_level');
-  if (req.session.user!.accessLevel < AccessLevel.ADMIN && level >= req.session.user!.accessLevel) {
-    return res.redirect('/admin/users?error=access_level_too_high');
-  }
+
   if (!shouldClearTwitchName && submittedTwitchName && !normalizedTwitchName) {
     return res.redirect('/admin/users?error=invalid_twitch_name');
   }
   if (trimmedDiscordId === req.session.user?.discordId) {
     return res.redirect('/admin/users?error=self_edit_forbidden');
+  }
+  if (req.session.user!.accessLevel < AccessLevel.ADMIN && level >= req.session.user!.accessLevel) {
+    return res.redirect('/admin/users?error=access_level_too_high');
   }
   if (req.session.user!.accessLevel < AccessLevel.ADMIN) {
     const existingUser = await findUser(trimmedDiscordId);
@@ -94,20 +124,15 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
     await userMutationQueue.run(trimmedDiscordId, () => addOrUpdateUserMutation({
       discordId: trimmedDiscordId,
       discordName: trimmedDiscordName,
-      level: level as AccessLevelValue,
+      level,
       normalizedTwitchName,
       shouldClearTwitchName,
     }));
   } catch (err) {
-    if (isLockWaitTimeoutDbError(err)) {
-      log.warn('Add user DB lock timeout', err);
-      return res.redirect('/admin/users?error=db_busy');
-    }
-    log.error('Add user error:', err);
     if (err instanceof DuplicateTwitchNameError || isDuplicateTwitchNameDbError(err)) {
       return res.redirect('/admin/users?error=duplicate_twitch_name');
     }
-    return res.redirect('/admin/users?error=add_failed');
+    return handleDbError(err, res, 'add_failed', 'Add user');
   }
   res.redirect('/admin/users');
 });
@@ -117,11 +142,14 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
   const { discord_id, access_level } = req.body as { discord_id?: string; access_level?: string };
   const trimmedDiscordId = trimField(discord_id);
   if (!trimmedDiscordId || access_level === undefined) return res.redirect('/admin/users');
-  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.redirect('/admin/users?error=invalid_discord_id');
-  if (!/^\d+$/.test(access_level)) return res.redirect('/admin/users?error=invalid_access_level');
-  const level = Number(access_level);
-  if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.redirect('/admin/users?error=invalid_access_level');
 
+  const idErr = discordIdError(trimmedDiscordId);
+  if (idErr) return res.redirect(`/admin/users?error=${idErr}`);
+
+  const levelErr = accessLevelError(access_level);
+  if (levelErr) return res.redirect(`/admin/users?error=${levelErr}`);
+
+  const level = Number(access_level);
   if (trimmedDiscordId === req.session.user!.discordId) {
     return res.redirect('/admin/users?error=self_edit_forbidden');
   }
@@ -137,12 +165,7 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
   try {
     await userMutationQueue.run(trimmedDiscordId, () => updateAccessLevel(trimmedDiscordId, level));
   } catch (err) {
-    if (isLockWaitTimeoutDbError(err)) {
-      log.warn('Update access level DB lock timeout', err);
-      return res.redirect('/admin/users?error=db_busy');
-    }
-    log.error('Update access level error:', err);
-    return res.redirect('/admin/users?error=update_failed');
+    return handleDbError(err, res, 'update_failed', 'Update access level');
   }
   res.redirect('/admin/users');
 });
@@ -152,7 +175,9 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
   const { discord_id } = req.body as { discord_id?: string };
   const trimmedDiscordId = trimField(discord_id);
   if (!trimmedDiscordId) return res.redirect('/admin/users');
-  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.redirect('/admin/users?error=invalid_discord_id');
+
+  const idErr = discordIdError(trimmedDiscordId);
+  if (idErr) return res.redirect(`/admin/users?error=${idErr}`);
 
   if (trimmedDiscordId === req.session.user!.discordId) {
     return res.redirect('/admin/users?error=self_remove_forbidden');
@@ -160,12 +185,7 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
   try {
     await userMutationQueue.run(trimmedDiscordId, () => removeUserMutation(trimmedDiscordId));
   } catch (err) {
-    if (isLockWaitTimeoutDbError(err)) {
-      log.warn('Remove user DB lock timeout', err);
-      return res.redirect('/admin/users?error=db_busy');
-    }
-    log.error('Remove user error:', err);
-    return res.redirect('/admin/users?error=remove_failed');
+    return handleDbError(err, res, 'remove_failed', 'Remove user');
   }
   res.redirect('/admin/users');
 });
@@ -178,26 +198,17 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   };
   const trimmedDiscordId = trimField(discord_id);
   if (!trimmedDiscordId) return res.redirect('/admin/users');
-  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.redirect('/admin/users?error=invalid_discord_id');
 
-  let nextEnabled: boolean;
-  if (is_twitch_bot_enabled === 'true' || is_twitch_bot_enabled === '1') {
-    nextEnabled = true;
-  } else if (is_twitch_bot_enabled === 'false' || is_twitch_bot_enabled === '0') {
-    nextEnabled = false;
-  } else {
-    return res.redirect('/admin/users?error=invalid_twitch_state');
-  }
+  const idErr = discordIdError(trimmedDiscordId);
+  if (idErr) return res.redirect(`/admin/users?error=${idErr}`);
+
+  const nextEnabled = parseTwitchEnabled(is_twitch_bot_enabled);
+  if (nextEnabled === null) return res.redirect('/admin/users?error=invalid_twitch_state');
 
   try {
     await userMutationQueue.run(trimmedDiscordId, () => toggleTwitchMutation(trimmedDiscordId, nextEnabled));
   } catch (err) {
-    if (isLockWaitTimeoutDbError(err)) {
-      log.warn('Toggle Twitch DB lock timeout', err);
-      return res.redirect('/admin/users?error=db_busy');
-    }
-    log.error('Toggle twitch user error:', err);
-    return res.redirect('/admin/users?error=toggle_failed');
+    return handleDbError(err, res, 'toggle_failed', 'Toggle twitch user');
   }
   res.redirect('/admin/users');
 });
