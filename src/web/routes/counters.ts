@@ -14,6 +14,12 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth, requireMod, requireManager } from '../middleware';
+import {
+  normalizeRequiredText,
+  normalizeSingleTokenRequiredText,
+  parsePositiveIntId,
+  renderError,
+} from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -29,31 +35,6 @@ const KNOWN_ERRORS = new Set([
   'remove_failed',
   'reset_failed',
 ]);
-
-function normalizeRequiredText(value: string | undefined): string | null {
-  if (typeof value !== 'string') return null;
-
-  const normalizedValue = value.trim();
-  return normalizedValue.length > 0 ? normalizedValue : null;
-}
-
-function normalizeSingleTokenRequiredText(value: string | undefined): string | null {
-  const normalizedValue = normalizeRequiredText(value);
-  if (!normalizedValue || /\s/.test(normalizedValue)) {
-    return null;
-  }
-
-  return normalizedValue.toLowerCase();
-}
-
-function parseCounterId(value: string | undefined): number | null {
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
-    return null;
-  }
-
-  const parsedValue = Number(value);
-  return Number.isSafeInteger(parsedValue) && parsedValue > 0 ? parsedValue : null;
-}
 
 type CounterFormValidationResult =
   | {
@@ -108,7 +89,7 @@ router.get('/counters', requireAuth, csrfProtection, async (req, res) => {
     });
   } catch (err) {
     log.error('Counters page error:', err);
-    res.status(500).render('error', { message: 'Failed to load counters page.', user: req.session.user ?? null });
+    renderError(res, 500, 'Failed to load counters page.', req.session.user);
   }
 });
 
@@ -153,7 +134,7 @@ router.post('/counters/add', requireMod, csrfProtection, async (req, res) => {
 router.post('/counters/update', requireMod, csrfProtection, async (req, res) => {
   const { id } = req.body as Record<string, string | undefined>;
 
-  const parsedId = parseCounterId(id);
+  const parsedId = parsePositiveIntId(id);
   const form = validateAndNormalizeCounterForm(req.body as Record<string, string | undefined>);
   if (form.error) {
     return res.redirect(`/counters?error=${form.error}`);
@@ -182,7 +163,7 @@ router.post('/counters/update', requireMod, csrfProtection, async (req, res) => 
     });
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
-      return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
+      return renderError(res, 404, 'Counter not found.', req.session.user);
     }
 
     if (err instanceof ReservedCommandError) {
@@ -202,7 +183,7 @@ router.post('/counters/update', requireMod, csrfProtection, async (req, res) => 
 
 router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => {
   const { id } = req.body as { id?: string };
-  const parsedId = parseCounterId(id);
+  const parsedId = parsePositiveIntId(id);
 
   if (parsedId === null) {
     return res.redirect('/counters?error=invalid_id');
@@ -212,7 +193,7 @@ router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => 
     await removeCounter(parsedId);
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
-      return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
+      return renderError(res, 404, 'Counter not found.', req.session.user);
     }
 
     log.error('Remove counter error:', err);
@@ -224,7 +205,7 @@ router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => 
 
 router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, res) => {
   const rawId = req.params.id;
-  const parsedId = parseCounterId(typeof rawId === 'string' ? rawId : undefined);
+  const parsedId = parsePositiveIntId(typeof rawId === 'string' ? rawId : undefined);
   if (parsedId === null) {
     return res.redirect('/counters?error=invalid_id');
   }
@@ -233,7 +214,7 @@ router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, r
     await resetCounterCurrentValue(parsedId);
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
-      return res.status(404).render('error', { message: 'Counter not found.', user: req.session.user ?? null });
+      return renderError(res, 404, 'Counter not found.', req.session.user);
     }
 
     log.error('Reset counter error:', err);

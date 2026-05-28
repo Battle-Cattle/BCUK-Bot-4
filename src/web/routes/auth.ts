@@ -6,6 +6,7 @@ import { findUser, updateDiscordName } from '../../db';
 import { fetchMemberDisplayName } from '../../discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
+import { renderError } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -31,11 +32,7 @@ router.get('/discord/callback', async (req, res) => {
   const { code, state } = req.query as { code?: string; state?: string };
 
   if (!code || !state || state !== req.session.oauthState) {
-    return res.status(400).render('error', {
-      message: 'Invalid OAuth2 state — please try logging in again.',
-      user: null,
-      csrfToken: '',
-    });
+    return renderError(res, 400, 'Invalid OAuth2 state — please try logging in again.', undefined);
   }
   delete req.session.oauthState;
 
@@ -71,11 +68,7 @@ router.get('/discord/callback', async (req, res) => {
     // 3. Check the user table whitelist
     const dbUser = await findUser(profile.id);
     if (!dbUser) {
-      return res.status(403).render('error', {
-        message: 'You are not on the whitelist. Contact an admin to be added.',
-        user: null,
-        csrfToken: '',
-      });
+      return renderError(res, 403, 'You are not on the whitelist. Contact an admin to be added.', undefined);
     }
 
     let syncedDiscordName = dbUser.discord_name?.trim() || profile.username;
@@ -114,11 +107,7 @@ router.get('/discord/callback', async (req, res) => {
     res.redirect('/');
   } catch (err) {
     log.error('Auth error:', err);
-    res.status(500).render('error', {
-      message: 'Authentication failed — please try again.',
-      user: null,
-      csrfToken: '',
-    });
+    renderError(res, 500, 'Authentication failed — please try again.', undefined);
   }
 });
 

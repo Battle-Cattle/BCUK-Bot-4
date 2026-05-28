@@ -4,6 +4,7 @@ import { getStatus } from '../../statusStore';
 import { csrfProtection } from '../csrf';
 import { getStreamerByDiscordId } from '../../db';
 import { hasAuthFailedSubs } from '../../twitchEventSubSubscriptions';
+import { renderError } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -24,10 +25,7 @@ router.get('/', csrfProtection, async (req, res) => {
     });
   } catch (err) {
     log.error('Dashboard error:', err);
-    res.status(500).render('error', {
-      message: 'Failed to load dashboard data.',
-      user: req.session.user ?? null,
-    });
+    renderError(res, 500, 'Failed to load dashboard data.', req.session.user);
   }
 });
 

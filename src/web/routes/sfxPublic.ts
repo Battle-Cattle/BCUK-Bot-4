@@ -2,6 +2,7 @@ import { createLogger } from '../../logger';
 import { Router } from 'express';
 import { getPublicSfxTriggers } from '../../db';
 import type { PublicSfxTrigger } from '../../db';
+import { renderError } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -25,11 +26,7 @@ router.get('/sfx-list', async (req, res) => {
     });
   } catch (err) {
     log.error('Public SFX list error:', err);
-    res.status(500).render('error', {
-      message: 'Failed to load SFX list.',
-      user: req.session.user ?? null,
-      csrfToken: '',
-    });
+    renderError(res, 500, 'Failed to load SFX list.', req.session.user);
   }
 });
 

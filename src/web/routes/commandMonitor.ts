@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { getRecentCommandTestEntries } from '../../commandMonitorStore';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
+import { renderError } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -17,10 +18,7 @@ router.get('/command-monitor', requireManager, csrfProtection, (req, res) => {
     });
   } catch (err) {
     log.error('Command monitor page error:', err);
-    res.status(500).render('error', {
-      message: 'Failed to load command monitor page.',
-      user: req.session.user ?? null,
-    });
+    renderError(res, 500, 'Failed to load command monitor page.', req.session.user);
   }
 });
 

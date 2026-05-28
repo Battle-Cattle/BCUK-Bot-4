@@ -18,6 +18,13 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth, requireMod } from '../middleware';
+import {
+  normalizeRequiredText,
+  normalizeSingleTokenRequiredText,
+  parsePositiveIntId,
+  normalizeDiscordId,
+  renderError,
+} from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -37,40 +44,6 @@ const KNOWN_ERRORS = new Set([
 
 interface CommandViewModel extends DbCustomCommandWithAssignments {
   unassigned_users: DbUser[];
-}
-
-function normalizeRequiredText(value: string | undefined): string | null {
-  if (typeof value !== 'string') return null;
-
-  const normalizedValue = value.trim();
-  return normalizedValue.length > 0 ? normalizedValue : null;
-}
-
-function normalizeSingleTokenRequiredText(value: string | undefined): string | null {
-  const normalizedValue = normalizeRequiredText(value);
-  if (!normalizedValue || /\s/.test(normalizedValue)) {
-    return null;
-  }
-
-  return normalizedValue.toLowerCase();
-}
-
-function parseCommandId(value: string | undefined): number | null {
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
-    return null;
-  }
-
-  const parsedValue = Number(value);
-  return Number.isSafeInteger(parsedValue) && parsedValue > 0 ? parsedValue : null;
-}
-
-function normalizeDiscordId(value: string | undefined): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  const trimmedValue = value.trim();
-  return /^\d+$/.test(trimmedValue) ? trimmedValue : null;
 }
 
 router.get('/commands', requireAuth, csrfProtection, async (req, res) => {
@@ -98,7 +71,7 @@ router.get('/commands', requireAuth, csrfProtection, async (req, res) => {
     });
   } catch (err) {
     log.error('Commands page error:', err);
-    res.status(500).render('error', { message: 'Failed to load commands page.', user: req.session.user ?? null });
+    renderError(res, 500, 'Failed to load commands page.', req.session.user);
   }
 });
 
@@ -157,7 +130,7 @@ router.post('/commands/update', requireMod, csrfProtection, async (req, res) => 
   const isMultiTwitch = req.body.is_multi_twitch === 'on';
   const normalizedTriggerString = normalizeSingleTokenRequiredText(trigger_string);
   const normalizedOutput = normalizeRequiredText(output);
-  const parsedCommandId = parseCommandId(command_id);
+  const parsedCommandId = parsePositiveIntId(command_id);
 
   if (!normalizedTriggerString || !normalizedOutput) {
     return res.redirect('/commands?error=missing_fields');
@@ -171,7 +144,7 @@ router.post('/commands/update', requireMod, csrfProtection, async (req, res) => 
     await updateCustomCommand(parsedCommandId, normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
     if (err instanceof CommandNotFoundError) {
-      return res.status(404).render('error', { message: 'Command not found.', user: req.session.user ?? null });
+      return renderError(res, 404, 'Command not found.', req.session.user);
     }
 
     if (err instanceof ReservedCommandError) {
@@ -193,7 +166,7 @@ router.post('/commands/remove', requireMod, csrfProtection, async (req, res) => 
   const { command_id } = req.body as { command_id?: string };
   if (!command_id) return res.redirect('/commands');
 
-  const parsedCommandId = parseCommandId(command_id);
+  const parsedCommandId = parsePositiveIntId(command_id);
   if (parsedCommandId === null) {
     return res.redirect('/commands?error=invalid_id');
   }
@@ -214,7 +187,7 @@ router.post('/commands/assign', requireMod, csrfProtection, async (req, res) => 
     return res.redirect('/commands?error=missing_fields');
   }
 
-  const parsedCommandId = parseCommandId(command_id);
+  const parsedCommandId = parsePositiveIntId(command_id);
   const normalizedDiscordId = normalizeDiscordId(discord_id);
 
   if (parsedCommandId === null || normalizedDiscordId === null) {
@@ -246,7 +219,7 @@ router.post('/commands/unassign', requireMod, csrfProtection, async (req, res) =
     return res.redirect('/commands?error=missing_fields');
   }
 
-  const parsedCommandId = parseCommandId(command_id);
+  const parsedCommandId = parsePositiveIntId(command_id);
   const normalizedDiscordId = normalizeDiscordId(discord_id);
 
   if (parsedCommandId === null || normalizedDiscordId === null) {
