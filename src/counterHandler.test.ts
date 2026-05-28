@@ -111,7 +111,7 @@ describe('executeCounterCommandForDiscord', () => {
   });
 
   it('swallows Discord not-found errors on reply failure', async () => {
-    const { isDiscordNotFoundError } = await import('./discordUtils');
+    const { isDiscordNotFoundError } = await import('./discordUtils.js');
     vi.mocked(isDiscordNotFoundError).mockReturnValue(true);
     vi.mocked(findCounterByCommand).mockResolvedValue(CHECK_COUNTER as any);
     const msg = makeMockMessage('!count');

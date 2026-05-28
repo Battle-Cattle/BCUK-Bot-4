@@ -120,7 +120,7 @@ describe('POST /commands/add', () => {
   });
 
   it('5. redirects ?error=command_taken when addCustomCommand throws CommandConflictError', async () => {
-    vi.mocked(addCustomCommand).mockRejectedValue(new CommandConflictError('conflict'));
+    vi.mocked(addCustomCommand).mockRejectedValue(new CommandConflictError(['conflict']));
     const res = await supertest(buildApp())
       .post('/commands/add')
       .type('form')
@@ -183,7 +183,7 @@ describe('POST /commands/update', () => {
   });
 
   it('11. returns 404 when updateCustomCommand throws CommandNotFoundError', async () => {
-    vi.mocked(updateCustomCommand).mockRejectedValue(new CommandNotFoundError('not found'));
+    vi.mocked(updateCustomCommand).mockRejectedValue(new CommandNotFoundError(1));
     const res = await supertest(buildApp())
       .post('/commands/update')
       .type('form')
