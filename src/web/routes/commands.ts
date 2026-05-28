@@ -1,5 +1,6 @@
 import { createLogger } from '../../logger';
 import { Router } from 'express';
+import type { Response } from 'express';
 import {
   addCustomCommand,
   assignUserToCommand,
@@ -28,6 +29,18 @@ import {
 
 const log = createLogger('Web');
 const router = Router();
+
+function handleCommandWriteError(err: unknown, res: Response): boolean {
+  if (err instanceof ReservedCommandError) {
+    res.redirect('/commands?error=reserved_command');
+    return true;
+  }
+  if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
+    res.redirect('/commands?error=command_taken');
+    return true;
+  }
+  return false;
+}
 
 const KNOWN_ERRORS = new Set([
   'missing_fields',
@@ -90,14 +103,7 @@ router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
   try {
     commandId = await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
-    if (err instanceof ReservedCommandError) {
-      return res.redirect('/commands?error=reserved_command');
-    }
-
-    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-      return res.redirect('/commands?error=command_taken');
-    }
-
+    if (handleCommandWriteError(err, res)) return;
     log.error('Add custom command error:', err);
     return res.redirect('/commands?error=add_failed');
   }
@@ -146,15 +152,7 @@ router.post('/commands/update', requireMod, csrfProtection, async (req, res) => 
     if (err instanceof CommandNotFoundError) {
       return renderError(res, 404, 'Command not found.', req.session.user);
     }
-
-    if (err instanceof ReservedCommandError) {
-      return res.redirect('/commands?error=reserved_command');
-    }
-
-    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-      return res.redirect('/commands?error=command_taken');
-    }
-
+    if (handleCommandWriteError(err, res)) return;
     log.error('Update custom command error:', err);
     return res.redirect('/commands?error=update_failed');
   }

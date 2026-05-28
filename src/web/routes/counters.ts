@@ -1,5 +1,6 @@
 import { createLogger } from '../../logger';
 import { Router } from 'express';
+import type { Response } from 'express';
 import {
   addCounter,
   CommandConflictError,
@@ -23,6 +24,18 @@ import {
 
 const log = createLogger('Web');
 const router = Router();
+
+function handleCounterWriteError(err: unknown, res: Response): boolean {
+  if (err instanceof ReservedCommandError) {
+    res.redirect('/counters?error=reserved_command');
+    return true;
+  }
+  if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
+    res.redirect('/counters?error=duplicate_command');
+    return true;
+  }
+  return false;
+}
 
 const KNOWN_ERRORS = new Set([
   'missing_fields',
@@ -116,14 +129,7 @@ router.post('/counters/add', requireMod, csrfProtection, async (req, res) => {
       form.resetYearly,
     );
   } catch (err) {
-    if (err instanceof ReservedCommandError) {
-      return res.redirect('/counters?error=reserved_command');
-    }
-
-    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-      return res.redirect('/counters?error=duplicate_command');
-    }
-
+    if (handleCounterWriteError(err, res)) return;
     log.error('Add counter error:', err);
     return res.redirect('/counters?error=add_failed');
   }
@@ -165,15 +171,7 @@ router.post('/counters/update', requireMod, csrfProtection, async (req, res) => 
     if (err instanceof CounterNotFoundError) {
       return renderError(res, 404, 'Counter not found.', req.session.user);
     }
-
-    if (err instanceof ReservedCommandError) {
-      return res.redirect('/counters?error=reserved_command');
-    }
-
-    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-      return res.redirect('/counters?error=duplicate_command');
-    }
-
+    if (handleCounterWriteError(err, res)) return;
     log.error('Update counter error:', err);
     return res.redirect('/counters?error=update_failed');
   }
