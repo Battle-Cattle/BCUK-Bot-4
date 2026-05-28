@@ -41,6 +41,7 @@ const KNOWN_ERRORS = new Set([
   'missing_fields',
   'same_commands',
   'duplicate_command',
+  'counter_not_found',
   'reserved_command',
   'invalid_id',
   'add_failed',
@@ -169,7 +170,7 @@ router.post('/counters/update', requireMod, csrfProtection, async (req, res) => 
     });
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
-      return renderError(res, 404, 'Counter not found.', req.session.user);
+      return res.redirect('/counters?error=counter_not_found');
     }
     if (handleCounterWriteError(err, res)) return;
     log.error('Update counter error:', err);
@@ -191,7 +192,7 @@ router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => 
     await removeCounter(parsedId);
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
-      return renderError(res, 404, 'Counter not found.', req.session.user);
+      return res.redirect('/counters?error=counter_not_found');
     }
 
     log.error('Remove counter error:', err);
@@ -212,7 +213,7 @@ router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, r
     await resetCounterCurrentValue(parsedId);
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
-      return renderError(res, 404, 'Counter not found.', req.session.user);
+      return res.redirect('/counters?error=counter_not_found');
     }
 
     log.error('Reset counter error:', err);

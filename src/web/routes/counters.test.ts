@@ -220,13 +220,14 @@ describe('POST /counters/update', () => {
     expect(res.headers.location).toBe('/counters?error=same_commands');
   });
 
-  it('14. returns 404 when updateCounter throws CounterNotFoundError', async () => {
+  it('14. redirects ?error=counter_not_found when updateCounter throws CounterNotFoundError', async () => {
     vi.mocked(updateCounter).mockRejectedValue(new CounterNotFoundError(1));
     const res = await supertest(buildApp())
       .post('/counters/update')
       .type('form')
       .send(VALID_UPDATE);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/counters?error=counter_not_found');
   });
 
   it('15. redirects ?error=reserved_command when updateCounter throws ReservedCommandError', async () => {
@@ -261,13 +262,14 @@ describe('POST /counters/remove', () => {
     expect(res.headers.location).toBe('/counters?error=invalid_id');
   });
 
-  it('18. returns 404 when removeCounter throws CounterNotFoundError', async () => {
+  it('18. redirects ?error=counter_not_found when removeCounter throws CounterNotFoundError', async () => {
     vi.mocked(removeCounter).mockRejectedValue(new CounterNotFoundError(1));
     const res = await supertest(buildApp())
       .post('/counters/remove')
       .type('form')
       .send({ id: '5' });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/counters?error=counter_not_found');
   });
 
   it('19. redirects /counters on valid remove', async () => {

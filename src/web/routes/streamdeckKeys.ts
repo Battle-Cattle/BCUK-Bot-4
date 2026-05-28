@@ -19,6 +19,8 @@ const router = Router();
 
 // ─── User routes (any authenticated user) ────────────────────────────────────
 
+const USER_KNOWN_ERRORS = new Set(['request_failed', 'revoke_failed']);
+
 router.get('/streamdeck-key', csrfProtection, async (req, res) => {
   try {
     const keyRow = await getApiKeyStatus(req.session.user!.discordId);
@@ -27,7 +29,7 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
       csrfToken: req.csrfToken(),
       keyRow,
       newKey: null,
-      error: null,
+      error: USER_KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
       webPort: WEB_PORT,
     });
   } catch (err) {
@@ -53,7 +55,7 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
     });
   } catch (err) {
     log.error('Streamdeck key request error:', err);
-    renderError(res, 500, 'Failed to generate API key.', req.session.user);
+    res.redirect('/streamdeck-key?error=request_failed');
   }
 });
 
@@ -63,7 +65,7 @@ router.post('/streamdeck-key/revoke', csrfProtection, async (req, res) => {
     res.redirect('/streamdeck-key');
   } catch (err) {
     log.error('Streamdeck key revoke error:', err);
-    renderError(res, 500, 'Failed to revoke API key.', req.session.user);
+    res.redirect('/streamdeck-key?error=revoke_failed');
   }
 });
 

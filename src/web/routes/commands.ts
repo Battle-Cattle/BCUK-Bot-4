@@ -45,6 +45,7 @@ function handleCommandWriteError(err: unknown, res: Response): boolean {
 const KNOWN_ERRORS = new Set([
   'missing_fields',
   'command_taken',
+  'command_not_found',
   'reserved_command',
   'invalid_id',
   'add_failed',
@@ -150,7 +151,7 @@ router.post('/commands/update', requireMod, csrfProtection, async (req, res) => 
     await updateCustomCommand(parsedCommandId, normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
     if (err instanceof CommandNotFoundError) {
-      return renderError(res, 404, 'Command not found.', req.session.user);
+      return res.redirect('/commands?error=command_not_found');
     }
     if (handleCommandWriteError(err, res)) return;
     log.error('Update custom command error:', err);

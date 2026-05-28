@@ -182,13 +182,14 @@ describe('POST /commands/update', () => {
     expect(res.headers.location).toBe('/commands?error=invalid_id');
   });
 
-  it('11. returns 404 when updateCustomCommand throws CommandNotFoundError', async () => {
+  it('11. redirects ?error=command_not_found when updateCustomCommand throws CommandNotFoundError', async () => {
     vi.mocked(updateCustomCommand).mockRejectedValue(new CommandNotFoundError(1));
     const res = await supertest(buildApp())
       .post('/commands/update')
       .type('form')
       .send({ command_id: '1', trigger_string: '!hello', output: 'Hello!' });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/commands?error=command_not_found');
   });
 
   it('12. redirects ?error=reserved_command when updateCustomCommand throws ReservedCommandError', async () => {

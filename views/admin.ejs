@@ -15,12 +15,24 @@
       <h2 class="section-title">User Management</h2>
 
       <% if (error) { %>
+      <% const errorMessages = {
+        add_failed:           'Failed to save the user. Please try again.',
+        update_failed:        'Failed to update access level. Please try again.',
+        remove_failed:        'Failed to remove the user. Please try again.',
+        toggle_failed:        'Failed to toggle Twitch bot. Please try again.',
+        duplicate_twitch_name: 'Twitch name is already assigned to another user.',
+        db_busy:              'Database is busy — please try again in a moment.',
+        invalid_discord_id:   'Invalid Discord ID format.',
+        invalid_access_level: 'Invalid access level.',
+        access_level_too_high: 'You cannot assign an access level equal to or above your own.',
+        invalid_twitch_name:  'Invalid Twitch channel name.',
+        self_edit_forbidden:  'You cannot modify your own account from this form.',
+        self_remove_forbidden: 'You cannot remove your own account.',
+        target_above_level:   'You cannot modify a user at or above your own access level.',
+        invalid_twitch_state: 'Invalid Twitch bot enabled state.',
+      }; %>
       <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
-        <span class="text-danger">&#9888; <%=
-          error === 'duplicate_twitch_name' ? 'Twitch name is already assigned to another user.' :
-          error === 'db_busy' ? 'Database is busy — please try again in a moment.' :
-          'Operation failed: ' + error.replace(/_/g, ' ')
-        %></span>
+        <span class="text-danger">&#9888; <%= errorMessages[error] || 'Operation failed: ' + error.replace(/_/g, ' ') %></span>
       </div>
       <% } %>
 
