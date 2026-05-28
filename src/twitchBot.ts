@@ -38,6 +38,9 @@ function isChannelJoined(channel: string): boolean {
   return client.getChannels().some((joinedChannel) => normalizeChannel(joinedChannel) === channel);
 }
 
+function fireAndForget(promise: Promise<void>, context: string): void {
+  promise.catch((err) => log.error(`${context}:`, err));
+}
 
 async function partStaleChannel(channel: string): Promise<void> {
   if (activeChannels.has(channel)) {
@@ -97,7 +100,7 @@ async function reconcileJoinedChannels(): Promise<void> {
   }
 }
 
-export async function startTwitchBot(): Promise<void> {
+async function initializeActiveChannels(): Promise<void> {
   const configuredChannels = await getTwitchEnabledChannels();
   for (const ch of configuredChannels) {
     const normalized = normalizeChannel(ch);
@@ -111,16 +114,77 @@ export async function startTwitchBot(): Promise<void> {
 
   if (activeChannels.size === 0) {
     log.warn('No enabled Twitch channels found in DB; connecting with no joined channels.');
+    return;
   }
 
-  if (activeChannels.size > 0) {
-    try {
-      const users = await getUsers([...activeChannels]);
-      for (const u of users) activeChannelUserIds.set(u.login.toLowerCase(), u.id);
-    } catch (err) {
-      log.error('Failed to resolve channel user IDs (shared-chat dedup unavailable):', err);
-    }
+  try {
+    const users = await getUsers([...activeChannels]);
+    for (const u of users) activeChannelUserIds.set(u.login.toLowerCase(), u.id);
+  } catch (err) {
+    log.error('Failed to resolve channel user IDs (shared-chat dedup unavailable):', err);
   }
+}
+
+function handleTwitchMessage(
+  channel: string,
+  tags: tmi.ChatUserstate,
+  message: string,
+  self: boolean,
+): void {
+  try {
+    if (self) return;
+    const normalizedChannel = normalizeChannel(channel);
+    if (!normalizedChannel) return;
+    if (!activeChannels.has(normalizedChannel)) return;
+
+    // In Twitch shared chat, source-room-id differs from room-id when a message
+    // originated in a partner channel and was shared into this one. Skip it entirely
+    // (including SFX command handling) so each message is only processed once, in
+    // its source channel.
+    if (tags['source-room-id'] && tags['source-room-id'] !== tags['room-id']) return;
+
+    const displayName = tags['display-name'] ?? tags.username ?? null;
+    const isMod = tags.mod === true || !!(tags.badges as Record<string, string> | null | undefined)?.broadcaster;
+
+    fireAndForget(executeCustomCommandForTwitch(normalizedChannel, message, displayName), 'Custom command error');
+    fireAndForget(executeCounterCommandForTwitch(normalizedChannel, message, displayName), 'Counter command error');
+    fireAndForget(executeMultiCommandForTwitch(normalizedChannel, message, displayName), 'Multi command error');
+    fireAndForget(executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod), 'Shoutout error');
+    fireAndForget(handleCommand(message, 'twitch'), 'Command handler error');
+    fireAndForget(executeCountdownForTwitch(normalizedChannel, message), 'Countdown error');
+  } catch (err) {
+    log.error('Unexpected error in message handler:', err);
+  }
+}
+
+function onConnected(addr: string, port: number): void {
+  connected = true;
+  log.info(`Connected to ${addr}:${port}`);
+  log.info(`Listening on: ${[...activeChannels].join(', ') || '(none)'}`);
+  // Reset every activeChannels entry via setTwitchChannel to a pessimistic
+  // disconnected state until reconcileJoinedChannels() asynchronously
+  // rechecks the actual joined memberships and corrects the status.
+  activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
+  void reconcileJoinedChannels().catch((err) => {
+    log.error('Failed to reconcile joined channels:', err);
+  });
+}
+
+function onDisconnected(reason: string): void {
+  connected = false;
+  // Clear tmi.js's confirmed-channel list so it doesn't replay those
+  // channels in its auto-rejoin queue on the next connect. All joining
+  // is handled by reconcileJoinedChannels after 'connected' fires.
+  // tmi.js doesn't expose `channels` in its public types, but it is a real
+  // internal array. Clearing it prevents tmi.js from auto-rejoining stale
+  // channels on the next connect — all joins are handled by reconcileJoinedChannels.
+  (client as any).channels = [];
+  log.warn(`Disconnected: ${reason}`);
+  activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
+}
+
+export async function startTwitchBot(): Promise<void> {
+  await initializeActiveChannels();
 
   client = new tmi.Client({
     identity: {
@@ -140,76 +204,9 @@ export async function startTwitchBot(): Promise<void> {
     },
   });
 
-  client.on('message', (channel, tags, message, self) => {
-    try {
-      // Don't respond to own messages
-      if (self) return;
-      const normalizedChannel = normalizeChannel(channel);
-      if (!normalizedChannel) return;
-      if (!activeChannels.has(normalizedChannel)) return;
-
-      // In Twitch shared chat, source-room-id differs from room-id when a message
-      // originated in a partner channel and was shared into this one. Skip it entirely
-      // (including SFX command handling) so each message is only processed once, in
-      // its source channel.
-      if (tags['source-room-id'] && tags['source-room-id'] !== tags['room-id']) return;
-
-      const displayName = tags['display-name'] ?? tags.username ?? null;
-      const isMod = tags.mod === true || !!(tags.badges as Record<string, string> | null | undefined)?.broadcaster;
-
-      executeCustomCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
-        log.error('Custom command error:', err),
-      );
-
-      executeCounterCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
-        log.error('Counter command error:', err),
-      );
-
-      executeMultiCommandForTwitch(normalizedChannel, message, displayName).catch((err) =>
-        log.error('Multi command error:', err),
-      );
-
-      executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod).catch((err) =>
-        log.error('Shoutout error:', err),
-      );
-
-      handleCommand(message, 'twitch').catch((err) =>
-        log.error('Command handler error:', err),
-      );
-
-      executeCountdownForTwitch(normalizedChannel, message).catch((err) =>
-        log.error('Countdown error:', err),
-      );
-    } catch (err) {
-      log.error('Unexpected error in message handler:', err);
-    }
-  });
-
-  client.on('connected', (addr, port) => {
-    connected = true;
-    log.info(`Connected to ${addr}:${port}`);
-    log.info(`Listening on: ${[...activeChannels].join(', ') || '(none)'}`);
-    // Reset every activeChannels entry via setTwitchChannel to a pessimistic
-    // disconnected state until reconcileJoinedChannels() asynchronously
-    // rechecks the actual joined memberships and corrects the status.
-    activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
-    void reconcileJoinedChannels().catch((err) => {
-      log.error('Failed to reconcile joined channels:', err);
-    });
-  });
-
-  client.on('disconnected', (reason) => {
-    connected = false;
-    // Clear tmi.js's confirmed-channel list so it doesn't replay those
-    // channels in its auto-rejoin queue on the next connect. All joining
-    // is handled by reconcileJoinedChannels after 'connected' fires.
-    // tmi.js doesn't expose `channels` in its public types, but it is a real
-    // internal array. Clearing it prevents tmi.js from auto-rejoining stale
-    // channels on the next connect — all joins are handled by reconcileJoinedChannels.
-    (client as any).channels = [];
-    log.warn(`Disconnected: ${reason}`);
-    activeChannels.forEach((ch) => { setTwitchChannel(ch, false); });
-  });
+  client.on('message', handleTwitchMessage);
+  client.on('connected', onConnected);
+  client.on('disconnected', onDisconnected);
 
   try {
     await client.connect();
