@@ -10,6 +10,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager, requireAdmin } from '../middleware';
+import { trimField, renderError } from './shared';
 import { normalizeTwitchChannelName } from '../../twitchChannelName';
 import { createMutationQueue } from '../../mutationQueue';
 import adminRefreshRouter, { refreshState } from './adminRefresh';
@@ -27,7 +28,11 @@ const router = Router();
 router.use(adminRefreshRouter);
 
 const DISCORD_ID_RE = /^\d{17,20}$/;
-const KNOWN_ERRORS = new Set(['add_failed', 'duplicate_twitch_name', 'db_busy', 'update_failed', 'remove_failed', 'toggle_failed']);
+const KNOWN_ERRORS = new Set([
+  'add_failed', 'duplicate_twitch_name', 'db_busy', 'update_failed', 'remove_failed', 'toggle_failed',
+  'invalid_discord_id', 'invalid_access_level', 'access_level_too_high', 'invalid_twitch_name',
+  'self_edit_forbidden', 'self_remove_forbidden', 'target_above_level', 'invalid_twitch_state',
+]);
 // Twitch membership changes are serialized per user in-process because this bot
 // currently runs as a single web instance. If that changes, move this lock into
 // shared storage or a DB transaction/row lock before scaling out.
@@ -47,7 +52,7 @@ router.get('/users', requireManager, csrfProtection, async (req, res) => {
     });
   } catch (err) {
     log.error('Admin users error:', err);
-    res.status(500).render('error', { message: 'Failed to load users.', user: req.session.user ?? null });
+    renderError(res, 500, 'Failed to load users.', req.session.user);
   }
 });
 
@@ -60,35 +65,32 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
     twitch_name?: string;
     clear_twitch_name?: string;
   };
-  const trimmedDiscordId = (discord_id ?? '').trim();
+  const trimmedDiscordId = trimField(discord_id);
   if (!trimmedDiscordId || !access_level) return res.redirect('/admin/users');
-  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.status(400).render('error', { message: 'Invalid Discord ID.', user: req.session.user ?? null });
-  const submittedTwitchName = (twitch_name ?? '').trim();
+  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.redirect('/admin/users?error=invalid_discord_id');
+  const submittedTwitchName = trimField(twitch_name);
   const shouldClearTwitchName = clear_twitch_name === '1';
   const normalizedTwitchName = submittedTwitchName ? normalizeTwitchChannelName(submittedTwitchName) : null;
-  const level = parseInt(access_level, 10);
-  if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
-  if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
+  if (!/^\d+$/.test(access_level)) return res.redirect('/admin/users?error=invalid_access_level');
+  const level = Number(access_level);
+  if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.redirect('/admin/users?error=invalid_access_level');
   if (req.session.user!.accessLevel < AccessLevel.ADMIN && level >= req.session.user!.accessLevel) {
-    return res.status(403).render('error', { message: 'You cannot assign an access level equal to or above your own.', user: req.session.user ?? null });
+    return res.redirect('/admin/users?error=access_level_too_high');
   }
   if (!shouldClearTwitchName && submittedTwitchName && !normalizedTwitchName) {
-    return res.status(400).render('error', { message: 'Invalid Twitch name.', user: req.session.user ?? null });
+    return res.redirect('/admin/users?error=invalid_twitch_name');
   }
   if (trimmedDiscordId === req.session.user?.discordId) {
-    return res.status(400).render('error', {
-      message: 'You cannot update your own account from this form.',
-      user: req.session.user ?? null,
-    });
+    return res.redirect('/admin/users?error=self_edit_forbidden');
   }
   if (req.session.user!.accessLevel < AccessLevel.ADMIN) {
     const existingUser = await findUser(trimmedDiscordId);
     if (existingUser && existingUser.access_level >= req.session.user!.accessLevel) {
-      return res.status(403).render('error', { message: 'You cannot modify a user at or above your own access level.', user: req.session.user ?? null });
+      return res.redirect('/admin/users?error=target_above_level');
     }
   }
   try {
-    const trimmedDiscordName = (discord_name ?? '').trim();
+    const trimmedDiscordName = trimField(discord_name);
     await userMutationQueue.run(trimmedDiscordId, () => addOrUpdateUserMutation({
       discordId: trimmedDiscordId,
       discordName: trimmedDiscordName,
@@ -113,26 +115,23 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
 // Update access level (Manager+; managers may only set levels below their own and cannot modify users at their level or above)
 router.post('/users/update', requireManager, csrfProtection, async (req, res) => {
   const { discord_id, access_level } = req.body as { discord_id?: string; access_level?: string };
-  const trimmedDiscordId = (discord_id ?? '').trim();
+  const trimmedDiscordId = trimField(discord_id);
   if (!trimmedDiscordId || access_level === undefined) return res.redirect('/admin/users');
-  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.status(400).render('error', { message: 'Invalid Discord ID.', user: req.session.user ?? null });
-  const level = parseInt(access_level, 10);
-  if (!Number.isFinite(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
-  if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.status(400).render('error', { message: 'Invalid access level.', user: req.session.user ?? null });
+  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.redirect('/admin/users?error=invalid_discord_id');
+  if (!/^\d+$/.test(access_level)) return res.redirect('/admin/users?error=invalid_access_level');
+  const level = Number(access_level);
+  if (!(Object.values(AccessLevel) as number[]).includes(level)) return res.redirect('/admin/users?error=invalid_access_level');
 
   if (trimmedDiscordId === req.session.user!.discordId) {
-    return res.status(400).render('error', {
-      message: 'You cannot change your own access level.',
-      user: req.session.user ?? null,
-    });
+    return res.redirect('/admin/users?error=self_edit_forbidden');
   }
   if (req.session.user!.accessLevel < AccessLevel.ADMIN && level >= req.session.user!.accessLevel) {
-    return res.status(403).render('error', { message: 'You cannot assign an access level equal to or above your own.', user: req.session.user ?? null });
+    return res.redirect('/admin/users?error=access_level_too_high');
   }
   if (req.session.user!.accessLevel < AccessLevel.ADMIN) {
     const targetUser = await findUser(trimmedDiscordId);
     if (targetUser && targetUser.access_level >= req.session.user!.accessLevel) {
-      return res.status(403).render('error', { message: 'You cannot modify a user at or above your own access level.', user: req.session.user ?? null });
+      return res.redirect('/admin/users?error=target_above_level');
     }
   }
   try {
@@ -151,15 +150,12 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
 // Remove a user (Admin only)
 router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
   const { discord_id } = req.body as { discord_id?: string };
-  const trimmedDiscordId = (discord_id ?? '').trim();
+  const trimmedDiscordId = trimField(discord_id);
   if (!trimmedDiscordId) return res.redirect('/admin/users');
-  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.status(400).render('error', { message: 'Invalid Discord ID.', user: req.session.user ?? null });
+  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.redirect('/admin/users?error=invalid_discord_id');
 
   if (trimmedDiscordId === req.session.user!.discordId) {
-    return res.status(400).render('error', {
-      message: 'You cannot remove yourself.',
-      user: req.session.user ?? null,
-    });
+    return res.redirect('/admin/users?error=self_remove_forbidden');
   }
   try {
     await userMutationQueue.run(trimmedDiscordId, () => removeUserMutation(trimmedDiscordId));
@@ -180,9 +176,9 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
     discord_id?: string;
     is_twitch_bot_enabled?: string;
   };
-  const trimmedDiscordId = (discord_id ?? '').trim();
+  const trimmedDiscordId = trimField(discord_id);
   if (!trimmedDiscordId) return res.redirect('/admin/users');
-  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.status(400).render('error', { message: 'Invalid Discord ID.', user: req.session.user ?? null });
+  if (!DISCORD_ID_RE.test(trimmedDiscordId)) return res.redirect('/admin/users?error=invalid_discord_id');
 
   let nextEnabled: boolean;
   if (is_twitch_bot_enabled === 'true' || is_twitch_bot_enabled === '1') {
@@ -190,10 +186,7 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   } else if (is_twitch_bot_enabled === 'false' || is_twitch_bot_enabled === '0') {
     nextEnabled = false;
   } else {
-    return res.status(400).render('error', {
-      message: 'Invalid Twitch enabled state.',
-      user: req.session.user ?? null,
-    });
+    return res.redirect('/admin/users?error=invalid_twitch_state');
   }
 
   try {

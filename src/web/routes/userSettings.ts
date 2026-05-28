@@ -4,6 +4,7 @@ import { randomBytes } from 'crypto';
 import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, EventSubConfig } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
+import { trimField, renderError } from './shared';
 import { reloadEventSubSubscriptions } from '../../twitchEventSub';
 import { hasAuthFailedSubs } from '../../twitchEventSubSubscriptions';
 import { TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, EVENTSUB_TOKEN_SECRET } from '../../config';
@@ -79,7 +80,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     });
   } catch (err) {
     log.error('User settings page error:', err);
-    res.status(500).render('error', { message: 'Failed to load settings page.', user: req.session.user ?? null });
+    renderError(res, 500, 'Failed to load settings page.', req.session.user);
   }
 });
 
@@ -155,7 +156,7 @@ router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) =>
     const MESSAGE_MAX_LENGTH = 500;
     const messageFields = ['follow_message', 'sub_message', 'resub_message', 'giftsub_message', 'raid_message'] as const;
     for (const field of messageFields) {
-      if ((body[field] ?? '').trim().length > MESSAGE_MAX_LENGTH) {
+      if (trimField(body[field]).length > MESSAGE_MAX_LENGTH) {
         return res.redirect('/user/settings?error=eventsub_config_failed');
       }
     }
@@ -164,7 +165,7 @@ router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) =>
     // the POST body. Fall back to existing config to avoid wiping saved settings.
     const current = streamer.config;
     function bodyMsg(key: string, fallback: string): string {
-      return key in body ? ((body[key] ?? '').trim() || fallback) : (current?.[key as keyof EventSubConfig] as string | undefined ?? fallback);
+      return key in body ? (trimField(body[key]) || fallback) : (current?.[key as keyof EventSubConfig] as string | undefined ?? fallback);
     }
     const config: EventSubConfig = {
       follow_enabled:  'follow_enabled'  in body ? body.follow_enabled  === 'on' : (current?.follow_enabled  ?? false),

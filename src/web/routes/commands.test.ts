@@ -139,25 +139,25 @@ describe('POST /commands/add', () => {
   });
 
   it('7. skips assignment and redirects /commands when user has no twitch_name', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '99', twitch_name: null } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '123456789012345678', twitch_name: null } as any);
     const res = await supertest(buildApp())
       .post('/commands/add')
       .type('form')
-      .send({ trigger_string: '!hello', output: 'Hello!', discord_ids: '99' });
+      .send({ trigger_string: '!hello', output: 'Hello!', discord_ids: '123456789012345678' });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/commands');
     expect(vi.mocked(assignUserToCommand)).not.toHaveBeenCalled();
   });
 
   it('8. calls assignUserToCommand and redirects /commands when user has twitch_name', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '99', twitch_name: 'streamer' } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '123456789012345678', twitch_name: 'streamer' } as any);
     const res = await supertest(buildApp())
       .post('/commands/add')
       .type('form')
-      .send({ trigger_string: '!hello', output: 'Hello!', discord_ids: '99' });
+      .send({ trigger_string: '!hello', output: 'Hello!', discord_ids: '123456789012345678' });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/commands');
-    expect(vi.mocked(assignUserToCommand)).toHaveBeenCalledWith(1, '99');
+    expect(vi.mocked(assignUserToCommand)).toHaveBeenCalledWith(1, '123456789012345678');
   });
 });
 
@@ -182,13 +182,14 @@ describe('POST /commands/update', () => {
     expect(res.headers.location).toBe('/commands?error=invalid_id');
   });
 
-  it('11. returns 404 when updateCustomCommand throws CommandNotFoundError', async () => {
+  it('11. redirects ?error=command_not_found when updateCustomCommand throws CommandNotFoundError', async () => {
     vi.mocked(updateCustomCommand).mockRejectedValue(new CommandNotFoundError(1));
     const res = await supertest(buildApp())
       .post('/commands/update')
       .type('form')
       .send({ command_id: '1', trigger_string: '!hello', output: 'Hello!' });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/commands?error=command_not_found');
   });
 
   it('12. redirects ?error=reserved_command when updateCustomCommand throws ReservedCommandError', async () => {
@@ -250,30 +251,30 @@ describe('POST /commands/assign', () => {
     const res = await supertest(buildApp())
       .post('/commands/assign')
       .type('form')
-      .send({ command_id: '1', discord_id: '99' });
+      .send({ command_id: '1', discord_id: '123456789012345678' });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/commands?error=invalid_assignment_user');
   });
 
   it('17b. redirects ?error=invalid_assignment_user when user exists but has no twitch_name', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '99', twitch_name: null } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '123456789012345678', twitch_name: null } as any);
     const res = await supertest(buildApp())
       .post('/commands/assign')
       .type('form')
-      .send({ command_id: '1', discord_id: '99' });
+      .send({ command_id: '1', discord_id: '123456789012345678' });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/commands?error=invalid_assignment_user');
   });
 
   it('18. redirects /commands on valid assign', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '99', twitch_name: 'streamer' } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '123456789012345678', twitch_name: 'streamer' } as any);
     const res = await supertest(buildApp())
       .post('/commands/assign')
       .type('form')
-      .send({ command_id: '1', discord_id: '99' });
+      .send({ command_id: '1', discord_id: '123456789012345678' });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/commands');
-    expect(vi.mocked(assignUserToCommand)).toHaveBeenCalledWith(1, '99');
+    expect(vi.mocked(assignUserToCommand)).toHaveBeenCalledWith(1, '123456789012345678');
   });
 });
 
@@ -293,9 +294,9 @@ describe('POST /commands/unassign', () => {
     const res = await supertest(buildApp())
       .post('/commands/unassign')
       .type('form')
-      .send({ command_id: '1', discord_id: '99' });
+      .send({ command_id: '1', discord_id: '123456789012345678' });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/commands');
-    expect(vi.mocked(unassignUserFromCommand)).toHaveBeenCalledWith(1, '99');
+    expect(vi.mocked(unassignUserFromCommand)).toHaveBeenCalledWith(1, '123456789012345678');
   });
 });
