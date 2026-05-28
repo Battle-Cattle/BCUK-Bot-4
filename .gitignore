@@ -27,3 +27,4 @@ graphify-out/.vocab.txt
 graphify-out/.needs_update
 logs/*
 !logs/.gitkeep
+coverage/
