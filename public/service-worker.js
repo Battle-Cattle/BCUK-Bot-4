@@ -7,6 +7,9 @@ const RUNTIME_CACHE_MAX_ENTRIES = 50;
 const STATIC_ASSETS = [
   '/offline.html',
   '/style.css',
+  '/dashboard-utils.js',
+  '/dashboard-status.js',
+  '/dashboard-voice.js',
   '/app.js',
   '/sfx.js',
   '/navbar.js',
