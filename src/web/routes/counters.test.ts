@@ -150,7 +150,7 @@ describe('POST /counters/add', () => {
   });
 
   it('7. redirects ?error=duplicate_command when addCounter throws CommandConflictError', async () => {
-    vi.mocked(addCounter).mockRejectedValue(new CommandConflictError('conflict'));
+    vi.mocked(addCounter).mockRejectedValue(new CommandConflictError(['conflict']));
     const res = await supertest(buildApp())
       .post('/counters/add')
       .type('form')
@@ -221,7 +221,7 @@ describe('POST /counters/update', () => {
   });
 
   it('14. returns 404 when updateCounter throws CounterNotFoundError', async () => {
-    vi.mocked(updateCounter).mockRejectedValue(new CounterNotFoundError('not found'));
+    vi.mocked(updateCounter).mockRejectedValue(new CounterNotFoundError(1));
     const res = await supertest(buildApp())
       .post('/counters/update')
       .type('form')
@@ -262,7 +262,7 @@ describe('POST /counters/remove', () => {
   });
 
   it('18. returns 404 when removeCounter throws CounterNotFoundError', async () => {
-    vi.mocked(removeCounter).mockRejectedValue(new CounterNotFoundError('not found'));
+    vi.mocked(removeCounter).mockRejectedValue(new CounterNotFoundError(1));
     const res = await supertest(buildApp())
       .post('/counters/remove')
       .type('form')

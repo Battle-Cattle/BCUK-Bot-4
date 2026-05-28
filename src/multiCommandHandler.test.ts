@@ -95,7 +95,7 @@ describe('executeMultiCommandForTwitch', () => {
   });
 
   it('skips channels that share the same shared-chat session ID', async () => {
-    const { resolveSharedChatSessionId } = await import('./customCommandHandler');
+    const { resolveSharedChatSessionId } = await import('./customCommandHandler.js');
     vi.mocked(resolveSharedChatSessionId).mockResolvedValue('session-xyz');
 
     vi.mocked(getMultiTwitchDataForChannel).mockReturnValue({

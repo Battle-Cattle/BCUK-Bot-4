@@ -31,24 +31,28 @@ const MISSING_ACCESS = 50001;
 import { isDiscordNotFoundError, isPermanentVoiceMisconfigurationError } from './discordUtils';
 import { DiscordAPIError } from 'discord.js';
 
+// The mock above replaces DiscordAPIError with a simpler single-arg constructor.
+// Cast here so TypeScript accepts the mock's signature without casting at every call site.
+const MockedDiscordAPIError = DiscordAPIError as unknown as new (opts: { code: number; status: number }) => DiscordAPIError;
+
 describe('isDiscordNotFoundError', () => {
   it('returns true for UnknownMessage code', () => {
-    const err = new DiscordAPIError({ code: UNKNOWN_MESSAGE, status: 200 });
+    const err = new MockedDiscordAPIError({ code: UNKNOWN_MESSAGE, status: 200 });
     expect(isDiscordNotFoundError(err)).toBe(true);
   });
 
   it('returns true for UnknownChannel code', () => {
-    const err = new DiscordAPIError({ code: UNKNOWN_CHANNEL, status: 200 });
+    const err = new MockedDiscordAPIError({ code: UNKNOWN_CHANNEL, status: 200 });
     expect(isDiscordNotFoundError(err)).toBe(true);
   });
 
   it('returns true when status is 404 regardless of code', () => {
-    const err = new DiscordAPIError({ code: 99999, status: 404 });
+    const err = new MockedDiscordAPIError({ code: 99999, status: 404 });
     expect(isDiscordNotFoundError(err)).toBe(true);
   });
 
   it('returns false for unrelated Discord errors', () => {
-    const err = new DiscordAPIError({ code: MISSING_ACCESS, status: 403 });
+    const err = new MockedDiscordAPIError({ code: MISSING_ACCESS, status: 403 });
     expect(isDiscordNotFoundError(err)).toBe(false);
   });
 
@@ -86,7 +90,7 @@ describe('isPermanentVoiceMisconfigurationError', () => {
   });
 
   it('returns true when the inner check is a 404 DiscordAPIError', () => {
-    const err = new DiscordAPIError({ code: UNKNOWN_CHANNEL, status: 200 });
+    const err = new MockedDiscordAPIError({ code: UNKNOWN_CHANNEL, status: 200 });
     expect(isPermanentVoiceMisconfigurationError(err)).toBe(true);
   });
 
