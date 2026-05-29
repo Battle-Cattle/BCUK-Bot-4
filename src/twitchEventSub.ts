@@ -54,7 +54,10 @@ function buildReconnectUrl(reconnectUrl: string): string | null {
     parsed.pathname === '/ws',
   ];
   if (!checks.every(Boolean)) return null;
-  return reconnectUrl;
+  // Reconstruct from validated components so taint analysis sees a clean value
+  const safe = new URL('wss://eventsub.wss.twitch.tv/ws');
+  safe.search = parsed.search;
+  return safe.href;
 }
 
 // ─── Per-streamer connection ──────────────────────────────────────────────────
