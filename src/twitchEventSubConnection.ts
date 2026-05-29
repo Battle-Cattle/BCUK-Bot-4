@@ -27,15 +27,19 @@ export function buildReconnectUrl(reconnectUrl: string): string | null {
   let parsed: URL;
   try { parsed = new URL(reconnectUrl); } catch { return null; }
   const validPorts = new Set(['', '443']);
-  const checks = [
-    parsed.protocol === 'wss:',
-    parsed.hostname === 'eventsub.wss.twitch.tv',
-    !parsed.username,
-    !parsed.password,
-    validPorts.has(parsed.port),
-    parsed.pathname === '/ws',
-  ];
-  if (!checks.every(Boolean)) return null;
+  const checkResults = {
+    protocol: parsed.protocol === 'wss:',
+    hostname: parsed.hostname === 'eventsub.wss.twitch.tv',
+    username: !parsed.username,
+    password: !parsed.password,
+    port: validPorts.has(parsed.port),
+    pathname: parsed.pathname === '/ws',
+  };
+  const failed = Object.entries(checkResults).filter(([, v]) => !v).map(([k]) => k);
+  if (failed.length > 0) {
+    log.error(`Invalid reconnect URL — failed checks: ${failed.join(', ')} — url: ${reconnectUrl}`);
+    return null;
+  }
   // Reconstruct from validated components so taint analysis sees a clean value
   const safe = new URL('wss://eventsub.wss.twitch.tv/ws');
   safe.search = parsed.search;
