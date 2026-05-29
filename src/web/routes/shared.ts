@@ -8,8 +8,8 @@ export function parsePositiveIntId(value: string | string[] | undefined): number
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-export function trimField(value: string | undefined): string {
-  return (value ?? '').trim();
+export function trimField(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 export function normalizeRequiredText(value: string | undefined): string | null {

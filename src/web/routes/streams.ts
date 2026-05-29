@@ -174,15 +174,16 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
 // ─── Streamers ────────────────────────────────────────────────────────────────
 
 router.post('/streams/streamers/add', requireManager, csrfProtection, async (req, res) => {
-  const { discord_id, group_id } = req.body as { discord_id?: string; group_id?: string };
-  if (!discord_id || !group_id) return res.redirect('/admin/streams?error=missing_fields');
+  const { discord_id, group_id } = req.body as { discord_id?: string | string[]; group_id?: string | string[] };
+  const discordId = typeof discord_id === 'string' ? discord_id.trim() : null;
+  if (!discordId || !group_id) return res.redirect('/admin/streams?error=missing_fields');
   const parsedGroupId = parsePositiveIntId(group_id);
   if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
-    const user = await findUser(discord_id.trim());
+    const user = await findUser(discordId);
     if (!user?.twitch_name) return res.redirect('/admin/streams?error=missing_fields');
-    await addStreamer(discord_id.trim(), parsedGroupId);
+    await addStreamer(discordId, parsedGroupId);
     triggerRestart();
   } catch (err) {
     log.error('Add streamer error:', err);

@@ -110,7 +110,7 @@ router.post('/settings/videos/upload', requireAuth, upload.single('video'), csrf
 
     if (!req.file) return res.redirect('/overlay/settings?error=invalid_file');
 
-    const name = (req.body?.name as string | undefined ?? '').trim().slice(0, 100) || req.file.originalname;
+    const name = (typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 100) : '') || req.file.originalname;
     const ext = req.file.mimetype === 'video/webm' ? 'webm' : 'mp4';
     const filename = `${randomUUID()}.${ext}`;
 
