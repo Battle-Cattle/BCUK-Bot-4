@@ -27,6 +27,11 @@ export function hasAuthFailedSubs(login: string): boolean {
   return false;
 }
 
+export function clearAuthFailedSubs(login: string): void {
+  const prefix = `${login}:`;
+  for (const key of authFailedSubs) if (key.startsWith(prefix)) authFailedSubs.delete(key);
+}
+
 // Maps EventSub notification types to their handler functions.
 // Using Map instead of a plain object prevents prototype-chain lookup on user-controlled keys.
 type NotificationHandler = (login: string, event: unknown, config: EventSubConfig, streamerId: number) => Promise<void>;
