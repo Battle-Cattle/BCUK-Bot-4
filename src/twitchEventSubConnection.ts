@@ -3,8 +3,10 @@ import { subscribeForStreamer, removeStreamerFromMap, dispatchNotification, hand
 
 const log = createLogger('EventSub');
 
+/** Default Twitch EventSub WebSocket URL. */
 export const EVENTSUB_WS_URL = 'wss://eventsub.wss.twitch.tv/ws';
 const RECONNECT_BACKOFF_MAX_MS = 30_000;
+/** How long a message ID is remembered for deduplication (ms). */
 export const MESSAGE_TTL_MS = 10 * 60 * 1000;
 
 export interface EventSubMetadata {
@@ -217,6 +219,7 @@ export class StreamerConnection {
 // TTL-based dedup: messageId → expiry timestamp (shared across all per-streamer connections)
 const seenMessageIds = new Map<string, number>();
 
+/** Returns true if messageId has been seen within MESSAGE_TTL_MS; records it otherwise. */
 export function isDuplicate(messageId: string): boolean {
   const now = Date.now();
   for (const [id, expiry] of seenMessageIds) {
@@ -227,6 +230,7 @@ export function isDuplicate(messageId: string): boolean {
   return false;
 }
 
+/** Returns true if the ISO timestamp is older than MESSAGE_TTL_MS or unparseable. */
 export function isStale(timestamp: string): boolean {
   const ts = Date.parse(timestamp);
   return !Number.isFinite(ts) || Date.now() - ts > MESSAGE_TTL_MS;

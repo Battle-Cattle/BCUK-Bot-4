@@ -13,21 +13,24 @@ import {
 const log = createLogger('EventSub');
 
 
+/** Describes a single EventSub subscription to create. */
 export interface SubSpec { type: string; version: string; condition: Record<string, string> }
 
-// In-memory lookup keyed by Twitch broadcaster user ID
+/** In-memory streamer info keyed by broadcaster user ID. */
 export interface StreamerInfo { login: string; streamerId: number; config: EventSubConfig | null }
 const streamerMap = new Map<string, StreamerInfo>();
 
 // Tracks "login:type:token" triples that failed with 403 — skipped until bot restarts or token changes
 const authFailedSubs = new Set<string>();
 
+/** Returns true if any subscription for the given login has previously failed with a 403. */
 export function hasAuthFailedSubs(login: string): boolean {
   const prefix = `${login}:`;
   for (const key of authFailedSubs) if (key.startsWith(prefix)) return true;
   return false;
 }
 
+/** Clears all auth-failed subscription records for the given login. */
 export function clearAuthFailedSubs(login: string): void {
   const prefix = `${login}:`;
   for (const key of authFailedSubs) if (key.startsWith(prefix)) authFailedSubs.delete(key);
@@ -179,6 +182,7 @@ async function subscribe(sessionId: string, spec: SubSpec, token: string, login:
 }
 
 
+/** Routes an EventSub notification to the appropriate handler based on subscription type. */
 export function dispatchNotification(type: string, event: Record<string, unknown>, condition: Record<string, string>): void {
   const broadcasterId = condition.broadcaster_user_id ?? condition.to_broadcaster_user_id;
   if (!broadcasterId) return;
@@ -201,6 +205,7 @@ export function dispatchNotification(type: string, event: Record<string, unknown
     .catch((err) => log.error(`${type} handler error:`, err));
 }
 
+/** Handles a subscription revocation message, clearing the broadcaster's token if authorisation was revoked. */
 export function handleRevocation(sub: { type: string; status: string; condition: Record<string, string> }): void {
   log.warn(`Subscription revoked: type=${sub.type} status=${sub.status}`);
 
