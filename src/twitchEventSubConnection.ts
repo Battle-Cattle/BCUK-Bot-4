@@ -9,12 +9,14 @@ const RECONNECT_BACKOFF_MAX_MS = 30_000;
 /** How long a message ID is remembered for deduplication (ms). */
 export const MESSAGE_TTL_MS = 10 * 60 * 1000;
 
+/** Metadata fields present on every EventSub WebSocket message. */
 export interface EventSubMetadata {
   message_type: string;
   message_id: string;
   message_timestamp: string;
 }
 
+/** A single EventSub WebSocket message. */
 export interface EventSubMessage {
   metadata: EventSubMetadata;
   payload: {
@@ -48,6 +50,7 @@ export function buildReconnectUrl(reconnectUrl: string): string | null {
   return safe.href;
 }
 
+/** Manages a per-streamer EventSub WebSocket connection with reconnection and keepalive logic. */
 export class StreamerConnection {
   readonly uid: string;
   private readonly name: string;
@@ -75,11 +78,13 @@ export class StreamerConnection {
     this.onSelfStop = cb;
   }
 
+  /** Opens the WebSocket connection for this streamer. */
   start(): void {
     this.stopped = false;
     this.connect();
   }
 
+  /** Closes the connection and removes this streamer from the subscription map. */
   stop(): void {
     this.stopped = true;
     this.isReconnecting = false;
@@ -91,6 +96,7 @@ export class StreamerConnection {
     removeStreamerFromMap(this.uid);
   }
 
+  /** Updates streamer data and re-subscribes on the live session (serialised via reloadChain). */
   reload(newData: StreamerEventSubData): void {
     this.currentData = newData;
     this.reloadChain = this.reloadChain
@@ -111,6 +117,7 @@ export class StreamerConnection {
     }
   }
 
+  /** Opens a new WebSocket to the given URL (defaults to the standard EventSub URL). */
   connect(url: string = EVENTSUB_WS_URL): void {
     if (this.stopped) return;
     const socket = new WebSocket(url);

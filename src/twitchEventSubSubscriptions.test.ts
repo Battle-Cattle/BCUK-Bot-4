@@ -30,7 +30,7 @@ import {
   loadStreamersForEventSub,
   subscribeForStreamer,
 } from './twitchEventSubSubscriptions';
-import { getAllEventSubStreamers, clearStreamerToken } from './db';
+import { getAllEventSubStreamers } from './db';
 import { getValidToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
 import { getUsers } from './twitchApi';
 import { getActiveChannels } from './twitchBot';

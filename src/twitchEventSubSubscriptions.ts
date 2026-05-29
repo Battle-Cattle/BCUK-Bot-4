@@ -123,6 +123,7 @@ async function createSubscriptionsForStreamer(
   return desired;
 }
 
+/** Data bundle passed to a StreamerConnection for setting up EventSub subscriptions. */
 export interface StreamerEventSubData {
   uid: string;
   token: string | null;
