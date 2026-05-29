@@ -106,7 +106,12 @@ router.post('/settings/videos/upload', requireAuth, upload.single('video'), csrf
     const ext = req.file.mimetype === 'video/webm' ? 'webm' : 'mp4';
     const filename = `${randomUUID()}.${ext}`;
 
-    const dir = path.join(OVERLAY_FOLDER, String(streamer.id));
+    const base = path.resolve(OVERLAY_FOLDER);
+    const dir = path.resolve(base, String(streamer.id));
+    const relativeDir = path.relative(base, dir);
+    if (relativeDir.startsWith('..') || path.isAbsolute(relativeDir)) {
+      return res.redirect('/overlay/settings?error=invalid_path');
+    }
     await fs.promises.mkdir(dir, { recursive: true });
     const fullPath = path.join(dir, filename);
     await fs.promises.writeFile(fullPath, req.file.buffer);
