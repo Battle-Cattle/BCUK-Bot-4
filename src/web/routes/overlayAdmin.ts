@@ -17,6 +17,7 @@ import { OVERLAY_FOLDER, PUBLIC_URL } from '../../config';
 import { getCustomRewards, TwitchCustomReward } from '../../twitchApi';
 import { getValidToken } from '../../twitchApiEventSub';
 import { parsePositiveIntId } from './shared';
+import { safeResolve } from '../../pathUtils';
 
 const log = createLogger('OverlayAdmin');
 const router = Router();
@@ -65,15 +66,6 @@ function parseWeight(raw: string | string[] | undefined): number {
   return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
 }
 
-/** Returns the resolved upload directory for a streamer, or null if the path escapes OVERLAY_FOLDER. */
-function resolveStreamerDir(streamerId: number | string): string | null {
-  const base = path.resolve(OVERLAY_FOLDER);
-  const dir = path.resolve(base, String(streamerId));
-  const rel = path.relative(base, dir);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
-  return dir;
-}
-
 // GET /overlay/settings
 router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
   try {
@@ -115,7 +107,7 @@ router.post('/settings/videos/upload', requireAuth, upload.single('video'), csrf
     const ext = req.file.mimetype === 'video/webm' ? 'webm' : 'mp4';
     const filename = `${randomUUID()}.${ext}`;
 
-    const dir = resolveStreamerDir(streamer.id);
+    const dir = safeResolve(OVERLAY_FOLDER, String(streamer.id));
     if (!dir) return res.redirect('/overlay/settings?error=invalid_path');
     await fs.promises.mkdir(dir, { recursive: true });
     const fullPath = path.join(dir, filename);
@@ -145,8 +137,8 @@ router.post('/settings/videos/:id/delete', requireAuth, csrfProtection, async (r
 
     const filename = await deleteVideo(videoId, streamer.id);
     if (filename) {
-      const filePath = path.join(OVERLAY_FOLDER, String(streamer.id), filename);
-      await fs.promises.rm(filePath, { force: true });
+      const filePath = safeResolve(OVERLAY_FOLDER, String(streamer.id), filename);
+      if (filePath) await fs.promises.rm(filePath, { force: true });
     }
 
     res.redirect('/overlay/settings?success=video_deleted');
