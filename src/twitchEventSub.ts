@@ -62,91 +62,108 @@ function buildReconnectUrl(reconnectUrl: string): string | null {
 
 // ─── Per-streamer connection ──────────────────────────────────────────────────
 
-function createStreamerConnection(data: StreamerEventSubData) {
-  const { uid, name } = data;
-  let currentData = data;
+class StreamerConnection {
+  readonly uid: string;
+  private readonly name: string;
+  private currentData: StreamerEventSubData;
 
-  let ws: WebSocket | null = null;
-  let sessionId: string | null = null;
-  let keepaliveTimeoutSecs = 10;
-  let keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let reconnectAttempts = 0;
-  let isReconnecting = false;
-  let stopped = false;
-  let reloadChain: Promise<void> = Promise.resolve();
+  private ws: WebSocket | null = null;
+  private sessionId: string | null = null;
+  private keepaliveTimeoutSecs = 10;
+  private keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
+  private isReconnecting = false;
+  private stopped = false;
+  private reloadChain: Promise<void> = Promise.resolve();
 
-  function clearKeepaliveTimer() {
-    if (keepaliveTimer) { clearTimeout(keepaliveTimer); keepaliveTimer = null; }
+  constructor(data: StreamerEventSubData) {
+    this.uid = data.uid;
+    this.name = data.name;
+    this.currentData = data;
   }
 
-  function resetKeepaliveTimer() {
-    clearKeepaliveTimer();
-    keepaliveTimer = setTimeout(() => {
-      log.warn(`[${name}] Keepalive timeout — reconnecting`);
-      ws?.close(4000, 'keepalive timeout');
-    }, (keepaliveTimeoutSecs + 10) * 1_000);
+  start(): void {
+    this.stopped = false;
+    this.connect();
   }
 
-  function scheduleReconnect() {
-    const delay = Math.min(RECONNECT_BACKOFF_MAX_MS, 1_000 * Math.pow(2, reconnectAttempts));
-    reconnectAttempts++;
-    log.info(`[${name}] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      connect();
-    }, delay);
+  stop(): void {
+    this.stopped = true;
+    this.isReconnecting = false;
+    this.sessionId = null;
+    this.clearKeepaliveTimer();
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    this.ws?.close(1000, 'shutdown');
+    this.ws = null;
+    removeStreamerFromMap(this.uid);
   }
 
-  function handleSessionReconnect(reconnectUrl: string) {
-    const safeUrl = buildReconnectUrl(reconnectUrl);
-    if (!safeUrl) {
-      log.error(`[${name}] Invalid reconnect URL — ignoring`);
+  reload(newData: StreamerEventSubData): void {
+    this.currentData = newData;
+    this.reloadChain = this.reloadChain
+      .then(() => this.doReload())
+      .catch((err) => { log.error(`[${this.name}] EventSub reload error:`, err); });
+  }
+
+  private async doReload(): Promise<void> {
+    if (!this.ws || !this.sessionId) {
+      if (!this.stopped) { this.stopped = false; this.connect(); }
       return;
     }
-    const oldSocket = ws;
-    isReconnecting = true;
-    log.info(`[${name}] Session reconnect — connecting to new session`);
-    connect(safeUrl);
-    setTimeout(() => { oldSocket?.close(1000, 'reconnect'); }, 5_000);
+    const count = await subscribeForStreamer(this.sessionId, this.currentData);
+    if (count === 0) {
+      log.info(`[${this.name}] No subscriptions after reload — disconnecting`);
+      this.stop();
+    }
   }
 
-  function handleMessage(msg: EventSubMessage) {
+  private connect(url: string = EVENTSUB_WS_URL): void {
+    if (this.stopped) return;
+    const socket = new WebSocket(url);
+    socket.addEventListener('open', () => this.onOpen());
+    socket.addEventListener('message', (ev: MessageEvent) => this.onMessage(ev));
+    socket.addEventListener('close', (ev: CloseEvent) => this.onClose(ev, socket));
+    socket.addEventListener('error', () => { log.error(`[${this.name}] WebSocket error`); });
+    this.ws = socket;
+  }
+
+  private onOpen(): void {
+    log.info(`[${this.name}] WebSocket connected`);
+    this.reconnectAttempts = 0;
+    this.resetKeepaliveTimer();
+  }
+
+  private onMessage(ev: MessageEvent): void {
+    try {
+      const msg = JSON.parse(ev.data as string) as EventSubMessage;
+      this.handleMessage(msg);
+    } catch (err) {
+      log.error(`[${this.name}] Message parse error:`, err);
+    }
+  }
+
+  private onClose(ev: CloseEvent, socket: WebSocket): void {
+    if (this.ws !== socket) return; // old socket closed during session migration — ignore
+    log.warn(`[${this.name}] WebSocket closed: ${ev.code} ${ev.reason}`);
+    this.clearKeepaliveTimer();
+    if (!this.stopped) {
+      this.isReconnecting = false;
+      this.scheduleReconnect();
+    }
+  }
+
+  private handleMessage(msg: EventSubMessage): void {
     const { message_type, message_id, message_timestamp } = msg.metadata;
-
-    if (isStale(message_timestamp)) {
-      log.warn(`[${name}] Stale message (${message_type}) — ignoring`);
-      return;
-    }
-    if (isDuplicate(message_id)) {
-      log.warn(`[${name}] Duplicate message (${message_type}) — ignoring`);
-      return;
-    }
-
-    resetKeepaliveTimer();
+    if (isStale(message_timestamp)) { log.warn(`[${this.name}] Stale message (${message_type}) — ignoring`); return; }
+    if (isDuplicate(message_id)) { log.warn(`[${this.name}] Duplicate message (${message_type}) — ignoring`); return; }
+    this.resetKeepaliveTimer();
 
     if (message_type === 'session_welcome') {
-      const session = msg.payload.session!;
-      sessionId = session.id;
-      keepaliveTimeoutSecs = session.keepalive_timeout_seconds;
-      resetKeepaliveTimer();
-      if (isReconnecting) {
-        isReconnecting = false;
-        log.info(`[${name}] Reconnected — session ${sessionId}`);
-      } else {
-        log.info(`[${name}] Session established: ${sessionId}`);
-        subscribeForStreamer(sessionId, currentData)
-          .then((count) => {
-            if (count === 0) {
-              log.info(`[${name}] No subscriptions — disconnecting`);
-              stop();
-            }
-          })
-          .catch((err) => log.error(`[${name}] Subscribe error:`, err));
-      }
+      this.onSessionWelcome(msg);
     } else if (message_type === 'session_reconnect') {
       const reconnectUrl = msg.payload.session?.reconnect_url;
-      if (reconnectUrl) handleSessionReconnect(reconnectUrl);
+      if (reconnectUrl) this.handleSessionReconnect(reconnectUrl);
     } else if (message_type === 'notification') {
       const sub = msg.payload.subscription;
       const event = msg.payload.event;
@@ -158,85 +175,54 @@ function createStreamerConnection(data: StreamerEventSubData) {
     // session_keepalive: timer already reset above
   }
 
-  function connect(url: string = EVENTSUB_WS_URL) {
-    if (stopped) return;
-
-    const socket = new WebSocket(url);
-
-    socket.addEventListener('open', () => {
-      log.info(`[${name}] WebSocket connected`);
-      reconnectAttempts = 0;
-      resetKeepaliveTimer();
-    });
-
-    socket.addEventListener('message', (ev: MessageEvent) => {
-      try {
-        const msg = JSON.parse(ev.data as string) as EventSubMessage;
-        handleMessage(msg);
-      } catch (err) {
-        log.error(`[${name}] Message parse error:`, err);
-      }
-    });
-
-    socket.addEventListener('close', (ev: CloseEvent) => {
-      if (ws !== socket) return; // old socket closed during session migration — ignore
-      log.warn(`[${name}] WebSocket closed: ${ev.code} ${ev.reason}`);
-      clearKeepaliveTimer();
-      if (!stopped) {
-        isReconnecting = false;
-        scheduleReconnect();
-      }
-    });
-
-    socket.addEventListener('error', () => {
-      log.error(`[${name}] WebSocket error`);
-    });
-
-    ws = socket;
+  private onSessionWelcome(msg: EventSubMessage): void {
+    const session = msg.payload.session!;
+    this.sessionId = session.id;
+    this.keepaliveTimeoutSecs = session.keepalive_timeout_seconds;
+    this.resetKeepaliveTimer();
+    if (this.isReconnecting) {
+      this.isReconnecting = false;
+      log.info(`[${this.name}] Reconnected — session ${this.sessionId}`);
+      return;
+    }
+    log.info(`[${this.name}] Session established: ${this.sessionId}`);
+    subscribeForStreamer(this.sessionId, this.currentData)
+      .then((count) => { if (count === 0) { log.info(`[${this.name}] No subscriptions — disconnecting`); this.stop(); } })
+      .catch((err) => log.error(`[${this.name}] Subscribe error:`, err));
   }
 
-  function stop() {
-    stopped = true;
-    isReconnecting = false;
-    sessionId = null;
-    clearKeepaliveTimer();
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    ws?.close(1000, 'shutdown');
-    ws = null;
-    removeStreamerFromMap(uid);
+  private handleSessionReconnect(reconnectUrl: string): void {
+    const safeUrl = buildReconnectUrl(reconnectUrl);
+    if (!safeUrl) { log.error(`[${this.name}] Invalid reconnect URL — ignoring`); return; }
+    const oldSocket = this.ws;
+    this.isReconnecting = true;
+    log.info(`[${this.name}] Session reconnect — connecting to new session`);
+    this.connect(safeUrl);
+    setTimeout(() => { oldSocket?.close(1000, 'reconnect'); }, 5_000);
   }
 
-  function reload(newData: StreamerEventSubData) {
-    currentData = newData;
-    reloadChain = reloadChain
-      .then(async () => {
-        if (!ws || !sessionId) {
-          if (!stopped) {
-            stopped = false;
-            connect();
-          }
-          return;
-        }
-        const count = await subscribeForStreamer(sessionId, currentData);
-        if (count === 0) {
-          log.info(`[${name}] No subscriptions after reload — disconnecting`);
-          stop();
-        }
-      })
-      .catch((err) => { log.error(`[${name}] EventSub reload error:`, err); });
+  private scheduleReconnect(): void {
+    const delay = Math.min(RECONNECT_BACKOFF_MAX_MS, 1_000 * Math.pow(2, this.reconnectAttempts));
+    this.reconnectAttempts++;
+    log.info(`[${this.name}] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.connect(); }, delay);
   }
 
-  function start() {
-    stopped = false;
-    connect();
+  private clearKeepaliveTimer(): void {
+    if (this.keepaliveTimer) { clearTimeout(this.keepaliveTimer); this.keepaliveTimer = null; }
   }
 
-  return { uid, start, stop, reload, isStopped: () => stopped };
+  private resetKeepaliveTimer(): void {
+    this.clearKeepaliveTimer();
+    this.keepaliveTimer = setTimeout(() => {
+      log.warn(`[${this.name}] Keepalive timeout — reconnecting`);
+      this.ws?.close(4000, 'keepalive timeout');
+    }, (this.keepaliveTimeoutSecs + 10) * 1_000);
+  }
 }
 
 // ─── Global connection map ────────────────────────────────────────────────────
 
-type StreamerConnection = ReturnType<typeof createStreamerConnection>;
 const connections = new Map<string, StreamerConnection>();
 let globalStopped = false;
 
@@ -252,7 +238,7 @@ export function startEventSub(): void {
       const streamers = await loadStreamersForEventSub();
       for (const data of streamers) {
         if (!connections.has(data.uid)) {
-          const conn = createStreamerConnection(data);
+          const conn = new StreamerConnection(data);
           connections.set(data.uid, conn);
           conn.start();
         }
@@ -276,10 +262,7 @@ export function reloadEventSubSubscriptions(): void {
 
       // Stop and remove connections for streamers no longer present
       for (const [uid, conn] of connections) {
-        if (!newUids.has(uid)) {
-          conn.stop();
-          connections.delete(uid);
-        }
+        if (!newUids.has(uid)) { conn.stop(); connections.delete(uid); }
       }
 
       // Reload existing or start new connections
@@ -288,7 +271,7 @@ export function reloadEventSubSubscriptions(): void {
         if (existing) {
           existing.reload(data);
         } else {
-          const conn = createStreamerConnection(data);
+          const conn = new StreamerConnection(data);
           connections.set(data.uid, conn);
           conn.start();
         }
