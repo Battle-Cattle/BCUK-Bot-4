@@ -106,6 +106,7 @@ describe('POST /streams/streamers/add — array and missing input handling', () 
       .send('discord_id=100000000000000001&group_id=1&group_id=2');
     expect(res.status).toBe(302);
     expect(res.headers.location).not.toContain('error');
+    expect(vi.mocked(addStreamer)).toHaveBeenCalledWith('100000000000000001', 1);
   });
 
   it('redirects with missing_fields when discord_id is absent', async () => {
