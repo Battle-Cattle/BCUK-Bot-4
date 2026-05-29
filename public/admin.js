@@ -54,6 +54,28 @@ document.querySelectorAll('form[action="/admin/users/add"]').forEach(function (f
   syncTwitchNameControls(form);
 });
 
+function parseRefreshStatusResponse(refreshBanner, response) {
+  var contentType = response.headers.get('content-type') || '';
+  if (response.status === 401 || response.status === 403) {
+    window.location.reload();
+    return null;
+  }
+  // Treat HTML/error responses as terminal so expired sessions do not loop forever.
+  if (!response.ok || contentType.indexOf('application/json') === -1) {
+    refreshBanner.textContent = 'Refresh status unavailable. Reload the page to check progress.';
+    return null;
+  }
+  return response.json();
+}
+
+function applyRefreshState(refreshBanner, state) {
+  if (state && state.outcome === 'running') {
+    scheduleRefreshStatusPolling(0);
+  } else if (state) {
+    window.location.reload();
+  }
+}
+
 function scheduleRefreshStatusPolling(retryCount) {
   var refreshBanner = document.querySelector('[data-refresh-running="true"]');
   if (!refreshBanner) return;
@@ -63,30 +85,15 @@ function scheduleRefreshStatusPolling(retryCount) {
     window.fetch('/admin/users/refresh-status', {
       headers: { Accept: 'application/json' }
     }).then(function (response) {
-      var contentType = response.headers.get('content-type') || '';
-      if (response.status === 401 || response.status === 403) {
-        window.location.reload();
-        return null;
-      }
-      // Treat HTML/error responses as terminal so expired sessions do not loop forever.
-      if (!response.ok || contentType.indexOf('application/json') === -1) {
-        refreshBanner.textContent = 'Refresh status unavailable. Reload the page to check progress.';
-        return null;
-      }
-      return response.json();
+      return parseRefreshStatusResponse(refreshBanner, response);
     }).then(function (state) {
-      if (!state) return;
-      if (state.outcome === 'running') {
-        scheduleRefreshStatusPolling(0);
-        return;
-      }
-      window.location.reload();
+      applyRefreshState(refreshBanner, state);
     }).catch(function () {
       if (attempt >= 4) {
         refreshBanner.textContent = 'Refresh status unavailable. Reload the page to check progress.';
-        return;
+      } else {
+        scheduleRefreshStatusPolling(attempt + 1);
       }
-      scheduleRefreshStatusPolling(attempt + 1);
     });
   }, 2000);
 }

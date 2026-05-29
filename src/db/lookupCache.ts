@@ -69,10 +69,9 @@ export function createManagedLookupCache<TCache extends RefreshingLookupCache>(
     if (!cache) {
       cache = options.createEmptyCache();
       log.error(`Background ${options.cacheName} refresh failed; serving an empty cache and retrying after ${retryDelayMs}ms.`, err);
-      return;
+    } else {
+      log.error(`Background ${options.cacheName} refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
     }
-
-    log.error(`Background ${options.cacheName} refresh failed; serving stale cache and retrying after ${retryDelayMs}ms.`, err);
   }
 
   function clearInFlightIfCurrent(promiseForFinally: Promise<TCache>): void {
@@ -82,43 +81,37 @@ export function createManagedLookupCache<TCache extends RefreshingLookupCache>(
   }
 
   function applyRefreshSuccess(requestVersion: number, rebuiltCache: TCache): void {
-    if (requestVersion !== version) {
-      return;
+    if (requestVersion === version) {
+      cache = rebuiltCache;
+      resetRefreshFailureState();
     }
-
-    cache = rebuiltCache;
-    resetRefreshFailureState();
   }
 
   function applyRefreshError(requestVersion: number, err: unknown): void {
-    if (requestVersion !== version) {
-      return;
+    if (requestVersion === version) {
+      refreshFailureCount += 1;
+      const retryDelayMs = getRefreshBackoffMs();
+      applyRefreshFailure(retryDelayMs);
+      handleRefreshFailureFallback(err, retryDelayMs);
     }
-
-    refreshFailureCount += 1;
-    const retryDelayMs = getRefreshBackoffMs();
-    applyRefreshFailure(retryDelayMs);
-    handleRefreshFailureFallback(err, retryDelayMs);
   }
 
   function startRefresh(now: number): Promise<TCache> | null {
-    if (!canStartRefresh(now)) {
-      return inFlightPromise;
+    if (canStartRefresh(now)) {
+      const requestVersion = version;
+      inFlightPromise = (async () => {
+        const rebuiltCache = await options.loadCache();
+        applyRefreshSuccess(requestVersion, rebuiltCache);
+        return rebuiltCache;
+      })();
+
+      const promiseForFinally = inFlightPromise;
+      void promiseForFinally
+        .catch((err) => applyRefreshError(requestVersion, err))
+        .finally(() => {
+          clearInFlightIfCurrent(promiseForFinally);
+        });
     }
-
-    const requestVersion = version;
-    inFlightPromise = (async () => {
-      const rebuiltCache = await options.loadCache();
-      applyRefreshSuccess(requestVersion, rebuiltCache);
-      return rebuiltCache;
-    })();
-
-    const promiseForFinally = inFlightPromise;
-    void promiseForFinally
-      .catch((err) => applyRefreshError(requestVersion, err))
-      .finally(() => {
-        clearInFlightIfCurrent(promiseForFinally);
-      });
 
     return inFlightPromise;
   }
