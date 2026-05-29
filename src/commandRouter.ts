@@ -59,7 +59,14 @@ export async function handleCommand(rawMessage: string, source: 'twitch' | 'disc
 
     // Pick a file (weighted random)
     const filename = pickWeightedRandom(files);
-    const fullPath = path.join(SFX_FOLDER, filename);
+    const base = path.resolve(SFX_FOLDER);
+    const target = path.resolve(base, filename);
+    const relative = path.relative(base, target);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      log.error(`[${source}] Invalid file path for trigger '${command}'`);
+      return;
+    }
+    const fullPath = target;
 
     log.info(`[${source}] Playing '${filename}' for trigger '${command}'`);
 
