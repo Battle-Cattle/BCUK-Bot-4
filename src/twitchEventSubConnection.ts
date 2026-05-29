@@ -50,6 +50,7 @@ export class StreamerConnection {
   readonly uid: string;
   private readonly name: string;
   private currentData: StreamerEventSubData;
+  private onSelfStop: ((uid: string) => void) | null = null;
 
   private ws: WebSocket | null = null;
   private sessionId: string | null = null;
@@ -65,6 +66,11 @@ export class StreamerConnection {
     this.uid = data.uid;
     this.name = data.name;
     this.currentData = data;
+  }
+
+  /** Register a callback invoked when this connection stops itself due to zero subscriptions. */
+  setSelfStopCallback(cb: (uid: string) => void): void {
+    this.onSelfStop = cb;
   }
 
   start(): void {
@@ -99,6 +105,7 @@ export class StreamerConnection {
     if (count === 0) {
       log.info(`[${this.name}] No subscriptions after reload — disconnecting`);
       this.stop();
+      this.onSelfStop?.(this.uid);
     }
   }
 
@@ -131,6 +138,8 @@ export class StreamerConnection {
     if (this.ws !== socket) return; // old socket closed during session migration — ignore
     log.warn(`[${this.name}] WebSocket closed: ${ev.code} ${ev.reason}`);
     this.clearKeepaliveTimer();
+    this.ws = null;
+    this.sessionId = null;
     if (!this.stopped) {
       this.isReconnecting = false;
       this.scheduleReconnect();
@@ -171,7 +180,7 @@ export class StreamerConnection {
     }
     log.info(`[${this.name}] Session established: ${this.sessionId}`);
     subscribeForStreamer(this.sessionId, this.currentData)
-      .then((count) => { if (count === 0) { log.info(`[${this.name}] No subscriptions — disconnecting`); this.stop(); } })
+      .then((count) => { if (count === 0) { log.info(`[${this.name}] No subscriptions — disconnecting`); this.stop(); this.onSelfStop?.(this.uid); } })
       .catch((err) => log.error(`[${this.name}] Subscribe error:`, err));
   }
 

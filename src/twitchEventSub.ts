@@ -13,9 +13,11 @@ export function startEventSub(): void {
   topReloadChain = topReloadChain
     .then(async () => {
       const streamers = await loadStreamersForEventSub();
+      if (globalStopped) return;
       for (const data of streamers) {
         if (!connections.has(data.uid)) {
           const conn = new StreamerConnection(data);
+          conn.setSelfStopCallback((uid) => { connections.delete(uid); });
           connections.set(data.uid, conn);
           conn.start();
         }
@@ -39,6 +41,7 @@ export function reloadEventSubSubscriptions(): void {
 
 async function doReload(): Promise<void> {
   const streamers = await loadStreamersForEventSub();
+  if (globalStopped) return;
   const newUids = new Set(streamers.map((s: StreamerEventSubData) => s.uid));
 
   for (const [uid, conn] of connections) {
