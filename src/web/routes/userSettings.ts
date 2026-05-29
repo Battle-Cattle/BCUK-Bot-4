@@ -52,11 +52,11 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       getStreamerByDiscordId(discordId),
     ]);
 
-    const errorKey = KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null;
+    const errorKey = filterQueryParam(req.query.error, KNOWN_ERRORS);
     const expectedAccount = (() => {
       if (errorKey !== 'eventsub_wrong_account') return undefined;
-      const expected = req.query.expected as string | undefined;
-      return expected && streamer?.twitch_name?.toLowerCase() === expected.toLowerCase() ? streamer.twitch_name : undefined;
+      const expected = req.query.expected;
+      return typeof expected === 'string' && streamer?.twitch_name?.toLowerCase() === expected.toLowerCase() ? streamer.twitch_name : undefined;
     })();
 
     // Strip decrypted OAuth tokens — the template only needs a boolean.
