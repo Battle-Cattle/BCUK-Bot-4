@@ -176,8 +176,10 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
 router.post('/streams/streamers/add', requireManager, csrfProtection, async (req, res) => {
   const { discord_id, group_id } = req.body as { discord_id?: string | string[]; group_id?: string | string[] };
   const discordId = typeof discord_id === 'string' ? discord_id.trim() : null;
-  if (!discordId || !group_id) return res.redirect('/admin/streams?error=missing_fields');
-  const parsedGroupId = parsePositiveIntId(group_id);
+  const rawGroupId = Array.isArray(group_id) ? group_id[0] : group_id;
+  const groupId = typeof rawGroupId === 'string' ? rawGroupId.trim() : null;
+  if (!discordId || !groupId) return res.redirect('/admin/streams?error=missing_fields');
+  const parsedGroupId = parsePositiveIntId(groupId);
   if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
