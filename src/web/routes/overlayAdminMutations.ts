@@ -11,7 +11,7 @@ import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import {
   addVideo, deleteVideo,
-  getRewardsForStreamer, upsertReward, setRewardVideos, deleteReward,
+  upsertReward, setRewardVideos, deleteReward,
 } from '../../db';
 import { OVERLAY_FOLDER } from '../../config';
 import { parsePositiveIntId } from './shared';
