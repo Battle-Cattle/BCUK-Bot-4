@@ -6,6 +6,7 @@ import { isPlaying } from './audioPlayer';
 import { playFile, VoiceNotConnectedError } from './sfxPlayer';
 import { SFX_FOLDER, GLOBAL_COOLDOWN_MS } from './config';
 import { setVoicePlaying } from './statusStore';
+import { safeResolve } from './pathUtils';
 
 const log = createLogger('CommandRouter');
 
@@ -23,10 +24,8 @@ async function lookupAndPlay(command: string, source: 'twitch' | 'discord' | 'ti
   }
 
   const filename = pickWeightedRandom(files);
-  const base = path.resolve(SFX_FOLDER);
-  const target = path.resolve(base, filename);
-  const relative = path.relative(base, target);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+  const fullPath = safeResolve(SFX_FOLDER, filename);
+  if (!fullPath) {
     log.error(`[${source}] Invalid file path for trigger '${command}'`);
     return;
   }
@@ -34,14 +33,14 @@ async function lookupAndPlay(command: string, source: 'twitch' | 'discord' | 'ti
   log.info(`[${source}] Playing '${filename}' for trigger '${command}'`);
 
   try {
-    playFile(target);
+    playFile(fullPath);
     lastPlayedAt = Date.now();
     setVoicePlaying(filename, command, source);
   } catch (err) {
     if (err instanceof VoiceNotConnectedError) {
       log.info(`[${source}] Skipping '${command}' — not connected to voice channel`);
     } else {
-      log.error(`[${source}] Failed to play ${target}:`, err);
+      log.error(`[${source}] Failed to play ${fullPath}:`, err);
     }
   }
 }
