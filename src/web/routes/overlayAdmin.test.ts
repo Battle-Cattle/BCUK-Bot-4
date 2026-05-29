@@ -3,12 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   getVideosForStreamer: vi.fn(),
-  addVideo: vi.fn(),
-  deleteVideo: vi.fn(),
   getRewardsForStreamer: vi.fn(),
-  upsertReward: vi.fn(),
-  setRewardVideos: vi.fn(),
-  deleteReward: vi.fn(),
 }));
 
 vi.mock('../csrf', () => ({
@@ -31,7 +26,6 @@ vi.mock('../../twitchApiEventSub', () => ({
 }));
 
 vi.mock('../../config', () => ({
-  OVERLAY_FOLDER: '/tmp/overlay',
   PUBLIC_URL: 'http://localhost:3000',
 }));
 
@@ -39,11 +33,9 @@ vi.mock('../../logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
-vi.mock('multer', () => {
-  const instance = { single: vi.fn().mockReturnValue((_r: any, _s: any, n: any) => n()) };
-  const m: any = vi.fn().mockReturnValue(instance);
-  m.memoryStorage = vi.fn().mockReturnValue({});
-  return { default: m };
+vi.mock('./overlayAdminMutations', async () => {
+  const { Router } = await import('express');
+  return { router: Router() };
 });
 
 import express from 'express';
