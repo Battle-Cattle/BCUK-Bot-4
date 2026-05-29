@@ -12,6 +12,40 @@ const log = createLogger('CommandRouter');
 let lastPlayedAt = 0;
 let inFlight = false;
 
+async function lookupAndPlay(command: string, source: 'twitch' | 'discord' | 'tiktok'): Promise<void> {
+  const trigger = await findTrigger(command);
+  if (!trigger) return;
+
+  const files = await findSoundFiles(trigger.id);
+  if (files.length === 0) {
+    log.warn(`[${source}] Trigger '${command}' has no sound files in DB`);
+    return;
+  }
+
+  const filename = pickWeightedRandom(files);
+  const base = path.resolve(SFX_FOLDER);
+  const target = path.resolve(base, filename);
+  const relative = path.relative(base, target);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    log.error(`[${source}] Invalid file path for trigger '${command}'`);
+    return;
+  }
+
+  log.info(`[${source}] Playing '${filename}' for trigger '${command}'`);
+
+  try {
+    playFile(target);
+    lastPlayedAt = Date.now();
+    setVoicePlaying(filename, command, source);
+  } catch (err) {
+    if (err instanceof VoiceNotConnectedError) {
+      log.info(`[${source}] Skipping '${command}' — not connected to voice channel`);
+    } else {
+      log.error(`[${source}] Failed to play ${target}:`, err);
+    }
+  }
+}
+
 /**
  * Handle a raw chat message from either Twitch or Discord.
  * Performs all checks (prefix, cooldown, playing state, DB lookup) before playing.
@@ -43,44 +77,7 @@ export async function handleCommand(rawMessage: string, source: 'twitch' | 'disc
   // Claim the slot before any await so concurrent message handlers see the flag.
   inFlight = true;
   try {
-    // Look up trigger in DB
-    const trigger = await findTrigger(command);
-    if (!trigger) {
-      // Not a recognised SFX command — silently ignore
-      return;
-    }
-
-    // Find associated sound files
-    const files = await findSoundFiles(trigger.id);
-    if (files.length === 0) {
-      log.warn(`[${source}] Trigger '${command}' has no sound files in DB`);
-      return;
-    }
-
-    // Pick a file (weighted random)
-    const filename = pickWeightedRandom(files);
-    const base = path.resolve(SFX_FOLDER);
-    const target = path.resolve(base, filename);
-    const relative = path.relative(base, target);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
-      log.error(`[${source}] Invalid file path for trigger '${command}'`);
-      return;
-    }
-    const fullPath = target;
-
-    log.info(`[${source}] Playing '${filename}' for trigger '${command}'`);
-
-    try {
-      playFile(fullPath);
-      lastPlayedAt = Date.now();
-      setVoicePlaying(filename, command, source);
-    } catch (err) {
-      if (err instanceof VoiceNotConnectedError) {
-        log.info(`[${source}] Skipping '${command}' — not connected to voice channel`);
-      } else {
-        log.error(`[${source}] Failed to play ${fullPath}:`, err);
-      }
-    }
+    await lookupAndPlay(command, source);
   } finally {
     inFlight = false;
   }
