@@ -79,7 +79,7 @@ function buildApp(sessionUser: SessionUser = ADMIN) {
   app.use(express.urlencoded({ extended: false }));
   app.use((req: any, res: any, next: any) => {
     req.session = { user: sessionUser };
-    res.render = (view: string) => res.send(`rendered:${view}`);
+    res.render = (view: string, locals?: any) => res.json({ view, ...locals });
     next();
   });
   app.use(router);
@@ -107,17 +107,19 @@ describe('GET /users', () => {
   it('renders the admin view on success', async () => {
     const res = await supertest(buildApp()).get('/users');
     expect(res.status).toBe(200);
-    expect(res.text).toBe('rendered:admin');
+    expect(res.body.view).toBe('admin');
   });
 
-  it('accepts a known error query param without crashing', async () => {
+  it('passes a known error query param to the template', async () => {
     const res = await supertest(buildApp()).get('/users?error=db_busy');
     expect(res.status).toBe(200);
+    expect(res.body.error).toBe('db_busy');
   });
 
-  it('ignores unknown error query params', async () => {
+  it('passes null to the template for an unknown error query param', async () => {
     const res = await supertest(buildApp()).get('/users?error=made_up_error');
     expect(res.status).toBe(200);
+    expect(res.body.error).toBeNull();
   });
 
   it('returns 500 when getAllUsers throws', async () => {
