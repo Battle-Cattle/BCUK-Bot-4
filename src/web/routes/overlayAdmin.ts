@@ -21,6 +21,14 @@ import { parsePositiveIntId } from './shared';
 const log = createLogger('OverlayAdmin');
 const router = Router();
 
+const KNOWN_ERRORS = new Set([
+  'not_a_streamer', 'invalid_file', 'upload_failed', 'delete_failed',
+  'invalid_reward_id', 'no_videos_selected', 'save_failed', 'invalid_id',
+]);
+const KNOWN_SUCCESSES = new Set([
+  'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted',
+]);
+
 const MAX_FILE_BYTES = parseInt(process.env.OVERLAY_MAX_FILE_MB ?? '100', 10) * 1024 * 1024;
 
 const upload = multer({
@@ -85,8 +93,8 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       rewards,
       twitchRewards,
       baseUrl: PUBLIC_URL,
-      error: req.query.error as string | undefined ?? null,
-      success: req.query.success as string | undefined ?? null,
+      error:   KNOWN_ERRORS.has(req.query.error as string)      ? (req.query.error   as string) : null,
+      success: KNOWN_SUCCESSES.has(req.query.success as string) ? (req.query.success as string) : null,
     });
   } catch (err) {
     log.error('Overlay settings page error:', err);

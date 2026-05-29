@@ -25,6 +25,7 @@ const KNOWN_ERRORS = new Set([
   'eventsub_wrong_account',
   'invalid_id',
 ]);
+const KNOWN_SUCCESSES = new Set(['twitch_connected']);
 
 const ERROR_MESSAGES: Record<string, string> = {
   no_streamer_record:            'You are not configured as a monitored streamer.',
@@ -55,7 +56,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     const expectedAccount = (() => {
       if (errorKey !== 'eventsub_wrong_account') return undefined;
       const expected = req.query.expected as string | undefined;
-      return expected && streamer?.twitch_name?.toLowerCase() === expected.toLowerCase() ? expected : undefined;
+      return expected && streamer?.twitch_name?.toLowerCase() === expected.toLowerCase() ? streamer.twitch_name : undefined;
     })();
 
     // Strip decrypted OAuth tokens — the template only needs a boolean.
@@ -74,7 +75,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       needsReconnect,
       csrfToken: req.csrfToken(),
       error: errorKey,
-      success: req.query.success as string | undefined,
+      success: KNOWN_SUCCESSES.has(req.query.success as string) ? (req.query.success as string) : null,
       successExpectedAccount: expectedAccount,
       getFriendlyError,
     });

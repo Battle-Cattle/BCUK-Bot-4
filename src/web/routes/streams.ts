@@ -32,6 +32,7 @@ const KNOWN_ERRORS = new Set([
   'add_streamer_failed', 'remove_streamer_failed',
   'eventsub_disconnect_failed',
 ]);
+const KNOWN_SUCCESSES = new Set<string>([]);
 
 export const ERROR_MESSAGES: Record<string, string> = {
   missing_fields:             'All required fields must be filled in.',
@@ -78,8 +79,8 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
       eventSubById,
       eligibleUsers,
       csrfToken: req.csrfToken(),
-      error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
-      success: req.query.success as string | undefined,
+      error:   KNOWN_ERRORS.has(req.query.error as string)      ? (req.query.error   as string) : null,
+      success: KNOWN_SUCCESSES.has(req.query.success as string) ? (req.query.success as string) : null,
       getFriendlyError,
     });
   } catch (err) {
