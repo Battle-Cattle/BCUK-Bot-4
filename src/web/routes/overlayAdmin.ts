@@ -16,7 +16,7 @@ import {
 import { OVERLAY_FOLDER, PUBLIC_URL } from '../../config';
 import { getCustomRewards, TwitchCustomReward } from '../../twitchApi';
 import { getValidToken } from '../../twitchApiEventSub';
-import { parsePositiveIntId } from './shared';
+import { parsePositiveIntId, filterQueryParam } from './shared';
 
 const log = createLogger('OverlayAdmin');
 const router = Router();
@@ -93,8 +93,8 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       rewards,
       twitchRewards,
       baseUrl: PUBLIC_URL,
-      error:   KNOWN_ERRORS.has(req.query.error as string)      ? (req.query.error   as string) : null,
-      success: KNOWN_SUCCESSES.has(req.query.success as string) ? (req.query.success as string) : null,
+      error:   filterQueryParam(req.query.error,   KNOWN_ERRORS),
+      success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),
     });
   } catch (err) {
     log.error('Overlay settings page error:', err);

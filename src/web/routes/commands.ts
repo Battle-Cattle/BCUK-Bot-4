@@ -8,7 +8,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { renderError } from './shared';
+import { renderError, filterQueryParam } from './shared';
 import commandMutationsRouter from './commandMutations';
 import commandAssignmentsRouter from './commandAssignments';
 
@@ -54,7 +54,7 @@ router.get('/commands', requireAuth, csrfProtection, async (req, res) => {
       commands: commandsForView,
       assignableUsers,
       csrfToken: req.csrfToken(),
-      error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
+      error: filterQueryParam(req.query.error, KNOWN_ERRORS),
     });
   } catch (err) {
     log.error('Commands page error:', err);

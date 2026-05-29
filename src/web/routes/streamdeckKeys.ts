@@ -12,7 +12,7 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
 import { WEB_PORT } from '../../config';
-import { normalizeDiscordId, renderError } from './shared';
+import { normalizeDiscordId, renderError, filterQueryParam } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -29,7 +29,7 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
       csrfToken: req.csrfToken(),
       keyRow,
       newKey: null,
-      error: USER_KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
+      error: filterQueryParam(req.query.error, USER_KNOWN_ERRORS),
       webPort: WEB_PORT,
     });
   } catch (err) {
@@ -81,7 +81,7 @@ router.get('/admin/streamdeck-keys', requireAdmin, csrfProtection, async (req, r
       csrfToken: req.csrfToken(),
       pending,
       all,
-      error: ADMIN_KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
+      error: filterQueryParam(req.query.error, ADMIN_KNOWN_ERRORS),
     });
   } catch (err) {
     log.error('Streamdeck admin keys error:', err);

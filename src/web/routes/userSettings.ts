@@ -4,7 +4,7 @@ import { randomBytes } from 'crypto';
 import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, EventSubConfig } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { trimField, renderError } from './shared';
+import { trimField, renderError, filterQueryParam } from './shared';
 import { reloadEventSubSubscriptions } from '../../twitchEventSub';
 import { hasAuthFailedSubs } from '../../twitchEventSubSubscriptions';
 import { TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, EVENTSUB_TOKEN_SECRET } from '../../config';
@@ -75,7 +75,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       needsReconnect,
       csrfToken: req.csrfToken(),
       error: errorKey,
-      success: KNOWN_SUCCESSES.has(req.query.success as string) ? (req.query.success as string) : null,
+      success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),
       successExpectedAccount: expectedAccount,
       getFriendlyError,
     });

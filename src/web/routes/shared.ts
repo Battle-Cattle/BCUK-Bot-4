@@ -39,3 +39,7 @@ export function renderError(
 ): void {
   res.status(status).render('error', { message, user: sessionUser ?? null, csrfToken: '' });
 }
+
+export function filterQueryParam(value: unknown, allowed: ReadonlySet<string>): string | null {
+  return typeof value === 'string' && allowed.has(value) ? value : null;
+}

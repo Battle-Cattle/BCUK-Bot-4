@@ -17,7 +17,7 @@ import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { restartTwitchMonitor, getLiveStates } from '../../twitchMonitor';
 import { AccessLevel } from '../../db';
-import { parsePositiveIntId } from './shared';
+import { parsePositiveIntId, filterQueryParam } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -79,8 +79,8 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
       eventSubById,
       eligibleUsers,
       csrfToken: req.csrfToken(),
-      error:   KNOWN_ERRORS.has(req.query.error as string)      ? (req.query.error   as string) : null,
-      success: KNOWN_SUCCESSES.has(req.query.success as string) ? (req.query.success as string) : null,
+      error:   filterQueryParam(req.query.error,   KNOWN_ERRORS),
+      success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),
       getFriendlyError,
     });
   } catch (err) {
