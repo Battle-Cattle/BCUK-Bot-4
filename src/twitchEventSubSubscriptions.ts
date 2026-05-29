@@ -114,32 +114,43 @@ async function createSubscriptionsForStreamer(
   return desired;
 }
 
-export async function subscribeAll(sid: string): Promise<number> {
+export interface StreamerEventSubData {
+  uid: string;
+  token: string | null;
+  name: string;
+  config: EventSubConfig | null;
+  streamerId: number;
+}
+
+/** Fetches all streamers from the DB, resolves their broadcaster IDs and valid tokens. */
+export async function loadStreamersForEventSub(): Promise<StreamerEventSubData[]> {
   const streamers = await getAllEventSubStreamers();
-
-  // Build into a temporary map so dispatchNotification/handleRevocation see a
-  // consistent snapshot throughout the async loop, not an empty map mid-reload.
-  const nextMap = new Map<string, StreamerInfo>();
-  let totalSubscriptions = 0;
-
+  const result: StreamerEventSubData[] = [];
   for (const streamer of streamers) {
     const token = await getValidToken(streamer);
     const config = streamer.config;
     const uid = await resolveBroadcasterId(streamer, config);
     if (!uid) continue;
-
-    nextMap.set(uid, { login: streamer.twitch_name ?? '', streamerId: streamer.id, config });
-
-    // Create desired subscriptions first so there is never a gap where zero are active
-    const desired = await createSubscriptionsForStreamer(sid, uid, token, config, streamer.twitch_name ?? '');
-    totalSubscriptions += desired.size;
-    await deleteStaleSubscriptions(uid, desired, token);
+    result.push({ uid, token, name: streamer.twitch_name ?? '', config, streamerId: streamer.id });
   }
+  return result;
+}
 
-  // Atomic swap — old map stays readable until all subscriptions are ready
-  streamerMap.clear();
-  for (const [uid, info] of nextMap) streamerMap.set(uid, info);
-  return totalSubscriptions;
+/** Creates all subscriptions for one streamer on their dedicated session, updates streamerMap,
+ *  and cleans up stale subscriptions. Returns the count of desired subscriptions. */
+export async function subscribeForStreamer(
+  sessionId: string, data: StreamerEventSubData,
+): Promise<number> {
+  const { uid, token, name, config, streamerId } = data;
+  streamerMap.set(uid, { login: name, streamerId, config });
+  const desired = await createSubscriptionsForStreamer(sessionId, uid, token, config, name);
+  await deleteStaleSubscriptions(uid, desired, token);
+  return desired.size;
+}
+
+/** Removes a streamer from the in-memory map (called when their connection is stopped). */
+export function removeStreamerFromMap(uid: string): void {
+  streamerMap.delete(uid);
 }
 
 async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<void> {
