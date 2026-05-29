@@ -44,18 +44,6 @@ export function createManagedLookupCache<TCache extends RefreshingLookupCache>(
   let refreshAllowedAt = 0;
   let refreshFailureCount = 0;
 
-  function getRefreshBackoffMs(): number {
-    const backoffMultiplier = 2 ** Math.max(0, refreshFailureCount - 1);
-    return Math.min(
-      options.refreshFailureBackoffMs * backoffMultiplier,
-      options.refreshFailureMaxBackoffMs,
-    );
-  }
-
-  function canStartRefresh(now: number): boolean {
-    return !inFlightPromise && now >= refreshAllowedAt;
-  }
-
   function resetRefreshFailureState(): void {
     refreshAllowedAt = 0;
     refreshFailureCount = 0;
@@ -90,14 +78,18 @@ export function createManagedLookupCache<TCache extends RefreshingLookupCache>(
   function applyRefreshError(requestVersion: number, err: unknown): void {
     if (requestVersion === version) {
       refreshFailureCount += 1;
-      const retryDelayMs = getRefreshBackoffMs();
+      const backoffMultiplier = 2 ** Math.max(0, refreshFailureCount - 1);
+      const retryDelayMs = Math.min(
+        options.refreshFailureBackoffMs * backoffMultiplier,
+        options.refreshFailureMaxBackoffMs,
+      );
       applyRefreshFailure(retryDelayMs);
       handleRefreshFailureFallback(err, retryDelayMs);
     }
   }
 
   function startRefresh(now: number): Promise<TCache> | null {
-    if (canStartRefresh(now)) {
+    if (!inFlightPromise && now >= refreshAllowedAt) {
       const requestVersion = version;
       inFlightPromise = (async () => {
         const rebuiltCache = await options.loadCache();
@@ -145,13 +137,9 @@ export function createManagedLookupCache<TCache extends RefreshingLookupCache>(
     }
 
     const resolvedCache = await awaitCachePromise(initialRefreshPromise);
-
-    if (requestVersion === version) {
-      return resolvedCache;
-    }
-
-    if (cache) {
-      return cache;
+    const postRefreshCache = requestVersion === version ? resolvedCache : cache;
+    if (postRefreshCache !== null) {
+      return postRefreshCache;
     }
 
     const retryRefreshPromise = startRefresh(Date.now());
