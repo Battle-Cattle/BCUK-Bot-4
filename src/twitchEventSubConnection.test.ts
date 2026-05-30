@@ -175,16 +175,17 @@ describe('StreamerConnection.handleMessage', () => {
     const onSelfStop = vi.fn();
     conn.setSelfStopCallback(onSelfStop);
     await conn.handleMessage(makeWelcomeMsg('sess-zero'));
-    // Wait for the promise inside to settle
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(onSelfStop).toHaveBeenCalledWith('uid-123');
+    await vi.waitFor(() => expect(onSelfStop).toHaveBeenCalledWith('uid-123'));
   });
 
   it('session_welcome when isReconnecting: does NOT call subscribeForStreamer', async () => {
     const conn = new StreamerConnection(makeStreamerData());
-    // Set isReconnecting via the private field accessor trick (cast to any)
-    (conn as any).isReconnecting = true;
+    // Transition to reconnecting state via a session_reconnect message (public API)
+    const reconnectMsg = makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-old', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=new' } },
+    });
+    conn.handleMessage(reconnectMsg);
     await conn.handleMessage(makeWelcomeMsg('sess-reconnect'));
     expect(subscribeForStreamer).not.toHaveBeenCalled();
   });

@@ -54,6 +54,7 @@ async function doReload(): Promise<void> {
       existing.reload(data);
     } else {
       const conn = new StreamerConnection(data);
+      conn.setSelfStopCallback((uid) => { connections.delete(uid); });
       connections.set(data.uid, conn);
       conn.start();
     }

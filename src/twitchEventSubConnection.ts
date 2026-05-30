@@ -106,7 +106,7 @@ export class StreamerConnection {
 
   private async doReload(): Promise<void> {
     if (!this.ws || !this.sessionId) {
-      if (!this.stopped) { this.stopped = false; this.connect(); }
+      if (!this.stopped) { this.connect(); }
       return;
     }
     const count = await subscribeForStreamer(this.sessionId, this.currentData);
