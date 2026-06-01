@@ -1,5 +1,6 @@
 import { createLogger } from './logger';
-import { getAllEventSubStreamers, clearStreamerToken, DbStreamerEventSub, EventSubConfig } from './db/eventSub';
+import { getAllEventSubStreamers, clearStreamerToken } from './db';
+import type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 import { getUsers } from './twitchApi';
 import { getActiveChannels } from './twitchBot';
 import { normalizeTwitchChannelName } from './twitchChannelName';
@@ -12,19 +13,27 @@ import {
 const log = createLogger('EventSub');
 
 
+/** Describes a single EventSub subscription to create. */
 export interface SubSpec { type: string; version: string; condition: Record<string, string> }
 
-// In-memory lookup keyed by Twitch broadcaster user ID
+/** In-memory streamer info keyed by broadcaster user ID. */
 export interface StreamerInfo { login: string; streamerId: number; config: EventSubConfig | null }
 const streamerMap = new Map<string, StreamerInfo>();
 
 // Tracks "login:type:token" triples that failed with 403 — skipped until bot restarts or token changes
 const authFailedSubs = new Set<string>();
 
+/** Returns true if any subscription for the given login has previously failed with a 403. */
 export function hasAuthFailedSubs(login: string): boolean {
   const prefix = `${login}:`;
   for (const key of authFailedSubs) if (key.startsWith(prefix)) return true;
   return false;
+}
+
+/** Clears all auth-failed subscription records for the given login. */
+export function clearAuthFailedSubs(login: string): void {
+  const prefix = `${login}:`;
+  for (const key of authFailedSubs) if (key.startsWith(prefix)) authFailedSubs.delete(key);
 }
 
 // Maps EventSub notification types to their handler functions.
@@ -114,32 +123,44 @@ async function createSubscriptionsForStreamer(
   return desired;
 }
 
-export async function subscribeAll(sid: string): Promise<number> {
+/** Data bundle passed to a StreamerConnection for setting up EventSub subscriptions. */
+export interface StreamerEventSubData {
+  uid: string;
+  token: string | null;
+  name: string;
+  config: EventSubConfig | null;
+  streamerId: number;
+}
+
+/** Fetches all streamers from the DB, resolves their broadcaster IDs and valid tokens. */
+export async function loadStreamersForEventSub(): Promise<StreamerEventSubData[]> {
   const streamers = await getAllEventSubStreamers();
-
-  // Build into a temporary map so dispatchNotification/handleRevocation see a
-  // consistent snapshot throughout the async loop, not an empty map mid-reload.
-  const nextMap = new Map<string, StreamerInfo>();
-  let totalSubscriptions = 0;
-
+  const result: StreamerEventSubData[] = [];
   for (const streamer of streamers) {
     const token = await getValidToken(streamer);
     const config = streamer.config;
     const uid = await resolveBroadcasterId(streamer, config);
     if (!uid) continue;
-
-    nextMap.set(uid, { login: streamer.twitch_name ?? '', streamerId: streamer.id, config });
-
-    // Create desired subscriptions first so there is never a gap where zero are active
-    const desired = await createSubscriptionsForStreamer(sid, uid, token, config, streamer.twitch_name ?? '');
-    totalSubscriptions += desired.size;
-    await deleteStaleSubscriptions(uid, desired, token);
+    result.push({ uid, token, name: streamer.twitch_name ?? '', config, streamerId: streamer.id });
   }
+  return result;
+}
 
-  // Atomic swap — old map stays readable until all subscriptions are ready
-  streamerMap.clear();
-  for (const [uid, info] of nextMap) streamerMap.set(uid, info);
-  return totalSubscriptions;
+/** Creates all subscriptions for one streamer on their dedicated session, updates streamerMap,
+ *  and cleans up stale subscriptions. Returns the count of desired subscriptions. */
+export async function subscribeForStreamer(
+  sessionId: string, data: StreamerEventSubData,
+): Promise<number> {
+  const { uid, token, name, config, streamerId } = data;
+  streamerMap.set(uid, { login: name, streamerId, config });
+  const desired = await createSubscriptionsForStreamer(sessionId, uid, token, config, name);
+  await deleteStaleSubscriptions(uid, desired, token);
+  return desired.size;
+}
+
+/** Removes a streamer from the in-memory map (called when their connection is stopped). */
+export function removeStreamerFromMap(uid: string): void {
+  streamerMap.delete(uid);
 }
 
 async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<void> {
@@ -162,6 +183,7 @@ async function subscribe(sessionId: string, spec: SubSpec, token: string, login:
 }
 
 
+/** Routes an EventSub notification to the appropriate handler based on subscription type. */
 export function dispatchNotification(type: string, event: Record<string, unknown>, condition: Record<string, string>): void {
   const broadcasterId = condition.broadcaster_user_id ?? condition.to_broadcaster_user_id;
   if (!broadcasterId) return;
@@ -184,6 +206,7 @@ export function dispatchNotification(type: string, event: Record<string, unknown
     .catch((err) => log.error(`${type} handler error:`, err));
 }
 
+/** Handles a subscription revocation message, clearing the broadcaster's token if authorisation was revoked. */
 export function handleRevocation(sub: { type: string; status: string; condition: Record<string, string> }): void {
   log.warn(`Subscription revoked: type=${sub.type} status=${sub.status}`);
 
