@@ -17,7 +17,7 @@ import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { restartTwitchMonitor, getLiveStates } from '../../twitchMonitor';
 import { AccessLevel } from '../../db';
-import { parsePositiveIntId } from './shared';
+import { parsePositiveIntId, filterQueryParam } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -32,6 +32,7 @@ const KNOWN_ERRORS = new Set([
   'add_streamer_failed', 'remove_streamer_failed',
   'eventsub_disconnect_failed',
 ]);
+const KNOWN_SUCCESSES = new Set<string>([]);
 
 export const ERROR_MESSAGES: Record<string, string> = {
   missing_fields:             'All required fields must be filled in.',
@@ -78,8 +79,8 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
       eventSubById,
       eligibleUsers,
       csrfToken: req.csrfToken(),
-      error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
-      success: req.query.success as string | undefined,
+      error:   filterQueryParam(req.query.error,   KNOWN_ERRORS),
+      success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),
       getFriendlyError,
     });
   } catch (err) {
@@ -173,15 +174,18 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
 // ─── Streamers ────────────────────────────────────────────────────────────────
 
 router.post('/streams/streamers/add', requireManager, csrfProtection, async (req, res) => {
-  const { discord_id, group_id } = req.body as { discord_id?: string; group_id?: string };
-  if (!discord_id || !group_id) return res.redirect('/admin/streams?error=missing_fields');
-  const parsedGroupId = parsePositiveIntId(group_id);
+  const { discord_id, group_id } = req.body as { discord_id?: string | string[]; group_id?: string | string[] };
+  const discordId = typeof discord_id === 'string' ? discord_id.trim() : null;
+  const rawGroupId = Array.isArray(group_id) ? group_id[0] : group_id;
+  const groupId = typeof rawGroupId === 'string' ? rawGroupId.trim() : null;
+  if (!discordId || !groupId) return res.redirect('/admin/streams?error=missing_fields');
+  const parsedGroupId = parsePositiveIntId(groupId);
   if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
-    const user = await findUser(discord_id.trim());
+    const user = await findUser(discordId);
     if (!user?.twitch_name) return res.redirect('/admin/streams?error=missing_fields');
-    await addStreamer(discord_id.trim(), parsedGroupId);
+    await addStreamer(discordId, parsedGroupId);
     triggerRestart();
   } catch (err) {
     log.error('Add streamer error:', err);

@@ -10,7 +10,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager, requireAdmin } from '../middleware';
-import { trimField, renderError } from './shared';
+import { trimField, renderError, filterQueryParam } from './shared';
 import { normalizeTwitchChannelName } from '../../twitchChannelName';
 import { createMutationQueue } from '../../mutationQueue';
 import adminRefreshRouter, { refreshState } from './adminRefresh';
@@ -72,7 +72,7 @@ router.get('/users', requireManager, csrfProtection, async (req, res) => {
       users,
       csrfToken: req.csrfToken(),
       accessLevelLabels: ACCESS_LEVEL_LABELS,
-      error: KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null,
+      error: filterQueryParam(req.query.error, KNOWN_ERRORS),
       refreshState,
     });
   } catch (err) {

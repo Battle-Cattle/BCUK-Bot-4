@@ -8,8 +8,8 @@ export function parsePositiveIntId(value: string | string[] | undefined): number
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-export function trimField(value: string | undefined): string {
-  return (value ?? '').trim();
+export function trimField(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 export function normalizeRequiredText(value: string | undefined): string | null {
@@ -38,4 +38,8 @@ export function renderError(
   sessionUser: SessionUser | undefined,
 ): void {
   res.status(status).render('error', { message, user: sessionUser ?? null, csrfToken: '' });
+}
+
+export function filterQueryParam(value: unknown, allowed: ReadonlySet<string>): string | null {
+  return typeof value === 'string' && allowed.has(value) ? value : null;
 }

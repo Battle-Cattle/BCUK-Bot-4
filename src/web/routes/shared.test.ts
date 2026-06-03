@@ -8,6 +8,7 @@ import {
   normalizeSingleTokenRequiredText,
   normalizeDiscordId,
   renderError,
+  filterQueryParam,
 } from './shared';
 
 describe('parsePositiveIntId', () => {
@@ -63,6 +64,14 @@ describe('trimField', () => {
 
   it('returns empty string for a whitespace-only string', () => {
     expect(trimField('   ')).toBe('');
+  });
+
+  it('returns empty string for an array (Express duplicate-param value)', () => {
+    expect(trimField(['a', 'b'])).toBe('');
+  });
+
+  it('returns empty string for null', () => {
+    expect(trimField(null)).toBe('');
   });
 });
 
@@ -193,5 +202,33 @@ describe('renderError', () => {
       user,
       csrfToken: '',
     });
+  });
+});
+
+describe('filterQueryParam', () => {
+  const ALLOWED = new Set(['known_error', 'another_error']);
+
+  it('returns the value when it is in the allowed set', () => {
+    expect(filterQueryParam('known_error', ALLOWED)).toBe('known_error');
+  });
+
+  it('returns null for a string not in the allowed set', () => {
+    expect(filterQueryParam('<script>alert(1)</script>', ALLOWED)).toBeNull();
+  });
+
+  it('returns null for an array (Express duplicate-param value)', () => {
+    expect(filterQueryParam(['known_error', 'x'], ALLOWED)).toBeNull();
+  });
+
+  it('returns null for undefined', () => {
+    expect(filterQueryParam(undefined, ALLOWED)).toBeNull();
+  });
+
+  it('returns null for an empty string', () => {
+    expect(filterQueryParam('', ALLOWED)).toBeNull();
+  });
+
+  it('returns null when the allowed set is empty', () => {
+    expect(filterQueryParam('known_error', new Set())).toBeNull();
   });
 });

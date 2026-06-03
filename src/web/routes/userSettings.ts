@@ -4,7 +4,7 @@ import { randomBytes } from 'crypto';
 import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, EventSubConfig } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { trimField, renderError } from './shared';
+import { trimField, renderError, filterQueryParam } from './shared';
 import { reloadEventSubSubscriptions } from '../../twitchEventSub';
 import { hasAuthFailedSubs } from '../../twitchEventSubSubscriptions';
 import { TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, EVENTSUB_TOKEN_SECRET } from '../../config';
@@ -25,6 +25,7 @@ const KNOWN_ERRORS = new Set([
   'eventsub_wrong_account',
   'invalid_id',
 ]);
+const KNOWN_SUCCESSES = new Set(['twitch_connected']);
 
 const ERROR_MESSAGES: Record<string, string> = {
   no_streamer_record:            'You are not configured as a monitored streamer.',
@@ -51,11 +52,11 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       getStreamerByDiscordId(discordId),
     ]);
 
-    const errorKey = KNOWN_ERRORS.has(req.query.error as string) ? (req.query.error as string) : null;
+    const errorKey = filterQueryParam(req.query.error, KNOWN_ERRORS);
     const expectedAccount = (() => {
       if (errorKey !== 'eventsub_wrong_account') return undefined;
-      const expected = req.query.expected as string | undefined;
-      return expected && streamer?.twitch_name?.toLowerCase() === expected.toLowerCase() ? expected : undefined;
+      const expected = req.query.expected;
+      return typeof expected === 'string' && streamer?.twitch_name?.toLowerCase() === expected.toLowerCase() ? streamer.twitch_name : undefined;
     })();
 
     // Strip decrypted OAuth tokens — the template only needs a boolean.
@@ -74,7 +75,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       needsReconnect,
       csrfToken: req.csrfToken(),
       error: errorKey,
-      success: req.query.success as string | undefined,
+      success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),
       successExpectedAccount: expectedAccount,
       getFriendlyError,
     });
