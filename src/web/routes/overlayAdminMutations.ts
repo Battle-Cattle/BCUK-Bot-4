@@ -19,7 +19,8 @@ import { parsePositiveIntId } from './shared';
 const log = createLogger('OverlayAdmin');
 export const router = Router();
 
-const MAX_FILE_BYTES = parseInt(process.env.OVERLAY_MAX_FILE_MB ?? '100', 10) * 1024 * 1024;
+const parsedMaxMb = parseInt(process.env.OVERLAY_MAX_FILE_MB ?? '100', 10);
+const MAX_FILE_BYTES = (Number.isFinite(parsedMaxMb) && parsedMaxMb > 0 ? parsedMaxMb : 100) * 1024 * 1024;
 
 export const upload = multer({
   storage: multer.memoryStorage(),
