@@ -15,6 +15,7 @@ import {
 } from '../../db';
 import { OVERLAY_FOLDER } from '../../config';
 import { parsePositiveIntId } from './shared';
+import { safeResolve } from '../../pathUtils';
 
 const log = createLogger('OverlayAdmin');
 export const router = Router();
@@ -64,7 +65,8 @@ router.post('/settings/videos/upload', requireAuth, upload.single('video'), csrf
     const ext = req.file.mimetype === 'video/webm' ? 'webm' : 'mp4';
     const filename = `${randomUUID()}.${ext}`;
 
-    const dir = path.join(OVERLAY_FOLDER, String(streamer.id));
+    const dir = safeResolve(OVERLAY_FOLDER, String(streamer.id));
+    if (!dir) return res.redirect('/overlay/settings?error=invalid_path');
     await fs.promises.mkdir(dir, { recursive: true });
     const fullPath = path.join(dir, filename);
     await fs.promises.writeFile(fullPath, req.file.buffer);
@@ -93,8 +95,8 @@ router.post('/settings/videos/:id/delete', requireAuth, csrfProtection, async (r
 
     const filename = await deleteVideo(videoId, streamer.id);
     if (filename) {
-      const filePath = path.join(OVERLAY_FOLDER, String(streamer.id), filename);
-      await fs.promises.rm(filePath, { force: true });
+      const filePath = safeResolve(OVERLAY_FOLDER, String(streamer.id), filename);
+      if (filePath) await fs.promises.rm(filePath, { force: true });
     }
 
     res.redirect('/overlay/settings?success=video_deleted');
