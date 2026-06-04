@@ -6,11 +6,44 @@ import { isPlaying } from './audioPlayer';
 import { playFile, VoiceNotConnectedError } from './sfxPlayer';
 import { SFX_FOLDER, GLOBAL_COOLDOWN_MS } from './config';
 import { setVoicePlaying } from './statusStore';
+import { safeResolve } from './pathUtils';
 
 const log = createLogger('CommandRouter');
 
 let lastPlayedAt = 0;
 let inFlight = false;
+
+async function lookupAndPlay(command: string, source: 'twitch' | 'discord' | 'tiktok'): Promise<void> {
+  const trigger = await findTrigger(command);
+  if (!trigger) return;
+
+  const files = await findSoundFiles(trigger.id);
+  if (files.length === 0) {
+    log.warn(`[${source}] Trigger '${command}' has no sound files in DB`);
+    return;
+  }
+
+  const filename = pickWeightedRandom(files);
+  const fullPath = safeResolve(SFX_FOLDER, filename);
+  if (!fullPath) {
+    log.error(`[${source}] Invalid file path for trigger '${command}'`);
+    return;
+  }
+
+  log.info(`[${source}] Playing '${filename}' for trigger '${command}'`);
+
+  try {
+    playFile(fullPath);
+    lastPlayedAt = Date.now();
+    setVoicePlaying(filename, command, source);
+  } catch (err) {
+    if (err instanceof VoiceNotConnectedError) {
+      log.info(`[${source}] Skipping '${command}' — not connected to voice channel`);
+    } else {
+      log.error(`[${source}] Failed to play ${fullPath}:`, err);
+    }
+  }
+}
 
 /**
  * Handle a raw chat message from either Twitch or Discord.
@@ -43,37 +76,7 @@ export async function handleCommand(rawMessage: string, source: 'twitch' | 'disc
   // Claim the slot before any await so concurrent message handlers see the flag.
   inFlight = true;
   try {
-    // Look up trigger in DB
-    const trigger = await findTrigger(command);
-    if (!trigger) {
-      // Not a recognised SFX command — silently ignore
-      return;
-    }
-
-    // Find associated sound files
-    const files = await findSoundFiles(trigger.id);
-    if (files.length === 0) {
-      log.warn(`[${source}] Trigger '${command}' has no sound files in DB`);
-      return;
-    }
-
-    // Pick a file (weighted random)
-    const filename = pickWeightedRandom(files);
-    const fullPath = path.join(SFX_FOLDER, filename);
-
-    log.info(`[${source}] Playing '${filename}' for trigger '${command}'`);
-
-    try {
-      playFile(fullPath);
-      lastPlayedAt = Date.now();
-      setVoicePlaying(filename, command, source);
-    } catch (err) {
-      if (err instanceof VoiceNotConnectedError) {
-        log.info(`[${source}] Skipping '${command}' — not connected to voice channel`);
-      } else {
-        log.error(`[${source}] Failed to play ${fullPath}:`, err);
-      }
-    }
+    await lookupAndPlay(command, source);
   } finally {
     inFlight = false;
   }
