@@ -10,6 +10,7 @@ import { requireApiKey } from '../middleware';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
 import { getDiscordClient } from '../../discord/discordBot';
+import { normalizeDiscordId } from './shared';
 
 const log = createLogger('Streamdeck');
 const router = Router();
@@ -89,11 +90,12 @@ router.get('/voice/channels', requireApiKey, async (_req, res) => {
 
 router.post('/voice/join', requireApiKey, async (req, res) => {
   const { channelId } = req.body as { channelId?: unknown };
-  if (typeof channelId !== 'string' || !channelId.trim()) {
+  if (typeof channelId !== 'string') {
     res.status(400).json({ ok: false, error: 'Missing or invalid "channelId" field' });
     return;
   }
-  if (!/^\d{17,20}$/.test(channelId.trim())) {
+  const normalizedChannelId = normalizeDiscordId(channelId);
+  if (!normalizedChannelId) {
     res.status(400).json({ ok: false, error: 'Missing or invalid "channelId" field' });
     return;
   }
@@ -106,7 +108,7 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
 
   try {
     disconnect();
-    await connect(discordClient, channelId.trim());
+    await connect(discordClient, normalizedChannelId);
     res.json({ ok: true });
   } catch (err) {
     log.error('Voice join failed:', err);
