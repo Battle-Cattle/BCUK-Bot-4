@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import path from 'path';
 import type { SfxTrigger, SfxFile } from '../db';
+
+const SFX_ROOT = path.resolve('/sfx');
 
 vi.mock('../shared/config', () => ({
   SFX_FOLDER: '/sfx',
@@ -99,7 +102,7 @@ describe('handleCommand', () => {
     await handleCommand('!ding discord', 'discord');
 
     expect(vi.mocked(findTrigger)).toHaveBeenCalledWith('!ding');
-    expect(vi.mocked(playFile)).toHaveBeenCalledWith('/sfx/ding.mp3');
+    expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.join(SFX_ROOT, 'ding.mp3'));
     expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('ding.mp3', '!ding', 'discord');
   });
 
@@ -216,7 +219,7 @@ describe('handleCommand', () => {
 
       await handleCommand('!safe', 'twitch');
 
-      expect(vi.mocked(playFile)).toHaveBeenCalledWith('/sfx/valid-sound.mp3');
+      expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.join(SFX_ROOT, 'valid-sound.mp3'));
       expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('valid-sound.mp3', '!safe', 'twitch');
     });
 
@@ -229,7 +232,7 @@ describe('handleCommand', () => {
 
       await handleCommand('!safe', 'twitch');
 
-      expect(vi.mocked(playFile)).toHaveBeenCalledWith('/sfx/category/sound.mp3');
+      expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.join(SFX_ROOT, 'category', 'sound.mp3'));
       expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('category/sound.mp3', '!safe', 'twitch');
     });
   });
