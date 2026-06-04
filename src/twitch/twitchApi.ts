@@ -58,10 +58,23 @@ function chunks<T>(arr: T[], size: number): T[][] {
 
 const HELIX_MAX_RETRIES = 3;
 
-async function fetchHelixWithRetry(url: string, headers: Record<string, string>): Promise<Response> {
-  let res = await twitchFetch(url, { headers });
+const NETWORK_RETRY_DELAYS_MS = [2_000, 4_000];
 
-  for (let attempt = 1; attempt <= HELIX_MAX_RETRIES && res.status === 429; attempt++) {
+async function fetchHelixWithRetry(url: string, headers: Record<string, string>): Promise<Response> {
+  let res: Response;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      res = await twitchFetch(url, { headers });
+      break;
+    } catch (err) {
+      if (attempt >= NETWORK_RETRY_DELAYS_MS.length) throw err;
+      const wait = NETWORK_RETRY_DELAYS_MS[attempt];
+      log.warn(`Network error (attempt ${attempt + 1}), retrying in ${wait}ms`);
+      await new Promise<void>((r) => setTimeout(r, wait));
+    }
+  }
+
+  for (let attempt = 1; attempt <= HELIX_MAX_RETRIES && res!.status === 429; attempt++) {
     const resetHeader = res.headers.get('ratelimit-reset');
     const parsedReset = resetHeader ? Number(resetHeader) : NaN;
     const resetAt = Number.isFinite(parsedReset) ? parsedReset * 1000 : Date.now() + 5_000;
@@ -71,7 +84,7 @@ async function fetchHelixWithRetry(url: string, headers: Record<string, string>)
     res = await twitchFetch(url, { headers });
   }
 
-  return res;
+  return res!;
 }
 
 export interface TwitchUser {
