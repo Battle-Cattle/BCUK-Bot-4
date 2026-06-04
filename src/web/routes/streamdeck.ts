@@ -93,6 +93,10 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
     res.status(400).json({ ok: false, error: 'Missing or invalid "channelId" field' });
     return;
   }
+  if (!/^\d{17,20}$/.test(channelId.trim())) {
+    res.status(400).json({ ok: false, error: 'Missing or invalid "channelId" field' });
+    return;
+  }
 
   const discordClient = getDiscordClient();
   if (!discordClient) {

@@ -42,6 +42,10 @@ router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
   try {
     const { channelId } = req.body as { channelId?: unknown };
     const trimmedChannelId = typeof channelId === 'string' ? channelId.trim() : '';
+    if (trimmedChannelId && !/^\d{17,20}$/.test(trimmedChannelId)) {
+      res.status(400).json({ ok: false, error: 'Invalid channel ID' });
+      return;
+    }
     const resolvedChannelId = trimmedChannelId ? trimmedChannelId : undefined;
 
     disconnect();

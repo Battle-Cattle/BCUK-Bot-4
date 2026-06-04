@@ -76,7 +76,7 @@ router.get('/:login/events', (req, res, next) => {
 });
 
 // GET /overlay/videos/:streamerId/:filename — serve video files (no auth)
-router.get('/videos/:streamerId/:filename', (req, res) => {
+router.get('/videos/:streamerId/:filename', async (req, res) => {
   const { streamerId, filename } = req.params;
 
   if (!/^\d+$/.test(streamerId)) { res.status(400).end(); return; }
@@ -85,7 +85,12 @@ router.get('/videos/:streamerId/:filename', (req, res) => {
   const resolved = safeResolve(OVERLAY_FOLDER, streamerId, filename);
   if (!resolved) { res.status(400).end(); return; }
 
-  if (!fs.existsSync(resolved)) { res.status(404).end(); return; }
+  try {
+    await fs.promises.access(resolved);
+  } catch {
+    res.status(404).end();
+    return;
+  }
 
   res.sendFile(resolved);
 });
