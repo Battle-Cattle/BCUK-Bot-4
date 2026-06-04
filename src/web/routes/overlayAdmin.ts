@@ -1,13 +1,13 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import { getVideosForStreamer, getRewardsForStreamer } from '../../db';
-import { PUBLIC_URL } from '../../config';
-import { getCustomRewards, TwitchCustomReward } from '../../twitchApi';
-import { getValidToken } from '../../twitchApiEventSub';
+import { PUBLIC_URL } from '../../shared/config';
+import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
+import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { filterQueryParam } from './shared';
 import { router as mutationsRouter } from './overlayAdminMutations';
 import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';

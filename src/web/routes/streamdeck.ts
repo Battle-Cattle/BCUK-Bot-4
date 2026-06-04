@@ -1,15 +1,15 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import path from 'path';
 import { Router } from 'express';
 import { findTrigger, findSoundFiles, getAllSfxTriggers } from '../../db';
-import { pickWeightedRandom } from '../../soundSelector';
-import { playFile, VoiceNotConnectedError } from '../../sfxPlayer';
-import { setVoicePlaying } from '../../statusStore';
-import { SFX_FOLDER, DISCORD_GUILD_ID } from '../../config';
+import { pickWeightedRandom } from '../../commands/soundSelector';
+import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
+import { setVoicePlaying } from '../../shared/statusStore';
+import { SFX_FOLDER, DISCORD_GUILD_ID } from '../../shared/config';
 import { requireApiKey } from '../middleware';
-import { getAvailableVoiceChannels } from '../../discordUtils';
-import { connect, disconnect } from '../../audioPlayer';
-import { getDiscordClient } from '../../discordBot';
+import { getAvailableVoiceChannels } from '../../discord/discordUtils';
+import { connect, disconnect } from '../../audio/audioPlayer';
+import { getDiscordClient } from '../../discord/discordBot';
 
 const log = createLogger('Streamdeck');
 const router = Router();

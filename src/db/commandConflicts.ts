@@ -1,8 +1,8 @@
-import { createLogger } from '../logger';
+import { createLogger } from '../shared/logger';
 import mysql from 'mysql2/promise';
 
 const log = createLogger('DB');
-import { normalizeTwitchChannelName } from '../twitchChannelName';
+import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import { type SqlExecutor, CommandConflictError } from './commandStringUtils';
 import {
   acquireNamedLock,

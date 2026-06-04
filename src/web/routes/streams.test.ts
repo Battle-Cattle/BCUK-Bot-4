@@ -26,12 +26,12 @@ vi.mock('../middleware', () => ({
   requireManager: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../twitchMonitor', () => ({
+vi.mock('../../twitch/monitor/twitchMonitor', () => ({
   restartTwitchMonitor: vi.fn(),
   getLiveStates: vi.fn().mockReturnValue([]),
 }));
 
-vi.mock('../../logger', () => ({
+vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 

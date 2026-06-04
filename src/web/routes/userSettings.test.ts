@@ -18,21 +18,21 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../twitchEventSub', () => ({
+vi.mock('../../twitch/eventsub/twitchEventSub', () => ({
   reloadEventSubSubscriptions: vi.fn(),
 }));
 
-vi.mock('../../twitchEventSubSubscriptions', () => ({
+vi.mock('../../twitch/eventsub/twitchEventSubSubscriptions', () => ({
   hasAuthFailedSubs: vi.fn().mockReturnValue(false),
 }));
 
-vi.mock('../../config', () => ({
+vi.mock('../../shared/config', () => ({
   TWITCH_CLIENT_ID: 'test-client-id',
   TWITCH_EVENTSUB_REDIRECT_URI: 'http://localhost/callback',
   EVENTSUB_TOKEN_SECRET: 'test-secret',
 }));
 
-vi.mock('../../logger', () => ({
+vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 

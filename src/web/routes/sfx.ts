@@ -1,4 +1,4 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { getAllSfxTriggers } from '../../db';
 import { csrfProtection } from '../csrf';

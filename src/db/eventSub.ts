@@ -1,7 +1,7 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
-import { EVENTSUB_TOKEN_SECRET } from '../config';
-import { encryptToken, decryptToken } from '../crypto';
+import { EVENTSUB_TOKEN_SECRET } from '../shared/config';
+import { encryptToken, decryptToken } from '../shared/crypto';
 
 export interface EventSubConfig {
   follow_enabled: boolean;

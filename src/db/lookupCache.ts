@@ -1,4 +1,4 @@
-import { createLogger } from '../logger';
+import { createLogger } from '../shared/logger';
 
 const log = createLogger('DB');
 

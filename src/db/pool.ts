@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../config';
+import { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../shared/config';
 
 let pool: mysql.Pool | undefined;
 

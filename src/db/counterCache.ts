@@ -1,4 +1,4 @@
-import { createLogger } from '../logger';
+import { createLogger } from '../shared/logger';
 import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
 import { normalizeCommandList } from './commandStringUtils';
 import { isAnyCommandTakenAcrossTables } from './commandLocks';

@@ -1,9 +1,9 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getStatus } from '../../statusStore';
+import { getStatus } from '../../shared/statusStore';
 import { csrfProtection } from '../csrf';
 import { getStreamerByDiscordId } from '../../db';
-import { hasAuthFailedSubs } from '../../twitchEventSubSubscriptions';
+import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 import { renderError } from './shared';
 
 const log = createLogger('Web');

@@ -1,19 +1,19 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
 import { getPool, closePool } from './db';
-import { startTwitchBot, stopTwitchBot, sayInChannel, getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitchBot';
-import { startDiscordBot, stopDiscordBot } from './discordBot';
-import { startTikTokBot, stopTikTokBot } from './tiktokBot';
-import { startTwitchMonitor, stopTwitchMonitor } from './twitchMonitor';
-import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitchEventSub';
+import { startTwitchBot, stopTwitchBot, sayInChannel, getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchBot';
+import { startDiscordBot, stopDiscordBot } from './discord/discordBot';
+import { startTikTokBot, stopTikTokBot } from './tiktok/tiktokBot';
+import { startTwitchMonitor, stopTwitchMonitor } from './twitch/monitor/twitchMonitor';
+import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitch/eventsub/twitchEventSub';
 import { startWebPanel } from './web/server';
-import { disconnect } from './audioPlayer';
-import { registerTwitchChatRuntime } from './customCommandHandler';
-import { registerCounterTwitchRuntime } from './counterHandler';
-import { registerMultiTwitchRuntime } from './multiCommandHandler';
-import { registerShoutoutRuntime } from './shoutoutHandler';
-import { registerCountdownTwitchRuntime } from './countdownHandler';
-import { startCounterScheduler, stopCounterScheduler } from './counterScheduler';
-import { createLogger } from './logger';
+import { disconnect } from './audio/audioPlayer';
+import { registerTwitchChatRuntime } from './commands/customCommandHandler';
+import { registerCounterTwitchRuntime } from './commands/counterHandler';
+import { registerMultiTwitchRuntime } from './commands/multiCommandHandler';
+import { registerShoutoutRuntime } from './commands/shoutoutHandler';
+import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
+import { startCounterScheduler, stopCounterScheduler } from './commands/counterScheduler';
+import { createLogger } from './shared/logger';
 
 const log = createLogger('Bot');
 

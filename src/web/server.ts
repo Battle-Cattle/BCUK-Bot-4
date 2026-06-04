@@ -1,4 +1,4 @@
-import { createLogger } from '../logger';
+import { createLogger } from '../shared/logger';
 import express from 'express';
 import type { ErrorRequestHandler } from 'express';
 import session from 'express-session';
@@ -6,7 +6,7 @@ import MySQLStore from 'express-mysql-session';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
-import { WEB_PORT, SESSION_SECRET, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../config';
+import { WEB_PORT, SESSION_SECRET, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../shared/config';
 
 const log = createLogger('Web');
 

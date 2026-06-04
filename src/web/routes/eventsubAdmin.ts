@@ -1,9 +1,9 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { clearStreamerToken } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
-import { reloadEventSubSubscriptions } from '../../twitchEventSub';
+import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { parsePositiveIntId } from './shared';
 
 const log = createLogger('Web');

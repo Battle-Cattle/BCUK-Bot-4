@@ -1,4 +1,4 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import {
   getTwitchEnabledChannels,
   findUser,
@@ -8,8 +8,8 @@ import {
   updateTwitchBotEnabled,
   AccessLevelValue,
 } from '../../db';
-import { joinTwitchChannel, partTwitchChannel } from '../../twitchBot';
-import { normalizeTwitchChannelName } from '../../twitchChannelName';
+import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchBot';
+import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 
 const log = createLogger('Web');
 
