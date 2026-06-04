@@ -4,9 +4,9 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { upsertReward, setRewardVideos, deleteReward } from '../../db';
 import { parsePositiveIntId } from './shared';
-import { requireStreamer, toStringArray, parseWeight } from './overlayAdminMutations';
+import { requireStreamer, toStringArray, parseWeight } from './overlayAdminShared';
 
-const log = createLogger('OverlayAdmin');
+const log = createLogger('OverlayAdminReward');
 export const router = Router();
 
 // POST /overlay/settings/rewards — create or update a reward assignment

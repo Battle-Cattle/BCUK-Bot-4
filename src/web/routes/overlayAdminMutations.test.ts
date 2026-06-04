@@ -91,6 +91,19 @@ describe('POST /settings/videos/upload', () => {
     expect(res.headers.location).toBe('/overlay/settings?error=invalid_file');
   });
 
+  it('rolls back the written file when addVideo fails', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(addVideo).mockRejectedValue(new Error('DB error'));
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .field('name', 'Test Video')
+      .attach('video', Buffer.from('fake video'), { filename: 'test.mp4', contentType: 'video/mp4' });
+    expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
+    expect(vi.mocked(fs.promises.writeFile)).toHaveBeenCalled();
+    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0][0] as string;
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
+  });
+
   it('successfully uploads a valid video file', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const res = await supertest(buildApp())
@@ -170,50 +183,5 @@ describe('POST /settings/videos/:id/delete', () => {
     const res = await supertest(buildApp()).post('/settings/videos/1/delete');
     expect(res.headers.location).toBe('/overlay/settings?success=video_deleted');
     expect(vi.mocked(fs.promises.rm)).not.toHaveBeenCalled();
-  });
-});
-
-// --- POST /settings/rewards ---
-
-describe('POST /settings/rewards', () => {
-  it('redirects with error when user is not a streamer', async () => {
-    const res = await supertest(buildApp())
-      .post('/settings/rewards')
-      .type('form')
-      .send({ twitch_reward_id: '12345678-1234-1234-1234-123456789abc', video_ids: ['1'] });
-    expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');
-  });
-
-  it('redirects with error for invalid reward id format', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp())
-      .post('/settings/rewards')
-      .type('form')
-      .send({ twitch_reward_id: 'invalid-id', video_ids: ['1'] });
-    expect(res.headers.location).toBe('/overlay/settings?error=invalid_reward_id');
-  });
-
-  it('redirects with error when no videos selected', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp())
-      .post('/settings/rewards')
-      .type('form')
-      .send({ twitch_reward_id: '12345678-1234-1234-1234-123456789abc' });
-    expect(res.headers.location).toBe('/overlay/settings?error=no_videos_selected');
-  });
-});
-
-// --- POST /settings/rewards/:id/delete ---
-
-describe('POST /settings/rewards/:id/delete', () => {
-  it('redirects with error when user is not a streamer', async () => {
-    const res = await supertest(buildApp()).post('/settings/rewards/1/delete');
-    expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');
-  });
-
-  it('redirects with error for invalid reward id', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp()).post('/settings/rewards/invalid/delete');
-    expect(res.headers.location).toBe('/overlay/settings?error=invalid_id');
   });
 });

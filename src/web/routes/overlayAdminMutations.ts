@@ -1,19 +1,19 @@
 import { createLogger } from '../../logger';
 import { Router } from 'express';
-import type { Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import { addVideo, deleteVideo } from '../../db';
 import { OVERLAY_FOLDER } from '../../config';
 import { parsePositiveIntId } from './shared';
 import { safeResolve } from '../../pathUtils';
-import { router as rewardRouter } from './overlayAdminRewardMutations';
+import { requireStreamer } from './overlayAdminShared';
+
+export { requireStreamer, toStringArray, parseWeight } from './overlayAdminShared';
 
 const log = createLogger('OverlayAdmin');
 export const router = Router();
@@ -29,27 +29,6 @@ export const upload = multer({
     cb(null, allowed.includes(file.mimetype));
   },
 });
-
-/** Resolves the streamer for the logged-in user, or redirects and returns null. */
-export async function requireStreamer(req: Request, res: Response): Promise<DbStreamerEventSub | null> {
-  const streamer = await getStreamerByDiscordId(req.session.user!.discordId);
-  if (!streamer) {
-    res.redirect('/overlay/settings?error=not_a_streamer');
-    return null;
-  }
-  return streamer;
-}
-
-/** Normalises a form field that may arrive as a single string or an array of strings. */
-export function toStringArray(value: string | string[] | undefined): string[] {
-  if (Array.isArray(value)) return value;
-  return value ? [value] : [];
-}
-
-export function parseWeight(raw: string | string[] | undefined): number {
-  const n = Number(Array.isArray(raw) ? raw[0] : raw);
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
-}
 
 async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.File, name: string): Promise<void> {
   const dir = safeResolve(OVERLAY_FOLDER, String(streamer.id));
@@ -105,5 +84,3 @@ router.post('/settings/videos/:id/delete', requireAuth, csrfProtection, async (r
     res.redirect('/overlay/settings?error=delete_failed');
   }
 });
-
-router.use(rewardRouter);

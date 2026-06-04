@@ -10,6 +10,7 @@ import { getCustomRewards, TwitchCustomReward } from '../../twitchApi';
 import { getValidToken } from '../../twitchApiEventSub';
 import { filterQueryParam } from './shared';
 import { router as mutationsRouter } from './overlayAdminMutations';
+import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';
 
 const log = createLogger('OverlayAdmin');
 const router = Router();
@@ -64,5 +65,6 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
 });
 
 router.use(mutationsRouter);
+router.use(rewardMutationsRouter);
 
 export default router;

@@ -7,6 +7,7 @@ import { playFile, VoiceNotConnectedError } from './sfxPlayer';
 import { SFX_FOLDER, GLOBAL_COOLDOWN_MS } from './config';
 import { setVoicePlaying } from './statusStore';
 import { safeResolve } from './pathUtils';
+import { recordCommandTestEntry } from './commandMonitorStore';
 
 const log = createLogger('CommandRouter');
 
@@ -36,6 +37,7 @@ async function lookupAndPlay(command: string, source: 'twitch' | 'discord' | 'ti
     playFile(fullPath);
     lastPlayedAt = Date.now();
     setVoicePlaying(filename, command, source);
+    recordCommandTestEntry({ source, command, response: filename, channel: null, user: null });
   } catch (err) {
     if (err instanceof VoiceNotConnectedError) {
       log.info(`[${source}] Skipping '${command}' — not connected to voice channel`);
