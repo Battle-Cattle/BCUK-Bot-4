@@ -37,7 +37,7 @@ export function buildReconnectUrl(reconnectUrl: string): string | null {
     username: !parsed.username,
     password: !parsed.password,
     port: validPorts.has(parsed.port),
-    pathname: parsed.pathname === '/ws',
+    pathname: parsed.pathname.replace(/\/$/, '') === '/ws',
   };
   const failed = Object.entries(checkResults).filter(([, v]) => !v).map(([k]) => k);
   if (failed.length > 0) {
@@ -124,7 +124,7 @@ export class StreamerConnection {
     socket.addEventListener('open', () => this.onOpen());
     socket.addEventListener('message', (ev: MessageEvent) => this.onMessage(ev));
     socket.addEventListener('close', (ev: CloseEvent) => this.onClose(ev, socket));
-    socket.addEventListener('error', () => { log.error(`[${this.name}] WebSocket error`); });
+    socket.addEventListener('error', () => { log.warn(`[${this.name}] WebSocket error`); });
     this.ws = socket;
   }
 
@@ -195,7 +195,7 @@ export class StreamerConnection {
 
   private handleSessionReconnect(reconnectUrl: string): void {
     const safeUrl = buildReconnectUrl(reconnectUrl);
-    if (!safeUrl) { log.error(`[${this.name}] Invalid reconnect URL — ignoring`); return; }
+    if (!safeUrl) { log.error(`[${this.name}] Invalid reconnect URL — reconnecting`); this.scheduleReconnect(); return; }
     const oldSocket = this.ws;
     this.isReconnecting = true;
     log.info(`[${this.name}] Session reconnect — connecting to new session`);
