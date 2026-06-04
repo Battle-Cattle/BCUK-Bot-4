@@ -36,6 +36,29 @@ function handleCommandWriteError(err: unknown, res: Response): boolean {
   return false;
 }
 
+/** Assigns users to a newly created command.  On any failure, deletes the command
+ *  to avoid leaving it in a partially-assigned state.  Returns an error code, or
+ *  null on success. */
+async function assignUsersToNewCommand(commandId: number, discordIds: string[]): Promise<string | null> {
+  for (const discordId of discordIds) {
+    try {
+      const user = await findUser(discordId);
+      if (!user || !user.twitch_name) continue;
+      await assignUserToCommand(commandId, discordId);
+    } catch (err) {
+      try {
+        await removeCustomCommand(commandId);
+      } catch (cleanupErr) {
+        log.error('Cleanup after failed assign error:', cleanupErr);
+      }
+      if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) return 'command_taken';
+      log.error('Assign user during command creation error:', err);
+      return 'assign_failed';
+    }
+  }
+  return null;
+}
+
 router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
   const { trigger_string, output } = req.body as Record<string, string | undefined>;
   const isDiscordEnabled = req.body.is_discord_enabled === 'on';
@@ -61,21 +84,8 @@ router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
     .map((id: string) => normalizeDiscordId(id))
     .filter((id): id is string => id !== null);
 
-  for (const discordId of discordIds) {
-    try {
-      const user = await findUser(discordId);
-      if (!user || !user.twitch_name) continue;
-      await assignUserToCommand(commandId, discordId);
-    } catch (err) {
-      // Roll back the newly created command so it doesn't get stuck partially assigned.
-      try { await removeCustomCommand(commandId); } catch (cleanupErr) { log.error('Cleanup after failed assign error:', cleanupErr); }
-      if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-        return res.redirect('/commands?error=command_taken');
-      }
-      log.error('Assign user during command creation error:', err);
-      return res.redirect('/commands?error=assign_failed');
-    }
-  }
+  const assignError = await assignUsersToNewCommand(commandId, discordIds);
+  if (assignError) return res.redirect(`/commands?error=${assignError}`);
 
   res.redirect('/commands');
 });
