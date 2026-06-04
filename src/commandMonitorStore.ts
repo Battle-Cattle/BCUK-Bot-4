@@ -1,4 +1,4 @@
-export type CommandTestSource = 'twitch' | 'discord';
+export type CommandTestSource = 'twitch' | 'discord' | 'tiktok';
 
 export interface CommandTestEntry {
   id: number;

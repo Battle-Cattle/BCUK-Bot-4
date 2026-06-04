@@ -10,13 +10,14 @@ import { getCustomRewards, TwitchCustomReward } from '../../twitchApi';
 import { getValidToken } from '../../twitchApiEventSub';
 import { filterQueryParam } from './shared';
 import { router as mutationsRouter } from './overlayAdminMutations';
+import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';
 
 const log = createLogger('OverlayAdmin');
 const router = Router();
 
 const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_file', 'upload_failed', 'delete_failed',
-  'invalid_reward_id', 'no_videos_selected', 'save_failed', 'invalid_id',
+  'invalid_reward_id', 'no_videos_selected', 'save_failed', 'invalid_id', 'invalid_path',
 ]);
 const KNOWN_SUCCESSES = new Set([
   'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted',
@@ -64,5 +65,6 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
 });
 
 router.use(mutationsRouter);
+router.use(rewardMutationsRouter);
 
 export default router;

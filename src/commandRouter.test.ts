@@ -169,4 +169,68 @@ describe('handleCommand', () => {
     expect(errorSpy).not.toHaveBeenCalled();
     expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
   });
+
+  describe('path traversal security', () => {
+    it('rejects path traversal with ../ sequences', async () => {
+      vi.mocked(isPlaying).mockReturnValue(false);
+      vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
+      vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+      vi.mocked(pickWeightedRandom).mockReturnValue('../../../etc/passwd');
+
+      await handleCommand('!exploit', 'twitch');
+
+      expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+      expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
+    });
+
+    it('rejects path traversal with encoded ../ sequences', async () => {
+      vi.mocked(isPlaying).mockReturnValue(false);
+      vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
+      vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+      vi.mocked(pickWeightedRandom).mockReturnValue('..%2F..%2Fetc%2Fpasswd');
+
+      await handleCommand('!exploit', 'twitch');
+
+      expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+      expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
+    });
+
+    it('rejects absolute paths', async () => {
+      vi.mocked(isPlaying).mockReturnValue(false);
+      vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
+      vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+      vi.mocked(pickWeightedRandom).mockReturnValue('/etc/passwd');
+
+      await handleCommand('!exploit', 'twitch');
+
+      expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+      expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
+    });
+
+    it('allows valid filenames within the SFX folder', async () => {
+      vi.mocked(isPlaying).mockReturnValue(false);
+      vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
+      vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+      vi.mocked(pickWeightedRandom).mockReturnValue('valid-sound.mp3');
+      vi.mocked(playFile).mockImplementation(() => {}); // Reset to no-op
+
+      await handleCommand('!safe', 'twitch');
+
+      expect(vi.mocked(playFile)).toHaveBeenCalledWith('/sfx/valid-sound.mp3');
+      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('valid-sound.mp3', '!safe', 'twitch');
+    });
+
+    it('allows valid filenames in subdirectories within the SFX folder', async () => {
+      vi.mocked(isPlaying).mockReturnValue(false);
+      vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
+      vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+      vi.mocked(pickWeightedRandom).mockReturnValue('category/sound.mp3');
+      vi.mocked(playFile).mockImplementation(() => {}); // Reset to no-op
+
+      await handleCommand('!safe', 'twitch');
+
+      expect(vi.mocked(playFile)).toHaveBeenCalledWith('/sfx/category/sound.mp3');
+      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('category/sound.mp3', '!safe', 'twitch');
+    });
+  });
 });

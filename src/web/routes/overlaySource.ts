@@ -1,8 +1,8 @@
 import { createLogger } from '../../logger';
 import { Router } from 'express';
-import path from 'path';
 import fs from 'fs';
 import { OVERLAY_FOLDER } from '../../config';
+import { safeResolve } from '../../pathUtils';
 
 const log = createLogger('OverlaySource');
 const router = Router();
@@ -82,10 +82,8 @@ router.get('/videos/:streamerId/:filename', (req, res) => {
   if (!/^\d+$/.test(streamerId)) { res.status(400).end(); return; }
   if (!FILENAME_RE.test(filename)) { res.status(400).end(); return; }
 
-  const filePath = path.join(OVERLAY_FOLDER, streamerId, filename);
-  const resolved = path.resolve(filePath);
-  const base = path.resolve(OVERLAY_FOLDER);
-  if (!resolved.startsWith(base + path.sep)) { res.status(400).end(); return; }
+  const resolved = safeResolve(OVERLAY_FOLDER, streamerId, filename);
+  if (!resolved) { res.status(400).end(); return; }
 
   if (!fs.existsSync(resolved)) { res.status(404).end(); return; }
 

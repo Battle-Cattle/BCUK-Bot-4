@@ -5,6 +5,7 @@ import fs from 'fs';
 import ffmpegPath from 'ffmpeg-static';
 import { SFX_FOLDER } from './config';
 import { isConnected, startPlayback } from './audioPlayer';
+import { safeResolve } from './pathUtils';
 
 const log = createLogger('SFXPlayer');
 
@@ -25,13 +26,6 @@ if (ffmpegPath) {
 const sfxRoot = path.resolve(SFX_FOLDER);
 let realSfxRoot: string | null = null;
 
-function isPathInsideRoot(rootPath: string, targetPath: string): boolean {
-  const relativePath = path.relative(rootPath, targetPath);
-  return relativePath !== '..'
-    && !relativePath.startsWith(`..${path.sep}`)
-    && !path.isAbsolute(relativePath);
-}
-
 function getRealSfxRoot(): string {
   if (!realSfxRoot) {
     realSfxRoot = fs.realpathSync(sfxRoot);
@@ -48,10 +42,8 @@ export function playFile(filePath: string): void {
     throw new VoiceNotConnectedError();
   }
 
-  const candidatePath = path.resolve(filePath);
-
-  // Reject obvious traversal attempts before touching the filesystem.
-  if (!isPathInsideRoot(sfxRoot, candidatePath)) {
+  const candidatePath = safeResolve(sfxRoot, filePath);
+  if (!candidatePath) {
     throw new Error(`Path traversal blocked: ${filePath} resolves outside SFX folder`);
   }
 
@@ -62,7 +54,7 @@ export function playFile(filePath: string): void {
   const resolved = fs.realpathSync(candidatePath);
 
   // Resolve symlinks and verify the final real path is still inside the SFX root.
-  if (!isPathInsideRoot(getRealSfxRoot(), resolved)) {
+  if (!safeResolve(getRealSfxRoot(), resolved)) {
     throw new Error(`Path traversal blocked: ${filePath} resolves outside SFX folder`);
   }
 
