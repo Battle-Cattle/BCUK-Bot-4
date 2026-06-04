@@ -106,6 +106,33 @@ describe('createManagedLookupCache', () => {
       expect(result).toMatchObject({ data: 'fresh' });
       expect(loadCache).toHaveBeenCalledTimes(2);
     });
+
+    it('invalidate during in-flight refresh rejection - recovers with a new refresh', async () => {
+      let rejectFirst!: (err: Error) => void;
+      const freshResult: TC = { loadedAt: Date.now(), data: 'fresh-after-invalidate' };
+
+      const createEmptyCache = vi.fn(() => ({ loadedAt: 0, data: 'empty' } as TC));
+      const loadCache = vi.fn<() => Promise<TC>>()
+        .mockImplementationOnce(() => new Promise<TC>((_, r) => { rejectFirst = r; }))
+        .mockResolvedValueOnce(freshResult);
+
+      const { getCache, invalidate } = createManagedLookupCache({
+        ...BASE_OPTS,
+        createEmptyCache,
+        loadCache,
+      });
+
+      const pending = getCache(); // cache=null → startRefresh with version=0
+
+      invalidate(); // version→1; cache→null; inFlightPromise→null
+
+      rejectFirst(new Error('DB error')); // orphaned refresh rejects; applyRefreshError no-ops (version mismatch)
+
+      const result = await pending; // should catch rejection, detect version change, retry with version=1
+
+      expect(result).toMatchObject({ data: 'fresh-after-invalidate' });
+      expect(loadCache).toHaveBeenCalledTimes(2);
+    });
   });
 
   // ─── Scenario 3: backoff reset after success ────────────────────────────────

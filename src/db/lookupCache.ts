@@ -120,7 +120,18 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
       throw new Error(`${this.options.cacheName} refresh did not start`);
     }
 
-    const resolvedCache = await this.awaitCachePromise(initialRefreshPromise);
+    let resolvedCache: TCache;
+    try {
+      resolvedCache = await this.awaitCachePromise(initialRefreshPromise);
+    } catch (err) {
+      if (requestVersion !== this.version) {
+        const retryAfterVersionChange = this.startRefresh(Date.now());
+        if (retryAfterVersionChange) {
+          return this.awaitCachePromise(retryAfterVersionChange);
+        }
+      }
+      throw err;
+    }
     const postRefreshCache = requestVersion === this.version ? resolvedCache : this.cache;
     if (postRefreshCache !== null) {
       return postRefreshCache;
