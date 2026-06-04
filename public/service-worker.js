@@ -4,6 +4,9 @@ const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const RUNTIME_CACHE_MAX_ENTRIES = 50;
 
+const STATIC_EXTENSIONS = ['.css', '.js', '.json', '.png', '.svg', '.woff2'];
+const BYPASS_PATH_PREFIXES = ['/api', '/auth', '/admin', '/streams'];
+
 const STATIC_ASSETS = [
   '/offline.html',
   '/style.css',
@@ -164,25 +167,13 @@ async function networkFirst(request) {
 function isStaticAsset(pathname) {
   return (
     pathname.startsWith('/icons/') ||
-    pathname.endsWith('.css') ||
-    pathname.endsWith('.js') ||
-    pathname.endsWith('.json') ||
-    pathname.endsWith('.png') ||
-    pathname.endsWith('.svg') ||
-    pathname.endsWith('.woff2')
+    STATIC_EXTENSIONS.some((ext) => pathname.endsWith(ext))
   );
 }
 
 function isBypassPath(pathname) {
-  return (
-    pathname === '/api' ||
-    pathname.startsWith('/api/') ||
-    pathname === '/auth' ||
-    pathname.startsWith('/auth/') ||
-    pathname === '/admin' ||
-    pathname.startsWith('/admin/') ||
-    pathname === '/streams' ||
-    pathname.startsWith('/streams/')
+  return BYPASS_PATH_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(prefix + '/')
   );
 }
 
