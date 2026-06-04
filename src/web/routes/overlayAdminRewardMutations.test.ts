@@ -68,7 +68,7 @@ describe('POST /settings/rewards', () => {
     const res = await supertest(buildApp())
       .post('/settings/rewards')
       .type('form')
-      .send({ twitch_reward_id: '12345678-1234-1234-1234-123456789abc', video_ids: ['1'] });
+      .send({ twitch_reward_id: '12345678-1234-1234-8234-123456789abc', video_ids: ['1'] });
     expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');
   });
 
@@ -81,12 +81,21 @@ describe('POST /settings/rewards', () => {
     expect(res.headers.location).toBe('/overlay/settings?error=invalid_reward_id');
   });
 
+  it('redirects with error for all-hyphens string that passes loose regex', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const res = await supertest(buildApp())
+      .post('/settings/rewards')
+      .type('form')
+      .send({ twitch_reward_id: '------------------------------------', video_ids: ['1'] });
+    expect(res.headers.location).toBe('/overlay/settings?error=invalid_reward_id');
+  });
+
   it('redirects with error when no videos selected', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const res = await supertest(buildApp())
       .post('/settings/rewards')
       .type('form')
-      .send({ twitch_reward_id: '12345678-1234-1234-1234-123456789abc' });
+      .send({ twitch_reward_id: '12345678-1234-1234-8234-123456789abc' });
     expect(res.headers.location).toBe('/overlay/settings?error=no_videos_selected');
   });
 
@@ -96,9 +105,9 @@ describe('POST /settings/rewards', () => {
     const res = await supertest(buildApp())
       .post('/settings/rewards')
       .type('form')
-      .send({ twitch_reward_id: '12345678-1234-1234-1234-123456789abc', video_ids: ['7', '8'], weight_7: '3', weight_8: '1' });
+      .send({ twitch_reward_id: '12345678-1234-1234-8234-123456789abc', video_ids: ['7', '8'], weight_7: '3', weight_8: '1' });
     expect(res.headers.location).toBe('/overlay/settings?success=reward_saved');
-    expect(vi.mocked(upsertReward)).toHaveBeenCalledWith(MOCK_STREAMER.id, '12345678-1234-1234-1234-123456789abc');
+    expect(vi.mocked(upsertReward)).toHaveBeenCalledWith(MOCK_STREAMER.id, '12345678-1234-1234-8234-123456789abc');
     expect(vi.mocked(setRewardVideos)).toHaveBeenCalledWith(
       42,
       MOCK_STREAMER.id,

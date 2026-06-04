@@ -18,7 +18,7 @@ router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) =
     const body = req.body as Record<string, string | string[] | undefined>;
     const twitchRewardId = (typeof body.twitch_reward_id === 'string' ? body.twitch_reward_id : '').trim();
 
-    if (!/^[0-9a-f-]{36}$/i.test(twitchRewardId)) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(twitchRewardId)) {
       return res.redirect('/overlay/settings?error=invalid_reward_id');
     }
 
