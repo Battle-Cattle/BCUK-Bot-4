@@ -18,7 +18,6 @@ vi.mock('./commandStringUtils', () => ({
 
 import { getPool } from './pool';
 import { isDeadlockError, getCommandWriteLockName, acquireNamedLock, isAnyCommandTakenAcrossTables } from './commandLocks';
-import { CommandConflictError } from './commandStringUtils';
 
 describe('isDeadlockError', () => {
   it('returns true when code is ER_LOCK_DEADLOCK', () => {
