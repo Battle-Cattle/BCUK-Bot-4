@@ -1,0 +1,229 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('../db', () => ({
+  findApprovedKeyByHash: vi.fn(),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+}));
+vi.mock('./csrf', () => ({
+  ensureSessionCsrfToken: vi.fn().mockReturnValue('csrf-token'),
+}));
+
+import { requireAuth, requireManager, requireMod, requireAdmin, requireApiKey } from './middleware';
+import { findApprovedKeyByHash } from '../db';
+
+function makeReq(overrides: object = {}): any {
+  return {
+    session: {},
+    headers: {},
+    ...overrides,
+  };
+}
+
+function makeRes(): any {
+  const res: any = {
+    status: vi.fn().mockReturnThis(),
+    redirect: vi.fn(),
+    render: vi.fn(),
+    json: vi.fn(),
+  };
+  return res;
+}
+
+const next = vi.fn();
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+// ─── requireAuth ─────────────────────────────────────────────────────────────
+
+describe('requireAuth', () => {
+  it('calls next() when session.user is set', () => {
+    const req = makeReq({ session: { user: { accessLevel: 0 } } });
+    requireAuth(req, makeRes(), next);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('redirects to /auth/login when session.user is absent', () => {
+    const req = makeReq({ session: {} });
+    const res = makeRes();
+    requireAuth(req, res, next);
+    expect(res.redirect).toHaveBeenCalledWith('/auth/login');
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+// ─── requireMod ──────────────────────────────────────────────────────────────
+
+describe('requireMod', () => {
+  it('calls next() when access level is MOD (1)', () => {
+    const req = makeReq({ session: { user: { accessLevel: 1 } } });
+    requireMod(req, makeRes(), next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('calls next() when access level is higher than MOD', () => {
+    const req = makeReq({ session: { user: { accessLevel: 3 } } });
+    requireMod(req, makeRes(), next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('returns 403 when access level is USER (0)', () => {
+    const req = makeReq({ session: { user: { accessLevel: 0 } } });
+    const res = makeRes();
+    requireMod(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.render).toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when session.user is absent', () => {
+    const req = makeReq({ session: {} });
+    const res = makeRes();
+    requireMod(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('renders error template with Mod-required message', () => {
+    const req = makeReq({ session: {} });
+    const res = makeRes();
+    requireMod(req, res, next);
+    const [template, data] = res.render.mock.calls[0];
+    expect(template).toBe('error');
+    expect(data.message).toContain('Mod');
+  });
+});
+
+// ─── requireManager ──────────────────────────────────────────────────────────
+
+describe('requireManager', () => {
+  it('calls next() when access level is MANAGER (2)', () => {
+    const req = makeReq({ session: { user: { accessLevel: 2 } } });
+    requireManager(req, makeRes(), next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('calls next() when access level is ADMIN (3)', () => {
+    const req = makeReq({ session: { user: { accessLevel: 3 } } });
+    requireManager(req, makeRes(), next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('returns 403 when access level is MOD (1)', () => {
+    const req = makeReq({ session: { user: { accessLevel: 1 } } });
+    const res = makeRes();
+    requireManager(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when no session user', () => {
+    const req = makeReq({ session: {} });
+    const res = makeRes();
+    requireManager(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  it('renders error template with Manager-required message', () => {
+    const req = makeReq({ session: { user: { accessLevel: 0 } } });
+    const res = makeRes();
+    requireManager(req, res, next);
+    const [template, data] = res.render.mock.calls[0];
+    expect(template).toBe('error');
+    expect(data.message).toContain('Manager');
+  });
+});
+
+// ─── requireAdmin ─────────────────────────────────────────────────────────────
+
+describe('requireAdmin', () => {
+  it('calls next() when access level is ADMIN (3)', () => {
+    const req = makeReq({ session: { user: { accessLevel: 3 } } });
+    requireAdmin(req, makeRes(), next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('returns 403 when access level is MANAGER (2)', () => {
+    const req = makeReq({ session: { user: { accessLevel: 2 } } });
+    const res = makeRes();
+    requireAdmin(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when no session user', () => {
+    const req = makeReq({ session: {} });
+    const res = makeRes();
+    requireAdmin(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  it('renders error template with Admin-required message', () => {
+    const req = makeReq({ session: { user: { accessLevel: 0 } } });
+    const res = makeRes();
+    requireAdmin(req, res, next);
+    const [, data] = res.render.mock.calls[0];
+    expect(data.message).toContain('Admin');
+  });
+});
+
+// ─── requireApiKey ────────────────────────────────────────────────────────────
+
+describe('requireApiKey', () => {
+  it('returns 401 when Authorization header is absent', async () => {
+    const req = makeReq({ headers: {} });
+    const res = makeRes();
+    await requireApiKey(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'Unauthorized' });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when Authorization header does not start with Bearer', async () => {
+    const req = makeReq({ headers: { authorization: 'Basic abc' } });
+    const res = makeRes();
+    await requireApiKey(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when findApprovedKeyByHash returns null', async () => {
+    vi.mocked(findApprovedKeyByHash).mockResolvedValue(null);
+    const req = makeReq({ headers: { authorization: 'Bearer mytoken' } });
+    const res = makeRes();
+    await requireApiKey(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('sets req.apiKeyOwner and calls next() when key is valid', async () => {
+    vi.mocked(findApprovedKeyByHash).mockResolvedValue({ discord_id: 'user42' } as any);
+    const req = makeReq({ headers: { authorization: 'Bearer validtoken' } });
+    const res = makeRes();
+    await requireApiKey(req, res, next);
+    expect(req.apiKeyOwner).toBe('user42');
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('hashes the token before looking it up', async () => {
+    vi.mocked(findApprovedKeyByHash).mockResolvedValue({ discord_id: 'u1' } as any);
+    const req = makeReq({ headers: { authorization: 'Bearer mytoken' } });
+    await requireApiKey(req, makeRes(), next);
+    const passedHash: string = vi.mocked(findApprovedKeyByHash).mock.calls[0][0];
+    // SHA256 of 'mytoken' is a 64-char hex string
+    expect(passedHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(passedHash).not.toBe('mytoken');
+  });
+
+  it('returns 500 when findApprovedKeyByHash throws', async () => {
+    vi.mocked(findApprovedKeyByHash).mockRejectedValue(new Error('DB error'));
+    const req = makeReq({ headers: { authorization: 'Bearer tok' } });
+    const res = makeRes();
+    await requireApiKey(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'Internal server error' });
+    expect(next).not.toHaveBeenCalled();
+  });
+});
