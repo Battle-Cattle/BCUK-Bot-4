@@ -40,3 +40,10 @@ jobs:
           name: coverage-report
           path: coverage/coverage-report.txt
           retention-days: 30
+
+      - name: Publish coverage to Qlty
+        if: always()
+        uses: qltysh/qlty-action/coverage@v2
+        with:
+          token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
+          files: coverage/lcov.info
