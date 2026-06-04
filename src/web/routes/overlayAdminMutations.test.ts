@@ -68,7 +68,7 @@ function buildApp(sessionUser: SessionUser = USER) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
-  vi.mocked(addVideo).mockResolvedValue(undefined);
+  vi.mocked(addVideo).mockResolvedValue(1);
   vi.mocked(deleteVideo).mockResolvedValue(null);
   vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
   vi.mocked(fs.promises.writeFile).mockResolvedValue(undefined);
