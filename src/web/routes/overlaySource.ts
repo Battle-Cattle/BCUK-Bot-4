@@ -63,6 +63,11 @@ router.get('/:login/events', (req, res, next) => {
       res.write(': ping\n\n');
     } catch {
       clearInterval(keepalive);
+      const clients = connections.get(key);
+      if (clients) {
+        clients.delete(res);
+        if (clients.size === 0) connections.delete(key);
+      }
     }
   }, 25_000);
 

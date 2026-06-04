@@ -67,6 +67,8 @@ router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
       if (!user || !user.twitch_name) continue;
       await assignUserToCommand(commandId, discordId);
     } catch (err) {
+      // Roll back the newly created command so it doesn't get stuck partially assigned.
+      try { await removeCustomCommand(commandId); } catch (cleanupErr) { log.error('Cleanup after failed assign error:', cleanupErr); }
       if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
         return res.redirect('/commands?error=command_taken');
       }
