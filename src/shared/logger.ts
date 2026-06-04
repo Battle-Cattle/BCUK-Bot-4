@@ -23,35 +23,34 @@ const consoleFormat = format.combine(
   }),
 );
 
-const sharedTransports = [
-  new DailyRotateFile({
-    dirname: LOG_DIR,
-    filename: 'combined-%DATE%.log',
-    datePattern: 'YYYY-MM-DD',
-    maxSize: '20m',
-    maxFiles: '14d',
-    zippedArchive: true,
-    format: fileFormat,
-  }),
-  new DailyRotateFile({
-    dirname: LOG_DIR,
-    filename: 'error-%DATE%.log',
-    datePattern: 'YYYY-MM-DD',
-    level: 'error',
-    maxSize: '20m',
-    maxFiles: '14d',
-    zippedArchive: true,
-    format: fileFormat,
-  }),
-  new transports.Console({
-    format: consoleFormat,
-  }),
-];
+const rootLogger = winstonCreateLogger({
+  level: LOG_LEVEL,
+  transports: [
+    new DailyRotateFile({
+      dirname: LOG_DIR,
+      filename: 'combined-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxSize: '20m',
+      maxFiles: '14d',
+      zippedArchive: true,
+      format: fileFormat,
+    }),
+    new DailyRotateFile({
+      dirname: LOG_DIR,
+      filename: 'error-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      level: 'error',
+      maxSize: '20m',
+      maxFiles: '14d',
+      zippedArchive: true,
+      format: fileFormat,
+    }),
+    new transports.Console({
+      format: consoleFormat,
+    }),
+  ],
+});
 
 export function createLogger(module: string) {
-  return winstonCreateLogger({
-    level: LOG_LEVEL,
-    defaultMeta: { label: module },
-    transports: sharedTransports,
-  });
+  return rootLogger.child({ label: module });
 }
