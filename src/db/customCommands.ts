@@ -175,8 +175,10 @@ export async function updateCustomCommand(
 
 export async function removeCustomCommand(commandId: number): Promise<void> {
   const connection = await getPool().getConnection();
+  const lockName = `bcuk_cmdid_${commandId}`;
 
   try {
+    await acquireNamedLock(connection, lockName);
     await connection.beginTransaction();
     await connection.execute(
       'DELETE FROM twitch_user_commands WHERE command_id = ?',
@@ -196,6 +198,7 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
     await connection.rollback();
     throw error;
   } finally {
+    await releaseNamedLock(connection, lockName);
     connection.release();
   }
 }

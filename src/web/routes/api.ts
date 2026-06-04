@@ -7,6 +7,7 @@ import { getDiscordClient } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { DISCORD_GUILD_ID, DISCORD_VOICE_CHANNEL_ID } from '../../shared/config';
+import { normalizeDiscordId } from './shared';
 
 const log = createLogger('API');
 const router = Router();
@@ -41,8 +42,16 @@ router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
   }
   try {
     const { channelId } = req.body as { channelId?: unknown };
+    if (channelId !== undefined && typeof channelId !== 'string') {
+      res.status(400).json({ ok: false, error: 'channelId must be a string' });
+      return;
+    }
     const trimmedChannelId = typeof channelId === 'string' ? channelId.trim() : '';
-    const resolvedChannelId = trimmedChannelId ? trimmedChannelId : undefined;
+    if (trimmedChannelId && !normalizeDiscordId(trimmedChannelId)) {
+      res.status(400).json({ ok: false, error: 'Invalid channel ID' });
+      return;
+    }
+    const resolvedChannelId = trimmedChannelId || undefined;
 
     disconnect();
     await connect(discordClient, resolvedChannelId);

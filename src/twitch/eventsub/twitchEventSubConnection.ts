@@ -106,7 +106,7 @@ export class StreamerConnection {
 
   private async doReload(): Promise<void> {
     if (!this.ws || !this.sessionId) {
-      if (!this.stopped) { this.connect(); }
+      if (!this.stopped && !this.reconnectTimer) { this.connect(); }
       return;
     }
     const count = await subscribeForStreamer(this.sessionId, this.currentData);
@@ -204,6 +204,7 @@ export class StreamerConnection {
   }
 
   private scheduleReconnect(): void {
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); }
     const delay = Math.min(RECONNECT_BACKOFF_MAX_MS, 1_000 * Math.pow(2, this.reconnectAttempts));
     this.reconnectAttempts++;
     log.info(`[${this.name}] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
