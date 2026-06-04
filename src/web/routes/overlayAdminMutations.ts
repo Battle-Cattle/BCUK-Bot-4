@@ -53,32 +53,34 @@ export function parseWeight(raw: string | string[] | undefined): number {
   return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
 }
 
+async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.File, name: string): Promise<void> {
+  const dir = safeResolve(OVERLAY_FOLDER, String(streamer.id));
+  if (!dir) throw Object.assign(new Error('Path traversal blocked'), { code: 'invalid_path' });
+  const ext = file.mimetype === 'video/webm' ? 'webm' : 'mp4';
+  const filename = `${randomUUID()}.${ext}`;
+  await fs.promises.mkdir(dir, { recursive: true });
+  const fullPath = path.join(dir, filename);
+  await fs.promises.writeFile(fullPath, file.buffer);
+  try {
+    await addVideo(streamer.id, name, filename);
+  } catch (e) {
+    await fs.promises.rm(fullPath, { force: true });
+    throw e;
+  }
+  log.info(`Overlay video uploaded for ${streamer.twitch_name}: ${filename}`);
+}
+
 // POST /overlay/settings/videos/upload
 router.post('/settings/videos/upload', requireAuth, upload.single('video'), csrfProtection, async (req, res) => {
   try {
     const streamer = await requireStreamer(req, res);
     if (!streamer) return;
-
     if (!req.file) return res.redirect('/overlay/settings?error=invalid_file');
-
     const name = (typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 100) : '') || req.file.originalname;
-    const ext = req.file.mimetype === 'video/webm' ? 'webm' : 'mp4';
-    const filename = `${randomUUID()}.${ext}`;
-
-    const dir = safeResolve(OVERLAY_FOLDER, String(streamer.id));
-    if (!dir) return res.redirect('/overlay/settings?error=invalid_path');
-    await fs.promises.mkdir(dir, { recursive: true });
-    const fullPath = path.join(dir, filename);
-    await fs.promises.writeFile(fullPath, req.file.buffer);
-    try {
-      await addVideo(streamer.id, name, filename);
-    } catch (e) {
-      await fs.promises.rm(fullPath, { force: true });
-      throw e;
-    }
-    log.info(`Overlay video uploaded for ${streamer.twitch_name}: ${filename}`);
+    await saveVideoFile(streamer, req.file, name);
     res.redirect('/overlay/settings?success=video_uploaded');
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.code === 'invalid_path') return res.redirect('/overlay/settings?error=invalid_path');
     log.error('Overlay video upload error:', err);
     res.redirect('/overlay/settings?error=upload_failed');
   }
