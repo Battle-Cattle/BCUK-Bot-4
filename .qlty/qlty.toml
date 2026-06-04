@@ -69,6 +69,3 @@ mode = "comment"
 
 [[plugin]]
 name = "trufflehog"
-
-[[plugin]]
-name = "vitest"
