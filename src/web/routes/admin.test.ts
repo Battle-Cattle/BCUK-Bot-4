@@ -20,11 +20,11 @@ vi.mock('../middleware', () => ({
   requireAdmin: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../twitchChannelName', () => ({
+vi.mock('../../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn(),
 }));
 
-vi.mock('../../mutationQueue', () => ({
+vi.mock('../../shared/mutationQueue', () => ({
   createMutationQueue: () => ({
     run: (_key: string, fn: () => Promise<unknown>) => fn(),
   }),
@@ -50,7 +50,7 @@ vi.mock('./adminUserMutations', () => {
   };
 });
 
-vi.mock('../../logger', () => ({
+vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
@@ -58,7 +58,7 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './admin';
 import { findUser, getAllUsers, updateAccessLevel } from '../../db';
-import { normalizeTwitchChannelName } from '../../twitchChannelName';
+import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 import {
   DuplicateTwitchNameError,
   isDuplicateTwitchNameDbError,

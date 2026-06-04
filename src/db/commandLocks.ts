@@ -1,4 +1,4 @@
-import { createLogger } from '../logger';
+import { createLogger } from '../shared/logger';
 import { createHash } from 'node:crypto';
 
 const log = createLogger('DB');

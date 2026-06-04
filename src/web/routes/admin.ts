@@ -1,4 +1,4 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import { Router, Response } from 'express';
 import {
   findUser,
@@ -11,8 +11,8 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireManager, requireAdmin } from '../middleware';
 import { trimField, renderError, filterQueryParam } from './shared';
-import { normalizeTwitchChannelName } from '../../twitchChannelName';
-import { createMutationQueue } from '../../mutationQueue';
+import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
+import { createMutationQueue } from '../../shared/mutationQueue';
 import adminRefreshRouter, { refreshState } from './adminRefresh';
 import {
   DuplicateTwitchNameError,

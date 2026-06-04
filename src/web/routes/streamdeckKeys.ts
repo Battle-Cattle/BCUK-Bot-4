@@ -1,4 +1,4 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import {
   requestApiKey,
@@ -11,7 +11,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
-import { WEB_PORT } from '../../config';
+import { WEB_PORT } from '../../shared/config';
 import { normalizeDiscordId, renderError, filterQueryParam } from './shared';
 
 const log = createLogger('Web');

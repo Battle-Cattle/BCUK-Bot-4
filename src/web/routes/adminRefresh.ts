@@ -1,9 +1,9 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { getAllUsers, updateDiscordName } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
-import { getDiscordClient, fetchMemberDisplayName } from '../../discordBot';
+import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
 
 export type RefreshOutcome = 'idle' | 'running' | 'success' | 'partial' | 'noop' | 'error';
 

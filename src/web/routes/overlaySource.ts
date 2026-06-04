@@ -1,8 +1,8 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import fs from 'fs';
-import { OVERLAY_FOLDER } from '../../config';
-import { safeResolve } from '../../pathUtils';
+import { OVERLAY_FOLDER } from '../../shared/config';
+import { safeResolve } from '../../shared/pathUtils';
 
 const log = createLogger('OverlaySource');
 const router = Router();

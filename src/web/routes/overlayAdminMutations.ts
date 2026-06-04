@@ -1,4 +1,4 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
@@ -8,9 +8,9 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import type { DbStreamerEventSub } from '../../db';
 import { addVideo, deleteVideo } from '../../db';
-import { OVERLAY_FOLDER } from '../../config';
+import { OVERLAY_FOLDER } from '../../shared/config';
 import { parsePositiveIntId } from './shared';
-import { safeResolve } from '../../pathUtils';
+import { safeResolve } from '../../shared/pathUtils';
 import { requireStreamer } from './overlayAdminShared';
 
 export { requireStreamer, toStringArray, parseWeight } from './overlayAdminShared';

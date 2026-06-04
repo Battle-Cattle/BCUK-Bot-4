@@ -9,12 +9,12 @@ vi.mock('../../db', () => ({
   getTwitchEnabledChannels: vi.fn(),
 }));
 
-vi.mock('../../twitchBot', () => ({
+vi.mock('../../twitch/twitchBot', () => ({
   joinTwitchChannel: vi.fn(),
   partTwitchChannel: vi.fn(),
 }));
 
-vi.mock('../../twitchChannelName', () => ({
+vi.mock('../../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn((name: string | null) => name?.toLowerCase() ?? null),
 }));
 
@@ -30,7 +30,7 @@ import {
   updateTwitchBotEnabled,
   getTwitchEnabledChannels,
 } from '../../db';
-import { joinTwitchChannel, partTwitchChannel } from '../../twitchBot';
+import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchBot';
 
 type MockDbUser = {
   discord_id: string;

@@ -1,12 +1,12 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getStatus } from '../../statusStore';
+import { getStatus } from '../../shared/statusStore';
 import { requireAuth, requireMod } from '../middleware';
-import { connect, disconnect, getCurrentChannelId } from '../../audioPlayer';
-import { getDiscordClient } from '../../discordBot';
+import { connect, disconnect, getCurrentChannelId } from '../../audio/audioPlayer';
+import { getDiscordClient } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
-import { getAvailableVoiceChannels } from '../../discordUtils';
-import { DISCORD_GUILD_ID, DISCORD_VOICE_CHANNEL_ID } from '../../config';
+import { getAvailableVoiceChannels } from '../../discord/discordUtils';
+import { DISCORD_GUILD_ID, DISCORD_VOICE_CHANNEL_ID } from '../../shared/config';
 
 const log = createLogger('API');
 const router = Router();

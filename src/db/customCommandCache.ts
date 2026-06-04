@@ -1,5 +1,5 @@
-import { createLogger } from '../logger';
-import { normalizeTwitchChannelName } from '../twitchChannelName';
+import { createLogger } from '../shared/logger';
+import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
 import { getTwitchEnabledChannels } from './users';
 // customCommands imports invalidateCustomCommandLookupCache from this module;

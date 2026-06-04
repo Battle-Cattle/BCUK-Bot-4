@@ -1,6 +1,6 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getRecentCommandTestEntries } from '../../commandMonitorStore';
+import { getRecentCommandTestEntries } from '../../commands/commandMonitorStore';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { renderError } from './shared';

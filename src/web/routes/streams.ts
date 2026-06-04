@@ -1,4 +1,4 @@
-import { createLogger } from '../../logger';
+import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import {
   getAllStreamGroups,
@@ -15,7 +15,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
-import { restartTwitchMonitor, getLiveStates } from '../../twitchMonitor';
+import { restartTwitchMonitor, getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db';
 import { parsePositiveIntId, filterQueryParam } from './shared';
 

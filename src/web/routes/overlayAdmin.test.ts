@@ -17,19 +17,19 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../twitchApi', () => ({
+vi.mock('../../twitch/twitchApi', () => ({
   getCustomRewards: vi.fn(),
 }));
 
-vi.mock('../../twitchApiEventSub', () => ({
+vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
   getValidToken: vi.fn(),
 }));
 
-vi.mock('../../config', () => ({
+vi.mock('../../shared/config', () => ({
   PUBLIC_URL: 'http://localhost:3000',
 }));
 
-vi.mock('../../logger', () => ({
+vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
