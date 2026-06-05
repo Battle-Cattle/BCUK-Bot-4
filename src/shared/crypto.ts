@@ -23,11 +23,16 @@ export function encryptToken(plaintext: string, secret: string): string {
   return `${ENC_PREFIX}${iv.toString('base64')}.${tag.toString('base64')}.${data.toString('base64')}`;
 }
 
-/** Decrypts a token produced by encryptToken. Returns plaintext values unchanged (migration path). */
+/**
+ * Decrypts a token produced by encryptToken.
+ * Throws if a plaintext token is encountered when a secret is available — the EventSub
+ * OAuth flow must be re-run to produce an encrypted token.
+ */
 export function decryptToken(stored: string, secret: string): string {
   if (!stored.startsWith(ENC_PREFIX)) {
-    log.warn('Decrypting a plaintext (unencrypted) token — re-run the EventSub OAuth flow to re-encrypt it');
-    return stored;
+    throw new Error(
+      'Stored token is not encrypted. Re-run the EventSub OAuth flow to re-encrypt it.',
+    );
   }
   const key = parseKey(secret);
   const [ivB64, tagB64, dataB64] = stored.slice(ENC_PREFIX.length).split('.');
