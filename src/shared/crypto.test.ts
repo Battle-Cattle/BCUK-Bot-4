@@ -44,8 +44,10 @@ describe('decryptToken', () => {
     expect(decryptToken(token, VALID_SECRET)).toBe(plaintext);
   });
 
-  it('returns unencrypted strings unchanged (migration path)', () => {
-    expect(decryptToken('plaintext-token', VALID_SECRET)).toBe('plaintext-token');
+  it('throws on plaintext tokens (migration path removed — re-auth required)', () => {
+    expect(() => decryptToken('plaintext-token', VALID_SECRET)).toThrow(
+      'Stored token is not encrypted',
+    );
   });
 
   it('throws on malformed encrypted token (missing parts)', () => {
