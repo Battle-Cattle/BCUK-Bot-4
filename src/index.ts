@@ -34,7 +34,7 @@ process.on('SIGINT',  () => { shutdown('SIGINT').catch((err)  => { log.error('Sh
 process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err) => { log.error('Shutdown error:', err); process.exit(1); }); });
 
 async function main(): Promise<void> {
-  log.info('Starting BCUK SFX Bot...');
+  log.info('Starting BCUK Bot 4...');
 
   // Verify DB connection early
   try {
