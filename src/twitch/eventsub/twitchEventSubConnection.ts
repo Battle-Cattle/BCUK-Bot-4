@@ -33,7 +33,7 @@ export function buildReconnectUrl(reconnectUrl: string): string | null {
   const validPorts = new Set(['', '443']);
   const checkResults = {
     protocol: parsed.protocol === 'wss:',
-    hostname: parsed.hostname === 'eventsub.wss.twitch.tv',
+    hostname: parsed.hostname === 'eventsub.wss.twitch.tv' || parsed.hostname.endsWith('.eventsub.wss.twitch.tv'),
     username: !parsed.username,
     password: !parsed.password,
     port: validPorts.has(parsed.port),
@@ -45,7 +45,7 @@ export function buildReconnectUrl(reconnectUrl: string): string | null {
     return null;
   }
   // Reconstruct from validated components so taint analysis sees a clean value
-  const safe = new URL('wss://eventsub.wss.twitch.tv/ws');
+  const safe = new URL(`wss://${parsed.hostname}/ws`);
   safe.search = parsed.search;
   return safe.href;
 }
