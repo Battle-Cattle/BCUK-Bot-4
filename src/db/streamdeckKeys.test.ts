@@ -7,6 +7,7 @@ vi.mock('./users', () => ({
 }));
 
 import { getPool } from './pool';
+import { AccessLevel } from './users';
 import {
   findApprovedKeyByHash,
   getApiKeyStatus,
@@ -204,7 +205,7 @@ describe('requestApiKey', () => {
     const row = { discord_id: '1', status: 'denied', requested_at: new Date(), approved_at: null, approved_by: null, user_name: null, approver_name: null };
     const pool = makePool([row]);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await expect(requestApiKey('1', 0)).rejects.toThrow('denied');
+    await expect(requestApiKey('1', AccessLevel.USER)).rejects.toThrow('denied');
   });
 
   it('returns status=approved for MANAGER access level (2)', async () => {
@@ -218,7 +219,7 @@ describe('requestApiKey', () => {
         }]]),
     };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await requestApiKey('1', 2);
+    const result = await requestApiKey('1', AccessLevel.MANAGER);
     expect(result.status).toBe('approved');
     expect(result.plain).toHaveLength(64); // 32 bytes as hex
   });
@@ -233,7 +234,7 @@ describe('requestApiKey', () => {
         }]]),
     };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await requestApiKey('1', 0);
+    const result = await requestApiKey('1', AccessLevel.USER);
     expect(result.status).toBe('pending');
   });
 
@@ -247,7 +248,7 @@ describe('requestApiKey', () => {
         }]]),
     };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await requestApiKey('1', 1);
+    const result = await requestApiKey('1', AccessLevel.MOD);
     expect(result.plain).toMatch(/^[0-9a-f]{64}$/);
   });
 });
