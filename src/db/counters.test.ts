@@ -226,7 +226,7 @@ describe('resetCounterCurrentValue', () => {
 
   it('invalidates cache on success', async () => {
     const pool = makePool();
-    pool.execute.mockResolvedValue([[{ affectedRows: 1 }], []]);
+    pool.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await resetCounterCurrentValue(1);
     expect(invalidateCounterLookupCache).toHaveBeenCalled();
@@ -271,7 +271,7 @@ describe('incrementCounter', () => {
     const pool = makePool();
     const conn = pool._conn;
     conn.execute
-      .mockResolvedValueOnce([[{ affectedRows: 1 }], []])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
       .mockResolvedValueOnce([[{ current_value: 3 }], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await incrementCounter(1);

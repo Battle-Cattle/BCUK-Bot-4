@@ -75,7 +75,7 @@ describe('addVideo', () => {
 
   it('passes streamerId, name, filename to execute', async () => {
     const pool = makePool();
-    pool.execute.mockResolvedValue([[{ insertId: 1 }], []]);
+    pool.execute.mockResolvedValue([{ insertId: 1 }, []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await addVideo(5, 'MyVid', 'vid.mp4');
     expect(pool.execute.mock.calls[0][1]).toEqual([5, 'MyVid', 'vid.mp4']);
@@ -206,7 +206,7 @@ describe('upsertReward', () => {
 
   it('passes streamerId and twitchRewardId to execute', async () => {
     const pool = makePool();
-    pool.execute.mockResolvedValue([[{ insertId: 1 }], []]);
+    pool.execute.mockResolvedValue([{ insertId: 1 }, []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await upsertReward(7, 'rewardXYZ');
     expect(pool.execute.mock.calls[0][1]).toEqual([7, 'rewardXYZ']);
