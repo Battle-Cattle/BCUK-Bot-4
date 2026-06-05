@@ -221,8 +221,10 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
     [id],
   );
 
-  if (result.affectedRows === 0 && !(await counterExists(id))) {
-    throw new CounterNotFoundError(id);
+  if (result.affectedRows === 0) {
+    if (!(await counterExists(id))) throw new CounterNotFoundError(id);
+    // Counter exists but value was already 0 — nothing changed, skip invalidation.
+    return;
   }
 
   invalidateCounterLookupCache();
