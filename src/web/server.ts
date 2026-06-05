@@ -4,7 +4,7 @@ import type { ErrorRequestHandler } from 'express';
 import session from 'express-session';
 import MySQLStore from 'express-mysql-session';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import path from 'path';
 import { WEB_PORT, SESSION_SECRET, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../shared/config';
 
@@ -66,7 +66,7 @@ app.set('views', path.join(__dirname, '../../views'));
 app.use(express.static(path.join(__dirname, '../../public')));
 
 // Rate limiting — applied after static assets so file downloads aren't counted
-const ipKey = (req: express.Request) => req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+const ipKey = (req: express.Request) => ipKeyGenerator(req.ip ?? req.socket?.remoteAddress ?? 'unknown');
 
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -97,7 +97,7 @@ const streamdeckLimiter = rateLimit({
   keyGenerator: (req) => {
     const auth = req.headers['authorization'];
     const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-    return token ?? (req.ip ?? req.socket?.remoteAddress ?? 'unknown');
+    return token ?? ipKeyGenerator(req.ip ?? req.socket?.remoteAddress ?? 'unknown');
   },
   message: 'Too many requests, please try again shortly.',
 });
