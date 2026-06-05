@@ -49,6 +49,15 @@ describe('buildReconnectUrl', () => {
     expect(buildReconnectUrl('wss://evil.example.com/ws')).toBeNull();
   });
 
+  it('accepts cell-specific subdomains (e.g. cell-a.eventsub.wss.twitch.tv)', () => {
+    const result = buildReconnectUrl('wss://cell-a.eventsub.wss.twitch.tv/ws?challenge=abc&id=123');
+    expect(result).toBe('wss://cell-a.eventsub.wss.twitch.tv/ws?challenge=abc&id=123');
+  });
+
+  it('returns null for a subdomain that only ends with twitch.tv but not the expected suffix', () => {
+    expect(buildReconnectUrl('wss://evil.eventsub.wss.twitch.tv.attacker.com/ws')).toBeNull();
+  });
+
   it('returns null when credentials are present (username)', () => {
     expect(buildReconnectUrl('wss://user@eventsub.wss.twitch.tv/ws')).toBeNull();
   });
