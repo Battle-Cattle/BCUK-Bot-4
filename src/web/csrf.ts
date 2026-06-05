@@ -40,16 +40,11 @@ export const csrfProtection: RequestHandler = (req, _res, next) => {
     return;
   }
 
-  const submittedBuffer = Buffer.from(submittedToken);
-  const sessionBuffer = Buffer.from(sessionToken);
-  const sameLength = submittedBuffer.length === sessionBuffer.length;
-  const len = Math.max(submittedBuffer.length, sessionBuffer.length);
-  const a = Buffer.alloc(len);
-  const b = Buffer.alloc(len);
-  submittedBuffer.copy(a);
-  sessionBuffer.copy(b);
-  const sameValue = crypto.timingSafeEqual(a, b);
-  if (!sameLength || !sameValue) {
+  // Compare hex digests so both buffers are always the same byte length,
+  // eliminating any timing side-channel from a length mismatch check.
+  const a = Buffer.from(crypto.createHash('sha256').update(submittedToken).digest('hex'));
+  const b = Buffer.from(crypto.createHash('sha256').update(sessionToken).digest('hex'));
+  if (!crypto.timingSafeEqual(a, b)) {
     next(createCsrfError());
     return;
   }
