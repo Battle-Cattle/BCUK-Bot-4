@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import { getPool } from './pool';
 import { createLogger } from '../shared/logger';
+import { fromBit } from './utils';
 
 const log = createLogger('DB');
 
@@ -33,7 +34,7 @@ function mapUser(r: mysql.RowDataPacket): DbUser {
   return {
     discord_id: String(r.discord_id),
     discord_name: r.discord_name,
-    is_twitch_bot_enabled: Buffer.isBuffer(r.is_twitch_bot_enabled) ? r.is_twitch_bot_enabled[0] === 1 : r.is_twitch_bot_enabled == 1,
+    is_twitch_bot_enabled: fromBit(r.is_twitch_bot_enabled),
     twitch_name: r.twitch_name,
     access_level: r.access_level,
   };
