@@ -51,6 +51,7 @@ export function authHeaders(token: string): Record<string, string> {
 }
 
 function chunks<T>(arr: T[], size: number): T[][] {
+  if (size <= 0) throw new Error(`chunks: size must be > 0, got ${size}`);
   const result: T[][] = [];
   for (let i = 0; i < arr.length; i += size) result.push(arr.slice(i, i + size));
   return result;
