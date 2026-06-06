@@ -8,6 +8,7 @@ vi.mock('../../db', () => ({
   denyApiKey: vi.fn().mockResolvedValue(undefined),
   getAllApiKeys: vi.fn().mockResolvedValue([]),
   getPendingRequests: vi.fn().mockResolvedValue([]),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 vi.mock('../csrf', () => ({
   csrfProtection: (req: any, _res: any, next: any) => {
@@ -26,10 +27,10 @@ import supertest from 'supertest';
 import router from './streamdeckKeys';
 import {
   requestApiKey, getApiKeyStatus, revokeApiKey,
-  approveApiKey, denyApiKey, getAllApiKeys, getPendingRequests,
+  approveApiKey, denyApiKey, getAllApiKeys, getPendingRequests, AccessLevel,
 } from '../../db';
 
-const SESSION_USER = { discordId: '111222333444555666', discordName: 'Alice', accessLevel: 3 as const };
+const SESSION_USER = { discordId: '111222333444555666', discordName: 'Alice', accessLevel: AccessLevel.ADMIN };
 const VALID_DISCORD_ID = '123456789012345678';
 
 function buildApp(sessionUser = SESSION_USER) {

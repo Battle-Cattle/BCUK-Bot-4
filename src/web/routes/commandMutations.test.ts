@@ -14,6 +14,7 @@ vi.mock('../../db', () => {
     CommandNotFoundError,
     ReservedCommandError,
     isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
+    AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
   };
 });
 vi.mock('../csrf', () => ({ csrfProtection: (_req: any, _res: any, next: any) => next() }));
@@ -27,7 +28,7 @@ import {
   addCustomCommand, updateCustomCommand, removeCustomCommand,
   assignUserToCommand, findUser,
   CommandConflictError, CommandNotFoundError, ReservedCommandError,
-  isMysqlDuplicateEntryError,
+  isMysqlDuplicateEntryError, AccessLevel,
 } from '../../db';
 
 function buildApp() {
@@ -94,7 +95,7 @@ describe('POST /commands/add', () => {
   });
 
   it('assigns users when discord_ids are provided and user has twitch_name', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, discord_name: 'Alice', is_twitch_bot_enabled: false, twitch_name: 'alice', access_level: 0 } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, discord_name: 'Alice', is_twitch_bot_enabled: false, twitch_name: 'alice', access_level: AccessLevel.USER } as any);
     const res = await supertest(buildApp())
       .post('/commands/add')
       .send(`trigger_string=!clap&output=Clap&discord_ids=${VALID_DISCORD_ID}`);
@@ -112,7 +113,7 @@ describe('POST /commands/add', () => {
   });
 
   it('redirects to ?error=command_taken when assignUserToCommand throws CommandConflictError', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, twitch_name: 'alice', discord_name: null, is_twitch_bot_enabled: false, access_level: 0 } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, twitch_name: 'alice', discord_name: null, is_twitch_bot_enabled: false, access_level: AccessLevel.USER } as any);
     vi.mocked(assignUserToCommand).mockRejectedValueOnce(new (CommandConflictError as any)('conflict'));
     const res = await supertest(buildApp())
       .post('/commands/add')
@@ -122,7 +123,7 @@ describe('POST /commands/add', () => {
   });
 
   it('redirects to ?error=assign_failed on unexpected assign error', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, twitch_name: 'alice', discord_name: null, is_twitch_bot_enabled: false, access_level: 0 } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, twitch_name: 'alice', discord_name: null, is_twitch_bot_enabled: false, access_level: AccessLevel.USER } as any);
     vi.mocked(assignUserToCommand).mockRejectedValueOnce(new Error('DB error'));
     const res = await supertest(buildApp())
       .post('/commands/add')
