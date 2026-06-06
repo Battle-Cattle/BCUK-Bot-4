@@ -9,7 +9,7 @@ vi.mock('./csrf', () => ({
 }));
 
 import { requireAuth, requireManager, requireMod, requireAdmin, requireApiKey } from './middleware';
-import { findApprovedKeyByHash } from '../db';
+import { findApprovedKeyByHash, AccessLevel } from '../db';
 
 function makeReq(overrides: object = {}): any {
   return {
@@ -39,7 +39,7 @@ beforeEach(() => {
 
 describe('requireAuth', () => {
   it('calls next() when session.user is set', () => {
-    const req = makeReq({ session: { user: { accessLevel: 0 } } });
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER } } });
     requireAuth(req, makeRes(), next);
     expect(next).toHaveBeenCalledOnce();
   });
@@ -57,19 +57,19 @@ describe('requireAuth', () => {
 
 describe('requireMod', () => {
   it('calls next() when access level is MOD (1)', () => {
-    const req = makeReq({ session: { user: { accessLevel: 1 } } });
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.MOD } } });
     requireMod(req, makeRes(), next);
     expect(next).toHaveBeenCalled();
   });
 
   it('calls next() when access level is higher than MOD', () => {
-    const req = makeReq({ session: { user: { accessLevel: 3 } } });
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN } } });
     requireMod(req, makeRes(), next);
     expect(next).toHaveBeenCalled();
   });
 
   it('returns 403 when access level is USER (0)', () => {
-    const req = makeReq({ session: { user: { accessLevel: 0 } } });
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER } } });
     const res = makeRes();
     requireMod(req, res, next);
     expect(res.status).toHaveBeenCalledWith(403);
@@ -99,19 +99,19 @@ describe('requireMod', () => {
 
 describe('requireManager', () => {
   it('calls next() when access level is MANAGER (2)', () => {
-    const req = makeReq({ session: { user: { accessLevel: 2 } } });
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.MANAGER } } });
     requireManager(req, makeRes(), next);
     expect(next).toHaveBeenCalled();
   });
 
   it('calls next() when access level is ADMIN (3)', () => {
-    const req = makeReq({ session: { user: { accessLevel: 3 } } });
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN } } });
     requireManager(req, makeRes(), next);
     expect(next).toHaveBeenCalled();
   });
 
   it('returns 403 when access level is MOD (1)', () => {
-    const req = makeReq({ session: { user: { accessLevel: 1 } } });
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.MOD } } });
     const res = makeRes();
     requireManager(req, res, next);
     expect(res.status).toHaveBeenCalledWith(403);
@@ -126,7 +126,7 @@ describe('requireManager', () => {
   });
 
   it('renders error template with Manager-required message', () => {
-    const req = makeReq({ session: { user: { accessLevel: 0 } } });
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER } } });
     const res = makeRes();
     requireManager(req, res, next);
     const [template, data] = res.render.mock.calls[0];
@@ -139,13 +139,13 @@ describe('requireManager', () => {
 
 describe('requireAdmin', () => {
   it('calls next() when access level is ADMIN (3)', () => {
-    const req = makeReq({ session: { user: { accessLevel: 3 } } });
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN } } });
     requireAdmin(req, makeRes(), next);
     expect(next).toHaveBeenCalled();
   });
 
   it('returns 403 when access level is MANAGER (2)', () => {
-    const req = makeReq({ session: { user: { accessLevel: 2 } } });
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.MANAGER } } });
     const res = makeRes();
     requireAdmin(req, res, next);
     expect(res.status).toHaveBeenCalledWith(403);
@@ -160,7 +160,7 @@ describe('requireAdmin', () => {
   });
 
   it('renders error template with Admin-required message', () => {
-    const req = makeReq({ session: { user: { accessLevel: 0 } } });
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER } } });
     const res = makeRes();
     requireAdmin(req, res, next);
     const [, data] = res.render.mock.calls[0];

@@ -21,7 +21,7 @@ export interface DbStreamerEventSub {
   twitch_user_id: string | null;
   eventsub_access_token: string | null;
   eventsub_refresh_token: string | null;
-  eventsub_token_expiry: number | null;
+  eventsub_token_expiry: string | null;
   config: EventSubConfig | null;
 }
 
@@ -60,7 +60,7 @@ function mapStreamerEventSub(r: mysql.RowDataPacket): DbStreamerEventSub {
     twitch_user_id: r.twitch_user_id ?? null,
     eventsub_access_token: maybeDecrypt(r.eventsub_access_token ?? null),
     eventsub_refresh_token: maybeDecrypt(r.eventsub_refresh_token ?? null),
-    eventsub_token_expiry: r.eventsub_token_expiry != null ? Number(r.eventsub_token_expiry) : null,
+    eventsub_token_expiry: r.eventsub_token_expiry != null ? String(r.eventsub_token_expiry) : null,
     config: r.follow_enabled != null ? mapConfig(r) : null,
   };
 }

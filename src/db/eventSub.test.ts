@@ -65,6 +65,7 @@ function makeRowWithConfig(overrides: object = {}): Record<string, unknown> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockSecret = 'a'.repeat(64);
   vi.mocked(encryptToken).mockImplementation((v: string) => `enc:${v}`);
   vi.mocked(decryptToken).mockImplementation((v: string) => v.replace('enc:', ''));
 });
@@ -125,11 +126,11 @@ describe('getAllEventSubStreamers', () => {
     expect(s.discord_id).toBe('12345');
   });
 
-  it('converts eventsub_token_expiry to Number', async () => {
+  it('preserves eventsub_token_expiry as a string (BIGINT — no Number coercion)', async () => {
     const row = makeRow({ eventsub_token_expiry: '9007199254740993' });
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getAllEventSubStreamers();
-    expect(typeof s.eventsub_token_expiry).toBe('number');
+    expect(s.eventsub_token_expiry).toBe('9007199254740993');
   });
 
   it('maps eventsub_token_expiry=null to null', async () => {

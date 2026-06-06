@@ -9,7 +9,7 @@ const TOKEN_BUFFER_MS = 5 * 60 * 1000;
 export async function getValidToken(streamer: DbStreamerEventSub): Promise<string | null> {
   if (!streamer.eventsub_access_token) return null;
   const needsRefresh = streamer.eventsub_token_expiry != null
-    && Date.now() > streamer.eventsub_token_expiry - TOKEN_BUFFER_MS;
+    && Date.now() > Number(streamer.eventsub_token_expiry) - TOKEN_BUFFER_MS;
   if (!needsRefresh) return streamer.eventsub_access_token;
   if (!streamer.eventsub_refresh_token) {
     log.warn(`No refresh token for ${streamer.twitch_name ?? 'unknown'}`);
