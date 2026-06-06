@@ -12,8 +12,9 @@ vi.mock('../middleware', () => ({
 
 import express from 'express';
 import supertest from 'supertest';
-import router from './sfxPublic';
 import { getPublicSfxTriggers } from '../../db';
+
+let router: any;
 
 function buildApp(sessionUser: unknown = { discordId: '1', discordName: 'Test', accessLevel: 0 }) {
   const app = express();
@@ -29,13 +30,14 @@ function buildApp(sessionUser: unknown = { discordId: '1', discordName: 'Test', 
   return app;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.resetModules();
   vi.clearAllMocks();
   vi.mocked(getPublicSfxTriggers).mockResolvedValue([]);
+  router = (await import('./sfxPublic.js')).default;
 });
 
 describe('GET /sfx-list', () => {
-  // Error test runs first so the module-level cache is cold
   it('returns 500 and renders error page when getPublicSfxTriggers throws', async () => {
     vi.mocked(getPublicSfxTriggers).mockRejectedValueOnce(new Error('DB down'));
     const res = await supertest(buildApp()).get('/sfx-list');
@@ -64,6 +66,8 @@ describe('GET /sfx-list', () => {
   it('passes null user when session has no user', async () => {
     vi.mocked(getPublicSfxTriggers).mockResolvedValue([]);
     const res = await supertest(buildApp(null)).get('/sfx-list');
+    expect(res.status).toBe(200);
+    expect((res.body as any).view).toBe('sfx-public');
     expect((res.body as any).locals.user).toBeNull();
   });
 });

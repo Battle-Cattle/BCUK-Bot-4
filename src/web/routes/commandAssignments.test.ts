@@ -8,6 +8,7 @@ vi.mock('../../db', () => {
     findUser: vi.fn().mockResolvedValue(null),
     CommandConflictError,
     isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
+    AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
   };
 });
 vi.mock('../csrf', () => ({
@@ -23,7 +24,7 @@ vi.mock('../../shared/logger', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router from './commandAssignments';
-import { assignUserToCommand, unassignUserFromCommand, findUser, CommandConflictError, isMysqlDuplicateEntryError } from '../../db';
+import { assignUserToCommand, unassignUserFromCommand, findUser, CommandConflictError, isMysqlDuplicateEntryError, AccessLevel } from '../../db';
 
 function buildApp() {
   const app = express();
@@ -37,7 +38,7 @@ const VALID_DISCORD_ID = '123456789012345678'; // 18 digits
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, discord_name: 'Alice', is_twitch_bot_enabled: true, twitch_name: 'alice', access_level: 0 } as any);
+  vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, discord_name: 'Alice', is_twitch_bot_enabled: true, twitch_name: 'alice', access_level: AccessLevel.USER } as any);
   vi.mocked(assignUserToCommand).mockResolvedValue(undefined);
   vi.mocked(unassignUserFromCommand).mockResolvedValue(undefined);
   vi.mocked(isMysqlDuplicateEntryError).mockReturnValue(false);
@@ -82,7 +83,7 @@ describe('POST /commands/assign', () => {
   });
 
   it('redirects to ?error=invalid_assignment_user when user has no twitch_name', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, discord_name: 'Alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: 0 } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, discord_name: 'Alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER } as any);
     const res = await supertest(buildApp())
       .post('/commands/assign')
       .send(`command_id=${VALID_COMMAND_ID}&discord_id=${VALID_DISCORD_ID}`);
@@ -135,6 +136,13 @@ describe('POST /commands/unassign', () => {
     const res = await supertest(buildApp())
       .post('/commands/unassign')
       .send(`command_id=abc&discord_id=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/commands?error=invalid_id');
+  });
+
+  it('redirects to ?error=invalid_id for malformed discord_id', async () => {
+    const res = await supertest(buildApp())
+      .post('/commands/unassign')
+      .send(`command_id=${VALID_COMMAND_ID}&discord_id=bad`);
     expect(res.headers.location).toBe('/commands?error=invalid_id');
   });
 

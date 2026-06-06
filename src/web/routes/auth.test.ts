@@ -8,6 +8,7 @@ vi.mock('../../shared/config', () => ({
 vi.mock('../../db', () => ({
   findUser: vi.fn().mockResolvedValue(null),
   updateDiscordName: vi.fn().mockResolvedValue(undefined),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 vi.mock('../../discord/discordBot', () => ({
   fetchMemberDisplayName: vi.fn().mockResolvedValue(null),
@@ -25,7 +26,7 @@ vi.mock('../../shared/logger', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router from './auth';
-import { findUser, updateDiscordName } from '../../db';
+import { findUser, updateDiscordName, AccessLevel } from '../../db';
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 
 function buildApp(sessionOverrides: Record<string, unknown> = {}) {
@@ -120,7 +121,6 @@ describe('GET /discord/callback', () => {
       { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
       { ok: true, json: () => Promise.resolve({ id: '999', username: 'stranger', avatar: null }) },
     ]);
-    vi.mocked(findUser).mockResolvedValue(null);
     const res = await supertest(buildApp({ oauthState: 'state123' }))
       .get('/discord/callback?code=code&state=state123');
     expect(res.status).toBe(403);
@@ -131,7 +131,7 @@ describe('GET /discord/callback', () => {
       { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
       { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
     ]);
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: 0 } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER } as any);
     const res = await supertest(buildApp({ oauthState: 'state123' }))
       .get('/discord/callback?code=code&state=state123');
     expect(res.status).toBe(302);
@@ -143,7 +143,7 @@ describe('GET /discord/callback', () => {
       { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
       { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
     ]);
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'OldName', is_twitch_bot_enabled: false, twitch_name: null, access_level: 0 } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'OldName', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER } as any);
     vi.mocked(fetchMemberDisplayName).mockResolvedValue('NewDisplayName');
     const res = await supertest(buildApp({ oauthState: 'state123' }))
       .get('/discord/callback?code=code&state=state123');
@@ -162,7 +162,7 @@ describe('GET /login', () => {
   });
 
   it('redirects to / when already authenticated', async () => {
-    const res = await supertest(buildApp({ user: { discordId: '1', discordName: 'Alice', accessLevel: 0 } })).get('/login');
+    const res = await supertest(buildApp({ user: { discordId: '1', discordName: 'Alice', accessLevel: AccessLevel.USER } })).get('/login');
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/');
   });
