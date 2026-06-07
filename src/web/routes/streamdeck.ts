@@ -70,7 +70,7 @@ router.post('/sfx', requireApiKey, async (req, res) => {
     if (err instanceof VoiceNotConnectedError) {
       res.status(503).json({ ok: false, error: 'Bot is not connected to a voice channel' });
     } else {
-      log.error(`Failed to play ${filename}:`, err);
+      log.error(`Failed to play ${filename.replace(/[\r\n]/g, '')}:`, err);
       res.status(500).json({ ok: false, error: 'Failed to play sound' });
     }
   }
