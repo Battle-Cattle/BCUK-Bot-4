@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Response } from 'express';
 import type { SessionUser } from '../../types/express';
+
+vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+
+import { AccessLevel } from '../../db/users';
 import {
   parsePositiveIntId,
   trimField,
@@ -194,7 +198,7 @@ describe('renderError', () => {
       discordId: '123456789012345678',
       discordName: 'TestUser',
       discordAvatar: null,
-      accessLevel: 1,
+      accessLevel: AccessLevel.MOD,
     };
     renderError(res, 500, 'Server error', user);
     expect(render).toHaveBeenCalledWith('error', {

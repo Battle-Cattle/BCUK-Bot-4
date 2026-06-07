@@ -27,13 +27,16 @@ vi.mock('../../config', () => ({
   PUBLIC_URL: 'https://example.com',
 }));
 
+vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+
 import express from 'express';
 import supertest from 'supertest';
 import { router } from './overlayAdminRewardMutations';
 import { getStreamerByDiscordId, upsertReward, setRewardVideos, deleteReward } from '../../db';
+import { AccessLevel } from '../../db/users';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
-const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: 0 };
+const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: AccessLevel.USER };
 
 const MOCK_STREAMER = {
   id: 123,

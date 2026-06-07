@@ -42,10 +42,11 @@ import express from 'express';
 import supertest from 'supertest';
 import { router } from './overlayAdminMutations';
 import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
+import { AccessLevel } from '../../db/users';
 import fs from 'fs';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
-const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: 0 };
+const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: AccessLevel.USER };
 
 const MOCK_STREAMER = {
   id: 123,

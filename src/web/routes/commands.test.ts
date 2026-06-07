@@ -37,6 +37,8 @@ vi.mock('../../logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
+vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+
 import express from 'express';
 import supertest from 'supertest';
 import router from './commands';
@@ -54,6 +56,7 @@ import {
   CommandNotFoundError,
   ReservedCommandError,
 } from '../../db';
+import { AccessLevel } from '../../db/users';
 
 function buildApp() {
   const app = express();
@@ -63,7 +66,7 @@ function buildApp() {
     next();
   });
   app.use((req: any, _res: any, next: any) => {
-    req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: 2 } };
+    req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER } };
     next();
   });
   app.use(router);
@@ -466,7 +469,7 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: 2 } };
+      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER } };
       next();
     });
     app.use(router);
@@ -486,7 +489,7 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: 2 } };
+      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER } };
       next();
     });
     app.use(router);
@@ -503,7 +506,7 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: 2 } };
+      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER } };
       next();
     });
     app.use(router);
@@ -539,7 +542,7 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: 2 } };
+      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER } };
       next();
     });
     app.use(router);

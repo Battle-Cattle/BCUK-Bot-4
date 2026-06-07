@@ -42,9 +42,10 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './overlayAdmin';
 import { getStreamerByDiscordId } from '../../db';
+import { AccessLevel } from '../../db/users';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
-const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: 1 };
+const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: AccessLevel.MOD };
 
 function buildApp(sessionUser: SessionUser = USER) {
   const app = express();
