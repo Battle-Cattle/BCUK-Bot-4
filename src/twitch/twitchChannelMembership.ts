@@ -142,6 +142,8 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       // agree with the live tmi.js state.
       activeChannels.add(normalized);
       setTwitchChannel(normalized, true);
+      cacheChannelUserId(normalized);
+      fireChannelJoinedHook(normalized);
       return;
     }
 

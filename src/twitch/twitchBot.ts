@@ -132,7 +132,6 @@ export async function sayInChannel(channel: string, message: string): Promise<vo
 export async function stopTwitchBot(): Promise<void> {
   connected = false;
   setConnected(false);
-  clearMembershipState();
   if (client) {
     try {
       await client.disconnect();
@@ -142,5 +141,6 @@ export async function stopTwitchBot(): Promise<void> {
     client = null;
     setTmiClient(null);
   }
+  clearMembershipState();
   log.info('Disconnected.');
 }
