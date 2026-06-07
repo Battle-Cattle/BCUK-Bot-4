@@ -8,7 +8,7 @@ import {
   updateTwitchBotEnabled,
   AccessLevelValue,
 } from '../../db';
-import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchBot';
+import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchChannelMembership';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 
 const log = createLogger('Web');

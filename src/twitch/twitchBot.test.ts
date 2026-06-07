@@ -76,13 +76,15 @@ vi.mock('../commands/countdownHandler', () => ({
 import {
   startTwitchBot,
   stopTwitchBot,
+  sayInChannel,
+} from './twitchBot';
+import {
   joinTwitchChannel,
   partTwitchChannel,
-  sayInChannel,
   getActiveChannels,
   getActiveChannelUserIds,
   setChannelJoinedHook,
-} from './twitchBot';
+} from './twitchChannelMembership';
 import { getTwitchEnabledChannels } from '../db';
 import { getUsers } from './twitchApi';
 import { setTwitchChannel } from '../shared/statusStore';
@@ -322,6 +324,40 @@ describe('joinTwitchChannel', () => {
     expect(mockClient.join).toHaveBeenCalledWith('streamer');
     expect(getActiveChannels().has('streamer')).toBe(true);
   });
+
+  it('fires the channel-joined hook when already joined in tmi.js', async () => {
+    await connectBot();
+    const hook = vi.fn();
+    setChannelJoinedHook(hook);
+    mockClient.getChannels.mockReturnValue(['#streamer']);
+
+    await joinTwitchChannel('streamer');
+
+    expect(hook).toHaveBeenCalledWith('streamer');
+  });
+
+  it('caches the user ID when already joined in tmi.js', async () => {
+    await connectBot();
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'streamer', id: 'uid99' } as any]);
+    mockClient.getChannels.mockReturnValue(['#streamer']);
+
+    await joinTwitchChannel('streamer');
+    await Promise.resolve(); // flush cacheChannelUserId
+
+    expect(getActiveChannelUserIds().get('streamer')).toBe('uid99');
+  });
+
+  it('caches the user ID when queuing a channel while disconnected', async () => {
+    // startTwitchBot assigns the client but 'connected' stays false until the event fires.
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'streamer', id: 'uid77' } as any]);
+    await startTwitchBot();
+
+    await joinTwitchChannel('streamer');
+    await Promise.resolve(); // flush cacheChannelUserId
+
+    expect(getActiveChannelUserIds().get('streamer')).toBe('uid77');
+  });
 });
 
 // ─── partTwitchChannel ───────────────────────────────────────────────────────
@@ -387,6 +423,34 @@ describe('partTwitchChannel', () => {
 
     await expect(partTwitchChannel('streamer')).rejects.toThrow('part failed');
     expect(getActiveChannels().has('streamer')).toBe(false);
+  });
+
+  it('removes the user ID from the cache on a successful part', async () => {
+    await connectBot();
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'streamer', id: 'uid42' } as any]);
+    await joinTwitchChannel('streamer');
+    await Promise.resolve(); // flush cacheChannelUserId
+    mockClient.getChannels.mockReturnValue(['#streamer']);
+
+    await partTwitchChannel('streamer');
+
+    expect(getActiveChannelUserIds().has('streamer')).toBe(false);
+  });
+
+  it('does not write a stale user ID back if the channel was parted before getUsers resolved', async () => {
+    await connectBot();
+    let resolveGetUsers!: (val: any) => void;
+    vi.mocked(getUsers).mockImplementationOnce(
+      () => new Promise((resolve) => { resolveGetUsers = resolve; }),
+    );
+    await joinTwitchChannel('streamer'); // cacheChannelUserId fires but getUsers is pending
+    mockClient.getChannels.mockReturnValue(['#streamer']);
+    await partTwitchChannel('streamer'); // removes from activeChannels before getUsers resolves
+
+    resolveGetUsers([{ login: 'streamer', id: 'uid-stale' }]);
+    await Promise.resolve(); // flush the .then
+
+    expect(getActiveChannelUserIds().has('streamer')).toBe(false);
   });
 });
 
@@ -479,5 +543,151 @@ describe('stopTwitchBot', () => {
   it('is a no-op when the client was never started', async () => {
     await stopTwitchBot();
     expect(mockClient.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('active channels remain visible to the disconnected handler during client.disconnect', async () => {
+    await connectBot();
+    vi.mocked(getUsers).mockResolvedValue([]);
+    await joinTwitchChannel('streamer');
+    // Make disconnect synchronously fire the 'disconnected' event, as tmi.js does in production.
+    mockClient.disconnect.mockImplementation(async () => {
+      registeredHandlers['disconnected']('Connection closed.');
+    });
+    vi.mocked(setTwitchChannel).mockClear();
+
+    await stopTwitchBot();
+
+    // onDisconnected must have seen 'streamer' and called setTwitchChannel.
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
+    // clearMembershipState runs after, so channels are gone.
+    expect(getActiveChannels().size).toBe(0);
+  });
+
+  it('marks active channels offline when client.disconnect() rejects', async () => {
+    await connectBot();
+    vi.mocked(getUsers).mockResolvedValue([]);
+    await joinTwitchChannel('streamer');
+    mockClient.disconnect.mockRejectedValue(new Error('disconnect failed'));
+    vi.mocked(setTwitchChannel).mockClear();
+
+    await stopTwitchBot();
+
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
+    expect(getActiveChannels().size).toBe(0);
+  });
+});
+
+// ─── reconcileJoinedChannels (via onConnected) ────────────────────────────────
+
+describe('reconcileJoinedChannels', () => {
+  it('parts a tmi.js-joined channel that is not in activeChannels', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    vi.mocked(getUsers).mockResolvedValue([]);
+    await startTwitchBot();
+    mockClient.getChannels.mockReturnValue(['#stale']);
+
+    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    await vi.runAllTimersAsync();
+
+    expect(mockClient.part).toHaveBeenCalledWith('stale');
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('stale', false);
+  });
+
+  it('joins an activeChannels channel that tmi.js is not yet joined to', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
+    vi.mocked(getUsers).mockResolvedValue([]);
+    await startTwitchBot();
+    mockClient.getChannels.mockReturnValue([]);
+
+    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    await vi.runAllTimersAsync(); // advance JOIN_THROTTLE_MS
+
+    expect(mockClient.join).toHaveBeenCalledWith('streamer');
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', true);
+  });
+
+  it('marks a channel online when it is in both activeChannels and tmi.js', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
+    vi.mocked(getUsers).mockResolvedValue([]);
+    await startTwitchBot();
+    mockClient.getChannels.mockReturnValue(['#streamer']);
+
+    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    await Promise.resolve();
+
+    expect(mockClient.part).not.toHaveBeenCalled();
+    expect(mockClient.join).not.toHaveBeenCalled();
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', true);
+  });
+
+  it('refreshes the user ID cache for a channel confirmed live by tmi.js on reconnect', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
+    vi.mocked(getUsers)
+      .mockResolvedValueOnce([]) // initializeActiveChannels — simulate failed startup cache
+      .mockResolvedValue([{ login: 'streamer', id: 'uid-reconcile' } as any]);
+    await startTwitchBot();
+    mockClient.getChannels.mockReturnValue(['#streamer']); // tmi.js already joined
+
+    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    await vi.runAllTimersAsync();
+    await Promise.resolve(); // flush cacheChannelUserId .then
+
+    expect(getActiveChannelUserIds().get('streamer')).toBe('uid-reconcile');
+  });
+
+  it('caches the user ID when joinMissingChannel joins a channel on reconnect', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
+    vi.mocked(getUsers)
+      .mockResolvedValueOnce([]) // initializeActiveChannels
+      .mockResolvedValue([{ login: 'streamer', id: 'uid-join' } as any]);
+    await startTwitchBot();
+    mockClient.getChannels.mockReturnValue([]); // tmi.js not yet joined
+
+    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    await vi.runAllTimersAsync(); // advance JOIN_THROTTLE_MS
+    await Promise.resolve(); // flush cacheChannelUserId .then
+
+    expect(getActiveChannelUserIds().get('streamer')).toBe('uid-join');
+  });
+
+  it('caches the user ID when joinMissingChannel finds the channel already joined', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
+    vi.mocked(getUsers)
+      .mockResolvedValueOnce([]) // initializeActiveChannels
+      .mockResolvedValue([{ login: 'streamer', id: 'uid-prejoin' } as any]);
+    await startTwitchBot();
+    // Snapshot at reconcile start sees no joins; by the time joinMissingChannel
+    // runs its isChannelJoined check, the channel is already joined.
+    mockClient.getChannels.mockReturnValue([]);
+    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    mockClient.getChannels.mockReturnValue(['#streamer']);
+    await vi.runAllTimersAsync();
+    await Promise.resolve(); // flush cacheChannelUserId .then
+
+    expect(getActiveChannelUserIds().get('streamer')).toBe('uid-prejoin');
+  });
+});
+
+// ─── onDisconnected ───────────────────────────────────────────────────────────
+
+describe('onDisconnected', () => {
+  it('marks all active channels offline', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
+    vi.mocked(getUsers).mockResolvedValue([]);
+    await startTwitchBot();
+    vi.mocked(setTwitchChannel).mockClear();
+
+    registeredHandlers['disconnected']('Connection closed.');
+
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
+  });
+
+  it('clears the tmi.js channels array to prevent auto-rejoin', async () => {
+    await connectBot();
+    mockClient.channels = ['#streamer', '#other'];
+
+    registeredHandlers['disconnected']('Connection closed.');
+
+    expect(mockClient.channels).toEqual([]);
   });
 });

@@ -6,7 +6,7 @@ vi.mock('../../db', () => ({
   clearStreamerToken: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../twitchApi', () => ({ getUsers: vi.fn() }));
-vi.mock('../twitchBot', () => ({ getActiveChannels: vi.fn().mockReturnValue(new Set<string>()) }));
+vi.mock('../twitchChannelMembership', () => ({ getActiveChannels: vi.fn().mockReturnValue(new Set<string>()) }));
 vi.mock('../twitchChannelName', () => ({ normalizeTwitchChannelName: vi.fn((n: string) => n.toLowerCase()) }));
 vi.mock('./twitchApiEventSub', () => ({
   createEventSubSubscription: vi.fn().mockResolvedValue('sub-id-1'),
@@ -33,7 +33,7 @@ import {
 import { getAllEventSubStreamers } from '../../db';
 import { getValidToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
 import { getUsers } from '../twitchApi';
-import { getActiveChannels } from '../twitchBot';
+import { getActiveChannels } from '../twitchChannelMembership';
 
 // ---------------------------------------------------------------------------
 // hasAuthFailedSubs / clearAuthFailedSubs
