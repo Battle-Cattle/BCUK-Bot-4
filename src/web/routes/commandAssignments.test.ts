@@ -8,7 +8,6 @@ vi.mock('../../db', () => {
     findUser: vi.fn().mockResolvedValue(null),
     CommandConflictError,
     isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
-    AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
   };
 });
 vi.mock('../csrf', () => ({
@@ -20,11 +19,15 @@ vi.mock('../middleware', () => ({
 vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
+vi.mock('../../db/users', () => ({
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+}));
 
 import express from 'express';
 import supertest from 'supertest';
 import router from './commandAssignments';
-import { assignUserToCommand, unassignUserFromCommand, findUser, CommandConflictError, isMysqlDuplicateEntryError, AccessLevel } from '../../db';
+import { assignUserToCommand, unassignUserFromCommand, findUser, CommandConflictError, isMysqlDuplicateEntryError } from '../../db';
+import { AccessLevel } from '../../db/users';
 
 function buildApp() {
   const app = express();

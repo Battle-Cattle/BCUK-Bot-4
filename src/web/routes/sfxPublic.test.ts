@@ -9,14 +9,18 @@ vi.mock('../../shared/logger', () => ({
 vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
+vi.mock('../../db/users', () => ({
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+}));
 
 import express from 'express';
 import supertest from 'supertest';
 import { getPublicSfxTriggers } from '../../db';
+import { AccessLevel } from '../../db/users';
 
 let router: any;
 
-function buildApp(sessionUser: unknown = { discordId: '1', discordName: 'Test', accessLevel: 0 }) {
+function buildApp(sessionUser: unknown = { discordId: '1', discordName: 'Test', accessLevel: AccessLevel.USER }) {
   const app = express();
   app.use((req: any, _res: any, next: any) => {
     req.session = { user: sessionUser };
@@ -56,7 +60,7 @@ describe('GET /sfx-list', () => {
   });
 
   it('passes session user to the template', async () => {
-    const user = { discordId: '42', discordName: 'Alice', accessLevel: 1 };
+    const user = { discordId: '42', discordName: 'Alice', accessLevel: AccessLevel.MOD };
     vi.mocked(getPublicSfxTriggers).mockResolvedValue([]);
     const res = await supertest(buildApp(user)).get('/sfx-list');
     expect(res.status).toBe(200);

@@ -8,7 +8,6 @@ vi.mock('../../shared/config', () => ({
 vi.mock('../../db', () => ({
   findUser: vi.fn().mockResolvedValue(null),
   updateDiscordName: vi.fn().mockResolvedValue(undefined),
-  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 vi.mock('../../discord/discordBot', () => ({
   fetchMemberDisplayName: vi.fn().mockResolvedValue(null),
@@ -26,7 +25,8 @@ vi.mock('../../shared/logger', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router from './auth';
-import { findUser, updateDiscordName, AccessLevel } from '../../db';
+import { findUser, updateDiscordName } from '../../db';
+import { AccessLevel } from '../../db/users';
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 
 function buildApp(sessionOverrides: Record<string, unknown> = {}) {
