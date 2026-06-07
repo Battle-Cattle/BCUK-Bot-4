@@ -1,11 +1,10 @@
 import { createLogger } from '../../shared/logger';
-import path from 'path';
 import { Router } from 'express';
 import { findTrigger, findSoundFiles, getAllSfxTriggers } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
-import { SFX_FOLDER, DISCORD_GUILD_ID } from '../../shared/config';
+import { DISCORD_GUILD_ID } from '../../shared/config';
 import { requireApiKey } from '../middleware';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
@@ -61,10 +60,9 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   }
 
   const filename = pickWeightedRandom(files);
-  const fullPath = path.join(SFX_FOLDER, filename);
 
   try {
-    playFile(fullPath);
+    playFile(filename);
     setVoicePlaying(filename, normalizedCommand, 'streamdeck');
     log.info(`Playing '${filename.replace(/[\r\n]/g, '')}' for trigger '${normalizedCommand.replace(/[\r\n]/g, '')}'`);
     res.json({ ok: true, file: filename });
@@ -72,7 +70,7 @@ router.post('/sfx', requireApiKey, async (req, res) => {
     if (err instanceof VoiceNotConnectedError) {
       res.status(503).json({ ok: false, error: 'Bot is not connected to a voice channel' });
     } else {
-      log.error(`Failed to play ${fullPath}:`, err);
+      log.error(`Failed to play ${filename.replace(/[\r\n]/g, '')}:`, err);
       res.status(500).json({ ok: false, error: 'Failed to play sound' });
     }
   }
