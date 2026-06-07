@@ -135,7 +135,36 @@ describe('createManagedLookupCache', () => {
     });
   });
 
-  // ─── Scenario 3: backoff reset after success ────────────────────────────────
+  // ─── Scenario 3: concurrent getCache() calls coalesce ─────────────────────
+  // When multiple callers call getCache() simultaneously while no cache is
+  // loaded, they should all share the same in-flight loadCache() promise rather
+  // than spawning separate refreshes.
+
+  describe('concurrent getCache() calls coalesce to a single loadCache() invocation', () => {
+    it('calls loadCache exactly once for two simultaneous calls', async () => {
+      let resolve!: (v: TC) => void;
+      const freshResult: TC = { loadedAt: Date.now(), data: 'loaded' };
+
+      const createEmptyCache = vi.fn(() => ({ loadedAt: 0, data: 'empty' } as TC));
+      const loadCache = vi.fn<() => Promise<TC>>(() => new Promise<TC>(r => { resolve = r; }));
+
+      const { getCache } = createManagedLookupCache({ ...BASE_OPTS, createEmptyCache, loadCache });
+
+      // Both calls issued before the first refresh resolves.
+      const p1 = getCache();
+      const p2 = getCache();
+
+      resolve(freshResult);
+
+      const [r1, r2] = await Promise.all([p1, p2]);
+
+      expect(loadCache).toHaveBeenCalledOnce();
+      expect(r1).toMatchObject({ data: 'loaded' });
+      expect(r2).toMatchObject({ data: 'loaded' });
+    });
+  });
+
+  // ─── Scenario 5: backoff reset after success ────────────────────────────────
   // After a successful refresh resetRefreshFailureState() sets refreshAllowedAt=0
   // and refreshFailureCount=0. The next getCache() call after TTL should
   // immediately start a background refresh with no extra delay, even if earlier

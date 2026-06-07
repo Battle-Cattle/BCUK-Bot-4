@@ -17,7 +17,8 @@ vi.mock('./commandStringUtils', () => ({
 }));
 
 import { getPool } from './pool';
-import { isDeadlockError, getCommandWriteLockName, acquireNamedLock, isAnyCommandTakenAcrossTables } from './commandLocks';
+import { isDeadlockError, getCommandWriteLockName, acquireNamedLock, isAnyCommandTakenAcrossTables, runSerializedCommandWrite, MAX_DEADLOCK_RETRIES } from './commandLocks';
+import { CommandConflictError } from './commandStringUtils';
 
 describe('isDeadlockError', () => {
   it('returns true when code is ER_LOCK_DEADLOCK', () => {
@@ -199,5 +200,111 @@ describe('isAnyCommandTakenAcrossTables', () => {
     const customCmdCall = pool.execute.mock.calls.find((args) => (args[0] as string).includes('custom_command'));
     expect(customCmdCall).toBeDefined();
     expect(customCmdCall![1]).toContain(7);
+  });
+});
+
+// ─── runSerializedCommandWrite ────────────────────────────────────────────────
+
+// existsResults: array of row arrays returned for each SELECT 1 FROM check.
+// Pass [[]] for "no conflict" (empty rows), [[{ '1': 1 }]] for "conflict".
+function makeSerializedWriteConnection(existsResults: Array<unknown[]> = [[], []]) {
+  let existsCallIndex = 0;
+  const conn = {
+    execute: vi.fn(async (sql: string) => {
+      if (sql.startsWith('SELECT GET_LOCK')) return [[{ lock_status: '1' }], []];
+      if (sql.startsWith('SELECT RELEASE_LOCK')) return [[], []];
+      if (sql.startsWith('SELECT 1 FROM')) return [existsResults[existsCallIndex++] ?? [], []];
+      return [[], []];
+    }),
+    beginTransaction: vi.fn().mockResolvedValue(undefined),
+    commit: vi.fn().mockResolvedValue(undefined),
+    rollback: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn(),
+  };
+  return conn;
+}
+
+describe('runSerializedCommandWrite', () => {
+  it('calls writeOperation once and commits when no conflict and no deadlock', async () => {
+    const conn = makeSerializedWriteConnection();
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    const writeOp = vi.fn().mockResolvedValue('result');
+    const result = await runSerializedCommandWrite('!test', undefined, writeOp);
+
+    expect(writeOp).toHaveBeenCalledOnce();
+    expect(conn.commit).toHaveBeenCalledOnce();
+    expect(conn.rollback).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalled();
+    expect(result).toBe('result');
+  });
+
+  it('throws CommandConflictError immediately (no retry) when command is taken', async () => {
+    // First exists check returns a row (trigger taken); second check not reached
+    const conn = makeSerializedWriteConnection([[{ '1': 1 }], []]);
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    const writeOp = vi.fn();
+    await expect(runSerializedCommandWrite('!test', undefined, writeOp)).rejects.toBeInstanceOf(CommandConflictError);
+    expect(writeOp).not.toHaveBeenCalled();
+    expect(conn.rollback).toHaveBeenCalledOnce();
+    expect(conn.release).toHaveBeenCalled();
+  });
+
+  it('retries on deadlock and succeeds on second attempt', async () => {
+    const conn = makeSerializedWriteConnection();
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    const deadlockError = Object.assign(new Error('Deadlock'), { code: 'ER_LOCK_DEADLOCK' });
+    const writeOp = vi.fn()
+      .mockRejectedValueOnce(deadlockError)
+      .mockResolvedValueOnce('ok');
+
+    const result = await runSerializedCommandWrite('!test', undefined, writeOp);
+
+    expect(writeOp).toHaveBeenCalledTimes(2);
+    expect(conn.rollback).toHaveBeenCalledOnce();
+    expect(conn.commit).toHaveBeenCalledOnce();
+    expect(result).toBe('ok');
+    expect(conn.release).toHaveBeenCalled();
+  });
+
+  it(`throws after ${MAX_DEADLOCK_RETRIES} consecutive deadlocks`, async () => {
+    const conn = makeSerializedWriteConnection();
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    const deadlockError = Object.assign(new Error('Deadlock'), { code: 'ER_LOCK_DEADLOCK' });
+    const writeOp = vi.fn().mockRejectedValue(deadlockError);
+
+    await expect(runSerializedCommandWrite('!test', undefined, writeOp)).rejects.toThrow('Deadlock');
+    expect(writeOp).toHaveBeenCalledTimes(MAX_DEADLOCK_RETRIES);
+    expect(conn.rollback).toHaveBeenCalledTimes(MAX_DEADLOCK_RETRIES);
+    expect(conn.release).toHaveBeenCalled();
+  });
+
+  it('re-throws non-deadlock errors immediately without retry', async () => {
+    const conn = makeSerializedWriteConnection();
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    const dupError = Object.assign(new Error('Duplicate entry'), { code: 'ER_DUP_ENTRY' });
+    const writeOp = vi.fn().mockRejectedValue(dupError);
+
+    await expect(runSerializedCommandWrite('!test', undefined, writeOp)).rejects.toThrow('Duplicate entry');
+    expect(writeOp).toHaveBeenCalledOnce();
+    expect(conn.release).toHaveBeenCalled();
+  });
+
+  it('releases connection even when acquireNamedLock throws', async () => {
+    const conn = {
+      execute: vi.fn().mockResolvedValue([[{ lock_status: '0' }]]),
+      beginTransaction: vi.fn(),
+      commit: vi.fn(),
+      rollback: vi.fn(),
+      release: vi.fn(),
+    };
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    await expect(runSerializedCommandWrite('!test', undefined, vi.fn())).rejects.toThrow();
+    expect(conn.release).toHaveBeenCalled();
   });
 });

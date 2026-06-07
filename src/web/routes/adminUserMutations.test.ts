@@ -24,9 +24,11 @@ import {
   addOrUpdateUserMutation,
   removeUserMutation,
   toggleTwitchMutation,
+  DuplicateTwitchNameError,
 } from './adminUserMutations';
 import {
   findUser,
+  findUserByTwitchName,
   upsertUser,
   removeUser,
   updateTwitchBotEnabled,
@@ -191,5 +193,87 @@ describe('toggleTwitchMutation — rollback on join/part failure', () => {
 
     expect(vi.mocked(updateTwitchBotEnabled)).toHaveBeenNthCalledWith(1, '111', true);
     expect(vi.mocked(updateTwitchBotEnabled)).toHaveBeenNthCalledWith(2, '111', false);
+  });
+});
+
+describe('addOrUpdateUserMutation — DuplicateTwitchNameError', () => {
+  it('throws DuplicateTwitchNameError when another user already has the given Twitch name', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce(null); // no pre-existing user for this discordId
+
+    // findUserByTwitchName returns a conflicting user
+    vi.mocked(findUserByTwitchName).mockResolvedValue({ discord_id: '999' } as any);
+
+    await expect(
+      addOrUpdateUserMutation({
+        discordId: '111',
+        discordName: 'TestUser',
+        level: 0,
+        normalizedTwitchName: 'taken_chan',
+        shouldClearTwitchName: false,
+      }),
+    ).rejects.toBeInstanceOf(DuplicateTwitchNameError);
+
+    expect(vi.mocked(upsertUser)).not.toHaveBeenCalled();
+  });
+});
+
+describe('addOrUpdateUserMutation — upsertUser throws', () => {
+  it('does not attempt Twitch channel changes when upsertUser throws', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({
+        ...BASE_USER,
+        twitch_name: 'existing_chan',
+        is_twitch_bot_enabled: true,
+      } as any);
+
+    // No conflict on the Twitch name check
+    vi.mocked(findUserByTwitchName).mockResolvedValue(null);
+
+    vi.mocked(upsertUser).mockRejectedValue(new Error('DB write failed'));
+
+    await expect(
+      addOrUpdateUserMutation({
+        discordId: '111',
+        discordName: 'TestUser',
+        level: 0,
+        normalizedTwitchName: 'new_chan',
+        shouldClearTwitchName: false,
+      }),
+    ).rejects.toThrow('DB write failed');
+
+    expect(vi.mocked(joinTwitchChannel)).not.toHaveBeenCalled();
+    expect(vi.mocked(partTwitchChannel)).not.toHaveBeenCalled();
+  });
+});
+
+describe('addOrUpdateUserMutation — rollback failure does not mask original error', () => {
+  it('propagates the original partTwitchChannel error even when the rollback upsertUser also throws', async () => {
+    const existingUser: MockDbUser = {
+      ...BASE_USER,
+      twitch_name: 'streamerchan',
+      is_twitch_bot_enabled: true,
+    };
+
+    vi.mocked(findUser)
+      .mockResolvedValueOnce(existingUser as any)
+      .mockResolvedValueOnce({ ...existingUser, twitch_name: null } as any);
+
+    vi.mocked(partTwitchChannel).mockRejectedValue(new Error('Part failed'));
+    // The rollback upsertUser also fails
+    vi.mocked(upsertUser)
+      .mockResolvedValueOnce(undefined) // first call (main upsert) succeeds
+      .mockRejectedValueOnce(new Error('Rollback DB error')); // second call (rollback) fails
+
+    // The original "Part failed" error must be thrown, not the rollback error
+    await expect(
+      addOrUpdateUserMutation({
+        discordId: '111',
+        discordName: 'TestUser',
+        level: 0,
+        normalizedTwitchName: null,
+        shouldClearTwitchName: true,
+      }),
+    ).rejects.toThrow('Part failed');
   });
 });
