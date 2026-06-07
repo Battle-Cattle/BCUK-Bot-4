@@ -562,6 +562,19 @@ describe('stopTwitchBot', () => {
     // clearMembershipState runs after, so channels are gone.
     expect(getActiveChannels().size).toBe(0);
   });
+
+  it('marks active channels offline when client.disconnect() rejects', async () => {
+    await connectBot();
+    vi.mocked(getUsers).mockResolvedValue([]);
+    await joinTwitchChannel('streamer');
+    mockClient.disconnect.mockRejectedValue(new Error('disconnect failed'));
+    vi.mocked(setTwitchChannel).mockClear();
+
+    await stopTwitchBot();
+
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
+    expect(getActiveChannels().size).toBe(0);
+  });
 });
 
 // ─── reconcileJoinedChannels (via onConnected) ────────────────────────────────

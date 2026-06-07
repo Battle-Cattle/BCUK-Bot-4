@@ -137,6 +137,7 @@ export async function stopTwitchBot(): Promise<void> {
       await client.disconnect();
     } catch (err) {
       log.warn('Error during disconnect:', err);
+      getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
     }
     client = null;
     setTmiClient(null);
