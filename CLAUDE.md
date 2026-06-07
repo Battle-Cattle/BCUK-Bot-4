@@ -47,6 +47,23 @@ npm test      # Vitest
 
 ---
 
+## Tests
+
+- Every new function or behaviour change **must** include or update a Vitest test in the relevant `*.test.ts` file alongside the source file.
+- Tests live in `src/__tests__/` or co-located `*.test.ts` files — match the convention of the file being tested.
+- When modifying existing behaviour, update affected tests before committing — never leave a passing-but-wrong test.
+- Run `npm test` and confirm all tests pass before committing.
+
+---
+
+## Docstrings
+
+- Public functions (exported from a module) **must** have a JSDoc comment describing what they do, their parameters, and return value — one line is enough for simple cases.
+- Internal helpers only need a comment when the WHY is non-obvious (see general comment guidance).
+- When you change a function's signature or behaviour, update its JSDoc to match — stale docs are worse than no docs.
+
+---
+
 ## New Command Handler Pattern
 
 Export `registerXRuntime(runtime)` from the handler file to store the platform client — avoids circular imports with `src/index.ts`. Call it from `index.ts` after the client is ready. Record matches via `commandMonitorStore`.
