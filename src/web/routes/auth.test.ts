@@ -172,8 +172,10 @@ describe('GET /login', () => {
 
 describe('POST /logout', () => {
   it('destroys session and redirects to /auth/login', async () => {
-    const res = await supertest(buildApp({ user: { discordId: '1' } })).post('/logout');
+    const destroy = vi.fn((cb: () => void) => cb());
+    const res = await supertest(buildApp({ user: { discordId: '1' }, destroy })).post('/logout');
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/auth/login');
+    expect(destroy).toHaveBeenCalled();
   });
 });
