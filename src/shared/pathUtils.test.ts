@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import path from 'path';
 import { safeResolve } from './pathUtils';
 
+const posix = path.posix;
+
 describe('safeResolve', () => {
   const base = '/srv/files';
 
@@ -22,7 +24,7 @@ describe('safeResolve', () => {
   });
 
   it('returns the base path itself when no parts given', () => {
-    expect(safeResolve(base)).toBe(path.resolve(base));
+    expect(safeResolve(base)).toBe(posix.resolve(base));
   });
 
   it('returns null for an absolute path that is outside base', () => {
@@ -32,7 +34,7 @@ describe('safeResolve', () => {
   it('returns the path when it exactly equals the base', () => {
     // path.relative(base, base) is '' which does not start with '..'
     const result = safeResolve(base, '.');
-    expect(result).toBe(path.resolve(base));
+    expect(result).toBe(posix.resolve(base));
   });
 
   it('handles a base without trailing slash', () => {

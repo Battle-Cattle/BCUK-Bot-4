@@ -23,7 +23,7 @@ if (ffmpegPath) {
   log.warn('ffmpeg-static returned no path!');
 }
 
-const sfxRoot = path.resolve(SFX_FOLDER);
+const sfxRoot = path.posix.resolve(SFX_FOLDER);
 let realSfxRoot: string | null = null;
 
 function getRealSfxRoot(): string {
