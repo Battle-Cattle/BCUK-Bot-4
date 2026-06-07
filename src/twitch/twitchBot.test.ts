@@ -76,13 +76,15 @@ vi.mock('../commands/countdownHandler', () => ({
 import {
   startTwitchBot,
   stopTwitchBot,
+  sayInChannel,
+} from './twitchBot';
+import {
   joinTwitchChannel,
   partTwitchChannel,
-  sayInChannel,
   getActiveChannels,
   getActiveChannelUserIds,
   setChannelJoinedHook,
-} from './twitchBot';
+} from './twitchChannelMembership';
 import { getTwitchEnabledChannels } from '../db';
 import { getUsers } from './twitchApi';
 import { setTwitchChannel } from '../shared/statusStore';

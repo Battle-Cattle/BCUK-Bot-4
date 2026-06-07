@@ -9,7 +9,7 @@ vi.mock('../../db', () => ({
   getTwitchEnabledChannels: vi.fn(),
 }));
 
-vi.mock('../../twitch/twitchBot', () => ({
+vi.mock('../../twitch/twitchChannelMembership', () => ({
   joinTwitchChannel: vi.fn(),
   partTwitchChannel: vi.fn(),
 }));
@@ -32,7 +32,7 @@ import {
   updateTwitchBotEnabled,
   getTwitchEnabledChannels,
 } from '../../db';
-import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchBot';
+import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchChannelMembership';
 import { AccessLevel } from '../../db/users';
 
 type MockDbUser = {

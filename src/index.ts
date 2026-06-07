@@ -1,6 +1,7 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
 import { getPool, closePool } from './db';
-import { startTwitchBot, stopTwitchBot, sayInChannel, getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchBot';
+import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
+import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startDiscordBot, stopDiscordBot } from './discord/discordBot';
 import { startTikTokBot, stopTikTokBot } from './tiktok/tiktokBot';
 import { startTwitchMonitor, stopTwitchMonitor } from './twitch/monitor/twitchMonitor';
