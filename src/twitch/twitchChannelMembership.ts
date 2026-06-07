@@ -37,7 +37,7 @@ function isChannelJoined(channel: string): boolean {
 
 function cacheChannelUserId(channel: string): void {
   getUsers([channel])
-    .then(([u]) => { if (u) activeChannelUserIds.set(channel, u.id); })
+    .then(([u]) => { if (u && activeChannels.has(channel)) activeChannelUserIds.set(channel, u.id); })
     .catch((err) => { log.warn(`Failed to cache user ID for channel ${channel}:`, err); });
 }
 
@@ -48,6 +48,7 @@ function fireChannelJoinedHook(channel: string): void {
 async function partStaleChannel(channel: string): Promise<void> {
   if (activeChannels.has(channel)) {
     setTwitchChannel(channel, true);
+    cacheChannelUserId(channel);
     return;
   }
   if (!_client || !_connected || !isChannelJoined(channel)) {
@@ -67,11 +68,13 @@ async function joinMissingChannel(channel: string): Promise<void> {
   }
   if (isChannelJoined(channel)) {
     setTwitchChannel(channel, true);
+    cacheChannelUserId(channel);
     return;
   }
   await _client.join(channel);
   await new Promise<void>((resolve) => { setTimeout(resolve, JOIN_THROTTLE_MS); });
   setTwitchChannel(channel, true);
+  cacheChannelUserId(channel);
   fireChannelJoinedHook(channel);
   log.info(`Joined queued channel after reconnect: ${channel}`);
 }

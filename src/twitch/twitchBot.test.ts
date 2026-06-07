@@ -436,6 +436,22 @@ describe('partTwitchChannel', () => {
 
     expect(getActiveChannelUserIds().has('streamer')).toBe(false);
   });
+
+  it('does not write a stale user ID back if the channel was parted before getUsers resolved', async () => {
+    await connectBot();
+    let resolveGetUsers!: (val: any) => void;
+    vi.mocked(getUsers).mockImplementationOnce(
+      () => new Promise((resolve) => { resolveGetUsers = resolve; }),
+    );
+    await joinTwitchChannel('streamer'); // cacheChannelUserId fires but getUsers is pending
+    mockClient.getChannels.mockReturnValue(['#streamer']);
+    await partTwitchChannel('streamer'); // removes from activeChannels before getUsers resolves
+
+    resolveGetUsers([{ login: 'streamer', id: 'uid-stale' }]);
+    await Promise.resolve(); // flush the .then
+
+    expect(getActiveChannelUserIds().has('streamer')).toBe(false);
+  });
 });
 
 // ─── sayInChannel ────────────────────────────────────────────────────────────
@@ -589,6 +605,53 @@ describe('reconcileJoinedChannels', () => {
     expect(mockClient.part).not.toHaveBeenCalled();
     expect(mockClient.join).not.toHaveBeenCalled();
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', true);
+  });
+
+  it('refreshes the user ID cache for a channel confirmed live by tmi.js on reconnect', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
+    vi.mocked(getUsers)
+      .mockResolvedValueOnce([]) // initializeActiveChannels — simulate failed startup cache
+      .mockResolvedValue([{ login: 'streamer', id: 'uid-reconcile' } as any]);
+    await startTwitchBot();
+    mockClient.getChannels.mockReturnValue(['#streamer']); // tmi.js already joined
+
+    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    await vi.runAllTimersAsync();
+    await Promise.resolve(); // flush cacheChannelUserId .then
+
+    expect(getActiveChannelUserIds().get('streamer')).toBe('uid-reconcile');
+  });
+
+  it('caches the user ID when joinMissingChannel joins a channel on reconnect', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
+    vi.mocked(getUsers)
+      .mockResolvedValueOnce([]) // initializeActiveChannels
+      .mockResolvedValue([{ login: 'streamer', id: 'uid-join' } as any]);
+    await startTwitchBot();
+    mockClient.getChannels.mockReturnValue([]); // tmi.js not yet joined
+
+    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    await vi.runAllTimersAsync(); // advance JOIN_THROTTLE_MS
+    await Promise.resolve(); // flush cacheChannelUserId .then
+
+    expect(getActiveChannelUserIds().get('streamer')).toBe('uid-join');
+  });
+
+  it('caches the user ID when joinMissingChannel finds the channel already joined', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
+    vi.mocked(getUsers)
+      .mockResolvedValueOnce([]) // initializeActiveChannels
+      .mockResolvedValue([{ login: 'streamer', id: 'uid-prejoin' } as any]);
+    await startTwitchBot();
+    // Snapshot at reconcile start sees no joins; by the time joinMissingChannel
+    // runs its isChannelJoined check, the channel is already joined.
+    mockClient.getChannels.mockReturnValue([]);
+    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    mockClient.getChannels.mockReturnValue(['#streamer']);
+    await vi.runAllTimersAsync();
+    await Promise.resolve(); // flush cacheChannelUserId .then
+
+    expect(getActiveChannelUserIds().get('streamer')).toBe('uid-prejoin');
   });
 });
 
