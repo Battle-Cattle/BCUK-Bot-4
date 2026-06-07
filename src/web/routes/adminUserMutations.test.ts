@@ -18,6 +18,8 @@ vi.mock('../../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn((name: string | null) => name?.toLowerCase() ?? null),
 }));
 
+vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+
 import {
   addOrUpdateUserMutation,
   removeUserMutation,
@@ -31,6 +33,7 @@ import {
   getTwitchEnabledChannels,
 } from '../../db';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchBot';
+import { AccessLevel } from '../../db/users';
 
 type MockDbUser = {
   discord_id: string;
@@ -43,7 +46,7 @@ type MockDbUser = {
 const BASE_USER: MockDbUser = {
   discord_id: '111',
   discord_name: 'TestUser',
-  access_level: 0,
+  access_level: AccessLevel.USER,
   twitch_name: null,
   is_twitch_bot_enabled: false,
 };

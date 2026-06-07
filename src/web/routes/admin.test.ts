@@ -54,10 +54,13 @@ vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
+vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+
 import express from 'express';
 import supertest from 'supertest';
 import router from './admin';
 import { findUser, getAllUsers, updateAccessLevel } from '../../db';
+import { AccessLevel } from '../../db/users';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 import {
   DuplicateTwitchNameError,
@@ -70,8 +73,8 @@ import {
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
 
-const ADMIN: SessionUser = { discordId: '100000000000000001', discordName: 'AdminUser', discordAvatar: null, accessLevel: 3 };
-const MANAGER: SessionUser = { discordId: '200000000000000001', discordName: 'ManagerUser', discordAvatar: null, accessLevel: 2 };
+const ADMIN: SessionUser = { discordId: '100000000000000001', discordName: 'AdminUser', discordAvatar: null, accessLevel: AccessLevel.ADMIN };
+const MANAGER: SessionUser = { discordId: '200000000000000001', discordName: 'ManagerUser', discordAvatar: null, accessLevel: AccessLevel.MANAGER };
 const VALID_ID = '300000000000000001';
 
 function buildApp(sessionUser: SessionUser = ADMIN) {
@@ -189,14 +192,14 @@ describe('POST /users/add', () => {
   });
 
   it('redirects ?error=target_above_level when manager edits a user at their own level', async () => {
-    vi.mocked(findUser).mockResolvedValue({ access_level: 2 } as any); // target at manager's level
+    vi.mocked(findUser).mockResolvedValue({ access_level: AccessLevel.MANAGER } as any); // target at manager's level
     const res = await supertest(buildApp(MANAGER)).post('/users/add').type('form')
       .send({ discord_id: VALID_ID, access_level: '1' }); // granting level 1 (below manager) is otherwise valid
     expect(res.headers.location).toBe('/admin/users?error=target_above_level');
   });
 
   it('admin bypasses the manager permission checks', async () => {
-    vi.mocked(findUser).mockResolvedValue({ access_level: 3 } as any);
+    vi.mocked(findUser).mockResolvedValue({ access_level: AccessLevel.ADMIN } as any);
     const res = await supertest(buildApp(ADMIN)).post('/users/add').type('form')
       .send({ discord_id: VALID_ID, access_level: '3' });
     expect(res.headers.location).toBe('/admin/users');
@@ -274,7 +277,7 @@ describe('POST /users/update', () => {
   });
 
   it('redirects ?error=target_above_level when manager edits user at their level', async () => {
-    vi.mocked(findUser).mockResolvedValue({ access_level: 2 } as any);
+    vi.mocked(findUser).mockResolvedValue({ access_level: AccessLevel.MANAGER } as any);
     const res = await supertest(buildApp(MANAGER)).post('/users/update').type('form')
       .send({ discord_id: VALID_ID, access_level: '1' });
     expect(res.headers.location).toBe('/admin/users?error=target_above_level');
