@@ -174,6 +174,7 @@ describe('updateTwitchBotEnabled', () => {
   it('propagates errors from setTwitchBotEnabledRecord', async () => {
     vi.mocked(setTwitchBotEnabledRecord).mockRejectedValue(new Error('DB error'));
     await expect(updateTwitchBotEnabled('1', true)).rejects.toThrow('DB error');
+    expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
   });
 });
 
@@ -188,5 +189,6 @@ describe('removeUser', () => {
   it('propagates errors from removeUserRecord', async () => {
     vi.mocked(removeUserRecord).mockRejectedValue(new Error('DB error'));
     await expect(removeUser('1')).rejects.toThrow('DB error');
+    expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
   });
 });

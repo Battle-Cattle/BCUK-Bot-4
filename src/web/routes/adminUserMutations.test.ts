@@ -208,7 +208,7 @@ describe('addOrUpdateUserMutation — DuplicateTwitchNameError', () => {
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: 0,
+        level: AccessLevel.USER,
         normalizedTwitchName: 'taken_chan',
         shouldClearTwitchName: false,
       }),
@@ -236,7 +236,7 @@ describe('addOrUpdateUserMutation — upsertUser throws', () => {
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: 0,
+        level: AccessLevel.USER,
         normalizedTwitchName: 'new_chan',
         shouldClearTwitchName: false,
       }),
@@ -270,7 +270,7 @@ describe('addOrUpdateUserMutation — rollback failure does not mask original er
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: 0,
+        level: AccessLevel.USER,
         normalizedTwitchName: null,
         shouldClearTwitchName: true,
       }),
