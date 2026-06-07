@@ -14,9 +14,11 @@ vi.mock('../../db', () => {
     CommandNotFoundError,
     ReservedCommandError,
     isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
-    AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
   };
 });
+vi.mock('../../db/users', () => ({
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+}));
 vi.mock('../csrf', () => ({ csrfProtection: (_req: any, _res: any, next: any) => next() }));
 vi.mock('../middleware', () => ({ requireMod: (_req: any, _res: any, next: any) => next() }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }) }));
@@ -28,8 +30,9 @@ import {
   addCustomCommand, updateCustomCommand, removeCustomCommand,
   assignUserToCommand, findUser,
   CommandConflictError, CommandNotFoundError, ReservedCommandError,
-  isMysqlDuplicateEntryError, AccessLevel,
+  isMysqlDuplicateEntryError,
 } from '../../db';
+import { AccessLevel } from '../../db/users';
 
 function buildApp() {
   const app = express();
