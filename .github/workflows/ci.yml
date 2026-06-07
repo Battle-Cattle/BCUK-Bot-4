@@ -11,9 +11,14 @@ permissions:
 
 jobs:
   ci:
-    name: Build & Test
-    runs-on: ubuntu-latest
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     environment: ci
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - name: Checkout repository
@@ -35,7 +40,7 @@ jobs:
         run: npm run test:coverage
 
       - name: Upload coverage report
-        if: always()
+        if: always() && matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
@@ -43,7 +48,7 @@ jobs:
           retention-days: 30
 
       - name: Publish coverage to Qlty
-        if: always()
+        if: always() && matrix.os == 'ubuntu-latest'
         uses: qltysh/qlty-action/coverage@v2
         with:
           token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
