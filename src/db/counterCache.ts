@@ -68,10 +68,12 @@ const counterLookupCacheState = createManagedLookupCache<CounterLookupCache>({
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/** Marks the counter lookup cache as stale so the next read triggers a refresh. */
 export function invalidateCounterLookupCache(): void {
   counterLookupCacheState.invalidate();
 }
 
+/** Looks up a counter by its trigger or check command string; returns null if not found. */
 export async function findCounterByCommand(command: string): Promise<DbMatchedCounter | null> {
   const normalizedCommand = command.trim().toLowerCase();
   if (!normalizedCommand) return null;
@@ -81,6 +83,7 @@ export async function findCounterByCommand(command: string): Promise<DbMatchedCo
   return counter ? { ...counter } : null;
 }
 
+/** Returns true if any of the given commands conflict with an existing counter (optionally excluding one by ID). */
 export async function isCounterCommandTaken(commandOrCommands: string | string[], excludeCounterId?: number): Promise<boolean> {
   if (Array.isArray(commandOrCommands)) {
     const normalizedCommands = normalizeCommandList(commandOrCommands);

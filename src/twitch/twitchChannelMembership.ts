@@ -18,14 +18,17 @@ const membershipMutationQueue = createMutationQueue();
 const JOIN_THROTTLE_MS = 600;
 let _onChannelJoined: ((channel: string) => void) | null = null;
 
+/** Sets the active tmi.js client instance (called from twitchBot after connect). */
 export function setTmiClient(c: tmi.Client | null): void {
   _client = c;
 }
 
+/** Updates the connected flag (called from twitchBot on connect/disconnect events). */
 export function setConnected(v: boolean): void {
   _connected = v;
 }
 
+/** Registers a callback fired each time the bot successfully joins a channel. */
 export function setChannelJoinedHook(fn: (channel: string) => void): void {
   _onChannelJoined = fn;
 }
@@ -79,6 +82,7 @@ async function joinMissingChannel(channel: string): Promise<void> {
   log.info(`Joined queued channel after reconnect: ${channel}`);
 }
 
+/** Parts channels no longer in activeChannels and joins any queued but unjoined channels. */
 export async function reconcileJoinedChannels(): Promise<void> {
   if (!_client || !_connected) return;
 
@@ -106,6 +110,7 @@ export async function reconcileJoinedChannels(): Promise<void> {
   }
 }
 
+/** Loads enabled channels from the DB, populates activeChannels, and pre-resolves user IDs. */
 export async function initializeActiveChannels(): Promise<void> {
   const configuredChannels = await getTwitchEnabledChannels();
   for (const ch of configuredChannels) {
@@ -131,6 +136,7 @@ export async function initializeActiveChannels(): Promise<void> {
   }
 }
 
+/** Joins a Twitch channel, throttled to respect Twitch rate limits. Serialised via mutationQueue. */
 export async function joinTwitchChannel(channel: string): Promise<void> {
   const normalized = normalizeTwitchChannelName(channel);
   if (!normalized) {
@@ -176,6 +182,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
   });
 }
 
+/** Parts a Twitch channel and removes it from active tracking. Serialised via mutationQueue. */
 export async function partTwitchChannel(channel: string): Promise<void> {
   const normalized = normalizeTwitchChannelName(channel);
   if (!normalized) return;
@@ -208,14 +215,17 @@ export async function partTwitchChannel(channel: string): Promise<void> {
   });
 }
 
+/** Returns the set of channels the bot is currently tracking as active. */
 export function getActiveChannels(): ReadonlySet<string> {
   return activeChannels;
 }
 
+/** Returns a map of channel login → Twitch user ID for all active channels. */
 export function getActiveChannelUserIds(): ReadonlyMap<string, string> {
   return activeChannelUserIds;
 }
 
+/** Clears all active channel and user ID state (used in tests). */
 export function clearMembershipState(): void {
   activeChannels.clear();
   activeChannelUserIds.clear();
