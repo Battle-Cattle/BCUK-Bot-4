@@ -1,6 +1,7 @@
 import tmi from 'tmi.js';
 import { TWITCH_USERNAME, TWITCH_OAUTH_TOKEN } from '../shared/config';
 import { handleCommand } from '../commands/commandRouter';
+import { resolveContextForTwitchChannel } from '../audio/voiceResolver';
 import { executeCustomCommandForTwitch } from '../commands/customCommandHandler';
 import { executeCounterCommandForTwitch } from '../commands/counterHandler';
 import { executeMultiCommandForTwitch } from '../commands/multiCommandHandler';
@@ -8,6 +9,7 @@ import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { setTwitchChannel } from '../shared/statusStore';
 import { normalizeTwitchChannelName } from './twitchChannelName';
+import { getDiscordClient } from '../discord/discordBot';
 import { createLogger } from '../shared/logger';
 import {
   setTmiClient,
@@ -53,7 +55,13 @@ function handleTwitchMessage(
     fireAndForget(executeCounterCommandForTwitch(normalizedChannel, message, displayName), 'Counter command error');
     fireAndForget(executeMultiCommandForTwitch(normalizedChannel, message, displayName), 'Multi command error');
     fireAndForget(executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod), 'Shoutout error');
-    fireAndForget(handleCommand(message, 'twitch'), 'Command handler error');
+    const discordClient = getDiscordClient();
+    const sfxPromise = discordClient
+      ? resolveContextForTwitchChannel(discordClient, normalizedChannel).then((ctx) =>
+          handleCommand(message, 'twitch', ctx ?? undefined),
+        )
+      : Promise.resolve();
+    fireAndForget(sfxPromise, 'Command handler error');
     fireAndForget(executeCountdownForTwitch(normalizedChannel, message), 'Countdown error');
   } catch (err) {
     log.error('Unexpected error in message handler:', err);

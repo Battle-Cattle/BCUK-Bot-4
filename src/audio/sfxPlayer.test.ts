@@ -10,6 +10,8 @@ vi.mock('./audioPlayer', () => ({
   startPlayback: vi.fn(),
 }));
 
+const TEST_GUILD = 'guild123';
+
 vi.mock('@discordjs/voice', () => ({
   createAudioResource: vi.fn((p: string) => ({ resourcePath: p })),
 }));
@@ -38,12 +40,12 @@ beforeEach(() => {
 describe('playFile', () => {
   it('throws VoiceNotConnectedError when not connected to a voice channel', () => {
     vi.mocked(isConnected).mockReturnValue(false);
-    expect(() => playFile(path.posix.join(SFX_ROOT, 'ding.mp3'))).toThrow(VoiceNotConnectedError);
+    expect(() => playFile(path.posix.join(SFX_ROOT, 'ding.mp3'), TEST_GUILD)).toThrow(VoiceNotConnectedError);
   });
 
   it('blocks a path that resolves outside the SFX folder', () => {
     vi.mocked(isConnected).mockReturnValue(true);
-    expect(() => playFile('/etc/passwd')).toThrow('Path traversal blocked');
+    expect(() => playFile('/etc/passwd', TEST_GUILD)).toThrow('Path traversal blocked');
   });
 
   it('blocks a symlink whose real path resolves outside the SFX folder', () => {
@@ -54,7 +56,7 @@ describe('playFile', () => {
     vi.mocked(fs.realpathSync).mockImplementation((p) =>
       String(p) === SFX_ROOT ? SFX_ROOT : outsidePath,
     );
-    expect(() => playFile(path.posix.join(SFX_ROOT, 'evil.mp3'))).toThrow('Path traversal blocked');
+    expect(() => playFile(path.posix.join(SFX_ROOT, 'evil.mp3'), TEST_GUILD)).toThrow('Path traversal blocked');
   });
 
   it('starts playback for a valid file inside the SFX folder', () => {
@@ -63,7 +65,7 @@ describe('playFile', () => {
     vi.mocked(fs.statSync).mockReturnValue({ isFile: () => true } as ReturnType<typeof fs.statSync>);
 
     const filePath = path.posix.join(SFX_ROOT, 'ding.mp3');
-    playFile(filePath);
+    playFile(filePath, TEST_GUILD);
 
     expect(vi.mocked(createAudioResource)).toHaveBeenCalledWith(filePath);
     expect(vi.mocked(startPlayback)).toHaveBeenCalledOnce();
@@ -73,7 +75,7 @@ describe('playFile', () => {
     vi.mocked(isConnected).mockReturnValue(true);
     vi.mocked(fs.existsSync).mockReturnValue(false);
 
-    expect(() => playFile(path.posix.join(SFX_ROOT, 'missing.mp3'))).toThrow('Sound file not found');
+    expect(() => playFile(path.posix.join(SFX_ROOT, 'missing.mp3'), TEST_GUILD)).toThrow('Sound file not found');
   });
 
   it('throws when the resolved path is a directory, not a file', () => {
@@ -81,6 +83,6 @@ describe('playFile', () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.statSync).mockReturnValue({ isFile: () => false } as ReturnType<typeof fs.statSync>);
 
-    expect(() => playFile(path.posix.join(SFX_ROOT, 'notafile'))).toThrow('Sound path is not a file');
+    expect(() => playFile(path.posix.join(SFX_ROOT, 'notafile'), TEST_GUILD)).toThrow('Sound path is not a file');
   });
 });

@@ -28,6 +28,7 @@ export interface DbUser {
   is_twitch_bot_enabled: boolean;
   twitch_name: string | null;
   access_level: number;
+  discord_guild_id: string | null;
 }
 
 function mapUser(r: mysql.RowDataPacket): DbUser {
@@ -37,12 +38,13 @@ function mapUser(r: mysql.RowDataPacket): DbUser {
     is_twitch_bot_enabled: fromBit(r.is_twitch_bot_enabled),
     twitch_name: r.twitch_name,
     access_level: r.access_level,
+    discord_guild_id: r.discord_guild_id ?? null,
   };
 }
 
 export async function findUser(discordId: string): Promise<DbUser | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level FROM `user` WHERE discord_id = ?',
+    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, discord_guild_id FROM `user` WHERE discord_id = ?',
     [discordId],
   );
   return rows.length === 0 ? null : mapUser(rows[0]);
@@ -55,12 +57,12 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
   }
 
   const sql = excludeDiscordId
-    ? `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level
+    ? `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, discord_guild_id
        FROM \`user\`
        WHERE twitch_name = ?
          AND discord_id <> ?
        LIMIT 1`
-    : `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level
+    : `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, discord_guild_id
        FROM \`user\`
        WHERE twitch_name = ?
        LIMIT 1`;
@@ -73,9 +75,32 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
 
 export async function getAllUsers(): Promise<DbUser[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level FROM `user` ORDER BY access_level DESC, discord_name ASC',
+    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, discord_guild_id FROM `user` ORDER BY access_level DESC, discord_name ASC',
   );
   return rows.map(mapUser);
+}
+
+/**
+ * Find the user configured to route audio to the given Discord guild.
+ * Returns null if no user has that guild ID configured.
+ */
+export async function findUserByDiscordGuildId(guildId: string): Promise<DbUser | null> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, discord_guild_id FROM `user` WHERE discord_guild_id = ? LIMIT 1',
+    [guildId],
+  );
+  return rows.length === 0 ? null : mapUser(rows[0]);
+}
+
+/**
+ * Set or clear the Discord guild used for audio routing for a user.
+ * Pass null to clear the routing and revert to the env-var default.
+ */
+export async function updateGuildRoutingRecord(discordId: string, guildId: string | null): Promise<void> {
+  await withShortLockTimeout((conn) => conn.execute(
+    'UPDATE `user` SET discord_guild_id = ? WHERE discord_id = ?',
+    [guildId, discordId],
+  ));
 }
 
 // Short timeout so callers fail fast instead of hanging 50s under lock contention.

@@ -5,6 +5,8 @@ vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   saveEventConfig: vi.fn(),
   clearStreamerToken: vi.fn(),
+  updateGuildRoutingRecord: vi.fn(),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
 vi.mock('../csrf', () => ({
@@ -39,7 +41,7 @@ vi.mock('../../shared/logger', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router from './userSettings';
-import { findUser, getStreamerByDiscordId } from '../../db';
+import { findUser, getStreamerByDiscordId, updateGuildRoutingRecord } from '../../db';
 import { AccessLevel } from '../../db/users';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
@@ -139,5 +141,86 @@ describe('GET / — successExpectedAccount', () => {
     const res = await supertest(buildApp()).get('/?error=eventsub_wrong_account&expected=mychannel&expected=other');
     expect(res.status).toBe(200);
     expect(res.body.successExpectedAccount).toBeUndefined();
+  });
+});
+
+describe('POST /guild-routing', () => {
+  const MANAGER_USER: SessionUser = { ...USER, accessLevel: AccessLevel.MANAGER };
+
+  function buildDbUser(overrides: Record<string, unknown> = {}) {
+    return {
+      discord_id: MANAGER_USER.discordId,
+      discord_name: 'TestUser',
+      is_twitch_bot_enabled: false,
+      twitch_name: null,
+      access_level: AccessLevel.MANAGER,
+      discord_guild_id: null,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(updateGuildRoutingRecord).mockResolvedValue(undefined);
+  });
+
+  it('saves a valid guild ID and redirects to success', async () => {
+    vi.mocked(findUser).mockResolvedValue(buildDbUser() as any);
+
+    const res = await supertest(buildApp(MANAGER_USER))
+      .post('/guild-routing')
+      .send('discord_guild_id=123456789012345678');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/user/settings?success=guild_routing_saved');
+    expect(vi.mocked(updateGuildRoutingRecord)).toHaveBeenCalledWith(MANAGER_USER.discordId, '123456789012345678');
+  });
+
+  it('clears routing when guild ID is empty and redirects to success', async () => {
+    vi.mocked(findUser).mockResolvedValue(buildDbUser({ discord_guild_id: '999' }) as any);
+
+    const res = await supertest(buildApp(MANAGER_USER))
+      .post('/guild-routing')
+      .send('discord_guild_id=');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/user/settings?success=guild_routing_saved');
+    expect(vi.mocked(updateGuildRoutingRecord)).toHaveBeenCalledWith(MANAGER_USER.discordId, null);
+  });
+
+  it('redirects to invalid error for a non-numeric guild ID', async () => {
+    vi.mocked(findUser).mockResolvedValue(buildDbUser() as any);
+
+    const res = await supertest(buildApp(MANAGER_USER))
+      .post('/guild-routing')
+      .send('discord_guild_id=not-a-snowflake');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/user/settings?error=guild_routing_invalid');
+    expect(vi.mocked(updateGuildRoutingRecord)).not.toHaveBeenCalled();
+  });
+
+  it('redirects to forbidden error when user is below Manager level', async () => {
+    const modUser: SessionUser = { ...USER, accessLevel: AccessLevel.MOD };
+    vi.mocked(findUser).mockResolvedValue(buildDbUser({ access_level: AccessLevel.MOD }) as any);
+
+    const res = await supertest(buildApp(modUser))
+      .post('/guild-routing')
+      .send('discord_guild_id=123456789012345678');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/user/settings?error=guild_routing_forbidden');
+    expect(vi.mocked(updateGuildRoutingRecord)).not.toHaveBeenCalled();
+  });
+
+  it('redirects to failed error when DB throws', async () => {
+    vi.mocked(findUser).mockResolvedValue(buildDbUser() as any);
+    vi.mocked(updateGuildRoutingRecord).mockRejectedValue(new Error('DB down'));
+
+    const res = await supertest(buildApp(MANAGER_USER))
+      .post('/guild-routing')
+      .send('discord_guild_id=123456789012345678');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/user/settings?error=guild_routing_failed');
   });
 });

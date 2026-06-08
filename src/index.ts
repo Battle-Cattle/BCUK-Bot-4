@@ -7,7 +7,7 @@ import { startTikTokBot, stopTikTokBot } from './tiktok/tiktokBot';
 import { startTwitchMonitor, stopTwitchMonitor } from './twitch/monitor/twitchMonitor';
 import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitch/eventsub/twitchEventSub';
 import { startWebPanel } from './web/server';
-import { disconnect } from './audio/audioPlayer';
+import { disconnectAll } from './audio/audioPlayer';
 import { registerTwitchChatRuntime } from './commands/customCommandHandler';
 import { registerCounterTwitchRuntime } from './commands/counterHandler';
 import { registerMultiTwitchRuntime } from './commands/multiCommandHandler';
@@ -28,7 +28,7 @@ async function shutdown(signal: string): Promise<void> {
   stopTikTokBot();
   await stopTwitchBot();
   stopDiscordBot();
-  disconnect();
+  disconnectAll();
   await closePool();
   process.exit(0);
 }

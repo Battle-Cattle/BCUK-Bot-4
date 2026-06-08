@@ -7,7 +7,11 @@ const SFX_ROOT = '/sfx';
 vi.mock('../shared/config', () => ({
   SFX_FOLDER: '/sfx',
   GLOBAL_COOLDOWN_MS: 3_000,
+  DISCORD_GUILD_ID: 'defaultGuild',
+  DISCORD_VOICE_CHANNEL_ID: 'defaultChannel',
 }));
+
+const TEST_CTX = { guildId: 'guild1', voiceChannelId: 'chan1' };
 
 vi.mock('../db', () => ({
   findTrigger: vi.fn(),
@@ -59,15 +63,24 @@ describe('handleCommand', () => {
     vi.mocked(isPlaying).mockReturnValue(false);
     vi.mocked(findTrigger).mockResolvedValue(null);
 
-    await handleCommand('!unknown', 'twitch');
+    await handleCommand('!unknown', 'twitch', TEST_CTX);
 
+    expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+  });
+
+  it('skips SFX silently when no ctx is provided (streamer not in voice)', async () => {
+    vi.mocked(isPlaying).mockReturnValue(false);
+
+    await handleCommand('!ding', 'twitch');
+
+    expect(vi.mocked(findTrigger)).not.toHaveBeenCalled();
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
 
   it('ignores the command while audio is already playing', async () => {
     vi.mocked(isPlaying).mockReturnValue(true);
 
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', TEST_CTX);
 
     expect(vi.mocked(findTrigger)).not.toHaveBeenCalled();
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
@@ -80,14 +93,14 @@ describe('handleCommand', () => {
     vi.mocked(findSoundFiles).mockResolvedValue(FILES);
     vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
 
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', TEST_CTX);
     expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
 
     // Second call at the same timestamp — cooldown has not elapsed
     vi.clearAllMocks();
     vi.spyOn(Date, 'now').mockReturnValue(mockNow);
 
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', TEST_CTX);
 
     expect(vi.mocked(findTrigger)).not.toHaveBeenCalled();
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
@@ -99,10 +112,10 @@ describe('handleCommand', () => {
     vi.mocked(findSoundFiles).mockResolvedValue(FILES);
     vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
 
-    await handleCommand('!ding discord', 'discord');
+    await handleCommand('!ding discord', 'discord', TEST_CTX);
 
     expect(vi.mocked(findTrigger)).toHaveBeenCalledWith('!ding');
-    expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'ding.mp3'));
+    expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'ding.mp3'), TEST_CTX.guildId);
     expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('ding.mp3', '!ding', 'discord');
   });
 
@@ -116,10 +129,10 @@ describe('handleCommand', () => {
     const firstTriggerPromise = new Promise<typeof TRIGGER>((resolve) => { resolveFirst = resolve; });
     vi.mocked(findTrigger).mockReturnValueOnce(firstTriggerPromise as ReturnType<typeof findTrigger>);
 
-    const first = handleCommand('!ding', 'twitch');
+    const first = handleCommand('!ding', 'twitch', TEST_CTX);
 
     // Second call arrives while first is suspended inside findTrigger
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', TEST_CTX);
     expect(vi.mocked(findTrigger)).toHaveBeenCalledTimes(1); // second was blocked
 
     // Let the first call complete
@@ -136,7 +149,7 @@ describe('handleCommand', () => {
     vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
     vi.mocked(findSoundFiles).mockResolvedValue([]);
 
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', TEST_CTX);
 
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
@@ -150,7 +163,7 @@ describe('handleCommand', () => {
 
     const errorSpy = vi.spyOn(console, 'error');
 
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', TEST_CTX);
 
     // setVoicePlaying must NOT be called when playback fails
     expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
@@ -167,7 +180,7 @@ describe('handleCommand', () => {
 
     const errorSpy = vi.spyOn(console, 'error');
 
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', TEST_CTX);
 
     expect(errorSpy).not.toHaveBeenCalled();
     expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
@@ -180,7 +193,7 @@ describe('handleCommand', () => {
       vi.mocked(findSoundFiles).mockResolvedValue(FILES);
       vi.mocked(pickWeightedRandom).mockReturnValue('../../../etc/passwd');
 
-      await handleCommand('!exploit', 'twitch');
+      await handleCommand('!exploit', 'twitch', TEST_CTX);
 
       expect(vi.mocked(playFile)).not.toHaveBeenCalled();
       expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
@@ -192,7 +205,7 @@ describe('handleCommand', () => {
       vi.mocked(findSoundFiles).mockResolvedValue(FILES);
       vi.mocked(pickWeightedRandom).mockReturnValue('..%2F..%2Fetc%2Fpasswd');
 
-      await handleCommand('!exploit', 'twitch');
+      await handleCommand('!exploit', 'twitch', TEST_CTX);
 
       expect(vi.mocked(playFile)).not.toHaveBeenCalled();
       expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
@@ -204,7 +217,7 @@ describe('handleCommand', () => {
       vi.mocked(findSoundFiles).mockResolvedValue(FILES);
       vi.mocked(pickWeightedRandom).mockReturnValue('/etc/passwd');
 
-      await handleCommand('!exploit', 'twitch');
+      await handleCommand('!exploit', 'twitch', TEST_CTX);
 
       expect(vi.mocked(playFile)).not.toHaveBeenCalled();
       expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
@@ -217,9 +230,9 @@ describe('handleCommand', () => {
       vi.mocked(pickWeightedRandom).mockReturnValue('valid-sound.mp3');
       vi.mocked(playFile).mockImplementation(() => {}); // Reset to no-op
 
-      await handleCommand('!safe', 'twitch');
+      await handleCommand('!safe', 'twitch', TEST_CTX);
 
-      expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'valid-sound.mp3'));
+      expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'valid-sound.mp3'), TEST_CTX.guildId);
       expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('valid-sound.mp3', '!safe', 'twitch');
     });
 
@@ -230,9 +243,9 @@ describe('handleCommand', () => {
       vi.mocked(pickWeightedRandom).mockReturnValue('category/sound.mp3');
       vi.mocked(playFile).mockImplementation(() => {}); // Reset to no-op
 
-      await handleCommand('!safe', 'twitch');
+      await handleCommand('!safe', 'twitch', TEST_CTX);
 
-      expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'category', 'sound.mp3'));
+      expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'category', 'sound.mp3'), TEST_CTX.guildId);
       expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('category/sound.mp3', '!safe', 'twitch');
     });
   });

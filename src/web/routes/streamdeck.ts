@@ -8,6 +8,7 @@ import { DISCORD_GUILD_ID } from '../../shared/config';
 import { requireApiKey } from '../middleware';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
+import type { GuildAudioContext } from '../../audio/audioTypes';
 import { getDiscordClient } from '../../discord/discordBot';
 import { normalizeDiscordId } from './shared';
 
@@ -62,7 +63,7 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   const filename = pickWeightedRandom(files);
 
   try {
-    playFile(filename);
+    playFile(filename, DISCORD_GUILD_ID);
     setVoicePlaying(filename, normalizedCommand, 'streamdeck');
     log.info(`Playing '${filename.replace(/[\r\n]/g, '')}' for trigger '${normalizedCommand.replace(/[\r\n]/g, '')}'`);
     res.json({ ok: true, file: filename });
@@ -104,9 +105,10 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
     return;
   }
 
+  const ctx: GuildAudioContext = { guildId: DISCORD_GUILD_ID, voiceChannelId: normalizedChannelId };
   try {
-    disconnect();
-    await connect(discordClient, normalizedChannelId);
+    disconnect(DISCORD_GUILD_ID);
+    await connect(discordClient, ctx);
     res.json({ ok: true });
   } catch (err) {
     log.error('Voice join failed:', err);
@@ -115,7 +117,7 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
 });
 
 router.post('/voice/leave', requireApiKey, (_req, res) => {
-  disconnect();
+  disconnect(DISCORD_GUILD_ID);
   res.json({ ok: true });
 });
 

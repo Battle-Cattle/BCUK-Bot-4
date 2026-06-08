@@ -143,6 +143,46 @@
     </section>
     <% } %>
 
+  <!-- ── Discord Audio Routing (Manager+) ─────────────────────────────── -->
+  <% if (user && user.accessLevel >= 2) { %>
+  <main class="main-content">
+    <section class="section">
+      <h2 class="section-title">Discord Audio Routing</h2>
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">
+            Set the Discord server where SFX commands from your Twitch chat will play.
+            The bot will join whichever voice channel you are currently in within that server.
+            Leave blank to use the bot-wide default server.
+          </p>
+          <% if (error === 'guild_routing_failed') { %><p class="error-text"><%= getFriendlyError('guild_routing_failed') %></p><% } %>
+          <% if (error === 'guild_routing_invalid') { %><p class="error-text"><%= getFriendlyError('guild_routing_invalid') %></p><% } %>
+          <% if (error === 'guild_routing_forbidden') { %><p class="error-text"><%= getFriendlyError('guild_routing_forbidden') %></p><% } %>
+          <% if (success === 'guild_routing_saved') { %><p class="success-text">Audio routing saved.</p><% } %>
+          <form method="POST" action="/user/settings/guild-routing">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="form-row-wrap">
+              <label>
+                <span class="hint hint-compact">Discord Server (Guild) ID</span>
+                <input class="input" type="text" name="discord_guild_id"
+                       value="<%= dbUser && dbUser.discord_guild_id ? dbUser.discord_guild_id : '' %>"
+                       placeholder="e.g. 123456789012345678"
+                       maxlength="20" pattern="\d{17,20}">
+              </label>
+            </div>
+            <div class="button-row-wrap">
+              <button type="submit" class="btn">Save Routing</button>
+              <% if (dbUser && dbUser.discord_guild_id) { %>
+              <button type="submit" name="discord_guild_id" value="" class="btn btn-ghost">Clear Routing</button>
+              <% } %>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+  <% } %>
+
   </main>
 
   <%- include('partials/pwa-register') %>

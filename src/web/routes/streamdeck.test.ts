@@ -45,6 +45,7 @@ vi.mock('../../shared/logger', () => ({
 
 vi.mock('../../shared/config', () => ({
   DISCORD_GUILD_ID: 'guild-123',
+  DISCORD_VOICE_CHANNEL_ID: 'default-chan',
 }));
 
 import express from 'express';
@@ -99,8 +100,8 @@ describe('POST /sfx', () => {
       .send({ command: '!ding' })
       .expect(200);
 
-    expect(vi.mocked(playFile)).toHaveBeenCalledWith('only1_v2.mp3');
-    expect(vi.mocked(playFile)).not.toHaveBeenCalledWith(expect.stringContaining('/'));
+    expect(vi.mocked(playFile)).toHaveBeenCalledWith('only1_v2.mp3', 'guild-123');
+    expect(vi.mocked(playFile)).not.toHaveBeenCalledWith(expect.stringContaining('/'), expect.anything());
   });
 
   it('returns 200 and the filename on success', async () => {
@@ -282,8 +283,8 @@ describe('POST /voice/join', () => {
       .expect(200);
 
     expect(res.body).toEqual({ ok: true });
-    expect(vi.mocked(disconnect)).toHaveBeenCalled();
-    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, '123456789012345678');
+    expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
+    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, { guildId: 'guild-123', voiceChannelId: '123456789012345678' });
   });
 
   it('returns 500 when connect throws', async () => {
@@ -303,6 +304,6 @@ describe('POST /voice/leave', () => {
     const res = await supertest(buildApp()).post('/voice/leave').expect(200);
 
     expect(res.body).toEqual({ ok: true });
-    expect(vi.mocked(disconnect)).toHaveBeenCalled();
+    expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
   });
 });

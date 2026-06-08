@@ -11,12 +11,14 @@ import { getPool } from './pool';
 import {
   findUser,
   findUserByTwitchName,
+  findUserByDiscordGuildId,
   getAllUsers,
   upsertUserRecord,
   updateDiscordName,
   getTwitchEnabledChannels,
   setTwitchBotEnabledRecord,
   updateAccessLevel,
+  updateGuildRoutingRecord,
   removeUserRecord,
   AccessLevel,
 } from './users';
@@ -298,6 +300,57 @@ describe('removeUserRecord', () => {
     expect(sql).toContain('DELETE FROM');
     const params = pool._conn.execute.mock.calls[1][1] as unknown[];
     expect(params).toContain('42');
+  });
+});
+
+// ─── findUserByDiscordGuildId ─────────────────────────────────────────────────
+
+describe('findUserByDiscordGuildId', () => {
+  it('returns null when no rows found', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([[]]) as any);
+    const result = await findUserByDiscordGuildId('999');
+    expect(result).toBeNull();
+  });
+
+  it('maps a found row correctly', async () => {
+    const row = { discord_id: '123', discord_name: 'Alice', is_twitch_bot_enabled: 1, twitch_name: 'alice', access_level: 2, discord_guild_id: '999' };
+    vi.mocked(getPool).mockReturnValue(makePool([[row]]) as any);
+    const result = await findUserByDiscordGuildId('999');
+    expect(result?.discord_id).toBe('123');
+    expect(result?.discord_guild_id).toBe('999');
+  });
+
+  it('passes guildId as query param', async () => {
+    const pool = makePool([[]]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await findUserByDiscordGuildId('12345');
+    const params = vi.mocked(pool.execute).mock.calls[0][1] as unknown[];
+    expect(params).toContain('12345');
+  });
+});
+
+// ─── updateGuildRoutingRecord ─────────────────────────────────────────────────
+
+describe('updateGuildRoutingRecord', () => {
+  it('executes an UPDATE with guildId and discordId', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await updateGuildRoutingRecord('42', '999');
+    const sql: string = pool._conn.execute.mock.calls[1][0] as string;
+    expect(sql).toContain('UPDATE');
+    expect(sql).toContain('discord_guild_id');
+    const params = pool._conn.execute.mock.calls[1][1] as unknown[];
+    expect(params).toContain('999');
+    expect(params).toContain('42');
+  });
+
+  it('passes null to clear routing', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await updateGuildRoutingRecord('42', null);
+    const params = pool._conn.execute.mock.calls[1][1] as unknown[];
+    expect(params[0]).toBeNull();
+    expect(params[1]).toBe('42');
   });
 });
 

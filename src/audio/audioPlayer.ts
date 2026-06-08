@@ -13,7 +13,6 @@ import {
   type DiscordGatewayAdapterLibraryMethods,
 } from '@discordjs/voice';
 import { Client, ChannelType, type VoiceBasedChannel } from 'discord.js';
-import { DISCORD_GUILD_ID, DISCORD_VOICE_CHANNEL_ID } from '../shared/config';
 import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from '../shared/statusStore';
 
 const log = createLogger('AudioPlayer');
@@ -24,25 +23,65 @@ import {
   releasePreviousConnection,
   cleanupFailedConnect,
 } from './audioConnectionHandlers';
+import type { GuildAudioContext } from './audioTypes';
 
-let connection: VoiceConnection | null = null;
-let player: DjsAudioPlayer;
-let playing = false;
+// ─── Per-guild session state ──────────────────────────────────────────────────
+
+interface AudioSession {
+  connection: VoiceConnection | null;
+  player: DjsAudioPlayer;
+  playing: boolean;
+  adapterCleanup: (() => void) | null;
+  reconnectTimer: NodeJS.Timeout | null;
+  reconnectAttempts: number;
+  shouldAutoReconnect: boolean;
+  currentAttemptId: number;
+  currentChannelId: string | null;
+  targetChannelId: string | undefined;
+}
+
+const sessions = new Map<string, AudioSession>();
 let activeClient: Client | null = null;
-let reconnectTimer: NodeJS.Timeout | null = null;
-let reconnectAttempts = 0;
-let shouldAutoReconnect = false;
-let currentAttemptId = 0;
-let currentChannelId: string | null = null;
-let targetChannelId: string | undefined = undefined;
+
+function getOrCreateSession(guildId: string): AudioSession {
+  const existing = sessions.get(guildId);
+  if (existing) return existing;
+
+  const player = createAudioPlayer({
+    behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
+  });
+  player.on(AudioPlayerStatus.Idle, () => {
+    const s = sessions.get(guildId);
+    if (s) {
+      s.playing = false;
+      setVoiceIdle();
+    }
+  });
+  player.on('error', (err) => {
+    log.error(`[${guildId}] Error: ${err.message}`, err);
+    const s = sessions.get(guildId);
+    if (s) s.playing = false;
+  });
+
+  const session: AudioSession = {
+    connection: null,
+    player,
+    playing: false,
+    adapterCleanup: null,
+    reconnectTimer: null,
+    reconnectAttempts: 0,
+    shouldAutoReconnect: false,
+    currentAttemptId: 0,
+    currentChannelId: null,
+    targetChannelId: undefined,
+  };
+  sessions.set(guildId, session);
+  return session;
+}
 
 // ─── Voice adapter ────────────────────────────────────────────────────────────
 // Bypasses discord.js's built-in voiceAdapterCreator to avoid type/version
 // incompatibilities with discord.js v14. Listens to raw gateway events instead.
-
-// Tracks the cleanup function for the currently active adapter so it can be
-// removed before a new one is registered, preventing listener accumulation.
-let activeAdapterCleanup: (() => void) | null = null;
 
 type RawPacket = { t: string; d: Record<string, unknown> };
 
@@ -61,6 +100,7 @@ function makeAdapterCleanup(
   channel: VoiceBasedChannel,
   onRaw: (packet: RawPacket) => void,
   originalMax: number,
+  session: AudioSession,
 ): () => void {
   let cleanedUp = false;
   return function cleanup(): void {
@@ -68,13 +108,13 @@ function makeAdapterCleanup(
     cleanedUp = true;
     channel.client.off('raw', onRaw);
     if (originalMax !== 0) channel.client.setMaxListeners(originalMax);
-    activeAdapterCleanup = null;
+    session.adapterCleanup = null;
   };
 }
 
-function buildAdapter(channel: VoiceBasedChannel): DiscordGatewayAdapterCreator {
+function buildAdapter(channel: VoiceBasedChannel, session: AudioSession): DiscordGatewayAdapterCreator {
   return (methods: DiscordGatewayAdapterLibraryMethods) => {
-    if (activeAdapterCleanup) activeAdapterCleanup();
+    if (session.adapterCleanup) session.adapterCleanup();
 
     const onRaw = makeOnRaw(methods);
     const originalMax = channel.client.getMaxListeners();
@@ -82,8 +122,8 @@ function buildAdapter(channel: VoiceBasedChannel): DiscordGatewayAdapterCreator 
     if (originalMax !== 0) channel.client.setMaxListeners(originalMax + 1);
     channel.client.on('raw', onRaw);
 
-    const cleanup = makeAdapterCleanup(channel, onRaw, originalMax);
-    activeAdapterCleanup = cleanup;
+    const cleanup = makeAdapterCleanup(channel, onRaw, originalMax, session);
+    session.adapterCleanup = cleanup;
 
     return {
       sendPayload: (payload: unknown) => {
@@ -106,111 +146,101 @@ const RECONNECT_BASE_DELAY_MS = 5_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
 const VOICE_CONNECT_TIMEOUT_MS = 30_000;
 
-function clearReconnectTimer(): void {
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+function clearReconnectTimer(session: AudioSession): void {
+  if (session.reconnectTimer) {
+    clearTimeout(session.reconnectTimer);
+    session.reconnectTimer = null;
   }
 }
 
-function scheduleReconnect(reason: string): void {
-  if (!shouldAutoReconnect || !activeClient || reconnectTimer || connection) return;
+function scheduleReconnect(guildId: string, reason: string): void {
+  const session = sessions.get(guildId);
+  if (!session) return;
+  if (!session.shouldAutoReconnect || !activeClient || session.reconnectTimer || session.connection) return;
 
-  const scheduledAttemptId = currentAttemptId;
-  const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts, RECONNECT_MAX_DELAY_MS);
-  reconnectAttempts += 1;
+  const scheduledAttemptId = session.currentAttemptId;
+  const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** session.reconnectAttempts, RECONNECT_MAX_DELAY_MS);
+  session.reconnectAttempts += 1;
 
-  log.warn(`Scheduling voice rejoin in ${delay}ms (${reason}).`);
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    if (scheduledAttemptId !== currentAttemptId) return;
-    if (!shouldAutoReconnect || !activeClient || connection) return;
-    connect(activeClient, targetChannelId).catch((err) => {
-      log.error('Voice rejoin failed:', err);
+  log.warn(`[${guildId}] Scheduling voice rejoin in ${delay}ms (${reason}).`);
+  session.reconnectTimer = setTimeout(() => {
+    session.reconnectTimer = null;
+    if (scheduledAttemptId !== session.currentAttemptId) return;
+    if (!session.shouldAutoReconnect || !activeClient || session.connection) return;
+    if (!session.targetChannelId) return;
+    connect(activeClient, { guildId, voiceChannelId: session.targetChannelId }).catch((err) => {
+      log.error(`[${guildId}] Voice rejoin failed:`, err);
     });
   }, delay);
 }
 
-function getPlayer(): DjsAudioPlayer {
-  if (!player) {
-    player = createAudioPlayer({
-      behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
-    });
-    player.on(AudioPlayerStatus.Idle, () => {
-      playing = false;
-      setVoiceIdle();
-    });
-    player.on('error', (err) => {
-      log.error(`Error: ${err.message}`, err);
-      playing = false;
-    });
-  }
-  return player;
-}
-
-function tearDownPlayer(): void {
+function tearDownSession(guildId: string): void {
+  const session = sessions.get(guildId);
+  if (!session) return;
   try {
-    getPlayer().stop(true);
+    session.player.stop(true);
   } catch {
     // Ignore audio stop errors during disconnect cleanup.
   }
-  playing = false;
-  currentChannelId = null;
+  session.playing = false;
+  session.currentChannelId = null;
   setVoiceDisconnected();
 }
 
-function makeDeps(): ConnectionHandlerDeps {
+function makeDeps(guildId: string): ConnectionHandlerDeps {
+  const session = getOrCreateSession(guildId);
   return {
-    getAttemptId: () => currentAttemptId,
-    getConnection: () => connection,
-    setConnection: (c) => { connection = c; },
-    tearDown: tearDownPlayer,
-    scheduleReconnect,
+    getAttemptId: () => session.currentAttemptId,
+    getConnection: () => session.connection,
+    setConnection: (c) => { session.connection = c; },
+    tearDown: () => tearDownSession(guildId),
+    scheduleReconnect: (reason) => scheduleReconnect(guildId, reason),
   };
 }
 
 /**
- * Join the specified voice channel or the configured one and subscribe the audio player.
- * Should be called once the Discord client is ready.
+ * Join the specified voice channel in the given guild and subscribe the audio player.
+ * Creates a new per-guild session if one does not already exist.
  */
-export async function connect(client: Client, channelId?: string): Promise<void> {
-  clearReconnectTimer();
-  const attemptId = ++currentAttemptId;
+export async function connect(client: Client, ctx: GuildAudioContext): Promise<void> {
+  const { guildId, voiceChannelId } = ctx;
+  const session = getOrCreateSession(guildId);
+
+  clearReconnectTimer(session);
+  const attemptId = ++session.currentAttemptId;
   let nextConnection: VoiceConnection | null = null;
 
   activeClient = client;
-  targetChannelId = channelId;
-  shouldAutoReconnect = true;
+  session.targetChannelId = voiceChannelId;
+  session.shouldAutoReconnect = true;
 
-  const previousConnection = connection;
-  const deps = makeDeps();
+  const previousConnection = session.connection;
+  const deps = makeDeps(guildId);
 
   try {
-    const resolvedChannelId = channelId || DISCORD_VOICE_CHANNEL_ID;
-
-    if (!DISCORD_GUILD_ID || !resolvedChannelId) {
-      throw new Error('Missing DISCORD_GUILD_ID or voice channel ID');
+    if (!guildId || !voiceChannelId) {
+      throw new Error('Missing guildId or voiceChannelId');
     }
 
-    const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
-    if (attemptId !== currentAttemptId) return;
+    const guild = await client.guilds.fetch(guildId);
+    if (attemptId !== session.currentAttemptId) return;
 
-    const channel = await guild.channels.fetch(resolvedChannelId);
-    if (attemptId !== currentAttemptId) return;
+    const channel = await guild.channels.fetch(voiceChannelId);
+    if (attemptId !== session.currentAttemptId) return;
 
     if (!channel || channel.type !== ChannelType.GuildVoice) {
-      throw new Error(`Channel ${resolvedChannelId} is not a voice channel`);
+      throw new Error(`Channel ${voiceChannelId} is not a voice channel`);
     }
 
     nextConnection = joinVoiceChannel({
       channelId: channel.id,
       guildId: guild.id,
-      adapterCreator: buildAdapter(channel),
+      adapterCreator: buildAdapter(channel, session),
       selfDeaf: false,
       selfMute: false,
     });
 
-    if (attemptId !== currentAttemptId) {
+    if (attemptId !== session.currentAttemptId) {
       nextConnection.destroy();
       return;
     }
@@ -220,31 +250,31 @@ export async function connect(client: Client, channelId?: string): Promise<void>
 
     await entersState(joinedConnection, VoiceConnectionStatus.Ready, VOICE_CONNECT_TIMEOUT_MS);
 
-    if (attemptId !== currentAttemptId) {
+    if (attemptId !== session.currentAttemptId) {
       joinedConnection.destroy();
       return;
     }
 
     releasePreviousConnection(previousConnection, joinedConnection, deps);
-    connection = joinedConnection;
-    currentChannelId = channel.id;
+    session.connection = joinedConnection;
+    session.currentChannelId = channel.id;
 
-    clearReconnectTimer();
-    log.info('Voice connection ready.');
-    reconnectAttempts = 0;
+    clearReconnectTimer(session);
+    log.info(`[${guildId}] Voice connection ready.`);
+    session.reconnectAttempts = 0;
 
-    joinedConnection.subscribe(getPlayer());
+    joinedConnection.subscribe(session.player);
     setVoiceConnected(channel.name);
-    log.info(`Joined voice channel: ${channel.name}`);
+    log.info(`[${guildId}] Joined voice channel: ${channel.name}`);
   } catch (err) {
-    if (attemptId === currentAttemptId) {
+    if (attemptId === session.currentAttemptId) {
       cleanupFailedConnect(previousConnection, nextConnection, deps);
     } else {
       nextConnection?.destroy();
     }
 
-    if (attemptId === currentAttemptId && shouldAutoReconnect && !isPermanentVoiceMisconfigurationError(err)) {
-      scheduleReconnect('connect failed');
+    if (attemptId === session.currentAttemptId && session.shouldAutoReconnect && !isPermanentVoiceMisconfigurationError(err)) {
+      scheduleReconnect(guildId, 'connect failed');
     }
 
     throw err;
@@ -252,50 +282,80 @@ export async function connect(client: Client, channelId?: string): Promise<void>
 }
 
 /**
- * Disconnect from the current voice channel, if connected.
+ * Disconnect from the voice channel for a specific guild.
  * Safe to call when already disconnected.
  */
-export function disconnect(): void {
-  currentAttemptId += 1;
-  shouldAutoReconnect = false;
-  activeClient = null;
-  targetChannelId = undefined;
-  clearReconnectTimer();
-  reconnectAttempts = 0;
-  currentChannelId = null;
+export function disconnect(guildId: string): void {
+  const session = sessions.get(guildId);
+  if (!session) return;
 
-  const existingConnection = connection;
+  session.currentAttemptId += 1;
+  session.shouldAutoReconnect = false;
+  session.targetChannelId = undefined;
+  clearReconnectTimer(session);
+  session.reconnectAttempts = 0;
+  session.currentChannelId = null;
+
+  const existingConnection = session.connection;
   if (existingConnection) {
     existingConnection.destroy();
-    connection = null;
+    session.connection = null;
     try {
-      getPlayer().stop(true);
+      session.player.stop(true);
     } catch {
       // Ignore audio stop errors during disconnect cleanup.
     }
-    playing = false;
+    session.playing = false;
     setVoiceDisconnected();
-    log.info('Disconnected from voice channel.');
+    log.info(`[${guildId}] Disconnected from voice channel.`);
   }
 }
 
-/** Returns true if a sound is currently being played. */
-export function isPlaying(): boolean {
-  return playing;
+/**
+ * Disconnect all active guild voice sessions. Called during process shutdown.
+ */
+export function disconnectAll(): void {
+  for (const guildId of sessions.keys()) {
+    disconnect(guildId);
+  }
+  sessions.clear();
+  activeClient = null;
 }
 
-/** Returns true if the bot is currently joined to a voice channel. */
-export function isConnected(): boolean {
-  return connection !== null;
+/**
+ * Returns true if a sound is currently being played in the given guild.
+ * If guildId is omitted, returns true if any guild is playing.
+ */
+export function isPlaying(guildId?: string): boolean {
+  if (guildId !== undefined) {
+    return sessions.get(guildId)?.playing ?? false;
+  }
+  for (const s of sessions.values()) {
+    if (s.playing) return true;
+  }
+  return false;
 }
 
-/** Returns the current voice channel ID if connected, null otherwise. */
-export function getCurrentChannelId(): string | null {
-  return currentChannelId;
+/**
+ * Returns true if the bot is currently joined to a voice channel in the given guild.
+ */
+export function isConnected(guildId: string): boolean {
+  return (sessions.get(guildId)?.connection ?? null) !== null;
 }
 
-/** Marks playback as active and sends the resource to the audio player. */
-export function startPlayback(resource: AudioResource): void {
-  playing = true;
-  getPlayer().play(resource);
+/**
+ * Returns the current voice channel ID for the given guild if connected, null otherwise.
+ */
+export function getCurrentChannelId(guildId: string): string | null {
+  return sessions.get(guildId)?.currentChannelId ?? null;
+}
+
+/**
+ * Marks playback as active and sends the resource to the audio player for the given guild.
+ */
+export function startPlayback(resource: AudioResource, guildId: string): void {
+  const session = sessions.get(guildId);
+  if (!session) throw new Error(`No audio session for guild ${guildId}`);
+  session.playing = true;
+  session.player.play(resource);
 }

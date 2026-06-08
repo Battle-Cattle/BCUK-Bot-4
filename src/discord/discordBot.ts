@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits, Guild } from 'discord.js';
 import { DISCORD_TOKEN, DISCORD_GUILD_ID } from '../shared/config';
 import { handleCommand } from '../commands/commandRouter';
+import { resolveContextForDiscordGuild } from '../audio/voiceResolver';
 import { executeCustomCommandForDiscord } from '../commands/customCommandHandler';
 import { executeCounterCommandForDiscord } from '../commands/counterHandler';
 import { setDiscordReady } from '../shared/statusStore';
@@ -58,21 +59,26 @@ export function startDiscordBot(): void {
 
   client.on('messageCreate', (message) => {
     if (message.author.bot) return;
-    if (message.guildId !== DISCORD_GUILD_ID) return;
+    if (!message.guildId) return; // ignore DMs
 
     const displayName = message.member?.displayName ?? message.author.username;
 
-    executeCustomCommandForDiscord(message, displayName).catch((err) =>
-      log.error('Custom command error:', err),
-    );
+    // Custom commands and counters only run in the primary configured guild.
+    if (message.guildId === DISCORD_GUILD_ID) {
+      executeCustomCommandForDiscord(message, displayName).catch((err) =>
+        log.error('Custom command error:', err),
+      );
 
-    executeCounterCommandForDiscord(message, displayName).catch((err) =>
-      log.error('Counter command error:', err),
-    );
+      executeCounterCommandForDiscord(message, displayName).catch((err) =>
+        log.error('Counter command error:', err),
+      );
+    }
 
-    handleCommand(message.content, 'discord').catch((err) =>
-      log.error('Command handler error:', err),
-    );
+    // SFX commands run in any guild the bot is in, routing audio to that guild's voice channel.
+    const guildId = message.guildId;
+    resolveContextForDiscordGuild(client, guildId)
+      .then((ctx) => handleCommand(message.content, 'discord', ctx ?? undefined))
+      .catch((err) => log.error('Command handler error:', err));
   });
 
   client.once('clientReady', async (c) => {

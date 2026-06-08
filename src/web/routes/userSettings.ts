@@ -1,7 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { randomBytes } from 'crypto';
-import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, EventSubConfig } from '../../db';
+import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, updateGuildRoutingRecord, AccessLevel, EventSubConfig } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { trimField, renderError, filterQueryParam } from './shared';
@@ -24,8 +24,11 @@ const KNOWN_ERRORS = new Set([
   'eventsub_token_invalid',
   'eventsub_wrong_account',
   'invalid_id',
+  'guild_routing_failed',
+  'guild_routing_invalid',
+  'guild_routing_forbidden',
 ]);
-const KNOWN_SUCCESSES = new Set(['twitch_connected']);
+const KNOWN_SUCCESSES = new Set(['twitch_connected', 'guild_routing_saved']);
 
 const ERROR_MESSAGES: Record<string, string> = {
   no_streamer_record:            'You are not configured as a monitored streamer.',
@@ -37,6 +40,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   eventsub_token_invalid:        'Could not verify the Twitch account. Please try again.',
   eventsub_wrong_account:        'Wrong Twitch account — please authorize with your own broadcaster account.',
   invalid_id:                    'Invalid request — please try again.',
+  guild_routing_failed:          'Failed to save audio routing. Please try again.',
+  guild_routing_invalid:         'Invalid Discord server ID — must be a numeric snowflake.',
+  guild_routing_forbidden:       'You do not have permission to change audio routing.',
 };
 
 function getFriendlyError(key: string): string {
@@ -185,6 +191,36 @@ router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) =>
   } catch (err) {
     log.error('EventSub config save error:', err);
     res.redirect('/user/settings?error=eventsub_config_failed');
+  }
+});
+
+// POST /user/guild-routing — set or clear per-user Discord guild for audio routing (Manager+)
+router.post('/guild-routing', requireAuth, csrfProtection, async (req, res) => {
+  try {
+    const discordId = req.session.user!.discordId;
+    const dbUser = await findUser(discordId);
+
+    if (!dbUser || dbUser.access_level < AccessLevel.MANAGER) {
+      return res.redirect('/user/settings?error=guild_routing_forbidden');
+    }
+
+    const body = req.body as Record<string, string | undefined>;
+    const rawGuildId = trimField(body.discord_guild_id);
+
+    let guildId: string | null = null;
+    if (rawGuildId) {
+      // Snowflake IDs are 17-20 digit numbers
+      if (!/^\d{17,20}$/.test(rawGuildId)) {
+        return res.redirect('/user/settings?error=guild_routing_invalid');
+      }
+      guildId = rawGuildId;
+    }
+
+    await updateGuildRoutingRecord(discordId, guildId);
+    return res.redirect('/user/settings?success=guild_routing_saved');
+  } catch (err) {
+    log.error('Guild routing save error:', err);
+    return res.redirect('/user/settings?error=guild_routing_failed');
   }
 });
 

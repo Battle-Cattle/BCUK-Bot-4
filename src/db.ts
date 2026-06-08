@@ -5,8 +5,9 @@ export { getPool, closePool } from './db/pool';
 
 export {
   AccessLevel, ACCESS_LEVEL_LABELS,
-  findUser, findUserByTwitchName, getAllUsers,
+  findUser, findUserByTwitchName, findUserByDiscordGuildId, getAllUsers,
   updateDiscordName, getTwitchEnabledChannels, updateAccessLevel,
+  updateGuildRoutingRecord,
 } from './db/users';
 export type { AccessLevelValue, DbUser } from './db/users';
 

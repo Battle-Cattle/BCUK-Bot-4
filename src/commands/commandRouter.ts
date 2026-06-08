@@ -8,13 +8,18 @@ import { SFX_FOLDER, GLOBAL_COOLDOWN_MS } from '../shared/config';
 import { setVoicePlaying } from '../shared/statusStore';
 import { safeResolve } from '../shared/pathUtils';
 import { recordCommandTestEntry } from './commandMonitorStore';
+import type { GuildAudioContext } from '../audio/audioTypes';
 
 const log = createLogger('CommandRouter');
 
 let lastPlayedAt = 0;
 let inFlight = false;
 
-async function lookupAndPlay(command: string, source: 'twitch' | 'discord' | 'tiktok'): Promise<void> {
+async function lookupAndPlay(
+  command: string,
+  source: 'twitch' | 'discord' | 'tiktok',
+  ctx: GuildAudioContext,
+): Promise<void> {
   const trigger = await findTrigger(command);
   if (!trigger) return;
 
@@ -31,16 +36,16 @@ async function lookupAndPlay(command: string, source: 'twitch' | 'discord' | 'ti
     return;
   }
 
-  log.info(`[${source}] Playing '${filename}' for trigger '${command}'`);
+  log.info(`[${source}] Playing '${filename}' for trigger '${command}' in guild ${ctx.guildId}`);
 
   try {
-    playFile(fullPath);
+    playFile(fullPath, ctx.guildId);
     lastPlayedAt = Date.now();
     setVoicePlaying(filename, command, source);
     recordCommandTestEntry({ source, command, response: filename, channel: null, user: null });
   } catch (err) {
     if (err instanceof VoiceNotConnectedError) {
-      log.info(`[${source}] Skipping '${command}' — not connected to voice channel`);
+      log.info(`[${source}] Skipping '${command}' — not connected to voice channel in guild ${ctx.guildId}`);
     } else {
       log.error(`[${source}] Failed to play ${fullPath}:`, err);
     }
@@ -52,9 +57,14 @@ async function lookupAndPlay(command: string, source: 'twitch' | 'discord' | 'ti
  * Performs all checks (prefix, cooldown, playing state, DB lookup) before playing.
  *
  * @param rawMessage The full message string as received from chat.
- * @param source     Label used for console logging ('twitch' | 'discord').
+ * @param source     Label used for console logging ('twitch' | 'discord' | 'tiktok').
+ * @param ctx        Guild and voice channel to play audio in. If omitted, SFX is skipped silently.
  */
-export async function handleCommand(rawMessage: string, source: 'twitch' | 'discord' | 'tiktok'): Promise<void> {
+export async function handleCommand(
+  rawMessage: string,
+  source: 'twitch' | 'discord' | 'tiktok',
+  ctx?: GuildAudioContext,
+): Promise<void> {
   const trimmed = rawMessage.trim();
 
   // Extract the first word of the message — this is matched directly against
@@ -75,10 +85,13 @@ export async function handleCommand(rawMessage: string, source: 'twitch' | 'disc
     return;
   }
 
+  // No audio context means the streamer is not in a voice channel — skip SFX silently.
+  if (!ctx) return;
+
   // Claim the slot before any await so concurrent message handlers see the flag.
   inFlight = true;
   try {
-    await lookupAndPlay(command, source);
+    await lookupAndPlay(command, source, ctx);
   } finally {
     inFlight = false;
   }

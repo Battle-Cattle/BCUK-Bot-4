@@ -71,6 +71,14 @@ vi.mock('../commands/countdownHandler', () => ({
   executeCountdownForTwitch: vi.fn(),
 }));
 
+vi.mock('../audio/voiceResolver', () => ({
+  resolveContextForTwitchChannel: vi.fn().mockResolvedValue({ guildId: 'g1', voiceChannelId: 'vc1' }),
+}));
+
+vi.mock('../discord/discordBot', () => ({
+  getDiscordClient: vi.fn().mockReturnValue({}),
+}));
+
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import {
@@ -188,7 +196,7 @@ describe('handleTwitchMessage', () => {
     expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', 'hello', null);
   });
 
-  it('dispatches all six executors for a normal message', () => {
+  it('dispatches all six executors for a normal message', async () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeCounterCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeMultiCommandForTwitch).mockResolvedValue(undefined);
@@ -197,6 +205,8 @@ describe('handleTwitchMessage', () => {
     vi.mocked(executeCountdownForTwitch).mockResolvedValue(undefined);
 
     sendMessage('#streamer', makeTags({ 'display-name': 'Alice' }), '!cmd');
+    // handleCommand is called after resolveContextForTwitchChannel resolves
+    await Promise.resolve();
 
     expect(executeCustomCommandForTwitch).toHaveBeenCalledOnce();
     expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce();

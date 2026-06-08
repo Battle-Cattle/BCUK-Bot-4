@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { getStatus } from '../../shared/statusStore';
 import { requireAuth, requireMod } from '../middleware';
 import { connect, disconnect, getCurrentChannelId } from '../../audio/audioPlayer';
+import type { GuildAudioContext } from '../../audio/audioTypes';
 import { getDiscordClient } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
@@ -25,7 +26,7 @@ router.get('/voice/channels', requireMod, async (_req, res) => {
       ok: true,
       channels,
       defaultChannelId: DISCORD_VOICE_CHANNEL_ID,
-      currentChannelId: getCurrentChannelId(),
+      currentChannelId: getCurrentChannelId(DISCORD_GUILD_ID),
     });
   } catch (err) {
     log.error('Failed to list voice channels:', err);
@@ -51,10 +52,11 @@ router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
       res.status(400).json({ ok: false, error: 'Invalid channel ID' });
       return;
     }
-    const resolvedChannelId = trimmedChannelId || undefined;
+    const resolvedChannelId = trimmedChannelId || DISCORD_VOICE_CHANNEL_ID;
+    const ctx: GuildAudioContext = { guildId: DISCORD_GUILD_ID, voiceChannelId: resolvedChannelId };
 
-    disconnect();
-    await connect(discordClient, resolvedChannelId);
+    disconnect(DISCORD_GUILD_ID);
+    await connect(discordClient, ctx);
     res.json({ ok: true });
   } catch (err) {
     log.error('Voice rejoin failed:', err);
@@ -64,7 +66,7 @@ router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
 
 // Leave the voice channel — Mod and above
 router.post('/voice/leave', requireMod, csrfProtection, (_req, res) => {
-  disconnect();
+  disconnect(DISCORD_GUILD_ID);
   res.json({ ok: true });
 });
 

@@ -34,11 +34,14 @@ function getRealSfxRoot(): string {
 }
 
 /**
- * Play a local sound file into the connected voice channel.
- * Throws if not connected or the file does not exist.
+ * Play a local sound file into the connected voice channel for the given guild.
+ * Throws VoiceNotConnectedError if not connected, or if the file is invalid.
+ *
+ * @param filePath Filename relative to SFX_FOLDER or absolute path within it.
+ * @param guildId  Discord guild ID of the audio session to use.
  */
-export function playFile(filePath: string): void {
-  if (!isConnected()) {
+export function playFile(filePath: string, guildId: string): void {
+  if (!isConnected(guildId)) {
     throw new VoiceNotConnectedError();
   }
 
@@ -63,5 +66,5 @@ export function playFile(filePath: string): void {
     throw new Error(`Sound path is not a file: ${resolved}`);
   }
 
-  startPlayback(createAudioResource(resolved));
+  startPlayback(createAudioResource(resolved), guildId);
 }
