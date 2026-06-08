@@ -48,7 +48,9 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.
 }
 
 // POST /overlay/settings/videos/upload
-router.post('/settings/videos/upload', requireAuth, upload.single('video'), csrfProtection, async (req, res) => {
+// csrfProtection runs BEFORE upload.single so a bad token is rejected before Multer buffers the file.
+// The CSRF token is passed in the URL query string (?_csrf=…) so it is available before body parsing.
+router.post('/settings/videos/upload', requireAuth, csrfProtection, upload.single('video'), async (req, res) => {
   try {
     const streamer = await requireStreamer(req, res);
     if (!streamer) return;

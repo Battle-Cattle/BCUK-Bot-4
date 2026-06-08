@@ -18,10 +18,9 @@ export function ensureSessionCsrfToken(req: Parameters<RequestHandler>[0]): stri
 }
 
 function getSubmittedCsrfToken(req: Parameters<RequestHandler>[0]): string | null {
-  if (typeof req.body?._csrf === 'string') {
-    return req.body._csrf;
-  }
-
+  // URL query param checked first — allows CSRF validation before multipart body is buffered.
+  if (typeof req.query?._csrf === 'string') return req.query._csrf;
+  if (typeof req.body?._csrf === 'string') return req.body._csrf;
   return null;
 }
 

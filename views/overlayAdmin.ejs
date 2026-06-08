@@ -69,8 +69,7 @@
 
       <div class="card card-spaced">
         <div class="card-body">
-          <form method="POST" action="/overlay/settings/videos/upload" enctype="multipart/form-data">
-            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <form method="POST" action="/overlay/settings/videos/upload?_csrf=<%= encodeURIComponent(csrfToken) %>" enctype="multipart/form-data">
             <div class="form-row-wrap" style="align-items:flex-end;">
               <div style="flex:1;">
                 <label class="hint hint-compact" for="video-name">Name</label>
