@@ -8,6 +8,8 @@ export const EVENTSUB_WS_URL = 'wss://eventsub.wss.twitch.tv/ws';
 const RECONNECT_BACKOFF_MAX_MS = 30_000;
 /** How long a message ID is remembered for deduplication (ms). */
 export const MESSAGE_TTL_MS = 10 * 60 * 1000;
+/** Grace period before closing the old WebSocket during a session migration (Twitch-specified window). */
+const SESSION_MIGRATION_CLOSE_DELAY_MS = 5_000;
 
 /** Metadata fields present on every EventSub WebSocket message. */
 export interface EventSubMetadata {
@@ -200,7 +202,7 @@ export class StreamerConnection {
     this.isReconnecting = true;
     log.info(`[${this.name}] Session reconnect — connecting to new session`);
     this.connect(safeUrl);
-    setTimeout(() => { oldSocket?.close(1000, 'reconnect'); }, 5_000);
+    setTimeout(() => { oldSocket?.close(1000, 'reconnect'); }, SESSION_MIGRATION_CLOSE_DELAY_MS);
   }
 
   private scheduleReconnect(): void {
