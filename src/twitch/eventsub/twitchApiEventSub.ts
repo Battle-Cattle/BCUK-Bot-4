@@ -1,7 +1,8 @@
 import { createLogger } from '../../shared/logger';
 import { TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET } from '../../shared/config';
 import { twitchFetch, authHeaders } from '../twitchApi';
-import { DbStreamerEventSub, saveStreamerToken, clearStreamerToken } from '../../db/eventSub';
+import type { DbStreamerEventSub } from '../../db';
+import { saveStreamerToken, clearStreamerToken } from '../../db';
 
 const log = createLogger('TwitchToken');
 const TOKEN_BUFFER_MS = 5 * 60 * 1000;

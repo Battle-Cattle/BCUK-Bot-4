@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { getAllEventSubStreamers, clearStreamerToken } from '../../db';
-import type { DbStreamerEventSub, EventSubConfig } from '../../db/eventSub';
+import type { DbStreamerEventSub, EventSubConfig } from '../../db';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
 import { normalizeTwitchChannelName } from '../twitchChannelName';

@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../twitchBot', () => ({ sayInChannel: vi.fn() }));
-vi.mock('../../db/overlayVideos', () => ({ getVideosForReward: vi.fn() }));
+vi.mock('../../db', () => ({ getVideosForReward: vi.fn() }));
 vi.mock('../../web/routes/overlaySource', () => ({ pushOverlayEvent: vi.fn() }));
 vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 
 import { handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption } from './twitchEventSubHandler';
 import { sayInChannel } from '../twitchBot';
-import { getVideosForReward } from '../../db/overlayVideos';
+import { getVideosForReward } from '../../db';
 import { pushOverlayEvent } from '../../web/routes/overlaySource';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 
