@@ -1,6 +1,6 @@
 import { sayInChannel } from '../twitchBot';
-import { EventSubConfig } from '../../db/eventSub';
-import { getVideosForReward } from '../../db/overlayVideos';
+import type { EventSubConfig } from '../../db';
+import { getVideosForReward } from '../../db';
 import { pushOverlayEvent } from '../../web/routes/overlaySource';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { createLogger } from '../../shared/logger';
