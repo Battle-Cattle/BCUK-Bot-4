@@ -4,7 +4,7 @@ import type { ErrorRequestHandler } from 'express';
 import session from 'express-session';
 import MySQLStore from 'express-mysql-session';
 import helmet from 'helmet';
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { WEB_PORT, SESSION_SECRET, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../shared/config';
 
@@ -30,6 +30,13 @@ import overlaySourceRouter from './routes/overlaySource';
 import overlayAdminRouter from './routes/overlayAdmin';
 import { requireAuth } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
+import {
+  ipKey,
+  generalLimiterSkip,
+  sessionLimiterKey,
+  sessionLimiterSkip,
+  streamdeckLimiterKey,
+} from './rateLimits';
 
 const app = express();
 
@@ -66,17 +73,13 @@ app.set('views', path.join(__dirname, '../../views'));
 app.use(express.static(path.join(__dirname, '../../public')));
 
 // Rate limiting — applied after static assets so file downloads aren't counted
-const ipKey = (req: express.Request) => ipKeyGenerator(req.ip ?? req.socket?.remoteAddress ?? 'unknown');
-
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 100,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   keyGenerator: ipKey,
-  // Skip authenticated users (session already proves identity) and the Streamdeck API
-  // which has its own limiter. This prevents panel pollers from exhausting the budget.
-  skip: (req) => req.path.startsWith('/api/streamdeck') || !!req.session?.user,
+  skip: generalLimiterSkip,
 });
 // Tighter limit for auth endpoints to protect against OAuth quota exhaustion
 const authLimiter = rateLimit({
@@ -94,12 +97,20 @@ const streamdeckLimiter = rateLimit({
   limit: 120,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    const auth = req.headers['authorization'];
-    const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-    return token ?? ipKeyGenerator(req.ip ?? req.socket?.remoteAddress ?? 'unknown');
-  },
+  keyGenerator: streamdeckLimiterKey,
   message: 'Too many requests, please try again shortly.',
+});
+// Per-account limit for session-authenticated panel users. Dashboard polling alone
+// can reach ~420 req/15 min (status + command-monitor + streams-live), so 600 gives
+// headroom while still capping a compromised or runaway session. Skips unauthenticated
+// requests (covered by generalLimiter) and the Streamdeck API (its own limiter).
+const sessionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 600,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: sessionLimiterKey,
+  skip: sessionLimiterSkip,
 });
 // Body parsers
 app.use(express.urlencoded({ extended: false }));
@@ -129,8 +140,9 @@ app.use(
   }),
 );
 
-// General rate limiter — placed after session so authenticated users can be skipped
+// Rate limiters — placed after session middleware so req.session is populated
 app.use(generalLimiter);
+app.use(sessionLimiter);
 
 app.use((req, res, next) => {
   res.locals.user = req.session.user ?? null;
