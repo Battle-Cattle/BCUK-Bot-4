@@ -8,19 +8,18 @@ import { createLogger } from '../shared/logger';
 
 const log = createLogger('Discord');
 
-let client: Client;
+let client: Client | null = null;
 let cachedGuild: Guild | null = null;
-let _discordClient: Client | null = null;
 
 /** Returns the Discord.js Client once it has fired `clientReady`, or null before then. */
-export function getDiscordClient(): Client | null { return _discordClient; }
+export function getDiscordClient(): Client | null { return client; }
 
 async function getConfiguredGuild(): Promise<Guild> {
-  if (!_discordClient) {
+  if (!client) {
     throw new Error('Discord client is not ready');
   }
 
-  const guildFromCache = _discordClient!.guilds.cache.get(DISCORD_GUILD_ID);
+  const guildFromCache = client.guilds.cache.get(DISCORD_GUILD_ID);
   if (guildFromCache) {
     cachedGuild = guildFromCache;
     return guildFromCache;
@@ -30,12 +29,12 @@ async function getConfiguredGuild(): Promise<Guild> {
     return cachedGuild;
   }
 
-  cachedGuild = await _discordClient!.guilds.fetch(DISCORD_GUILD_ID);
+  cachedGuild = await client.guilds.fetch(DISCORD_GUILD_ID);
   return cachedGuild;
 }
 
 export async function fetchMemberDisplayName(discordId: string, force = false): Promise<string | null> {
-  if (!_discordClient) return null;
+  if (!client) return null;
   try {
     const guild = await getConfiguredGuild();
     const member = await guild.members.fetch({ user: discordId, force });
@@ -77,7 +76,7 @@ export function startDiscordBot(): void {
 
   client.once('clientReady', async (c) => {
     log.info(`Logged in as ${c.user.tag}`);
-    _discordClient = c;
+    client = c;
     try {
       const guild = await getConfiguredGuild();
       setDiscordReady(c.user.tag, guild.name);
@@ -94,10 +93,11 @@ export function startDiscordBot(): void {
 }
 
 export function stopDiscordBot(): void {
-  _discordClient = null;
+  const existing = client;
+  client = null;
   cachedGuild = null;
   try {
-    client?.destroy();
+    existing?.destroy();
   } catch (err) {
     log.error('Error destroying client:', err);
   }
