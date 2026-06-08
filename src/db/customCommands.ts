@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
+import { fromBit } from './utils';
 import { AccessLevel } from './users';
 import type { AccessLevelValue } from './users';
 import { assertNotReservedCommand } from './reservedCommands';
@@ -36,17 +37,13 @@ export interface DbCustomCommandWithAssignments extends DbCustomCommand {
 
 // ─── Row mappers ─────────────────────────────────────────────────────────────
 
-function mapBool(value: unknown): boolean {
-  return Buffer.isBuffer(value) ? value[0] === 1 : Number(value) === 1;
-}
-
 function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
   return {
     command_id: row.command_id,
     trigger_string: row.trigger_string,
     output: row.output,
-    is_discord_enabled: mapBool(row.is_discord_enabled),
-    is_multi_twitch: mapBool(row.is_multi_twitch),
+    is_discord_enabled: fromBit(row.is_discord_enabled),
+    is_multi_twitch: fromBit(row.is_multi_twitch),
   };
 }
 
@@ -80,7 +77,7 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
         discord_name: row.discord_name ?? null,
         twitch_name: row.twitch_name ?? null,
         access_level: row.access_level ?? AccessLevel.USER,
-        is_twitch_bot_enabled: mapBool(row.is_twitch_bot_enabled),
+        is_twitch_bot_enabled: fromBit(row.is_twitch_bot_enabled),
         is_orphaned_user: row.user_discord_id === null || row.user_discord_id === undefined,
       });
     }

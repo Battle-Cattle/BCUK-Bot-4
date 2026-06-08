@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
+import { fromBit } from './utils';
 
 export interface DbStreamGroup {
   id: number;
@@ -45,9 +46,6 @@ export interface DbStreamerFull {
   group: DbStreamGroup;
 }
 
-function mapBool(value: unknown): boolean {
-  return Buffer.isBuffer(value) ? value[0] === 1 : value == 1;
-}
 
 function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
   return {
@@ -56,8 +54,8 @@ function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
     discord_channel: String(r.discord_channel),
     live_message: r.live_message,
     new_game_message: r.new_game_message,
-    multi_twitch: mapBool(r.multi_twitch),
-    delete_old_posts: mapBool(r.delete_old_posts),
+    multi_twitch: fromBit(r.multi_twitch),
+    delete_old_posts: fromBit(r.delete_old_posts),
   };
 }
 
@@ -145,8 +143,8 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
       discord_channel: String(r.discord_channel),
       live_message: r.live_message,
       new_game_message: r.new_game_message,
-      multi_twitch: mapBool(r.multi_twitch),
-      delete_old_posts: mapBool(r.delete_old_posts),
+      multi_twitch: fromBit(r.multi_twitch),
+      delete_old_posts: fromBit(r.delete_old_posts),
     },
   }));
 }
