@@ -13,7 +13,11 @@ const FILENAME_RE = /^[\w-]+\.(webm|mp4)$/i;
 const RESERVED_LOGINS = new Set(['settings', 'videos']);
 
 // In-memory map of active SSE connections keyed by Twitch channel login (lowercase).
-const connections = new Map<string, Set<import('express').Response>>();
+export const connections = new Map<string, Set<import('express').Response>>();
+
+const parsedMaxSse = parseInt(process.env.OVERLAY_MAX_SSE_PER_CHANNEL ?? '10', 10);
+export const MAX_SSE_CONNECTIONS_PER_CHANNEL =
+  Number.isFinite(parsedMaxSse) && parsedMaxSse > 0 ? parsedMaxSse : 10;
 
 /** Push a video URL to all browser sources connected for this channel. */
 export function pushOverlayEvent(login: string, videoPath: string): void {
@@ -46,6 +50,12 @@ router.get('/:login/events', (req, res, next) => {
   const { login } = req.params;
   if (!LOGIN_RE.test(login) || RESERVED_LOGINS.has(login.toLowerCase())) { next(); return; }
   const key = login.toLowerCase();
+
+  const existing = connections.get(key);
+  if (existing && existing.size >= MAX_SSE_CONNECTIONS_PER_CHANNEL) {
+    res.status(429).end();
+    return;
+  }
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
