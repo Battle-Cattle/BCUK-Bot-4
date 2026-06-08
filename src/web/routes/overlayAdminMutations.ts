@@ -56,8 +56,10 @@ router.post('/settings/videos/upload', requireAuth, upload.single('video'), csrf
     const name = (typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 100) : '') || req.file.originalname;
     await saveVideoFile(streamer, req.file, name);
     res.redirect('/overlay/settings?success=video_uploaded');
-  } catch (err: any) {
-    if (err?.code === 'invalid_path') return res.redirect('/overlay/settings?error=invalid_path');
+  } catch (err: unknown) {
+    if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'invalid_path') {
+      return res.redirect('/overlay/settings?error=invalid_path');
+    }
     log.error('Overlay video upload error:', err);
     res.redirect('/overlay/settings?error=upload_failed');
   }
