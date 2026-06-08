@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
+import { fromBit } from './utils';
 import { EVENTSUB_TOKEN_SECRET } from '../shared/config';
 import { encryptToken, decryptToken } from '../shared/crypto';
 
@@ -25,19 +26,15 @@ export interface DbStreamerEventSub {
   config: EventSubConfig | null;
 }
 
-function mapBool(value: unknown): boolean {
-  return Buffer.isBuffer(value) ? value[0] === 1 : value == 1;
-}
-
 function mapConfig(r: mysql.RowDataPacket): EventSubConfig {
   return {
-    follow_enabled: mapBool(r.follow_enabled),
+    follow_enabled: fromBit(r.follow_enabled),
     follow_message: r.follow_message,
-    sub_enabled: mapBool(r.sub_enabled),
+    sub_enabled: fromBit(r.sub_enabled),
     sub_message: r.sub_message,
     resub_message: r.resub_message,
     giftsub_message: r.giftsub_message,
-    raid_enabled: mapBool(r.raid_enabled),
+    raid_enabled: fromBit(r.raid_enabled),
     raid_message: r.raid_message,
   };
 }

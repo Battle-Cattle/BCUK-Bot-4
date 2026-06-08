@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
+import { fromBit } from './utils';
 
 export interface SfxTrigger {
   id: bigint;
@@ -28,10 +29,6 @@ export interface SfxTriggerRow {
   files: Array<{ id: number; file: string; weight: number; hidden: boolean }>;
 }
 
-function mapBool(value: unknown): boolean {
-  return Buffer.isBuffer(value) ? value[0] === 1 : value == 1;
-}
-
 /**
  * Look up a trigger by its command string (case-insensitive).
  * Hidden triggers ARE included — the hidden flag only affects public listing, not playback.
@@ -49,7 +46,7 @@ export async function findTrigger(command: string): Promise<SfxTrigger | null> {
     id: BigInt(row.id),
     trigger_command: row.trigger_command,
     category_id: row.category_id,
-    hidden: mapBool(row.hidden),
+    hidden: fromBit(row.hidden),
     description: row.description,
   };
 }
@@ -71,7 +68,7 @@ export async function findSoundFiles(triggerId: bigint): Promise<SfxFile[]> {
     file: row.file,
     trigger_command: row.trigger_command,
     weight: row.weight,
-    hidden: mapBool(row.hidden),
+    hidden: fromBit(row.hidden),
     category_id: row.category_id,
   }));
 }
@@ -122,7 +119,7 @@ export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
         triggerId: r.triggerId,
         triggerCommand: r.triggerCommand,
         description: r.description ?? null,
-        hidden: mapBool(r.triggerHidden),
+        hidden: fromBit(r.triggerHidden),
         categoryName: r.categoryName ?? null,
         files: [],
       });
@@ -132,7 +129,7 @@ export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
         id: r.sfxId,
         file: r.file,
         weight: r.weight,
-        hidden: mapBool(r.sfxHidden),
+        hidden: fromBit(r.sfxHidden),
       });
     }
   }
