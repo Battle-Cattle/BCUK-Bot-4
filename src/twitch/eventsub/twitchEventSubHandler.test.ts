@@ -2,15 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../twitchBot', () => ({ sayInChannel: vi.fn() }));
 vi.mock('../../db', () => ({ getVideosForReward: vi.fn() }));
-vi.mock('../../web/routes/overlaySource', () => ({ pushOverlayEvent: vi.fn() }));
 vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 
-import { handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption } from './twitchEventSubHandler';
+import { handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption, registerEventSubOverlayRuntime } from './twitchEventSubHandler';
 import { sayInChannel } from '../twitchBot';
 import { getVideosForReward } from '../../db';
-import { pushOverlayEvent } from '../../web/routes/overlaySource';
 import { pickWeightedRandom } from '../../commands/soundSelector';
+
+const mockPushOverlayEvent = vi.fn();
+registerEventSubOverlayRuntime({ pushOverlayEvent: mockPushOverlayEvent });
 
 // Minimal EventSubConfig helper — avoids importing from db/eventSub
 function makeConfig(overrides: Partial<{
@@ -248,7 +249,7 @@ describe('handleRedemption', () => {
   it('does not call pushOverlayEvent when getVideosForReward returns an empty array', async () => {
     vi.mocked(getVideosForReward).mockResolvedValue([]);
     await handleRedemption('streamer', event, makeConfig(), streamerId);
-    expect(pushOverlayEvent).not.toHaveBeenCalled();
+    expect(mockPushOverlayEvent).not.toHaveBeenCalled();
   });
 
   it('calls pickWeightedRandom and pushOverlayEvent with correct path when videos are available', async () => {
@@ -260,6 +261,6 @@ describe('handleRedemption', () => {
 
     expect(getVideosForReward).toHaveBeenCalledWith('reward-abc', streamerId);
     expect(pickWeightedRandom).toHaveBeenCalledWith(videos);
-    expect(pushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip2.mp4');
+    expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip2.mp4');
   });
 });
