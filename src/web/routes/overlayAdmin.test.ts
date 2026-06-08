@@ -35,7 +35,7 @@ vi.mock('../../shared/logger', () => ({
 
 vi.mock('./overlayAdminMutations', async () => {
   const { Router } = await import('express');
-  return { router: Router() };
+  return { router: Router(), MAX_UPLOAD_MB: 100 };
 });
 
 import express from 'express';
