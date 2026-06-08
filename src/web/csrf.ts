@@ -18,9 +18,10 @@ export function ensureSessionCsrfToken(req: Parameters<RequestHandler>[0]): stri
 }
 
 function getSubmittedCsrfToken(req: Parameters<RequestHandler>[0]): string | null {
-  if (typeof req.body?._csrf === 'string') {
-    return req.body._csrf;
-  }
+  if (typeof req.body?._csrf === 'string') return req.body._csrf;
+
+  const header = req.headers['x-csrf-token'] ?? req.headers['x-xsrf-token'];
+  if (typeof header === 'string') return header;
 
   return null;
 }
