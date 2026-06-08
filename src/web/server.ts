@@ -73,10 +73,14 @@ const generalLimiter = rateLimit({
   limit: 100,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  keyGenerator: ipKey,
-  // Skip authenticated users (session already proves identity) and the Streamdeck API
-  // which has its own limiter. This prevents panel pollers from exhausting the budget.
-  skip: (req) => req.path.startsWith('/api/streamdeck') || !!req.session?.user,
+  // Authenticated users are keyed by Discord ID so each account gets its own
+  // bucket regardless of IP sharing (proxies, NAT). Unauthenticated requests
+  // fall back to IP. Streamdeck API has its own limiter and is excluded here.
+  keyGenerator: (req) => {
+    if (req.path.startsWith('/api/streamdeck')) return '__streamdeck__';
+    return req.session?.user?.discordId ?? (req.ip ?? req.socket?.remoteAddress ?? 'unknown');
+  },
+  skip: (req) => req.path.startsWith('/api/streamdeck'),
 });
 // Tighter limit for auth endpoints to protect against OAuth quota exhaustion
 const authLimiter = rateLimit({
