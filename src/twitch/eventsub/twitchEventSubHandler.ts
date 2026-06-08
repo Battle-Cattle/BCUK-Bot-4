@@ -1,11 +1,24 @@
 import { sayInChannel } from '../twitchBot';
 import type { EventSubConfig } from '../../db';
 import { getVideosForReward } from '../../db';
-import { pushOverlayEvent } from '../../web/routes/overlaySource';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { createLogger } from '../../shared/logger';
 
 const log = createLogger('EventSubHandler');
+
+// Runtime injection for the overlay push function — avoids a direct import of the
+// web layer from core Twitch handler code.  Registered from index.ts after the web
+// panel starts.
+interface EventSubOverlayRuntime {
+  pushOverlayEvent: (login: string, videoPath: string) => void;
+}
+
+let _overlayRuntime: EventSubOverlayRuntime | null = null;
+
+/** Register the overlay push function. Called from index.ts after startWebPanel(). */
+export function registerEventSubOverlayRuntime(runtime: EventSubOverlayRuntime): void {
+  _overlayRuntime = runtime;
+}
 
 export interface FollowEvent {
   user_login: string;
@@ -131,6 +144,6 @@ export async function handleRedemption(
 
   const filename = pickWeightedRandom(videos);
   const videoPath = `/overlay/videos/${streamerId}/${filename}`;
-  pushOverlayEvent(login, videoPath);
+  _overlayRuntime?.pushOverlayEvent(login, videoPath);
   log.info(`Overlay triggered for ${login}: reward="${event.reward.title}" video=${filename}`);
 }

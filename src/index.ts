@@ -13,6 +13,8 @@ import { registerCounterTwitchRuntime } from './commands/counterHandler';
 import { registerMultiTwitchRuntime } from './commands/multiCommandHandler';
 import { registerShoutoutRuntime } from './commands/shoutoutHandler';
 import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
+import { registerEventSubOverlayRuntime } from './twitch/eventsub/twitchEventSubHandler';
+import { pushOverlayEvent } from './web/routes/overlaySource';
 import { startCounterScheduler, stopCounterScheduler } from './commands/counterScheduler';
 import { createLogger } from './shared/logger';
 
@@ -60,6 +62,7 @@ async function main(): Promise<void> {
   registerMultiTwitchRuntime({ send: sayInChannel, getActiveChannels, getLoginUserIds: getActiveChannelUserIds });
   registerShoutoutRuntime({ send: sayInChannel });
   registerCountdownTwitchRuntime({ send: sayInChannel });
+  registerEventSubOverlayRuntime({ pushOverlayEvent });
 
   setChannelJoinedHook(() => reloadEventSubSubscriptions());
   startDiscordBot();
