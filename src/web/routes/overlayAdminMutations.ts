@@ -30,10 +30,26 @@ export const upload = multer({
   },
 });
 
+/**
+ * Detect video type from buffer magic bytes, independent of the client-supplied MIME type.
+ * WebM: EBML header 0x1A 0x45 0xDF 0xA3
+ * MP4: ftyp box signature at bytes 4–7: 0x66 0x74 0x79 0x70
+ */
+export function detectVideoType(buf: Buffer): 'webm' | 'mp4' | null {
+  if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) {
+    return 'webm';
+  }
+  if (buf.length >= 8 && buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) {
+    return 'mp4';
+  }
+  return null;
+}
+
 async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.File, name: string): Promise<void> {
   const dir = safeResolve(OVERLAY_FOLDER, String(streamer.id));
   if (!dir) throw Object.assign(new Error('Path traversal blocked'), { code: 'invalid_path' });
-  const ext = file.mimetype === 'video/webm' ? 'webm' : 'mp4';
+  const ext = detectVideoType(file.buffer);
+  if (!ext) throw Object.assign(new Error('Invalid file type'), { code: 'invalid_file' });
   const filename = `${randomUUID()}.${ext}`;
   await fs.promises.mkdir(dir, { recursive: true });
   const fullPath = path.join(dir, filename);
@@ -56,8 +72,10 @@ router.post('/settings/videos/upload', requireAuth, upload.single('video'), csrf
     const name = (typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 100) : '') || req.file.originalname;
     await saveVideoFile(streamer, req.file, name);
     res.redirect('/overlay/settings?success=video_uploaded');
-  } catch (err: any) {
-    if (err?.code === 'invalid_path') return res.redirect('/overlay/settings?error=invalid_path');
+  } catch (err: unknown) {
+    const code = (err as any)?.code;
+    if (code === 'invalid_path') return res.redirect('/overlay/settings?error=invalid_path');
+    if (code === 'invalid_file') return res.redirect('/overlay/settings?error=invalid_file');
     log.error('Overlay video upload error:', err);
     res.redirect('/overlay/settings?error=upload_failed');
   }

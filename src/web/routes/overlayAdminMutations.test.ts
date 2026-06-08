@@ -40,10 +40,14 @@ vi.mock('fs', () => ({
 
 import express from 'express';
 import supertest from 'supertest';
-import { router } from './overlayAdminMutations';
+import { router, detectVideoType } from './overlayAdminMutations';
 import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
 import { AccessLevel } from '../../db/users';
 import fs from 'fs';
+
+// Minimal buffers with correct magic bytes for each format
+const WEBM_BUF = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00, 0x00, 0x00, 0x00]);
+const MP4_BUF  = Buffer.from([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]);
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
 const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: AccessLevel.USER };
@@ -98,23 +102,43 @@ describe('POST /settings/videos/upload', () => {
     const res = await supertest(buildApp())
       .post('/settings/videos/upload')
       .field('name', 'Test Video')
-      .attach('video', Buffer.from('fake video'), { filename: 'test.mp4', contentType: 'video/mp4' });
+      .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
     expect(vi.mocked(fs.promises.writeFile)).toHaveBeenCalled();
     const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0][0] as string;
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
   });
 
-  it('successfully uploads a valid video file', async () => {
+  it('successfully uploads a valid mp4 file', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const res = await supertest(buildApp())
       .post('/settings/videos/upload')
       .field('name', 'Test Video')
-      .attach('video', Buffer.from('fake video'), { filename: 'test.mp4', contentType: 'video/mp4' });
+      .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
     expect(vi.mocked(fs.promises.mkdir)).toHaveBeenCalled();
     expect(vi.mocked(fs.promises.writeFile)).toHaveBeenCalled();
     expect(vi.mocked(addVideo)).toHaveBeenCalled();
+  });
+
+  it('successfully uploads a valid webm file', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .field('name', 'Test WebM')
+      .attach('video', WEBM_BUF, { filename: 'test.webm', contentType: 'video/webm' });
+    expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+    expect(vi.mocked(addVideo)).toHaveBeenCalled();
+  });
+
+  it('rejects a file with no recognised magic bytes even if MIME type is correct', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .field('name', 'Bad File')
+      .attach('video', Buffer.from('not a real video'), { filename: 'evil.mp4', contentType: 'video/mp4' });
+    expect(res.headers.location).toBe('/overlay/settings?error=invalid_file');
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
   });
 });
 
@@ -126,7 +150,7 @@ describe('POST /settings/videos/upload — path traversal protection', () => {
     const res = await supertest(buildApp())
       .post('/settings/videos/upload')
       .field('name', 'Test Video')
-      .attach('video', Buffer.from('fake video'), { filename: 'test.mp4', contentType: 'video/mp4' });
+      .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=invalid_path');
     expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
@@ -137,7 +161,7 @@ describe('POST /settings/videos/upload — path traversal protection', () => {
     const res = await supertest(buildApp())
       .post('/settings/videos/upload')
       .field('name', 'Test Video')
-      .attach('video', Buffer.from('fake video'), { filename: 'test.mp4', contentType: 'video/mp4' });
+      .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=invalid_path');
     expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
@@ -148,7 +172,7 @@ describe('POST /settings/videos/upload — path traversal protection', () => {
     const res = await supertest(buildApp())
       .post('/settings/videos/upload')
       .field('name', 'Test Video')
-      .attach('video', Buffer.from('fake video'), { filename: 'test.mp4', contentType: 'video/mp4' });
+      .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
     expect(vi.mocked(fs.promises.writeFile)).toHaveBeenCalled();
     expect(vi.mocked(addVideo)).toHaveBeenCalled();
@@ -184,5 +208,25 @@ describe('POST /settings/videos/:id/delete', () => {
     const res = await supertest(buildApp()).post('/settings/videos/1/delete');
     expect(res.headers.location).toBe('/overlay/settings?success=video_deleted');
     expect(vi.mocked(fs.promises.rm)).not.toHaveBeenCalled();
+  });
+});
+
+// --- detectVideoType unit tests ---
+
+describe('detectVideoType', () => {
+  it('detects WebM by EBML magic bytes', () => {
+    expect(detectVideoType(Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00, 0x00]))).toBe('webm');
+  });
+
+  it('detects MP4 by ftyp box at bytes 4–7', () => {
+    expect(detectVideoType(Buffer.from([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]))).toBe('mp4');
+  });
+
+  it('returns null for unrecognised bytes', () => {
+    expect(detectVideoType(Buffer.from('not a video'))).toBeNull();
+  });
+
+  it('returns null for a buffer that is too short', () => {
+    expect(detectVideoType(Buffer.from([0x1a, 0x45]))).toBeNull();
   });
 });
