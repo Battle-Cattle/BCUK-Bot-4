@@ -48,7 +48,7 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.
 }
 
 // POST /overlay/settings/videos/upload
-router.post('/settings/videos/upload', requireAuth, upload.single('video'), csrfProtection, async (req, res) => {
+router.post('/settings/videos/upload', requireAuth, csrfProtection, upload.single('video'), async (req, res) => {
   try {
     const streamer = await requireStreamer(req, res);
     if (!streamer) return;

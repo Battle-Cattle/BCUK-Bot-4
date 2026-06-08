@@ -14,10 +14,10 @@ vi.mock('../../db', () => ({
 }));
 
 vi.mock('../csrf', () => ({
-  csrfProtection: (req: any, _res: any, next: any) => {
+  csrfProtection: vi.fn((req: any, _res: any, next: any) => {
     req.csrfToken = () => 'test-csrf-token';
     next();
-  },
+  }),
 }));
 
 vi.mock('../middleware', () => ({
@@ -44,6 +44,7 @@ import { router } from './overlayAdminMutations';
 import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
 import { AccessLevel } from '../../db/users';
 import fs from 'fs';
+import { csrfProtection } from '../csrf';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
 const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: AccessLevel.USER };
@@ -115,6 +116,26 @@ describe('POST /settings/videos/upload', () => {
     expect(vi.mocked(fs.promises.mkdir)).toHaveBeenCalled();
     expect(vi.mocked(fs.promises.writeFile)).toHaveBeenCalled();
     expect(vi.mocked(addVideo)).toHaveBeenCalled();
+  });
+});
+
+// --- POST /settings/videos/upload - CSRF Protection ---
+
+describe('POST /settings/videos/upload — CSRF protection', () => {
+  it('rejects with 403 and does not invoke Multer when CSRF token is invalid', async () => {
+    vi.mocked(csrfProtection).mockImplementationOnce((_req, res, _next) => {
+      res.status(403).send('invalid csrf token');
+    });
+
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .field('name', 'Test Video')
+      .attach('video', Buffer.from('fake video'), { filename: 'test.mp4', contentType: 'video/mp4' });
+
+    expect(res.status).toBe(403);
+    // Multer file processing must not have proceeded: no file written, no DB call
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
   });
 });
 

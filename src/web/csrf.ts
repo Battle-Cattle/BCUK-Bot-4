@@ -18,6 +18,12 @@ export function ensureSessionCsrfToken(req: Parameters<RequestHandler>[0]): stri
 }
 
 function getSubmittedCsrfToken(req: Parameters<RequestHandler>[0]): string | null {
+  // Check header first so CSRF can be validated before multipart body parsing (e.g. file uploads).
+  const header = req.headers['x-csrf-token'];
+  if (typeof header === 'string' && header.length > 0) {
+    return header;
+  }
+
   if (typeof req.body?._csrf === 'string') {
     return req.body._csrf;
   }
