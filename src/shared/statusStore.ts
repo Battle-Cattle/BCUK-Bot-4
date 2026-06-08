@@ -1,3 +1,4 @@
+/** Live connection and stream status for a single Twitch or TikTok channel. */
 export interface ChannelStatus {
   connected: boolean;
   lastConnectedAt: Date | null;
@@ -24,17 +25,20 @@ const state = {
   tiktok: new Map<string, ChannelStatus>(),
 };
 
+/** Marks the Discord bot as ready with its tag and guild name. */
 export function setDiscordReady(tag: string, guildName: string): void {
   state.discord.ready = true;
   state.discord.tag = tag;
   state.discord.guildName = guildName;
 }
 
+/** Records that the bot has joined a voice channel. */
 export function setVoiceConnected(channelName: string): void {
   state.voice.connected = true;
   state.voice.channelName = channelName;
 }
 
+/** Records that the bot has left the voice channel and clears playback state. */
 export function setVoiceDisconnected(): void {
   state.voice.connected = false;
   state.voice.channelName = null;
@@ -42,6 +46,7 @@ export function setVoiceDisconnected(): void {
   state.voice.currentFile = null;
 }
 
+/** Updates voice state to reflect that a file is now playing. */
 export function setVoicePlaying(file: string, command: string, source: string): void {
   state.voice.playing = true;
   state.voice.currentFile = file;
@@ -50,6 +55,7 @@ export function setVoicePlaying(file: string, command: string, source: string): 
   state.voice.lastPlayedAt = new Date();
 }
 
+/** Clears the playing flag and current file when playback finishes. */
 export function setVoiceIdle(): void {
   state.voice.playing = false;
   state.voice.currentFile = null;
@@ -68,20 +74,24 @@ function updateChannel(map: Map<string, ChannelStatus>, key: string, connected: 
   map.set(key, existing);
 }
 
+/** Updates the connected state for a Twitch channel. */
 export function setTwitchChannel(channel: string, connected: boolean): void {
   updateChannel(state.twitch, channel.toLowerCase().replace(/^#/, ''), connected);
 }
 
+/** Updates the connected state for a TikTok channel. */
 export function setTikTokChannel(username: string, connected: boolean): void {
   updateChannel(state.tiktok, username, connected);
 }
 
+/** Updates the isLive flag for a Twitch channel. No-ops if the channel isn't tracked yet. */
 export function setTwitchChannelLive(login: string, isLive: boolean): void {
   const key = login.toLowerCase().replace(/^#/, '');
   const existing = state.twitch.get(key);
   if (existing) existing.isLive = isLive;
 }
 
+/** Returns a snapshot of the current bot status (Discord, voice, Twitch channels, TikTok channels). */
 export function getStatus() {
   return {
     discord: { ...state.discord },
