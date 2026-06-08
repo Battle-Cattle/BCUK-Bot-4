@@ -1,4 +1,3 @@
-import { sayInChannel } from '../twitchBot';
 import type { EventSubConfig } from '../../db';
 import { getVideosForReward } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
@@ -28,6 +27,19 @@ let _overlayRuntime: EventSubOverlayRuntime | null = null;
 /** Register the overlay push function. Called from index.ts after startWebPanel(). */
 export function registerEventSubOverlayRuntime(runtime: EventSubOverlayRuntime): void {
   _overlayRuntime = runtime;
+}
+
+// Runtime injection for the Twitch chat send function — avoids a direct import
+// of twitchBot from core EventSub handler code.  Registered from index.ts.
+interface EventSubTwitchRuntime {
+  send: (channel: string, message: string) => Promise<void>;
+}
+
+let _twitchRuntime: EventSubTwitchRuntime | null = null;
+
+/** Register the Twitch chat send function. Called from index.ts after startTwitchBot(). */
+export function registerEventSubTwitchRuntime(runtime: EventSubTwitchRuntime): void {
+  _twitchRuntime = runtime;
 }
 
 export interface FollowEvent {
@@ -92,7 +104,7 @@ export async function handleFollow(login: string, event: FollowEvent, config: Ev
     username: event.user_login,
     display_name: event.user_name,
   });
-  await sayInChannel(login, msg);
+  await _twitchRuntime?.send(login, msg);
 }
 
 export async function handleSub(login: string, event: SubEvent, config: EventSubConfig): Promise<void> {
@@ -103,7 +115,7 @@ export async function handleSub(login: string, event: SubEvent, config: EventSub
     tier: event.tier,
     tier_name: tierName(event.tier),
   });
-  await sayInChannel(login, msg);
+  await _twitchRuntime?.send(login, msg);
 }
 
 export async function handleResub(login: string, event: ResubEvent, config: EventSubConfig): Promise<void> {
@@ -116,7 +128,7 @@ export async function handleResub(login: string, event: ResubEvent, config: Even
     months: String(event.cumulative_months),
     streak: event.streak_months != null ? String(event.streak_months) : '0',
   });
-  await sayInChannel(login, msg);
+  await _twitchRuntime?.send(login, msg);
 }
 
 export async function handleGiftSub(login: string, event: GiftSubEvent, config: EventSubConfig): Promise<void> {
@@ -130,7 +142,7 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
     tier: event.tier,
     tier_name: tierName(event.tier),
   });
-  await sayInChannel(login, msg);
+  await _twitchRuntime?.send(login, msg);
 }
 
 export async function handleRaid(login: string, event: RaidEvent, config: EventSubConfig): Promise<void> {
@@ -140,7 +152,7 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
     from_display: event.from_broadcaster_user_name,
     viewers: String(event.viewers),
   });
-  await sayInChannel(login, msg);
+  await _twitchRuntime?.send(login, msg);
 }
 
 export async function handleRedemption(
