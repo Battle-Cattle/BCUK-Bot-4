@@ -1,16 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../twitchBot', () => ({ sayInChannel: vi.fn() }));
 vi.mock('../../db/overlayVideos', () => ({ getVideosForReward: vi.fn() }));
 vi.mock('../../web/routes/overlaySource', () => ({ pushOverlayEvent: vi.fn() }));
 vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 
-import { handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption } from './twitchEventSubHandler';
-import { sayInChannel } from '../twitchBot';
+import { handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption, registerEventSubTwitchRuntime } from './twitchEventSubHandler';
 import { getVideosForReward } from '../../db/overlayVideos';
 import { pushOverlayEvent } from '../../web/routes/overlaySource';
 import { pickWeightedRandom } from '../../commands/soundSelector';
+
+const mockSend = vi.fn<(channel: string, message: string) => Promise<void>>();
+registerEventSubTwitchRuntime({ send: mockSend });
 
 // Minimal EventSubConfig helper — avoids importing from db/eventSub
 function makeConfig(overrides: Partial<{
@@ -52,7 +53,7 @@ describe('handleFollow', () => {
 
   it('does not call sayInChannel when follow_enabled is false', async () => {
     await handleFollow('streamer', event, makeConfig({ follow_enabled: false }));
-    expect(sayInChannel).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   it('calls sayInChannel with substituted {username} and {display_name} when follow_enabled is true', async () => {
@@ -60,8 +61,8 @@ describe('handleFollow', () => {
       follow_enabled: true,
       follow_message: 'Welcome {username} aka {display_name}!',
     }));
-    expect(sayInChannel).toHaveBeenCalledOnce();
-    expect(sayInChannel).toHaveBeenCalledWith('streamer', 'Welcome testuser aka TestUser!');
+    expect(mockSend).toHaveBeenCalledOnce();
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'Welcome testuser aka TestUser!');
   });
 });
 
@@ -79,12 +80,12 @@ describe('handleSub', () => {
 
   it('does not call sayInChannel when sub_enabled is false', async () => {
     await handleSub('streamer', { ...baseEvent }, makeConfig({ sub_enabled: false }));
-    expect(sayInChannel).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   it('does not call sayInChannel when is_gift is true even if sub_enabled is true', async () => {
     await handleSub('streamer', { ...baseEvent, is_gift: true }, makeConfig({ sub_enabled: true }));
-    expect(sayInChannel).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   it('calls sayInChannel with {tier} and {tier_name} substituted (Tier 1)', async () => {
@@ -92,7 +93,7 @@ describe('handleSub', () => {
       sub_enabled: true,
       sub_message: 'tier={tier} name={tier_name}',
     }));
-    expect(sayInChannel).toHaveBeenCalledWith('streamer', 'tier=1000 name=Tier 1');
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'tier=1000 name=Tier 1');
   });
 
   it('tierName maps 2000 to Tier 2', async () => {
@@ -100,7 +101,7 @@ describe('handleSub', () => {
       sub_enabled: true,
       sub_message: 'name={tier_name}',
     }));
-    expect(sayInChannel).toHaveBeenCalledWith('streamer', 'name=Tier 2');
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'name=Tier 2');
   });
 
   it('tierName maps 3000 to Tier 3', async () => {
@@ -108,7 +109,7 @@ describe('handleSub', () => {
       sub_enabled: true,
       sub_message: 'name={tier_name}',
     }));
-    expect(sayInChannel).toHaveBeenCalledWith('streamer', 'name=Tier 3');
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'name=Tier 3');
   });
 
   it('tierName passes unknown tier through unchanged', async () => {
@@ -116,7 +117,7 @@ describe('handleSub', () => {
       sub_enabled: true,
       sub_message: 'name={tier_name}',
     }));
-    expect(sayInChannel).toHaveBeenCalledWith('streamer', 'name=prime');
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'name=prime');
   });
 });
 
@@ -138,7 +139,7 @@ describe('handleResub', () => {
       sub_enabled: true,
       resub_message: 'months={months} streak={streak}',
     }));
-    expect(sayInChannel).toHaveBeenCalledWith('streamer', 'months=6 streak=3');
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'months=6 streak=3');
   });
 
   it('substitutes {streak} as "0" when streak_months is null', async () => {
@@ -146,7 +147,7 @@ describe('handleResub', () => {
       sub_enabled: true,
       resub_message: 'streak={streak}',
     }));
-    expect(sayInChannel).toHaveBeenCalledWith('streamer', 'streak=0');
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'streak=0');
   });
 
   it('substitutes {streak} as the number string when streak_months is set', async () => {
@@ -154,12 +155,12 @@ describe('handleResub', () => {
       sub_enabled: true,
       resub_message: 'streak={streak}',
     }));
-    expect(sayInChannel).toHaveBeenCalledWith('streamer', 'streak=12');
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'streak=12');
   });
 
   it('does not call sayInChannel when sub_enabled is false', async () => {
     await handleResub('streamer', baseEvent, makeConfig({ sub_enabled: false }));
-    expect(sayInChannel).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
   });
 });
 
@@ -178,7 +179,7 @@ describe('handleGiftSub', () => {
 
   it('does not call sayInChannel when sub_enabled is false', async () => {
     await handleGiftSub('streamer', baseEvent, makeConfig({ sub_enabled: false }));
-    expect(sayInChannel).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   it('uses "anonymous" and "Anonymous" for {gifter} and {gifter_display} when is_anonymous is true', async () => {
@@ -186,7 +187,7 @@ describe('handleGiftSub', () => {
       sub_enabled: true,
       giftsub_message: '{gifter} / {gifter_display}',
     }));
-    expect(sayInChannel).toHaveBeenCalledWith('streamer', 'anonymous / Anonymous');
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'anonymous / Anonymous');
   });
 
   it('uses event.user_login as {gifter} when is_anonymous is false', async () => {
@@ -194,7 +195,7 @@ describe('handleGiftSub', () => {
       sub_enabled: true,
       giftsub_message: '{gifter} / {gifter_display}',
     }));
-    expect(sayInChannel).toHaveBeenCalledWith('streamer', 'gifter / GifterDisplay');
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'gifter / GifterDisplay');
   });
 
   it('substitutes {count} correctly', async () => {
@@ -202,7 +203,7 @@ describe('handleGiftSub', () => {
       sub_enabled: true,
       giftsub_message: 'count={count}',
     }));
-    expect(sayInChannel).toHaveBeenCalledWith('streamer', 'count=3');
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'count=3');
   });
 });
 
@@ -219,7 +220,7 @@ describe('handleRaid', () => {
 
   it('does not call sayInChannel when raid_enabled is false', async () => {
     await handleRaid('streamer', event, makeConfig({ raid_enabled: false }));
-    expect(sayInChannel).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   it('calls sayInChannel with {from_channel}, {from_display}, {viewers} substituted when raid_enabled is true', async () => {
@@ -227,7 +228,7 @@ describe('handleRaid', () => {
       raid_enabled: true,
       raid_message: '{from_channel} ({from_display}) viewers={viewers}',
     }));
-    expect(sayInChannel).toHaveBeenCalledWith('streamer', 'raider (RaiderDisplay) viewers=42');
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'raider (RaiderDisplay) viewers=42');
   });
 });
 
