@@ -129,6 +129,22 @@ describe('POST /streams/streamers/add — array and missing input handling', () 
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('error=missing_fields');
   });
+
+  it('redirects with missing_fields when discord_id is not a valid snowflake', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/streamers/add')
+      .send('discord_id=not-a-snowflake&group_id=1');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=missing_fields');
+  });
+
+  it('redirects with missing_fields when discord_id is too short', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/streamers/add')
+      .send('discord_id=1234&group_id=1');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=missing_fields');
+  });
 });
 
 describe('POST /streams/groups/add — field length capping', () => {

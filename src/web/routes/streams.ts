@@ -17,7 +17,7 @@ import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { restartTwitchMonitor, getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db';
-import { parsePositiveIntId, filterQueryParam } from './shared';
+import { parsePositiveIntId, filterQueryParam, normalizeDiscordId } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -175,7 +175,7 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
 
 router.post('/streams/streamers/add', requireManager, csrfProtection, async (req, res) => {
   const { discord_id, group_id } = req.body as { discord_id?: string | string[]; group_id?: string | string[] };
-  const discordId = typeof discord_id === 'string' ? discord_id.trim() : null;
+  const discordId = normalizeDiscordId(typeof discord_id === 'string' ? discord_id : undefined);
   const rawGroupId = Array.isArray(group_id) ? group_id[0] : group_id;
   const groupId = typeof rawGroupId === 'string' ? rawGroupId.trim() : null;
   if (!discordId || !groupId) return res.redirect('/admin/streams?error=missing_fields');
