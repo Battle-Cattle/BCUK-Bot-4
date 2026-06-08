@@ -108,10 +108,10 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
 
   try {
     await addStreamGroup({
-      name: name!.trim(),
-      discordChannel: discord_channel!.trim(),
-      liveMessage: live_message!.trim(),
-      newGameMessage: new_game_message!.trim(),
+      name: name!.trim().slice(0, 100),
+      discordChannel: discord_channel!.trim().slice(0, 20),
+      liveMessage: live_message!.trim().slice(0, 2000),
+      newGameMessage: new_game_message!.trim().slice(0, 2000),
       multiTwitch: multi_twitch,
       deleteOldPosts: delete_old_posts,
     });
@@ -138,10 +138,10 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
   try {
     await updateStreamGroup({
       id: parsedGroupId,
-      name: name!.trim(),
-      discordChannel: discord_channel!.trim(),
-      liveMessage: live_message!.trim(),
-      newGameMessage: new_game_message!.trim(),
+      name: name!.trim().slice(0, 100),
+      discordChannel: discord_channel!.trim().slice(0, 20),
+      liveMessage: live_message!.trim().slice(0, 2000),
+      newGameMessage: new_game_message!.trim().slice(0, 2000),
       multiTwitch: multi_twitch,
       deleteOldPosts: delete_old_posts,
     });
