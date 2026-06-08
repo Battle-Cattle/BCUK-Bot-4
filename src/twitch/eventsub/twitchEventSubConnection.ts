@@ -155,7 +155,7 @@ export class StreamerConnection {
     }
   }
 
-  handleMessage(msg: EventSubMessage): void {
+  private handleMessage(msg: EventSubMessage): void {
     const { message_type, message_id, message_timestamp } = msg.metadata;
     if (isStale(message_timestamp)) { log.warn(`[${this.name}] Stale message (${message_type}) — ignoring`); return; }
     if (isDuplicate(message_id)) { log.warn(`[${this.name}] Duplicate message (${message_type}) — ignoring`); return; }
