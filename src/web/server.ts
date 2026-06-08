@@ -101,6 +101,18 @@ const streamdeckLimiter = rateLimit({
   },
   message: 'Too many requests, please try again shortly.',
 });
+// Per-account limit for session-authenticated panel users. Dashboard polling alone
+// can reach ~420 req/15 min (status + command-monitor + streams-live), so 600 gives
+// headroom while still capping a compromised or runaway session. Skips unauthenticated
+// requests (covered by generalLimiter) and the Streamdeck API (its own limiter).
+const sessionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 600,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.session?.user?.discordId ?? '__unauthenticated__',
+  skip: (req) => req.path.startsWith('/api/streamdeck') || !req.session?.user,
+});
 // Body parsers
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
@@ -129,8 +141,9 @@ app.use(
   }),
 );
 
-// General rate limiter — placed after session so authenticated users can be skipped
+// Rate limiters — placed after session middleware so req.session is populated
 app.use(generalLimiter);
+app.use(sessionLimiter);
 
 app.use((req, res, next) => {
   res.locals.user = req.session.user ?? null;
