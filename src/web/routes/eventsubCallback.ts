@@ -47,6 +47,14 @@ router.get('/twitch/eventsub/callback', async (req, res) => {
     const streamer = await getStreamerById(streamerId);
     if (!streamer) return res.redirect('/user/settings?error=invalid_id');
 
+    // If there is an authenticated session user, verify they own this streamer record.
+    // Prevents a shared-browser scenario where a different user completes another's OAuth flow.
+    const sessionUser = req.session.user;
+    if (sessionUser && streamer.discord_id !== sessionUser.discordId) {
+      log.warn(`EventSub OAuth user mismatch: session user ${sessionUser.discordId} does not own streamer ${streamerId}`);
+      return res.redirect('/user/settings?error=eventsub_oauth_state_mismatch');
+    }
+
     const expectedLogin = streamer.twitch_name?.toLowerCase();
     if (!expectedLogin || twitchUser.login.toLowerCase() !== expectedLogin) {
       log.warn(`EventSub OAuth mismatch: expected ${streamer.twitch_name ?? 'unknown'}, got ${twitchUser.login}`);
