@@ -73,14 +73,10 @@ const generalLimiter = rateLimit({
   limit: 100,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  // Authenticated users are keyed by Discord ID so each account gets its own
-  // bucket regardless of IP sharing (proxies, NAT). Unauthenticated requests
-  // fall back to IP. Streamdeck API has its own limiter and is excluded here.
-  keyGenerator: (req) => {
-    if (req.path.startsWith('/api/streamdeck')) return '__streamdeck__';
-    return req.session?.user?.discordId ?? (req.ip ?? req.socket?.remoteAddress ?? 'unknown');
-  },
-  skip: (req) => req.path.startsWith('/api/streamdeck'),
+  keyGenerator: ipKey,
+  // Skip authenticated users (covered by sessionLimiter) and the Streamdeck API
+  // (its own limiter). This prevents panel pollers from exhausting the shared IP bucket.
+  skip: (req) => req.path.startsWith('/api/streamdeck') || !!req.session?.user,
 });
 // Tighter limit for auth endpoints to protect against OAuth quota exhaustion
 const authLimiter = rateLimit({
@@ -104,6 +100,18 @@ const streamdeckLimiter = rateLimit({
     return token ?? ipKeyGenerator(req.ip ?? req.socket?.remoteAddress ?? 'unknown');
   },
   message: 'Too many requests, please try again shortly.',
+});
+// Per-account limit for session-authenticated panel users. Dashboard polling alone
+// can reach ~420 req/15 min (status + command-monitor + streams-live), so 600 gives
+// headroom while still capping a compromised or runaway session. Skips unauthenticated
+// requests (covered by generalLimiter) and the Streamdeck API (its own limiter).
+const sessionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 600,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.session?.user?.discordId ?? '__unauthenticated__',
+  skip: (req) => req.path.startsWith('/api/streamdeck') || !req.session?.user,
 });
 // Body parsers
 app.use(express.urlencoded({ extended: false }));
@@ -133,8 +141,9 @@ app.use(
   }),
 );
 
-// General rate limiter — placed after session so authenticated users can be skipped
+// Rate limiters — placed after session middleware so req.session is populated
 app.use(generalLimiter);
+app.use(sessionLimiter);
 
 app.use((req, res, next) => {
   res.locals.user = req.session.user ?? null;
