@@ -40,7 +40,7 @@ vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, A
 import express from 'express';
 import supertest from 'supertest';
 import router from './streams';
-import { getAllStreamGroups, getAllStreamers, getAllUsers, findUser, addStreamer } from '../../db';
+import { getAllStreamGroups, getAllStreamers, getAllUsers, findUser, addStreamer, addStreamGroup, updateStreamGroup } from '../../db';
 import { AccessLevel } from '../../db/users';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
@@ -65,6 +65,8 @@ beforeEach(() => {
   vi.mocked(getAllUsers).mockResolvedValue([]);
   vi.mocked(findUser).mockResolvedValue(null);
   vi.mocked(addStreamer).mockResolvedValue(undefined);
+  vi.mocked(addStreamGroup).mockResolvedValue(undefined);
+  vi.mocked(updateStreamGroup).mockResolvedValue(undefined);
 });
 
 describe('GET /streams — query param filtering', () => {
@@ -126,5 +128,47 @@ describe('POST /streams/streamers/add — array and missing input handling', () 
       .send('discord_id=100000000000000001');
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('error=missing_fields');
+  });
+});
+
+describe('POST /streams/groups/add — field length capping', () => {
+  const longStr = (n: number) => 'x'.repeat(n);
+
+  it('truncates name to 100 chars, discordChannel to 20, messages to 2000', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/groups/add')
+      .send(
+        `name=${longStr(200)}&discord_channel=${longStr(30)}&live_message=${longStr(3000)}&new_game_message=${longStr(3000)}`,
+      );
+    expect(res.status).toBe(302);
+    expect(vi.mocked(addStreamGroup)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: longStr(100),
+        discordChannel: longStr(20),
+        liveMessage: longStr(2000),
+        newGameMessage: longStr(2000),
+      }),
+    );
+  });
+});
+
+describe('POST /streams/groups/update — field length capping', () => {
+  const longStr = (n: number) => 'x'.repeat(n);
+
+  it('truncates name to 100 chars, discordChannel to 20, messages to 2000', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/groups/update')
+      .send(
+        `group_id=1&name=${longStr(200)}&discord_channel=${longStr(30)}&live_message=${longStr(3000)}&new_game_message=${longStr(3000)}`,
+      );
+    expect(res.status).toBe(302);
+    expect(vi.mocked(updateStreamGroup)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: longStr(100),
+        discordChannel: longStr(20),
+        liveMessage: longStr(2000),
+        newGameMessage: longStr(2000),
+      }),
+    );
   });
 });
