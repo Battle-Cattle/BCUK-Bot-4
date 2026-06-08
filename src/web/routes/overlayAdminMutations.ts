@@ -19,7 +19,9 @@ const log = createLogger('OverlayAdmin');
 export const router = Router();
 
 const parsedMaxMb = parseInt(process.env.OVERLAY_MAX_FILE_MB ?? '100', 10);
-const MAX_FILE_BYTES = (Number.isFinite(parsedMaxMb) && parsedMaxMb > 0 ? parsedMaxMb : 100) * 1024 * 1024;
+/** Maximum upload size in megabytes, passed to templates to avoid direct process.env access in EJS. */
+export const MAX_UPLOAD_MB = Number.isFinite(parsedMaxMb) && parsedMaxMb > 0 ? parsedMaxMb : 100;
+const MAX_FILE_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
 export const upload = multer({
   storage: multer.memoryStorage(),
