@@ -7,9 +7,19 @@ import { createLogger } from '../../shared/logger';
 const log = createLogger('EventSubHandler');
 
 // Runtime injection for the overlay push function — avoids a direct import of the
-// web layer from core Twitch handler code.  Registered from index.ts after the web
-// panel starts.
+// web layer from core Twitch handler code.  registerEventSubOverlayRuntime is called
+// from index.ts before startWebPanel(), which is safe because pushOverlayEvent is
+// just a function reference and does not require the HTTP server to be running.
+/**
+ * Public contract for the overlay runtime injection.
+ * Passed to {@link registerEventSubOverlayRuntime} from index.ts.
+ */
 interface EventSubOverlayRuntime {
+  /**
+   * Push an overlay event to the named channel's SSE stream.
+   * @param login - Broadcaster login name.
+   * @param videoPath - Server-relative path of the video to display.
+   */
   pushOverlayEvent: (login: string, videoPath: string) => void;
 }
 
