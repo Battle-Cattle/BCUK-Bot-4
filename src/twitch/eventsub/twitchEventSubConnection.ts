@@ -225,15 +225,18 @@ export class StreamerConnection {
 }
 
 // TTL-based dedup: messageId → expiry timestamp (shared across all per-streamer connections)
-const seenMessageIds = new Map<string, number>();
+export const seenMessageIds = new Map<string, number>();
 
-// Purge expired entries on a fixed interval so isDuplicate stays O(1).
-setInterval(() => {
+/** Removes all expired entries from the deduplication map. */
+export function purgeExpiredMessageIds(): void {
   const now = Date.now();
   for (const [id, expiry] of seenMessageIds) {
-    if (now > expiry) seenMessageIds.delete(id);
+    if (expiry < now) seenMessageIds.delete(id);
   }
-}, MESSAGE_TTL_MS).unref();
+}
+
+// Purge expired entries on a fixed interval so isDuplicate stays O(1).
+setInterval(purgeExpiredMessageIds, MESSAGE_TTL_MS).unref();
 
 /** Returns true if messageId has been seen within MESSAGE_TTL_MS; records it otherwise. */
 export function isDuplicate(messageId: string): boolean {
