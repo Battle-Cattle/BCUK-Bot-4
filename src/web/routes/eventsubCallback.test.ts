@@ -32,8 +32,9 @@ import supertest from 'supertest';
 import router from './eventsubCallback';
 import { getStreamerById, saveStreamerToken, initEventConfig } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { AccessLevel, AccessLevelValue } from '../../db/users';
 
-type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
+type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: AccessLevelValue };
 
 const MOCK_STREAMER = {
   id: 1,
@@ -46,7 +47,7 @@ const SESSION_USER: SessionUser = {
   discordId: MOCK_STREAMER.discord_id,
   discordName: 'TestUser',
   discordAvatar: null,
-  accessLevel: 1,
+  accessLevel: AccessLevel.MOD,
 };
 
 function buildApp(sessionOverrides: Record<string, any> = {}) {
@@ -104,6 +105,8 @@ describe('GET /twitch/eventsub/callback — user binding', () => {
       .get('/twitch/eventsub/callback?code=abc&state=valid-state-abc');
     expect(res.headers.location).toContain('error=eventsub_oauth_state_mismatch');
     expect(vi.mocked(saveStreamerToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(exchangeCode)).not.toHaveBeenCalled();
+    expect(vi.mocked(getUserFromToken)).not.toHaveBeenCalled();
   });
 
   it('succeeds when authenticated user owns the streamer record', async () => {
