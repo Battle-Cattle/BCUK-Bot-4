@@ -51,8 +51,11 @@ router.get('/:login/events', (req, res, next) => {
   if (!LOGIN_RE.test(login) || RESERVED_LOGINS.has(login.toLowerCase())) { next(); return; }
   const key = login.toLowerCase();
 
-  const existing = connections.get(key);
-  if (existing && existing.size >= MAX_SSE_CONNECTIONS_PER_CHANNEL) {
+  if (!connections.has(key)) connections.set(key, new Set());
+  const clients = connections.get(key)!;
+  clients.add(res);
+  if (clients.size > MAX_SSE_CONNECTIONS_PER_CHANNEL) {
+    clients.delete(res);
     res.status(429).end();
     return;
   }
@@ -64,9 +67,6 @@ router.get('/:login/events', (req, res, next) => {
   res.flushHeaders();
 
   res.write(': connected\n\n');
-
-  if (!connections.has(key)) connections.set(key, new Set());
-  connections.get(key)!.add(res);
 
   const keepalive = setInterval(() => {
     try {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
@@ -28,8 +28,16 @@ beforeEach(() => {
 });
 
 describe('MAX_SSE_CONNECTIONS_PER_CHANNEL', () => {
-  it('defaults to 10', () => {
-    expect(MAX_SSE_CONNECTIONS_PER_CHANNEL).toBe(10);
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('defaults to 10', async () => {
+    vi.stubEnv('OVERLAY_MAX_SSE_PER_CHANNEL', '10');
+    vi.resetModules();
+    const { MAX_SSE_CONNECTIONS_PER_CHANNEL: limit } = await import('./overlaySource.js');
+    expect(limit).toBe(10);
   });
 });
 
