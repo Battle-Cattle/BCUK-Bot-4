@@ -20,12 +20,17 @@ afterEach(() => vi.useRealTimers());
 
 describe('executeCountdownForTwitch', () => {
   it('does nothing for commands other than !321', async () => {
-    await executeCountdownForTwitch('#chan', '!other');
+    await executeCountdownForTwitch('#chan', '!other', true);
+    expect(mockRuntime.send).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when isMod is false', async () => {
+    await executeCountdownForTwitch('#chan', '!321', false);
     expect(mockRuntime.send).not.toHaveBeenCalled();
   });
 
   it('sends all four countdown steps in order with 1s delays', async () => {
-    const promise = executeCountdownForTwitch('#chan', '!321');
+    const promise = executeCountdownForTwitch('#chan', '!321', true);
 
     // First step sent immediately
     await vi.advanceTimersByTimeAsync(0);
@@ -52,7 +57,7 @@ describe('executeCountdownForTwitch', () => {
       .mockResolvedValueOnce(undefined) // '3' succeeds
       .mockRejectedValueOnce(new Error('Rate limited')); // '2' fails
 
-    const promise = executeCountdownForTwitch('#chan', '!321');
+    const promise = executeCountdownForTwitch('#chan', '!321', true);
 
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(1000);
@@ -63,11 +68,8 @@ describe('executeCountdownForTwitch', () => {
   });
 
   it('does nothing when no runtime is registered', async () => {
-    // Deregister by providing null-like workaround: register a no-op then call
-    // with a command that bypasses the runtime check (no runtime = early return)
-    // Reset by registering null — use casting to simulate unregistered state.
     registerCountdownTwitchRuntime(null as any);
-    await executeCountdownForTwitch('#chan', '!321');
+    await executeCountdownForTwitch('#chan', '!321', true);
     expect(mockRuntime.send).not.toHaveBeenCalled();
   });
 });
