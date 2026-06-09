@@ -36,10 +36,10 @@ export const upload = multer({
  * MP4: ftyp box signature at bytes 4–7: 0x66 0x74 0x79 0x70
  */
 export function detectVideoType(buf: Buffer): 'webm' | 'mp4' | null {
-  if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) {
+  if (buf.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) {
     return 'webm';
   }
-  if (buf.length >= 8 && buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) {
+  if (buf.subarray(4, 8).equals(Buffer.from([0x66, 0x74, 0x79, 0x70]))) {
     return 'mp4';
   }
   return null;
