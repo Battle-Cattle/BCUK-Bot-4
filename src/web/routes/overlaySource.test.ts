@@ -34,7 +34,7 @@ describe('MAX_SSE_CONNECTIONS_PER_CHANNEL', () => {
   });
 
   it('defaults to 10', async () => {
-    vi.stubEnv('OVERLAY_MAX_SSE_PER_CHANNEL', '10');
+    vi.stubEnv('OVERLAY_MAX_SSE_PER_CHANNEL', '');
     vi.resetModules();
     const { MAX_SSE_CONNECTIONS_PER_CHANNEL: limit } = await import('./overlaySource.js');
     expect(limit).toBe(10);
