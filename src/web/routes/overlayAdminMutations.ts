@@ -73,7 +73,7 @@ router.post('/settings/videos/upload', requireAuth, upload.single('video'), csrf
     await saveVideoFile(streamer, req.file, name);
     res.redirect('/overlay/settings?success=video_uploaded');
   } catch (err: unknown) {
-    const code = (err as any)?.code;
+    const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
     if (code === 'invalid_path') return res.redirect('/overlay/settings?error=invalid_path');
     if (code === 'invalid_file') return res.redirect('/overlay/settings?error=invalid_file');
     log.error('Overlay video upload error:', err);
