@@ -27,6 +27,8 @@ import {
   executeCustomCommandForDiscord,
   executeCustomCommandForTwitch,
   registerTwitchChatRuntime,
+  purgeExpiredSessionCache,
+  sessionCache,
 } from './customCommandHandler';
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from '../db';
 import { recordCommandTestEntry } from './commandMonitorStore';
@@ -158,5 +160,44 @@ describe('executeCustomCommandForTwitch', () => {
     // Falls back to source channel only
     expect(mockRuntime.send).toHaveBeenCalledTimes(1);
     expect(mockRuntime.send).toHaveBeenCalledWith('#a', 'Hi!');
+  });
+});
+
+// ─── Session cache cleanup ────────────────────────────────────────────────────
+
+describe('purgeExpiredSessionCache', () => {
+  beforeEach(() => {
+    sessionCache.clear();
+  });
+
+  it('removes entries whose expiry has passed', () => {
+    const now = Date.now();
+    sessionCache.set('user-expired', { sessionId: 'abc', expiry: now - 1 });
+    sessionCache.set('user-fresh',   { sessionId: 'xyz', expiry: now + 60_000 });
+
+    purgeExpiredSessionCache();
+
+    expect(sessionCache.has('user-expired')).toBe(false);
+    expect(sessionCache.has('user-fresh')).toBe(true);
+  });
+
+  it('leaves all entries intact when none have expired', () => {
+    const now = Date.now();
+    sessionCache.set('user-a', { sessionId: '1', expiry: now + 10_000 });
+    sessionCache.set('user-b', { sessionId: '2', expiry: now + 20_000 });
+
+    purgeExpiredSessionCache();
+
+    expect(sessionCache.size).toBe(2);
+  });
+
+  it('empties the map when all entries have expired', () => {
+    const past = Date.now() - 1000;
+    sessionCache.set('user-a', { sessionId: '1', expiry: past });
+    sessionCache.set('user-b', { sessionId: '2', expiry: past });
+
+    purgeExpiredSessionCache();
+
+    expect(sessionCache.size).toBe(0);
   });
 });

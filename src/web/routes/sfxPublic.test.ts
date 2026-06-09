@@ -74,4 +74,24 @@ describe('GET /sfx-list', () => {
     expect((res.body as any).view).toBe('sfx-public');
     expect((res.body as any).locals.user).toBeNull();
   });
+
+  it('coalesces concurrent cache-miss requests into a single DB query', async () => {
+    let resolveData!: (data: any[]) => void;
+    const pending = new Promise<any[]>((r) => { resolveData = r; });
+    vi.mocked(getPublicSfxTriggers).mockReturnValueOnce(pending as any);
+
+    const app = buildApp();
+    const p1 = supertest(app).get('/sfx-list');
+    const p2 = supertest(app).get('/sfx-list');
+
+    // Yield so both requests reach the await inside getCachedData before the deferred resolves
+    await new Promise<void>((r) => setImmediate(r));
+    resolveData([]);
+
+    const [res1, res2] = await Promise.all([p1, p2]);
+
+    expect(getPublicSfxTriggers).toHaveBeenCalledOnce();
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
+  });
 });
