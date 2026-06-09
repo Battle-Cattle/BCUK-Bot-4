@@ -46,7 +46,6 @@ export interface DbStreamerFull {
   group: DbStreamGroup;
 }
 
-
 function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
   return {
     id: r.id,
