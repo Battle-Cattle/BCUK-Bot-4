@@ -63,9 +63,6 @@ describe('executeCountdownForTwitch', () => {
   });
 
   it('does nothing when no runtime is registered', async () => {
-    // Deregister by providing null-like workaround: register a no-op then call
-    // with a command that bypasses the runtime check (no runtime = early return)
-    // Reset by registering null — use casting to simulate unregistered state.
     registerCountdownTwitchRuntime(null as any);
     await executeCountdownForTwitch('#chan', '!321');
     expect(mockRuntime.send).not.toHaveBeenCalled();
