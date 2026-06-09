@@ -20,8 +20,7 @@ export function registerCountdownTwitchRuntime(runtime: CountdownTwitchRuntime):
   _twitchRuntime = runtime;
 }
 
-export async function executeCountdownForTwitch(channel: string, rawMessage: string, isMod: boolean): Promise<void> {
-  if (!isMod) return;
+export async function executeCountdownForTwitch(channel: string, rawMessage: string): Promise<void> {
   if (extractCommand(rawMessage) !== COUNTDOWN_COMMAND) return;
   const runtime = _twitchRuntime;
   if (!runtime) return;

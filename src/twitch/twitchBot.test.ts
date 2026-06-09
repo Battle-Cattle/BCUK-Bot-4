@@ -204,18 +204,6 @@ describe('handleTwitchMessage', () => {
     expect(executeCountdownForTwitch).toHaveBeenCalledOnce();
   });
 
-  it('passes isMod=true to executeCountdownForTwitch for a moderator', () => {
-    vi.mocked(executeCountdownForTwitch).mockResolvedValue(undefined);
-    sendMessage('#streamer', makeTags({ mod: true }), '!321');
-    expect(executeCountdownForTwitch).toHaveBeenCalledWith('streamer', '!321', true);
-  });
-
-  it('passes isMod=false to executeCountdownForTwitch for a regular user', () => {
-    vi.mocked(executeCountdownForTwitch).mockResolvedValue(undefined);
-    sendMessage('#streamer', makeTags({ mod: false }), '!321');
-    expect(executeCountdownForTwitch).toHaveBeenCalledWith('streamer', '!321', false);
-  });
-
   it('passes the normalized channel and message to executors', () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     sendMessage('#STREAMER', makeTags({ 'display-name': 'Alice' }), '!clap');

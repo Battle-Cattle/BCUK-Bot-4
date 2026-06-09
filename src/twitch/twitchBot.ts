@@ -151,7 +151,7 @@ function handleTwitchMessage(
     fireAndForget(executeMultiCommandForTwitch(normalizedChannel, message, displayName), 'Multi command error');
     fireAndForget(executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod), 'Shoutout error');
     fireAndForget(handleCommand(message, 'twitch'), 'Command handler error');
-    fireAndForget(executeCountdownForTwitch(normalizedChannel, message, isMod), 'Countdown error');
+    fireAndForget(executeCountdownForTwitch(normalizedChannel, message), 'Countdown error');
   } catch (err) {
     log.error('Unexpected error in message handler:', err);
   }
