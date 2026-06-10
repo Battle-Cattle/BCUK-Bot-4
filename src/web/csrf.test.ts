@@ -99,6 +99,16 @@ describe('csrfProtection — body takes priority over header', () => {
   });
 });
 
+describe('csrfProtection — X-CSRF-Token falls back to X-XSRF-Token when empty', () => {
+  it('uses X-XSRF-Token when X-CSRF-Token is an empty string', async () => {
+    const res = await supertest(buildApp())
+      .post('/test')
+      .set('X-CSRF-Token', '')
+      .set('X-XSRF-Token', SESSION_TOKEN);
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('csrfProtection — query takes priority over body and header', () => {
   it('uses query token when query, body, and header tokens are all present', async () => {
     const res = await supertest(buildApp())

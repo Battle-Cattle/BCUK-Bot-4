@@ -21,7 +21,8 @@ function getSubmittedCsrfToken(req: Parameters<RequestHandler>[0]): string | nul
   // Query param checked first — available before multipart body parsing (Multer).
   if (typeof req.query?._csrf === 'string') return req.query._csrf;
   if (typeof req.body?._csrf === 'string') return req.body._csrf;
-  const header = req.headers['x-csrf-token'] ?? req.headers['x-xsrf-token'];
+  const xcsrf = req.headers['x-csrf-token'];
+  const header = (typeof xcsrf === 'string' && xcsrf.trim() !== '') ? xcsrf : req.headers['x-xsrf-token'];
   if (typeof header === 'string') return header;
   return null;
 }

@@ -9,6 +9,7 @@ import { createLogger } from '../shared/logger';
 const log = createLogger('Discord');
 
 let client: Client | null = null;
+let bootingClient: Client | null = null;
 let cachedGuild: Guild | null = null;
 
 /** Returns the Discord.js Client once it has fired `clientReady`, or null before then. */
@@ -33,6 +34,14 @@ async function getConfiguredGuild(): Promise<Guild> {
   return cachedGuild;
 }
 
+/**
+ * Fetch the display name of a Discord guild member.
+ * Returns null if the client is not ready, the guild is unavailable, or the member is not found.
+ *
+ * @param discordId - Discord user snowflake ID to look up.
+ * @param force - When true, bypasses the guild member cache and fetches fresh from the API.
+ * @returns The member's server display name, or null on any failure.
+ */
 export async function fetchMemberDisplayName(discordId: string, force = false): Promise<string | null> {
   if (!client) return null;
   try {
@@ -45,6 +54,14 @@ export async function fetchMemberDisplayName(discordId: string, force = false): 
   }
 }
 
+/**
+ * Create and connect a Discord client. The module-level client (returned by
+ * {@link getDiscordClient}) is set only once `clientReady` fires, so callers
+ * cannot observe a partially-initialised client.
+ *
+ * If {@link stopDiscordBot} is called before the connection completes, the
+ * in-flight client is destroyed and the `clientReady` handler is discarded.
+ */
 export function startDiscordBot(): void {
   const localClient = new Client({
     intents: [
@@ -54,6 +71,7 @@ export function startDiscordBot(): void {
       GatewayIntentBits.GuildVoiceStates,
     ],
   });
+  bootingClient = localClient;
 
   localClient.on('messageCreate', (message) => {
     if (message.author.bot) return;
@@ -75,8 +93,14 @@ export function startDiscordBot(): void {
   });
 
   localClient.once('clientReady', async (c) => {
+    if (bootingClient !== localClient) {
+      // stopDiscordBot() ran during boot — discard this ready client
+      try { c.destroy(); } catch { /* ignore */ }
+      return;
+    }
+    bootingClient = null;
+    client = c;
     log.info(`Logged in as ${c.user.tag}`);
-    client = c; // only set module-level client once the bot is truly ready
     try {
       const guild = await getConfiguredGuild();
       setDiscordReady(c.user.tag, guild.name);
@@ -92,14 +116,26 @@ export function startDiscordBot(): void {
   localClient.login(DISCORD_TOKEN).catch((err) => log.error('Login failed:', err));
 }
 
+/**
+ * Disconnect and destroy the Discord client, including any client that is
+ * still connecting. Idempotent — safe to call before {@link startDiscordBot}.
+ * Errors thrown by `destroy()` are caught and logged rather than propagated.
+ */
 export function stopDiscordBot(): void {
-  const existing = client;
+  const existingReady = client;
+  const existingBooting = bootingClient;
   client = null;
+  bootingClient = null;
   cachedGuild = null;
   try {
-    existing?.destroy();
+    existingReady?.destroy();
   } catch (err) {
     log.error('Error destroying client:', err);
+  }
+  try {
+    existingBooting?.destroy();
+  } catch (err) {
+    log.error('Error destroying booting client:', err);
   }
   log.info('Client destroyed.');
 }

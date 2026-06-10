@@ -182,4 +182,20 @@ describe('stopDiscordBot', () => {
     expect(() => mod.stopDiscordBot()).not.toThrow();
     expect(mod.getDiscordClient()).toBeNull();
   });
+
+  it('destroys a booting client when stopDiscordBot is called before clientReady fires', () => {
+    mod.startDiscordBot();
+    expect(mod.getDiscordClient()).toBeNull();
+    mod.stopDiscordBot();
+    expect(mockInstance.destroy).toHaveBeenCalledOnce();
+    expect(mod.getDiscordClient()).toBeNull();
+  });
+
+  it('discards a clientReady event that fires after stopDiscordBot', async () => {
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    mod.stopDiscordBot();
+    await readyCb(mockInstance); // fires late, after stop
+    expect(mod.getDiscordClient()).toBeNull();
+  });
 });
