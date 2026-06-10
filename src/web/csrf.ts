@@ -36,9 +36,15 @@ function getSubmittedCsrfToken(req: Parameters<RequestHandler>[0]): string | nul
 /**
  * Express middleware that enforces CSRF protection on all non-safe HTTP methods.
  * Safe methods (GET, HEAD, OPTIONS) pass through unconditionally.
- * Unsafe methods must supply a token matching the session's `csrfToken` via query
- * (`_csrf`), form body (`_csrf`), `X-CSRF-Token`, or `X-XSRF-Token` header.
- * Mismatches call `next` with an error bearing `code: 'EBADCSRFTOKEN'`.
+ *
+ * For unsafe methods the submitted token is resolved in this priority order:
+ * 1. Query parameter `_csrf`
+ * 2. Form/JSON body field `_csrf`
+ * 3. `X-CSRF-Token` header (ignored when empty)
+ * 4. `X-XSRF-Token` header
+ *
+ * The submitted token must match the session's `csrfToken` via constant-time
+ * comparison. Mismatches call `next` with an error bearing `code: 'EBADCSRFTOKEN'`.
  */
 export const csrfProtection: RequestHandler = (req, _res, next) => {
   const sessionToken = ensureSessionCsrfToken(req);

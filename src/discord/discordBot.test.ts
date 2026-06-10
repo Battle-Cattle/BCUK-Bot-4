@@ -67,6 +67,12 @@ describe('getDiscordClient', () => {
     expect(mod.getDiscordClient()).toBeNull();
   });
 
+  it('is idempotent — a second call while booting does not create a second Client', () => {
+    mod.startDiscordBot();
+    mod.startDiscordBot(); // should be a no-op
+    expect(mockInstance.login).toHaveBeenCalledOnce();
+  });
+
   it('returns the client instance after clientReady fires', async () => {
     mod.startDiscordBot();
     expect(mod.getDiscordClient()).toBeNull();

@@ -52,12 +52,12 @@ describe('handleFollow', () => {
     broadcaster_user_login: 'streamer',
   };
 
-  it('does not call sayInChannel when follow_enabled is false', async () => {
+  it('does not call injected runtime when follow_enabled is false', async () => {
     await handleFollow('streamer', event, makeConfig({ follow_enabled: false }));
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  it('calls sayInChannel with substituted {username} and {display_name} when follow_enabled is true', async () => {
+  it('calls injected runtime (mockSend) with substituted {username} and {display_name} when follow_enabled is true', async () => {
     await handleFollow('streamer', event, makeConfig({
       follow_enabled: true,
       follow_message: 'Welcome {username} aka {display_name}!',
@@ -79,17 +79,17 @@ describe('handleSub', () => {
     is_gift: false,
   };
 
-  it('does not call sayInChannel when sub_enabled is false', async () => {
+  it('does not call injected runtime when sub_enabled is false', async () => {
     await handleSub('streamer', { ...baseEvent }, makeConfig({ sub_enabled: false }));
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  it('does not call sayInChannel when is_gift is true even if sub_enabled is true', async () => {
+  it('does not call injected runtime when is_gift is true even if sub_enabled is true', async () => {
     await handleSub('streamer', { ...baseEvent, is_gift: true }, makeConfig({ sub_enabled: true }));
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  it('calls sayInChannel with {tier} and {tier_name} substituted (Tier 1)', async () => {
+  it('calls injected runtime (mockSend) with {tier} and {tier_name} substituted (Tier 1)', async () => {
     await handleSub('streamer', { ...baseEvent, tier: '1000' }, makeConfig({
       sub_enabled: true,
       sub_message: 'tier={tier} name={tier_name}',
@@ -135,7 +135,7 @@ describe('handleResub', () => {
     streak_months: 3,
   };
 
-  it('calls sayInChannel with {months} and {streak} substituted when sub_enabled is true', async () => {
+  it('calls injected runtime (mockSend) with {months} and {streak} substituted when sub_enabled is true', async () => {
     await handleResub('streamer', baseEvent, makeConfig({
       sub_enabled: true,
       resub_message: 'months={months} streak={streak}',
@@ -159,7 +159,7 @@ describe('handleResub', () => {
     expect(mockSend).toHaveBeenCalledWith('streamer', 'streak=12');
   });
 
-  it('does not call sayInChannel when sub_enabled is false', async () => {
+  it('does not call injected runtime when sub_enabled is false', async () => {
     await handleResub('streamer', baseEvent, makeConfig({ sub_enabled: false }));
     expect(mockSend).not.toHaveBeenCalled();
   });
@@ -178,7 +178,7 @@ describe('handleGiftSub', () => {
     is_anonymous: false,
   };
 
-  it('does not call sayInChannel when sub_enabled is false', async () => {
+  it('does not call injected runtime when sub_enabled is false', async () => {
     await handleGiftSub('streamer', baseEvent, makeConfig({ sub_enabled: false }));
     expect(mockSend).not.toHaveBeenCalled();
   });
@@ -219,12 +219,12 @@ describe('handleRaid', () => {
     viewers: 42,
   };
 
-  it('does not call sayInChannel when raid_enabled is false', async () => {
+  it('does not call injected runtime when raid_enabled is false', async () => {
     await handleRaid('streamer', event, makeConfig({ raid_enabled: false }));
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  it('calls sayInChannel with {from_channel}, {from_display}, {viewers} substituted when raid_enabled is true', async () => {
+  it('calls injected runtime (mockSend) with {from_channel}, {from_display}, {viewers} substituted when raid_enabled is true', async () => {
     await handleRaid('streamer', event, makeConfig({
       raid_enabled: true,
       raid_message: '{from_channel} ({from_display}) viewers={viewers}',

@@ -55,14 +55,17 @@ export async function fetchMemberDisplayName(discordId: string, force = false): 
 }
 
 /**
- * Create and connect a Discord client. The module-level client (returned by
- * {@link getDiscordClient}) is set only once `clientReady` fires, so callers
- * cannot observe a partially-initialised client.
+ * Create and connect a Discord client. No-op if a client is already running or
+ * booting — call {@link stopDiscordBot} first to replace it.
  *
- * If {@link stopDiscordBot} is called before the connection completes, the
- * in-flight client is destroyed and the `clientReady` handler is discarded.
+ * The module-level client (returned by {@link getDiscordClient}) is set only
+ * once `clientReady` fires, so callers cannot observe a partially-initialised
+ * client. If {@link stopDiscordBot} is called before the connection completes,
+ * the in-flight client is destroyed and the `clientReady` handler is discarded.
+ * If login fails, `bootingClient` is cleared so the next call can retry.
  */
 export function startDiscordBot(): void {
+  if (client || bootingClient) return;
   const localClient = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -113,7 +116,10 @@ export function startDiscordBot(): void {
     log.error('Client error:', err);
   });
 
-  localClient.login(DISCORD_TOKEN).catch((err) => log.error('Login failed:', err));
+  localClient.login(DISCORD_TOKEN).catch((err) => {
+    log.error('Login failed:', err);
+    bootingClient = null; // clear so the next startDiscordBot() call can retry
+  });
 }
 
 /**
