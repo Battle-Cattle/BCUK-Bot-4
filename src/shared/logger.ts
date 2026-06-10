@@ -51,6 +51,7 @@ const rootLogger = winstonCreateLogger({
   ],
 });
 
+/** Returns a child logger tagged with the given module label. */
 export function createLogger(module: string) {
   return rootLogger.child({ label: module });
 }

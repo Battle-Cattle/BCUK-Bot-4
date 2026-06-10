@@ -174,7 +174,7 @@ describe('StreamerConnection.handleMessage', () => {
 
   it('session_welcome (non-reconnecting): sets sessionId and calls subscribeForStreamer', async () => {
     const conn = new StreamerConnection(makeStreamerData());
-    await conn.handleMessage(makeWelcomeMsg('sess-abc'));
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-abc'));
     expect(subscribeForStreamer).toHaveBeenCalledWith('sess-abc', expect.objectContaining({ uid: 'uid-123' }));
   });
 
@@ -183,7 +183,7 @@ describe('StreamerConnection.handleMessage', () => {
     const conn = new StreamerConnection(makeStreamerData());
     const onSelfStop = vi.fn();
     conn.setSelfStopCallback(onSelfStop);
-    await conn.handleMessage(makeWelcomeMsg('sess-zero'));
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-zero'));
     await vi.waitFor(() => expect(onSelfStop).toHaveBeenCalledWith('uid-123'));
   });
 
@@ -194,8 +194,8 @@ describe('StreamerConnection.handleMessage', () => {
       message_type: 'session_reconnect',
       payload: { session: { id: 'sess-old', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=new' } },
     });
-    conn.handleMessage(reconnectMsg);
-    await conn.handleMessage(makeWelcomeMsg('sess-reconnect'));
+    (conn as any).handleMessage(reconnectMsg);
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-reconnect'));
     expect(subscribeForStreamer).not.toHaveBeenCalled();
   });
 
@@ -208,7 +208,7 @@ describe('StreamerConnection.handleMessage', () => {
         event: { user_login: 'follower' },
       },
     });
-    conn.handleMessage(msg);
+    (conn as any).handleMessage(msg);
     expect(dispatchNotification).toHaveBeenCalledWith(
       'channel.follow',
       { user_login: 'follower' },
@@ -220,7 +220,7 @@ describe('StreamerConnection.handleMessage', () => {
     const conn = new StreamerConnection(makeStreamerData());
     const sub = { type: 'channel.follow', status: 'authorization_revoked', condition: { broadcaster_user_id: 'uid-123' } };
     const msg = makeMsg({ message_type: 'revocation', payload: { subscription: sub } });
-    conn.handleMessage(msg);
+    (conn as any).handleMessage(msg);
     expect(handleRevocation).toHaveBeenCalledWith(sub);
   });
 
@@ -235,7 +235,7 @@ describe('StreamerConnection.handleMessage', () => {
         event: {},
       },
     });
-    conn.handleMessage(msg);
+    (conn as any).handleMessage(msg);
     expect(dispatchNotification).not.toHaveBeenCalled();
   });
 
@@ -252,15 +252,15 @@ describe('StreamerConnection.handleMessage', () => {
     });
     const msg2 = { ...msg1, metadata: { ...msg1.metadata } }; // same id
 
-    conn.handleMessage(msg1);
-    conn.handleMessage(msg2);
+    (conn as any).handleMessage(msg1);
+    (conn as any).handleMessage(msg2);
     expect(dispatchNotification).toHaveBeenCalledTimes(1);
   });
 
   it('session_keepalive: no dispatch, no error', () => {
     const conn = new StreamerConnection(makeStreamerData());
     const msg = makeMsg({ message_type: 'session_keepalive', payload: {} });
-    expect(() => conn.handleMessage(msg)).not.toThrow();
+    expect(() => (conn as any).handleMessage(msg)).not.toThrow();
     expect(dispatchNotification).not.toHaveBeenCalled();
     expect(handleRevocation).not.toHaveBeenCalled();
   });

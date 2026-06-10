@@ -14,6 +14,7 @@ import { invalidateCustomCommandLookupCache } from './customCommandCache';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+/** A custom command row from the database. */
 export interface DbCustomCommand {
   command_id: number;
   trigger_string: string;
@@ -22,6 +23,7 @@ export interface DbCustomCommand {
   is_multi_twitch: boolean;
 }
 
+/** A user assigned to a custom command (may be orphaned if their account no longer exists). */
 export interface DbCustomCommandAssignedUser {
   discord_id: string;
   discord_name: string | null;
@@ -31,6 +33,7 @@ export interface DbCustomCommandAssignedUser {
   is_orphaned_user: boolean;
 }
 
+/** A custom command with its full list of assigned users. */
 export interface DbCustomCommandWithAssignments extends DbCustomCommand {
   assigned_users: DbCustomCommandAssignedUser[];
 }
