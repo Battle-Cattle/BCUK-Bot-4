@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
+import { fromBit } from './utils';
 import { AccessLevel } from './users';
 import type { AccessLevelValue } from './users';
 import { assertNotReservedCommand } from './reservedCommands';
@@ -36,22 +37,19 @@ export interface DbCustomCommandWithAssignments extends DbCustomCommand {
 
 // ─── Row mappers ─────────────────────────────────────────────────────────────
 
-function mapBool(value: unknown): boolean {
-  return Buffer.isBuffer(value) ? value[0] === 1 : Number(value) === 1;
-}
-
 function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
   return {
     command_id: row.command_id,
     trigger_string: row.trigger_string,
     output: row.output,
-    is_discord_enabled: mapBool(row.is_discord_enabled),
-    is_multi_twitch: mapBool(row.is_multi_twitch),
+    is_discord_enabled: fromBit(row.is_discord_enabled),
+    is_multi_twitch: fromBit(row.is_multi_twitch),
   };
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
+/** Return all custom commands, each with its full list of assigned users. */
 export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCommandWithAssignments[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT c.command_id, c.trigger_string, c.output, c.is_discord_enabled, c.is_multi_twitch,
@@ -80,7 +78,7 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
         discord_name: row.discord_name ?? null,
         twitch_name: row.twitch_name ?? null,
         access_level: row.access_level ?? AccessLevel.USER,
-        is_twitch_bot_enabled: mapBool(row.is_twitch_bot_enabled),
+        is_twitch_bot_enabled: fromBit(row.is_twitch_bot_enabled),
         is_orphaned_user: row.user_discord_id === null || row.user_discord_id === undefined,
       });
     }
@@ -91,6 +89,16 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Create a new custom command. Validates and normalises the trigger string, checks for
+ * conflicts, and invalidates the lookup cache on success.
+ *
+ * @param triggerString - Full prefixed command string (e.g. `!clap`); lowercased before storing.
+ * @param output - Response text, max 2000 characters.
+ * @param isDiscordEnabled - When true, the command responds in Discord.
+ * @param isMultiTwitch - When true, the command can be assigned to multiple Twitch streamers.
+ * @returns The auto-incremented `command_id` of the newly created row.
+ */
 export async function addCustomCommand(
   triggerString: string,
   output: string,
@@ -130,6 +138,17 @@ export async function addCustomCommand(
   return commandId;
 }
 
+/**
+ * Update an existing custom command's trigger string, output, and flags.
+ * Validates conflicts against other commands, throws {@link CommandNotFoundError}
+ * if the command does not exist, and invalidates the lookup cache on success.
+ *
+ * @param commandId - ID of the command to update.
+ * @param triggerString - New trigger string; lowercased before storing.
+ * @param output - New response text, max 2000 characters.
+ * @param isDiscordEnabled - Whether the command responds in Discord.
+ * @param isMultiTwitch - Whether the command can be assigned to multiple Twitch streamers.
+ */
 export async function updateCustomCommand(
   commandId: number,
   triggerString: string,
@@ -173,6 +192,13 @@ export async function updateCustomCommand(
   invalidateCustomCommandLookupCache();
 }
 
+/**
+ * Delete a custom command and all its user assignments within a transaction.
+ * Throws {@link CommandNotFoundError} if the command does not exist.
+ * Invalidates the lookup cache only after a successful commit.
+ *
+ * @param commandId - ID of the command to delete.
+ */
 export async function removeCustomCommand(commandId: number): Promise<void> {
   const connection = await getPool().getConnection();
   const lockName = `bcuk_cmdid_${commandId}`;
@@ -203,6 +229,15 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
   }
 }
 
+/**
+ * Assign a Discord user to a custom command's Twitch streamer list.
+ * Acquires a named lock for the command ID, then delegates to
+ * {@link assignUserToCommandWithinTransaction} to check cross-command conflicts
+ * before inserting. Invalidates the lookup cache on success.
+ *
+ * @param commandId - ID of the command to assign the user to.
+ * @param discordId - Discord snowflake of the user to assign.
+ */
 export async function assignUserToCommand(commandId: number, discordId: string): Promise<void> {
   const connection = await getPool().getConnection();
 
@@ -226,6 +261,12 @@ export async function assignUserToCommand(commandId: number, discordId: string):
   }
 }
 
+/**
+ * Remove a Discord user's assignment from a custom command and invalidate the lookup cache.
+ *
+ * @param commandId - ID of the command to remove the assignment from.
+ * @param discordId - Discord snowflake of the user to unassign.
+ */
 export async function unassignUserFromCommand(commandId: number, discordId: string): Promise<void> {
   await getPool().execute(
     'DELETE FROM twitch_user_commands WHERE command_id = ? AND discord_id = ?',

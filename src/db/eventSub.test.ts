@@ -138,6 +138,14 @@ describe('getAllEventSubStreamers', () => {
     const [s] = await getAllEventSubStreamers();
     expect(s.eventsub_token_expiry).toBeNull();
   });
+
+  it('returns null for token when EVENTSUB_TOKEN_SECRET is absent but token value is present', async () => {
+    mockSecret = undefined;
+    const row = makeRow({ eventsub_access_token: 'some-encrypted-token' });
+    vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
+    const [s] = await getAllEventSubStreamers();
+    expect(s.eventsub_access_token).toBeNull();
+  });
 });
 
 // ─── getStreamerByDiscordId ───────────────────────────────────────────────────
@@ -175,6 +183,14 @@ describe('getStreamerById', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getStreamerById(42);
     expect(pool.execute.mock.calls[0][1]).toContain(42);
+  });
+
+  it('maps and returns the found row', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([makeRow({ id: 7, twitch_name: 'bob' })]) as any);
+    const result = await getStreamerById(7);
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe(7);
+    expect(result!.twitch_name).toBe('bob');
   });
 });
 

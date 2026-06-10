@@ -9,6 +9,12 @@ function createCsrfError(): Error & { code: string } {
   return error;
 }
 
+/**
+ * Return the session's CSRF token, generating and storing a new one if absent.
+ *
+ * @param req - Express request with a `session` object attached.
+ * @returns The 64-character hex CSRF token bound to this session.
+ */
 export function ensureSessionCsrfToken(req: Parameters<RequestHandler>[0]): string {
   if (typeof req.session.csrfToken !== 'string' || req.session.csrfToken.length === 0) {
     req.session.csrfToken = crypto.randomBytes(32).toString('hex');
@@ -18,14 +24,28 @@ export function ensureSessionCsrfToken(req: Parameters<RequestHandler>[0]): stri
 }
 
 function getSubmittedCsrfToken(req: Parameters<RequestHandler>[0]): string | null {
-  // Query param and header checked first — both are available before multipart body parsing.
+  // Query param checked first — available before multipart body parsing (Multer).
   if (typeof req.query?._csrf === 'string') return req.query._csrf;
-  const header = req.headers['x-csrf-token'];
-  if (typeof header === 'string' && header.length > 0) return header;
   if (typeof req.body?._csrf === 'string') return req.body._csrf;
+  const xcsrf = req.headers['x-csrf-token'];
+  const header = (typeof xcsrf === 'string' && xcsrf.trim() !== '') ? xcsrf : req.headers['x-xsrf-token'];
+  if (typeof header === 'string') return header;
   return null;
 }
 
+/**
+ * Express middleware that enforces CSRF protection on all non-safe HTTP methods.
+ * Safe methods (GET, HEAD, OPTIONS) pass through unconditionally.
+ *
+ * For unsafe methods the submitted token is resolved in this priority order:
+ * 1. Query parameter `_csrf`
+ * 2. Form/JSON body field `_csrf`
+ * 3. `X-CSRF-Token` header (ignored when empty)
+ * 4. `X-XSRF-Token` header
+ *
+ * The submitted token must match the session's `csrfToken` via constant-time
+ * comparison. Mismatches call `next` with an error bearing `code: 'EBADCSRFTOKEN'`.
+ */
 export const csrfProtection: RequestHandler = (req, _res, next) => {
   const sessionToken = ensureSessionCsrfToken(req);
   req.csrfToken = () => sessionToken;
