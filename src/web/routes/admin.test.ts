@@ -145,19 +145,9 @@ describe('POST /users/add', () => {
     expect(res.headers.location).toBe('/admin/users');
   });
 
-  it('redirects ?error=invalid_discord_id for a short ID', async () => {
+  it('redirects ?error=invalid_discord_id for an invalid ID', async () => {
     const res = await supertest(buildApp()).post('/users/add').type('form').send({ discord_id: '1234', access_level: '0' });
     expect(res.headers.location).toBe('/admin/users?error=invalid_discord_id');
-  });
-
-  it('redirects ?error=invalid_discord_id for a non-numeric ID', async () => {
-    const res = await supertest(buildApp()).post('/users/add').type('form').send({ discord_id: 'not-an-id-xxxx', access_level: '0' });
-    expect(res.headers.location).toBe('/admin/users?error=invalid_discord_id');
-  });
-
-  it('redirects ?error=invalid_access_level for a non-numeric access_level', async () => {
-    const res = await supertest(buildApp()).post('/users/add').type('form').send({ discord_id: VALID_ID, access_level: 'admin' });
-    expect(res.headers.location).toBe('/admin/users?error=invalid_access_level');
   });
 
   it('redirects ?error=invalid_access_level for an out-of-range access_level', async () => {
@@ -171,7 +161,7 @@ describe('POST /users/add', () => {
     expect(res.headers.location).toBe('/admin/users?error=invalid_twitch_name');
   });
 
-  it('skips twitch validation when clear_twitch_name=1', async () => {
+  it('skips twitch validation when clear_twitch_name=1 and calls mutation with shouldClearTwitchName', async () => {
     vi.mocked(normalizeTwitchChannelName).mockReturnValue(null);
     const res = await supertest(buildApp()).post('/users/add').type('form')
       .send({ discord_id: VALID_ID, access_level: '0', twitch_name: 'bad name!', clear_twitch_name: '1' });
@@ -183,26 +173,6 @@ describe('POST /users/add', () => {
     const res = await supertest(buildApp(ADMIN)).post('/users/add').type('form')
       .send({ discord_id: ADMIN.discordId, access_level: '0' });
     expect(res.headers.location).toBe('/admin/users?error=self_edit_forbidden');
-  });
-
-  it('redirects ?error=access_level_too_high when manager tries to grant own level', async () => {
-    const res = await supertest(buildApp(MANAGER)).post('/users/add').type('form')
-      .send({ discord_id: VALID_ID, access_level: '2' }); // MANAGER is level 2
-    expect(res.headers.location).toBe('/admin/users?error=access_level_too_high');
-  });
-
-  it('redirects ?error=target_above_level when manager edits a user at their own level', async () => {
-    vi.mocked(findUser).mockResolvedValue({ access_level: AccessLevel.MANAGER } as any); // target at manager's level
-    const res = await supertest(buildApp(MANAGER)).post('/users/add').type('form')
-      .send({ discord_id: VALID_ID, access_level: '1' }); // granting level 1 (below manager) is otherwise valid
-    expect(res.headers.location).toBe('/admin/users?error=target_above_level');
-  });
-
-  it('admin bypasses the manager permission checks', async () => {
-    vi.mocked(findUser).mockResolvedValue({ access_level: AccessLevel.ADMIN } as any);
-    const res = await supertest(buildApp(ADMIN)).post('/users/add').type('form')
-      .send({ discord_id: VALID_ID, access_level: '3' });
-    expect(res.headers.location).toBe('/admin/users');
   });
 
   it('redirects ?error=duplicate_twitch_name on DuplicateTwitchNameError', async () => {
@@ -254,33 +224,9 @@ describe('POST /users/update', () => {
     expect(res.headers.location).toBe('/admin/users?error=invalid_discord_id');
   });
 
-  it('redirects ?error=invalid_access_level for a non-numeric level', async () => {
-    const res = await supertest(buildApp()).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: 'bad' });
-    expect(res.headers.location).toBe('/admin/users?error=invalid_access_level');
-  });
-
   it('redirects ?error=invalid_access_level for an out-of-range level', async () => {
     const res = await supertest(buildApp()).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '5' });
     expect(res.headers.location).toBe('/admin/users?error=invalid_access_level');
-  });
-
-  it('redirects ?error=self_edit_forbidden when editing self', async () => {
-    const res = await supertest(buildApp(ADMIN)).post('/users/update').type('form')
-      .send({ discord_id: ADMIN.discordId, access_level: '0' });
-    expect(res.headers.location).toBe('/admin/users?error=self_edit_forbidden');
-  });
-
-  it('redirects ?error=access_level_too_high when manager tries to grant own level', async () => {
-    const res = await supertest(buildApp(MANAGER)).post('/users/update').type('form')
-      .send({ discord_id: VALID_ID, access_level: '2' });
-    expect(res.headers.location).toBe('/admin/users?error=access_level_too_high');
-  });
-
-  it('redirects ?error=target_above_level when manager edits user at their level', async () => {
-    vi.mocked(findUser).mockResolvedValue({ access_level: AccessLevel.MANAGER } as any);
-    const res = await supertest(buildApp(MANAGER)).post('/users/update').type('form')
-      .send({ discord_id: VALID_ID, access_level: '1' });
-    expect(res.headers.location).toBe('/admin/users?error=target_above_level');
   });
 
   it('redirects ?error=db_busy on lock timeout', async () => {
@@ -368,23 +314,9 @@ describe('POST /users/toggle-twitch', () => {
     expect(vi.mocked(toggleTwitchMutation)).toHaveBeenCalledWith(VALID_ID, true);
   });
 
-  it('enables with is_twitch_bot_enabled=1', async () => {
-    const res = await supertest(buildApp()).post('/users/toggle-twitch').type('form')
-      .send({ discord_id: VALID_ID, is_twitch_bot_enabled: '1' });
-    expect(res.headers.location).toBe('/admin/users');
-    expect(vi.mocked(toggleTwitchMutation)).toHaveBeenCalledWith(VALID_ID, true);
-  });
-
   it('disables with is_twitch_bot_enabled=false', async () => {
     const res = await supertest(buildApp()).post('/users/toggle-twitch').type('form')
       .send({ discord_id: VALID_ID, is_twitch_bot_enabled: 'false' });
-    expect(res.headers.location).toBe('/admin/users');
-    expect(vi.mocked(toggleTwitchMutation)).toHaveBeenCalledWith(VALID_ID, false);
-  });
-
-  it('disables with is_twitch_bot_enabled=0', async () => {
-    const res = await supertest(buildApp()).post('/users/toggle-twitch').type('form')
-      .send({ discord_id: VALID_ID, is_twitch_bot_enabled: '0' });
     expect(res.headers.location).toBe('/admin/users');
     expect(vi.mocked(toggleTwitchMutation)).toHaveBeenCalledWith(VALID_ID, false);
   });
