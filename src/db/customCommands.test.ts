@@ -132,7 +132,7 @@ describe('getAllCustomCommandsWithAssignments', () => {
     expect(result[1].is_multi_twitch).toBe(true);
   });
 
-  it('maps BIT(1) Buffer fields for is_discord_enabled and is_multi_twitch', async () => {
+  it('maps BIT(1) Buffer([1]) fields for is_discord_enabled and is_multi_twitch as true', async () => {
     const row = { command_id: 1, trigger_string: '!ok', output: 'ok', is_discord_enabled: Buffer.from([1]), is_multi_twitch: Buffer.from([1]), assigned_discord_id: null, user_discord_id: null, discord_name: null, twitch_name: null, access_level: 0, is_twitch_bot_enabled: 0 };
     const pool = makePool();
     pool.execute.mockResolvedValue([[row], []]);
@@ -140,6 +140,26 @@ describe('getAllCustomCommandsWithAssignments', () => {
     const result = await getAllCustomCommandsWithAssignments();
     expect(result[0].is_discord_enabled).toBe(true);
     expect(result[0].is_multi_twitch).toBe(true);
+  });
+
+  it('maps BIT(1) Buffer([0]) fields for is_discord_enabled and is_multi_twitch as false', async () => {
+    const row = { command_id: 1, trigger_string: '!ok', output: 'ok', is_discord_enabled: Buffer.from([0]), is_multi_twitch: Buffer.from([0]), assigned_discord_id: null, user_discord_id: null, discord_name: null, twitch_name: null, access_level: 0, is_twitch_bot_enabled: 0 };
+    const pool = makePool();
+    pool.execute.mockResolvedValue([[row], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await getAllCustomCommandsWithAssignments();
+    expect(result[0].is_discord_enabled).toBe(false);
+    expect(result[0].is_multi_twitch).toBe(false);
+  });
+
+  it('maps null fields for is_discord_enabled and is_multi_twitch as false', async () => {
+    const row = { command_id: 1, trigger_string: '!ok', output: 'ok', is_discord_enabled: null, is_multi_twitch: null, assigned_discord_id: null, user_discord_id: null, discord_name: null, twitch_name: null, access_level: 0, is_twitch_bot_enabled: 0 };
+    const pool = makePool();
+    pool.execute.mockResolvedValue([[row], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await getAllCustomCommandsWithAssignments();
+    expect(result[0].is_discord_enabled).toBe(false);
+    expect(result[0].is_multi_twitch).toBe(false);
   });
 
   it('marks user as orphaned when user_discord_id is null', async () => {

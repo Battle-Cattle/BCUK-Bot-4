@@ -96,3 +96,14 @@ describe('csrfProtection — body takes priority over header', () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe('csrfProtection — query takes priority over body and header', () => {
+  it('uses query token when query, body, and header tokens are all present', async () => {
+    const res = await supertest(buildApp())
+      .post(`/test?_csrf=${SESSION_TOKEN}`)
+      .send('_csrf=wrong-body-token')
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .set('X-CSRF-Token', 'wrong-header-token');
+    expect(res.status).toBe(200);
+  });
+});

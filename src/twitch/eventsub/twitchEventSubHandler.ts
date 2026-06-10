@@ -37,7 +37,15 @@ interface EventSubTwitchRuntime {
 
 let _twitchRuntime: EventSubTwitchRuntime | null = null;
 
-/** Register the Twitch chat send function. Called from index.ts after startTwitchBot(). */
+/**
+ * Register the Twitch chat send function. Called from index.ts during initialisation,
+ * before startTwitchBot(), so the runtime is in place before the first event arrives.
+ * Stores the provided runtime in the module-level _twitchRuntime variable for later use.
+ *
+ * @param runtime - The {@link EventSubTwitchRuntime} to store; must supply a `send` function
+ *   that delivers a chat message to the given channel.
+ * @returns void
+ */
 export function registerEventSubTwitchRuntime(runtime: EventSubTwitchRuntime): void {
   _twitchRuntime = runtime;
 }
