@@ -19,7 +19,9 @@ const log = createLogger('OverlayAdmin');
 export const router = Router();
 
 const parsedMaxMb = parseInt(process.env.OVERLAY_MAX_FILE_MB ?? '100', 10);
-const MAX_FILE_BYTES = (Number.isFinite(parsedMaxMb) && parsedMaxMb > 0 ? parsedMaxMb : 100) * 1024 * 1024;
+/** Maximum upload size in megabytes, passed to templates to avoid direct process.env access in EJS. */
+export const MAX_UPLOAD_MB = Number.isFinite(parsedMaxMb) && parsedMaxMb > 0 ? parsedMaxMb : 100;
+const MAX_FILE_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
 export const upload = multer({
   storage: multer.memoryStorage(),
@@ -71,7 +73,7 @@ router.post('/settings/videos/upload', requireAuth, csrfProtection, upload.singl
     const streamer = await requireStreamer(req, res);
     if (!streamer) return;
     if (!req.file) return res.redirect('/overlay/settings?error=invalid_file');
-    const name = (typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 100) : '') || req.file.originalname;
+    const name = (typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 100) : '') || req.file.originalname.trim().slice(0, 100);
     await saveVideoFile(streamer, req.file, name);
     res.redirect('/overlay/settings?success=video_uploaded');
   } catch (err: unknown) {

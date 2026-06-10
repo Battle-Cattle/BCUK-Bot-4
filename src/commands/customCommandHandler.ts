@@ -55,8 +55,19 @@ interface SessionCacheEntry {
 }
 const SESSION_CACHE_TTL_MS = 30_000;
 const SHORT_RETRY_TTL_MS = 5_000;
-const sessionCache = new Map<string, SessionCacheEntry>();
+export const sessionCache = new Map<string, SessionCacheEntry>();
 const inFlightRefreshes = new Map<string, Promise<void>>();
+
+/** Remove all entries whose TTL has elapsed. Called by the cleanup interval and exported for tests. */
+export function purgeExpiredSessionCache(): void {
+  const now = Date.now();
+  for (const [userId, entry] of sessionCache) {
+    if (now > entry.expiry) sessionCache.delete(userId);
+  }
+}
+
+// Purge expired entries so the cache does not grow without bound over long uptimes.
+setInterval(purgeExpiredSessionCache, SESSION_CACHE_TTL_MS).unref();
 
 export async function resolveSharedChatSessionId(userId: string): Promise<string | null> {
   const now = Date.now();

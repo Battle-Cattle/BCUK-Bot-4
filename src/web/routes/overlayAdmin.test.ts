@@ -35,7 +35,7 @@ vi.mock('../../shared/logger', () => ({
 
 vi.mock('./overlayAdminMutations', async () => {
   const { Router } = await import('express');
-  return { router: Router() };
+  return { router: Router(), MAX_UPLOAD_MB: 100 };
 });
 
 import express from 'express';
@@ -93,5 +93,11 @@ describe('GET /settings — query param filtering', () => {
     vi.mocked(getStreamerByDiscordId).mockRejectedValue(new Error('DB down'));
     const res = await supertest(buildApp()).get('/settings');
     expect(res.status).toBe(500);
+  });
+
+  it('passes MAX_UPLOAD_MB to the template as maxFileMb', async () => {
+    const res = await supertest(buildApp()).get('/settings');
+    expect(res.status).toBe(200);
+    expect(res.body.maxFileMb).toBe(100);
   });
 });

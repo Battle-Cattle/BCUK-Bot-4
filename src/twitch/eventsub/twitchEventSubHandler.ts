@@ -1,4 +1,3 @@
-import { sayInChannel } from '../twitchBot';
 import type { EventSubConfig } from '../../db';
 import { getVideosForReward } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
@@ -28,6 +27,27 @@ let _overlayRuntime: EventSubOverlayRuntime | null = null;
 /** Register the overlay push function. Called from index.ts after startWebPanel(). */
 export function registerEventSubOverlayRuntime(runtime: EventSubOverlayRuntime): void {
   _overlayRuntime = runtime;
+}
+
+// Runtime injection for the Twitch chat send function — avoids a direct import
+// of twitchBot from core EventSub handler code.  Registered from index.ts.
+interface EventSubTwitchRuntime {
+  send: (channel: string, message: string) => Promise<void>;
+}
+
+let _twitchRuntime: EventSubTwitchRuntime | null = null;
+
+/**
+ * Register the Twitch chat send function. Called from index.ts during initialisation,
+ * before startTwitchBot(), so the runtime is in place before the first event arrives.
+ * Stores the provided runtime in the module-level _twitchRuntime variable for later use.
+ *
+ * @param runtime - The {@link EventSubTwitchRuntime} to store; must supply a `send` function
+ *   that delivers a chat message to the given channel.
+ * @returns void
+ */
+export function registerEventSubTwitchRuntime(runtime: EventSubTwitchRuntime): void {
+  _twitchRuntime = runtime;
 }
 
 export interface FollowEvent {
@@ -86,15 +106,32 @@ function tierName(tier: string): string {
   return ({ '1000': 'Tier 1', '2000': 'Tier 2', '3000': 'Tier 3' } as Record<string, string>)[tier] ?? tier;
 }
 
+/**
+ * Handle a channel.follow EventSub notification.
+ * Sends a chat message to the broadcaster's channel using the injected `_twitchRuntime`.
+ * No-ops when `config.follow_enabled` is false or `_twitchRuntime` has not been registered.
+ *
+ * @param login - Broadcaster login name (chat channel to send to).
+ * @param event - Follow event payload from Twitch EventSub.
+ * @param config - Streamer's event response configuration.
+ */
 export async function handleFollow(login: string, event: FollowEvent, config: EventSubConfig): Promise<void> {
   if (!config.follow_enabled) return;
   const msg = fill(config.follow_message, {
     username: event.user_login,
     display_name: event.user_name,
   });
-  await sayInChannel(login, msg);
+  await _twitchRuntime?.send(login, msg);
 }
 
+/**
+ * Handle a channel.subscribe EventSub notification.
+ * No-ops when `config.sub_enabled` is false, the subscription is a gift, or `_twitchRuntime` is absent.
+ *
+ * @param login - Broadcaster login name.
+ * @param event - Subscribe event payload; gift subs are silently skipped (handled by handleGiftSub).
+ * @param config - Streamer's event response configuration.
+ */
 export async function handleSub(login: string, event: SubEvent, config: EventSubConfig): Promise<void> {
   if (!config.sub_enabled || event.is_gift) return;
   const msg = fill(config.sub_message, {
@@ -103,9 +140,17 @@ export async function handleSub(login: string, event: SubEvent, config: EventSub
     tier: event.tier,
     tier_name: tierName(event.tier),
   });
-  await sayInChannel(login, msg);
+  await _twitchRuntime?.send(login, msg);
 }
 
+/**
+ * Handle a channel.subscription.message (resub) EventSub notification.
+ * No-ops when `config.sub_enabled` is false or `_twitchRuntime` is absent.
+ *
+ * @param login - Broadcaster login name.
+ * @param event - Resub event payload including cumulative and streak month counts.
+ * @param config - Streamer's event response configuration.
+ */
 export async function handleResub(login: string, event: ResubEvent, config: EventSubConfig): Promise<void> {
   if (!config.sub_enabled) return;
   const msg = fill(config.resub_message, {
@@ -116,9 +161,18 @@ export async function handleResub(login: string, event: ResubEvent, config: Even
     months: String(event.cumulative_months),
     streak: event.streak_months != null ? String(event.streak_months) : '0',
   });
-  await sayInChannel(login, msg);
+  await _twitchRuntime?.send(login, msg);
 }
 
+/**
+ * Handle a channel.subscription.gift EventSub notification.
+ * Anonymous gifters are reported as "anonymous" / "Anonymous".
+ * No-ops when `config.sub_enabled` is false or `_twitchRuntime` is absent.
+ *
+ * @param login - Broadcaster login name.
+ * @param event - Gift-sub event payload; `is_anonymous` controls gifter display name.
+ * @param config - Streamer's event response configuration.
+ */
 export async function handleGiftSub(login: string, event: GiftSubEvent, config: EventSubConfig): Promise<void> {
   if (!config.sub_enabled) return;
   const gifter = event.is_anonymous ? 'anonymous' : event.user_login;
@@ -130,9 +184,17 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
     tier: event.tier,
     tier_name: tierName(event.tier),
   });
-  await sayInChannel(login, msg);
+  await _twitchRuntime?.send(login, msg);
 }
 
+/**
+ * Handle a channel.raid EventSub notification.
+ * No-ops when `config.raid_enabled` is false or `_twitchRuntime` is absent.
+ *
+ * @param login - Broadcaster login name (the raid target's channel).
+ * @param event - Raid event payload including the raiding channel and viewer count.
+ * @param config - Streamer's event response configuration.
+ */
 export async function handleRaid(login: string, event: RaidEvent, config: EventSubConfig): Promise<void> {
   if (!config.raid_enabled) return;
   const msg = fill(config.raid_message, {
@@ -140,9 +202,19 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
     from_display: event.from_broadcaster_user_name,
     viewers: String(event.viewers),
   });
-  await sayInChannel(login, msg);
+  await _twitchRuntime?.send(login, msg);
 }
 
+/**
+ * Handle a channel.channel_points_custom_reward_redemption.add EventSub notification.
+ * Looks up videos configured for the redeemed reward and triggers an overlay event if found.
+ * No-ops when no videos are configured for the reward or `_overlayRuntime` is absent.
+ *
+ * @param login - Broadcaster login name.
+ * @param event - Redemption event payload including reward ID and user details.
+ * @param _config - Streamer event config (unused for redemptions; reserved for future use).
+ * @param streamerId - DB row ID of the streamer, used to scope video lookups.
+ */
 export async function handleRedemption(
   login: string,
   event: RedemptionEvent,

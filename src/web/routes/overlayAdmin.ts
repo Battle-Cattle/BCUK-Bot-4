@@ -9,7 +9,7 @@ import { PUBLIC_URL } from '../../shared/config';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { filterQueryParam } from './shared';
-import { router as mutationsRouter } from './overlayAdminMutations';
+import { router as mutationsRouter, MAX_UPLOAD_MB } from './overlayAdminMutations';
 import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';
 
 const log = createLogger('OverlayAdmin');
@@ -55,6 +55,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       rewards,
       twitchRewards,
       baseUrl: PUBLIC_URL,
+      maxFileMb: MAX_UPLOAD_MB,
       error:   filterQueryParam(req.query.error,   KNOWN_ERRORS),
       success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),
     });
