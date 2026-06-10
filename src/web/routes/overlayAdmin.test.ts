@@ -94,4 +94,10 @@ describe('GET /settings — query param filtering', () => {
     const res = await supertest(buildApp()).get('/settings');
     expect(res.status).toBe(500);
   });
+
+  it('passes MAX_UPLOAD_MB to the template as maxFileMb', async () => {
+    const res = await supertest(buildApp()).get('/settings');
+    expect(res.status).toBe(200);
+    expect(res.body.maxFileMb).toBe(100);
+  });
 });
