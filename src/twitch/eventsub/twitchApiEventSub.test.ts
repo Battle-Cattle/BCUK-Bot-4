@@ -16,7 +16,7 @@ vi.mock('../twitchApi', () => ({
   authHeaders: vi.fn((token: string) => ({ Authorization: `Bearer ${token}` })),
 }));
 
-import { twitchFetch, authHeaders } from '../twitchApi';
+import { twitchFetch } from '../twitchApi';
 import { saveStreamerToken, clearStreamerToken } from '../../db/eventSub';
 import {
   TwitchAuthError,
