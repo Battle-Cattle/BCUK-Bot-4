@@ -166,6 +166,59 @@ describe('POST /streams/groups/add — field length capping', () => {
       }),
     );
   });
+
+  it('preserves fields exactly at the limits without over-truncation', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/groups/add')
+      .send(
+        `name=${longStr(100)}&discord_channel=${longStr(20)}&live_message=${longStr(2000)}&new_game_message=${longStr(2000)}`,
+      );
+    expect(res.status).toBe(302);
+    expect(vi.mocked(addStreamGroup)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: longStr(100),
+        discordChannel: longStr(20),
+        liveMessage: longStr(2000),
+        newGameMessage: longStr(2000),
+      }),
+    );
+  });
+
+  it('preserves fields under the limits unchanged', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/groups/add')
+      .send(
+        `name=${longStr(50)}&discord_channel=${longStr(10)}&live_message=${longStr(1000)}&new_game_message=${longStr(1000)}`,
+      );
+    expect(res.status).toBe(302);
+    expect(vi.mocked(addStreamGroup)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: longStr(50),
+        discordChannel: longStr(10),
+        liveMessage: longStr(1000),
+        newGameMessage: longStr(1000),
+      }),
+    );
+  });
+
+  it('trims leading/trailing whitespace before applying the length cap', async () => {
+    // Wrap each value in two spaces (%20 encoding); values are over-limit after trimming
+    const padded = (n: number) => `%20%20${longStr(n)}%20%20`;
+    const res = await supertest(buildApp())
+      .post('/streams/groups/add')
+      .send(
+        `name=${padded(105)}&discord_channel=${padded(25)}&live_message=${padded(2005)}&new_game_message=${padded(2005)}`,
+      );
+    expect(res.status).toBe(302);
+    expect(vi.mocked(addStreamGroup)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: longStr(100),
+        discordChannel: longStr(20),
+        liveMessage: longStr(2000),
+        newGameMessage: longStr(2000),
+      }),
+    );
+  });
 });
 
 describe('POST /streams/groups/update — field length capping', () => {
@@ -176,6 +229,58 @@ describe('POST /streams/groups/update — field length capping', () => {
       .post('/streams/groups/update')
       .send(
         `group_id=1&name=${longStr(200)}&discord_channel=${longStr(30)}&live_message=${longStr(3000)}&new_game_message=${longStr(3000)}`,
+      );
+    expect(res.status).toBe(302);
+    expect(vi.mocked(updateStreamGroup)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: longStr(100),
+        discordChannel: longStr(20),
+        liveMessage: longStr(2000),
+        newGameMessage: longStr(2000),
+      }),
+    );
+  });
+
+  it('preserves fields exactly at the limits without over-truncation', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/groups/update')
+      .send(
+        `group_id=1&name=${longStr(100)}&discord_channel=${longStr(20)}&live_message=${longStr(2000)}&new_game_message=${longStr(2000)}`,
+      );
+    expect(res.status).toBe(302);
+    expect(vi.mocked(updateStreamGroup)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: longStr(100),
+        discordChannel: longStr(20),
+        liveMessage: longStr(2000),
+        newGameMessage: longStr(2000),
+      }),
+    );
+  });
+
+  it('preserves fields under the limits unchanged', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/groups/update')
+      .send(
+        `group_id=1&name=${longStr(50)}&discord_channel=${longStr(10)}&live_message=${longStr(1000)}&new_game_message=${longStr(1000)}`,
+      );
+    expect(res.status).toBe(302);
+    expect(vi.mocked(updateStreamGroup)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: longStr(50),
+        discordChannel: longStr(10),
+        liveMessage: longStr(1000),
+        newGameMessage: longStr(1000),
+      }),
+    );
+  });
+
+  it('trims leading/trailing whitespace before applying the length cap', async () => {
+    const padded = (n: number) => `%20%20${longStr(n)}%20%20`;
+    const res = await supertest(buildApp())
+      .post('/streams/groups/update')
+      .send(
+        `group_id=1&name=${padded(105)}&discord_channel=${padded(25)}&live_message=${padded(2005)}&new_game_message=${padded(2005)}`,
       );
     expect(res.status).toBe(302);
     expect(vi.mocked(updateStreamGroup)).toHaveBeenCalledWith(
