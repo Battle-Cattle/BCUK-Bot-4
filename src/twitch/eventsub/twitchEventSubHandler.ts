@@ -106,6 +106,15 @@ function tierName(tier: string): string {
   return ({ '1000': 'Tier 1', '2000': 'Tier 2', '3000': 'Tier 3' } as Record<string, string>)[tier] ?? tier;
 }
 
+/**
+ * Handle a channel.follow EventSub notification.
+ * Sends a chat message to the broadcaster's channel using the injected `_twitchRuntime`.
+ * No-ops when `config.follow_enabled` is false or `_twitchRuntime` has not been registered.
+ *
+ * @param login - Broadcaster login name (chat channel to send to).
+ * @param event - Follow event payload from Twitch EventSub.
+ * @param config - Streamer's event response configuration.
+ */
 export async function handleFollow(login: string, event: FollowEvent, config: EventSubConfig): Promise<void> {
   if (!config.follow_enabled) return;
   const msg = fill(config.follow_message, {
@@ -115,6 +124,14 @@ export async function handleFollow(login: string, event: FollowEvent, config: Ev
   await _twitchRuntime?.send(login, msg);
 }
 
+/**
+ * Handle a channel.subscribe EventSub notification.
+ * No-ops when `config.sub_enabled` is false, the subscription is a gift, or `_twitchRuntime` is absent.
+ *
+ * @param login - Broadcaster login name.
+ * @param event - Subscribe event payload; gift subs are silently skipped (handled by handleGiftSub).
+ * @param config - Streamer's event response configuration.
+ */
 export async function handleSub(login: string, event: SubEvent, config: EventSubConfig): Promise<void> {
   if (!config.sub_enabled || event.is_gift) return;
   const msg = fill(config.sub_message, {
@@ -126,6 +143,14 @@ export async function handleSub(login: string, event: SubEvent, config: EventSub
   await _twitchRuntime?.send(login, msg);
 }
 
+/**
+ * Handle a channel.subscription.message (resub) EventSub notification.
+ * No-ops when `config.sub_enabled` is false or `_twitchRuntime` is absent.
+ *
+ * @param login - Broadcaster login name.
+ * @param event - Resub event payload including cumulative and streak month counts.
+ * @param config - Streamer's event response configuration.
+ */
 export async function handleResub(login: string, event: ResubEvent, config: EventSubConfig): Promise<void> {
   if (!config.sub_enabled) return;
   const msg = fill(config.resub_message, {
@@ -139,6 +164,15 @@ export async function handleResub(login: string, event: ResubEvent, config: Even
   await _twitchRuntime?.send(login, msg);
 }
 
+/**
+ * Handle a channel.subscription.gift EventSub notification.
+ * Anonymous gifters are reported as "anonymous" / "Anonymous".
+ * No-ops when `config.sub_enabled` is false or `_twitchRuntime` is absent.
+ *
+ * @param login - Broadcaster login name.
+ * @param event - Gift-sub event payload; `is_anonymous` controls gifter display name.
+ * @param config - Streamer's event response configuration.
+ */
 export async function handleGiftSub(login: string, event: GiftSubEvent, config: EventSubConfig): Promise<void> {
   if (!config.sub_enabled) return;
   const gifter = event.is_anonymous ? 'anonymous' : event.user_login;
@@ -153,6 +187,14 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
   await _twitchRuntime?.send(login, msg);
 }
 
+/**
+ * Handle a channel.raid EventSub notification.
+ * No-ops when `config.raid_enabled` is false or `_twitchRuntime` is absent.
+ *
+ * @param login - Broadcaster login name (the raid target's channel).
+ * @param event - Raid event payload including the raiding channel and viewer count.
+ * @param config - Streamer's event response configuration.
+ */
 export async function handleRaid(login: string, event: RaidEvent, config: EventSubConfig): Promise<void> {
   if (!config.raid_enabled) return;
   const msg = fill(config.raid_message, {

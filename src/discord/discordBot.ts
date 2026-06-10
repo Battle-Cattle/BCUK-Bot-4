@@ -46,7 +46,7 @@ export async function fetchMemberDisplayName(discordId: string, force = false): 
 }
 
 export function startDiscordBot(): void {
-  client = new Client({
+  const localClient = new Client({
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
@@ -55,7 +55,7 @@ export function startDiscordBot(): void {
     ],
   });
 
-  client.on('messageCreate', (message) => {
+  localClient.on('messageCreate', (message) => {
     if (message.author.bot) return;
     if (message.guildId !== DISCORD_GUILD_ID) return;
 
@@ -74,9 +74,9 @@ export function startDiscordBot(): void {
     );
   });
 
-  client.once('clientReady', async (c) => {
+  localClient.once('clientReady', async (c) => {
     log.info(`Logged in as ${c.user.tag}`);
-    client = c;
+    client = c; // only set module-level client once the bot is truly ready
     try {
       const guild = await getConfiguredGuild();
       setDiscordReady(c.user.tag, guild.name);
@@ -85,11 +85,11 @@ export function startDiscordBot(): void {
     }
   });
 
-  client.on('error', (err) => {
+  localClient.on('error', (err) => {
     log.error('Client error:', err);
   });
 
-  client.login(DISCORD_TOKEN).catch((err) => log.error('Login failed:', err));
+  localClient.login(DISCORD_TOKEN).catch((err) => log.error('Login failed:', err));
 }
 
 export function stopDiscordBot(): void {

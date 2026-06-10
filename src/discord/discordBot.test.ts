@@ -62,8 +62,14 @@ describe('getDiscordClient', () => {
     expect(mod.getDiscordClient()).toBeNull();
   });
 
+  it('returns null after startDiscordBot but before clientReady fires', () => {
+    mod.startDiscordBot();
+    expect(mod.getDiscordClient()).toBeNull();
+  });
+
   it('returns the client instance after clientReady fires', async () => {
     mod.startDiscordBot();
+    expect(mod.getDiscordClient()).toBeNull();
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await readyCb(mockInstance);
     expect(mod.getDiscordClient()).toBe(mockInstance);

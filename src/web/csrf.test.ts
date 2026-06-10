@@ -50,6 +50,7 @@ describe('csrfProtection — body token', () => {
   it('rejects POST with no token', async () => {
     const res = await supertest(buildApp()).post('/test');
     expect(res.status).toBe(403);
+    expect(res.body.code).toBe('EBADCSRFTOKEN');
   });
 });
 
@@ -83,6 +84,7 @@ describe('csrfProtection — X-XSRF-Token header', () => {
       .post('/test')
       .set('X-XSRF-Token', 'bad-token');
     expect(res.status).toBe(403);
+    expect(res.body.code).toBe('EBADCSRFTOKEN');
   });
 });
 
