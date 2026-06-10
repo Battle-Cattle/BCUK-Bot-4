@@ -79,6 +79,7 @@ export interface PublicSfxTrigger {
   description: string | null;
 }
 
+/** Return all non-hidden SFX triggers for public display, ordered by category then command. */
 export async function getPublicSfxTriggers(): Promise<PublicSfxTrigger[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT t.trigger_command AS triggerCommand, c.name AS categoryName, t.description
@@ -94,6 +95,7 @@ export async function getPublicSfxTriggers(): Promise<PublicSfxTrigger[]> {
   }));
 }
 
+/** Return all SFX triggers (including hidden) with their associated sound files, for the admin panel. */
 export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT

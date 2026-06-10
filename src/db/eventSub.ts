@@ -70,6 +70,7 @@ const EVENT_SUB_SELECT = `
   c.sub_enabled, c.sub_message, c.resub_message, c.giftsub_message,
   c.raid_enabled, c.raid_message`;
 
+/** Return all Twitch-bot-enabled streamers with their EventSub OAuth tokens and event config. */
 export async function getAllEventSubStreamers(): Promise<DbStreamerEventSub[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT ${EVENT_SUB_SELECT}
@@ -82,6 +83,11 @@ export async function getAllEventSubStreamers(): Promise<DbStreamerEventSub[]> {
   return rows.map(mapStreamerEventSub);
 }
 
+/**
+ * Look up a streamer by their Discord snowflake ID. Returns null if not found.
+ *
+ * @param discordId - Discord user snowflake to search for.
+ */
 export async function getStreamerByDiscordId(discordId: string): Promise<DbStreamerEventSub | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT ${EVENT_SUB_SELECT}
@@ -94,6 +100,11 @@ export async function getStreamerByDiscordId(discordId: string): Promise<DbStrea
   return rows.length === 0 ? null : mapStreamerEventSub(rows[0]);
 }
 
+/**
+ * Look up a streamer by their DB row ID. Returns null if not found.
+ *
+ * @param id - Primary key of the `streamer` row.
+ */
 export async function getStreamerById(id: number): Promise<DbStreamerEventSub | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT ${EVENT_SUB_SELECT}
@@ -106,6 +117,16 @@ export async function getStreamerById(id: number): Promise<DbStreamerEventSub | 
   return rows.length === 0 ? null : mapStreamerEventSub(rows[0]);
 }
 
+/**
+ * Encrypt and persist a streamer's EventSub OAuth tokens. Throws if
+ * `EVENTSUB_TOKEN_SECRET` is not configured, to prevent storing plaintext credentials.
+ *
+ * @param streamerId - DB row ID of the streamer to update.
+ * @param twitchUserId - Twitch user ID associated with the tokens.
+ * @param accessToken - OAuth access token (encrypted before storage).
+ * @param refreshToken - OAuth refresh token (encrypted before storage).
+ * @param expiryMs - Token expiry as Unix epoch milliseconds, or null if unknown.
+ */
 export async function saveStreamerToken(
   streamerId: number,
   twitchUserId: string,
@@ -124,6 +145,11 @@ export async function saveStreamerToken(
   );
 }
 
+/**
+ * Null out all OAuth token fields for a streamer (used on logout or token revocation).
+ *
+ * @param streamerId - DB row ID of the streamer whose tokens should be cleared.
+ */
 export async function clearStreamerToken(streamerId: number): Promise<void> {
   await getPool().execute(
     `UPDATE streamer
@@ -144,6 +170,12 @@ const DEFAULT_EVENT_CONFIG: EventSubConfig = {
   raid_message: 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!',
 };
 
+/**
+ * Insert a default event config row for a streamer if one does not already exist.
+ * Uses INSERT IGNORE so it is safe to call multiple times without overwriting existing config.
+ *
+ * @param streamerId - DB row ID of the streamer to initialise config for.
+ */
 export async function initEventConfig(streamerId: number): Promise<void> {
   const c = DEFAULT_EVENT_CONFIG;
   await getPool().execute(
@@ -161,6 +193,13 @@ export async function initEventConfig(streamerId: number): Promise<void> {
   );
 }
 
+/**
+ * Upsert the event config for a streamer. Inserts a new row or updates all fields
+ * if a row for this streamer already exists.
+ *
+ * @param streamerId - DB row ID of the streamer.
+ * @param config - Full event config to persist; boolean flags are stored as BIT(1).
+ */
 export async function saveEventConfig(streamerId: number, config: EventSubConfig): Promise<void> {
   await getPool().execute(
     `INSERT INTO streamer_event_config

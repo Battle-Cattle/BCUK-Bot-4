@@ -9,6 +9,12 @@ function createCsrfError(): Error & { code: string } {
   return error;
 }
 
+/**
+ * Return the session's CSRF token, generating and storing a new one if absent.
+ *
+ * @param req - Express request with a `session` object attached.
+ * @returns The 64-character hex CSRF token bound to this session.
+ */
 export function ensureSessionCsrfToken(req: Parameters<RequestHandler>[0]): string {
   if (typeof req.session.csrfToken !== 'string' || req.session.csrfToken.length === 0) {
     req.session.csrfToken = crypto.randomBytes(32).toString('hex');
@@ -27,6 +33,13 @@ function getSubmittedCsrfToken(req: Parameters<RequestHandler>[0]): string | nul
   return null;
 }
 
+/**
+ * Express middleware that enforces CSRF protection on all non-safe HTTP methods.
+ * Safe methods (GET, HEAD, OPTIONS) pass through unconditionally.
+ * Unsafe methods must supply a token matching the session's `csrfToken` via query
+ * (`_csrf`), form body (`_csrf`), `X-CSRF-Token`, or `X-XSRF-Token` header.
+ * Mismatches call `next` with an error bearing `code: 'EBADCSRFTOKEN'`.
+ */
 export const csrfProtection: RequestHandler = (req, _res, next) => {
   const sessionToken = ensureSessionCsrfToken(req);
   req.csrfToken = () => sessionToken;

@@ -205,6 +205,16 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
   await _twitchRuntime?.send(login, msg);
 }
 
+/**
+ * Handle a channel.channel_points_custom_reward_redemption.add EventSub notification.
+ * Looks up videos configured for the redeemed reward and triggers an overlay event if found.
+ * No-ops when no videos are configured for the reward or `_overlayRuntime` is absent.
+ *
+ * @param login - Broadcaster login name.
+ * @param event - Redemption event payload including reward ID and user details.
+ * @param _config - Streamer event config (unused for redemptions; reserved for future use).
+ * @param streamerId - DB row ID of the streamer, used to scope video lookups.
+ */
 export async function handleRedemption(
   login: string,
   event: RedemptionEvent,

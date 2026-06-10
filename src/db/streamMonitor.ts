@@ -69,6 +69,7 @@ function streamGroupParams(input: AddStreamGroupInput): Array<string | number> {
   ];
 }
 
+/** Return all stream groups ordered by name. */
 export async function getAllStreamGroups(): Promise<DbStreamGroup[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT id, name, discord_channel, live_message, new_game_message, multi_twitch, delete_old_posts
@@ -77,6 +78,11 @@ export async function getAllStreamGroups(): Promise<DbStreamGroup[]> {
   return rows.map(mapStreamGroup);
 }
 
+/**
+ * Insert a new stream group.
+ *
+ * @param input - Stream group fields to store.
+ */
 export async function addStreamGroup(input: AddStreamGroupInput): Promise<void> {
   await getPool().execute(
     `INSERT INTO stream_group (name, discord_channel, live_message, new_game_message, multi_twitch, delete_old_posts)
@@ -85,6 +91,11 @@ export async function addStreamGroup(input: AddStreamGroupInput): Promise<void> 
   );
 }
 
+/**
+ * Update all fields of an existing stream group.
+ *
+ * @param input - Updated stream group fields; `id` identifies the row to update.
+ */
 export async function updateStreamGroup(input: UpdateStreamGroupInput): Promise<void> {
   await getPool().execute(
     `UPDATE stream_group SET name=?, discord_channel=?, live_message=?, new_game_message=?, multi_twitch=?, delete_old_posts=?
@@ -93,10 +104,16 @@ export async function updateStreamGroup(input: UpdateStreamGroupInput): Promise<
   );
 }
 
+/**
+ * Delete a stream group by ID.
+ *
+ * @param id - Primary key of the stream group to remove.
+ */
 export async function removeStreamGroup(id: number): Promise<void> {
   await getPool().execute('DELETE FROM stream_group WHERE id = ?', [id]);
 }
 
+/** Return all streamers with their group name, ordered by group then Twitch name (flat view for the admin panel). */
 export async function getAllStreamers(): Promise<DbStreamer[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT s.id, s.discord_id, s.group_id,
@@ -117,6 +134,7 @@ export async function getAllStreamers(): Promise<DbStreamer[]> {
   }));
 }
 
+/** Return all streamers with their full group configuration, ordered by group then Twitch name (used by twitchMonitor). */
 export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT s.id, s.discord_id, s.group_id,
@@ -148,6 +166,12 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
   }));
 }
 
+/**
+ * Add a streamer to a stream group.
+ *
+ * @param discordId - Discord snowflake of the user to register as a streamer.
+ * @param groupId - ID of the stream group to add the streamer to.
+ */
 export async function addStreamer(discordId: string, groupId: number): Promise<void> {
   await getPool().execute(
     'INSERT INTO streamer (discord_id, group_id) VALUES (?, ?)',
@@ -155,14 +179,32 @@ export async function addStreamer(discordId: string, groupId: number): Promise<v
   );
 }
 
+/**
+ * Remove a streamer row by its DB ID.
+ *
+ * @param id - Primary key of the streamer row to delete.
+ */
 export async function removeStreamer(id: number): Promise<void> {
   await getPool().execute('DELETE FROM streamer WHERE id = ?', [id]);
 }
 
+/**
+ * Remove all streamers belonging to a given stream group.
+ *
+ * @param groupId - ID of the stream group whose streamers should be deleted.
+ */
 export async function removeStreamersByGroup(groupId: number): Promise<void> {
   await getPool().execute('DELETE FROM streamer WHERE group_id = ?', [groupId]);
 }
 
+/**
+ * Persist the Discord message details for a streamer's current live post.
+ *
+ * @param id - DB row ID of the streamer.
+ * @param messageId - Discord message snowflake of the live announcement post.
+ * @param channelId - Discord channel snowflake where the post was sent.
+ * @param game - Game title reported at the time of going live.
+ */
 export async function setStreamerLive(
   id: number,
   messageId: string,
@@ -175,6 +217,11 @@ export async function setStreamerLive(
   );
 }
 
+/**
+ * Clear a streamer's live post state, nulling the stored message, channel, and game.
+ *
+ * @param id - DB row ID of the streamer to mark as offline.
+ */
 export async function clearStreamerLive(id: number): Promise<void> {
   await getPool().execute(
     'UPDATE streamer SET discord_message_id=NULL, discord_channel_id=NULL, live_game=NULL WHERE id=?',
