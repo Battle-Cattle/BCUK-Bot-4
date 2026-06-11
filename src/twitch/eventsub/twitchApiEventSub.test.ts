@@ -7,7 +7,7 @@ vi.mock('../../shared/config', () => ({
   TWITCH_CLIENT_ID: 'test-client-id',
   TWITCH_CLIENT_SECRET: 'test-client-secret',
 }));
-vi.mock('../../db/eventSub', () => ({
+vi.mock('../../db', () => ({
   saveStreamerToken: vi.fn(),
   clearStreamerToken: vi.fn(),
 }));
@@ -17,7 +17,7 @@ vi.mock('../twitchApi', () => ({
 }));
 
 import { twitchFetch } from '../twitchApi';
-import { saveStreamerToken, clearStreamerToken } from '../../db/eventSub';
+import { saveStreamerToken, clearStreamerToken } from '../../db';
 import {
   TwitchAuthError,
   getValidToken,
@@ -28,7 +28,7 @@ import {
   listEventSubSubscriptions,
   deleteEventSubSubscription,
 } from './twitchApiEventSub';
-import type { DbStreamerEventSub } from '../../db/eventSub';
+import type { DbStreamerEventSub } from '../../db';
 
 function mockFetch(status: number, body: unknown, textBody?: string): Response {
   return {
@@ -48,8 +48,9 @@ function makeStreamer(overrides: Partial<DbStreamerEventSub> = {}): DbStreamerEv
     eventsub_access_token: 'valid-access-token',
     eventsub_refresh_token: 'valid-refresh-token',
     eventsub_token_expiry: String(Date.now() + 60 * 60 * 1000), // 1 hour from now
+    config: null,
     ...overrides,
-  } as DbStreamerEventSub;
+  };
 }
 
 // ─── TwitchAuthError ──────────────────────────────────────────────────────────
