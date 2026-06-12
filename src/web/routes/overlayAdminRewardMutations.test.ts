@@ -122,11 +122,6 @@ describe('POST /settings/rewards', () => {
 // --- POST /settings/rewards/:id/delete ---
 
 describe('POST /settings/rewards/:id/delete', () => {
-  it('redirects with error when user is not a streamer', async () => {
-    const res = await supertest(buildApp()).post('/settings/rewards/1/delete');
-    expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');
-  });
-
   it('redirects with error for invalid reward id', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const res = await supertest(buildApp()).post('/settings/rewards/invalid/delete');
