@@ -104,7 +104,7 @@ router.get('/twitch-connect', requireAuth, async (req, res) => {
     }
 
     const state = randomBytes(16).toString('hex');
-    req.session.eventsubOAuthState = state;
+    req.session.eventsubOAuthState = { value: state, expiresAt: Date.now() + 10 * 60 * 1000 };
     req.session.eventsubStreamerId = streamer.id;
 
     const params = new URLSearchParams({

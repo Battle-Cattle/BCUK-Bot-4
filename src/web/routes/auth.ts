@@ -14,7 +14,7 @@ const router = Router();
 // ─── Redirect to Discord OAuth2 ─────────────────────────────────────────────
 router.get('/discord', (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
-  req.session.oauthState = state;
+  req.session.oauthState = { value: state, expiresAt: Date.now() + 10 * 60 * 1000 };
 
   const params = new URLSearchParams({
     client_id: DISCORD_CLIENT_ID,
@@ -31,10 +31,11 @@ router.get('/discord', (req, res) => {
 router.get('/discord/callback', async (req, res) => {
   const { code, state } = req.query as { code?: string; state?: string };
 
-  if (!code || !state || state !== req.session.oauthState) {
+  const storedOAuth = req.session.oauthState;
+  delete req.session.oauthState;
+  if (!code || !state || !storedOAuth || state !== storedOAuth.value || Date.now() > storedOAuth.expiresAt) {
     return renderError(res, 400, 'Invalid OAuth2 state — please try logging in again.', undefined);
   }
-  delete req.session.oauthState;
 
   try {
     // 1. Exchange code for access token
