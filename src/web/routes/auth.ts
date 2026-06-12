@@ -33,7 +33,8 @@ router.get('/discord/callback', async (req, res) => {
 
   const storedOAuth = req.session.oauthState;
   delete req.session.oauthState;
-  if (!code || !state || !storedOAuth || state !== storedOAuth.value || Date.now() > storedOAuth.expiresAt) {
+  const stateValid = !!storedOAuth && state === storedOAuth.value && Date.now() <= storedOAuth.expiresAt;
+  if (!code || !state || !stateValid) {
     return renderError(res, 400, 'Invalid OAuth2 state — please try logging in again.', undefined);
   }
 
