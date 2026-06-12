@@ -147,6 +147,8 @@ describe('runDiscordNameRefresh outcomes', () => {
     expect(refreshState.outcome).toBe('success');
     expect(refreshState.updatedCount).toBe(2);
     expect(refreshState.failureCount).toBe(0);
+    expect(vi.mocked(updateDiscordName)).toHaveBeenCalledWith('1', 'NewName1');
+    expect(vi.mocked(updateDiscordName)).toHaveBeenCalledWith('2', 'NewName2');
   });
 
   it('outcome is "noop" when display names have not changed', async () => {
