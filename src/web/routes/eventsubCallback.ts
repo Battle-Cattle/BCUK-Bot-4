@@ -15,17 +15,17 @@ const router = Router();
 router.get('/twitch/eventsub/callback', async (req, res) => {
   const { code, state, error } = req.query as Record<string, string | undefined>;
 
+  const storedOAuth = req.session.eventsubOAuthState;
+  const streamerId = req.session.eventsubStreamerId;
+
+  // Clear state from session immediately to prevent replay — even on OAuth errors.
+  delete req.session.eventsubOAuthState;
+  delete req.session.eventsubStreamerId;
+
   if (error) {
     log.warn(`EventSub OAuth denied: ${error}`);
     return res.redirect('/user/settings?error=eventsub_oauth_denied');
   }
-
-  const storedOAuth = req.session.eventsubOAuthState;
-  const streamerId = req.session.eventsubStreamerId;
-
-  // Clear state from session immediately to prevent replay
-  delete req.session.eventsubOAuthState;
-  delete req.session.eventsubStreamerId;
 
   if (!code || !state || !storedOAuth || !streamerId) {
     return res.redirect('/user/settings?error=eventsub_oauth_state_mismatch');
