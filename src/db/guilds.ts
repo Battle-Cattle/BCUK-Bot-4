@@ -33,6 +33,28 @@ export async function getAllGuilds(): Promise<DbGuild[]> {
   return rows.map(mapGuild);
 }
 
+/**
+ * Returns the guilds the bot should actively serve: those with at least one
+ * guild_member row. A bare `guild` row alone does not qualify.
+ *
+ * This is the "registered guild" set the in-memory registry loads. The
+ * member-presence gate is what makes (un)registration durable: a guild
+ * discovered via `guildCreate` (or re-inserted on reconnect) is inert until the
+ * Owner provisions its first member, and removing every member durably stops the
+ * bot serving it even though reconnects keep re-inserting the bare guild row.
+ *
+ * @returns Servable guilds ordered by name.
+ */
+export async function getProvisionedGuilds(): Promise<DbGuild[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT g.guild_id, g.name, g.voice_channel_id
+     FROM guild g
+     WHERE EXISTS (SELECT 1 FROM guild_member gm WHERE gm.guild_id = g.guild_id)
+     ORDER BY g.name`,
+  );
+  return rows.map(mapGuild);
+}
+
 /** Returns a single guild by its ID, or null if it is not registered. */
 export async function getGuildById(guildId: string): Promise<DbGuild | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(

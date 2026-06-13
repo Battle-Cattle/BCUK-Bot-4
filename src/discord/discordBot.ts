@@ -101,10 +101,13 @@ export function startDiscordBot(): void {
     );
   });
 
-  // Bootstrap Option B: when the bot is added to a server, register the guild row
-  // only — no auto-whitelisting. The bot Owner provisions the first guild_member
-  // through the panel. guildCreate also fires on reconnect, so upsertGuild is
-  // insert-if-not-exists and never wipes existing per-guild config.
+  // Bootstrap Option B: when the bot is added to a server, record the guild row
+  // only — no auto-whitelisting. The guild is NOT served until the Owner
+  // provisions its first guild_member through the panel (the registry gates on
+  // member presence, see guildRegistry / getProvisionedGuilds). guildCreate also
+  // fires on reconnect, so upsertGuild is insert-if-not-exists and never wipes
+  // existing per-guild config; and because a bare guild row isn't served, a
+  // reconnect cannot silently re-enable a guild whose members were removed.
   localClient.on('guildCreate', (guild) => {
     upsertGuild(guild.id, guild.name)
       .then(() => reloadGuildRegistry())

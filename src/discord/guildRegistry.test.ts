@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
-vi.mock('../db', () => ({ getAllGuilds: vi.fn() }));
+vi.mock('../db', () => ({ getProvisionedGuilds: vi.fn() }));
 
-import { getAllGuilds } from '../db';
+import { getProvisionedGuilds } from '../db';
 import {
   reloadGuildRegistry,
   isRegisteredGuild,
@@ -20,7 +20,7 @@ beforeEach(() => {
 
 describe('reloadGuildRegistry', () => {
   it('loads guilds from the DB into the registry', async () => {
-    vi.mocked(getAllGuilds).mockResolvedValueOnce([
+    vi.mocked(getProvisionedGuilds).mockResolvedValueOnce([
       { guild_id: '111', name: 'Alpha', voice_channel_id: '222' },
       { guild_id: '333', name: 'Beta', voice_channel_id: null },
     ]);
@@ -33,13 +33,13 @@ describe('reloadGuildRegistry', () => {
   });
 
   it('replaces the previous registry contents on reload', async () => {
-    vi.mocked(getAllGuilds).mockResolvedValueOnce([
+    vi.mocked(getProvisionedGuilds).mockResolvedValueOnce([
       { guild_id: '111', name: 'Alpha', voice_channel_id: null },
     ]);
     await reloadGuildRegistry();
     expect(isRegisteredGuild('111')).toBe(true);
 
-    vi.mocked(getAllGuilds).mockResolvedValueOnce([
+    vi.mocked(getProvisionedGuilds).mockResolvedValueOnce([
       { guild_id: '999', name: 'Gamma', voice_channel_id: null },
     ]);
     await reloadGuildRegistry();
@@ -49,12 +49,12 @@ describe('reloadGuildRegistry', () => {
   });
 
   it('leaves the previous registry intact when the DB read fails', async () => {
-    vi.mocked(getAllGuilds).mockResolvedValueOnce([
+    vi.mocked(getProvisionedGuilds).mockResolvedValueOnce([
       { guild_id: '111', name: 'Alpha', voice_channel_id: null },
     ]);
     await reloadGuildRegistry();
 
-    vi.mocked(getAllGuilds).mockRejectedValueOnce(new Error('db down'));
+    vi.mocked(getProvisionedGuilds).mockRejectedValueOnce(new Error('db down'));
     await expect(reloadGuildRegistry()).rejects.toThrow('db down');
 
     expect(isRegisteredGuild('111')).toBe(true);
@@ -69,7 +69,7 @@ describe('isRegisteredGuild', () => {
 
 describe('getRegisteredGuild', () => {
   it('returns the cached config for a known guild', async () => {
-    vi.mocked(getAllGuilds).mockResolvedValueOnce([
+    vi.mocked(getProvisionedGuilds).mockResolvedValueOnce([
       { guild_id: '111', name: 'Alpha', voice_channel_id: '222' },
     ]);
     await reloadGuildRegistry();
@@ -81,7 +81,7 @@ describe('getRegisteredGuild', () => {
 
 describe('getRegisteredGuilds', () => {
   it('returns every cached guild config', async () => {
-    vi.mocked(getAllGuilds).mockResolvedValueOnce([
+    vi.mocked(getProvisionedGuilds).mockResolvedValueOnce([
       { guild_id: '111', name: 'Alpha', voice_channel_id: null },
       { guild_id: '333', name: 'Beta', voice_channel_id: null },
     ]);

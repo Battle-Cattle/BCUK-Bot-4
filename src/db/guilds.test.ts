@@ -4,7 +4,7 @@ vi.mock('./pool', () => ({ getPool: vi.fn() }));
 vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
-import { getAllGuilds, getGuildById, upsertGuild, setGuildVoiceChannel } from './guilds';
+import { getAllGuilds, getProvisionedGuilds, getGuildById, upsertGuild, setGuildVoiceChannel } from './guilds';
 
 function makePool() {
   return { execute: vi.fn().mockResolvedValue([[], []]) };
@@ -39,6 +39,27 @@ describe('getAllGuilds', () => {
   it('returns an empty array when no guilds exist', async () => {
     pool.execute.mockResolvedValueOnce([[], []]);
     expect(await getAllGuilds()).toEqual([]);
+  });
+});
+
+describe('getProvisionedGuilds', () => {
+  it('filters to guilds with at least one member and maps BIGINT columns', async () => {
+    pool.execute.mockResolvedValueOnce([
+      [{ guild_id: 111n, name: 'Alpha', voice_channel_id: 222n }],
+      [],
+    ]);
+
+    const result = await getProvisionedGuilds();
+
+    expect(result).toEqual([{ guild_id: '111', name: 'Alpha', voice_channel_id: '222' }]);
+    const [sql] = pool.execute.mock.calls[0];
+    expect(sql).toContain('EXISTS');
+    expect(sql).toContain('guild_member');
+  });
+
+  it('returns an empty array when no guild has members', async () => {
+    pool.execute.mockResolvedValueOnce([[], []]);
+    expect(await getProvisionedGuilds()).toEqual([]);
   });
 });
 
