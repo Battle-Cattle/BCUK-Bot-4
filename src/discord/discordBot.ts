@@ -4,34 +4,29 @@ import { handleCommand } from '../commands/commandRouter';
 import { executeCustomCommandForDiscord } from '../commands/customCommandHandler';
 import { executeCounterCommandForDiscord } from '../commands/counterHandler';
 import { setDiscordReady } from '../shared/statusStore';
+import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
+import { upsertGuild } from '../db/guilds';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('Discord');
 
 let client: Client | null = null;
 let bootingClient: Client | null = null;
-let cachedGuild: Guild | null = null;
 
 /** Returns the Discord.js Client once it has fired `clientReady`, or null before then. */
 export function getDiscordClient(): Client | null { return client; }
 
-async function getConfiguredGuild(): Promise<Guild> {
+/**
+ * Resolve a guild by ID from the discord.js cache, falling back to a fetch.
+ * @throws if the client is not ready.
+ */
+async function getGuild(guildId: string): Promise<Guild> {
   if (!client) {
     throw new Error('Discord client is not ready');
   }
-
-  const guildFromCache = client.guilds.cache.get(DISCORD_GUILD_ID);
-  if (guildFromCache) {
-    cachedGuild = guildFromCache;
-    return guildFromCache;
-  }
-
-  if (cachedGuild) {
-    return cachedGuild;
-  }
-
-  cachedGuild = await client.guilds.fetch(DISCORD_GUILD_ID);
-  return cachedGuild;
+  const cached = client.guilds.cache.get(guildId);
+  if (cached) return cached;
+  return client.guilds.fetch(guildId);
 }
 
 /**
@@ -40,12 +35,19 @@ async function getConfiguredGuild(): Promise<Guild> {
  *
  * @param discordId - Discord user snowflake ID to look up.
  * @param force - When true, bypasses the guild member cache and fetches fresh from the API.
+ * @param guildId - Guild to look the member up in. Defaults to the legacy configured guild
+ *   so existing single-guild callers (e.g. web login) keep working until the web panel
+ *   threads its own guild context through in a later phase.
  * @returns The member's server display name, or null on any failure.
  */
-export async function fetchMemberDisplayName(discordId: string, force = false): Promise<string | null> {
+export async function fetchMemberDisplayName(
+  discordId: string,
+  force = false,
+  guildId: string = DISCORD_GUILD_ID,
+): Promise<string | null> {
   if (!client) return null;
   try {
-    const guild = await getConfiguredGuild();
+    const guild = await getGuild(guildId);
     const member = await guild.members.fetch({ user: discordId, force });
     return member.displayName;
   } catch (err) {
@@ -63,6 +65,9 @@ export async function fetchMemberDisplayName(discordId: string, force = false): 
  * client. If {@link stopDiscordBot} is called before the connection completes,
  * the in-flight client is destroyed and the `clientReady` handler is discarded.
  * If login fails, `bootingClient` is cleared so the next call can retry.
+ *
+ * The guild registry must be loaded (see {@link reloadGuildRegistry}) before the
+ * client connects, so the `messageCreate` gate can recognise registered guilds.
  */
 export function startDiscordBot(): void {
   if (client || bootingClient) return;
@@ -78,7 +83,7 @@ export function startDiscordBot(): void {
 
   localClient.on('messageCreate', (message) => {
     if (message.author.bot) return;
-    if (message.guildId !== DISCORD_GUILD_ID) return;
+    if (!message.guildId || !isRegisteredGuild(message.guildId)) return;
 
     const displayName = message.member?.displayName ?? message.author.username;
 
@@ -95,6 +100,17 @@ export function startDiscordBot(): void {
     );
   });
 
+  // Bootstrap Option B: when the bot is added to a server, register the guild row
+  // only — no auto-whitelisting. The bot Owner provisions the first guild_member
+  // through the panel. guildCreate also fires on reconnect, so upsertGuild is
+  // insert-if-not-exists and never wipes existing per-guild config.
+  localClient.on('guildCreate', (guild) => {
+    upsertGuild(guild.id, guild.name)
+      .then(() => reloadGuildRegistry())
+      .then(() => log.info(`Registered guild '${guild.name}' (${guild.id}).`))
+      .catch((err) => log.error(`Failed to register guild ${guild.id}:`, err));
+  });
+
   localClient.once('clientReady', async (c) => {
     if (bootingClient !== localClient) {
       // stopDiscordBot() ran during boot — discard this ready client
@@ -105,7 +121,7 @@ export function startDiscordBot(): void {
     client = c;
     log.info(`Logged in as ${c.user.tag}`);
     try {
-      const guild = await getConfiguredGuild();
+      const guild = await getGuild(DISCORD_GUILD_ID);
       setDiscordReady(c.user.tag, guild.name);
     } catch (err) {
       log.error('Failed to initialise:', err);
@@ -132,7 +148,6 @@ export function stopDiscordBot(): void {
   const existingBooting = bootingClient;
   client = null;
   bootingClient = null;
-  cachedGuild = null;
   try {
     existingReady?.destroy();
   } catch (err) {
