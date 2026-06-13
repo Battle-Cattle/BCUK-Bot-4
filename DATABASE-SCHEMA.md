@@ -247,7 +247,7 @@ Expected constraints:
 
 ## `streamdeck_api_keys`
 
-Per-user Streamdeck API keys. Created outside this repository; `migrations/multi_guild.sql` adds the `guild_id` column.
+Per-user Streamdeck API keys. Defined in `schema.sql`. For existing deployments where this table was created externally (before the multi-guild migration), `migrations/multi_guild.sql` conditionally adds the `guild_id` column.
 
 | Column | Type | Notes |
 | --- | --- | --- |

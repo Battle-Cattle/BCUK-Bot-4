@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS guild_member (
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS stream_group (
   id               INT          NOT NULL AUTO_INCREMENT,
-  guild_id         BIGINT       NOT NULL,
+  guild_id         BIGINT       NULL,
   name             VARCHAR(255) NOT NULL,
   discord_channel  BIGINT       NOT NULL,
   live_message     TEXT         NOT NULL,
@@ -199,7 +199,7 @@ CREATE TABLE IF NOT EXISTS guild_command_override (
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS counter (
   id                INT          NOT NULL AUTO_INCREMENT,
-  guild_id          BIGINT       NOT NULL,
+  guild_id          BIGINT       NULL,
   trigger_command   VARCHAR(255) NOT NULL,
   check_command     VARCHAR(255) NOT NULL,
   message           TEXT         NOT NULL,
@@ -266,7 +266,7 @@ CREATE TABLE IF NOT EXISTS overlay_reward_video (
 CREATE TABLE IF NOT EXISTS streamdeck_api_keys (
   discord_id   BIGINT                                       NOT NULL,
   key_hash     VARCHAR(64)                                  NOT NULL,
-  guild_id     BIGINT                                       NOT NULL,
+  guild_id     BIGINT                                       NULL,
   status       ENUM('pending','approved','revoked','denied') NOT NULL DEFAULT 'pending',
   requested_at DATETIME                                     NOT NULL,
   approved_at  DATETIME                                     NULL,
