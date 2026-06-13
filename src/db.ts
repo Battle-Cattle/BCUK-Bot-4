@@ -8,6 +8,12 @@ export {
 } from './db/guilds';
 export type { DbGuild } from './db/guilds';
 
+export {
+  getGuildMembers, getMemberAccessLevel, setMemberAccessLevel,
+  removeGuildMember, getEffectiveAccessLevel,
+} from './db/guildMembers';
+export type { DbGuildMember } from './db/guildMembers';
+
 // ─── User / access-level ────────────────────────────────────────────────────
 
 export {
