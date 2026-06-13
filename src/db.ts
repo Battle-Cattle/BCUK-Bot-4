@@ -1,6 +1,13 @@
 export type { RefreshingLookupCache, ManagedLookupCacheOptions, ManagedLookupCache } from './db/lookupCache';
 export { getPool, closePool } from './db/pool';
 
+// ─── Guilds ──────────────────────────────────────────────────────────────────
+
+export {
+  getAllGuilds, getGuildById, upsertGuild, setGuildVoiceChannel,
+} from './db/guilds';
+export type { DbGuild } from './db/guilds';
+
 // ─── User / access-level ────────────────────────────────────────────────────
 
 export {
