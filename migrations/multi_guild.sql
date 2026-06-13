@@ -60,8 +60,10 @@ SELECT @legacy_guild_id, discord_id, access_level FROM `user`;
 -- INT. Normalize to UNSIGNED before creating guild_command_override whose FK
 -- requires an exact type match. Auto-increment PKs are always positive so the
 -- signed→unsigned conversion is lossless.
+-- COLUMN_TYPE is 'int' on MySQL 8.0.19+ but 'int(11)' on older builds;
+-- use NOT LIKE '%unsigned%' to reliably detect signed INT regardless of version.
 SET @need_cmd_normalize = (
-  SELECT IF(COLUMN_TYPE = 'int', 1, 0)
+  SELECT IF(COLUMN_TYPE NOT LIKE '%unsigned%', 1, 0)
   FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE()
     AND TABLE_NAME   = 'custom_command'
@@ -97,7 +99,7 @@ SET @tuc_cmd_type = (
     AND TABLE_NAME   = 'twitch_user_commands'
     AND COLUMN_NAME  = 'command_id'
 );
-SET @sql = IF(@tuc_cmd_type = 'int',
+SET @sql = IF(@tuc_cmd_type NOT LIKE '%unsigned%',
   'ALTER TABLE twitch_user_commands MODIFY COLUMN command_id INT UNSIGNED NOT NULL',
   'SELECT 1');
 PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
