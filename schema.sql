@@ -59,23 +59,59 @@ CREATE TABLE IF NOT EXISTS `user` (
   is_twitch_bot_enabled TINYINT(1)   NOT NULL DEFAULT 0,
   twitch_name           VARCHAR(255) NULL,
   twitchoauth           VARCHAR(512) NULL,
-  access_level          INT          NOT NULL DEFAULT 0,
+  access_level          INT          NOT NULL DEFAULT 0,  -- deprecated: per-guild level lives in guild_member; dropped in a later migration
+  is_owner              TINYINT(1)   NOT NULL DEFAULT 0,  -- global super-admin; set manually in the DB only
   PRIMARY KEY (discord_id),
   UNIQUE KEY uq_user_twitch_name (twitch_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- guild
+-- Registry of every Discord server the bot serves, plus per-guild config.
+-- Populated automatically by the guildCreate handler.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS guild (
+  guild_id         BIGINT       NOT NULL,
+  name             VARCHAR(255) NOT NULL DEFAULT '',
+  voice_channel_id BIGINT       NULL,
+  created_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (guild_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- guild_member
+-- Per-guild access levels (0=User, 1=Mod, 2=Manager, 3=Admin). Replaces the
+-- single global user.access_level. No row → access level 0 in that guild.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS guild_member (
+  guild_id     BIGINT NOT NULL,
+  discord_id   BIGINT NOT NULL,
+  access_level INT    NOT NULL DEFAULT 0,
+  PRIMARY KEY (guild_id, discord_id),
+  FOREIGN KEY (guild_id)   REFERENCES guild(guild_id)    ON DELETE CASCADE,
+  FOREIGN KEY (discord_id) REFERENCES `user`(discord_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
 -- stream_group
+-- guild_id is NULL here for the PR-1→PR-2 transition: current runtime code
+-- does not yet supply guild_id on INSERT.  PR 2 (runtime guild-awareness) will
+-- update these INSERTs and tighten all three guild_id columns back to NOT NULL.
+-- Existing deployments use migrations/multi_guild.sql which already enforces
+-- NOT NULL DEFAULT <legacy_guild_id> so the two paths converge after PR 2.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS stream_group (
   id               INT          NOT NULL AUTO_INCREMENT,
+  guild_id         BIGINT       NULL,
   name             VARCHAR(255) NOT NULL,
   discord_channel  BIGINT       NOT NULL,
   live_message     TEXT         NOT NULL,
   new_game_message TEXT         NOT NULL,
   multi_twitch     TINYINT(1)   NOT NULL DEFAULT 0,
   delete_old_posts TINYINT(1)   NOT NULL DEFAULT 0,
-  PRIMARY KEY (id)
+  PRIMARY KEY (id),
+  INDEX idx_stream_group_guild (guild_id),
+  CONSTRAINT fk_stream_group_guild FOREIGN KEY (guild_id) REFERENCES guild(guild_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
@@ -145,13 +181,30 @@ CREATE TABLE IF NOT EXISTS twitch_user_commands (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- guild_command_override
+-- Sparse per-guild overlay on the global custom_command catalog. A row exists
+-- only where a guild has disabled a command or replaced its Discord output.
+-- No row → catalog default (enabled, catalog output). Twitch ignores this table.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS guild_command_override (
+  guild_id    BIGINT       NOT NULL,
+  command_id  INT UNSIGNED NOT NULL,
+  is_disabled TINYINT(1)   NOT NULL DEFAULT 0,
+  output      TEXT         NULL,
+  PRIMARY KEY (guild_id, command_id),
+  FOREIGN KEY (guild_id)   REFERENCES guild(guild_id)            ON DELETE CASCADE,
+  FOREIGN KEY (command_id) REFERENCES custom_command(command_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
 -- counter
--- Column-level UNIQUEs prevent duplicate trigger/check commands per column.
--- Cross-column uniqueness is enforced at the application layer via advisory
--- locks and isAnyCommandTakenAcrossTables(). See DATABASE-SCHEMA.md.
+-- Per-guild. UNIQUEs are scoped to (guild_id, command) so two guilds may share
+-- a command string. Cross-column uniqueness is enforced at the application
+-- layer via advisory locks and isAnyCommandTakenAcrossTables(). See DATABASE-SCHEMA.md.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS counter (
   id                INT          NOT NULL AUTO_INCREMENT,
+  guild_id          BIGINT       NULL,
   trigger_command   VARCHAR(255) NOT NULL,
   check_command     VARCHAR(255) NOT NULL,
   message           TEXT         NOT NULL,
@@ -165,8 +218,9 @@ CREATE TABLE IF NOT EXISTS counter (
   value2024         INT          NULL,
   value2025         INT          NULL,
   PRIMARY KEY (id),
-  CONSTRAINT uq_counter_trigger_command UNIQUE (trigger_command),
-  CONSTRAINT uq_counter_check_command   UNIQUE (check_command),
+  CONSTRAINT uq_counter_guild_trigger UNIQUE (guild_id, trigger_command),
+  CONSTRAINT uq_counter_guild_check   UNIQUE (guild_id, check_command),
+  CONSTRAINT fk_counter_guild FOREIGN KEY (guild_id) REFERENCES guild(guild_id),
   INDEX idx_counter_trigger (trigger_command),
   INDEX idx_counter_check   (check_command)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -217,11 +271,13 @@ CREATE TABLE IF NOT EXISTS overlay_reward_video (
 CREATE TABLE IF NOT EXISTS streamdeck_api_keys (
   discord_id   BIGINT                                       NOT NULL,
   key_hash     VARCHAR(64)                                  NOT NULL,
+  guild_id     BIGINT                                       NULL,
   status       ENUM('pending','approved','revoked','denied') NOT NULL DEFAULT 'pending',
   requested_at DATETIME                                     NOT NULL,
   approved_at  DATETIME                                     NULL,
   approved_by  BIGINT                                       NULL,
   PRIMARY KEY (discord_id),
+  CONSTRAINT fk_streamdeck_guild FOREIGN KEY (guild_id) REFERENCES guild(guild_id),
   FOREIGN KEY (approved_by) REFERENCES `user`(discord_id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
