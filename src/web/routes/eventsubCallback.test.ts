@@ -54,7 +54,7 @@ function buildApp(sessionOverrides: Record<string, any> = {}) {
   const app = express();
   app.use((req: any, _res: any, next: any) => {
     req.session = {
-      eventsubOAuthState: 'valid-state-abc',
+      eventsubOAuthState: { value: 'valid-state-abc', expiresAt: Date.now() + 60_000 },
       eventsubStreamerId: MOCK_STREAMER.id,
       user: SESSION_USER,
       ...sessionOverrides,
@@ -91,10 +91,29 @@ describe('GET /twitch/eventsub/callback — state validation', () => {
     expect(res.headers.location).toContain('error=eventsub_oauth_state_mismatch');
   });
 
-  it('redirects with denied error when OAuth returns error param', async () => {
-    const res = await supertest(buildApp())
-      .get('/twitch/eventsub/callback?error=access_denied');
+  it('redirects with denied error when OAuth returns error param and clears session state', async () => {
+    let capturedSession: any;
+    const app = express();
+    app.use((req: any, _res: any, next: any) => {
+      req.session = {
+        eventsubOAuthState: { value: 'valid-state-abc', expiresAt: Date.now() + 60_000 },
+        eventsubStreamerId: MOCK_STREAMER.id,
+        user: SESSION_USER,
+      };
+      capturedSession = req.session;
+      next();
+    });
+    app.use(router);
+    const res = await supertest(app).get('/twitch/eventsub/callback?error=access_denied');
     expect(res.headers.location).toContain('error=eventsub_oauth_denied');
+    expect(capturedSession.eventsubOAuthState).toBeUndefined();
+    expect(capturedSession.eventsubStreamerId).toBeUndefined();
+  });
+
+  it('rejects with state_mismatch when OAuth state has expired', async () => {
+    const res = await supertest(buildApp({ eventsubOAuthState: { value: 'valid-state-abc', expiresAt: Date.now() - 1 } }))
+      .get('/twitch/eventsub/callback?code=abc&state=valid-state-abc');
+    expect(res.headers.location).toContain('error=eventsub_oauth_state_mismatch');
   });
 });
 

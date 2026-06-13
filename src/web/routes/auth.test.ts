@@ -86,21 +86,28 @@ describe('GET /discord', () => {
 
 describe('GET /discord/callback', () => {
   it('renders error 400 when state does not match session', async () => {
-    const res = await supertest(buildApp({ oauthState: 'expected' }))
+    const res = await supertest(buildApp({ oauthState: { value: 'expected', expiresAt: Date.now() + 60_000 } }))
       .get('/discord/callback?code=abc&state=wrong');
     expect(res.status).toBe(400);
     expect((res.body as any).view).toBe('error');
   });
 
   it('renders error 400 when code is missing', async () => {
-    const res = await supertest(buildApp({ oauthState: 'abc' }))
+    const res = await supertest(buildApp({ oauthState: { value: 'abc', expiresAt: Date.now() + 60_000 } }))
       .get('/discord/callback?state=abc');
     expect(res.status).toBe(400);
   });
 
+  it('renders error 400 when OAuth state has expired', async () => {
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() - 1 } }))
+      .get('/discord/callback?code=code&state=state123');
+    expect(res.status).toBe(400);
+    expect((res.body as any).view).toBe('error');
+  });
+
   it('renders error 500 when token exchange fails', async () => {
     mockFetch([{ ok: false, status: 400 }]);
-    const res = await supertest(buildApp({ oauthState: 'state123' }))
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
       .get('/discord/callback?code=code&state=state123');
     expect(res.status).toBe(500);
     expect((res.body as any).view).toBe('error');
@@ -111,7 +118,7 @@ describe('GET /discord/callback', () => {
       { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
       { ok: false, status: 401 },
     ]);
-    const res = await supertest(buildApp({ oauthState: 'state123' }))
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
       .get('/discord/callback?code=code&state=state123');
     expect(res.status).toBe(500);
   });
@@ -121,7 +128,7 @@ describe('GET /discord/callback', () => {
       { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
       { ok: true, json: () => Promise.resolve({ id: '999', username: 'stranger', avatar: null }) },
     ]);
-    const res = await supertest(buildApp({ oauthState: 'state123' }))
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
       .get('/discord/callback?code=code&state=state123');
     expect(res.status).toBe(403);
   });
@@ -132,7 +139,7 @@ describe('GET /discord/callback', () => {
       { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
     ]);
     vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER } as any);
-    const res = await supertest(buildApp({ oauthState: 'state123' }))
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
       .get('/discord/callback?code=code&state=state123');
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/');
@@ -145,7 +152,7 @@ describe('GET /discord/callback', () => {
     ]);
     vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'OldName', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER } as any);
     vi.mocked(fetchMemberDisplayName).mockResolvedValue('NewDisplayName');
-    const res = await supertest(buildApp({ oauthState: 'state123' }))
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
       .get('/discord/callback?code=code&state=state123');
     expect(res.status).toBe(302);
     expect(updateDiscordName).toHaveBeenCalledWith('111', 'NewDisplayName');

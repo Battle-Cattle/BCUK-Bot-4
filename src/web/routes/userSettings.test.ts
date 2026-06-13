@@ -141,3 +141,31 @@ describe('GET / — successExpectedAccount', () => {
     expect(res.body.successExpectedAccount).toBeUndefined();
   });
 });
+
+describe('GET /twitch-connect — session state shape', () => {
+  it('writes eventsubOAuthState as { value, expiresAt } with a 10-minute expiry window', async () => {
+    vi.mocked(findUser).mockResolvedValue({ is_twitch_bot_enabled: true } as any);
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 42, twitch_name: 'streamer' } as any);
+
+    let capturedSession: any;
+    const app = express();
+    app.use((req: any, res: any, next: any) => {
+      req.session = { user: USER };
+      capturedSession = req.session;
+      res.render = (view: string, locals?: any) => res.json({ view, ...locals });
+      next();
+    });
+    app.use(router);
+
+    const now = Date.now();
+    const res = await supertest(app).get('/twitch-connect');
+
+    expect(res.status).toBe(302);
+    expect(capturedSession.eventsubOAuthState).toBeDefined();
+    expect(typeof capturedSession.eventsubOAuthState.value).toBe('string');
+    expect(capturedSession.eventsubOAuthState.value.length).toBeGreaterThan(0);
+    expect(capturedSession.eventsubOAuthState.expiresAt).toBeGreaterThan(now + 9 * 60 * 1000);
+    expect(capturedSession.eventsubOAuthState.expiresAt).toBeLessThan(now + 11 * 60 * 1000);
+    expect(capturedSession.eventsubStreamerId).toBe(42);
+  });
+});
