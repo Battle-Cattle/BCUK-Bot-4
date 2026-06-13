@@ -11,9 +11,9 @@ export interface SessionUser {
 declare module 'express-session' {
   interface SessionData {
     user?: SessionUser;
-    oauthState?: string;
+    oauthState?: { value: string; expiresAt: number };
     csrfToken?: string;
-    eventsubOAuthState?: string;
+    eventsubOAuthState?: { value: string; expiresAt: number };
     eventsubStreamerId?: number;
   }
 }
