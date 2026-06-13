@@ -86,6 +86,32 @@ Stores SFX categories.
 | `id` | `INT` PK | Category identifier |
 | `name` | `VARCHAR(...)` | Display name |
 
+## `guild`
+
+Registry of every Discord server the bot serves, plus per-guild configuration. Created by `migrations/multi_guild.sql`. Populated automatically by the `guildCreate` handler when the bot is added to a server.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `guild_id` | `BIGINT` PK | Discord guild (server) ID |
+| `name` | `VARCHAR(255)` | Display name, synced from Discord |
+| `voice_channel_id` | `BIGINT` nullable | Default voice channel for this guild (replaces the `DISCORD_VOICE_CHANNEL_ID` env var) |
+| `created_at` | `TIMESTAMP` | When the guild was registered |
+
+## `guild_member`
+
+Per-guild access levels. Replaces the single global `user.access_level`. A user with no row in a given guild is treated as access level `0` (User). Created by `migrations/multi_guild.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `guild_id` | `BIGINT` | FK to `guild.guild_id` `ON DELETE CASCADE` |
+| `discord_id` | `BIGINT` | FK to `user.discord_id` `ON DELETE CASCADE` |
+| `access_level` | `INT` | `0=USER`, `1=MOD`, `2=MANAGER`, `3=ADMIN` — scoped to this guild |
+
+Expected constraints:
+
+- Composite primary key `(guild_id, discord_id)`.
+- Cross-guild super-admin is expressed by `user.is_owner`, not by a `guild_member` row.
+
 ## `user`
 
 Stores web/admin users plus Twitch bot participation state.
@@ -97,7 +123,8 @@ Stores web/admin users plus Twitch bot participation state.
 | `is_twitch_bot_enabled` | `BIT(1)` or `TINYINT(1)` | Whether the Twitch bot should join this user's Twitch channel |
 | `twitch_name` | `VARCHAR(...)` nullable | Twitch channel name; should be unique when non-null |
 | `twitchoauth` | `VARCHAR(...)` nullable | Legacy/optional Twitch auth storage |
-| `access_level` | `INT` | `0=USER`, `1=MOD`, `2=MANAGER`, `3=ADMIN` |
+| `access_level` | `INT` | `0=USER`, `1=MOD`, `2=MANAGER`, `3=ADMIN`. **Deprecated** — per-guild access lives in `guild_member`; this column is migrated into `guild_member` and dropped in a later migration |
+| `is_owner` | `TINYINT(1)` | Global super-admin flag. Set manually in the DB only; never settable through the web panel |
 
 Expected constraints and behavior:
 
@@ -111,8 +138,9 @@ Stores configuration for Twitch announcement groups.
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | `INT` PK | Group identifier |
+| `guild_id` | `BIGINT` | FK to `guild.guild_id`; the server this group belongs to |
 | `name` | `VARCHAR(...)` | Display name |
-| `discord_channel` | `BIGINT` | Channel ID for announcements |
+| `discord_channel` | `BIGINT` | Channel ID for announcements (must belong to `guild_id`) |
 | `live_message` | `TEXT` | Go-live message template |
 | `new_game_message` | `TEXT` | Game-change message template |
 | `multi_twitch` | `BIT(1)` or `TINYINT(1)` | Enables multitwitch URL field in embeds |
@@ -163,7 +191,7 @@ Created by `migrations/twitch_eventsub.sql`.
 
 ## `custom_command`
 
-Stores custom text commands managed through the admin panel.
+Stores custom text commands managed through the admin panel. This is a **global catalog** shared across all guilds (no `guild_id`); per-guild deviations (disable / output override) live in `guild_command_override`. On Discord, every catalog command is enabled by default in every guild.
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -199,6 +227,38 @@ ALTER TABLE custom_command
     DROP INDEX uq_custom_command_trigger_string;
 ```
 
+## `guild_command_override`
+
+Sparse per-guild overlay on the **global** `custom_command` catalog. Every catalog command is enabled on Discord by default; a row here exists only where a guild has deviated. Created by `migrations/multi_guild.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `guild_id` | `BIGINT` | FK to `guild.guild_id` `ON DELETE CASCADE` |
+| `command_id` | `INT UNSIGNED` | FK to `custom_command.command_id` `ON DELETE CASCADE` |
+| `is_disabled` | `TINYINT(1)` | When `1`, the command does not fire on Discord in this guild |
+| `output` | `TEXT` nullable | Per-guild replacement output; `NULL` means use the catalog `output` |
+
+Resolution for a Discord message in a guild: load the global catalog command, then apply the `(guild_id, command_id)` override if present (`is_disabled = 1` ⇒ no fire; non-null `output` ⇒ replace text). **Twitch routing ignores this table** — Twitch chat has no Discord-guild context.
+
+Expected constraints:
+
+- Composite primary key `(guild_id, command_id)`.
+- Both foreign keys use `ON DELETE CASCADE`, so deleting a catalog command or a guild removes its override rows.
+
+## `streamdeck_api_keys`
+
+Per-user Streamdeck API keys. Created outside this repository; `migrations/multi_guild.sql` adds the `guild_id` column.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `discord_id` | `BIGINT` PK | Key owner (one key per user) |
+| `key_hash` | `VARCHAR(...)` | SHA-256 hash of the plaintext key |
+| `guild_id` | `BIGINT` | FK to `guild.guild_id`; the guild this key acts on |
+| `status` | `ENUM`/`VARCHAR` | `pending`, `approved`, `revoked`, or `denied` |
+| `requested_at` | `DATETIME` | When the key was requested |
+| `approved_at` | `DATETIME` nullable | When approved |
+| `approved_by` | `BIGINT` nullable | Approver's `discord_id` |
+
 ## `twitch_user_commands`
 
 Join table mapping users to custom commands.
@@ -222,6 +282,7 @@ Stores counter command definitions and values managed through the admin panel.
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | `INT` PK | Counter row identifier |
+| `guild_id` | `BIGINT` | FK to `guild.guild_id`; counters are per-guild |
 | `trigger_command` | `VARCHAR(...)` | Full command token used for increment actions (including prefix) |
 | `check_command` | `VARCHAR(...)` | Full command token used for read/check actions |
 | `message` | `TEXT` | Read/check reply template; `%d` placeholder is used for current value |
@@ -232,16 +293,16 @@ Stores counter command definitions and values managed through the admin panel.
 
 Expected constraints and behavior:
 
-- `trigger_command` and `check_command` should be unique.
+- `trigger_command` and `check_command` should be unique **per guild** (the same counter command may exist in different guilds).
 - Both command columns should store single-token commands including any prefix.
 - Current panel support includes CRUD and manual reset of `current_value`; runtime command handling/scheduler wiring can be implemented independently.
 
-Recommended migrations (run once) for DB-level protection:
+Per-guild uniqueness (applied by `migrations/multi_guild.sql`, which also drops any earlier global `uq_counter_*` constraints):
 
 ```sql
 ALTER TABLE counter
-    ADD CONSTRAINT uq_counter_trigger_command UNIQUE (trigger_command),
-    ADD CONSTRAINT uq_counter_check_command UNIQUE (check_command);
+    ADD CONSTRAINT uq_counter_guild_trigger UNIQUE (guild_id, trigger_command),
+    ADD CONSTRAINT uq_counter_guild_check   UNIQUE (guild_id, check_command);
 
 CREATE INDEX idx_counter_trigger ON counter(trigger_command);
 CREATE INDEX idx_counter_check   ON counter(check_command);
