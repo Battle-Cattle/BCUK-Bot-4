@@ -54,6 +54,60 @@ CREATE TABLE guild_member (
 INSERT INTO guild_member (guild_id, discord_id, access_level)
 SELECT @legacy_guild_id, discord_id, access_level FROM `user`;
 
+-- ─── Normalize command_id to INT UNSIGNED (for FK compatibility) ──────────────
+-- On deployments created before schema.sql standardised INT UNSIGNED, the
+-- custom_command and twitch_user_commands tables may have command_id as signed
+-- INT. Normalize to UNSIGNED before creating guild_command_override whose FK
+-- requires an exact type match. Auto-increment PKs are always positive so the
+-- signed→unsigned conversion is lossless.
+SET @need_cmd_normalize = (
+  SELECT IF(COLUMN_TYPE = 'int', 1, 0)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME   = 'custom_command'
+    AND COLUMN_NAME  = 'command_id'
+);
+
+-- Drop the FK from twitch_user_commands → custom_command before modifying the
+-- referenced column (MySQL requires this).
+SET @tuc_fk_name = (
+  SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+  WHERE TABLE_SCHEMA          = DATABASE()
+    AND TABLE_NAME            = 'twitch_user_commands'
+    AND COLUMN_NAME           = 'command_id'
+    AND REFERENCED_TABLE_NAME = 'custom_command'
+  LIMIT 1
+);
+SET @sql = IF(@need_cmd_normalize = 1 AND @tuc_fk_name IS NOT NULL,
+  CONCAT('ALTER TABLE twitch_user_commands DROP FOREIGN KEY `', @tuc_fk_name, '`'),
+  'SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- Normalize custom_command.command_id.
+SET @sql = IF(@need_cmd_normalize = 1,
+  'ALTER TABLE custom_command MODIFY COLUMN command_id INT UNSIGNED NOT NULL AUTO_INCREMENT',
+  'SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- Normalize twitch_user_commands.command_id (may also be signed INT on the same
+-- deployment; check independently in case its FK was already absent).
+SET @tuc_cmd_type = (
+  SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME   = 'twitch_user_commands'
+    AND COLUMN_NAME  = 'command_id'
+);
+SET @sql = IF(@tuc_cmd_type = 'int',
+  'ALTER TABLE twitch_user_commands MODIFY COLUMN command_id INT UNSIGNED NOT NULL',
+  'SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- Restore the FK if it was dropped.
+SET @sql = IF(@need_cmd_normalize = 1 AND @tuc_fk_name IS NOT NULL,
+  'ALTER TABLE twitch_user_commands ADD FOREIGN KEY (command_id) REFERENCES custom_command(command_id) ON DELETE CASCADE',
+  'SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
 -- ─── guild_command_override ───────────────────────────────────────────────────
 -- Sparse overlay on the GLOBAL custom_command catalog. A row exists only where a
 -- guild has deviated: disabled the command, or replaced its Discord output text.
