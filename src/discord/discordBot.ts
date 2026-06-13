@@ -5,7 +5,7 @@ import { executeCustomCommandForDiscord } from '../commands/customCommandHandler
 import { executeCounterCommandForDiscord } from '../commands/counterHandler';
 import { setDiscordReady } from '../shared/statusStore';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
-import { upsertGuild } from '../db/guilds';
+import { upsertGuild } from '../db';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('Discord');

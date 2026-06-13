@@ -21,7 +21,12 @@ function mapGuildMember(row: mysql.RowDataPacket): DbGuildMember {
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
-/** Returns every membership row for a guild, highest access level first. */
+/**
+ * Returns every membership row for a guild, ordered by access level descending.
+ *
+ * @param guildId - Guild snowflake ID.
+ * @returns Array of guild member rows, highest access level first.
+ */
 export async function getGuildMembers(guildId: string): Promise<DbGuildMember[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT guild_id, discord_id, access_level
@@ -36,6 +41,10 @@ export async function getGuildMembers(guildId: string): Promise<DbGuildMember[]>
 /**
  * Returns a user's access level within a specific guild, or null if they have no
  * membership row there. Reads the guild_member table directly.
+ *
+ * @param guildId - Guild snowflake ID.
+ * @param discordId - User snowflake ID.
+ * @returns The access level (0–3), or null if no membership row exists.
  */
 export async function getMemberAccessLevel(guildId: string, discordId: string): Promise<number | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -50,9 +59,9 @@ export async function getMemberAccessLevel(guildId: string, discordId: string): 
 /**
  * Sets (inserting or updating) a user's access level within a guild.
  *
- * @param guildId BIGINT snowflake as a string.
- * @param discordId BIGINT snowflake as a string.
- * @param accessLevel One of the AccessLevel values (0–3).
+ * @param guildId - Guild snowflake ID.
+ * @param discordId - User snowflake ID.
+ * @param accessLevel - One of the AccessLevel values (0–3); rejects invalid values.
  */
 export async function setMemberAccessLevel(guildId: string, discordId: string, accessLevel: number): Promise<void> {
   if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
@@ -66,7 +75,12 @@ export async function setMemberAccessLevel(guildId: string, discordId: string, a
   );
 }
 
-/** Removes a user's membership row from a guild. No-op if no row exists. */
+/**
+ * Removes a user's membership row from a guild. No-op if no row exists.
+ *
+ * @param guildId - Guild snowflake ID.
+ * @param discordId - User snowflake ID.
+ */
 export async function removeGuildMember(guildId: string, discordId: string): Promise<void> {
   await getPool().execute(
     'DELETE FROM guild_member WHERE guild_id = ? AND discord_id = ?',

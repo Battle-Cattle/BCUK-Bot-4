@@ -147,6 +147,19 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
 
 // ─── Execute functions ────────────────────────────────────────────────────────
 
+/**
+ * Checks a Discord message against the custom command catalog and replies if a match is found.
+ *
+ * Guild context is resolved in priority order: the explicit `guildId` argument, then
+ * `message.guildId`. Returns without action when no guild context is available.
+ * The guild's per-guild override overlay is applied before the reply (disabled commands
+ * are skipped; output overrides replace the catalog text). Discord not-found errors
+ * (e.g. message deleted before the reply lands) are silently swallowed.
+ *
+ * @param message - The Discord message to inspect and, if matched, reply to.
+ * @param username - Display name for the monitoring entry; null or omitted if unknown.
+ * @param guildId - Explicit guild ID for override-aware lookup; falls back to message.guildId.
+ */
 export async function executeCustomCommandForDiscord(
   message: Message,
   username?: string | null,

@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { getAllGuilds, type DbGuild } from '../db/guilds';
+import { getAllGuilds, type DbGuild } from '../db';
 
 const log = createLogger('GuildRegistry');
 

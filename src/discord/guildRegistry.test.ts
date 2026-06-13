@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
-vi.mock('../db/guilds', () => ({ getAllGuilds: vi.fn() }));
+vi.mock('../db', () => ({ getAllGuilds: vi.fn() }));
 
-import { getAllGuilds } from '../db/guilds';
+import { getAllGuilds } from '../db';
 import {
   reloadGuildRegistry,
   isRegisteredGuild,
