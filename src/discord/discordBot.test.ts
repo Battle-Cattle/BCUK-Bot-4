@@ -18,7 +18,7 @@ vi.mock('./guildRegistry', () => ({
   isRegisteredGuild: vi.fn((id: string) => id === 'guild-id'),
   reloadGuildRegistry: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../db/guilds', () => ({ upsertGuild: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../db', () => ({ upsertGuild: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 vi.mock('discord.js', () => ({
   Client: vi.fn(),
@@ -159,7 +159,7 @@ describe('startDiscordBot — guildCreate handler', () => {
   }
 
   it('registers the guild row and reloads the registry (no auto-whitelist)', async () => {
-    const guilds = await import('../db/guilds.js');
+    const guilds = await import('../db.js');
     const registry = await import('./guildRegistry.js');
     const cb = getGuildCreateCb();
 
