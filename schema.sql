@@ -94,6 +94,11 @@ CREATE TABLE IF NOT EXISTS guild_member (
 
 -- ---------------------------------------------------------------------------
 -- stream_group
+-- guild_id is NULL here for the PR-1→PR-2 transition: current runtime code
+-- does not yet supply guild_id on INSERT.  PR 2 (runtime guild-awareness) will
+-- update these INSERTs and tighten all three guild_id columns back to NOT NULL.
+-- Existing deployments use migrations/multi_guild.sql which already enforces
+-- NOT NULL DEFAULT <legacy_guild_id> so the two paths converge after PR 2.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS stream_group (
   id               INT          NOT NULL AUTO_INCREMENT,
