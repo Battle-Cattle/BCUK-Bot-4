@@ -14,6 +14,11 @@ export {
 } from './db/guildMembers';
 export type { DbGuildMember } from './db/guildMembers';
 
+export {
+  getOverridesForGuild, getAllOverrides, upsertOverride, removeOverride,
+} from './db/guildCommandOverrides';
+export type { DbGuildCommandOverride } from './db/guildCommandOverrides';
+
 // ─── User / access-level ────────────────────────────────────────────────────
 
 export {

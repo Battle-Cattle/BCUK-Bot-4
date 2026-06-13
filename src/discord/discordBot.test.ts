@@ -146,7 +146,7 @@ describe('startDiscordBot — messageCreate handler', () => {
     const msg = { author: { bot: false, username: 'Alice' }, guildId: 'guild-id', content: '!test', member: { displayName: 'Alice' } };
     cb(msg);
     expect(vi.mocked(commands.handleCommand)).toHaveBeenCalledWith('!test', 'discord');
-    expect(vi.mocked(customCmds.executeCustomCommandForDiscord)).toHaveBeenCalledWith(msg, 'Alice');
+    expect(vi.mocked(customCmds.executeCustomCommandForDiscord)).toHaveBeenCalledWith(msg, 'Alice', 'guild-id');
   });
 });
 

@@ -39,6 +39,7 @@ function mockMsg(content: string) {
   return {
     id: 'msg-1',
     content,
+    guildId: 'guild-1',
     reply: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -98,6 +99,33 @@ describe('executeCustomCommandForDiscord', () => {
     msg.reply.mockRejectedValue(new Error('Unknown message'));
 
     await expect(executeCustomCommandForDiscord(msg as any)).resolves.toBeUndefined();
+  });
+
+  it('threads an explicit guildId into the override-aware lookup', async () => {
+    vi.mocked(getCustomCommandForDiscord).mockResolvedValue({ output: 'Hi!', is_multi_twitch: false } as any);
+    const msg = mockMsg('!hello');
+
+    await executeCustomCommandForDiscord(msg as any, 'viewer1', 'explicit-guild');
+
+    expect(vi.mocked(getCustomCommandForDiscord)).toHaveBeenCalledWith('!hello', 'explicit-guild');
+  });
+
+  it('falls back to the message guild when no guildId is passed', async () => {
+    vi.mocked(getCustomCommandForDiscord).mockResolvedValue({ output: 'Hi!', is_multi_twitch: false } as any);
+    const msg = mockMsg('!hello');
+
+    await executeCustomCommandForDiscord(msg as any, 'viewer1');
+
+    expect(vi.mocked(getCustomCommandForDiscord)).toHaveBeenCalledWith('!hello', 'guild-1');
+  });
+
+  it('does nothing when no guild context is available', async () => {
+    const msg = { id: 'm', content: '!hello', guildId: null, reply: vi.fn() };
+
+    await executeCustomCommandForDiscord(msg as any, 'viewer1');
+
+    expect(vi.mocked(getCustomCommandForDiscord)).not.toHaveBeenCalled();
+    expect(msg.reply).not.toHaveBeenCalled();
   });
 });
 

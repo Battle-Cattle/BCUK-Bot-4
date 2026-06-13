@@ -150,11 +150,17 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
 export async function executeCustomCommandForDiscord(
   message: Message,
   username?: string | null,
+  guildId?: string,
 ): Promise<void> {
   const command = extractCommand(message.content);
   if (!command) return;
 
-  const result = await lookupCommand(command, getCustomCommandForDiscord);
+  // Prefer the explicitly threaded guildId; fall back to the message's own guild.
+  // The Discord lookup applies that guild's per-guild override overlay.
+  const resolvedGuildId = guildId ?? message.guildId;
+  if (!resolvedGuildId) return;
+
+  const result = await lookupCommand(command, (cmd) => getCustomCommandForDiscord(cmd, resolvedGuildId));
   if (!result) return;
 
   recordCommandTestEntry({

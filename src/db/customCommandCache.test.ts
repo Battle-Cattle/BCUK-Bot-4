@@ -19,6 +19,10 @@ vi.mock('./users', () => ({
   getTwitchEnabledChannels: vi.fn(),
 }));
 
+vi.mock('./guildCommandOverrides', () => ({
+  getAllOverrides: vi.fn(),
+}));
+
 vi.mock('../twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn((name: string | null) => {
     if (!name) return null;
@@ -30,6 +34,9 @@ vi.mock('../twitchChannelName', () => ({
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './customCommandCache';
 import { getAllCustomCommandsWithAssignments } from './customCommands';
 import { getTwitchEnabledChannels } from './users';
+import { getAllOverrides } from './guildCommandOverrides';
+
+const GUILD = 'guild-1';
 
 type MockCommand = {
   command_id: number;
@@ -60,41 +67,42 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([]);
   vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+  vi.mocked(getAllOverrides).mockResolvedValue([]);
 });
 
 // ─── getCustomCommandForDiscord ───────────────────────────────────────────────
 
 describe('getCustomCommandForDiscord', () => {
   it('returns null for empty string', async () => {
-    expect(await getCustomCommandForDiscord('')).toBeNull();
+    expect(await getCustomCommandForDiscord('', GUILD)).toBeNull();
   });
 
   it('returns null for whitespace-only string', async () => {
-    expect(await getCustomCommandForDiscord('   ')).toBeNull();
+    expect(await getCustomCommandForDiscord('   ', GUILD)).toBeNull();
   });
 
   it('returns the command when trigger matches (case-insensitive)', async () => {
     vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([makeCommand()] as any);
-    const result = await getCustomCommandForDiscord('!CLAP');
+    const result = await getCustomCommandForDiscord('!CLAP', GUILD);
     expect(result).not.toBeNull();
     expect(result?.trigger_string).toBe('!clap');
   });
 
   it('trims whitespace from the query before lookup', async () => {
     vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([makeCommand()] as any);
-    expect(await getCustomCommandForDiscord('  !clap  ')).not.toBeNull();
+    expect(await getCustomCommandForDiscord('  !clap  ', GUILD)).not.toBeNull();
   });
 
   it('returns null when the command is not discord-enabled', async () => {
     vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
       makeCommand({ is_discord_enabled: false }),
     ] as any);
-    expect(await getCustomCommandForDiscord('!clap')).toBeNull();
+    expect(await getCustomCommandForDiscord('!clap', GUILD)).toBeNull();
   });
 
   it('returns null when trigger does not match', async () => {
     vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([makeCommand()] as any);
-    expect(await getCustomCommandForDiscord('!other')).toBeNull();
+    expect(await getCustomCommandForDiscord('!other', GUILD)).toBeNull();
   });
 
   it('collision: lower command_id wins', async () => {
@@ -102,16 +110,64 @@ describe('getCustomCommandForDiscord', () => {
       makeCommand({ command_id: 2, output: 'second' }),
       makeCommand({ command_id: 1, output: 'first' }),
     ] as any);
-    const result = await getCustomCommandForDiscord('!clap');
+    const result = await getCustomCommandForDiscord('!clap', GUILD);
     expect(result?.output).toBe('first');
   });
 
   it('returns a copy — mutating result does not affect subsequent lookups', async () => {
     vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([makeCommand()] as any);
-    const first = await getCustomCommandForDiscord('!clap');
+    const first = await getCustomCommandForDiscord('!clap', GUILD);
     (first as any).output = 'mutated';
-    const second = await getCustomCommandForDiscord('!clap');
+    const second = await getCustomCommandForDiscord('!clap', GUILD);
     expect(second?.output).toBe('*claps*');
+  });
+});
+
+// ─── getCustomCommandForDiscord — per-guild overrides ─────────────────────────
+
+describe('getCustomCommandForDiscord — per-guild overrides', () => {
+  it('returns the catalog command when the guild has no override', async () => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([makeCommand()] as any);
+    vi.mocked(getAllOverrides).mockResolvedValue([
+      { guild_id: 'other-guild', command_id: 1, is_disabled: true, output: null },
+    ] as any);
+    const result = await getCustomCommandForDiscord('!clap', GUILD);
+    expect(result?.output).toBe('*claps*');
+  });
+
+  it('returns null when the guild has disabled the command', async () => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([makeCommand()] as any);
+    vi.mocked(getAllOverrides).mockResolvedValue([
+      { guild_id: GUILD, command_id: 1, is_disabled: true, output: null },
+    ] as any);
+    expect(await getCustomCommandForDiscord('!clap', GUILD)).toBeNull();
+  });
+
+  it('substitutes the guild output when the override sets one', async () => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([makeCommand()] as any);
+    vi.mocked(getAllOverrides).mockResolvedValue([
+      { guild_id: GUILD, command_id: 1, is_disabled: false, output: 'guild text' },
+    ] as any);
+    const result = await getCustomCommandForDiscord('!clap', GUILD);
+    expect(result?.output).toBe('guild text');
+  });
+
+  it('uses the catalog output when the override output is null', async () => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([makeCommand()] as any);
+    vi.mocked(getAllOverrides).mockResolvedValue([
+      { guild_id: GUILD, command_id: 1, is_disabled: false, output: null },
+    ] as any);
+    const result = await getCustomCommandForDiscord('!clap', GUILD);
+    expect(result?.output).toBe('*claps*');
+  });
+
+  it('isolates overrides between guilds', async () => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([makeCommand()] as any);
+    vi.mocked(getAllOverrides).mockResolvedValue([
+      { guild_id: GUILD, command_id: 1, is_disabled: false, output: 'only here' },
+    ] as any);
+    expect((await getCustomCommandForDiscord('!clap', GUILD))?.output).toBe('only here');
+    expect((await getCustomCommandForDiscord('!clap', 'other-guild'))?.output).toBe('*claps*');
   });
 });
 

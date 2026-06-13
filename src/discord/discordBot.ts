@@ -86,8 +86,9 @@ export function startDiscordBot(): void {
     if (!message.guildId || !isRegisteredGuild(message.guildId)) return;
 
     const displayName = message.member?.displayName ?? message.author.username;
+    const guildId = message.guildId;
 
-    executeCustomCommandForDiscord(message, displayName).catch((err) =>
+    executeCustomCommandForDiscord(message, displayName, guildId).catch((err) =>
       log.error('Custom command error:', err),
     );
 
