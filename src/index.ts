@@ -3,6 +3,7 @@ import { getPool, closePool } from './db';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startDiscordBot, stopDiscordBot } from './discord/discordBot';
+import { reloadGuildRegistry } from './discord/guildRegistry';
 import { startTikTokBot, stopTikTokBot } from './tiktok/tiktokBot';
 import { startTwitchMonitor, stopTwitchMonitor } from './twitch/monitor/twitchMonitor';
 import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitch/eventsub/twitchEventSub';
@@ -64,6 +65,15 @@ async function main(): Promise<void> {
   registerCountdownTwitchRuntime({ send: sayInChannel });
   registerEventSubOverlayRuntime({ pushOverlayEvent });
   registerEventSubTwitchRuntime({ send: sayInChannel });
+
+  // Load the guild registry before the Discord client connects so the
+  // messageCreate gate recognises registered guilds from the first message.
+  try {
+    await reloadGuildRegistry();
+  } catch (err) {
+    log.error('Cannot load guild registry:', err);
+    process.exit(1);
+  }
 
   setChannelJoinedHook(() => reloadEventSubSubscriptions());
   startDiscordBot();

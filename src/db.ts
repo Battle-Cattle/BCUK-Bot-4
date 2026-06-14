@@ -1,6 +1,24 @@
 export type { RefreshingLookupCache, ManagedLookupCacheOptions, ManagedLookupCache } from './db/lookupCache';
 export { getPool, closePool } from './db/pool';
 
+// ─── Guilds ──────────────────────────────────────────────────────────────────
+
+export {
+  getAllGuilds, getProvisionedGuilds, getGuildById, upsertGuild, setGuildVoiceChannel,
+} from './db/guilds';
+export type { DbGuild } from './db/guilds';
+
+export {
+  getGuildMembers, getMemberAccessLevel, setMemberAccessLevel,
+  removeGuildMember, getEffectiveAccessLevel,
+} from './db/guildMembers';
+export type { DbGuildMember } from './db/guildMembers';
+
+export {
+  getOverridesForGuild, getAllOverrides, upsertOverride, removeOverride,
+} from './db/guildCommandOverrides';
+export type { DbGuildCommandOverride } from './db/guildCommandOverrides';
+
 // ─── User / access-level ────────────────────────────────────────────────────
 
 export {

@@ -11,6 +11,7 @@ import {
   type DbCustomCommandWithAssignments,
   type DbCustomCommandAssignedUser,
 } from './customCommands';
+import { getAllOverrides, type DbGuildCommandOverride } from './guildCommandOverrides';
 
 const log = createLogger('DB');
 
@@ -19,6 +20,9 @@ const log = createLogger('DB');
 interface CustomCommandLookupCache extends RefreshingLookupCache {
   discordByTrigger: Map<string, DbCustomCommand>;
   twitchByChannelAndTrigger: Map<string, DbCustomCommand>;
+  // Per-guild Discord overlay on the global catalog: guild_id → (command_id → override).
+  // Sparse — only guilds/commands with a deviation appear. Twitch lookups ignore this.
+  overridesByGuild: Map<string, Map<number, DbGuildCommandOverride>>;
 }
 
 interface TwitchCommandCandidate {
@@ -41,7 +45,24 @@ function createEmptyCustomCommandLookupCache(): CustomCommandLookupCache {
     loadedAt: 0,
     discordByTrigger: new Map<string, DbCustomCommand>(),
     twitchByChannelAndTrigger: new Map<string, DbCustomCommand>(),
+    overridesByGuild: new Map<string, Map<number, DbGuildCommandOverride>>(),
   };
+}
+
+/** Index a flat list of override rows by guild_id → command_id for O(1) overlay lookups. */
+function buildOverridesByGuild(
+  overrides: DbGuildCommandOverride[],
+): Map<string, Map<number, DbGuildCommandOverride>> {
+  const byGuild = new Map<string, Map<number, DbGuildCommandOverride>>();
+  for (const override of overrides) {
+    let guildMap = byGuild.get(override.guild_id);
+    if (!guildMap) {
+      guildMap = new Map<number, DbGuildCommandOverride>();
+      byGuild.set(override.guild_id, guildMap);
+    }
+    guildMap.set(override.command_id, override);
+  }
+  return byGuild;
 }
 
 function getTwitchCommandCacheKey(channelName: string, triggerString: string): string | null {
@@ -189,6 +210,7 @@ function registerAssignedTwitchCandidates(
 function buildCustomCommandLookupCache(
   commands: DbCustomCommandWithAssignments[],
   activeTwitchChannels: string[],
+  overrides: DbGuildCommandOverride[],
 ): CustomCommandLookupCache {
   const discordByTrigger = new Map<string, DbCustomCommand>();
   const twitchCandidateByChannelAndTrigger = new Map<string, TwitchCommandCandidate>();
@@ -237,6 +259,7 @@ function buildCustomCommandLookupCache(
     loadedAt: Date.now(),
     discordByTrigger,
     twitchByChannelAndTrigger,
+    overridesByGuild: buildOverridesByGuild(overrides),
   };
 }
 
@@ -253,11 +276,12 @@ const customCommandLookupCacheState = createManagedLookupCache<CustomCommandLook
   refreshFailureMaxBackoffMs: CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
   createEmptyCache: createEmptyCustomCommandLookupCache,
   loadCache: async () => {
-    const [commands, activeTwitchChannels] = await Promise.all([
+    const [commands, activeTwitchChannels, overrides] = await Promise.all([
       getAllCustomCommandsWithAssignments(),
       getTwitchEnabledChannels(),
+      getAllOverrides(),
     ]);
-    return buildCustomCommandLookupCache(commands, activeTwitchChannels);
+    return buildCustomCommandLookupCache(commands, activeTwitchChannels, overrides);
   },
 });
 
@@ -278,7 +302,22 @@ export async function getCustomCommandForTwitchChannel(channelName: string, trig
   return cachedCommand ? { ...cachedCommand } : null;
 }
 
-export async function getCustomCommandForDiscord(triggerString: string): Promise<DbCustomCommand | null> {
+/**
+ * Resolve a Discord custom command for a guild, applying that guild's override.
+ *
+ * Resolution: start from the global catalog command; if the guild has an override
+ * row for it, `is_disabled` ⇒ the command does not fire (null), and a non-null
+ * `output` ⇒ that text replaces the catalog output. No override row ⇒ catalog
+ * default. Guilds without any overrides resolve to the plain catalog command.
+ *
+ * @param triggerString The full prefixed trigger (e.g. `!clap`); matched case-insensitively.
+ * @param guildId The guild the message came from (BIGINT snowflake as a string).
+ * @returns The (possibly output-substituted) command, or null if absent or disabled.
+ */
+export async function getCustomCommandForDiscord(
+  triggerString: string,
+  guildId: string,
+): Promise<DbCustomCommand | null> {
   const normalizedTriggerString = triggerString.trim().toLowerCase();
   if (!normalizedTriggerString) {
     return null;
@@ -286,5 +325,19 @@ export async function getCustomCommandForDiscord(triggerString: string): Promise
 
   const cache = await customCommandLookupCacheState.getCache();
   const cachedCommand = cache.discordByTrigger.get(normalizedTriggerString);
-  return cachedCommand ? { ...cachedCommand } : null;
+  if (!cachedCommand) {
+    return null;
+  }
+
+  const override = cache.overridesByGuild.get(guildId)?.get(cachedCommand.command_id);
+  if (override) {
+    if (override.is_disabled) {
+      return null;
+    }
+    if (override.output !== null) {
+      return { ...cachedCommand, output: override.output };
+    }
+  }
+
+  return { ...cachedCommand };
 }

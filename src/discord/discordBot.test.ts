@@ -13,6 +13,12 @@ vi.mock('../commands/commandRouter', () => ({ handleCommand: vi.fn().mockResolve
 vi.mock('../commands/customCommandHandler', () => ({ executeCustomCommandForDiscord: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../commands/counterHandler', () => ({ executeCounterCommandForDiscord: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../shared/statusStore', () => ({ setDiscordReady: vi.fn() }));
+vi.mock('./guildRegistry', () => ({
+  // Only the legacy configured guild is registered in these tests.
+  isRegisteredGuild: vi.fn((id: string) => id === 'guild-id'),
+  reloadGuildRegistry: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../db', () => ({ upsertGuild: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 vi.mock('discord.js', () => ({
   Client: vi.fn(),
@@ -46,6 +52,9 @@ function makeMockClient() {
 
 beforeEach(async () => {
   vi.resetModules();
+  // vi.mock() creates one shared mock instance per factory; resetModules clears the
+  // module cache but not call counts, so clearAllMocks() is needed before each test.
+  vi.clearAllMocks();
   mockInstance = makeMockClient();
   const djs = await import('discord.js');
   vi.mocked(djs.Client).mockImplementation(function () { return mockInstance; } as any);
@@ -123,18 +132,63 @@ describe('startDiscordBot — messageCreate handler', () => {
     expect(vi.mocked(commands.handleCommand)).not.toHaveBeenCalled();
   });
 
-  it('skips messages from the wrong guild', () => {
+  it('skips messages from an unregistered guild', () => {
     const cb = getMessageCreateCb();
     cb({ author: { bot: false, username: 'Alice' }, guildId: 'other-guild', content: '!test', member: null });
     expect(vi.mocked(commands.handleCommand)).not.toHaveBeenCalled();
   });
 
-  it('dispatches to command handlers for valid guild messages', () => {
+  it('skips DMs (no guildId)', () => {
+    const cb = getMessageCreateCb();
+    cb({ author: { bot: false, username: 'Alice' }, guildId: null, content: '!test', member: null });
+    expect(vi.mocked(commands.handleCommand)).not.toHaveBeenCalled();
+  });
+
+  it('dispatches to command handlers for registered guild messages', () => {
     const cb = getMessageCreateCb();
     const msg = { author: { bot: false, username: 'Alice' }, guildId: 'guild-id', content: '!test', member: { displayName: 'Alice' } };
     cb(msg);
     expect(vi.mocked(commands.handleCommand)).toHaveBeenCalledWith('!test', 'discord');
-    expect(vi.mocked(customCmds.executeCustomCommandForDiscord)).toHaveBeenCalledWith(msg, 'Alice');
+    expect(vi.mocked(customCmds.executeCustomCommandForDiscord)).toHaveBeenCalledWith(msg, 'Alice', 'guild-id');
+  });
+});
+
+// ─── startDiscordBot — guildCreate handler ────────────────────────────────────
+
+describe('startDiscordBot — guildCreate handler', () => {
+  function getGuildCreateCb() {
+    mod.startDiscordBot();
+    return mockInstance.on.mock.calls.find(([event]: string[]) => event === 'guildCreate')?.[1] as Function;
+  }
+
+  it('registers the guild row and reloads the registry (no auto-whitelist)', async () => {
+    const guilds = await import('../db.js');
+    const registry = await import('./guildRegistry.js');
+    const cb = getGuildCreateCb();
+
+    await cb({ id: 'new-guild', name: 'New Server' });
+    // Let the upsert → reload promise chain settle.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(guilds.upsertGuild)).toHaveBeenCalledWith('new-guild', 'New Server');
+    expect(vi.mocked(registry.reloadGuildRegistry)).toHaveBeenCalled();
+
+    const [upsertOrder] = vi.mocked(guilds.upsertGuild).mock.invocationCallOrder;
+    const [reloadOrder] = vi.mocked(registry.reloadGuildRegistry).mock.invocationCallOrder;
+    expect(upsertOrder).toBeLessThan(reloadOrder);
+  });
+
+  it('swallows upsertGuild errors and does not call reloadGuildRegistry', async () => {
+    const guilds = await import('../db.js');
+    const registry = await import('./guildRegistry.js');
+    vi.mocked(guilds.upsertGuild).mockRejectedValueOnce(new Error('db error'));
+    const cb = getGuildCreateCb();
+
+    cb({ id: 'new-guild', name: 'New Server' });
+    // Let the promise chain's .catch branch execute.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(registry.reloadGuildRegistry)).not.toHaveBeenCalled();
   });
 });
 
