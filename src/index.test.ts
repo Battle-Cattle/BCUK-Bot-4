@@ -67,7 +67,18 @@ let exitSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   vi.resetModules();
-  exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+  // vi.mock() creates one shared mock instance per factory; resetModules clears the
+  // module cache but does not reset call counts. clearAllMocks() resets counts to 0
+  // so failure-path assertions on mocks like startDiscordBot start from a clean slate.
+  vi.clearAllMocks();
+  // Throw on the first call so main() stops executing after a catch block calls
+  // process.exit(1). Revert to a no-op on subsequent calls so the outer
+  // main().catch() path — which also calls process.exit(1) after the inner throw
+  // propagates out — doesn't produce an unhandled rejection.
+  exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+    exitSpy.mockImplementation((() => {}) as never);
+    throw new Error('process.exit');
+  }) as never);
 });
 
 afterEach(() => {
@@ -97,17 +108,20 @@ describe('startup — guild registry preload', () => {
     expect(registryCallOrder).toBeLessThan(botCallOrder);
   });
 
-  it('calls process.exit(1) when reloadGuildRegistry rejects', async () => {
+  it('calls process.exit(1) and does not start the bot when reloadGuildRegistry rejects', async () => {
     const { reloadGuildRegistry } = await import('./discord/guildRegistry.js');
+    const { startDiscordBot } = await import('./discord/discordBot.js');
     vi.mocked(reloadGuildRegistry).mockRejectedValueOnce(new Error('DB unavailable'));
 
     await runMain();
 
     expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(vi.mocked(startDiscordBot)).not.toHaveBeenCalled();
   });
 
-  it('calls process.exit(1) when the DB connection ping fails', async () => {
+  it('calls process.exit(1) and does not start the bot when the DB connection ping fails', async () => {
     const db = await import('./db.js');
+    const { startDiscordBot } = await import('./discord/discordBot.js');
     vi.mocked(db.getPool).mockReturnValueOnce({
       getConnection: vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED')),
     } as any);
@@ -115,5 +129,6 @@ describe('startup — guild registry preload', () => {
     await runMain();
 
     expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(vi.mocked(startDiscordBot)).not.toHaveBeenCalled();
   });
 });
