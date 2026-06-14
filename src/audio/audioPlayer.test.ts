@@ -81,6 +81,8 @@ beforeEach(async () => {
     createdConnections.push(conn);
     return conn as never;
   });
+  const utils = await import('../discord/discordUtils.js');
+  vi.mocked(utils.isPermanentVoiceMisconfigurationError).mockReset().mockReturnValue(false);
   mod = await import('./audioPlayer.js') as AudioPlayerModule;
 });
 
@@ -116,6 +118,16 @@ describe('connect', () => {
 
     await expect(mod.connect(client as never, 'guild-A', 'text-chan')).rejects.toThrow('not a voice channel');
     expect(mod.isConnected('guild-A')).toBe(false);
+  });
+
+  it('rejects when the guild ID is missing', async () => {
+    const { client } = makeClient();
+    const utils = await import('../discord/discordUtils.js');
+    // Treat the misconfiguration as permanent so no reconnect timer is scheduled.
+    vi.mocked(utils.isPermanentVoiceMisconfigurationError).mockReturnValue(true);
+
+    await expect(mod.connect(client as never, '', 'chan-1')).rejects.toThrow('Missing guild ID or voice channel ID');
+    expect(client.guilds.fetch).not.toHaveBeenCalled();
   });
 });
 
@@ -192,6 +204,27 @@ describe('reconnect', () => {
 
       expect(vi.mocked(voice.joinVoiceChannel).mock.calls.length).toBeGreaterThan(joinsAfterFirst);
       expect(mod.isConnected('guild-A')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('logs and keeps retrying when a scheduled reconnect also fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client } = makeClient();
+      const voice = await import('@discordjs/voice');
+      // Every Ready wait times out → the initial connect and its retry both fail.
+      vi.mocked(voice.entersState).mockRejectedValue(new Error('still timing out'));
+
+      await expect(mod.connect(client as never, 'guild-A', 'chan-1')).rejects.toThrow('still timing out');
+      const joinsAfterFirst = vi.mocked(voice.joinVoiceChannel).mock.calls.length;
+
+      // Firing the retry exercises the timer callback's connect().catch path.
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(vi.mocked(voice.joinVoiceChannel).mock.calls.length).toBeGreaterThan(joinsAfterFirst);
+      expect(mod.isConnected('guild-A')).toBe(false);
     } finally {
       vi.useRealTimers();
     }
