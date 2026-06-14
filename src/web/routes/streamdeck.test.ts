@@ -282,8 +282,8 @@ describe('POST /voice/join', () => {
       .expect(200);
 
     expect(res.body).toEqual({ ok: true });
-    expect(vi.mocked(disconnect)).toHaveBeenCalled();
-    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, '123456789012345678');
+    expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
+    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, 'guild-123', '123456789012345678');
   });
 
   it('returns 500 when connect throws', async () => {

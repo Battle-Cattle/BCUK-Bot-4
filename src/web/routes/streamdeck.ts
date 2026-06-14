@@ -105,8 +105,8 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
   }
 
   try {
-    disconnect();
-    await connect(discordClient, normalizedChannelId);
+    disconnect(DISCORD_GUILD_ID);
+    await connect(discordClient, DISCORD_GUILD_ID, normalizedChannelId);
     res.json({ ok: true });
   } catch (err) {
     log.error('Voice join failed:', err);
@@ -115,7 +115,7 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
 });
 
 router.post('/voice/leave', requireApiKey, (_req, res) => {
-  disconnect();
+  disconnect(DISCORD_GUILD_ID);
   res.json({ ok: true });
 });
 
