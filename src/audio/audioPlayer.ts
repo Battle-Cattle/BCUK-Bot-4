@@ -189,7 +189,9 @@ export async function connect(client: Client, guildId: string, channelId?: strin
     const resolvedChannelId = channelId || DISCORD_VOICE_CHANNEL_ID;
 
     if (!guildId || !resolvedChannelId) {
-      throw new Error('Missing guild ID or voice channel ID');
+      // Message text must stay in sync with isPermanentVoiceMisconfigurationError
+      // so this is classified as permanent (not retried).
+      throw new Error('Missing DISCORD_GUILD_ID or voice channel ID');
     }
 
     // Fetching the channel from the target guild also validates that the channel

@@ -126,7 +126,7 @@ describe('connect', () => {
     // Treat the misconfiguration as permanent so no reconnect timer is scheduled.
     vi.mocked(utils.isPermanentVoiceMisconfigurationError).mockReturnValue(true);
 
-    await expect(mod.connect(client as never, '', 'chan-1')).rejects.toThrow('Missing guild ID or voice channel ID');
+    await expect(mod.connect(client as never, '', 'chan-1')).rejects.toThrow('Missing DISCORD_GUILD_ID or voice channel ID');
     expect(client.guilds.fetch).not.toHaveBeenCalled();
   });
 });
