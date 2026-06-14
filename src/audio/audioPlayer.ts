@@ -320,7 +320,11 @@ export function getCurrentChannelId(guildId: string): string | null {
   return states.get(guildId)?.currentChannelId ?? null;
 }
 
-/** Marks playback as active and sends the resource to the shared audio player. */
+/**
+ * Marks playback as active and sends the resource to the shared audio player.
+ *
+ * @param resource - The audio resource to play.
+ */
 export function startPlayback(resource: AudioResource): void {
   playing = true;
   getPlayer().play(resource);

@@ -7,6 +7,10 @@ import {
 
 const log = createLogger('AudioConn');
 
+/**
+ * Callbacks injected into the connection handler functions so they can read
+ * and mutate per-guild voice state without a direct import cycle.
+ */
 export interface ConnectionHandlerDeps {
   getAttemptId: () => number;
   getConnection: () => VoiceConnection | null;
@@ -59,6 +63,14 @@ async function handleDisconnected(
   }
 }
 
+/**
+ * Destroys the previous connection if it differs from the newly joined one,
+ * cleaning up state so only the active connection is tracked.
+ *
+ * @param previousConnection - The connection held before this connect attempt, or null.
+ * @param joinedConnection - The connection that just became ready.
+ * @param deps - Per-guild state accessors.
+ */
 export function releasePreviousConnection(
   previousConnection: VoiceConnection | null,
   joinedConnection: VoiceConnection,
@@ -69,6 +81,14 @@ export function releasePreviousConnection(
   if (deps.getConnection() === previousConnection) deps.setConnection(null);
 }
 
+/**
+ * Tears down connections after a failed connect attempt, restoring the state
+ * machine so a reconnect can be scheduled.
+ *
+ * @param previousConnection - The connection held before the failed attempt, or null.
+ * @param nextConnection - The partially-created connection that failed, or null.
+ * @param deps - Per-guild state accessors.
+ */
 export function cleanupFailedConnect(
   previousConnection: VoiceConnection | null,
   nextConnection: VoiceConnection | null,
@@ -89,6 +109,13 @@ export function cleanupFailedConnect(
   }
 }
 
+/**
+ * Attaches error and disconnect event handlers to a newly joined connection.
+ *
+ * @param joinedConnection - The voice connection to attach handlers to.
+ * @param attemptId - The attempt ID at the time of joining; stale callbacks check against this.
+ * @param deps - Per-guild state accessors used within the handlers.
+ */
 export function setupConnectionHandlers(
   joinedConnection: VoiceConnection,
   attemptId: number,

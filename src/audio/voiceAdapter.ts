@@ -84,7 +84,12 @@ function registerAdapter(
 
 /** Builds the gateway adapter creators for one guild's voice connections. */
 export interface VoiceAdapterFactory {
-  /** Returns an adapter creator bound to the given voice channel. */
+  /**
+   * Returns an adapter creator bound to the given voice channel.
+   *
+   * @param channel - The voice channel the adapter will relay gateway events for.
+   * @returns A `DiscordGatewayAdapterCreator` that can be passed to `joinVoiceChannel`.
+   */
   build(channel: VoiceBasedChannel): DiscordGatewayAdapterCreator;
 }
 
