@@ -31,7 +31,12 @@ function mapOverride(row: mysql.RowDataPacket): DbGuildCommandOverride {
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
-/** Returns every override row for a guild. */
+/**
+ * Returns every override row for a guild.
+ *
+ * @param guildId BIGINT snowflake as a string.
+ * @returns All override rows for that guild; empty array if none exist.
+ */
 export async function getOverridesForGuild(guildId: string): Promise<DbGuildCommandOverride[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     'SELECT guild_id, command_id, is_disabled, output FROM guild_command_override WHERE guild_id = ?',
@@ -40,7 +45,11 @@ export async function getOverridesForGuild(guildId: string): Promise<DbGuildComm
   return rows.map(mapOverride);
 }
 
-/** Returns every override row across all guilds (used to build the per-guild overlay cache). */
+/**
+ * Returns every override row across all guilds (used to build the per-guild overlay cache).
+ *
+ * @returns All override rows for all guilds; empty array if none exist.
+ */
 export async function getAllOverrides(): Promise<DbGuildCommandOverride[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     'SELECT guild_id, command_id, is_disabled, output FROM guild_command_override',
@@ -57,6 +66,7 @@ export async function getAllOverrides(): Promise<DbGuildCommandOverride[]> {
  * @param commandId The catalog command's command_id.
  * @param override.isDisabled When true, the command does not fire in this guild.
  * @param override.output Replacement Discord output, or null to use the catalog output.
+ * @returns Resolves when the upsert is complete.
  */
 export async function upsertOverride(
   guildId: string,
@@ -71,7 +81,13 @@ export async function upsertOverride(
   );
 }
 
-/** Removes a guild's override for a command, reverting it to the catalog default. No-op if absent. */
+/**
+ * Removes a guild's override for a command, reverting it to the catalog default. No-op if absent.
+ *
+ * @param guildId BIGINT snowflake as a string.
+ * @param commandId The catalog command's command_id.
+ * @returns Resolves when the delete is complete.
+ */
 export async function removeOverride(guildId: string, commandId: number): Promise<void> {
   await getPool().execute(
     'DELETE FROM guild_command_override WHERE guild_id = ? AND command_id = ?',

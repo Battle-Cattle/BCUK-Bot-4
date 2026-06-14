@@ -55,7 +55,7 @@ export async function getProvisionedGuilds(): Promise<DbGuild[]> {
   return rows.map(mapGuild);
 }
 
-/** Returns a single guild by its ID, or null if it is not registered. */
+/** Returns a single guild by its ID, or null if it is not found in the guild table. */
 export async function getGuildById(guildId: string): Promise<DbGuild | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     'SELECT guild_id, name, voice_channel_id FROM guild WHERE guild_id = ? LIMIT 1',

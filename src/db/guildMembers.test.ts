@@ -30,20 +30,25 @@ beforeEach(() => {
 });
 
 describe('getGuildMembers', () => {
-  it('maps rows and stringifies BIGINTs', async () => {
+  it('maps rows and preserves BIGINT snowflakes as strings without precision loss', async () => {
+    // These values exceed Number.MAX_SAFE_INTEGER; coercing to Number would corrupt them.
+    const GUILD  = 915557543463727107n;
+    const ALICE  = 799843684990877696n;
+    const BOB    = 799843684990877697n;
+
     pool.execute.mockResolvedValueOnce([
       [
-        { guild_id: 111, discord_id: 222, access_level: 3 },
-        { guild_id: 111, discord_id: 333, access_level: 1 },
+        { guild_id: GUILD, discord_id: ALICE, access_level: 3 },
+        { guild_id: GUILD, discord_id: BOB,   access_level: 1 },
       ],
       [],
     ]);
 
-    const result = await getGuildMembers('111');
+    const result = await getGuildMembers(String(GUILD));
 
     expect(result).toEqual([
-      { guild_id: '111', discord_id: '222', access_level: 3 },
-      { guild_id: '111', discord_id: '333', access_level: 1 },
+      { guild_id: '915557543463727107', discord_id: '799843684990877696', access_level: 3 },
+      { guild_id: '915557543463727107', discord_id: '799843684990877697', access_level: 1 },
     ]);
   });
 });

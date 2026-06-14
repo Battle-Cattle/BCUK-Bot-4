@@ -169,6 +169,10 @@ describe('startDiscordBot — guildCreate handler', () => {
 
     expect(vi.mocked(guilds.upsertGuild)).toHaveBeenCalledWith('new-guild', 'New Server');
     expect(vi.mocked(registry.reloadGuildRegistry)).toHaveBeenCalled();
+
+    const [upsertOrder] = vi.mocked(guilds.upsertGuild).mock.invocationCallOrder;
+    const [reloadOrder] = vi.mocked(registry.reloadGuildRegistry).mock.invocationCallOrder;
+    expect(upsertOrder).toBeLessThan(reloadOrder);
   });
 
   it('swallows upsertGuild errors without throwing', async () => {

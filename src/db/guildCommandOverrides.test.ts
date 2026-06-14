@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('./pool', () => ({ getPool: vi.fn() }));
 vi.mock('mysql2/promise', () => ({ default: {} }));
-vi.mock('./utils', () => ({ fromBit: (v: unknown) => v === 1 || v === true }));
 
 import { getPool } from './pool';
 import {
@@ -25,11 +24,13 @@ beforeEach(() => {
 });
 
 describe('getOverridesForGuild', () => {
-  it('maps rows, stringifies guild_id, and decodes is_disabled', async () => {
+  it('maps rows, stringifies guild_id, and decodes BIT is_disabled via real fromBit', async () => {
+    // MySQL BIT(1) columns arrive as single-byte Buffers, not plain integers.
+    // Using real Buffer fixtures here validates the actual fromBit decoding path.
     pool.execute.mockResolvedValueOnce([
       [
-        { guild_id: 111, command_id: 5, is_disabled: 1, output: null },
-        { guild_id: 111, command_id: 6, is_disabled: 0, output: 'custom text' },
+        { guild_id: 111, command_id: 5, is_disabled: Buffer.from([1]), output: null },
+        { guild_id: 111, command_id: 6, is_disabled: Buffer.from([0]), output: 'custom text' },
       ],
       [],
     ]);
