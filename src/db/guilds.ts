@@ -55,7 +55,12 @@ export async function getProvisionedGuilds(): Promise<DbGuild[]> {
   return rows.map(mapGuild);
 }
 
-/** Returns a single guild by its ID, or null if it is not found in the guild table. */
+/**
+ * Returns a single guild by its ID, or null if it is not found in the guild table.
+ *
+ * @param guildId BIGINT snowflake as a string.
+ * @returns The guild row, or null if absent (including unprovisioned discovered guilds).
+ */
 export async function getGuildById(guildId: string): Promise<DbGuild | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     'SELECT guild_id, name, voice_channel_id FROM guild WHERE guild_id = ? LIMIT 1',
@@ -75,6 +80,7 @@ export async function getGuildById(guildId: string): Promise<DbGuild | null> {
  *
  * @param guildId BIGINT snowflake as a string.
  * @param name Human-friendly server name.
+ * @returns Resolves when the upsert is complete.
  */
 export async function upsertGuild(guildId: string, name: string): Promise<void> {
   await getPool().execute(
@@ -89,6 +95,7 @@ export async function upsertGuild(guildId: string, name: string): Promise<void> 
  *
  * @param guildId BIGINT snowflake as a string.
  * @param voiceChannelId BIGINT snowflake as a string, or null to clear.
+ * @returns Resolves when the update is complete.
  */
 export async function setGuildVoiceChannel(guildId: string, voiceChannelId: string | null): Promise<void> {
   await getPool().execute(

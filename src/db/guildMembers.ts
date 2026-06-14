@@ -62,6 +62,7 @@ export async function getMemberAccessLevel(guildId: string, discordId: string): 
  * @param guildId - Guild snowflake ID.
  * @param discordId - User snowflake ID.
  * @param accessLevel - One of the AccessLevel values (0–3); rejects invalid values.
+ * @returns Resolves when the upsert is complete.
  */
 export async function setMemberAccessLevel(guildId: string, discordId: string, accessLevel: number): Promise<void> {
   if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
@@ -80,6 +81,7 @@ export async function setMemberAccessLevel(guildId: string, discordId: string, a
  *
  * @param guildId - Guild snowflake ID.
  * @param discordId - User snowflake ID.
+ * @returns Resolves when the delete is complete.
  */
 export async function removeGuildMember(guildId: string, discordId: string): Promise<void> {
   await getPool().execute(
