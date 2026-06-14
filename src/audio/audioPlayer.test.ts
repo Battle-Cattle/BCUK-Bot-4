@@ -70,6 +70,17 @@ beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
   createdConnections.length = 0;
+  // clearAllMocks resets call history but not implementations, so restore the
+  // default happy-path behaviour explicitly (tests below override per-case).
+  const voice = await import('@discordjs/voice');
+  vi.mocked(voice.entersState).mockReset().mockResolvedValue(undefined as never);
+  vi.mocked(voice.createAudioPlayer).mockReset()
+    .mockImplementation(() => ({ on: vi.fn(), stop: vi.fn(), play: vi.fn() }) as never);
+  vi.mocked(voice.joinVoiceChannel).mockReset().mockImplementation(() => {
+    const conn = makeConnection();
+    createdConnections.push(conn);
+    return conn as never;
+  });
   mod = await import('./audioPlayer.js') as AudioPlayerModule;
 });
 
@@ -160,5 +171,111 @@ describe('isConnected / getCurrentChannelId for unknown guilds', () => {
   it('reports not connected and null channel without throwing', () => {
     expect(mod.isConnected('never-seen')).toBe(false);
     expect(mod.getCurrentChannelId('never-seen')).toBeNull();
+  });
+});
+
+describe('reconnect', () => {
+  it('schedules a reconnect after a failed connect and retries when the timer fires', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client } = makeClient();
+      const voice = await import('@discordjs/voice');
+      // First join attempt times out waiting for Ready → connect rejects.
+      vi.mocked(voice.entersState).mockRejectedValueOnce(new Error('ready timeout'));
+
+      await expect(mod.connect(client as never, 'guild-A', 'chan-1')).rejects.toThrow('ready timeout');
+      expect(mod.isConnected('guild-A')).toBe(false);
+      const joinsAfterFirst = vi.mocked(voice.joinVoiceChannel).mock.calls.length;
+
+      // The scheduled retry (entersState now resolves) should connect successfully.
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(vi.mocked(voice.joinVoiceChannel).mock.calls.length).toBeGreaterThan(joinsAfterFirst);
+      expect(mod.isConnected('guild-A')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears a pending reconnect timer when connect is called again', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client } = makeClient();
+      const voice = await import('@discordjs/voice');
+      vi.mocked(voice.entersState).mockRejectedValueOnce(new Error('ready timeout'));
+
+      await expect(mod.connect(client as never, 'guild-A', 'chan-1')).rejects.toThrow();
+      // A retry timer is pending; an explicit reconnect must cancel it.
+      await mod.connect(client as never, 'guild-A', 'chan-2');
+      expect(mod.isConnected('guild-A')).toBe(true);
+
+      const joinsBefore = vi.mocked(voice.joinVoiceChannel).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      // The cancelled timer must not trigger a further join.
+      expect(vi.mocked(voice.joinVoiceChannel).mock.calls.length).toBe(joinsBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('tears down and clears voice status when a live connection drops', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client } = makeClient();
+      const voice = await import('@discordjs/voice');
+      const status = await import('../shared/statusStore.js');
+      await mod.connect(client as never, 'guild-A', 'chan-1');
+      expect(mod.isConnected('guild-A')).toBe(true);
+
+      const conn = createdConnections[0];
+      const dropHandler = conn.on.mock.calls.find(([e]) => e === 'disconnected')?.[1] as () => Promise<void>;
+      vi.mocked(status.setVoiceDisconnected).mockClear();
+      // The Signalling/Connecting recovery race fails → the connection is torn down.
+      vi.mocked(voice.entersState).mockRejectedValue(new Error('gone'));
+
+      await dropHandler();
+
+      expect(mod.isConnected('guild-A')).toBe(false);
+      expect(conn.destroy).toHaveBeenCalled();
+      expect(vi.mocked(status.setVoiceDisconnected)).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('shared audio player', () => {
+  it('Idle handler clears the playing flag and reports idle status', async () => {
+    const { client } = makeClient();
+    const voice = await import('@discordjs/voice');
+    const status = await import('../shared/statusStore.js');
+    const fakePlayer = { on: vi.fn(), stop: vi.fn(), play: vi.fn() };
+    vi.mocked(voice.createAudioPlayer).mockReturnValue(fakePlayer as never);
+
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    mod.startPlayback({} as never);
+    expect(mod.isPlaying()).toBe(true);
+
+    const idleHandler = fakePlayer.on.mock.calls.find(([e]) => e === 'idle')?.[1] as () => void;
+    idleHandler();
+
+    expect(mod.isPlaying()).toBe(false);
+    expect(vi.mocked(status.setVoiceIdle)).toHaveBeenCalled();
+  });
+
+  it('error handler resets the playing flag', async () => {
+    const { client } = makeClient();
+    const voice = await import('@discordjs/voice');
+    const fakePlayer = { on: vi.fn(), stop: vi.fn(), play: vi.fn() };
+    vi.mocked(voice.createAudioPlayer).mockReturnValue(fakePlayer as never);
+
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    mod.startPlayback({} as never);
+    expect(mod.isPlaying()).toBe(true);
+
+    const errorHandler = fakePlayer.on.mock.calls.find(([e]) => e === 'error')?.[1] as (err: Error) => void;
+    errorHandler(new Error('decode failed'));
+
+    expect(mod.isPlaying()).toBe(false);
   });
 });
