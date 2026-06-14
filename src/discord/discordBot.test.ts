@@ -52,6 +52,9 @@ function makeMockClient() {
 
 beforeEach(async () => {
   vi.resetModules();
+  // vi.mock() creates one shared mock instance per factory; resetModules clears the
+  // module cache but not call counts, so clearAllMocks() is needed before each test.
+  vi.clearAllMocks();
   mockInstance = makeMockClient();
   const djs = await import('discord.js');
   vi.mocked(djs.Client).mockImplementation(function () { return mockInstance; } as any);
@@ -175,15 +178,17 @@ describe('startDiscordBot — guildCreate handler', () => {
     expect(upsertOrder).toBeLessThan(reloadOrder);
   });
 
-  it('swallows upsertGuild errors without throwing', async () => {
+  it('swallows upsertGuild errors and does not call reloadGuildRegistry', async () => {
     const guilds = await import('../db.js');
+    const registry = await import('./guildRegistry.js');
     vi.mocked(guilds.upsertGuild).mockRejectedValueOnce(new Error('db error'));
     const cb = getGuildCreateCb();
 
     cb({ id: 'new-guild', name: 'New Server' });
     // Let the promise chain's .catch branch execute.
     await new Promise((resolve) => setImmediate(resolve));
-    // No assertion needed beyond reaching here without an unhandled rejection.
+
+    expect(vi.mocked(registry.reloadGuildRegistry)).not.toHaveBeenCalled();
   });
 });
 

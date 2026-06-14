@@ -159,6 +159,7 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
  * @param message - The Discord message to inspect and, if matched, reply to.
  * @param username - Display name for the monitoring entry; null or omitted if unknown.
  * @param guildId - Explicit guild ID for override-aware lookup; falls back to message.guildId.
+ * @returns Resolves when the command is handled (or skipped).
  */
 export async function executeCustomCommandForDiscord(
   message: Message,
