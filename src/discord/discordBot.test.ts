@@ -170,6 +170,17 @@ describe('startDiscordBot — guildCreate handler', () => {
     expect(vi.mocked(guilds.upsertGuild)).toHaveBeenCalledWith('new-guild', 'New Server');
     expect(vi.mocked(registry.reloadGuildRegistry)).toHaveBeenCalled();
   });
+
+  it('swallows upsertGuild errors without throwing', async () => {
+    const guilds = await import('../db.js');
+    vi.mocked(guilds.upsertGuild).mockRejectedValueOnce(new Error('db error'));
+    const cb = getGuildCreateCb();
+
+    cb({ id: 'new-guild', name: 'New Server' });
+    // Let the promise chain's .catch branch execute.
+    await new Promise((resolve) => setImmediate(resolve));
+    // No assertion needed beyond reaching here without an unhandled rejection.
+  });
 });
 
 // ─── startDiscordBot — clientReady error path ─────────────────────────────────
