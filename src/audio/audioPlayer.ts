@@ -9,15 +9,14 @@ import {
   type AudioResource,
   type VoiceConnection,
   type AudioPlayer as DjsAudioPlayer,
-  type DiscordGatewayAdapterCreator,
-  type DiscordGatewayAdapterLibraryMethods,
 } from '@discordjs/voice';
-import { Client, ChannelType, type VoiceBasedChannel } from 'discord.js';
+import { Client, ChannelType } from 'discord.js';
 import { DISCORD_VOICE_CHANNEL_ID } from '../shared/config';
 import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from '../shared/statusStore';
 
 const log = createLogger('AudioPlayer');
 import { isPermanentVoiceMisconfigurationError } from '../discord/discordUtils';
+import { createVoiceAdapterFactory, type VoiceAdapterFactory } from './voiceAdapter';
 import {
   type ConnectionHandlerDeps,
   setupConnectionHandlers,
@@ -32,11 +31,12 @@ import {
 // by guild ID. The reconnect state machine (attempt IDs, timers, backoff) runs
 // independently per guild so a drop in one guild never disturbs another.
 //
-// NOTE: the @discordjs/voice AudioPlayer below is still a single shared instance
-// (Pitfall #7 in the plan): only one guild can play audio at a time, and a
-// resource sent to the player is heard on every connection currently subscribed.
-// That is acceptable for the single-guild deployment (one connection) and is
-// documented as an MVP limitation; true concurrency needs a per-guild player.
+// The @discordjs/voice AudioPlayer below is intentionally a single shared
+// instance (Pitfall #7 in the plan): only one guild can play audio at a time,
+// and a resource sent to the player is heard on every connection currently
+// subscribed. That is acceptable for the single-guild deployment (one
+// connection) and is documented as an MVP limitation; true concurrency needs a
+// per-guild player.
 
 interface GuildVoiceState {
   guildId: string;
@@ -48,8 +48,8 @@ interface GuildVoiceState {
   reconnectAttempts: number;
   shouldAutoReconnect: boolean;
   currentAttemptId: number;
-  // Cleanup for this guild's active raw-gateway adapter listener (see buildAdapter).
-  activeAdapterCleanup: (() => void) | null;
+  // Builds this guild's raw-gateway voice adapters and tracks their cleanup.
+  adapterFactory: VoiceAdapterFactory;
 }
 
 const states = new Map<string, GuildVoiceState>();
@@ -68,7 +68,7 @@ function getState(guildId: string): GuildVoiceState {
       reconnectAttempts: 0,
       shouldAutoReconnect: false,
       currentAttemptId: 0,
-      activeAdapterCleanup: null,
+      adapterFactory: createVoiceAdapterFactory(),
     };
     states.set(guildId, state);
   }
@@ -86,69 +86,6 @@ function anyConnected(): boolean {
 // Single shared audio player (see note above).
 let player: DjsAudioPlayer;
 let playing = false;
-
-// ─── Voice adapter ────────────────────────────────────────────────────────────
-// Bypasses discord.js's built-in voiceAdapterCreator to avoid type/version
-// incompatibilities with discord.js v14. Listens to raw gateway events instead.
-
-type RawPacket = { t: string; d: Record<string, unknown> };
-
-function makeOnRaw(methods: DiscordGatewayAdapterLibraryMethods): (packet: RawPacket) => void {
-  return function onRaw(packet: RawPacket): void {
-    if (packet.t === 'VOICE_STATE_UPDATE') {
-      methods.onVoiceStateUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceStateUpdate>[0]);
-    }
-    if (packet.t === 'VOICE_SERVER_UPDATE') {
-      methods.onVoiceServerUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceServerUpdate>[0]);
-    }
-  };
-}
-
-function makeAdapterCleanup(
-  channel: VoiceBasedChannel,
-  onRaw: (packet: RawPacket) => void,
-  originalMax: number,
-  state: GuildVoiceState,
-): () => void {
-  let cleanedUp = false;
-  return function cleanup(): void {
-    if (cleanedUp) return;
-    cleanedUp = true;
-    channel.client.off('raw', onRaw);
-    if (originalMax !== 0) channel.client.setMaxListeners(originalMax);
-    state.activeAdapterCleanup = null;
-  };
-}
-
-function buildAdapter(channel: VoiceBasedChannel, state: GuildVoiceState): DiscordGatewayAdapterCreator {
-  return (methods: DiscordGatewayAdapterLibraryMethods) => {
-    // Tear down this guild's previous adapter before registering a new one so
-    // raw-gateway listeners do not accumulate across reconnects.
-    if (state.activeAdapterCleanup) state.activeAdapterCleanup();
-
-    const onRaw = makeOnRaw(methods);
-    const originalMax = channel.client.getMaxListeners();
-    // 0 means unlimited — don't touch it.
-    if (originalMax !== 0) channel.client.setMaxListeners(originalMax + 1);
-    channel.client.on('raw', onRaw);
-
-    const cleanup = makeAdapterCleanup(channel, onRaw, originalMax, state);
-    state.activeAdapterCleanup = cleanup;
-
-    return {
-      sendPayload: (payload: unknown) => {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          channel.guild.shard.send(payload as any);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-      destroy: cleanup,
-    };
-  };
-}
 
 // ─── Reconnect ────────────────────────────────────────────────────────────────
 
@@ -270,7 +207,7 @@ export async function connect(client: Client, guildId: string, channelId?: strin
     nextConnection = joinVoiceChannel({
       channelId: channel.id,
       guildId: guild.id,
-      adapterCreator: buildAdapter(channel, state),
+      adapterCreator: state.adapterFactory.build(channel),
       selfDeaf: false,
       selfMute: false,
     });
