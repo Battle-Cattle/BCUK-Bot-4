@@ -30,11 +30,11 @@ function makeOnRaw(methods: DiscordGatewayAdapterLibraryMethods): (packet: RawPa
   };
 }
 
-/** Builds the idempotent cleanup that removes the raw listener and restores the cap. */
+/** Builds the idempotent cleanup that removes the raw listener and decrements the cap. */
 function makeCleanup(
   channel: VoiceBasedChannel,
   onRaw: (packet: RawPacket) => void,
-  originalMax: number,
+  increment: number,
   state: AdapterCleanupState,
 ): () => void {
   let cleanedUp = false;
@@ -42,7 +42,9 @@ function makeCleanup(
     if (cleanedUp) return;
     cleanedUp = true;
     channel.client.off('raw', onRaw);
-    if (originalMax !== 0) channel.client.setMaxListeners(originalMax);
+    // Decrement rather than restore to a snapshot so that cross-guild adapters
+    // sharing the same client do not race each other's cap bookkeeping.
+    if (increment > 0) channel.client.setMaxListeners(channel.client.getMaxListeners() - increment);
     state.activeCleanup = null;
   };
 }
@@ -71,12 +73,13 @@ function registerAdapter(
   if (state.activeCleanup) state.activeCleanup();
 
   const onRaw = makeOnRaw(methods);
-  const originalMax = channel.client.getMaxListeners();
+  const currentMax = channel.client.getMaxListeners();
   // 0 means unlimited — don't touch it.
-  if (originalMax !== 0) channel.client.setMaxListeners(originalMax + 1);
+  const increment = currentMax !== 0 ? 1 : 0;
+  if (increment > 0) channel.client.setMaxListeners(currentMax + 1);
   channel.client.on('raw', onRaw);
 
-  const cleanup = makeCleanup(channel, onRaw, originalMax, state);
+  const cleanup = makeCleanup(channel, onRaw, increment, state);
   state.activeCleanup = cleanup;
 
   return { sendPayload: makeSendPayload(channel), destroy: cleanup };

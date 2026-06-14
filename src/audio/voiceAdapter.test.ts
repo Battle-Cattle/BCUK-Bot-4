@@ -2,13 +2,16 @@ import { describe, it, expect, vi } from 'vitest';
 import { createVoiceAdapterFactory } from './voiceAdapter';
 
 // Minimal fake voice channel exposing only what the adapter touches.
+// getMaxListeners/setMaxListeners are stateful so the incremental cap bookkeeping
+// can be tested accurately.
 function makeChannel() {
   const shardSend = vi.fn();
+  let cap = 10;
   const client = {
     on: vi.fn(),
     off: vi.fn(),
-    getMaxListeners: vi.fn(() => 10),
-    setMaxListeners: vi.fn(),
+    getMaxListeners: vi.fn(() => cap),
+    setMaxListeners: vi.fn((n: number) => { cap = n; }),
   };
   const channel = { client, guild: { shard: { send: shardSend } } };
   return { channel, client, shardSend };
@@ -74,6 +77,31 @@ describe('createVoiceAdapterFactory', () => {
     factory.build(channel as never)(methods);
 
     expect(client.setMaxListeners).not.toHaveBeenCalled();
+  });
+
+  it('two guild adapters sharing a client restore the baseline cap regardless of destroy order', () => {
+    let cap = 10;
+    const sharedClient = {
+      on: vi.fn(),
+      off: vi.fn(),
+      getMaxListeners: vi.fn(() => cap),
+      setMaxListeners: vi.fn((n: number) => { cap = n; }),
+    };
+    const channelA = { client: sharedClient, guild: { shard: { send: vi.fn() } } };
+    const channelB = { client: sharedClient, guild: { shard: { send: vi.fn() } } };
+
+    const factoryA = createVoiceAdapterFactory();
+    const factoryB = createVoiceAdapterFactory();
+    const adapterA = factoryA.build(channelA as never)(methods);
+    const adapterB = factoryB.build(channelB as never)(methods);
+    expect(cap).toBe(12);
+
+    // Destroy A first — the snapshot approach would leave cap at 11 after B also
+    // destroys (B's snapshot was 11, not the true baseline of 10).
+    adapterA.destroy();
+    expect(cap).toBe(11);
+    adapterB.destroy();
+    expect(cap).toBe(10);
   });
 
   it('forwards raw voice packets to the matching gateway method', () => {
