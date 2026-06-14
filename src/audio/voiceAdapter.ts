@@ -1,5 +1,6 @@
 import type {
   DiscordGatewayAdapterCreator,
+  DiscordGatewayAdapterImplementerMethods,
   DiscordGatewayAdapterLibraryMethods,
 } from '@discordjs/voice';
 import type { VoiceBasedChannel } from 'discord.js';
@@ -7,8 +8,16 @@ import type { VoiceBasedChannel } from 'discord.js';
 // ─── Voice adapter ────────────────────────────────────────────────────────────
 // Bypasses discord.js's built-in voiceAdapterCreator to avoid type/version
 // incompatibilities with discord.js v14. Listens to raw gateway events instead.
+//
+// The pieces are kept as flat module-level helpers (rather than closures nested
+// inside the factory) so each stays simple and independently testable.
 
 type RawPacket = { t: string; d: Record<string, unknown> };
+
+/** Tracks the cleanup for a guild's currently-registered adapter listener. */
+interface AdapterCleanupState {
+  activeCleanup: (() => void) | null;
+}
 
 function makeOnRaw(methods: DiscordGatewayAdapterLibraryMethods): (packet: RawPacket) => void {
   return function onRaw(packet: RawPacket): void {
@@ -19,6 +28,58 @@ function makeOnRaw(methods: DiscordGatewayAdapterLibraryMethods): (packet: RawPa
       methods.onVoiceServerUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceServerUpdate>[0]);
     }
   };
+}
+
+/** Builds the idempotent cleanup that removes the raw listener and restores the cap. */
+function makeCleanup(
+  channel: VoiceBasedChannel,
+  onRaw: (packet: RawPacket) => void,
+  originalMax: number,
+  state: AdapterCleanupState,
+): () => void {
+  let cleanedUp = false;
+  return function cleanup(): void {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    channel.client.off('raw', onRaw);
+    if (originalMax !== 0) channel.client.setMaxListeners(originalMax);
+    state.activeCleanup = null;
+  };
+}
+
+function makeSendPayload(channel: VoiceBasedChannel): (payload: unknown) => boolean {
+  return function sendPayload(payload: unknown): boolean {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      channel.guild.shard.send(payload as any);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+}
+
+/**
+ * Registers a raw-gateway adapter for one connection, tearing down the guild's
+ * previous adapter first so listeners do not accumulate across reconnects.
+ */
+function registerAdapter(
+  channel: VoiceBasedChannel,
+  methods: DiscordGatewayAdapterLibraryMethods,
+  state: AdapterCleanupState,
+): DiscordGatewayAdapterImplementerMethods {
+  if (state.activeCleanup) state.activeCleanup();
+
+  const onRaw = makeOnRaw(methods);
+  const originalMax = channel.client.getMaxListeners();
+  // 0 means unlimited — don't touch it.
+  if (originalMax !== 0) channel.client.setMaxListeners(originalMax + 1);
+  channel.client.on('raw', onRaw);
+
+  const cleanup = makeCleanup(channel, onRaw, originalMax, state);
+  state.activeCleanup = cleanup;
+
+  return { sendPayload: makeSendPayload(channel), destroy: cleanup };
 }
 
 /** Builds the gateway adapter creators for one guild's voice connections. */
@@ -35,43 +96,8 @@ export interface VoiceAdapterFactory {
  * @returns A factory whose `build` produces channel-bound adapter creators.
  */
 export function createVoiceAdapterFactory(): VoiceAdapterFactory {
-  let activeCleanup: (() => void) | null = null;
-
-  function build(channel: VoiceBasedChannel): DiscordGatewayAdapterCreator {
-    return (methods: DiscordGatewayAdapterLibraryMethods) => {
-      // Tear down the previous adapter before registering a new one.
-      if (activeCleanup) activeCleanup();
-
-      const onRaw = makeOnRaw(methods);
-      const originalMax = channel.client.getMaxListeners();
-      // 0 means unlimited — don't touch it.
-      if (originalMax !== 0) channel.client.setMaxListeners(originalMax + 1);
-      channel.client.on('raw', onRaw);
-
-      let cleanedUp = false;
-      const cleanup = (): void => {
-        if (cleanedUp) return;
-        cleanedUp = true;
-        channel.client.off('raw', onRaw);
-        if (originalMax !== 0) channel.client.setMaxListeners(originalMax);
-        activeCleanup = null;
-      };
-      activeCleanup = cleanup;
-
-      return {
-        sendPayload: (payload: unknown) => {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            channel.guild.shard.send(payload as any);
-            return true;
-          } catch {
-            return false;
-          }
-        },
-        destroy: cleanup,
-      };
-    };
-  }
-
-  return { build };
+  const state: AdapterCleanupState = { activeCleanup: null };
+  return {
+    build: (channel) => (methods) => registerAdapter(channel, methods, state),
+  };
 }
