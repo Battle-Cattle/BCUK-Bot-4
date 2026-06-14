@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Controller Overlay</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: transparent; }
+    #root { position: relative; display: inline-block; padding: 6px; font-family: 'Segoe UI', sans-serif; }
+    #status { position: absolute; z-index: 10; top: 50%; left: 50%; transform: translate(-50%, -50%); white-space: nowrap; text-align: center; font-size: 16px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #ffffff; background: rgba(0,0,0,0.85); border: 1px solid rgba(255,255,255,0.15); padding: 10px 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+    #status.connected { visibility: hidden; }
+  </style>
+</head>
+<body>
+<div id="root">
+  <div id="status">No controller connected</div>
+
+  <svg id="ctrl" viewBox="0 0 320 200" xmlns="http://www.w3.org/2000/svg" width="320" style="display:block">
+    <defs>
+      <clipPath id="lt-clip"><rect x="5" y="5" width="140" height="42" rx="8"/></clipPath>
+      <clipPath id="rt-clip"><rect x="175" y="5" width="140" height="42" rx="8"/></clipPath>
+    </defs>
+
+    <!-- LT / Brake -->
+    <rect x="5" y="5" width="140" height="42" rx="8" fill="#272727" stroke="#383838" stroke-width="1"/>
+    <rect id="lt-fill" x="5" y="5" width="0" height="42" rx="8" fill="#00d4ff" opacity="0.85" clip-path="url(#lt-clip)"/>
+    <text x="75" y="33" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="16" font-weight="700" fill="#aaa">BRAKE</text>
+
+    <!-- RT / Throttle -->
+    <rect x="175" y="5" width="140" height="42" rx="8" fill="#272727" stroke="#383838" stroke-width="1"/>
+    <rect id="rt-fill" x="175" y="5" width="0" height="42" rx="8" fill="#00d4ff" opacity="0.85" clip-path="url(#rt-clip)"/>
+    <text x="245" y="33" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="16" font-weight="700" fill="#aaa">THROTTLE</text>
+
+    <!-- Left Stick -->
+    <circle cx="85" cy="142" r="55" fill="#111" stroke="#2a2a2a" stroke-width="1.5"/>
+    <circle id="ls-ring" cx="85" cy="142" r="42" fill="#222" stroke="#333" stroke-width="1"/>
+    <line id="ls-line" x1="85" y1="142" x2="85" y2="142" stroke="#00d4ff" stroke-width="2.5" stroke-linecap="round" opacity="0"/>
+    <circle id="ls-dot" cx="85" cy="142" r="17" fill="#3a3a3a"/>
+    <text x="85" y="197" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="13" font-weight="700" fill="#555">LS</text>
+
+    <!-- A Button / Hand Brake -->
+    <circle id="btn-a" cx="245" cy="142" r="50" fill="#272727" stroke="#3c3c3c" stroke-width="1"/>
+    <text text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="16" font-weight="700" fill="#33aa33">
+      <tspan x="245" dy="0" y="134">HAND</tspan>
+      <tspan x="245" dy="20">BRAKE</tspan>
+    </text>
+  </svg>
+</div>
+
+<script src="/controller-overlay.js"></script>
+</body>
+</html>

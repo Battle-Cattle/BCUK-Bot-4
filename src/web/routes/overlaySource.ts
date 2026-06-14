@@ -10,7 +10,7 @@ const router = Router();
 const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
 const FILENAME_RE = /^[\w-]+\.(webm|mp4)$/i;
 // Words reserved for admin routes — must not be treated as channel logins.
-const RESERVED_LOGINS = new Set(['settings', 'videos']);
+const RESERVED_LOGINS = new Set(['settings', 'videos', 'controller']);
 
 // In-memory map of active SSE connections keyed by Twitch channel login (lowercase).
 export const connections = new Map<string, Set<import('express').Response>>();
@@ -37,6 +37,11 @@ export function pushOverlayEvent(login: string, videoPath: string): void {
   if (clients.size === 0) connections.delete(key);
   log.info(`Pushed overlay event to ${clients.size} client(s) for ${login}`);
 }
+
+// GET /overlay/controller — Forza/gamepad controller browser source (no auth, opened by OBS)
+router.get('/controller', (_req, res) => {
+  res.render('controllerOverlay');
+});
 
 // GET /overlay/:login — browser source HTML page (no auth, opened by OBS)
 router.get('/:login', (req, res, next) => {
