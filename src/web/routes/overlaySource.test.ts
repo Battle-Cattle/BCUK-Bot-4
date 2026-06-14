@@ -18,6 +18,12 @@ import router, { MAX_SSE_CONNECTIONS_PER_CHANNEL, connections } from './overlayS
 
 function buildApp() {
   const app = express();
+  // Capture res.render calls as JSON so tests don't need a real view engine.
+  app.use((req, res, next) => {
+    (res as any).render = (view: string, locals?: Record<string, unknown>) =>
+      res.json({ view, ...(locals ?? {}) });
+    next();
+  });
   app.use(router);
   return app;
 }
@@ -25,6 +31,21 @@ function buildApp() {
 beforeEach(() => {
   connections.clear();
   vi.clearAllMocks();
+});
+
+describe('GET /controller', () => {
+  it('returns 200 and renders the controllerOverlay view', async () => {
+    const res = await supertest(buildApp()).get('/controller');
+    expect(res.status).toBe(200);
+    expect(res.body.view).toBe('controllerOverlay');
+  });
+
+  it('is not caught by the :login route — "controller" is in RESERVED_LOGINS', async () => {
+    // /:login renders 'overlaySource'; /controller must render 'controllerOverlay'.
+    const res = await supertest(buildApp()).get('/controller');
+    expect(res.body.view).toBe('controllerOverlay');
+    expect(res.body.view).not.toBe('overlaySource');
+  });
 });
 
 describe('MAX_SSE_CONNECTIONS_PER_CHANNEL', () => {
