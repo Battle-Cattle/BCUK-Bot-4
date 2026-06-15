@@ -20,7 +20,7 @@ rollback() {
 }
 
 echo "==> Pulling latest code..."
-if ! git diff-index --quiet HEAD -- || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+if ! git diff-index --quiet HEAD --; then
     echo "ERROR: Working directory has uncommitted changes or untracked files."
     echo "       Commit or stash changes before deploying."
     exit 1
