@@ -10,8 +10,24 @@ cd "$(dirname "$0")"
 
 [ -f package.json ] || { echo "ERROR: Run this script from the repo root."; exit 1; }
 
+PREVIOUS_SHA=$(git rev-parse HEAD)
+
+# On any error after git pull, roll back to the previous commit.
+rollback() {
+    echo "ERROR: Deployment failed. Rolling back to $PREVIOUS_SHA..."
+    git reset --hard "$PREVIOUS_SHA"
+    exit 1
+}
+
 echo "==> Pulling latest code..."
+if ! git diff-index --quiet HEAD -- || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+    echo "ERROR: Working directory has uncommitted changes or untracked files."
+    echo "       Commit or stash changes before deploying."
+    exit 1
+fi
 git pull origin main
+
+trap rollback ERR
 
 echo "==> Installing dependencies..."
 npm ci
@@ -27,6 +43,8 @@ npm test
 
 echo "==> Pruning dev dependencies..."
 npm prune --omit=dev
+
+trap - ERR  # Rollback no longer needed — code is good.
 
 echo "==> Restarting bot in screen session '$SCREEN_SESSION'..."
 if screen -list | grep -Eq "[0-9]+\.$SCREEN_SESSION[[:space:]]"; then
