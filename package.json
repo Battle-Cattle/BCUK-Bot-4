@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "graphify:hook": "graphify hook install"
+    "graphify:hook": "graphify hook install",
+    "deploy": "bash deploy.sh"
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
