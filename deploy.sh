@@ -47,14 +47,18 @@ npm prune --omit=dev
 trap - ERR  # Rollback no longer needed — code is good.
 
 echo "==> Restarting bot in screen session '$SCREEN_SESSION'..."
-if screen -list | grep -Eq "[0-9]+\.$SCREEN_SESSION[[:space:]]"; then
+if screen -list | grep -Eq "[0-9]+\.${SCREEN_SESSION}[[:space:]]"; then
     screen -S "$SCREEN_SESSION" -X stuff $'\003'
 
     # Wait up to 15s for the node process to fully exit before restarting.
-    for i in {1..15}; do
+    for _ in {1..15}; do
         pgrep -f "node dist/index.js" > /dev/null 2>&1 || break
         sleep 1
     done
+
+    if pgrep -f "node dist/index.js" > /dev/null 2>&1; then
+        echo "WARNING: Node process did not stop within 15s. Attempting restart anyway..."
+    fi
 
     screen -S "$SCREEN_SESSION" -X stuff "npm start\n"
     echo "==> Bot restarted."
