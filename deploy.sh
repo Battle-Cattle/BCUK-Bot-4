@@ -61,7 +61,8 @@ if screen -list | grep -Eq "[0-9]+\.${SCREEN_SESSION}[[:space:]]"; then
         echo "WARNING: Node process did not stop within 15s. Attempting restart anyway..."
     fi
 
-    screen -S "$SCREEN_SESSION" -X stuff "npm start\n"
+    REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+    screen -S "$SCREEN_SESSION" -X stuff "cd ${REPO_DIR} && npm start\n"
     echo "==> Bot restarted."
 else
     echo "WARNING: Screen session '$SCREEN_SESSION' not found."
