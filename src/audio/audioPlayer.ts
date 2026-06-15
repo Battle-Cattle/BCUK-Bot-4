@@ -293,7 +293,8 @@ export function disconnect(guildId?: string): void {
     for (const state of states.values()) disconnectGuild(state);
     return;
   }
-  disconnectGuild(getState(guildId));
+  const state = states.get(guildId);
+  if (state) disconnectGuild(state);
 }
 
 /** Returns true if a sound is currently being played (shared across guilds). */

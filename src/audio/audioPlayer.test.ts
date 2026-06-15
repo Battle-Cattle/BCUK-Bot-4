@@ -162,6 +162,38 @@ describe('per-guild isolation', () => {
     expect(vi.mocked(status.setVoiceDisconnected)).not.toHaveBeenCalled();
   });
 
+  it('a scheduled reconnect in one guild does not affect the other guild', async () => {
+    vi.useFakeTimers();
+    try {
+      const a = makeClient();
+      const b = makeClient();
+      const voice = await import('@discordjs/voice');
+
+      // Guild-A fails to connect → reconnect timer scheduled.
+      vi.mocked(voice.entersState).mockRejectedValueOnce(new Error('guild-A timeout'));
+      await expect(mod.connect(a.client as never, 'guild-A', 'chan-A')).rejects.toThrow('guild-A timeout');
+      expect(mod.isConnected('guild-A')).toBe(false);
+
+      // Guild-B connects successfully.
+      await mod.connect(b.client as never, 'guild-B', 'chan-B');
+      expect(mod.isConnected('guild-B')).toBe(true);
+
+      const joinCountBeforeTimer = vi.mocked(voice.joinVoiceChannel).mock.calls.length;
+
+      // Guild-A's reconnect timer fires and also fails; guild-B must be unaffected.
+      vi.mocked(voice.entersState).mockRejectedValue(new Error('still failing'));
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(mod.isConnected('guild-B')).toBe(true);
+      expect(mod.getCurrentChannelId('guild-B')).toBe('chan-B');
+      // Guild-A retried (one extra join), guild-B did not.
+      expect(vi.mocked(voice.joinVoiceChannel).mock.calls.length).toBeGreaterThan(joinCountBeforeTimer);
+      expect(mod.isConnected('guild-A')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('disconnect() with no guild tears down every guild and clears voice status', async () => {
     const a = makeClient();
     const b = makeClient();
@@ -183,6 +215,13 @@ describe('isConnected / getCurrentChannelId for unknown guilds', () => {
   it('reports not connected and null channel without throwing', () => {
     expect(mod.isConnected('never-seen')).toBe(false);
     expect(mod.getCurrentChannelId('never-seen')).toBeNull();
+  });
+
+  it('disconnect() on a never-connected guild is a no-op and does not allocate state', async () => {
+    const status = await import('../shared/statusStore.js');
+    mod.disconnect('never-connected');
+    expect(mod.isConnected('never-connected')).toBe(false);
+    expect(vi.mocked(status.setVoiceDisconnected)).not.toHaveBeenCalled();
   });
 });
 
@@ -228,6 +267,23 @@ describe('reconnect', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('a second connect() to the same guild supersedes an in-flight one at the next await point', async () => {
+    const { client } = makeClient();
+    const voice = await import('@discordjs/voice');
+
+    // Start two connects without awaiting the first. The second call increments
+    // currentAttemptId before the first connect reaches its next checkpoint
+    // (guilds.fetch resolves as a microtask), so the first connect exits silently.
+    const firstConnect = mod.connect(client as never, 'guild-A', 'chan-1');
+    await mod.connect(client as never, 'guild-A', 'chan-2');
+    await firstConnect; // already resolved early — must not throw
+
+    expect(mod.isConnected('guild-A')).toBe(true);
+    expect(mod.getCurrentChannelId('guild-A')).toBe('chan-2');
+    // First connect exits before joinVoiceChannel; only one join total.
+    expect(vi.mocked(voice.joinVoiceChannel).mock.calls.length).toBe(1);
   });
 
   it('clears a pending reconnect timer when connect is called again', async () => {
