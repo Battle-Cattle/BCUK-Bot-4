@@ -57,7 +57,7 @@
         <div class="card-body">
           <p class="hint hint-compact">Add this URL as a Browser Source in OBS (1920×1080, transparent background):</p>
           <% const login = streamer.twitch_name ? streamer.twitch_name.toLowerCase() : ''; %>
-          <code class="mono" style="display:block;margin-top:0.4rem;user-select:all;"><%= baseUrl %>/overlay/<%= login %></code>
+          <code class="mono" style="display:block;margin-top:0.4rem;user-select:all;word-break:break-all;overflow-wrap:anywhere;"><%= baseUrl %>/overlay/<%= login %></code>
           <p class="hint" style="margin-top:0.5rem;">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the URL above.</p>
         </div>
       </div>
@@ -69,7 +69,7 @@
       <div class="card">
         <div class="card-body">
           <p class="hint hint-compact">Add this URL as a Browser Source in OBS to display a gamepad input visualiser (throttle, brake, steering, handbrake):</p>
-          <code class="mono" style="display:block;margin-top:0.4rem;user-select:all;"><%= baseUrl %>/overlay/controller</code>
+          <code class="mono" style="display:block;margin-top:0.4rem;user-select:all;word-break:break-all;overflow-wrap:anywhere;"><%= baseUrl %>/overlay/controller</code>
           <p class="hint" style="margin-top:0.5rem;">Works with any Xbox / PlayStation / generic controller. Transparent background — native size is <strong>332&times;212px</strong> (set the OBS browser source to these dimensions, then scale to taste).</p>
         </div>
       </div>
@@ -108,7 +108,7 @@
       </div>
       <% } else { %>
       <div class="card">
-        <div class="card-body">
+        <div class="table-scroll">
           <table class="table" style="width:100%;">
             <thead>
               <tr>
@@ -209,7 +209,7 @@
           <div class="form-row-wrap" style="align-items:center;justify-content:space-between;">
             <div>
               <p class="hint hint-compact">Reward ID</p>
-              <code class="mono"><%= r.twitch_reward_id %></code>
+              <code class="mono" style="word-break:break-all;overflow-wrap:anywhere;"><%= r.twitch_reward_id %></code>
             </div>
             <form method="POST" action="/overlay/settings/rewards/<%= r.id %>/delete" style="margin:0;">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -220,19 +220,21 @@
             </form>
           </div>
           <% if (r.videos.length > 0) { %>
-          <table class="table" style="width:100%;margin-top:0.75rem;">
-            <thead>
-              <tr><th>Video</th><th>Weight</th></tr>
-            </thead>
-            <tbody>
-              <% for (const v of r.videos) { %>
-              <tr>
-                <td><%= v.name %></td>
-                <td><%= v.weight %></td>
-              </tr>
-              <% } %>
-            </tbody>
-          </table>
+          <div class="table-scroll" style="margin-top:0.75rem;">
+            <table class="table" style="width:100%;">
+              <thead>
+                <tr><th>Video</th><th>Weight</th></tr>
+              </thead>
+              <tbody>
+                <% for (const v of r.videos) { %>
+                <tr>
+                  <td><%= v.name %></td>
+                  <td><%= v.weight %></td>
+                </tr>
+                <% } %>
+              </tbody>
+            </table>
+          </div>
           <% } else { %>
           <p class="hint" style="margin-top:0.5rem;">No videos assigned.</p>
           <% } %>
