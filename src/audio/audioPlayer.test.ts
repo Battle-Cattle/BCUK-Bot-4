@@ -120,6 +120,16 @@ describe('connect', () => {
     expect(mod.isConnected('guild-A')).toBe(false);
   });
 
+  it('rejects and stays disconnected when the channel does not exist in the guild (cross-guild channel ID)', async () => {
+    const { client, channelsFetch } = makeClient();
+    // guild.channels.fetch returns null for a channel that belongs to a different guild.
+    channelsFetch.mockResolvedValueOnce(null as never);
+
+    await expect(mod.connect(client as never, 'guild-A', 'chan-from-other-guild'))
+      .rejects.toThrow('not a voice channel');
+    expect(mod.isConnected('guild-A')).toBe(false);
+  });
+
   it('rejects when the guild ID is missing', async () => {
     const { client } = makeClient();
     const utils = await import('../discord/discordUtils.js');
