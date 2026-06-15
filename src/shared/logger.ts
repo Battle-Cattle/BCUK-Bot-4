@@ -3,6 +3,7 @@ import DailyRotateFile from 'winston-daily-rotate-file';
 
 const LOG_LEVEL = process.env.LOG_LEVEL ?? (process.env.NODE_ENV === 'production' ? 'info' : 'debug');
 const LOG_DIR = 'logs';
+const IS_TEST = !!process.env.VITEST;
 
 const fileFormat = format.combine(
   format.errors({ stack: true }),
@@ -26,25 +27,29 @@ const consoleFormat = format.combine(
 const rootLogger = winstonCreateLogger({
   level: LOG_LEVEL,
   transports: [
-    new DailyRotateFile({
-      dirname: LOG_DIR,
-      filename: 'combined-%DATE%.log',
-      datePattern: 'YYYY-MM-DD',
-      maxSize: '20m',
-      maxFiles: '14d',
-      zippedArchive: true,
-      format: fileFormat,
-    }),
-    new DailyRotateFile({
-      dirname: LOG_DIR,
-      filename: 'error-%DATE%.log',
-      datePattern: 'YYYY-MM-DD',
-      level: 'error',
-      maxSize: '20m',
-      maxFiles: '14d',
-      zippedArchive: true,
-      format: fileFormat,
-    }),
+    ...(!IS_TEST
+      ? [
+          new DailyRotateFile({
+            dirname: LOG_DIR,
+            filename: 'combined-%DATE%.log',
+            datePattern: 'YYYY-MM-DD',
+            maxSize: '20m',
+            maxFiles: '14d',
+            zippedArchive: true,
+            format: fileFormat,
+          }),
+          new DailyRotateFile({
+            dirname: LOG_DIR,
+            filename: 'error-%DATE%.log',
+            datePattern: 'YYYY-MM-DD',
+            level: 'error',
+            maxSize: '20m',
+            maxFiles: '14d',
+            zippedArchive: true,
+            format: fileFormat,
+          }),
+        ]
+      : []),
     new transports.Console({
       format: consoleFormat,
     }),
