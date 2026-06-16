@@ -7,12 +7,15 @@ vi.mock('../../db', () => {
   return {
     getAllCustomCommandsWithAssignments: vi.fn().mockResolvedValue([]),
     getAllUsers: vi.fn().mockResolvedValue([]),
+    getOverridesForGuild: vi.fn().mockResolvedValue([]),
     addCustomCommand: vi.fn().mockResolvedValue(1),
     updateCustomCommand: vi.fn().mockResolvedValue(undefined),
     removeCustomCommand: vi.fn().mockResolvedValue(undefined),
     assignUserToCommand: vi.fn().mockResolvedValue(undefined),
     unassignUserFromCommand: vi.fn().mockResolvedValue(undefined),
     findUser: vi.fn().mockResolvedValue(null),
+    upsertOverride: vi.fn().mockResolvedValue(undefined),
+    removeOverride: vi.fn().mockResolvedValue(undefined),
     CommandConflictError,
     CommandNotFoundError,
     ReservedCommandError,
@@ -31,6 +34,7 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
   requireMod: (_req: any, _res: any, next: any) => next(),
   requireManager: (_req: any, _res: any, next: any) => next(),
+  requireGuildContext: (_req: any, _res: any, next: any) => next(),
 }));
 
 vi.mock('../../logger', () => ({

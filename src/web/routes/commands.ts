@@ -2,15 +2,18 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import {
   DbCustomCommandWithAssignments,
+  DbGuildCommandOverride,
   DbUser,
   getAllCustomCommandsWithAssignments,
   getAllUsers,
+  getOverridesForGuild,
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { renderError, filterQueryParam } from './shared';
 import commandMutationsRouter from './commandMutations';
 import commandAssignmentsRouter from './commandAssignments';
+import commandGuildOverridesRouter from './commandGuildOverrides';
 
 const log = createLogger('Web');
 const router = Router();
@@ -27,25 +30,32 @@ const KNOWN_ERRORS = new Set([
   'assign_failed',
   'unassign_failed',
   'invalid_assignment_user',
+  'override_failed',
+  'override_reset_failed',
 ]);
 
 interface CommandViewModel extends DbCustomCommandWithAssignments {
   unassigned_users: DbUser[];
+  /** Per-guild override row for the current guild, or null when at catalog default. */
+  guildOverride: DbGuildCommandOverride | null;
 }
 
 router.get('/commands', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const [commands, users] = await Promise.all([
+    const guildId = req.session.user?.currentGuildId ?? null;
+    const [commands, users, overrides] = await Promise.all([
       getAllCustomCommandsWithAssignments(),
       getAllUsers(),
+      guildId ? getOverridesForGuild(guildId) : Promise.resolve([] as DbGuildCommandOverride[]),
     ]);
+    const overridesByCommandId = new Map(overrides.map((o) => [o.command_id, o]));
     const assignableUsers = users.filter((entry) => entry.twitch_name);
     const commandsForView: CommandViewModel[] = commands.map((command) => {
       const assignedDiscordIds = new Set(command.assigned_users.map((entry) => entry.discord_id));
-
       return {
         ...command,
         unassigned_users: assignableUsers.filter((entry) => !assignedDiscordIds.has(entry.discord_id)),
+        guildOverride: overridesByCommandId.get(command.command_id) ?? null,
       };
     });
 
@@ -64,5 +74,6 @@ router.get('/commands', requireAuth, csrfProtection, async (req, res) => {
 
 router.use(commandMutationsRouter);
 router.use(commandAssignmentsRouter);
+router.use(commandGuildOverridesRouter);
 
 export default router;
