@@ -12,10 +12,15 @@ const log = createLogger('AudioConn');
  * and mutate per-guild voice state without a direct import cycle.
  */
 export interface ConnectionHandlerDeps {
+  /** Returns the current attempt ID for the guild, used to detect stale callbacks. */
   getAttemptId: () => number;
+  /** Returns the guild's current active voice connection, or null if none. */
   getConnection: () => VoiceConnection | null;
+  /** Replaces the guild's active connection reference. */
   setConnection: (c: VoiceConnection | null) => void;
+  /** Tears down guild playback state after the voice connection is lost. */
   tearDown: () => void;
+  /** Schedules an exponential-backoff reconnect attempt for the guild. */
   scheduleReconnect: (reason: string) => void;
 }
 
