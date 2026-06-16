@@ -27,9 +27,8 @@ vi.mock('../../discord/discordUtils', () => ({
   getAvailableVoiceChannels: vi.fn(),
 }));
 
-vi.mock('../../shared/config', () => ({
-  DISCORD_GUILD_ID: 'guild-123',
-  DISCORD_VOICE_CHANNEL_ID: 'default-vc',
+vi.mock('../../db', () => ({
+  getGuildById: vi.fn(),
 }));
 
 vi.mock('./shared', () => ({
@@ -47,10 +46,18 @@ import { getStatus } from '../../shared/statusStore';
 import { connect, disconnect, getCurrentChannelId } from '../../audio/audioPlayer';
 import { getDiscordClient } from '../../discord/discordBot';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
+import { getGuildById } from '../../db';
 
-function buildApp() {
+const GUILD_ID = '900000000000000001';
+
+// Injects a session with the current guild so the guild-scoped voice routes resolve.
+function buildApp(currentGuildId: string | null = GUILD_ID) {
   const app = express();
   app.use(express.json());
+  app.use((req: any, _res: any, next: any) => {
+    req.session = { user: { discordId: 'u1', currentGuildId } };
+    next();
+  });
   app.use(router);
   return app;
 }
@@ -62,6 +69,7 @@ beforeEach(() => {
   vi.mocked(connect).mockResolvedValue(undefined);
   vi.mocked(getCurrentChannelId).mockReturnValue('current-vc');
   vi.mocked(getAvailableVoiceChannels).mockResolvedValue([]);
+  vi.mocked(getGuildById).mockResolvedValue({ guild_id: GUILD_ID, name: 'Guild', voice_channel_id: 'default-vc' });
 });
 
 describe('GET /status', () => {
@@ -72,14 +80,26 @@ describe('GET /status', () => {
 });
 
 describe('GET /voice/channels', () => {
-  it('reports the current channel for the configured guild', async () => {
+  it('reports the current channel and DB default for the session guild', async () => {
     const res = await supertest(buildApp()).get('/voice/channels').expect(200);
     expect(res.body).toMatchObject({
       ok: true,
       defaultChannelId: 'default-vc',
       currentChannelId: 'current-vc',
     });
-    expect(vi.mocked(getCurrentChannelId)).toHaveBeenCalledWith('guild-123');
+    expect(vi.mocked(getCurrentChannelId)).toHaveBeenCalledWith(GUILD_ID);
+    expect(vi.mocked(getAvailableVoiceChannels)).toHaveBeenCalledWith(GUILD_ID);
+  });
+
+  it('returns null default when the guild has no configured voice channel', async () => {
+    vi.mocked(getGuildById).mockResolvedValue({ guild_id: GUILD_ID, name: 'Guild', voice_channel_id: null });
+    const res = await supertest(buildApp()).get('/voice/channels').expect(200);
+    expect(res.body.defaultChannelId).toBeNull();
+  });
+
+  it('returns 400 when no guild is selected', async () => {
+    const res = await supertest(buildApp(null)).get('/voice/channels').expect(400);
+    expect(res.body).toMatchObject({ ok: false });
   });
 
   it('returns 500 when channel lookup fails', async () => {
@@ -90,20 +110,25 @@ describe('GET /voice/channels', () => {
 });
 
 describe('POST /voice/join', () => {
-  it('disconnects then joins the requested channel for the configured guild', async () => {
+  it('disconnects then joins the requested channel for the session guild', async () => {
     const res = await supertest(buildApp())
       .post('/voice/join')
       .send({ channelId: '123456789012345678' })
       .expect(200);
 
     expect(res.body).toEqual({ ok: true });
-    expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
-    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, 'guild-123', '123456789012345678');
+    expect(vi.mocked(disconnect)).toHaveBeenCalledWith(GUILD_ID);
+    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, GUILD_ID, '123456789012345678');
   });
 
-  it('falls back to the default channel when no channelId is given', async () => {
+  it('falls back to the guild default channel when no channelId is given', async () => {
     await supertest(buildApp()).post('/voice/join').send({}).expect(200);
-    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, 'guild-123', undefined);
+    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, GUILD_ID, 'default-vc');
+  });
+
+  it('returns 400 when no guild is selected', async () => {
+    await supertest(buildApp(null)).post('/voice/join').send({ channelId: '123456789012345678' }).expect(400);
+    expect(vi.mocked(connect)).not.toHaveBeenCalled();
   });
 
   it('returns 400 for a non-string channelId', async () => {
@@ -133,9 +158,14 @@ describe('POST /voice/join', () => {
 });
 
 describe('POST /voice/leave', () => {
-  it('disconnects the configured guild and returns ok', async () => {
+  it('disconnects the session guild and returns ok', async () => {
     const res = await supertest(buildApp()).post('/voice/leave').expect(200);
     expect(res.body).toEqual({ ok: true });
-    expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
+    expect(vi.mocked(disconnect)).toHaveBeenCalledWith(GUILD_ID);
+  });
+
+  it('returns 400 when no guild is selected', async () => {
+    await supertest(buildApp(null)).post('/voice/leave').expect(400);
+    expect(vi.mocked(disconnect)).not.toHaveBeenCalled();
   });
 });
