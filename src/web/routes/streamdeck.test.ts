@@ -282,8 +282,8 @@ describe('POST /voice/join', () => {
       .expect(200);
 
     expect(res.body).toEqual({ ok: true });
-    expect(vi.mocked(disconnect)).toHaveBeenCalled();
-    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, '123456789012345678');
+    expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
+    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, 'guild-123', '123456789012345678');
   });
 
   it('returns 500 when connect throws', async () => {
@@ -303,6 +303,7 @@ describe('POST /voice/leave', () => {
     const res = await supertest(buildApp()).post('/voice/leave').expect(200);
 
     expect(res.body).toEqual({ ok: true });
-    expect(vi.mocked(disconnect)).toHaveBeenCalled();
+    // Leaving must be scoped to the configured guild, not an unscoped disconnect.
+    expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
   });
 });

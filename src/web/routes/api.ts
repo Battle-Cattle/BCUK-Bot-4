@@ -25,7 +25,7 @@ router.get('/voice/channels', requireMod, async (_req, res) => {
       ok: true,
       channels,
       defaultChannelId: DISCORD_VOICE_CHANNEL_ID,
-      currentChannelId: getCurrentChannelId(),
+      currentChannelId: getCurrentChannelId(DISCORD_GUILD_ID),
     });
   } catch (err) {
     log.error('Failed to list voice channels:', err);
@@ -53,8 +53,8 @@ router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
     }
     const resolvedChannelId = trimmedChannelId || undefined;
 
-    disconnect();
-    await connect(discordClient, resolvedChannelId);
+    disconnect(DISCORD_GUILD_ID);
+    await connect(discordClient, DISCORD_GUILD_ID, resolvedChannelId);
     res.json({ ok: true });
   } catch (err) {
     log.error('Voice rejoin failed:', err);
@@ -64,7 +64,7 @@ router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
 
 // Leave the voice channel — Mod and above
 router.post('/voice/leave', requireMod, csrfProtection, (_req, res) => {
-  disconnect();
+  disconnect(DISCORD_GUILD_ID);
   res.json({ ok: true });
 });
 
