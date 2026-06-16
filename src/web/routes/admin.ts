@@ -24,7 +24,6 @@ import {
   parseTwitchNameInput,
   checkManagerEditAuth,
   handleDbError,
-  resolveGuildId,
   resolveValidDiscordId,
   resolveToggleTwitchInputs,
 } from './adminUserValidation';
@@ -45,8 +44,7 @@ const userMutationQueue = createMutationQueue();
 
 // View the current guild's members (Manager+)
 router.get('/users', requireManager, csrfProtection, async (req, res) => {
-  const guildId = req.session.user!.currentGuildId;
-  if (!guildId) return res.redirect('/guild/select');
+  const guildId = req.session.user!.currentGuildId!;
   try {
     const users = await getGuildMemberUsers(guildId);
     res.render('admin', {
@@ -76,8 +74,7 @@ async function reloadRegistrySafe(): Promise<void> {
 // managers may only assign levels below their own). Identity and Twitch are global;
 // the access level is written to guild_member for the current guild.
 router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
-  const guildId = resolveGuildId(req, res);
-  if (!guildId) return;
+  const guildId = req.session.user!.currentGuildId!;
 
   const { discord_id, discord_name, access_level, twitch_name, clear_twitch_name } = req.body as {
     discord_id?: string;
@@ -127,8 +124,7 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
 // Update a member's access level within the current guild (Manager+; managers may
 // only set levels below their own and cannot modify members at their level or above)
 router.post('/users/update', requireManager, csrfProtection, async (req, res) => {
-  const guildId = resolveGuildId(req, res);
-  if (!guildId) return;
+  const guildId = req.session.user!.currentGuildId!;
 
   const { discord_id, access_level } = req.body as { discord_id?: string; access_level?: string };
   if (access_level === undefined) return res.redirect('/admin/users');
@@ -152,8 +148,7 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
 // Remove a member from the current guild (Admin only). The global user row and
 // Twitch identity are left intact — they may belong to other guilds.
 router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
-  const guildId = resolveGuildId(req, res);
-  if (!guildId) return;
+  const guildId = req.session.user!.currentGuildId!;
 
   const { discord_id } = req.body as { discord_id?: string };
   const trimmedDiscordId = resolveValidDiscordId(res, discord_id);
@@ -174,8 +169,7 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
 
 // Toggle twitch bot participation for a user (Manager+)
 router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, res) => {
-  const guildId = resolveGuildId(req, res);
-  if (!guildId) return;
+  const guildId = req.session.user!.currentGuildId!;
 
   const { discord_id, is_twitch_bot_enabled } = req.body as {
     discord_id?: string;
