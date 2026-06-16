@@ -1,4 +1,4 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { createLogger } from '../../shared/logger';
 import { findUser, getMemberAccessLevel, AccessLevel } from '../../db';
 import { trimField } from './shared';
@@ -7,6 +7,43 @@ import { isLockWaitTimeoutDbError } from './adminUserMutations';
 
 const log = createLogger('Web');
 const DISCORD_ID_RE = /^\d{17,20}$/;
+
+/**
+ * Resolves the acting user's current guild from the session.
+ * Redirects to the guild picker and returns null when no guild is selected.
+ *
+ * @param req The incoming request (reads `session.user.currentGuildId`).
+ * @param res The response, used to redirect when no guild is set.
+ */
+export function resolveGuildId(req: Request, res: Response): string | null {
+  const guildId = req.session.user!.currentGuildId;
+  if (!guildId) {
+    res.redirect('/guild/select');
+    return null;
+  }
+  return guildId;
+}
+
+/**
+ * Trims and validates a submitted `discord_id` field. Returns the normalized ID,
+ * or redirects and returns null: to `/admin/users` when the field is absent, or
+ * to `?error=invalid_discord_id` when it is malformed.
+ *
+ * @param res The response, used to redirect on absent/invalid input.
+ * @param rawId The raw `discord_id` value from the request body.
+ */
+export function resolveValidDiscordId(res: Response, rawId: string | undefined): string | null {
+  const trimmed = trimField(rawId);
+  if (!trimmed) {
+    res.redirect('/admin/users');
+    return null;
+  }
+  if (discordIdError(trimmed)) {
+    res.redirect('/admin/users?error=invalid_discord_id');
+    return null;
+  }
+  return trimmed;
+}
 
 export function discordIdError(id: string): string | null {
   return DISCORD_ID_RE.test(id) ? null : 'invalid_discord_id';

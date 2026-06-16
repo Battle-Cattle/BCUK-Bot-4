@@ -32,8 +32,10 @@ import {
   parseTwitchNameInput,
   checkManagerEditAuth,
   handleDbError,
+  resolveGuildId,
+  resolveValidDiscordId,
 } from './adminUserValidation';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 
 const ACCESS_LEVEL_VALUES = [AccessLevel.USER, AccessLevel.MOD, AccessLevel.MANAGER, AccessLevel.ADMIN];
 
@@ -246,6 +248,62 @@ describe('checkManagerEditAuth', () => {
     vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
     const result = await checkManagerEditAuth(MANAGER_SESSION, '300000000000000003', AccessLevel.MOD, GUILD_ID);
     expect(result).toBeNull();
+  });
+});
+
+// ─── resolveGuildId ──────────────────────────────────────────────────────────
+
+describe('resolveGuildId', () => {
+  function mockRes() {
+    const redirect = vi.fn();
+    return { res: { redirect } as unknown as Response, redirect };
+  }
+
+  it('returns the current guild id when one is set in the session', () => {
+    const { res, redirect } = mockRes();
+    const req = { session: { user: { currentGuildId: '900000000000000001' } } } as unknown as Request;
+    expect(resolveGuildId(req, res)).toBe('900000000000000001');
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('redirects to /guild/select and returns null when no guild is set', () => {
+    const { res, redirect } = mockRes();
+    const req = { session: { user: { currentGuildId: undefined } } } as unknown as Request;
+    expect(resolveGuildId(req, res)).toBeNull();
+    expect(redirect).toHaveBeenCalledWith('/guild/select');
+  });
+});
+
+// ─── resolveValidDiscordId ───────────────────────────────────────────────────
+
+describe('resolveValidDiscordId', () => {
+  function mockRes() {
+    const redirect = vi.fn();
+    return { res: { redirect } as unknown as Response, redirect };
+  }
+
+  it('returns the trimmed id for a valid snowflake', () => {
+    const { res, redirect } = mockRes();
+    expect(resolveValidDiscordId(res, '  12345678901234567  ')).toBe('12345678901234567');
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('redirects to /admin/users and returns null when the id is absent', () => {
+    const { res, redirect } = mockRes();
+    expect(resolveValidDiscordId(res, undefined)).toBeNull();
+    expect(redirect).toHaveBeenCalledWith('/admin/users');
+  });
+
+  it('redirects to /admin/users and returns null for a whitespace-only id', () => {
+    const { res, redirect } = mockRes();
+    expect(resolveValidDiscordId(res, '   ')).toBeNull();
+    expect(redirect).toHaveBeenCalledWith('/admin/users');
+  });
+
+  it('redirects to ?error=invalid_discord_id for a malformed id', () => {
+    const { res, redirect } = mockRes();
+    expect(resolveValidDiscordId(res, 'not-a-snowflake')).toBeNull();
+    expect(redirect).toHaveBeenCalledWith('/admin/users?error=invalid_discord_id');
   });
 });
 

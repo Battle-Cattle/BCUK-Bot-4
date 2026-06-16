@@ -20,12 +20,13 @@ import {
   toggleTwitchMutation,
 } from './adminUserMutations';
 import {
-  discordIdError,
   accessLevelError,
   parseTwitchEnabled,
   parseTwitchNameInput,
   checkManagerEditAuth,
   handleDbError,
+  resolveGuildId,
+  resolveValidDiscordId,
 } from './adminUserValidation';
 
 const log = createLogger('Web');
@@ -75,8 +76,8 @@ async function reloadRegistrySafe(): Promise<void> {
 // managers may only assign levels below their own). Identity and Twitch are global;
 // the access level is written to guild_member for the current guild.
 router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
-  const guildId = req.session.user!.currentGuildId;
-  if (!guildId) return res.redirect('/guild/select');
+  const guildId = resolveGuildId(req, res);
+  if (!guildId) return;
 
   const { discord_id, discord_name, access_level, twitch_name, clear_twitch_name } = req.body as {
     discord_id?: string;
@@ -85,11 +86,9 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
     twitch_name?: string;
     clear_twitch_name?: string;
   };
-  const trimmedDiscordId = trimField(discord_id);
-  if (!trimmedDiscordId || !access_level) return res.redirect('/admin/users');
-
-  const idErr = discordIdError(trimmedDiscordId);
-  if (idErr) return res.redirect(`/admin/users?error=${idErr}`);
+  const trimmedDiscordId = resolveValidDiscordId(res, discord_id);
+  if (!trimmedDiscordId) return;
+  if (!access_level) return res.redirect('/admin/users');
 
   const levelErr = accessLevelError(access_level);
   if (levelErr) return res.redirect(`/admin/users?error=${levelErr}`);
@@ -128,15 +127,13 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
 // Update a member's access level within the current guild (Manager+; managers may
 // only set levels below their own and cannot modify members at their level or above)
 router.post('/users/update', requireManager, csrfProtection, async (req, res) => {
-  const guildId = req.session.user!.currentGuildId;
-  if (!guildId) return res.redirect('/guild/select');
+  const guildId = resolveGuildId(req, res);
+  if (!guildId) return;
 
   const { discord_id, access_level } = req.body as { discord_id?: string; access_level?: string };
-  const trimmedDiscordId = trimField(discord_id);
-  if (!trimmedDiscordId || access_level === undefined) return res.redirect('/admin/users');
-
-  const idErr = discordIdError(trimmedDiscordId);
-  if (idErr) return res.redirect(`/admin/users?error=${idErr}`);
+  if (access_level === undefined) return res.redirect('/admin/users');
+  const trimmedDiscordId = resolveValidDiscordId(res, discord_id);
+  if (!trimmedDiscordId) return;
 
   const levelErr = accessLevelError(access_level);
   if (levelErr) return res.redirect(`/admin/users?error=${levelErr}`);
@@ -155,15 +152,12 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
 // Remove a member from the current guild (Admin only). The global user row and
 // Twitch identity are left intact — they may belong to other guilds.
 router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
-  const guildId = req.session.user!.currentGuildId;
-  if (!guildId) return res.redirect('/guild/select');
+  const guildId = resolveGuildId(req, res);
+  if (!guildId) return;
 
   const { discord_id } = req.body as { discord_id?: string };
-  const trimmedDiscordId = trimField(discord_id);
-  if (!trimmedDiscordId) return res.redirect('/admin/users');
-
-  const idErr = discordIdError(trimmedDiscordId);
-  if (idErr) return res.redirect(`/admin/users?error=${idErr}`);
+  const trimmedDiscordId = resolveValidDiscordId(res, discord_id);
+  if (!trimmedDiscordId) return;
 
   if (trimmedDiscordId === req.session.user!.discordId) {
     return res.redirect('/admin/users?error=self_remove_forbidden');
@@ -184,11 +178,8 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
     discord_id?: string;
     is_twitch_bot_enabled?: string;
   };
-  const trimmedDiscordId = trimField(discord_id);
-  if (!trimmedDiscordId) return res.redirect('/admin/users');
-
-  const idErr = discordIdError(trimmedDiscordId);
-  if (idErr) return res.redirect(`/admin/users?error=${idErr}`);
+  const trimmedDiscordId = resolveValidDiscordId(res, discord_id);
+  if (!trimmedDiscordId) return;
 
   const nextEnabled = parseTwitchEnabled(is_twitch_bot_enabled);
   if (nextEnabled === null) return res.redirect('/admin/users?error=invalid_twitch_state');
