@@ -2,7 +2,14 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import crypto from 'crypto';
 import { DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_CALLBACK_URL } from '../../shared/config';
-import { findUser, updateDiscordName } from '../../db';
+import {
+  findUser,
+  updateDiscordName,
+  getAllGuilds,
+  getGuildsForMember,
+  getEffectiveAccessLevel,
+  type DbGuild,
+} from '../../db';
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
@@ -87,7 +94,30 @@ router.get('/discord/callback', async (req, res) => {
       log.warn('Non-blocking discord_name sync failed:', syncErr);
     }
 
-    // 4. Save to session — regenerate the session ID first to prevent session fixation.
+    // 4. Resolve the guilds this user may act in. Owners get every guild; everyone
+    //    else gets the guilds they have a membership row in. No accessible guild
+    //    means they have not been provisioned anywhere — deny rather than show an
+    //    empty panel.
+    const accessibleGuilds: DbGuild[] = dbUser.is_owner
+      ? await getAllGuilds()
+      : await getGuildsForMember(profile.id);
+    if (accessibleGuilds.length === 0) {
+      return renderError(
+        res,
+        403,
+        'You have not been added to any server yet. Contact the bot owner to be granted access.',
+        undefined,
+      );
+    }
+
+    // Auto-select when there is only one choice; otherwise force the guild picker
+    // by leaving currentGuildId null (accessLevel stays 0 until a guild is chosen).
+    const currentGuildId = accessibleGuilds.length === 1 ? accessibleGuilds[0].guild_id : null;
+    const accessLevel = currentGuildId
+      ? ((await getEffectiveAccessLevel(currentGuildId, profile.id)) as 0 | 1 | 2 | 3)
+      : 0;
+
+    // 5. Save to session — regenerate the session ID first to prevent session fixation.
     const rawAvatar = profile.avatar
       ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
       : null;
@@ -95,7 +125,10 @@ router.get('/discord/callback', async (req, res) => {
       discordId: profile.id,
       discordName: syncedDiscordName,
       discordAvatar: rawAvatar?.startsWith('https://cdn.discordapp.com/') ? rawAvatar : null,
-      accessLevel: dbUser.access_level as 0 | 1 | 2 | 3,
+      isOwner: dbUser.is_owner,
+      accessLevel,
+      currentGuildId,
+      guilds: accessibleGuilds.map((g) => ({ guildId: g.guild_id, name: g.name })),
     };
 
     await new Promise<void>((resolve, reject) => {

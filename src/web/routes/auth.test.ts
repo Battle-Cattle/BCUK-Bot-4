@@ -8,6 +8,9 @@ vi.mock('../../shared/config', () => ({
 vi.mock('../../db', () => ({
   findUser: vi.fn().mockResolvedValue(null),
   updateDiscordName: vi.fn().mockResolvedValue(undefined),
+  getAllGuilds: vi.fn().mockResolvedValue([]),
+  getGuildsForMember: vi.fn().mockResolvedValue([]),
+  getEffectiveAccessLevel: vi.fn().mockResolvedValue(0),
 }));
 vi.mock('../../discord/discordBot', () => ({
   fetchMemberDisplayName: vi.fn().mockResolvedValue(null),
@@ -25,7 +28,7 @@ vi.mock('../../shared/logger', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router from './auth';
-import { findUser, updateDiscordName } from '../../db';
+import { findUser, updateDiscordName, getGuildsForMember, getEffectiveAccessLevel } from '../../db';
 import { AccessLevel } from '../../db/users';
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 
@@ -64,6 +67,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(findUser).mockResolvedValue(null);
   vi.mocked(fetchMemberDisplayName).mockResolvedValue(null);
+  vi.mocked(getGuildsForMember).mockResolvedValue([]);
+  vi.mocked(getEffectiveAccessLevel).mockResolvedValue(0);
 });
 
 // ─── GET /discord ─────────────────────────────────────────────────────────────
@@ -133,12 +138,25 @@ describe('GET /discord/callback', () => {
     expect(res.status).toBe(403);
   });
 
+  it('renders error 403 when the whitelisted user belongs to no guild', async () => {
+    mockFetch([
+      { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
+      { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
+    ]);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER, is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([]);
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
+      .get('/discord/callback?code=code&state=state123');
+    expect(res.status).toBe(403);
+  });
+
   it('redirects to / on successful authentication', async () => {
     mockFetch([
       { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
       { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
     ]);
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER, is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: '555', name: 'Guild', voice_channel_id: null }] as any);
     const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
       .get('/discord/callback?code=code&state=state123');
     expect(res.status).toBe(302);
@@ -150,7 +168,8 @@ describe('GET /discord/callback', () => {
       { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
       { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
     ]);
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'OldName', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'OldName', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER, is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: '555', name: 'Guild', voice_channel_id: null }] as any);
     vi.mocked(fetchMemberDisplayName).mockResolvedValue('NewDisplayName');
     const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
       .get('/discord/callback?code=code&state=state123');

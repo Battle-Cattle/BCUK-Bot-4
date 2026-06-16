@@ -98,6 +98,7 @@ describe('getEffectiveAccessLevel (PR 2 shim)', () => {
       is_twitch_bot_enabled: false,
       twitch_name: null,
       access_level: 2,
+      is_owner: false,
     });
 
     expect(await getEffectiveAccessLevel('any-guild', '222')).toBe(2);

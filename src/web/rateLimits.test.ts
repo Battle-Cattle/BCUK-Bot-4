@@ -13,7 +13,10 @@ const authedUser: SessionUser = {
   discordId: '123456789',
   discordName: 'TestUser',
   discordAvatar: null,
+  isOwner: false,
   accessLevel: 0,
+  currentGuildId: '999000999000999000',
+  guilds: [{ guildId: '999000999000999000', name: 'Test Guild' }],
 };
 
 function makeReq(overrides: Partial<{

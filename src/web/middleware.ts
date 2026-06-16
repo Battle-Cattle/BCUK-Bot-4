@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { ensureSessionCsrfToken } from './csrf';
-import { AccessLevel, findApprovedKeyByHash } from '../db';
+import { AccessLevel, findApprovedKeyByHash, getEffectiveAccessLevel } from '../db';
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   if (req.session.user) {
@@ -9,6 +9,40 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   } else {
     res.redirect('/auth/login');
   }
+}
+
+/**
+ * Ensures the session has a current guild selected before a guild-scoped route runs.
+ * Assumes `requireAuth` ran first. Auto-selects when the user has exactly one guild
+ * (so single-guild deployments never see the picker); redirects to the picker when a
+ * choice is required; and re-validates that the stored guild is still one the user
+ * belongs to. The effective access level is recomputed for the resolved guild so
+ * authorization always reflects the current guild, never a stale login-time value.
+ */
+export async function requireGuildContext(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const user = req.session.user;
+  if (!user) {
+    res.redirect('/auth/login');
+    return;
+  }
+
+  // A stored guild must still be one the user can act in (membership may have been
+  // revoked since login). Drop it and re-pick if not.
+  if (user.currentGuildId && !user.guilds.some((g) => g.guildId === user.currentGuildId)) {
+    user.currentGuildId = null;
+  }
+
+  if (!user.currentGuildId) {
+    if (user.guilds.length === 1) {
+      user.currentGuildId = user.guilds[0].guildId;
+      user.accessLevel = (await getEffectiveAccessLevel(user.currentGuildId, user.discordId)) as 0 | 1 | 2 | 3;
+    } else {
+      res.redirect('/guild/select');
+      return;
+    }
+  }
+
+  next();
 }
 
 export function requireManager(req: Request, res: Response, next: NextFunction): void {

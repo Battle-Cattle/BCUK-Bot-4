@@ -69,6 +69,25 @@ export async function getGuildById(guildId: string): Promise<DbGuild | null> {
   return rows.length === 0 ? null : mapGuild(rows[0]);
 }
 
+/**
+ * Returns the guilds a user is a member of (one row per guild_member), ordered by name.
+ * Used to build the web panel's guild switcher for non-owner users.
+ *
+ * @param discordId BIGINT snowflake as a string.
+ * @returns The user's member guilds; empty if they belong to none.
+ */
+export async function getGuildsForMember(discordId: string): Promise<DbGuild[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT g.guild_id, g.name, g.voice_channel_id
+     FROM guild g
+     JOIN guild_member gm ON gm.guild_id = g.guild_id
+     WHERE gm.discord_id = ?
+     ORDER BY g.name`,
+    [discordId],
+  );
+  return rows.map(mapGuild);
+}
+
 // ─── Mutations ─────────────────────────────────────────────────────────────────
 
 /**
