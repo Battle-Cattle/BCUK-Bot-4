@@ -126,6 +126,13 @@ describe('POST /voice/join', () => {
     expect(vi.mocked(connect)).toHaveBeenCalledWith({}, GUILD_ID, 'default-vc');
   });
 
+  it('returns 400 when no channelId is given and guild has no default', async () => {
+    vi.mocked(getGuildById).mockResolvedValueOnce({ guild_id: GUILD_ID, name: 'Test', voice_channel_id: null } as any);
+    await supertest(buildApp()).post('/voice/join').send({}).expect(400);
+    expect(vi.mocked(disconnect)).not.toHaveBeenCalled();
+    expect(vi.mocked(connect)).not.toHaveBeenCalled();
+  });
+
   it('returns 400 when no guild is selected', async () => {
     await supertest(buildApp(null)).post('/voice/join').send({ channelId: '123456789012345678' }).expect(400);
     expect(vi.mocked(connect)).not.toHaveBeenCalled();

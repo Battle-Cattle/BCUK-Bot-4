@@ -308,6 +308,11 @@ describe('POST /users/remove', () => {
 // --- POST /users/toggle-twitch ---
 
 describe('POST /users/toggle-twitch', () => {
+  beforeEach(() => {
+    // Target user is a member of the current guild by default.
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
+  });
+
   it('redirects to /admin/users when discord_id is missing', async () => {
     const res = await supertest(buildApp()).post('/users/toggle-twitch').type('form').send({ is_twitch_bot_enabled: 'true' });
     expect(res.headers.location).toBe('/admin/users');
@@ -317,6 +322,14 @@ describe('POST /users/toggle-twitch', () => {
     const res = await supertest(buildApp()).post('/users/toggle-twitch').type('form')
       .send({ discord_id: 'bad', is_twitch_bot_enabled: 'true' });
     expect(res.headers.location).toBe('/admin/users?error=invalid_discord_id');
+  });
+
+  it('redirects ?error=target_above_level when target is not a member of the current guild', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    const res = await supertest(buildApp()).post('/users/toggle-twitch').type('form')
+      .send({ discord_id: VALID_ID, is_twitch_bot_enabled: 'true' });
+    expect(res.headers.location).toBe('/admin/users?error=target_above_level');
+    expect(vi.mocked(toggleTwitchMutation)).not.toHaveBeenCalled();
   });
 
   it('redirects ?error=invalid_twitch_state for an unrecognised value', async () => {

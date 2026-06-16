@@ -2,6 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import {
   getGuildMemberUsers,
+  getMemberAccessLevel,
   setMemberAccessLevel,
   removeGuildMember,
   ACCESS_LEVEL_LABELS,
@@ -174,6 +175,9 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
 
 // Toggle twitch bot participation for a user (Manager+)
 router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, res) => {
+  const guildId = resolveGuildId(req, res);
+  if (!guildId) return;
+
   const { discord_id, is_twitch_bot_enabled } = req.body as {
     discord_id?: string;
     is_twitch_bot_enabled?: string;
@@ -183,6 +187,10 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
 
   const nextEnabled = parseTwitchEnabled(is_twitch_bot_enabled);
   if (nextEnabled === null) return res.redirect('/admin/users?error=invalid_twitch_state');
+
+  // Verify target is a member of the current guild before modifying their Twitch state.
+  const memberLevel = await getMemberAccessLevel(guildId, trimmedDiscordId);
+  if (memberLevel === null) return res.redirect('/admin/users?error=target_above_level');
 
   try {
     await userMutationQueue.run(trimmedDiscordId, () => toggleTwitchMutation(trimmedDiscordId, nextEnabled));

@@ -236,15 +236,15 @@
                         </div>
                         <div class="button-row-wrap">
                           <button type="submit" class="btn">Save Server Override</button>
-                          <% if (guildOverride) { %>
-                          <form method="POST" action="/commands/guild-override/reset" class="inline-form-sm">
-                            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                            <input type="hidden" name="command_id" value="<%= command.command_id %>">
-                            <button type="submit" class="btn btn-ghost btn-sm">Reset to Catalog Default</button>
-                          </form>
-                          <% } %>
                         </div>
                       </form>
+                      <% if (guildOverride) { %>
+                      <form method="POST" action="/commands/guild-override/reset" class="inline-form-sm">
+                        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                        <input type="hidden" name="command_id" value="<%= command.command_id %>">
+                        <button type="submit" class="btn btn-ghost btn-sm">Reset to Catalog Default</button>
+                      </form>
+                      <% } %>
                     </div>
                     <% } %>
                   </div>

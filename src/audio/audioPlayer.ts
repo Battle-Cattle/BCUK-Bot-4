@@ -112,7 +112,7 @@ function scheduleReconnect(state: GuildVoiceState, reason: string): void {
   state.reconnectTimer = setTimeout(() => {
     state.reconnectTimer = null;
     if (scheduledAttemptId !== state.currentAttemptId) return;
-    if (!state.shouldAutoReconnect || !state.client || state.connection) return;
+    if (!state.shouldAutoReconnect || !state.client || state.connection || !state.targetChannelId) return;
     connect(state.client, state.guildId, state.targetChannelId).catch((err) => {
       log.error(`Voice rejoin failed for guild ${state.guildId}:`, err);
     });
@@ -172,10 +172,10 @@ function makeDeps(state: GuildVoiceState): ConnectionHandlerDeps {
  *
  * @param client - The ready Discord client.
  * @param guildId - The guild whose voice channel to join (BIGINT snowflake string).
- * @param channelId - Target voice channel ID; falls back to the legacy default when omitted.
+ * @param channelId - Target voice channel ID (required).
  * @returns Resolves once the connection is ready, or rejects if the join fails.
  */
-export async function connect(client: Client, guildId: string, channelId?: string): Promise<void> {
+export async function connect(client: Client, guildId: string, channelId: string): Promise<void> {
   const state = getState(guildId);
   clearReconnectTimer(state);
   const attemptId = ++state.currentAttemptId;

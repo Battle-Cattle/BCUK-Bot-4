@@ -92,7 +92,7 @@ router.post('/users/refresh-names', requireManager, csrfProtection, async (req, 
     return res.redirect('/admin/users');
   }
   const guildId = req.session.user?.currentGuildId;
-  if (!guildId) return res.redirect('/admin/users?error=no_guild');
+  if (!guildId) return res.redirect('/guild/select');
   void runDiscordNameRefresh(guildId);
   return res.redirect('/admin/users');
 });

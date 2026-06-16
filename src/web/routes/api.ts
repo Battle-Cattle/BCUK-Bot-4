@@ -78,6 +78,10 @@ router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
     }
     // Fall back to the guild's configured default channel when none is supplied.
     const resolvedChannelId = trimmedChannelId || (await getGuildById(guildId))?.voice_channel_id || undefined;
+    if (!resolvedChannelId) {
+      res.status(400).json({ ok: false, error: 'No voice channel selected and no default configured' });
+      return;
+    }
 
     disconnect(guildId);
     await connect(discordClient, guildId, resolvedChannelId);

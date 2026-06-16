@@ -83,7 +83,7 @@ export async function findApprovedKeyByHash(hash: string): Promise<StreamdeckKey
 
 export async function getApiKeyStatus(discordId: string): Promise<StreamdeckKeyRow | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT discord_id, status, requested_at, approved_at, approved_by
+    `SELECT discord_id, guild_id, status, requested_at, approved_at, approved_by
      FROM streamdeck_api_keys
      WHERE discord_id = ?`,
     [discordId],
@@ -116,7 +116,7 @@ export async function revokeApiKey(discordId: string): Promise<void> {
 
 export async function getPendingRequests(): Promise<StreamdeckKeyRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT k.discord_id, k.status, k.requested_at, k.approved_at, k.approved_by,
+    `SELECT k.discord_id, k.guild_id, k.status, k.requested_at, k.approved_at, k.approved_by,
             u.discord_name AS user_name, NULL AS approver_name
      FROM streamdeck_api_keys k
      LEFT JOIN \`user\` u ON u.discord_id = k.discord_id
@@ -128,7 +128,7 @@ export async function getPendingRequests(): Promise<StreamdeckKeyRow[]> {
 
 export async function getAllApiKeys(): Promise<StreamdeckKeyRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT k.discord_id, k.status, k.requested_at, k.approved_at, k.approved_by,
+    `SELECT k.discord_id, k.guild_id, k.status, k.requested_at, k.approved_at, k.approved_by,
             u.discord_name AS user_name, a.discord_name AS approver_name
      FROM streamdeck_api_keys k
      LEFT JOIN \`user\` u ON u.discord_id = k.discord_id

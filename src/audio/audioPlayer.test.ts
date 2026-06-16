@@ -107,7 +107,7 @@ describe('connect', () => {
     const utils = await import('../discord/discordUtils.js');
     vi.mocked(utils.isPermanentVoiceMisconfigurationError).mockReturnValue(true);
 
-    await expect(mod.connect(client as never, 'guild-A')).rejects.toThrow('Missing guild ID or voice channel ID');
+    await expect(mod.connect(client as never, 'guild-A', '')).rejects.toThrow('Missing guild ID or voice channel ID');
   });
 
   it('rejects and stays disconnected when the channel is not a voice channel', async () => {

@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { upsertOverride, removeOverride } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod, requireGuildContext } from '../middleware';
-import { parsePositiveIntId } from './shared';
+import { parsePositiveIntId, trimField } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -16,13 +16,13 @@ const router = Router();
  */
 router.post('/commands/guild-override', requireMod, requireGuildContext, csrfProtection, async (req, res) => {
   const guildId = req.session.user!.currentGuildId!;
-  const body = req.body as Record<string, string | undefined>;
-  const commandId = parsePositiveIntId(body.command_id);
+  const body = req.body as Record<string, unknown>;
+  const commandId = parsePositiveIntId(body.command_id as string | string[] | undefined);
   if (!commandId) return res.redirect('/commands?error=invalid_id');
 
   const isDisabled = body.is_disabled === '1';
   const clearOutput = body.clear_output === '1';
-  const rawOutput = (body.output ?? '').trim();
+  const rawOutput = trimField(Array.isArray(body.output) ? (body.output as string[])[0] : body.output as string | undefined);
   const output = clearOutput || !rawOutput ? null : rawOutput;
 
   try {
@@ -40,8 +40,8 @@ router.post('/commands/guild-override', requireMod, requireGuildContext, csrfPro
  */
 router.post('/commands/guild-override/reset', requireMod, requireGuildContext, csrfProtection, async (req, res) => {
   const guildId = req.session.user!.currentGuildId!;
-  const body = req.body as Record<string, string | undefined>;
-  const commandId = parsePositiveIntId(body.command_id);
+  const body = req.body as Record<string, unknown>;
+  const commandId = parsePositiveIntId(body.command_id as string | string[] | undefined);
   if (!commandId) return res.redirect('/commands?error=invalid_id');
 
   try {

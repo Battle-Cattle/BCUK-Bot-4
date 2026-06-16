@@ -196,8 +196,9 @@ describe('startDiscordBot — guildCreate handler', () => {
 // ─── startDiscordBot — clientReady error path ─────────────────────────────────
 
 describe('startDiscordBot — clientReady error path', () => {
-  it('catches guild fetch errors without crashing', async () => {
-    mockInstance.guilds.fetch.mockRejectedValueOnce(new Error('guild unavailable'));
+  it('catches getAllGuilds errors without crashing', async () => {
+    const db = await import('../db.js');
+    vi.mocked(db.getAllGuilds).mockRejectedValueOnce(new Error('guild unavailable'));
     mod.startDiscordBot();
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await expect(readyCb(mockInstance)).resolves.toBeUndefined();
