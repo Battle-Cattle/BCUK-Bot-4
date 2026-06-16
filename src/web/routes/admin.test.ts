@@ -88,7 +88,6 @@ type SessionUser = {
 
 const GUILD_ID = '900000000000000001';
 const ADMIN: SessionUser = { discordId: '100000000000000001', discordName: 'AdminUser', discordAvatar: null, isOwner: false, accessLevel: AccessLevel.ADMIN, currentGuildId: GUILD_ID };
-const MANAGER: SessionUser = { discordId: '200000000000000001', discordName: 'ManagerUser', discordAvatar: null, isOwner: false, accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID };
 const VALID_ID = '300000000000000001';
 
 function buildApp(sessionUser: SessionUser = ADMIN) {
