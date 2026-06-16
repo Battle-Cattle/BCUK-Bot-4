@@ -34,6 +34,7 @@ import {
   handleDbError,
   resolveGuildId,
   resolveValidDiscordId,
+  resolveToggleTwitchInputs,
 } from './adminUserValidation';
 import type { Request, Response } from 'express';
 
@@ -304,6 +305,51 @@ describe('resolveValidDiscordId', () => {
     const { res, redirect } = mockRes();
     expect(resolveValidDiscordId(res, 'not-a-snowflake')).toBeNull();
     expect(redirect).toHaveBeenCalledWith('/admin/users?error=invalid_discord_id');
+  });
+});
+
+// ─── resolveToggleTwitchInputs ───────────────────────────────────────────────
+
+describe('resolveToggleTwitchInputs', () => {
+  const GUILD_ID = '900000000000000001';
+  const TARGET_ID = '300000000000000001';
+
+  function mockRes() {
+    const redirect = vi.fn();
+    return { res: { redirect } as unknown as Response, redirect };
+  }
+
+  beforeEach(() => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
+  });
+
+  it('returns true when enabled flag is "true" and target is a guild member', async () => {
+    const { res, redirect } = mockRes();
+    const result = await resolveToggleTwitchInputs(res, GUILD_ID, TARGET_ID, 'true');
+    expect(result).toBe(true);
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('returns false when enabled flag is "false" and target is a guild member', async () => {
+    const { res, redirect } = mockRes();
+    const result = await resolveToggleTwitchInputs(res, GUILD_ID, TARGET_ID, 'false');
+    expect(result).toBe(false);
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('redirects ?error=invalid_twitch_state and returns null for an unrecognised flag', async () => {
+    const { res, redirect } = mockRes();
+    const result = await resolveToggleTwitchInputs(res, GUILD_ID, TARGET_ID, 'maybe');
+    expect(result).toBeNull();
+    expect(redirect).toHaveBeenCalledWith('/admin/users?error=invalid_twitch_state');
+  });
+
+  it('redirects ?error=target_above_level and returns null when target is not a guild member', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    const { res, redirect } = mockRes();
+    const result = await resolveToggleTwitchInputs(res, GUILD_ID, TARGET_ID, 'true');
+    expect(result).toBeNull();
+    expect(redirect).toHaveBeenCalledWith('/admin/users?error=target_above_level');
   });
 });
 

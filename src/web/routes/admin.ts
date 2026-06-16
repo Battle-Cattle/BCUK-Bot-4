@@ -2,7 +2,6 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import {
   getGuildMemberUsers,
-  getMemberAccessLevel,
   setMemberAccessLevel,
   removeGuildMember,
   ACCESS_LEVEL_LABELS,
@@ -22,12 +21,12 @@ import {
 } from './adminUserMutations';
 import {
   accessLevelError,
-  parseTwitchEnabled,
   parseTwitchNameInput,
   checkManagerEditAuth,
   handleDbError,
   resolveGuildId,
   resolveValidDiscordId,
+  resolveToggleTwitchInputs,
 } from './adminUserValidation';
 
 const log = createLogger('Web');
@@ -185,12 +184,8 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   const trimmedDiscordId = resolveValidDiscordId(res, discord_id);
   if (!trimmedDiscordId) return;
 
-  const nextEnabled = parseTwitchEnabled(is_twitch_bot_enabled);
-  if (nextEnabled === null) return res.redirect('/admin/users?error=invalid_twitch_state');
-
-  // Verify target is a member of the current guild before modifying their Twitch state.
-  const memberLevel = await getMemberAccessLevel(guildId, trimmedDiscordId);
-  if (memberLevel === null) return res.redirect('/admin/users?error=target_above_level');
+  const nextEnabled = await resolveToggleTwitchInputs(res, guildId, trimmedDiscordId, is_twitch_bot_enabled);
+  if (nextEnabled === null) return;
 
   try {
     await userMutationQueue.run(trimmedDiscordId, () => toggleTwitchMutation(trimmedDiscordId, nextEnabled));

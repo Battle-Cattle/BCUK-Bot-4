@@ -111,6 +111,35 @@ export async function checkManagerEditAuth(
   return null;
 }
 
+/**
+ * Validates and resolves inputs for the toggle-twitch route.
+ * Checks the enabled flag is parseable and that the target is a member of the current guild.
+ * Sends the appropriate error redirect and returns null on failure; returns the parsed boolean on success.
+ *
+ * @param res The response, used to redirect on error.
+ * @param guildId The guild to verify membership in.
+ * @param targetDiscordId The user whose Twitch state is being toggled.
+ * @param isTwitchBotEnabled The raw form value for the enabled flag.
+ */
+export async function resolveToggleTwitchInputs(
+  res: Response,
+  guildId: string,
+  targetDiscordId: string,
+  isTwitchBotEnabled: string | undefined,
+): Promise<boolean | null> {
+  const nextEnabled = parseTwitchEnabled(isTwitchBotEnabled);
+  if (nextEnabled === null) {
+    res.redirect('/admin/users?error=invalid_twitch_state');
+    return null;
+  }
+  const memberLevel = await getMemberAccessLevel(guildId, targetDiscordId);
+  if (memberLevel === null) {
+    res.redirect('/admin/users?error=target_above_level');
+    return null;
+  }
+  return nextEnabled;
+}
+
 export function handleDbError(err: unknown, res: Response, failCode: string, context: string): void {
   if (isLockWaitTimeoutDbError(err)) {
     log.warn(`${context} DB lock timeout`, err);
