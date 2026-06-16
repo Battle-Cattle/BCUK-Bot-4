@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getAllUsers, updateDiscordName } from '../../db';
+import { getGuildMemberUsers, updateDiscordName } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
@@ -26,7 +26,7 @@ export const refreshState: {
 
 const log = createLogger('Web');
 
-async function runDiscordNameRefresh(): Promise<void> {
+async function runDiscordNameRefresh(guildId: string): Promise<void> {
   refreshState.outcome = 'running';
   refreshState.updatedCount = 0;
   refreshState.failureCount = 0;
@@ -38,13 +38,13 @@ async function runDiscordNameRefresh(): Promise<void> {
       throw new Error('Discord client is not ready');
     }
 
-    const users = await getAllUsers();
+    const users = await getGuildMemberUsers(guildId);
     let updatedCount = 0;
     let failureCount = 0;
 
     for (const user of users) {
       try {
-        const name = await fetchMemberDisplayName(user.discord_id, true);
+        const name = await fetchMemberDisplayName(user.discord_id, true, guildId);
         if (name == null) {
           failureCount++;
           refreshState.failureCount = failureCount;
@@ -87,11 +87,13 @@ router.get('/users/refresh-status', requireManager, (_req, res) => {
   res.json(refreshState);
 });
 
-router.post('/users/refresh-names', requireManager, csrfProtection, async (_req, res) => {
+router.post('/users/refresh-names', requireManager, csrfProtection, async (req, res) => {
   if (refreshState.outcome === 'running') {
     return res.redirect('/admin/users');
   }
-  void runDiscordNameRefresh();
+  const guildId = req.session.user?.currentGuildId;
+  if (!guildId) return res.redirect('/admin/users?error=no_guild');
+  void runDiscordNameRefresh(guildId);
   return res.redirect('/admin/users');
 });
 

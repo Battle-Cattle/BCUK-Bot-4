@@ -11,7 +11,6 @@ import {
   type AudioPlayer as DjsAudioPlayer,
 } from '@discordjs/voice';
 import { Client, ChannelType } from 'discord.js';
-import { DISCORD_VOICE_CHANNEL_ID } from '../shared/config';
 import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from '../shared/statusStore';
 
 const log = createLogger('AudioPlayer');
@@ -190,12 +189,10 @@ export async function connect(client: Client, guildId: string, channelId?: strin
   const deps = makeDeps(state);
 
   try {
-    const resolvedChannelId = channelId || DISCORD_VOICE_CHANNEL_ID;
-
-    if (!guildId || !resolvedChannelId) {
+    if (!guildId || !channelId) {
       // Message text must stay in sync with isPermanentVoiceMisconfigurationError
       // so this is classified as permanent (not retried).
-      throw new Error('Missing DISCORD_GUILD_ID or voice channel ID');
+      throw new Error('Missing guild ID or voice channel ID');
     }
 
     // Fetching the channel from the target guild also validates that the channel
@@ -203,11 +200,11 @@ export async function connect(client: Client, guildId: string, channelId?: strin
     const guild = await client.guilds.fetch(guildId);
     if (attemptId !== state.currentAttemptId) return;
 
-    const channel = await guild.channels.fetch(resolvedChannelId);
+    const channel = await guild.channels.fetch(channelId);
     if (attemptId !== state.currentAttemptId) return;
 
     if (!channel || channel.type !== ChannelType.GuildVoice) {
-      throw new Error(`Channel ${resolvedChannelId} is not a voice channel in guild ${guildId}`);
+      throw new Error(`Channel ${channelId} is not a voice channel in guild ${guildId}`);
     }
 
     nextConnection = joinVoiceChannel({

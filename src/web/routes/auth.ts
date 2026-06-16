@@ -80,20 +80,6 @@ router.get('/discord/callback', async (req, res) => {
       return renderError(res, 403, 'You are not on the whitelist. Contact an admin to be added.', undefined);
     }
 
-    let syncedDiscordName = dbUser.discord_name?.trim() || profile.username;
-    try {
-      const displayName = await fetchMemberDisplayName(profile.id, true);
-      const trimmedDisplayName = displayName?.trim();
-      if (trimmedDisplayName) {
-        syncedDiscordName = trimmedDisplayName;
-      }
-      if (syncedDiscordName !== dbUser.discord_name) {
-        await updateDiscordName(profile.id, syncedDiscordName);
-      }
-    } catch (syncErr) {
-      log.warn('Non-blocking discord_name sync failed:', syncErr);
-    }
-
     // 4. Resolve the guilds this user may act in. Owners get every guild; everyone
     //    else gets the guilds they have a membership row in. No accessible guild
     //    means they have not been provisioned anywhere — deny rather than show an
@@ -108,6 +94,22 @@ router.get('/discord/callback', async (req, res) => {
         'You have not been added to any server yet. Contact the bot owner to be granted access.',
         undefined,
       );
+    }
+
+    // Sync display name using the first accessible guild (display names are per-guild
+    // in Discord; we use a best-effort lookup against one guild at login time).
+    let syncedDiscordName = dbUser.discord_name?.trim() || profile.username;
+    try {
+      const displayName = await fetchMemberDisplayName(profile.id, true, accessibleGuilds[0].guild_id);
+      const trimmedDisplayName = displayName?.trim();
+      if (trimmedDisplayName) {
+        syncedDiscordName = trimmedDisplayName;
+      }
+      if (syncedDiscordName !== dbUser.discord_name) {
+        await updateDiscordName(profile.id, syncedDiscordName);
+      }
+    } catch (syncErr) {
+      log.warn('Non-blocking discord_name sync failed:', syncErr);
     }
 
     // Auto-select when there is only one choice; otherwise force the guild picker

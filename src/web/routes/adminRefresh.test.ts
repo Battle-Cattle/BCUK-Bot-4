@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../db', () => ({
-  getAllUsers: vi.fn(),
+  getGuildMemberUsers: vi.fn(),
   updateDiscordName: vi.fn(),
 }));
 vi.mock('../../discord/discordBot', () => ({
@@ -18,7 +18,7 @@ vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn() }),
 }));
 
-import { getAllUsers, updateDiscordName } from '../../db';
+import { getGuildMemberUsers, updateDiscordName } from '../../db';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
 import express from 'express';
 import supertest from 'supertest';
@@ -26,10 +26,16 @@ import supertest from 'supertest';
 // Import module last so mocks are in place before module-level code runs
 import router, { refreshState, type RefreshOutcome } from './adminRefresh';
 
+const GUILD_ID = '900000000000000001';
+
 function buildApp() {
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
+  app.use((req: any, _res: any, next: any) => {
+    req.session = { user: { discordId: 'u1', currentGuildId: GUILD_ID, accessLevel: 2 } };
+    next();
+  });
   app.use(router);
   return supertest(app);
 }
@@ -99,7 +105,7 @@ describe('GET /users/refresh-status', () => {
 describe('POST /users/refresh-names', () => {
   it('redirects to /admin/users immediately', async () => {
     vi.mocked(getDiscordClient).mockReturnValue({} as any);
-    vi.mocked(getAllUsers).mockResolvedValue([]);
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([]);
     const app = buildApp();
     const res = await app.post('/users/refresh-names');
     expect(res.status).toBe(302);
@@ -111,7 +117,7 @@ describe('POST /users/refresh-names', () => {
     const app = buildApp();
     const res = await app.post('/users/refresh-names');
     expect(res.status).toBe(302);
-    expect(getAllUsers).not.toHaveBeenCalled();
+    expect(getGuildMemberUsers).not.toHaveBeenCalled();
   });
 });
 
@@ -120,7 +126,7 @@ describe('POST /users/refresh-names', () => {
 describe('runDiscordNameRefresh outcomes', () => {
   it('outcome is "noop" when discord client ready but no users need updating', async () => {
     vi.mocked(getDiscordClient).mockReturnValue({} as any);
-    vi.mocked(getAllUsers).mockResolvedValue([]);
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([]);
     const app = buildApp();
     await app.post('/users/refresh-names');
     await waitForRefreshComplete();
@@ -132,7 +138,7 @@ describe('runDiscordNameRefresh outcomes', () => {
 
   it('outcome is "success" when all users are updated with no failures', async () => {
     vi.mocked(getDiscordClient).mockReturnValue({} as any);
-    vi.mocked(getAllUsers).mockResolvedValue([
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([
       { discord_id: '1', discord_name: 'OldName1' },
       { discord_id: '2', discord_name: 'OldName2' },
     ] as any);
@@ -153,7 +159,7 @@ describe('runDiscordNameRefresh outcomes', () => {
 
   it('outcome is "noop" when display names have not changed', async () => {
     vi.mocked(getDiscordClient).mockReturnValue({} as any);
-    vi.mocked(getAllUsers).mockResolvedValue([
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([
       { discord_id: '1', discord_name: 'UnchangedName' },
     ] as any);
     vi.mocked(fetchMemberDisplayName).mockResolvedValue('UnchangedName');
@@ -168,7 +174,7 @@ describe('runDiscordNameRefresh outcomes', () => {
 
   it('outcome is "partial" when some users succeed and some fail', async () => {
     vi.mocked(getDiscordClient).mockReturnValue({} as any);
-    vi.mocked(getAllUsers).mockResolvedValue([
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([
       { discord_id: '1', discord_name: 'OldName1' },
       { discord_id: '2', discord_name: 'OldName2' },
     ] as any);
@@ -186,7 +192,7 @@ describe('runDiscordNameRefresh outcomes', () => {
 
   it('outcome is "error" when all lookups fail', async () => {
     vi.mocked(getDiscordClient).mockReturnValue({} as any);
-    vi.mocked(getAllUsers).mockResolvedValue([
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([
       { discord_id: '1', discord_name: 'OldName1' },
     ] as any);
     vi.mocked(fetchMemberDisplayName).mockResolvedValue(null);
@@ -210,7 +216,7 @@ describe('runDiscordNameRefresh outcomes', () => {
 
   it('finishedAt is set after completion', async () => {
     vi.mocked(getDiscordClient).mockReturnValue({} as any);
-    vi.mocked(getAllUsers).mockResolvedValue([]);
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([]);
 
     const before = Date.now();
     const app = buildApp();
@@ -221,7 +227,7 @@ describe('runDiscordNameRefresh outcomes', () => {
 
   it('individual user errors are caught and counted as failures', async () => {
     vi.mocked(getDiscordClient).mockReturnValue({} as any);
-    vi.mocked(getAllUsers).mockResolvedValue([
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([
       { discord_id: '1', discord_name: 'OldName' },
     ] as any);
     vi.mocked(fetchMemberDisplayName).mockRejectedValue(new Error('Network error'));

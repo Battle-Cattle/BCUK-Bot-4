@@ -8,8 +8,6 @@ function require_env(name: string): string {
 }
 
 export const DISCORD_TOKEN = require_env('DISCORD_TOKEN');
-export const DISCORD_GUILD_ID = require_env('DISCORD_GUILD_ID');
-export const DISCORD_VOICE_CHANNEL_ID = require_env('DISCORD_VOICE_CHANNEL_ID');
 
 export const TWITCH_USERNAME = require_env('TWITCH_USERNAME');
 export const TWITCH_OAUTH_TOKEN = require_env('TWITCH_OAUTH_TOKEN');
