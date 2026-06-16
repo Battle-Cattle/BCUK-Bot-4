@@ -52,11 +52,12 @@ describe('findApprovedKeyByHash', () => {
 
   it('returns the mapped row when hash matches', async () => {
     const hash = sha256hex('mysecretkey');
-    const row = { discord_id: '42', key_hash: hash, status: 'approved', requested_at: new Date(), approved_at: new Date(), approved_by: '1' };
+    const row = { discord_id: '42', key_hash: hash, guild_id: 'g1', status: 'approved', requested_at: new Date(), approved_at: new Date(), approved_by: '1' };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const result = await findApprovedKeyByHash(hash);
     expect(result).not.toBeNull();
     expect(result!.discord_id).toBe('42');
+    expect(result!.guild_id).toBe('g1');
     expect(result!.status).toBe('approved');
   });
 
@@ -202,10 +203,10 @@ describe('getAllApiKeys', () => {
 
 describe('requestApiKey', () => {
   it('throws when existing status is denied', async () => {
-    const row = { discord_id: '1', status: 'denied', requested_at: new Date(), approved_at: null, approved_by: null, user_name: null, approver_name: null };
+    const row = { discord_id: '1', guild_id: 'g1', status: 'denied', requested_at: new Date(), approved_at: null, approved_by: null, user_name: null, approver_name: null };
     const pool = makePool([row]);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await expect(requestApiKey('1', AccessLevel.USER)).rejects.toThrow('denied');
+    await expect(requestApiKey('1', AccessLevel.USER, 'g1')).rejects.toThrow('denied');
   });
 
   it('returns status=approved for MANAGER access level (2)', async () => {
@@ -215,11 +216,11 @@ describe('requestApiKey', () => {
         .mockResolvedValueOnce([[]])    // getApiKeyStatus initial
         .mockResolvedValueOnce([[]])    // INSERT
         .mockResolvedValueOnce([[{     // getApiKeyStatus after insert
-          discord_id: '1', status: 'approved', requested_at: new Date(), approved_at: new Date(), approved_by: '1', user_name: null, approver_name: null,
+          discord_id: '1', guild_id: 'g1', status: 'approved', requested_at: new Date(), approved_at: new Date(), approved_by: '1', user_name: null, approver_name: null,
         }]]),
     };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await requestApiKey('1', AccessLevel.MANAGER);
+    const result = await requestApiKey('1', AccessLevel.MANAGER, 'g1');
     expect(result.status).toBe('approved');
     expect(result.plain).toHaveLength(64); // 32 bytes as hex
   });
@@ -230,11 +231,11 @@ describe('requestApiKey', () => {
         .mockResolvedValueOnce([[]])   // getApiKeyStatus initial
         .mockResolvedValueOnce([[]])   // INSERT
         .mockResolvedValueOnce([[{    // getApiKeyStatus after insert
-          discord_id: '1', status: 'pending', requested_at: new Date(), approved_at: null, approved_by: null, user_name: null, approver_name: null,
+          discord_id: '1', guild_id: 'g1', status: 'pending', requested_at: new Date(), approved_at: null, approved_by: null, user_name: null, approver_name: null,
         }]]),
     };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await requestApiKey('1', AccessLevel.USER);
+    const result = await requestApiKey('1', AccessLevel.USER, 'g1');
     expect(result.status).toBe('pending');
   });
 
@@ -244,11 +245,11 @@ describe('requestApiKey', () => {
         .mockResolvedValueOnce([[]])
         .mockResolvedValueOnce([[]])
         .mockResolvedValueOnce([[{
-          discord_id: '1', status: 'pending', requested_at: new Date(), approved_at: null, approved_by: null, user_name: null, approver_name: null,
+          discord_id: '1', guild_id: 'g1', status: 'pending', requested_at: new Date(), approved_at: null, approved_by: null, user_name: null, approver_name: null,
         }]]),
     };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await requestApiKey('1', AccessLevel.MOD);
+    const result = await requestApiKey('1', AccessLevel.MOD, 'g1');
     expect(result.plain).toMatch(/^[0-9a-f]{64}$/);
   });
 });

@@ -43,6 +43,7 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
     const { plain } = await requestApiKey(
       req.session.user!.discordId,
       req.session.user!.accessLevel,
+      req.session.user!.currentGuildId!,
     );
     const keyRow = await getApiKeyStatus(req.session.user!.discordId);
     res.render('streamdeck-keys', {

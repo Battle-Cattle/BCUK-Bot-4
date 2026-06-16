@@ -30,7 +30,15 @@ import {
 } from '../../db';
 import { AccessLevel } from '../../db/users';
 
-const SESSION_USER = { discordId: '111222333444555666', discordName: 'Alice', accessLevel: AccessLevel.ADMIN };
+const GUILD_ID = '900000000000000001';
+const SESSION_USER = {
+  discordId: '111222333444555666',
+  discordName: 'Alice',
+  accessLevel: AccessLevel.ADMIN,
+  currentGuildId: GUILD_ID,
+  isOwner: false,
+  guilds: [{ guildId: GUILD_ID, name: 'Test Guild' }],
+};
 const VALID_DISCORD_ID = '123456789012345678';
 
 function buildApp(sessionUser = SESSION_USER) {
@@ -95,6 +103,11 @@ describe('POST /streamdeck-key/request', () => {
     const res = await supertest(buildApp()).post('/streamdeck-key/request');
     expect(res.status).toBe(200);
     expect((res.body as any).locals.newKey).toBeTruthy();
+    expect(vi.mocked(requestApiKey)).toHaveBeenCalledWith(
+      SESSION_USER.discordId,
+      SESSION_USER.accessLevel,
+      GUILD_ID,
+    );
   });
 
   it('redirects to ?error=request_failed on error', async () => {

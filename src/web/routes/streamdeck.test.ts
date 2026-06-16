@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SfxTrigger, SfxFile } from '../../db';
 
 vi.mock('../middleware', () => ({
-  requireApiKey: (_req: any, _res: any, next: any) => next(),
+  requireApiKey: (req: any, _res: any, next: any) => {
+    req.apiKeyGuildId = 'guild-123';
+    next();
+  },
 }));
 
 vi.mock('../../db', () => ({
@@ -41,10 +44,6 @@ vi.mock('../../discord/discordBot', () => ({
 
 vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
-}));
-
-vi.mock('../../shared/config', () => ({
-  DISCORD_GUILD_ID: 'guild-123',
 }));
 
 import express from 'express';

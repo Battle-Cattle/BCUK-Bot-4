@@ -5,6 +5,8 @@ import { AccessLevel } from './users';
 
 export interface StreamdeckKeyRow {
   discord_id: string;
+  /** The guild this key acts on. */
+  guild_id: string;
   status: 'pending' | 'approved' | 'revoked' | 'denied';
   requested_at: Date;
   approved_at: Date | null;
@@ -16,6 +18,7 @@ export interface StreamdeckKeyRow {
 function mapRow(r: mysql.RowDataPacket): StreamdeckKeyRow {
   return {
     discord_id: String(r.discord_id),
+    guild_id: String(r.guild_id),
     status: r.status as StreamdeckKeyRow['status'],
     requested_at: r.requested_at,
     approved_at: r.approved_at ?? null,
@@ -28,6 +31,7 @@ function mapRow(r: mysql.RowDataPacket): StreamdeckKeyRow {
 export async function requestApiKey(
   discordId: string,
   accessLevel: number,
+  guildId: string,
 ): Promise<{ plain: string; status: 'pending' | 'approved' }> {
   const existing = await getApiKeyStatus(discordId);
   if (existing?.status === 'denied') {
@@ -43,15 +47,16 @@ export async function requestApiKey(
 
   await getPool().execute(
     `INSERT INTO streamdeck_api_keys
-       (discord_id, key_hash, status, requested_at, approved_at, approved_by)
-     VALUES (?, ?, ?, ?, ?, ?) AS new_row
+       (discord_id, key_hash, guild_id, status, requested_at, approved_at, approved_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE
        key_hash     = IF(status = 'denied', key_hash,     new_row.key_hash),
+       guild_id     = IF(status = 'denied', guild_id,     new_row.guild_id),
        status       = IF(status = 'denied', status,       new_row.status),
        requested_at = IF(status = 'denied', requested_at, new_row.requested_at),
        approved_at  = IF(status = 'denied', approved_at,  new_row.approved_at),
        approved_by  = IF(status = 'denied', approved_by,  new_row.approved_by)`,
-    [discordId, hash, status, now, approvedAt, approvedBy],
+    [discordId, hash, guildId, status, now, approvedAt, approvedBy],
   );
 
   const after = await getApiKeyStatus(discordId);
@@ -64,7 +69,7 @@ export async function requestApiKey(
 
 export async function findApprovedKeyByHash(hash: string): Promise<StreamdeckKeyRow | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT discord_id, key_hash, status, requested_at, approved_at, approved_by
+    `SELECT discord_id, key_hash, guild_id, status, requested_at, approved_at, approved_by
      FROM streamdeck_api_keys
      WHERE key_hash = ? AND status = 'approved'`,
     [hash],

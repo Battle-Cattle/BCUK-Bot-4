@@ -88,6 +88,7 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
       return;
     }
     req.apiKeyOwner = row.discord_id;
+    req.apiKeyGuildId = row.guild_id;
     next();
   } catch {
     res.status(500).json({ ok: false, error: 'Internal server error' });

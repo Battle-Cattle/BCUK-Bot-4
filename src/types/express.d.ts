@@ -38,6 +38,8 @@ declare module 'express-serve-static-core' {
   interface Request {
     csrfToken(): string;
     apiKeyOwner?: string;
+    /** The guild the Streamdeck API key is bound to, set by requireApiKey. */
+    apiKeyGuildId?: string;
   }
 }
 
