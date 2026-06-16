@@ -23,7 +23,7 @@ export type { DbGuildCommandOverride } from './db/guildCommandOverrides';
 
 export {
   AccessLevel, ACCESS_LEVEL_LABELS,
-  findUser, findUserByTwitchName, getAllUsers,
+  findUser, findUserByTwitchName, getAllUsers, getGuildMemberUsers,
   updateDiscordName, getTwitchEnabledChannels, updateAccessLevel,
 } from './db/users';
 export type { AccessLevelValue, DbUser } from './db/users';

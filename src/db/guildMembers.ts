@@ -90,25 +90,24 @@ export async function removeGuildMember(guildId: string, discordId: string): Pro
   );
 }
 
-// ─── Effective access-level shim ───────────────────────────────────────────────
+// ─── Effective access-level resolution ─────────────────────────────────────────
 
 /**
- * Resolves a user's effective access level for a guild.
+ * Resolves a user's effective access level within a guild.
  *
- * COMPATIBILITY SHIM (PR 2): while only one guild exists and the web panel still
- * writes the legacy `user.access_level` column, this returns that legacy value so
- * every existing reader keeps behaving identically. It deliberately does NOT read
- * `guild_member` yet — that table is seeded from `access_level` at migration time
- * but would drift the moment an admin changes a level through the current UI.
+ * Resolution order (PR 3): a non-whitelisted user is User (0); a bot owner
+ * (`user.is_owner`) is Admin everywhere regardless of membership; otherwise the
+ * level comes from the user's `guild_member` row for that guild, defaulting to
+ * User (0) when they have no membership there. The web panel writes `guild_member`
+ * for the current guild, so this is the single source of truth for authorization.
  *
- * PR 3 flips the source to `guild_member` (per-guild) and adds the `is_owner`
- * short-circuit once the readers and the admin UI are migrated together.
- *
- * @param _guildId Accepted now so callers can thread guildId through; unused until PR 3.
- * @param discordId BIGINT snowflake as a string.
- * @returns The user's access level, or AccessLevel.USER (0) if they have no user row.
+ * @param guildId Guild snowflake as a string.
+ * @param discordId User snowflake as a string.
+ * @returns The user's access level (0–3) for the guild.
  */
-export async function getEffectiveAccessLevel(_guildId: string, discordId: string): Promise<number> {
+export async function getEffectiveAccessLevel(guildId: string, discordId: string): Promise<number> {
   const user = await findUser(discordId);
-  return user ? user.access_level : AccessLevel.USER;
+  if (!user) return AccessLevel.USER;
+  if (user.is_owner) return AccessLevel.ADMIN;
+  return (await getMemberAccessLevel(guildId, discordId)) ?? AccessLevel.USER;
 }

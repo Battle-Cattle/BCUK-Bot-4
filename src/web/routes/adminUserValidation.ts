@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { createLogger } from '../../shared/logger';
-import { findUser, AccessLevel } from '../../db';
+import { findUser, getMemberAccessLevel, AccessLevel } from '../../db';
 import { trimField } from './shared';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 import { isLockWaitTimeoutDbError } from './adminUserMutations';
@@ -42,16 +42,34 @@ export function parseTwitchNameInput(
   return { error: null, normalizedTwitchName, shouldClearTwitchName };
 }
 
+/**
+ * Authorizes a Manager/Admin editing a user's access level within a guild.
+ * Returns an error code string, or null when the edit is permitted.
+ *
+ * Rules: nobody edits themselves through this form; only an owner may edit an
+ * owner; and a non-Admin actor may neither assign a level at or above their own
+ * nor modify a target who already sits at or above their own level **in this
+ * guild** (the target's level is read from `guild_member`, not the global column).
+ *
+ * @param sessionUser The acting user (current-guild access level + owner flag).
+ * @param targetDiscordId The user being edited.
+ * @param targetLevel The access level being assigned.
+ * @param guildId The guild the edit applies to.
+ */
 export async function checkManagerEditAuth(
-  sessionUser: { discordId: string; accessLevel: number },
+  sessionUser: { discordId: string; accessLevel: number; isOwner?: boolean },
   targetDiscordId: string,
   targetLevel: number,
+  guildId: string,
 ): Promise<string | null> {
   if (targetDiscordId === sessionUser.discordId) return 'self_edit_forbidden';
+  // Bot owners are global super-admins — only another owner may touch them.
+  const existingUser = await findUser(targetDiscordId);
+  if (existingUser?.is_owner && !sessionUser.isOwner) return 'target_above_level';
   if (sessionUser.accessLevel < AccessLevel.ADMIN) {
     if (targetLevel >= sessionUser.accessLevel) return 'access_level_too_high';
-    const existingUser = await findUser(targetDiscordId);
-    if (existingUser && existingUser.access_level >= sessionUser.accessLevel) return 'target_above_level';
+    const targetCurrentLevel = await getMemberAccessLevel(guildId, targetDiscordId);
+    if (targetCurrentLevel !== null && targetCurrentLevel >= sessionUser.accessLevel) return 'target_above_level';
   }
   return null;
 }
