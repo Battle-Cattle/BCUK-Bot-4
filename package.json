@@ -33,7 +33,7 @@
     "winston-daily-rotate-file": "^5.0.0"
   },
   "overrides": {
-    "ws": ">=8.20.1"
+    "ws": ">=8.21.0"
   },
   "devDependencies": {
     "@types/ejs": "^3.1.5",
