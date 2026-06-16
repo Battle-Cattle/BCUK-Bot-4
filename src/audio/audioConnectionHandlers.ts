@@ -19,6 +19,7 @@ export interface ConnectionHandlerDeps {
   scheduleReconnect: (reason: string) => void;
 }
 
+/** Logs the connection error, suppressing transient DNS failures that self-resolve via the state handler. */
 function handleConnectionError(err: Error, attemptId: number, deps: ConnectionHandlerDeps): void {
   if (attemptId !== deps.getAttemptId()) return;
 
@@ -31,6 +32,7 @@ function handleConnectionError(err: Error, attemptId: number, deps: ConnectionHa
   log.error('Voice connection error:', err);
 }
 
+/** Handles a voice connection drop, allowing a brief reconnect window before tearing down and scheduling a retry. */
 async function handleDisconnected(
   joinedConnection: VoiceConnection,
   attemptId: number,

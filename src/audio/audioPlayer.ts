@@ -93,6 +93,7 @@ const RECONNECT_BASE_DELAY_MS = 5_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
 const VOICE_CONNECT_TIMEOUT_MS = 30_000;
 
+/** Cancels and nulls any pending reconnect timer for the given guild state. */
 function clearReconnectTimer(state: GuildVoiceState): void {
   if (state.reconnectTimer) {
     clearTimeout(state.reconnectTimer);
@@ -100,6 +101,7 @@ function clearReconnectTimer(state: GuildVoiceState): void {
   }
 }
 
+/** Schedules an exponential-backoff voice reconnect for a guild, skipping if one is already pending. */
 function scheduleReconnect(state: GuildVoiceState, reason: string): void {
   if (!state.shouldAutoReconnect || !state.client || state.reconnectTimer || state.connection) return;
 
@@ -118,6 +120,7 @@ function scheduleReconnect(state: GuildVoiceState, reason: string): void {
   }, delay);
 }
 
+/** Returns the shared audio player, lazily creating it with idle and error handlers on first use. */
 function getPlayer(): DjsAudioPlayer {
   if (!player) {
     player = createAudioPlayer({
@@ -153,6 +156,7 @@ function tearDownGuild(state: GuildVoiceState): void {
   }
 }
 
+/** Builds the ConnectionHandlerDeps callbacks bound to a specific guild's mutable voice state. */
 function makeDeps(state: GuildVoiceState): ConnectionHandlerDeps {
   return {
     getAttemptId: () => state.currentAttemptId,

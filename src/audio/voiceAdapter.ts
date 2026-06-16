@@ -19,6 +19,7 @@ interface AdapterCleanupState {
   activeCleanup: (() => void) | null;
 }
 
+/** Creates the raw-gateway event handler that routes voice state and server update packets to the library. */
 function makeOnRaw(methods: DiscordGatewayAdapterLibraryMethods): (packet: RawPacket) => void {
   return function onRaw(packet: RawPacket): void {
     if (packet.t === 'VOICE_STATE_UPDATE') {
@@ -49,6 +50,7 @@ function makeCleanup(
   };
 }
 
+/** Creates the gateway payload sender that routes voice data through the channel's guild shard. */
 function makeSendPayload(channel: VoiceBasedChannel): (payload: unknown) => boolean {
   return function sendPayload(payload: unknown): boolean {
     try {
