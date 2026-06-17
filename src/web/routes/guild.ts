@@ -14,7 +14,12 @@ const router = Router();
 // page lets them choose which one the session acts in. Single-guild users never
 // reach it — requireGuildContext auto-selects their only guild.
 
-/** Render the guild picker. Users with a single guild are sent straight to the dashboard. */
+/**
+ * Renders the guild picker page for multi-guild users.
+ * @param req - Express request; reads `req.session.user.guilds`.
+ * @param res - Express response; renders `guildSelect`, or redirects to `/` when the user
+ *   has at most one guild (single-guild users are sent straight to the dashboard).
+ */
 router.get('/select', requireAuth, csrfProtection, (req, res) => {
   const user = req.session.user!;
   if (user.guilds.length <= 1) {
