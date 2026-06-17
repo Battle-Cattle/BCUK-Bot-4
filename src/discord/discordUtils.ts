@@ -12,6 +12,12 @@ export function isDiscordNotFoundError(err: unknown): boolean {
   );
 }
 
+/**
+ * Returns true when a voice-connect error is permanent and should not be retried.
+ *
+ * @param err - Caught error from voice connect/reconnect flow.
+ * @returns Whether the error indicates permanent misconfiguration/access/not-found.
+ */
 export function isPermanentVoiceMisconfigurationError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const { message } = err;
@@ -21,6 +27,7 @@ export function isPermanentVoiceMisconfigurationError(err: unknown): boolean {
   const isConfigError =
     message.includes('Missing DISCORD_GUILD_ID or DISCORD_VOICE_CHANNEL_ID') ||
     message.includes('Missing DISCORD_GUILD_ID or voice channel ID') ||
+    message.includes('Missing guild ID or voice channel ID') ||
     message.includes('is not a voice channel');
   const isForbidden = status === 403 || code === RESTJSONErrorCodes.MissingAccess;
   return isConfigError || isForbidden || isDiscordNotFoundError(err);

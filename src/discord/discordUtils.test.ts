@@ -67,9 +67,15 @@ describe('isDiscordNotFoundError', () => {
 });
 
 describe('isPermanentVoiceMisconfigurationError', () => {
-  it('returns true for a missing-config message', () => {
+  it('returns true for the legacy missing-config message', () => {
     expect(isPermanentVoiceMisconfigurationError(
       new Error('Missing DISCORD_GUILD_ID or DISCORD_VOICE_CHANNEL_ID'),
+    )).toBe(true);
+  });
+
+  it('returns true for the current missing-config message', () => {
+    expect(isPermanentVoiceMisconfigurationError(
+      new Error('Missing guild ID or voice channel ID'),
     )).toBe(true);
   });
 
