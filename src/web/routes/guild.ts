@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { findUser, getAllGuilds, getEffectiveAccessLevel, getGuildsForMember } from '../../db';
+import { AccessLevel, findUser, getAllGuilds, getEffectiveAccessLevel, getGuildsForMember } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { normalizeDiscordId } from './shared';
@@ -55,7 +55,7 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
     }
     user.isOwner = isOwner;
     user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
-    const accessLevel = (await getEffectiveAccessLevel(requestedGuildId, user.discordId)) as 0 | 1 | 2 | 3;
+    const accessLevel = (await getEffectiveAccessLevel(requestedGuildId, user.discordId)) as (typeof AccessLevel)[keyof typeof AccessLevel];
     user.currentGuildId = requestedGuildId;
     user.accessLevel = accessLevel;
   } catch (err) {

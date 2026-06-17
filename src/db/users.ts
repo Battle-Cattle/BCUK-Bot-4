@@ -43,7 +43,11 @@ function mapUser(r: mysql.RowDataPacket): DbUser {
   };
 }
 
-/** Look up a user by Discord ID. Returns null if no row exists. */
+/**
+ * Look up a user by Discord ID.
+ * @param discordId - Discord snowflake as a string.
+ * @returns The matching user row, or null if no row exists.
+ */
 export async function findUser(discordId: string): Promise<DbUser | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner FROM `user` WHERE discord_id = ?',
@@ -54,8 +58,10 @@ export async function findUser(discordId: string): Promise<DbUser | null> {
 
 /**
  * Look up a user by their normalized Twitch channel name.
+ * @param twitchName - Raw Twitch channel name input to normalize before matching.
  * @param excludeDiscordId - When set, excludes that Discord ID from the match (used when
  *   checking for a conflicting Twitch name during a different user's update).
+ * @returns The matching user row, or null if no match is found or the name is invalid.
  */
 export async function findUserByTwitchName(twitchName: string, excludeDiscordId?: string): Promise<DbUser | null> {
   const normalizedTwitchName = normalizeTwitchChannelName(twitchName);

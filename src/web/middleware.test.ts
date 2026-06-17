@@ -337,4 +337,15 @@ describe('requireGuildContext', () => {
     expect(res.redirect).toHaveBeenCalledWith('/guild/select');
     expect(next).not.toHaveBeenCalled();
   });
+
+  it('redirects to login when the user has no accessible guilds', async () => {
+    vi.mocked(getGuildsForMember).mockResolvedValue([] as any);
+    const req = makeReq({
+      session: { user: { discordId: 'u1', currentGuildId: null, accessLevel: 0, guilds: [] } },
+    });
+    const res = makeRes();
+    await requireGuildContext(req, res, next);
+    expect(res.redirect).toHaveBeenCalledWith('/auth/login');
+    expect(next).not.toHaveBeenCalled();
+  });
 });

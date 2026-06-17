@@ -29,8 +29,14 @@ vi.mock('../../shared/logger', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router from './auth';
-import { findUser, updateDiscordName, getAllGuilds, getGuildsForMember, getEffectiveAccessLevel } from '../../db';
-import { AccessLevel } from '../../db/users';
+import {
+  findUser,
+  updateDiscordName,
+  getAllGuilds,
+  getGuildsForMember,
+  getEffectiveAccessLevel,
+  AccessLevel,
+} from '../../db';
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 
 function buildApp(sessionOverrides: Record<string, unknown> = {}, captureSession?: (session: any) => void) {
@@ -42,10 +48,12 @@ function buildApp(sessionOverrides: Record<string, unknown> = {}, captureSession
       user: undefined,
       destroy: vi.fn((cb: () => void) => cb()),
       regenerate: vi.fn((cb: (err: null) => void) => cb(null)),
-      save: vi.fn((cb: (err: null) => void) => cb(null)),
+      save: vi.fn((cb: (err: null) => void) => {
+        captureSession?.(req.session);
+        cb(null);
+      }),
       ...sessionOverrides,
     };
-    captureSession?.(req.session);
     next();
   });
   app.use((req: any, res: any, next: any) => {

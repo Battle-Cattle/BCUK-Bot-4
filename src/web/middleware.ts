@@ -57,6 +57,10 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
   }
 
   if (!user.currentGuildId) {
+    if (user.guilds.length === 0) {
+      res.redirect('/auth/login');
+      return;
+    }
     if (user.guilds.length === 1) {
       user.currentGuildId = user.guilds[0].guildId;
     } else {
@@ -65,7 +69,7 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
     }
   }
 
-  user.accessLevel = (await getEffectiveAccessLevel(user.currentGuildId, user.discordId)) as 0 | 1 | 2 | 3;
+  user.accessLevel = (await getEffectiveAccessLevel(user.currentGuildId, user.discordId)) as (typeof AccessLevel)[keyof typeof AccessLevel];
 
   next();
 }
