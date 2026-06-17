@@ -40,7 +40,7 @@ vi.mock('./adminRefresh', async () => {
   const { Router } = await import('express');
   return {
     default: Router(),
-    refreshState: { outcome: 'idle', updatedCount: 0, failureCount: 0, startedAt: null, finishedAt: null },
+    getRefreshState: vi.fn(() => ({ outcome: 'idle', updatedCount: 0, failureCount: 0, startedAt: null, finishedAt: null })),
   };
 });
 

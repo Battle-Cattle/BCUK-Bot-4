@@ -12,6 +12,7 @@ import {
   findUser,
   findUserByTwitchName,
   getAllUsers,
+  getGuildMemberUsers,
   upsertUserRecord,
   updateDiscordName,
   getTwitchEnabledChannels,
@@ -161,6 +162,32 @@ describe('getAllUsers', () => {
     expect(result).toHaveLength(2);
     expect(result[0].discord_id).toBe('1');
     expect(result[1].is_twitch_bot_enabled).toBe(true);
+  });
+});
+
+// ─── getGuildMemberUsers ──────────────────────────────────────────────────────
+
+describe('getGuildMemberUsers', () => {
+  it('returns an empty array when the guild has no members', async () => {
+    const pool = makePool([[]]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await getGuildMemberUsers('900000000000000001');
+    expect(result).toEqual([]);
+  });
+
+  it('queries guild_member filtered by guildId and maps access_level from it', async () => {
+    const rows = [
+      { discord_id: '1', discord_name: 'Alice', is_twitch_bot_enabled: 1, twitch_name: 'alice', access_level: 3, is_owner: 0 },
+    ];
+    const pool = makePool([rows]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await getGuildMemberUsers('900000000000000001');
+    expect(result).toHaveLength(1);
+    expect(result[0].discord_id).toBe('1');
+    expect(result[0].access_level).toBe(3);
+    const [sql, params] = vi.mocked(pool.execute).mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('guild_member');
+    expect(params).toEqual(['900000000000000001']);
   });
 });
 

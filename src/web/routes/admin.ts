@@ -12,7 +12,7 @@ import { csrfProtection } from '../csrf';
 import { requireManager, requireAdmin } from '../middleware';
 import { trimField, renderError, filterQueryParam } from './shared';
 import { createMutationQueue } from '../../shared/mutationQueue';
-import adminRefreshRouter, { refreshState } from './adminRefresh';
+import adminRefreshRouter, { getRefreshState } from './adminRefresh';
 import {
   DuplicateTwitchNameError,
   isDuplicateTwitchNameDbError,
@@ -53,7 +53,7 @@ router.get('/users', requireManager, csrfProtection, async (req, res) => {
       csrfToken: req.csrfToken(),
       accessLevelLabels: ACCESS_LEVEL_LABELS,
       error: filterQueryParam(req.query.error, KNOWN_ERRORS),
-      refreshState,
+      refreshState: getRefreshState(guildId),
     });
   } catch (err) {
     log.error('Admin users error:', err);

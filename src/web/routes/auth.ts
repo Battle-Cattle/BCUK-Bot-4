@@ -8,6 +8,7 @@ import {
   getAllGuilds,
   getGuildsForMember,
   getEffectiveAccessLevel,
+  AccessLevel,
   type DbGuild,
 } from '../../db';
 import { fetchMemberDisplayName } from '../../discord/discordBot';
@@ -117,7 +118,7 @@ router.get('/discord/callback', async (req, res) => {
     const currentGuildId = accessibleGuilds.length === 1 ? accessibleGuilds[0].guild_id : null;
     const accessLevel = currentGuildId
       ? ((await getEffectiveAccessLevel(currentGuildId, profile.id)) as 0 | 1 | 2 | 3)
-      : 0;
+      : AccessLevel.USER;
 
     // 5. Save to session — regenerate the session ID first to prevent session fixation.
     const rawAvatar = profile.avatar

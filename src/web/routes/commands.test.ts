@@ -55,6 +55,7 @@ import {
   findUser,
   getAllCustomCommandsWithAssignments,
   getAllUsers,
+  getOverridesForGuild,
   isMysqlDuplicateEntryError,
   CommandConflictError,
   CommandNotFoundError,
@@ -81,6 +82,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([]);
   vi.mocked(getAllUsers).mockResolvedValue([]);
+  vi.mocked(getOverridesForGuild).mockResolvedValue([]);
   vi.mocked(addCustomCommand).mockResolvedValue(1);
   vi.mocked(updateCustomCommand).mockResolvedValue(undefined);
   vi.mocked(removeCustomCommand).mockResolvedValue(undefined);
@@ -516,6 +518,41 @@ describe('GET /commands', () => {
     app.use(router);
     const res = await supertest(app).get('/commands');
     expect(res.status).toBe(500);
+  });
+
+  it("36b. resolves the current guild's override onto the matching command and skips the lookup without a current guild", async () => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
+      { command_id: 1, trigger_string: '!hello', output: 'Hello!', is_discord_enabled: true, is_multi_twitch: false, assigned_users: [] } as any,
+      { command_id: 2, trigger_string: '!bye', output: 'Bye!', is_discord_enabled: true, is_multi_twitch: false, assigned_users: [] } as any,
+    ]);
+    vi.mocked(getOverridesForGuild).mockResolvedValue([
+      { guild_id: '900000000000000001', command_id: 1, is_disabled: true, output: null } as any,
+    ]);
+
+    let capturedLocals: any;
+    const app = express();
+    app.use(express.urlencoded({ extended: false }));
+    app.use((_req: any, res: any, next: any) => {
+      res.render = (_view: string, locals: any) => {
+        capturedLocals = locals;
+        res.send('ok');
+      };
+      next();
+    });
+    app.use((req: any, _res: any, next: any) => {
+      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER, currentGuildId: '900000000000000001' } };
+      next();
+    });
+    app.use(router);
+
+    await supertest(app).get('/commands');
+    expect(vi.mocked(getOverridesForGuild)).toHaveBeenCalledWith('900000000000000001');
+    expect(capturedLocals.commands[0].guildOverride).toMatchObject({ command_id: 1, is_disabled: true });
+    expect(capturedLocals.commands[1].guildOverride).toBeNull();
+
+    vi.mocked(getOverridesForGuild).mockClear();
+    await supertest(buildApp()).get('/commands');
+    expect(vi.mocked(getOverridesForGuild)).not.toHaveBeenCalled();
   });
 
   it('37. computes unassigned_users correctly when commands and users are present', async () => {

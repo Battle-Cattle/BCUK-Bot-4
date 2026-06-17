@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../../db', () => ({
   getEffectiveAccessLevel: vi.fn().mockResolvedValue(0),
 }));
+vi.mock('../../db/users', () => ({
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+}));
 vi.mock('../csrf', () => ({
   csrfProtection: (_req: any, _res: any, next: any) => next(),
 }));
@@ -17,6 +20,7 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './guild';
 import { getEffectiveAccessLevel } from '../../db';
+import { AccessLevel } from '../../db/users';
 
 const TWO_GUILDS = [
   { guildId: '100000000000000001', name: 'Alpha' },
@@ -41,7 +45,7 @@ function buildApp(sessionUser: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getEffectiveAccessLevel).mockResolvedValue(0);
+  vi.mocked(getEffectiveAccessLevel).mockResolvedValue(AccessLevel.USER);
 });
 
 describe('GET /guild/select', () => {
@@ -63,8 +67,8 @@ describe('GET /guild/select', () => {
 
 describe('POST /guild/select', () => {
   it('selects a guild the user belongs to and recomputes the access level', async () => {
-    vi.mocked(getEffectiveAccessLevel).mockResolvedValue(2);
-    const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: 0, guilds: TWO_GUILDS };
+    vi.mocked(getEffectiveAccessLevel).mockResolvedValue(AccessLevel.MANAGER);
+    const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
     const app = express();
     app.use(express.urlencoded({ extended: false }));
     app.use((req: any, _res: any, next: any) => {
@@ -82,12 +86,12 @@ describe('POST /guild/select', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/');
     expect(user.currentGuildId).toBe('100000000000000002');
-    expect(user.accessLevel).toBe(2);
+    expect(user.accessLevel).toBe(AccessLevel.MANAGER);
     expect(vi.mocked(getEffectiveAccessLevel)).toHaveBeenCalledWith('100000000000000002', 'u1');
   });
 
   it('rejects a guild the user does not belong to (cross-guild IDOR guard)', async () => {
-    const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: 0, guilds: TWO_GUILDS };
+    const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
     const app = express();
     app.use(express.urlencoded({ extended: false }));
     app.use((req: any, _res: any, next: any) => {
@@ -109,7 +113,7 @@ describe('POST /guild/select', () => {
   });
 
   it('rejects a malformed guild ID', async () => {
-    const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: 0, guilds: TWO_GUILDS };
+    const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
     const app = express();
     app.use(express.urlencoded({ extended: false }));
     app.use((req: any, _res: any, next: any) => {

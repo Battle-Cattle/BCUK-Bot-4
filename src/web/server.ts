@@ -160,7 +160,7 @@ app.use('/', sfxPublicRouter);
 app.use('/overlay', overlaySourceRouter);
 app.use('/guild', requireAuth, guildRouter);
 app.use('/api', requireAuth, apiRouter);
-app.use('/', requireAuth, streamdeckKeysRouter);
+app.use('/', requireAuth, requireGuildContext, streamdeckKeysRouter);
 app.use('/', requireAuth, sfxRouter);
 app.use('/admin', requireAuth, requireGuildContext, adminRouter);
 app.use('/admin', requireAuth, streamsRouter);

@@ -84,6 +84,7 @@ describe('getApiKeyStatus', () => {
     const now = new Date();
     const row = {
       discord_id: '123',
+      guild_id: 'g1',
       status: 'pending',
       requested_at: now,
       approved_at: null,
@@ -94,6 +95,7 @@ describe('getApiKeyStatus', () => {
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const result = await getApiKeyStatus('123');
     expect(result!.discord_id).toBe('123');
+    expect(result!.guild_id).toBe('g1');
     expect(result!.status).toBe('pending');
     expect(result!.requested_at).toBe(now);
     expect(result!.approved_at).toBeNull();
@@ -103,6 +105,7 @@ describe('getApiKeyStatus', () => {
   it('maps a row with approver info', async () => {
     const row = {
       discord_id: '1',
+      guild_id: 'g1',
       status: 'approved',
       requested_at: new Date(),
       approved_at: new Date(),
@@ -112,6 +115,7 @@ describe('getApiKeyStatus', () => {
     };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const result = await getApiKeyStatus('1');
+    expect(result!.guild_id).toBe('g1');
     expect(result!.approved_by).toBe('99');
     expect(result!.user_name).toBe('Alice');
     expect(result!.approver_name).toBe('Admin');
@@ -168,10 +172,11 @@ describe('getPendingRequests', () => {
   });
 
   it('maps pending rows', async () => {
-    const row = { discord_id: '1', status: 'pending', requested_at: new Date(), approved_at: null, approved_by: null, user_name: 'Alice', approver_name: null };
+    const row = { discord_id: '1', guild_id: 'g1', status: 'pending', requested_at: new Date(), approved_at: null, approved_by: null, user_name: 'Alice', approver_name: null };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const result = await getPendingRequests();
     expect(result).toHaveLength(1);
+    expect(result[0].guild_id).toBe('g1');
     expect(result[0].status).toBe('pending');
     expect(result[0].user_name).toBe('Alice');
   });
@@ -188,13 +193,15 @@ describe('getAllApiKeys', () => {
 
   it('maps multiple rows with different statuses', async () => {
     const rows = [
-      { discord_id: '1', status: 'approved', requested_at: new Date(), approved_at: new Date(), approved_by: '2', user_name: 'Alice', approver_name: 'Admin' },
-      { discord_id: '3', status: 'revoked', requested_at: new Date(), approved_at: null, approved_by: null, user_name: 'Bob', approver_name: null },
+      { discord_id: '1', guild_id: 'g1', status: 'approved', requested_at: new Date(), approved_at: new Date(), approved_by: '2', user_name: 'Alice', approver_name: 'Admin' },
+      { discord_id: '3', guild_id: 'g2', status: 'revoked', requested_at: new Date(), approved_at: null, approved_by: null, user_name: 'Bob', approver_name: null },
     ];
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const result = await getAllApiKeys();
     expect(result).toHaveLength(2);
+    expect(result[0].guild_id).toBe('g1');
     expect(result[0].status).toBe('approved');
+    expect(result[1].guild_id).toBe('g2');
     expect(result[1].status).toBe('revoked');
   });
 });

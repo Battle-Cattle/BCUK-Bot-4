@@ -28,6 +28,16 @@ function mapRow(r: mysql.RowDataPacket): StreamdeckKeyRow {
   };
 }
 
+/**
+ * Requests (or re-requests) a Streamdeck API key for a user, scoped to one guild.
+ * Manager+ access levels are auto-approved; everyone else is queued as pending.
+ * Throws if a previous request for this user was denied.
+ *
+ * @param discordId Requesting user's Discord snowflake.
+ * @param accessLevel The user's effective access level in `guildId`, used to decide auto-approval.
+ * @param guildId The guild the key will act on.
+ * @returns The plaintext key (only ever returned here — only the hash is stored) and its status.
+ */
 export async function requestApiKey(
   discordId: string,
   accessLevel: number,
