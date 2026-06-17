@@ -4,6 +4,11 @@ import { getGuildMemberUsers, updateDiscordName } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
+import { createMutationQueue } from '../../shared/mutationQueue';
+
+// A user can belong to multiple guilds, so refreshes for different guilds can run
+// concurrently and race on the same user row. Serialize writes per discord_id.
+const userMutationQueue = createMutationQueue();
 
 export type RefreshOutcome = 'idle' | 'running' | 'success' | 'partial' | 'noop' | 'error';
 
@@ -57,7 +62,7 @@ async function runDiscordNameRefresh(guildId: string): Promise<void> {
 
         const trimmedName = name?.trim();
         if (trimmedName && trimmedName !== user.discord_name) {
-          await updateDiscordName(user.discord_id, trimmedName);
+          await userMutationQueue.run(user.discord_id, () => updateDiscordName(user.discord_id, trimmedName));
           updatedCount++;
           state.updatedCount = updatedCount;
         }

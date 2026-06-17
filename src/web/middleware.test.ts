@@ -241,13 +241,14 @@ describe('requireGuildContext', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('calls next() when a valid current guild is already selected', async () => {
-    const req = makeReq({
-      session: { user: { discordId: 'u1', currentGuildId: 'g1', accessLevel: 2, guilds: [{ guildId: 'g1', name: 'A' }] } },
-    });
+  it('calls next() when a valid current guild is already selected, refreshing the access level', async () => {
+    vi.mocked(getEffectiveAccessLevel).mockResolvedValue(3);
+    const user = { discordId: 'u1', currentGuildId: 'g1', accessLevel: 2, guilds: [{ guildId: 'g1', name: 'A' }] };
+    const req = makeReq({ session: { user } });
     await requireGuildContext(req, makeRes(), next);
     expect(next).toHaveBeenCalledOnce();
-    expect(vi.mocked(getEffectiveAccessLevel)).not.toHaveBeenCalled();
+    expect(vi.mocked(getEffectiveAccessLevel)).toHaveBeenCalledWith('g1', 'u1');
+    expect(user.accessLevel).toBe(3);
   });
 
   it('auto-selects and recomputes the level when the user has exactly one guild', async () => {

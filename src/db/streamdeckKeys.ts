@@ -6,7 +6,7 @@ import { AccessLevel } from './users';
 export interface StreamdeckKeyRow {
   discord_id: string;
   /** The guild this key acts on. */
-  guild_id: string;
+  guild_id: string | null;
   status: 'pending' | 'approved' | 'revoked' | 'denied';
   requested_at: Date;
   approved_at: Date | null;
@@ -18,7 +18,7 @@ export interface StreamdeckKeyRow {
 function mapRow(r: mysql.RowDataPacket): StreamdeckKeyRow {
   return {
     discord_id: String(r.discord_id),
-    guild_id: String(r.guild_id),
+    guild_id: r.guild_id === null ? null : String(r.guild_id),
     status: r.status as StreamdeckKeyRow['status'],
     requested_at: r.requested_at,
     approved_at: r.approved_at ?? null,

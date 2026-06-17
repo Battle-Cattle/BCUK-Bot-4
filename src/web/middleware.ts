@@ -35,12 +35,13 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
   if (!user.currentGuildId) {
     if (user.guilds.length === 1) {
       user.currentGuildId = user.guilds[0].guildId;
-      user.accessLevel = (await getEffectiveAccessLevel(user.currentGuildId, user.discordId)) as 0 | 1 | 2 | 3;
     } else {
       res.redirect('/guild/select');
       return;
     }
   }
+
+  user.accessLevel = (await getEffectiveAccessLevel(user.currentGuildId, user.discordId)) as 0 | 1 | 2 | 3;
 
   next();
 }

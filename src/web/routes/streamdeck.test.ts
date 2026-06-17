@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SfxTrigger, SfxFile } from '../../db';
 
+let mockApiKeyGuildId: string | null = 'guild-123';
 vi.mock('../middleware', () => ({
   requireApiKey: (req: any, _res: any, next: any) => {
-    req.apiKeyGuildId = 'guild-123';
+    req.apiKeyGuildId = mockApiKeyGuildId;
     next();
   },
 }));
@@ -78,6 +79,7 @@ function buildApp() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockApiKeyGuildId = 'guild-123';
   vi.mocked(getAllSfxTriggers).mockResolvedValue([]);
   vi.mocked(findTrigger).mockResolvedValue(null);
   vi.mocked(findSoundFiles).mockResolvedValue([]);
@@ -250,6 +252,14 @@ describe('GET /voice/channels', () => {
 
     expect(res.body).toMatchObject({ ok: false });
   });
+
+  it('returns 503 when the API key has no guild binding', async () => {
+    mockApiKeyGuildId = null;
+
+    const res = await supertest(buildApp()).get('/voice/channels').expect(503);
+
+    expect(res.body).toMatchObject({ ok: false });
+  });
 });
 
 describe('POST /voice/join', () => {
@@ -295,6 +305,17 @@ describe('POST /voice/join', () => {
 
     expect(res.body).toMatchObject({ ok: false });
   });
+
+  it('returns 503 when the API key has no guild binding', async () => {
+    mockApiKeyGuildId = null;
+
+    const res = await supertest(buildApp())
+      .post('/voice/join')
+      .send({ channelId: '123456789012345678' })
+      .expect(503);
+
+    expect(res.body).toMatchObject({ ok: false });
+  });
 });
 
 describe('POST /voice/leave', () => {
@@ -304,5 +325,13 @@ describe('POST /voice/leave', () => {
     expect(res.body).toEqual({ ok: true });
     // Leaving must be scoped to the configured guild, not an unscoped disconnect.
     expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
+  });
+
+  it('returns 503 when the API key has no guild binding', async () => {
+    mockApiKeyGuildId = null;
+
+    const res = await supertest(buildApp()).post('/voice/leave').expect(503);
+
+    expect(res.body).toMatchObject({ ok: false });
   });
 });

@@ -43,8 +43,9 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
   }
 
   try {
+    const accessLevel = (await getEffectiveAccessLevel(requestedGuildId, user.discordId)) as 0 | 1 | 2 | 3;
     user.currentGuildId = requestedGuildId;
-    user.accessLevel = (await getEffectiveAccessLevel(requestedGuildId, user.discordId)) as 0 | 1 | 2 | 3;
+    user.accessLevel = accessLevel;
   } catch (err) {
     log.error('Guild select failed:', err);
     return res.redirect('/guild/select');

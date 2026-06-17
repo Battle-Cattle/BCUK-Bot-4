@@ -178,7 +178,7 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   const trimmedDiscordId = resolveValidDiscordId(res, discord_id);
   if (!trimmedDiscordId) return;
 
-  const nextEnabled = await resolveToggleTwitchInputs(res, guildId, trimmedDiscordId, is_twitch_bot_enabled);
+  const nextEnabled = await resolveToggleTwitchInputs(res, req.session.user!, guildId, trimmedDiscordId, is_twitch_bot_enabled);
   if (nextEnabled === null) return;
 
   try {

@@ -102,6 +102,22 @@ describe('getApiKeyStatus', () => {
     expect(result!.approved_by).toBeNull();
   });
 
+  it('preserves a null guild_id instead of stringifying it', async () => {
+    const row = {
+      discord_id: '123',
+      guild_id: null,
+      status: 'pending',
+      requested_at: new Date(),
+      approved_at: null,
+      approved_by: null,
+      user_name: null,
+      approver_name: null,
+    };
+    vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
+    const result = await getApiKeyStatus('123');
+    expect(result!.guild_id).toBeNull();
+  });
+
   it('maps a row with approver info', async () => {
     const row = {
       discord_id: '1',

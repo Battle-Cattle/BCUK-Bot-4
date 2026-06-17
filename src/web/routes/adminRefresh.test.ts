@@ -182,6 +182,7 @@ describe('runDiscordNameRefresh outcomes', () => {
     expect(getRefreshState(GUILD_ID).outcome).toBe('noop');
     expect(getRefreshState(GUILD_ID).updatedCount).toBe(0);
     expect(updateDiscordName).not.toHaveBeenCalled();
+    expect(vi.mocked(fetchMemberDisplayName)).toHaveBeenCalledWith('1', true, GUILD_ID);
   });
 
   it('outcome is "partial" when some users succeed and some fail', async () => {
@@ -200,6 +201,8 @@ describe('runDiscordNameRefresh outcomes', () => {
     expect(getRefreshState(GUILD_ID).outcome).toBe('partial');
     expect(getRefreshState(GUILD_ID).updatedCount).toBe(1);
     expect(getRefreshState(GUILD_ID).failureCount).toBe(1);
+    expect(vi.mocked(fetchMemberDisplayName)).toHaveBeenCalledWith('1', true, GUILD_ID);
+    expect(vi.mocked(fetchMemberDisplayName)).toHaveBeenCalledWith('2', true, GUILD_ID);
   });
 
   it('outcome is "error" when all lookups fail', async () => {
@@ -215,6 +218,7 @@ describe('runDiscordNameRefresh outcomes', () => {
     expect(getRefreshState(GUILD_ID).outcome).toBe('error');
     expect(getRefreshState(GUILD_ID).updatedCount).toBe(0);
     expect(getRefreshState(GUILD_ID).failureCount).toBe(1);
+    expect(vi.mocked(fetchMemberDisplayName)).toHaveBeenCalledWith('1', true, GUILD_ID);
   });
 
   it('outcome is "error" when Discord client is not ready', async () => {
@@ -249,5 +253,6 @@ describe('runDiscordNameRefresh outcomes', () => {
     await waitForRefreshComplete();
     expect(getRefreshState(GUILD_ID).failureCount).toBe(1);
     expect(getRefreshState(GUILD_ID).outcome).toBe('error');
+    expect(vi.mocked(fetchMemberDisplayName)).toHaveBeenCalledWith('1', true, GUILD_ID);
   });
 });
