@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../db', () => ({
   findApprovedKeyByHash: vi.fn(),
   getEffectiveAccessLevel: vi.fn(),
+  findUser: vi.fn(),
+  getAllGuilds: vi.fn(),
+  getGuildsForMember: vi.fn(),
   AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 vi.mock('./csrf', () => ({
@@ -10,7 +13,7 @@ vi.mock('./csrf', () => ({
 }));
 
 import { requireAuth, requireManager, requireMod, requireAdmin, requireApiKey, requireGuildContext } from './middleware';
-import { findApprovedKeyByHash, getEffectiveAccessLevel, AccessLevel } from '../db';
+import { findApprovedKeyByHash, getEffectiveAccessLevel, findUser, getAllGuilds, getGuildsForMember, AccessLevel } from '../db';
 
 function makeReq(overrides: object = {}): any {
   return {
@@ -232,6 +235,10 @@ describe('requireApiKey', () => {
 // ─── requireGuildContext ────────────────────────────────────────────────────
 
 describe('requireGuildContext', () => {
+  beforeEach(() => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+  });
+
   it('redirects to login when no session user', async () => {
     const req = makeReq({ session: {} });
     const res = makeRes();
@@ -240,8 +247,19 @@ describe('requireGuildContext', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it('redirects to login when the session user no longer exists in the database', async () => {
+    vi.mocked(findUser).mockResolvedValue(null);
+    const user = { discordId: 'u1', currentGuildId: 'g1', accessLevel: 2, guilds: [{ guildId: 'g1', name: 'A' }] };
+    const req = makeReq({ session: { user } });
+    const res = makeRes();
+    await requireGuildContext(req, res, next);
+    expect(res.redirect).toHaveBeenCalledWith('/auth/login');
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('calls next() when a valid current guild is already selected, refreshing the access level', async () => {
     vi.mocked(getEffectiveAccessLevel).mockResolvedValue(3);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: 'g1', name: 'A', voice_channel_id: null }] as any);
     const user = { discordId: 'u1', currentGuildId: 'g1', accessLevel: 2, guilds: [{ guildId: 'g1', name: 'A' }] };
     const req = makeReq({ session: { user } });
     await requireGuildContext(req, makeRes(), next);
@@ -250,8 +268,38 @@ describe('requireGuildContext', () => {
     expect(user.accessLevel).toBe(3);
   });
 
+  it('re-derives guild membership from the database, ignoring a stale session guild list', async () => {
+    // Session cache claims membership in g2 too, but the live DB lookup only returns g1 —
+    // the live data must win so a revoked membership takes effect immediately.
+    vi.mocked(getEffectiveAccessLevel).mockResolvedValue(1);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: 'g1', name: 'A', voice_channel_id: null }] as any);
+    const user = {
+      discordId: 'u1',
+      currentGuildId: 'g1',
+      accessLevel: 3,
+      guilds: [{ guildId: 'g1', name: 'A' }, { guildId: 'g2', name: 'B' }],
+    };
+    const req = makeReq({ session: { user } });
+    await requireGuildContext(req, makeRes(), next);
+    expect(user.guilds).toEqual([{ guildId: 'g1', name: 'A' }]);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('uses getAllGuilds instead of getGuildsForMember when the database reports the user as owner', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
+    vi.mocked(getAllGuilds).mockResolvedValue([{ guild_id: 'g1', name: 'A', voice_channel_id: null }] as any);
+    vi.mocked(getEffectiveAccessLevel).mockResolvedValue(3);
+    const user = { discordId: 'u1', currentGuildId: 'g1', accessLevel: 0, isOwner: false, guilds: [{ guildId: 'g1', name: 'A' }] };
+    const req = makeReq({ session: { user } });
+    await requireGuildContext(req, makeRes(), next);
+    expect(user.isOwner).toBe(true);
+    expect(vi.mocked(getAllGuilds)).toHaveBeenCalled();
+    expect(vi.mocked(getGuildsForMember)).not.toHaveBeenCalled();
+  });
+
   it('auto-selects and recomputes the level when the user has exactly one guild', async () => {
     vi.mocked(getEffectiveAccessLevel).mockResolvedValue(3);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: 'g1', name: 'A', voice_channel_id: null }] as any);
     const user = { discordId: 'u1', currentGuildId: null, accessLevel: 0, guilds: [{ guildId: 'g1', name: 'A' }] };
     const req = makeReq({ session: { user } });
     await requireGuildContext(req, makeRes(), next);
@@ -261,6 +309,10 @@ describe('requireGuildContext', () => {
   });
 
   it('redirects to the picker when multiple guilds and none selected', async () => {
+    vi.mocked(getGuildsForMember).mockResolvedValue([
+      { guild_id: 'g1', name: 'A', voice_channel_id: null },
+      { guild_id: 'g2', name: 'B', voice_channel_id: null },
+    ] as any);
     const req = makeReq({
       session: { user: { discordId: 'u1', currentGuildId: null, accessLevel: 0, guilds: [{ guildId: 'g1', name: 'A' }, { guildId: 'g2', name: 'B' }] } },
     });
@@ -272,6 +324,10 @@ describe('requireGuildContext', () => {
 
   it('drops a stale guild the user no longer belongs to and re-picks', async () => {
     // currentGuildId points at a guild absent from the (now-reduced) membership list.
+    vi.mocked(getGuildsForMember).mockResolvedValue([
+      { guild_id: 'g1', name: 'A', voice_channel_id: null },
+      { guild_id: 'g2', name: 'B', voice_channel_id: null },
+    ] as any);
     const req = makeReq({
       session: { user: { discordId: 'u1', currentGuildId: 'gone', accessLevel: 3, guilds: [{ guildId: 'g1', name: 'A' }, { guildId: 'g2', name: 'B' }] } },
     });

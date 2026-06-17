@@ -43,6 +43,7 @@ function mapUser(r: mysql.RowDataPacket): DbUser {
   };
 }
 
+/** Look up a user by Discord ID. Returns null if no row exists. */
 export async function findUser(discordId: string): Promise<DbUser | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner FROM `user` WHERE discord_id = ?',
@@ -51,6 +52,11 @@ export async function findUser(discordId: string): Promise<DbUser | null> {
   return rows.length === 0 ? null : mapUser(rows[0]);
 }
 
+/**
+ * Look up a user by their normalized Twitch channel name.
+ * @param excludeDiscordId - When set, excludes that Discord ID from the match (used when
+ *   checking for a conflicting Twitch name during a different user's update).
+ */
 export async function findUserByTwitchName(twitchName: string, excludeDiscordId?: string): Promise<DbUser | null> {
   const normalizedTwitchName = normalizeTwitchChannelName(twitchName);
   if (!normalizedTwitchName) {
@@ -74,6 +80,7 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
   return rows.length === 0 ? null : mapUser(rows[0]);
 }
 
+/** Returns every user row, ordered by access level (highest first) then name. */
 export async function getAllUsers(): Promise<DbUser[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner FROM `user` ORDER BY access_level DESC, discord_name ASC',

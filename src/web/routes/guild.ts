@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getAllGuilds, getEffectiveAccessLevel, getGuildsForMember } from '../../db';
+import { findUser, getAllGuilds, getEffectiveAccessLevel, getGuildsForMember } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { normalizeDiscordId } from './shared';
@@ -28,11 +28,11 @@ router.get('/select', requireAuth, csrfProtection, (req, res) => {
 });
 
 /**
- * Select the active guild. The requested guild ID is untrusted input: membership
- * is re-checked against live `guild_member` data (not the session's cached guild
- * list, which can be stale if membership was revoked after login) before it is
- * accepted. On success the effective access level is recomputed for that guild so
- * authorization reflects the current guild, never the previous one.
+ * Select the active guild. The requested guild ID is untrusted input: owner status and
+ * membership are re-read from the database (not the session's cached `isOwner`/`guilds`,
+ * which can be stale if either was revoked after login) before the guild is accepted.
+ * On success the effective access level is recomputed for that guild so authorization
+ * reflects the current guild, never the previous one.
  */
 router.post('/select', requireAuth, csrfProtection, async (req, res) => {
   const user = req.session.user!;
@@ -44,10 +44,16 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
   }
 
   try {
-    const liveGuilds = user.isOwner ? await getAllGuilds() : await getGuildsForMember(user.discordId);
+    const dbUser = await findUser(user.discordId);
+    if (!dbUser) {
+      return res.redirect('/auth/login');
+    }
+    const isOwner = dbUser.is_owner;
+    const liveGuilds = isOwner ? await getAllGuilds() : await getGuildsForMember(user.discordId);
     if (!liveGuilds.some((g) => g.guild_id === requestedGuildId)) {
       return res.redirect('/guild/select');
     }
+    user.isOwner = isOwner;
     user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
     const accessLevel = (await getEffectiveAccessLevel(requestedGuildId, user.discordId)) as 0 | 1 | 2 | 3;
     user.currentGuildId = requestedGuildId;

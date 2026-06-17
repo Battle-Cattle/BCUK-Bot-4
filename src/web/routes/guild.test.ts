@@ -4,6 +4,7 @@ vi.mock('../../db', () => ({
   getEffectiveAccessLevel: vi.fn().mockResolvedValue(0),
   getAllGuilds: vi.fn(),
   getGuildsForMember: vi.fn(),
+  findUser: vi.fn(),
 }));
 vi.mock('../../db/users', () => ({
   AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
@@ -21,7 +22,7 @@ vi.mock('../../shared/logger', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router from './guild';
-import { getAllGuilds, getEffectiveAccessLevel, getGuildsForMember } from '../../db';
+import { findUser, getAllGuilds, getEffectiveAccessLevel, getGuildsForMember } from '../../db';
 import { AccessLevel } from '../../db/users';
 
 const TWO_GUILDS = [
@@ -55,6 +56,7 @@ beforeEach(() => {
   vi.mocked(getEffectiveAccessLevel).mockResolvedValue(AccessLevel.USER);
   vi.mocked(getGuildsForMember).mockResolvedValue(TWO_DB_GUILDS as any);
   vi.mocked(getAllGuilds).mockResolvedValue(TWO_DB_GUILDS as any);
+  vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
 });
 
 describe('GET /guild/select', () => {
@@ -147,11 +149,12 @@ describe('POST /guild/select', () => {
   });
 
   it('uses getAllGuilds (not getGuildsForMember) when the user is the bot owner', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
     const user: any = {
       discordId: 'u1',
       currentGuildId: null,
       accessLevel: AccessLevel.USER,
-      isOwner: true,
+      isOwner: false,
       guilds: TWO_GUILDS,
     };
     const app = express();
@@ -171,8 +174,61 @@ describe('POST /guild/select', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/');
     expect(user.currentGuildId).toBe('100000000000000002');
+    expect(user.isOwner).toBe(true);
     expect(vi.mocked(getAllGuilds)).toHaveBeenCalled();
     expect(vi.mocked(getGuildsForMember)).not.toHaveBeenCalled();
+  });
+
+  it('ignores a stale session-cached isOwner flag and re-derives it from the database', async () => {
+    // Session says owner, but the live DB record says otherwise (e.g. revoked) — the
+    // route must trust the DB, not the cached session value.
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    const user: any = {
+      discordId: 'u1',
+      currentGuildId: null,
+      accessLevel: AccessLevel.USER,
+      isOwner: true,
+      guilds: TWO_GUILDS,
+    };
+    const app = express();
+    app.use(express.urlencoded({ extended: false }));
+    app.use((req: any, _res: any, next: any) => {
+      req.session = { user };
+      req.csrfToken = () => 'csrf-token';
+      next();
+    });
+    app.use('/guild', router);
+
+    await supertest(app)
+      .post('/guild/select')
+      .type('form')
+      .send({ guild_id: '100000000000000002' });
+
+    expect(user.isOwner).toBe(false);
+    expect(vi.mocked(getGuildsForMember)).toHaveBeenCalled();
+    expect(vi.mocked(getAllGuilds)).not.toHaveBeenCalled();
+  });
+
+  it('redirects to login when the session user no longer exists in the database', async () => {
+    vi.mocked(findUser).mockResolvedValue(null);
+    const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+    const app = express();
+    app.use(express.urlencoded({ extended: false }));
+    app.use((req: any, _res: any, next: any) => {
+      req.session = { user };
+      req.csrfToken = () => 'csrf-token';
+      next();
+    });
+    app.use('/guild', router);
+
+    const res = await supertest(app)
+      .post('/guild/select')
+      .type('form')
+      .send({ guild_id: '100000000000000002' });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/auth/login');
+    expect(vi.mocked(getEffectiveAccessLevel)).not.toHaveBeenCalled();
   });
 
   it('rejects a malformed guild ID', async () => {

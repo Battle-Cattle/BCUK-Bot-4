@@ -1,7 +1,14 @@
 import { createHash } from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { ensureSessionCsrfToken } from './csrf';
-import { AccessLevel, findApprovedKeyByHash, getEffectiveAccessLevel } from '../db';
+import {
+  AccessLevel,
+  findApprovedKeyByHash,
+  findUser,
+  getAllGuilds,
+  getEffectiveAccessLevel,
+  getGuildsForMember,
+} from '../db';
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   if (req.session.user) {
@@ -16,8 +23,16 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
  * Assumes `requireAuth` ran first. Auto-selects when the user has exactly one guild
  * (so single-guild deployments never see the picker); redirects to the picker when a
  * choice is required; and re-validates that the stored guild is still one the user
- * belongs to. The effective access level is recomputed for the resolved guild so
- * authorization always reflects the current guild, never a stale login-time value.
+ * belongs to. Membership and owner status are re-read from the database on every call
+ * (rather than trusted from the session cache) so a revoked guild membership or owner
+ * flag takes effect immediately instead of only at next login. The effective access
+ * level is recomputed for the resolved guild so authorization always reflects the
+ * current guild, never a stale login-time value.
+ *
+ * @param req - Express request; reads and mutates `req.session.user`.
+ * @param res - Express response; used to redirect when no guild context can be resolved.
+ * @param next - Called once a valid `currentGuildId` and `accessLevel` are set on the session user.
+ * @returns A promise that resolves once `next()` or a redirect has been issued.
  */
 export async function requireGuildContext(req: Request, res: Response, next: NextFunction): Promise<void> {
   const user = req.session.user;
@@ -25,6 +40,15 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
     res.redirect('/auth/login');
     return;
   }
+
+  const dbUser = await findUser(user.discordId);
+  if (!dbUser) {
+    res.redirect('/auth/login');
+    return;
+  }
+  const liveGuilds = dbUser.is_owner ? await getAllGuilds() : await getGuildsForMember(user.discordId);
+  user.isOwner = dbUser.is_owner;
+  user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
 
   // A stored guild must still be one the user can act in (membership may have been
   // revoked since login). Drop it and re-pick if not.
