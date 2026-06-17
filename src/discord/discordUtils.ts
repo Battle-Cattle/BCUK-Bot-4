@@ -12,6 +12,12 @@ export function isDiscordNotFoundError(err: unknown): boolean {
   );
 }
 
+/**
+ * Returns true when a voice-connect error is permanent and should not be retried.
+ *
+ * @param err - Caught error from voice connect/reconnect flow.
+ * @returns Whether the error indicates permanent misconfiguration/access/not-found.
+ */
 export function isPermanentVoiceMisconfigurationError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const { message } = err;

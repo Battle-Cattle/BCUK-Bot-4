@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getEffectiveAccessLevel } from '../../db';
+import { getAllGuilds, getEffectiveAccessLevel, getGuildsForMember } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { normalizeDiscordId } from './shared';
@@ -28,9 +28,10 @@ router.get('/select', requireAuth, csrfProtection, (req, res) => {
 });
 
 /**
- * Select the active guild. The requested guild ID is untrusted input: it must be
- * one the user already belongs to (their session guild list), or the request is
- * rejected. On success the effective access level is recomputed for that guild so
+ * Select the active guild. The requested guild ID is untrusted input: membership
+ * is re-checked against live `guild_member` data (not the session's cached guild
+ * list, which can be stale if membership was revoked after login) before it is
+ * accepted. On success the effective access level is recomputed for that guild so
  * authorization reflects the current guild, never the previous one.
  */
 router.post('/select', requireAuth, csrfProtection, async (req, res) => {
@@ -38,11 +39,16 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
   const { guild_id } = req.body as { guild_id?: unknown };
   const requestedGuildId = typeof guild_id === 'string' ? normalizeDiscordId(guild_id) : null;
 
-  if (!requestedGuildId || !user.guilds.some((g) => g.guildId === requestedGuildId)) {
+  if (!requestedGuildId) {
     return res.redirect('/guild/select');
   }
 
   try {
+    const liveGuilds = user.isOwner ? await getAllGuilds() : await getGuildsForMember(user.discordId);
+    if (!liveGuilds.some((g) => g.guild_id === requestedGuildId)) {
+      return res.redirect('/guild/select');
+    }
+    user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
     const accessLevel = (await getEffectiveAccessLevel(requestedGuildId, user.discordId)) as 0 | 1 | 2 | 3;
     user.currentGuildId = requestedGuildId;
     user.accessLevel = accessLevel;

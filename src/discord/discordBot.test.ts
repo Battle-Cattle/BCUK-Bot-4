@@ -203,6 +203,14 @@ describe('startDiscordBot — clientReady error path', () => {
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await expect(readyCb(mockInstance)).resolves.toBeUndefined();
   });
+
+  it('sets ready state with DB guild names on clientReady success', async () => {
+    const status = await import('../shared/statusStore.js');
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    expect(vi.mocked(status.setDiscordReady)).toHaveBeenCalledWith('Bot#1234', 'TestGuild');
+  });
 });
 
 // ─── startDiscordBot — error event ───────────────────────────────────────────

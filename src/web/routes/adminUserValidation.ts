@@ -114,8 +114,9 @@ export async function checkManagerEditAuth(
 /**
  * Validates and resolves inputs for the toggle-twitch route.
  * Checks the enabled flag is parseable, that the target is a member of the current guild,
- * and that the acting user outranks the target (mirrors `checkManagerEditAuth`'s rule: a
- * non-Admin actor may not modify a target already at or above their own level).
+ * that only an owner may toggle another owner's Twitch state, and that the acting user
+ * outranks the target (mirrors `checkManagerEditAuth`'s rules: a non-Admin actor may not
+ * modify a target already at or above their own level).
  * Sends the appropriate error redirect and returns null on failure; returns the parsed boolean on success.
  *
  * @param res The response, used to redirect on error.
@@ -138,6 +139,12 @@ export async function resolveToggleTwitchInputs(
   }
   const memberLevel = await getMemberAccessLevel(guildId, targetDiscordId);
   if (memberLevel === null) {
+    res.redirect('/admin/users?error=target_above_level');
+    return null;
+  }
+  // Bot owners are global super-admins — only another owner may touch them, even an Admin.
+  const existingUser = await findUser(targetDiscordId);
+  if (existingUser?.is_owner && !sessionUser.isOwner) {
     res.redirect('/admin/users?error=target_above_level');
     return null;
   }

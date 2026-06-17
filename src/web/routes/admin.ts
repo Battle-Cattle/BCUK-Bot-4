@@ -11,7 +11,7 @@ import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { csrfProtection } from '../csrf';
 import { requireManager, requireAdmin } from '../middleware';
 import { trimField, renderError, filterQueryParam } from './shared';
-import { createMutationQueue } from '../../shared/mutationQueue';
+import { userMutationQueue } from './adminUserMutationQueue';
 import adminRefreshRouter, { getRefreshState } from './adminRefresh';
 import {
   DuplicateTwitchNameError,
@@ -37,11 +37,6 @@ const KNOWN_ERRORS = new Set([
   'invalid_discord_id', 'invalid_access_level', 'access_level_too_high', 'invalid_twitch_name',
   'self_edit_forbidden', 'self_remove_forbidden', 'target_above_level', 'invalid_twitch_state',
 ]);
-// Twitch membership changes are serialized per user in-process because this bot
-// currently runs as a single web instance. If that changes, move this lock into
-// shared storage or a DB transaction/row lock before scaling out.
-const userMutationQueue = createMutationQueue();
-
 // View the current guild's members (Manager+)
 router.get('/users', requireManager, csrfProtection, async (req, res) => {
   const guildId = req.session.user!.currentGuildId!;

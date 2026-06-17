@@ -246,6 +246,9 @@ describe('requestApiKey', () => {
     const result = await requestApiKey('1', AccessLevel.MANAGER, 'g1');
     expect(result.status).toBe('approved');
     expect(result.plain).toHaveLength(64); // 32 bytes as hex
+    const [insertSql, insertParams] = pool.execute.mock.calls[1] as [string, unknown[]];
+    expect(insertSql).toContain('(discord_id, key_hash, guild_id, status, requested_at, approved_at, approved_by)');
+    expect(insertParams[2]).toBe('g1');
   });
 
   it('returns status=pending for USER access level (0)', async () => {

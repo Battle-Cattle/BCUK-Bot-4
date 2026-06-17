@@ -14,7 +14,7 @@ const router = Router();
  * `output` (custom output text) and `clear_output` ("1" = remove any custom output).
  * Guild ID is always taken from the session — never from the request body.
  */
-router.post('/commands/guild-override', requireMod, requireGuildContext, csrfProtection, async (req, res) => {
+router.post('/commands/guild-override', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const guildId = req.session.user!.currentGuildId!;
   const body = req.body as Record<string, unknown>;
   const commandId = parsePositiveIntId(body.command_id as string | string[] | undefined);
@@ -38,7 +38,7 @@ router.post('/commands/guild-override', requireMod, requireGuildContext, csrfPro
  * Removes the per-guild override for a catalog command, reverting it to the catalog default.
  * Accepts `command_id`. Guild ID is always taken from the session.
  */
-router.post('/commands/guild-override/reset', requireMod, requireGuildContext, csrfProtection, async (req, res) => {
+router.post('/commands/guild-override/reset', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const guildId = req.session.user!.currentGuildId!;
   const body = req.body as Record<string, unknown>;
   const commandId = parsePositiveIntId(body.command_id as string | string[] | undefined);

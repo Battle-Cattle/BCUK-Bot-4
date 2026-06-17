@@ -175,11 +175,21 @@ describe('GET /discord/callback', () => {
       { guild_id: '555', name: 'Guild', voice_channel_id: null },
       { guild_id: '556', name: 'Other Guild', voice_channel_id: null },
     ] as any);
-    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
-      .get('/discord/callback?code=code&state=state123');
+
+    let capturedSession: any;
+    const app = buildApp(
+      { oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } },
+      (session) => { capturedSession = session; },
+    );
+    const res = await supertest(app).get('/discord/callback?code=code&state=state123');
+
     expect(res.status).toBe(302);
     expect(getAllGuilds).toHaveBeenCalled();
     expect(getGuildsForMember).not.toHaveBeenCalled();
+    expect(capturedSession.user).toMatchObject({
+      currentGuildId: null,
+      accessLevel: AccessLevel.USER,
+    });
   });
 
   it('stores discordId, accessLevel and currentGuildId on the session after successful auth', async () => {

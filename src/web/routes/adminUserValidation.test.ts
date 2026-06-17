@@ -315,6 +315,7 @@ describe('resolveToggleTwitchInputs', () => {
   const TARGET_ID = '300000000000000001';
   const ADMIN_USER = { accessLevel: AccessLevel.ADMIN, isOwner: false };
   const MANAGER_USER = { accessLevel: AccessLevel.MANAGER, isOwner: false };
+  const OWNER_USER = { accessLevel: AccessLevel.ADMIN, isOwner: true };
 
   function mockRes() {
     const redirect = vi.fn();
@@ -323,6 +324,7 @@ describe('resolveToggleTwitchInputs', () => {
 
   beforeEach(() => {
     vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
+    vi.mocked(findUser).mockResolvedValue(null);
   });
 
   it('returns true when enabled flag is "true" and target is a guild member', async () => {
@@ -366,6 +368,22 @@ describe('resolveToggleTwitchInputs', () => {
     vi.mocked(getMemberAccessLevel).mockResolvedValue(AccessLevel.ADMIN);
     const { res, redirect } = mockRes();
     const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'true');
+    expect(result).toBe(true);
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('redirects ?error=target_above_level when a non-owner admin targets a bot owner', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: TARGET_ID, is_owner: true } as any);
+    const { res, redirect } = mockRes();
+    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'true');
+    expect(result).toBeNull();
+    expect(redirect).toHaveBeenCalledWith('/admin/users?error=target_above_level');
+  });
+
+  it('allows an owner to toggle another bot owner', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: TARGET_ID, is_owner: true } as any);
+    const { res, redirect } = mockRes();
+    const result = await resolveToggleTwitchInputs(res, OWNER_USER, GUILD_ID, TARGET_ID, 'true');
     expect(result).toBe(true);
     expect(redirect).not.toHaveBeenCalled();
   });

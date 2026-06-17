@@ -4,11 +4,7 @@ import { getGuildMemberUsers, updateDiscordName } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
-import { createMutationQueue } from '../../shared/mutationQueue';
-
-// A user can belong to multiple guilds, so refreshes for different guilds can run
-// concurrently and race on the same user row. Serialize writes per discord_id.
-const userMutationQueue = createMutationQueue();
+import { userMutationQueue } from './adminUserMutationQueue';
 
 export type RefreshOutcome = 'idle' | 'running' | 'success' | 'partial' | 'noop' | 'error';
 
