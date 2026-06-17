@@ -2,14 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../db', () => ({
   findApprovedKeyByHash: vi.fn(),
+  getEffectiveAccessLevel: vi.fn(),
   AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 vi.mock('./csrf', () => ({
   ensureSessionCsrfToken: vi.fn().mockReturnValue('csrf-token'),
 }));
 
-import { requireAuth, requireManager, requireMod, requireAdmin, requireApiKey } from './middleware';
-import { findApprovedKeyByHash, AccessLevel } from '../db';
+import { requireAuth, requireManager, requireMod, requireAdmin, requireApiKey, requireGuildContext } from './middleware';
+import { findApprovedKeyByHash, getEffectiveAccessLevel, AccessLevel } from '../db';
 
 function makeReq(overrides: object = {}): any {
   return {
@@ -224,6 +225,60 @@ describe('requireApiKey', () => {
     await requireApiKey(req, res, next);
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'Internal server error' });
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+// ─── requireGuildContext ────────────────────────────────────────────────────
+
+describe('requireGuildContext', () => {
+  it('redirects to login when no session user', async () => {
+    const req = makeReq({ session: {} });
+    const res = makeRes();
+    await requireGuildContext(req, res, next);
+    expect(res.redirect).toHaveBeenCalledWith('/auth/login');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('calls next() when a valid current guild is already selected, refreshing the access level', async () => {
+    vi.mocked(getEffectiveAccessLevel).mockResolvedValue(3);
+    const user = { discordId: 'u1', currentGuildId: 'g1', accessLevel: 2, guilds: [{ guildId: 'g1', name: 'A' }] };
+    const req = makeReq({ session: { user } });
+    await requireGuildContext(req, makeRes(), next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(vi.mocked(getEffectiveAccessLevel)).toHaveBeenCalledWith('g1', 'u1');
+    expect(user.accessLevel).toBe(3);
+  });
+
+  it('auto-selects and recomputes the level when the user has exactly one guild', async () => {
+    vi.mocked(getEffectiveAccessLevel).mockResolvedValue(3);
+    const user = { discordId: 'u1', currentGuildId: null, accessLevel: 0, guilds: [{ guildId: 'g1', name: 'A' }] };
+    const req = makeReq({ session: { user } });
+    await requireGuildContext(req, makeRes(), next);
+    expect(user.currentGuildId).toBe('g1');
+    expect(user.accessLevel).toBe(3);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('redirects to the picker when multiple guilds and none selected', async () => {
+    const req = makeReq({
+      session: { user: { discordId: 'u1', currentGuildId: null, accessLevel: 0, guilds: [{ guildId: 'g1', name: 'A' }, { guildId: 'g2', name: 'B' }] } },
+    });
+    const res = makeRes();
+    await requireGuildContext(req, res, next);
+    expect(res.redirect).toHaveBeenCalledWith('/guild/select');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('drops a stale guild the user no longer belongs to and re-picks', async () => {
+    // currentGuildId points at a guild absent from the (now-reduced) membership list.
+    const req = makeReq({
+      session: { user: { discordId: 'u1', currentGuildId: 'gone', accessLevel: 3, guilds: [{ guildId: 'g1', name: 'A' }, { guildId: 'g2', name: 'B' }] } },
+    });
+    const res = makeRes();
+    await requireGuildContext(req, res, next);
+    expect(req.session.user.currentGuildId).toBeNull();
+    expect(res.redirect).toHaveBeenCalledWith('/guild/select');
     expect(next).not.toHaveBeenCalled();
   });
 });

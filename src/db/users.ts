@@ -28,6 +28,8 @@ export interface DbUser {
   is_twitch_bot_enabled: boolean;
   twitch_name: string | null;
   access_level: number;
+  /** Bot-owner flag (global super-admin). Set only via direct DB access, never the web panel. */
+  is_owner: boolean;
 }
 
 function mapUser(r: mysql.RowDataPacket): DbUser {
@@ -37,12 +39,13 @@ function mapUser(r: mysql.RowDataPacket): DbUser {
     is_twitch_bot_enabled: fromBit(r.is_twitch_bot_enabled),
     twitch_name: r.twitch_name,
     access_level: r.access_level,
+    is_owner: fromBit(r.is_owner),
   };
 }
 
 export async function findUser(discordId: string): Promise<DbUser | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level FROM `user` WHERE discord_id = ?',
+    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner FROM `user` WHERE discord_id = ?',
     [discordId],
   );
   return rows.length === 0 ? null : mapUser(rows[0]);
@@ -55,12 +58,12 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
   }
 
   const sql = excludeDiscordId
-    ? `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level
+    ? `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner
        FROM \`user\`
        WHERE twitch_name = ?
          AND discord_id <> ?
        LIMIT 1`
-    : `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level
+    : `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner
        FROM \`user\`
        WHERE twitch_name = ?
        LIMIT 1`;
@@ -73,7 +76,7 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
 
 export async function getAllUsers(): Promise<DbUser[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level FROM `user` ORDER BY access_level DESC, discord_name ASC',
+    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner FROM `user` ORDER BY access_level DESC, discord_name ASC',
   );
   return rows.map(mapUser);
 }

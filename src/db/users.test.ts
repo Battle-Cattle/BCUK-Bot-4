@@ -88,6 +88,16 @@ describe('findUser', () => {
     const user = await findUser('999');
     expect(user!.discord_id).toBe('999');
   });
+
+  it('maps the is_owner bit column to a boolean', async () => {
+    const ownerRow = { discord_id: '1', discord_name: 'Owner', is_twitch_bot_enabled: 0, twitch_name: null, access_level: 3, is_owner: Buffer.from([1]) };
+    vi.mocked(getPool).mockReturnValue(makePool([[ownerRow]]) as any);
+    expect((await findUser('1'))!.is_owner).toBe(true);
+
+    const plainRow = { discord_id: '2', discord_name: 'User', is_twitch_bot_enabled: 0, twitch_name: null, access_level: 0, is_owner: 0 };
+    vi.mocked(getPool).mockReturnValue(makePool([[plainRow]]) as any);
+    expect((await findUser('2'))!.is_owner).toBe(false);
+  });
 });
 
 // ─── findUserByTwitchName ─────────────────────────────────────────────────────

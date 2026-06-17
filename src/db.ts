@@ -4,7 +4,7 @@ export { getPool, closePool } from './db/pool';
 // ─── Guilds ──────────────────────────────────────────────────────────────────
 
 export {
-  getAllGuilds, getProvisionedGuilds, getGuildById, upsertGuild, setGuildVoiceChannel,
+  getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember, upsertGuild, setGuildVoiceChannel,
 } from './db/guilds';
 export type { DbGuild } from './db/guilds';
 

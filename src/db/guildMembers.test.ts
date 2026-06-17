@@ -90,23 +90,42 @@ describe('removeGuildMember', () => {
   });
 });
 
-describe('getEffectiveAccessLevel (PR 2 shim)', () => {
-  it('returns the legacy user.access_level regardless of guild', async () => {
-    vi.mocked(findUser).mockResolvedValueOnce({
-      discord_id: '222',
-      discord_name: 'Alice',
-      is_twitch_bot_enabled: false,
-      twitch_name: null,
-      access_level: 2,
-    });
+describe('getEffectiveAccessLevel', () => {
+  const baseUser = {
+    discord_id: '222',
+    discord_name: 'Alice',
+    is_twitch_bot_enabled: false,
+    twitch_name: null,
+    access_level: 0,
+    is_owner: false,
+  };
 
-    expect(await getEffectiveAccessLevel('any-guild', '222')).toBe(2);
-    // Shim must not touch guild_member yet.
+  it('defaults to USER (0) when the user is not whitelisted', async () => {
+    vi.mocked(findUser).mockResolvedValueOnce(null);
+    expect(await getEffectiveAccessLevel('g1', '999')).toBe(0);
+    // No guild_member lookup needed when there is no user row.
     expect(pool.execute).not.toHaveBeenCalled();
   });
 
-  it('defaults to USER (0) when the user has no row', async () => {
-    vi.mocked(findUser).mockResolvedValueOnce(null);
-    expect(await getEffectiveAccessLevel('any-guild', '999')).toBe(0);
+  it('returns ADMIN (3) for a bot owner regardless of membership', async () => {
+    vi.mocked(findUser).mockResolvedValueOnce({ ...baseUser, is_owner: true });
+    expect(await getEffectiveAccessLevel('g1', '222')).toBe(3);
+    // Owners short-circuit before any guild_member query.
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+
+  it('reads the per-guild level from guild_member for a non-owner', async () => {
+    vi.mocked(findUser).mockResolvedValueOnce({ ...baseUser });
+    pool.execute.mockResolvedValueOnce([[{ access_level: 2 }], []]);
+    expect(await getEffectiveAccessLevel('g1', '222')).toBe(2);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('FROM guild_member');
+    expect(params).toEqual(['g1', '222']);
+  });
+
+  it('defaults to USER (0) when a whitelisted non-owner has no membership in the guild', async () => {
+    vi.mocked(findUser).mockResolvedValueOnce({ ...baseUser });
+    pool.execute.mockResolvedValueOnce([[], []]);
+    expect(await getEffectiveAccessLevel('g1', '222')).toBe(0);
   });
 });

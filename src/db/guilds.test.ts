@@ -4,7 +4,7 @@ vi.mock('./pool', () => ({ getPool: vi.fn() }));
 vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
-import { getAllGuilds, getProvisionedGuilds, getGuildById, upsertGuild, setGuildVoiceChannel } from './guilds';
+import { getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember, upsertGuild, setGuildVoiceChannel } from './guilds';
 
 function makePool() {
   return { execute: vi.fn().mockResolvedValue([[], []]) };
@@ -39,6 +39,27 @@ describe('getAllGuilds', () => {
   it('returns an empty array when no guilds exist', async () => {
     pool.execute.mockResolvedValueOnce([[], []]);
     expect(await getAllGuilds()).toEqual([]);
+  });
+});
+
+describe('getGuildsForMember', () => {
+  it('joins guild_member and maps BIGINT columns for the given user', async () => {
+    pool.execute.mockResolvedValueOnce([
+      [{ guild_id: 111n, name: 'Alpha', voice_channel_id: 222n }],
+      [],
+    ]);
+
+    const result = await getGuildsForMember('555');
+
+    expect(result).toEqual([{ guild_id: '111', name: 'Alpha', voice_channel_id: '222' }]);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('JOIN guild_member');
+    expect(params).toEqual(['555']);
+  });
+
+  it('returns an empty array when the user belongs to no guild', async () => {
+    pool.execute.mockResolvedValueOnce([[], []]);
+    expect(await getGuildsForMember('555')).toEqual([]);
   });
 });
 
