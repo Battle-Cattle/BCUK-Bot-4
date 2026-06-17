@@ -216,6 +216,10 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
   });
 });
 
+// Exported so server.test.ts can drive the real route/middleware wiring with supertest
+// without spinning up a listening socket.
+export { app };
+
 export function startWebPanel(): void {
   app.listen(WEB_PORT, () => {
     log.info(`Panel available at http://localhost:${WEB_PORT}`);

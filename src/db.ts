@@ -32,6 +32,15 @@ import { upsertUserRecord, setTwitchBotEnabledRecord, removeUserRecord } from '.
 
 // Wrappers add cache invalidation — users.ts is a pure DB layer with no cache knowledge.
 
+/**
+ * Upserts a user record and invalidates the custom-command lookup cache if the
+ * Twitch name was changed.
+ * @param discordId - Discord snowflake as a string.
+ * @param discordName - Display name to store; blank after trimming is stored as null.
+ * @param accessLevel - Legacy global access level; must be one of `AccessLevel`'s values.
+ * @param twitchName - Twitch channel name to set, or null to clear it; omit to leave unchanged.
+ * @returns Resolves once the upsert (and any cache invalidation) completes.
+ */
 export async function upsertUser(
   discordId: string,
   discordName: string,
@@ -44,11 +53,23 @@ export async function upsertUser(
   }
 }
 
+/**
+ * Sets whether a user's Twitch bot integration is enabled and invalidates the
+ * custom-command lookup cache.
+ * @param discordId - Discord snowflake as a string.
+ * @param enabled - True to enable the Twitch bot for this user, false to disable it.
+ * @returns Resolves once the update (and cache invalidation) completes.
+ */
 export async function updateTwitchBotEnabled(discordId: string, enabled: boolean): Promise<void> {
   await setTwitchBotEnabledRecord(discordId, enabled);
   invalidateCustomCommandLookupCache();
 }
 
+/**
+ * Deletes a user record and invalidates the custom-command lookup cache.
+ * @param discordId - Discord snowflake as a string.
+ * @returns Resolves once the deletion (and cache invalidation) completes.
+ */
 export async function removeUser(discordId: string): Promise<void> {
   await removeUserRecord(discordId);
   invalidateCustomCommandLookupCache();

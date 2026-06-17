@@ -251,4 +251,19 @@ describe('POST /guild/select', () => {
     expect(res.headers.location).toBe('/guild/select');
     expect(vi.mocked(getEffectiveAccessLevel)).not.toHaveBeenCalled();
   });
+
+  it('redirects to the picker and does not mutate the session when an unexpected error occurs', async () => {
+    vi.mocked(getEffectiveAccessLevel).mockRejectedValue(new Error('DB unavailable'));
+    const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+    const app = buildApp(user);
+
+    const res = await supertest(app)
+      .post('/guild/select')
+      .type('form')
+      .send({ guild_id: '100000000000000002' });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/guild/select');
+    expect(user.currentGuildId).toBeNull();
+  });
 });
