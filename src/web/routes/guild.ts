@@ -55,11 +55,15 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
     }
     const isOwner = dbUser.is_owner;
     const liveGuilds = isOwner ? await getAllGuilds() : await getGuildsForMember(user.discordId);
+    user.isOwner = isOwner;
+    user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
+    if (user.guilds.length === 0) {
+      user.currentGuildId = null;
+      return res.redirect('/auth/login');
+    }
     if (!liveGuilds.some((g) => g.guild_id === requestedGuildId)) {
       return res.redirect('/guild/select');
     }
-    user.isOwner = isOwner;
-    user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
     const accessLevel = (await getEffectiveAccessLevel(requestedGuildId, user.discordId)) as (typeof AccessLevel)[keyof typeof AccessLevel];
     user.currentGuildId = requestedGuildId;
     user.accessLevel = accessLevel;

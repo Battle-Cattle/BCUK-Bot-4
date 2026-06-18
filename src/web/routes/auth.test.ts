@@ -77,6 +77,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(findUser).mockResolvedValue(null);
   vi.mocked(fetchMemberDisplayName).mockResolvedValue(null);
+  vi.mocked(getAllGuilds).mockResolvedValue([]);
   vi.mocked(getGuildsForMember).mockResolvedValue([]);
   vi.mocked(getEffectiveAccessLevel).mockResolvedValue(0);
 });

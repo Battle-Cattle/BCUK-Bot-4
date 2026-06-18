@@ -55,13 +55,13 @@ function markerRouter(label: string) {
 vi.mock('./routes/auth', () => ({ default: emptyRouter() }));
 vi.mock('./routes/guild', () => ({ default: markerRouter('guild') }));
 vi.mock('./routes/eventsubCallback', () => ({ default: emptyRouter() }));
-vi.mock('./routes/eventsubAdmin', () => ({ default: emptyRouter() }));
+vi.mock('./routes/eventsubAdmin', () => ({ default: markerRouter('eventsubAdmin') }));
 vi.mock('./routes/dashboard', () => ({ default: markerRouter('dashboard') }));
 vi.mock('./routes/admin', () => ({ default: markerRouter('admin') }));
 vi.mock('./routes/api', () => ({ default: emptyRouter() }));
 vi.mock('./routes/sfx', () => ({ default: emptyRouter() }));
 vi.mock('./routes/sfxPublic', () => ({ default: emptyRouter() }));
-vi.mock('./routes/streams', () => ({ default: emptyRouter() }));
+vi.mock('./routes/streams', () => ({ default: markerRouter('streams') }));
 vi.mock('./routes/commands', () => ({ default: emptyRouter() }));
 vi.mock('./routes/counters', () => ({ default: emptyRouter() }));
 vi.mock('./routes/commandMonitor', () => ({ default: emptyRouter() }));
@@ -91,6 +91,22 @@ describe('server route wiring', () => {
     const res = await request(app).get('/admin/__marker_admin');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ label: 'admin' });
+    expect(requireAuth).toHaveBeenCalled();
+    expect(requireGuildContext).toHaveBeenCalled();
+  });
+
+  it('mounts the /admin streams router behind both requireAuth and requireGuildContext', async () => {
+    const res = await request(app).get('/admin/__marker_streams');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ label: 'streams' });
+    expect(requireAuth).toHaveBeenCalled();
+    expect(requireGuildContext).toHaveBeenCalled();
+  });
+
+  it('mounts the /admin eventsub router behind both requireAuth and requireGuildContext', async () => {
+    const res = await request(app).get('/admin/__marker_eventsubAdmin');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ label: 'eventsubAdmin' });
     expect(requireAuth).toHaveBeenCalled();
     expect(requireGuildContext).toHaveBeenCalled();
   });

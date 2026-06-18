@@ -209,6 +209,40 @@ describe('POST /guild/select', () => {
     expect(vi.mocked(getAllGuilds)).not.toHaveBeenCalled();
   });
 
+  it('refreshes the session guild list before rejecting a stale guild selection', async () => {
+    // Membership was revoked after login; the session's cached guild list is stale.
+    // Even though the request is rejected, the session must be refreshed with the
+    // live guild list so the picker doesn't keep rendering stale entries.
+    vi.mocked(getGuildsForMember).mockResolvedValue([TWO_DB_GUILDS[0]] as any);
+    const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+    const app = buildApp(user);
+
+    const res = await supertest(app)
+      .post('/guild/select')
+      .type('form')
+      .send({ guild_id: '100000000000000002' });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/guild/select');
+    expect(user.guilds).toEqual([{ guildId: '100000000000000001', name: 'Alpha' }]);
+  });
+
+  it('redirects to login when the live guild list is empty', async () => {
+    vi.mocked(getGuildsForMember).mockResolvedValue([]);
+    const user: any = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+    const app = buildApp(user);
+
+    const res = await supertest(app)
+      .post('/guild/select')
+      .type('form')
+      .send({ guild_id: '100000000000000002' });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/auth/login');
+    expect(user.currentGuildId).toBeNull();
+    expect(vi.mocked(getEffectiveAccessLevel)).not.toHaveBeenCalled();
+  });
+
   it('redirects to login when the session user no longer exists in the database', async () => {
     vi.mocked(findUser).mockResolvedValue(null);
     const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };

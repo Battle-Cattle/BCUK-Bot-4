@@ -1,5 +1,6 @@
 import 'express-session';
 import 'express-serve-static-core';
+import { AccessLevel } from '../db/users';
 
 /** A guild the logged-in user may act in, shown in the guild switcher. */
 export interface SessionGuildSummary {
@@ -17,7 +18,7 @@ export interface SessionUser {
    * Effective access level for `currentGuildId` (owners always resolve to Admin).
    * Recomputed on login and on every guild switch — never trust it across guilds.
    */
-  accessLevel: 0 | 1 | 2 | 3;
+  accessLevel: (typeof AccessLevel)[keyof typeof AccessLevel];
   /** The guild the session is currently acting in, or null until one is picked. */
   currentGuildId: string | null;
   /** Guilds this user may switch between (their memberships, or all guilds if owner). */
