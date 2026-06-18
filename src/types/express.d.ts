@@ -1,6 +1,6 @@
 import 'express-session';
 import 'express-serve-static-core';
-import { AccessLevel } from '../db/users';
+import { AccessLevel } from '../db';
 
 /** A guild the logged-in user may act in, shown in the guild switcher. */
 export interface SessionGuildSummary {

@@ -8,7 +8,7 @@ vi.mock('./users', () => ({
 }));
 
 import { getPool } from './pool';
-import { findUser } from './users';
+import { findUser, AccessLevel } from './users';
 import {
   getGuildMembers,
   getMemberAccessLevel,
@@ -102,14 +102,14 @@ describe('getEffectiveAccessLevel', () => {
 
   it('defaults to USER (0) when the user is not whitelisted', async () => {
     vi.mocked(findUser).mockResolvedValueOnce(null);
-    expect(await getEffectiveAccessLevel('g1', '999')).toBe(0);
+    expect(await getEffectiveAccessLevel('g1', '999')).toBe(AccessLevel.USER);
     // No guild_member lookup needed when there is no user row.
     expect(pool.execute).not.toHaveBeenCalled();
   });
 
   it('returns ADMIN (3) for a bot owner regardless of membership', async () => {
     vi.mocked(findUser).mockResolvedValueOnce({ ...baseUser, is_owner: true });
-    expect(await getEffectiveAccessLevel('g1', '222')).toBe(3);
+    expect(await getEffectiveAccessLevel('g1', '222')).toBe(AccessLevel.ADMIN);
     // Owners short-circuit before any guild_member query.
     expect(pool.execute).not.toHaveBeenCalled();
   });
@@ -117,7 +117,7 @@ describe('getEffectiveAccessLevel', () => {
   it('reads the per-guild level from guild_member for a non-owner', async () => {
     vi.mocked(findUser).mockResolvedValueOnce({ ...baseUser });
     pool.execute.mockResolvedValueOnce([[{ access_level: 2 }], []]);
-    expect(await getEffectiveAccessLevel('g1', '222')).toBe(2);
+    expect(await getEffectiveAccessLevel('g1', '222')).toBe(AccessLevel.MANAGER);
     const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('FROM guild_member');
     expect(params).toEqual(['g1', '222']);
@@ -126,6 +126,6 @@ describe('getEffectiveAccessLevel', () => {
   it('defaults to USER (0) when a whitelisted non-owner has no membership in the guild', async () => {
     vi.mocked(findUser).mockResolvedValueOnce({ ...baseUser });
     pool.execute.mockResolvedValueOnce([[], []]);
-    expect(await getEffectiveAccessLevel('g1', '222')).toBe(0);
+    expect(await getEffectiveAccessLevel('g1', '222')).toBe(AccessLevel.USER);
   });
 });
