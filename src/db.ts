@@ -33,8 +33,8 @@ import { upsertUserRecord, setTwitchBotEnabledRecord, removeUserRecord } from '.
 // Wrappers add cache invalidation — users.ts is a pure DB layer with no cache knowledge.
 
 /**
- * Upserts a user record and invalidates the custom-command lookup cache if the
- * Twitch name was changed.
+ * Upserts a user record and invalidates the custom-command lookup cache when
+ * the `twitchName` field is provided (including explicit null to clear it).
  * @param discordId - Discord snowflake as a string.
  * @param discordName - Display name to store; blank after trimming is stored as null.
  * @param accessLevel - Legacy global access level; must be one of `AccessLevel`'s values.
