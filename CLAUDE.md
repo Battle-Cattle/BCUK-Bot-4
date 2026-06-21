@@ -58,8 +58,7 @@ npm test      # Vitest
 
 ## Docstrings
 
-- Public functions (exported from a module) **must** have a JSDoc comment describing what they do, their parameters, and return value — one line is enough for simple cases.
-- Internal helpers only need a comment when the WHY is non-obvious (see general comment guidance).
+- All functions — including exported functions, internal helpers, and anonymous functions (e.g. inline Express route handlers) — **must** have a JSDoc comment describing what they do, their parameters, and return value — one line is enough for simple cases.
 - When you change a function's signature or behaviour, update its JSDoc to match — stale docs are worse than no docs.
 
 ---
