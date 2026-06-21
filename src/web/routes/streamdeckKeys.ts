@@ -21,6 +21,7 @@ const router = Router();
 
 const USER_KNOWN_ERRORS = new Set(['request_failed', 'revoke_failed']);
 
+/** Renders the current user's Streamdeck API key status page. */
 router.get('/streamdeck-key', csrfProtection, async (req, res) => {
   try {
     const keyRow = await getApiKeyStatus(req.session.user!.discordId);
@@ -38,6 +39,7 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
   }
 });
 
+/** Requests a new Streamdeck API key for the current user and renders the plaintext key once. */
 router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
   try {
     const { plain } = await requestApiKey(
@@ -60,6 +62,7 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
   }
 });
 
+/** Revokes the current user's own Streamdeck API key. */
 router.post('/streamdeck-key/revoke', csrfProtection, async (req, res) => {
   try {
     await revokeApiKey(req.session.user!.discordId);
@@ -74,6 +77,7 @@ router.post('/streamdeck-key/revoke', csrfProtection, async (req, res) => {
 
 const ADMIN_KNOWN_ERRORS = new Set(['approve_failed', 'deny_failed', 'revoke_failed', 'invalid_discord_id']);
 
+/** Renders the admin Streamdeck key management page, listing pending and all key requests. */
 router.get('/admin/streamdeck-keys', requireAdmin, csrfProtection, async (req, res) => {
   try {
     const [pending, all] = await Promise.all([getPendingRequests(), getAllApiKeys()]);
@@ -90,6 +94,7 @@ router.get('/admin/streamdeck-keys', requireAdmin, csrfProtection, async (req, r
   }
 });
 
+/** Approves a pending Streamdeck API key request for the Discord ID in the request body. */
 router.post('/admin/streamdeck-keys/approve', requireAdmin, csrfProtection, async (req, res) => {
   const validId = normalizeDiscordId((req.body as { discord_id?: string }).discord_id);
   if (!validId) return res.redirect('/admin/streamdeck-keys?error=invalid_discord_id');
@@ -102,6 +107,7 @@ router.post('/admin/streamdeck-keys/approve', requireAdmin, csrfProtection, asyn
   }
 });
 
+/** Denies a pending Streamdeck API key request for the Discord ID in the request body. */
 router.post('/admin/streamdeck-keys/deny', requireAdmin, csrfProtection, async (req, res) => {
   const validId = normalizeDiscordId((req.body as { discord_id?: string }).discord_id);
   if (!validId) return res.redirect('/admin/streamdeck-keys?error=invalid_discord_id');
@@ -114,6 +120,7 @@ router.post('/admin/streamdeck-keys/deny', requireAdmin, csrfProtection, async (
   }
 });
 
+/** Revokes the Streamdeck API key for the Discord ID in the request body. */
 router.post('/admin/streamdeck-keys/revoke', requireAdmin, csrfProtection, async (req, res) => {
   const validId = normalizeDiscordId((req.body as { discord_id?: string }).discord_id);
   if (!validId) return res.redirect('/admin/streamdeck-keys?error=invalid_discord_id');
