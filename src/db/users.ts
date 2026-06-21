@@ -94,6 +94,27 @@ export async function getAllUsers(): Promise<DbUser[]> {
   return rows.map(mapUser);
 }
 
+/**
+ * Returns the members of one guild as user records, with `access_level` sourced
+ * from the per-guild `guild_member` row (not the legacy global column). Backs the
+ * admin user list, which manages membership of the currently-selected guild.
+ *
+ * @param guildId Guild snowflake as a string.
+ * @returns The guild's members, highest access level first.
+ */
+export async function getGuildMemberUsers(guildId: string): Promise<DbUser[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT u.discord_id, u.discord_name, u.is_twitch_bot_enabled, u.twitch_name,
+            gm.access_level AS access_level, u.is_owner
+     FROM guild_member gm
+     JOIN \`user\` u ON u.discord_id = gm.discord_id
+     WHERE gm.guild_id = ?
+     ORDER BY gm.access_level DESC, u.discord_name ASC`,
+    [guildId],
+  );
+  return rows.map(mapUser);
+}
+
 // Short timeout so callers fail fast instead of hanging 50s under lock contention.
 async function withShortLockTimeout<T>(fn: (conn: mysql.PoolConnection) => Promise<T>): Promise<T> {
   const connection = await getPool().getConnection();

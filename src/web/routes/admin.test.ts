@@ -2,10 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../db', () => ({
   findUser: vi.fn(),
-  getAllUsers: vi.fn(),
-  updateAccessLevel: vi.fn(),
+  getMemberAccessLevel: vi.fn(),
+  getGuildMemberUsers: vi.fn(),
+  setMemberAccessLevel: vi.fn(),
+  removeGuildMember: vi.fn(),
   ACCESS_LEVEL_LABELS: { 0: 'User', 1: 'Mod', 2: 'Manager', 3: 'Admin' },
   AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+}));
+
+vi.mock('../../discord/guildRegistry', () => ({
+  reloadGuildRegistry: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../csrf', () => ({
@@ -34,7 +40,7 @@ vi.mock('./adminRefresh', async () => {
   const { Router } = await import('express');
   return {
     default: Router(),
-    refreshState: { outcome: 'idle', updatedCount: 0, failureCount: 0, startedAt: null, finishedAt: null },
+    getRefreshState: vi.fn(() => ({ outcome: 'idle', updatedCount: 0, failureCount: 0, startedAt: null, finishedAt: null })),
   };
 });
 
@@ -50,8 +56,12 @@ vi.mock('./adminUserMutations', () => {
   };
 });
 
+const { mockLog } = vi.hoisted(() => ({
+  mockLog: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+}));
+
 vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
+  createLogger: () => mockLog,
 }));
 
 vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
@@ -59,7 +69,8 @@ vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, A
 import express from 'express';
 import supertest from 'supertest';
 import router from './admin';
-import { findUser, getAllUsers, updateAccessLevel } from '../../db';
+import { findUser, getMemberAccessLevel, getGuildMemberUsers, setMemberAccessLevel, removeGuildMember } from '../../db';
+import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { AccessLevel } from '../../db/users';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 import {
@@ -67,14 +78,20 @@ import {
   isDuplicateTwitchNameDbError,
   isLockWaitTimeoutDbError,
   addOrUpdateUserMutation,
-  removeUserMutation,
   toggleTwitchMutation,
 } from './adminUserMutations';
 
-type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
+type SessionUser = {
+  discordId: string;
+  discordName: string;
+  discordAvatar: string | null;
+  isOwner: boolean;
+  accessLevel: 0 | 1 | 2 | 3;
+  currentGuildId: string;
+};
 
-const ADMIN: SessionUser = { discordId: '100000000000000001', discordName: 'AdminUser', discordAvatar: null, accessLevel: AccessLevel.ADMIN };
-const MANAGER: SessionUser = { discordId: '200000000000000001', discordName: 'ManagerUser', discordAvatar: null, accessLevel: AccessLevel.MANAGER };
+const GUILD_ID = '900000000000000001';
+const ADMIN: SessionUser = { discordId: '100000000000000001', discordName: 'AdminUser', discordAvatar: null, isOwner: false, accessLevel: AccessLevel.ADMIN, currentGuildId: GUILD_ID };
 const VALID_ID = '300000000000000001';
 
 function buildApp(sessionUser: SessionUser = ADMIN) {
@@ -91,11 +108,13 @@ function buildApp(sessionUser: SessionUser = ADMIN) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getAllUsers).mockResolvedValue([]);
+  vi.mocked(getGuildMemberUsers).mockResolvedValue([]);
   vi.mocked(findUser).mockResolvedValue(null);
-  vi.mocked(updateAccessLevel).mockResolvedValue(undefined);
+  vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+  vi.mocked(setMemberAccessLevel).mockResolvedValue(undefined);
+  vi.mocked(removeGuildMember).mockResolvedValue(undefined);
+  vi.mocked(reloadGuildRegistry).mockResolvedValue(undefined);
   vi.mocked(addOrUpdateUserMutation).mockResolvedValue(undefined);
-  vi.mocked(removeUserMutation).mockResolvedValue(undefined);
   vi.mocked(toggleTwitchMutation).mockResolvedValue(undefined);
   vi.mocked(isLockWaitTimeoutDbError).mockReturnValue(false);
   vi.mocked(isDuplicateTwitchNameDbError).mockReturnValue(false);
@@ -125,8 +144,8 @@ describe('GET /users', () => {
     expect(res.body.error).toBeNull();
   });
 
-  it('returns 500 when getAllUsers throws', async () => {
-    vi.mocked(getAllUsers).mockRejectedValue(new Error('DB down'));
+  it('returns 500 when getGuildMemberUsers throws', async () => {
+    vi.mocked(getGuildMemberUsers).mockRejectedValue(new Error('DB down'));
     const res = await supertest(buildApp()).get('/users');
     expect(res.status).toBe(500);
   });
@@ -201,13 +220,22 @@ describe('POST /users/add', () => {
     expect(res.headers.location).toBe('/admin/users?error=add_failed');
   });
 
-  it('redirects to /admin/users on success', async () => {
+  it('redirects to /admin/users on success and grants guild membership', async () => {
     const res = await supertest(buildApp()).post('/users/add').type('form')
       .send({ discord_id: VALID_ID, discord_name: 'TestUser', access_level: '0', twitch_name: 'streamer' });
     expect(res.headers.location).toBe('/admin/users');
     expect(vi.mocked(addOrUpdateUserMutation)).toHaveBeenCalledWith(
       expect.objectContaining({ discordId: VALID_ID, discordName: 'TestUser', level: 0, normalizedTwitchName: 'streamer' }),
     );
+    expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, VALID_ID, 0);
+    expect(vi.mocked(reloadGuildRegistry)).toHaveBeenCalled();
+  });
+
+  it('still redirects to /admin/users when the registry reload fails, but logs the error', async () => {
+    vi.mocked(reloadGuildRegistry).mockRejectedValue(new Error('registry unavailable'));
+    const res = await supertest(buildApp()).post('/users/add').type('form').send({ discord_id: VALID_ID, access_level: '0' });
+    expect(res.headers.location).toBe('/admin/users');
+    expect(mockLog.error).toHaveBeenCalledWith('Guild registry reload after membership change failed:', expect.any(Error));
   });
 });
 
@@ -230,22 +258,22 @@ describe('POST /users/update', () => {
   });
 
   it('redirects ?error=db_busy on lock timeout', async () => {
-    vi.mocked(updateAccessLevel).mockRejectedValue(new Error('lock'));
+    vi.mocked(setMemberAccessLevel).mockRejectedValue(new Error('lock'));
     vi.mocked(isLockWaitTimeoutDbError).mockReturnValue(true);
     const res = await supertest(buildApp()).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '0' });
     expect(res.headers.location).toBe('/admin/users?error=db_busy');
   });
 
   it('redirects ?error=update_failed on unexpected DB error', async () => {
-    vi.mocked(updateAccessLevel).mockRejectedValue(new Error('unexpected'));
+    vi.mocked(setMemberAccessLevel).mockRejectedValue(new Error('unexpected'));
     const res = await supertest(buildApp()).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '0' });
     expect(res.headers.location).toBe('/admin/users?error=update_failed');
   });
 
-  it('redirects to /admin/users on success', async () => {
+  it('redirects to /admin/users on success and writes the per-guild level', async () => {
     const res = await supertest(buildApp()).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
     expect(res.headers.location).toBe('/admin/users');
-    expect(vi.mocked(updateAccessLevel)).toHaveBeenCalledWith(VALID_ID, 1);
+    expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, VALID_ID, 1);
   });
 });
 
@@ -268,28 +296,34 @@ describe('POST /users/remove', () => {
   });
 
   it('redirects ?error=db_busy on lock timeout', async () => {
-    vi.mocked(removeUserMutation).mockRejectedValue(new Error('lock'));
+    vi.mocked(removeGuildMember).mockRejectedValue(new Error('lock'));
     vi.mocked(isLockWaitTimeoutDbError).mockReturnValue(true);
     const res = await supertest(buildApp()).post('/users/remove').type('form').send({ discord_id: VALID_ID });
     expect(res.headers.location).toBe('/admin/users?error=db_busy');
   });
 
   it('redirects ?error=remove_failed on unexpected DB error', async () => {
-    vi.mocked(removeUserMutation).mockRejectedValue(new Error('unexpected'));
+    vi.mocked(removeGuildMember).mockRejectedValue(new Error('unexpected'));
     const res = await supertest(buildApp()).post('/users/remove').type('form').send({ discord_id: VALID_ID });
     expect(res.headers.location).toBe('/admin/users?error=remove_failed');
   });
 
-  it('redirects to /admin/users on success', async () => {
+  it('removes the member from the current guild and reloads the registry', async () => {
     const res = await supertest(buildApp()).post('/users/remove').type('form').send({ discord_id: VALID_ID });
     expect(res.headers.location).toBe('/admin/users');
-    expect(vi.mocked(removeUserMutation)).toHaveBeenCalledWith(VALID_ID);
+    expect(vi.mocked(removeGuildMember)).toHaveBeenCalledWith(GUILD_ID, VALID_ID);
+    expect(vi.mocked(reloadGuildRegistry)).toHaveBeenCalled();
   });
 });
 
 // --- POST /users/toggle-twitch ---
 
 describe('POST /users/toggle-twitch', () => {
+  beforeEach(() => {
+    // Target user is a member of the current guild by default.
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
+  });
+
   it('redirects to /admin/users when discord_id is missing', async () => {
     const res = await supertest(buildApp()).post('/users/toggle-twitch').type('form').send({ is_twitch_bot_enabled: 'true' });
     expect(res.headers.location).toBe('/admin/users');
@@ -299,6 +333,14 @@ describe('POST /users/toggle-twitch', () => {
     const res = await supertest(buildApp()).post('/users/toggle-twitch').type('form')
       .send({ discord_id: 'bad', is_twitch_bot_enabled: 'true' });
     expect(res.headers.location).toBe('/admin/users?error=invalid_discord_id');
+  });
+
+  it('redirects ?error=target_above_level when target is not a member of the current guild', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    const res = await supertest(buildApp()).post('/users/toggle-twitch').type('form')
+      .send({ discord_id: VALID_ID, is_twitch_bot_enabled: 'true' });
+    expect(res.headers.location).toBe('/admin/users?error=target_above_level');
+    expect(vi.mocked(toggleTwitchMutation)).not.toHaveBeenCalled();
   });
 
   it('redirects ?error=invalid_twitch_state for an unrecognised value', async () => {
