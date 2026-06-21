@@ -6,8 +6,10 @@ import { requireManager } from '../middleware';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
 import { userMutationQueue } from './adminUserMutationQueue';
 
+/** Lifecycle state of a guild's Discord-name-refresh job. */
 export type RefreshOutcome = 'idle' | 'running' | 'success' | 'partial' | 'noop' | 'error';
 
+/** Progress/result of a guild's most recent (or in-progress) Discord-name-refresh job. */
 export interface RefreshState {
   outcome: RefreshOutcome;
   updatedCount: number;

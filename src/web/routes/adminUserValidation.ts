@@ -45,27 +45,38 @@ export function resolveValidDiscordId(res: Response, rawId: string | undefined):
   return trimmed;
 }
 
+/** Returns `'invalid_discord_id'` when `id` doesn't look like a Discord snowflake, else null. */
 export function discordIdError(id: string): string | null {
   return DISCORD_ID_RE.test(id) ? null : 'invalid_discord_id';
 }
 
+/** Returns `'invalid_access_level'` when `levelStr` isn't a known `AccessLevel` value, else null. */
 export function accessLevelError(levelStr: string): string | null {
   if (!/^\d+$/.test(levelStr)) return 'invalid_access_level';
   return (Object.values(AccessLevel) as number[]).includes(Number(levelStr)) ? null : 'invalid_access_level';
 }
 
+/** Parses a form checkbox/boolean value (`'true'`/`'1'`/`'false'`/`'0'`) into a boolean, or null if unrecognized. */
 export function parseTwitchEnabled(val: string | undefined): boolean | null {
   if (val === 'true' || val === '1') return true;
   if (val === 'false' || val === '0') return false;
   return null;
 }
 
+/** Result of validating a submitted Twitch name field. */
 export interface ParsedTwitchInput {
   error: string | null;
   normalizedTwitchName: string | null;
   shouldClearTwitchName: boolean;
 }
 
+/**
+ * Trims and normalizes a submitted Twitch channel name, honoring an explicit "clear" flag.
+ *
+ * @param twitchName The raw Twitch name field from the request body.
+ * @param clearTwitchName Raw `clear_twitch_name` field; `'1'` clears the name regardless of `twitchName`.
+ * @returns The parsed result: normalized name, whether to clear it, and an error code when the name is invalid.
+ */
 export function parseTwitchNameInput(
   twitchName: string | undefined,
   clearTwitchName: string | undefined,
@@ -155,6 +166,15 @@ export async function resolveToggleTwitchInputs(
   return nextEnabled;
 }
 
+/**
+ * Redirects on a DB error from a mutation route: `?error=db_busy` for lock-wait timeouts
+ * (logged at warn), or `?error=${failCode}` for anything else (logged at error).
+ *
+ * @param err The caught error.
+ * @param res The response, used to redirect.
+ * @param failCode The error code to use for non-lock-timeout failures.
+ * @param context Short label identifying the calling route, used in the log line.
+ */
 export function handleDbError(err: unknown, res: Response, failCode: string, context: string): void {
   if (isLockWaitTimeoutDbError(err)) {
     log.warn(`${context} DB lock timeout`, err);
