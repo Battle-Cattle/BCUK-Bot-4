@@ -11,7 +11,6 @@ import {
   type AudioPlayer as DjsAudioPlayer,
 } from '@discordjs/voice';
 import { Client, ChannelType } from 'discord.js';
-import { DISCORD_VOICE_CHANNEL_ID } from '../shared/config';
 import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from '../shared/statusStore';
 
 const log = createLogger('AudioPlayer');
@@ -113,7 +112,7 @@ function scheduleReconnect(state: GuildVoiceState, reason: string): void {
   state.reconnectTimer = setTimeout(() => {
     state.reconnectTimer = null;
     if (scheduledAttemptId !== state.currentAttemptId) return;
-    if (!state.shouldAutoReconnect || !state.client || state.connection) return;
+    if (!state.shouldAutoReconnect || !state.client || state.connection || !state.targetChannelId) return;
     connect(state.client, state.guildId, state.targetChannelId).catch((err) => {
       log.error(`Voice rejoin failed for guild ${state.guildId}:`, err);
     });
@@ -173,10 +172,10 @@ function makeDeps(state: GuildVoiceState): ConnectionHandlerDeps {
  *
  * @param client - The ready Discord client.
  * @param guildId - The guild whose voice channel to join (BIGINT snowflake string).
- * @param channelId - Target voice channel ID; falls back to the legacy default when omitted.
+ * @param channelId - Target voice channel ID (required).
  * @returns Resolves once the connection is ready, or rejects if the join fails.
  */
-export async function connect(client: Client, guildId: string, channelId?: string): Promise<void> {
+export async function connect(client: Client, guildId: string, channelId: string): Promise<void> {
   const state = getState(guildId);
   clearReconnectTimer(state);
   const attemptId = ++state.currentAttemptId;
@@ -190,12 +189,10 @@ export async function connect(client: Client, guildId: string, channelId?: strin
   const deps = makeDeps(state);
 
   try {
-    const resolvedChannelId = channelId || DISCORD_VOICE_CHANNEL_ID;
-
-    if (!guildId || !resolvedChannelId) {
+    if (!guildId || !channelId) {
       // Message text must stay in sync with isPermanentVoiceMisconfigurationError
       // so this is classified as permanent (not retried).
-      throw new Error('Missing DISCORD_GUILD_ID or voice channel ID');
+      throw new Error('Missing guild ID or voice channel ID');
     }
 
     // Fetching the channel from the target guild also validates that the channel
@@ -203,11 +200,11 @@ export async function connect(client: Client, guildId: string, channelId?: strin
     const guild = await client.guilds.fetch(guildId);
     if (attemptId !== state.currentAttemptId) return;
 
-    const channel = await guild.channels.fetch(resolvedChannelId);
+    const channel = await guild.channels.fetch(channelId);
     if (attemptId !== state.currentAttemptId) return;
 
     if (!channel || channel.type !== ChannelType.GuildVoice) {
-      throw new Error(`Channel ${resolvedChannelId} is not a voice channel in guild ${guildId}`);
+      throw new Error(`Channel ${channelId} is not a voice channel in guild ${guildId}`);
     }
 
     nextConnection = joinVoiceChannel({

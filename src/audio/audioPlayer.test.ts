@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-vi.mock('../shared/config', () => ({ DISCORD_VOICE_CHANNEL_ID: 'default-vc' }));
+vi.mock('../shared/config', () => ({}));
 vi.mock('../shared/statusStore', () => ({
   setVoiceConnected: vi.fn(),
   setVoiceDisconnected: vi.fn(),
@@ -102,15 +102,12 @@ describe('connect', () => {
     expect(vi.mocked(status.setVoiceConnected)).toHaveBeenCalledWith('vc-chan-1');
   });
 
-  it('falls back to the default channel when none is given', async () => {
+  it('rejects when no channelId is given', async () => {
     const { client } = makeClient();
-    const voice = await import('@discordjs/voice');
+    const utils = await import('../discord/discordUtils.js');
+    vi.mocked(utils.isPermanentVoiceMisconfigurationError).mockReturnValue(true);
 
-    await mod.connect(client as never, 'guild-A');
-
-    expect(vi.mocked(voice.joinVoiceChannel)).toHaveBeenCalledWith(
-      expect.objectContaining({ channelId: 'default-vc' }),
-    );
+    await expect(mod.connect(client as never, 'guild-A', '')).rejects.toThrow('Missing guild ID or voice channel ID');
   });
 
   it('rejects and stays disconnected when the channel is not a voice channel', async () => {
@@ -136,7 +133,7 @@ describe('connect', () => {
     // Treat the misconfiguration as permanent so no reconnect timer is scheduled.
     vi.mocked(utils.isPermanentVoiceMisconfigurationError).mockReturnValue(true);
 
-    await expect(mod.connect(client as never, '', 'chan-1')).rejects.toThrow('Missing DISCORD_GUILD_ID or voice channel ID');
+    await expect(mod.connect(client as never, '', 'chan-1')).rejects.toThrow('Missing guild ID or voice channel ID');
     expect(client.guilds.fetch).not.toHaveBeenCalled();
   });
 });
