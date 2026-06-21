@@ -14,8 +14,8 @@ const log = createLogger('Streamdeck');
 const router = Router();
 
 /**
- * Returns the guild ID the API key is bound to, or sends 503 and returns null
- * when `requireApiKey` did not populate it (should never happen in practice).
+ * Returns the guild ID the API key is bound to. Sends 503 and returns null
+ * if the key is not bound to a guild.
  */
 function getApiKeyGuildId(req: Request, res: Response): string | null {
   const guildId = req.apiKeyGuildId ?? null;
