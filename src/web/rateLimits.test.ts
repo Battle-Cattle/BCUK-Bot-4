@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { Request } from 'express';
 import type { SessionUser } from '../types/express';
+
+vi.mock('../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+
+import { AccessLevel } from '../db/users';
 import {
   ipKey,
   generalLimiterSkip,
@@ -13,7 +17,10 @@ const authedUser: SessionUser = {
   discordId: '123456789',
   discordName: 'TestUser',
   discordAvatar: null,
-  accessLevel: 0,
+  isOwner: false,
+  accessLevel: AccessLevel.USER,
+  currentGuildId: '999000999000999000',
+  guilds: [{ guildId: '999000999000999000', name: 'Test Guild' }],
 };
 
 function makeReq(overrides: Partial<{

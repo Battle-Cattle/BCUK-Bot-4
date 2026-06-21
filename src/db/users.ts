@@ -28,6 +28,8 @@ export interface DbUser {
   is_twitch_bot_enabled: boolean;
   twitch_name: string | null;
   access_level: number;
+  /** Bot-owner flag (global super-admin). Set only via direct DB access, never the web panel. */
+  is_owner: boolean;
 }
 
 function mapUser(r: mysql.RowDataPacket): DbUser {
@@ -37,17 +39,30 @@ function mapUser(r: mysql.RowDataPacket): DbUser {
     is_twitch_bot_enabled: fromBit(r.is_twitch_bot_enabled),
     twitch_name: r.twitch_name,
     access_level: r.access_level,
+    is_owner: fromBit(r.is_owner),
   };
 }
 
+/**
+ * Look up a user by Discord ID.
+ * @param discordId - Discord snowflake as a string.
+ * @returns The matching user row, or null if no row exists.
+ */
 export async function findUser(discordId: string): Promise<DbUser | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level FROM `user` WHERE discord_id = ?',
+    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner FROM `user` WHERE discord_id = ?',
     [discordId],
   );
   return rows.length === 0 ? null : mapUser(rows[0]);
 }
 
+/**
+ * Look up a user by their normalized Twitch channel name.
+ * @param twitchName - Raw Twitch channel name input to normalize before matching.
+ * @param excludeDiscordId - When set, excludes that Discord ID from the match (used when
+ *   checking for a conflicting Twitch name during a different user's update).
+ * @returns The matching user row, or null if no match is found or the name is invalid.
+ */
 export async function findUserByTwitchName(twitchName: string, excludeDiscordId?: string): Promise<DbUser | null> {
   const normalizedTwitchName = normalizeTwitchChannelName(twitchName);
   if (!normalizedTwitchName) {
@@ -55,12 +70,12 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
   }
 
   const sql = excludeDiscordId
-    ? `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level
+    ? `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner
        FROM \`user\`
        WHERE twitch_name = ?
          AND discord_id <> ?
        LIMIT 1`
-    : `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level
+    : `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner
        FROM \`user\`
        WHERE twitch_name = ?
        LIMIT 1`;
@@ -71,9 +86,10 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
   return rows.length === 0 ? null : mapUser(rows[0]);
 }
 
+/** Returns every user row, ordered by access level (highest first) then name. */
 export async function getAllUsers(): Promise<DbUser[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level FROM `user` ORDER BY access_level DESC, discord_name ASC',
+    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner FROM `user` ORDER BY access_level DESC, discord_name ASC',
   );
   return rows.map(mapUser);
 }
@@ -93,9 +109,13 @@ async function withShortLockTimeout<T>(fn: (conn: mysql.PoolConnection) => Promi
 }
 
 /**
- * Upserts a user record. Returns true when the twitchName field was included in the
- * call (even if null), so the caller can decide whether to invalidate any caches that
- * depend on Twitch channel assignments.
+ * Upserts a user record.
+ * @param discordId - Discord snowflake as a string.
+ * @param discordName - Display name to store; blank after trimming is stored as null.
+ * @param accessLevel - Legacy global access level; must be one of `AccessLevel`'s values.
+ * @param twitchName - Twitch channel name to set, or null to clear it; omit to leave unchanged.
+ * @returns True when the twitchName field was included in the call (even if null), so the
+ *   caller can decide whether to invalidate any caches that depend on Twitch channel assignments.
  */
 export async function upsertUserRecord(
   discordId: string,
@@ -132,6 +152,12 @@ export async function upsertUserRecord(
   return twitchNameProvided;
 }
 
+/**
+ * Updates a user's stored Discord display name.
+ * @param discordId - Discord snowflake as a string.
+ * @param name - New display name; blank after trimming is stored as null.
+ * @returns Resolves once the update completes.
+ */
 export async function updateDiscordName(discordId: string, name: string): Promise<void> {
   const trimmed = name.trim();
   await getPool().execute(
@@ -140,6 +166,10 @@ export async function updateDiscordName(discordId: string, name: string): Promis
   );
 }
 
+/**
+ * Returns the normalized Twitch channel names of all users with the Twitch bot enabled.
+ * @returns Normalized channel names; invalid/unparseable names are silently dropped.
+ */
 export async function getTwitchEnabledChannels(): Promise<string[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT twitch_name
@@ -153,6 +183,12 @@ export async function getTwitchEnabledChannels(): Promise<string[]> {
     .filter((v): v is string => v !== null);
 }
 
+/**
+ * Sets whether a user's Twitch bot integration is enabled.
+ * @param discordId - Discord snowflake as a string.
+ * @param enabled - True to enable the Twitch bot for this user, false to disable it.
+ * @returns Resolves once the update completes.
+ */
 export async function setTwitchBotEnabledRecord(discordId: string, enabled: boolean): Promise<void> {
   await withShortLockTimeout((conn) => conn.execute(
     'UPDATE `user` SET is_twitch_bot_enabled = ? WHERE discord_id = ?',
@@ -160,6 +196,13 @@ export async function setTwitchBotEnabledRecord(discordId: string, enabled: bool
   ));
 }
 
+/**
+ * Updates a user's legacy global access level.
+ * @param discordId - Discord snowflake as a string.
+ * @param accessLevel - New access level; must be one of `AccessLevel`'s values.
+ * @returns Resolves once the update completes.
+ * @throws If `accessLevel` is not a valid `AccessLevel` value.
+ */
 export async function updateAccessLevel(discordId: string, accessLevel: number): Promise<void> {
   if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
     throw new Error(`Invalid accessLevel: ${accessLevel}`);
@@ -170,6 +213,11 @@ export async function updateAccessLevel(discordId: string, accessLevel: number):
   ));
 }
 
+/**
+ * Deletes a user record.
+ * @param discordId - Discord snowflake as a string.
+ * @returns Resolves once the deletion completes.
+ */
 export async function removeUserRecord(discordId: string): Promise<void> {
   await withShortLockTimeout((conn) => conn.execute(
     'DELETE FROM `user` WHERE discord_id = ?',

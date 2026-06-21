@@ -1,8 +1,22 @@
 import { createHash } from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { ensureSessionCsrfToken } from './csrf';
-import { AccessLevel, findApprovedKeyByHash } from '../db';
+import {
+  AccessLevel,
+  findApprovedKeyByHash,
+  findUser,
+  getAllGuilds,
+  getEffectiveAccessLevel,
+  getGuildsForMember,
+} from '../db';
 
+/**
+ * Ensures the request has a logged-in session user, redirecting to login otherwise.
+ * @param req - Express request; checked for `req.session.user`.
+ * @param res - Express response; used to redirect when no session user is present.
+ * @param next - Called when a session user is present.
+ * @returns Nothing; either calls `next()` or issues a redirect.
+ */
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   if (req.session.user) {
     next();
@@ -11,6 +25,69 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   }
 }
 
+/**
+ * Ensures the session has a current guild selected before a guild-scoped route runs.
+ * Assumes `requireAuth` ran first. Auto-selects when the user has exactly one guild
+ * (so single-guild deployments never see the picker); redirects to the picker when a
+ * choice is required; and re-validates that the stored guild is still one the user
+ * belongs to. Membership and owner status are re-read from the database on every call
+ * (rather than trusted from the session cache) so a revoked guild membership or owner
+ * flag takes effect immediately instead of only at next login. The effective access
+ * level is recomputed for the resolved guild so authorization always reflects the
+ * current guild, never a stale login-time value.
+ *
+ * @param req - Express request; reads and mutates `req.session.user`.
+ * @param res - Express response; used to redirect when no guild context can be resolved.
+ * @param next - Called once a valid `currentGuildId` and `accessLevel` are set on the session user.
+ * @returns A promise that resolves once `next()` or a redirect has been issued.
+ */
+export async function requireGuildContext(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const user = req.session.user;
+  if (!user) {
+    res.redirect('/auth/login');
+    return;
+  }
+
+  const dbUser = await findUser(user.discordId);
+  if (!dbUser) {
+    res.redirect('/auth/login');
+    return;
+  }
+  const liveGuilds = dbUser.is_owner ? await getAllGuilds() : await getGuildsForMember(user.discordId);
+  user.isOwner = dbUser.is_owner;
+  user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
+
+  // A stored guild must still be one the user can act in (membership may have been
+  // revoked since login). Drop it and re-pick if not.
+  if (user.currentGuildId && !user.guilds.some((g) => g.guildId === user.currentGuildId)) {
+    user.currentGuildId = null;
+  }
+
+  if (!user.currentGuildId) {
+    if (user.guilds.length === 0) {
+      res.redirect('/auth/login');
+      return;
+    }
+    if (user.guilds.length === 1) {
+      user.currentGuildId = user.guilds[0].guildId;
+    } else {
+      res.redirect('/guild/select');
+      return;
+    }
+  }
+
+  user.accessLevel = (await getEffectiveAccessLevel(user.currentGuildId, user.discordId)) as (typeof AccessLevel)[keyof typeof AccessLevel];
+
+  next();
+}
+
+/**
+ * Ensures the current-guild access level is Manager or above, otherwise renders a 403.
+ * @param req - Express request; reads `req.session.user.accessLevel`.
+ * @param res - Express response; used to render the 403 error page on denial.
+ * @param next - Called when the access level check passes.
+ * @returns Nothing; either calls `next()` or renders an error response.
+ */
 export function requireManager(req: Request, res: Response, next: NextFunction): void {
   if (req.session.user && req.session.user.accessLevel >= AccessLevel.MANAGER) {
     next();
@@ -25,6 +102,13 @@ export function requireManager(req: Request, res: Response, next: NextFunction):
   }
 }
 
+/**
+ * Ensures the current-guild access level is Mod or above, otherwise renders a 403.
+ * @param req - Express request; reads `req.session.user.accessLevel`.
+ * @param res - Express response; used to render the 403 error page on denial.
+ * @param next - Called when the access level check passes.
+ * @returns Nothing; either calls `next()` or renders an error response.
+ */
 export function requireMod(req: Request, res: Response, next: NextFunction): void {
   if (req.session.user && req.session.user.accessLevel >= AccessLevel.MOD) {
     next();
@@ -39,6 +123,14 @@ export function requireMod(req: Request, res: Response, next: NextFunction): voi
   }
 }
 
+/**
+ * Authenticates a Streamdeck API request via a `Bearer` token, hashing it and looking it
+ * up against approved keys. On success, attaches the key owner's Discord ID to the request.
+ * @param req - Express request; reads the `Authorization` header.
+ * @param res - Express response; used to respond 401/500 on failure.
+ * @param next - Called once `req.apiKeyOwner` has been set.
+ * @returns A promise that resolves once `next()` or an error response has been issued.
+ */
 export async function requireApiKey(req: Request, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers['authorization'];
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
@@ -60,6 +152,13 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
   }
 }
 
+/**
+ * Ensures the current-guild access level is Admin, otherwise renders a 403.
+ * @param req - Express request; reads `req.session.user.accessLevel`.
+ * @param res - Express response; used to render the 403 error page on denial.
+ * @param next - Called when the access level check passes.
+ * @returns Nothing; either calls `next()` or renders an error response.
+ */
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   if (req.session.user && req.session.user.accessLevel >= AccessLevel.ADMIN) {
     next();

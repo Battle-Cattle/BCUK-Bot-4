@@ -12,6 +12,7 @@ const log = createLogger('Web');
 
 const isProduction = process.env.NODE_ENV === 'production';
 import authRouter from './routes/auth';
+import guildRouter from './routes/guild';
 import eventsubCallbackRouter from './routes/eventsubCallback';
 import eventsubAdminRouter from './routes/eventsubAdmin';
 import dashboardRouter from './routes/dashboard';
@@ -28,7 +29,7 @@ import streamdeckKeysRouter from './routes/streamdeckKeys';
 import userSettingsRouter from './routes/userSettings';
 import overlaySourceRouter from './routes/overlaySource';
 import overlayAdminRouter from './routes/overlayAdmin';
-import { requireAuth } from './middleware';
+import { requireAuth, requireGuildContext } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
 import {
   ipKey,
@@ -157,18 +158,19 @@ app.use('/auth', authLimiter, eventsubCallbackRouter);
 app.use('/api/streamdeck', streamdeckLimiter, streamdeckRouter);
 app.use('/', sfxPublicRouter);
 app.use('/overlay', overlaySourceRouter);
+app.use('/guild', requireAuth, guildRouter);
 app.use('/api', requireAuth, apiRouter);
 app.use('/', requireAuth, streamdeckKeysRouter);
 app.use('/', requireAuth, sfxRouter);
-app.use('/admin', requireAuth, adminRouter);
-app.use('/admin', requireAuth, streamsRouter);
-app.use('/admin', requireAuth, eventsubAdminRouter);
+app.use('/admin', requireAuth, requireGuildContext, adminRouter);
+app.use('/admin', requireAuth, requireGuildContext, streamsRouter);
+app.use('/admin', requireAuth, requireGuildContext, eventsubAdminRouter);
 app.use('/user/settings', requireAuth, userSettingsRouter);
 app.use('/overlay', requireAuth, overlayAdminRouter);
 app.use('/', requireAuth, commandsRouter);
 app.use('/', requireAuth, countersRouter);
 app.use('/', requireAuth, commandMonitorRouter);
-app.use('/', requireAuth, dashboardRouter);
+app.use('/', requireAuth, requireGuildContext, dashboardRouter);
 
 // 404 handler
 app.use((req, res) => {
@@ -213,6 +215,10 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
     csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
   });
 });
+
+// Exported so server.test.ts can drive the real route/middleware wiring with supertest
+// without spinning up a listening socket.
+export { app };
 
 export function startWebPanel(): void {
   app.listen(WEB_PORT, () => {

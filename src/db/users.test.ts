@@ -88,6 +88,16 @@ describe('findUser', () => {
     const user = await findUser('999');
     expect(user!.discord_id).toBe('999');
   });
+
+  it('maps the is_owner bit column to a boolean', async () => {
+    const ownerRow = { discord_id: '1', discord_name: 'Owner', is_twitch_bot_enabled: 0, twitch_name: null, access_level: 3, is_owner: Buffer.from([1]) };
+    vi.mocked(getPool).mockReturnValue(makePool([[ownerRow]]) as any);
+    expect((await findUser('1'))!.is_owner).toBe(true);
+
+    const plainRow = { discord_id: '2', discord_name: 'User', is_twitch_bot_enabled: 0, twitch_name: null, access_level: 0, is_owner: 0 };
+    vi.mocked(getPool).mockReturnValue(makePool([[plainRow]]) as any);
+    expect((await findUser('2'))!.is_owner).toBe(false);
+  });
 });
 
 // ─── findUserByTwitchName ─────────────────────────────────────────────────────
@@ -109,10 +119,18 @@ describe('findUserByTwitchName', () => {
   });
 
   it('maps a found row correctly', async () => {
-    const row = { discord_id: '111', discord_name: 'Alice', is_twitch_bot_enabled: 1, twitch_name: 'alice', access_level: 0 };
+    const row = {
+      discord_id: '111',
+      discord_name: 'Alice',
+      is_twitch_bot_enabled: 1,
+      twitch_name: 'alice',
+      access_level: 0,
+      is_owner: Buffer.from([1]),
+    };
     vi.mocked(getPool).mockReturnValue(makePool([[row]]) as any);
     const result = await findUserByTwitchName('alice');
     expect(result!.discord_id).toBe('111');
+    expect(result!.is_owner).toBe(true);
   });
 
   it('uses an exclude query when excludeDiscordId is provided', async () => {
@@ -143,14 +161,16 @@ describe('getAllUsers', () => {
 
   it('maps multiple rows', async () => {
     const rows = [
-      { discord_id: '1', discord_name: 'A', is_twitch_bot_enabled: 0, twitch_name: null, access_level: 3 },
-      { discord_id: '2', discord_name: 'B', is_twitch_bot_enabled: 1, twitch_name: 'b', access_level: 0 },
+      { discord_id: '1', discord_name: 'A', is_twitch_bot_enabled: 0, twitch_name: null, access_level: 3, is_owner: 1 },
+      { discord_id: '2', discord_name: 'B', is_twitch_bot_enabled: 1, twitch_name: 'b', access_level: 0, is_owner: 0 },
     ];
     vi.mocked(getPool).mockReturnValue(makePool([rows]) as any);
     const result = await getAllUsers();
     expect(result).toHaveLength(2);
     expect(result[0].discord_id).toBe('1');
     expect(result[1].is_twitch_bot_enabled).toBe(true);
+    expect(result[0].is_owner).toBe(true);
+    expect(result[1].is_owner).toBe(false);
   });
 });
 

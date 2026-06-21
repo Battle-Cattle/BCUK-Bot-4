@@ -198,7 +198,10 @@ describe('renderError', () => {
       discordId: '123456789012345678',
       discordName: 'TestUser',
       discordAvatar: null,
+      isOwner: false,
       accessLevel: AccessLevel.MOD,
+      currentGuildId: '999000999000999000',
+      guilds: [{ guildId: '999000999000999000', name: 'Test Guild' }],
     };
     renderError(res, 500, 'Server error', user);
     expect(render).toHaveBeenCalledWith('error', {
