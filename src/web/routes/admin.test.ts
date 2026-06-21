@@ -56,8 +56,12 @@ vi.mock('./adminUserMutations', () => {
   };
 });
 
+const { mockLog } = vi.hoisted(() => ({
+  mockLog: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+}));
+
 vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
+  createLogger: () => mockLog,
 }));
 
 vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
@@ -225,6 +229,13 @@ describe('POST /users/add', () => {
     );
     expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, VALID_ID, 0);
     expect(vi.mocked(reloadGuildRegistry)).toHaveBeenCalled();
+  });
+
+  it('still redirects to /admin/users when the registry reload fails, but logs the error', async () => {
+    vi.mocked(reloadGuildRegistry).mockRejectedValue(new Error('registry unavailable'));
+    const res = await supertest(buildApp()).post('/users/add').type('form').send({ discord_id: VALID_ID, access_level: '0' });
+    expect(res.headers.location).toBe('/admin/users');
+    expect(mockLog.error).toHaveBeenCalledWith('Guild registry reload after membership change failed:', expect.any(Error));
   });
 });
 
