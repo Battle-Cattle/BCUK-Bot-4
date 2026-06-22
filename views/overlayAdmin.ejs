@@ -125,10 +125,9 @@
                 <td class="mono" style="font-size:0.8em;"><%= v.filename %></td>
                 <td><%= new Date(v.created_at).toLocaleDateString() %></td>
                 <td>
-                  <form method="POST" action="/overlay/settings/videos/<%= v.id %>/delete" style="margin:0;">
+                  <form method="POST" action="/overlay/settings/videos/<%= v.id %>/delete" style="margin:0;" class="js-confirm-delete-video">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                    <button type="submit" class="btn btn-ghost btn-sm"
-                      onclick="return confirm('Delete this video? Any reward assignments using it will be removed.')">
+                    <button type="submit" class="btn btn-ghost btn-sm">
                       Delete
                     </button>
                   </form>
@@ -211,10 +210,9 @@
               <p class="hint hint-compact">Reward ID</p>
               <code class="mono" style="word-break:break-all;overflow-wrap:anywhere;"><%= r.twitch_reward_id %></code>
             </div>
-            <form method="POST" action="/overlay/settings/rewards/<%= r.id %>/delete" style="margin:0;">
+            <form method="POST" action="/overlay/settings/rewards/<%= r.id %>/delete" style="margin:0;" class="js-confirm-delete-reward">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-              <button type="submit" class="btn btn-ghost btn-sm"
-                onclick="return confirm('Remove this reward assignment?')">
+              <button type="submit" class="btn btn-ghost btn-sm">
                 Remove
               </button>
             </form>
@@ -249,5 +247,7 @@
   </main>
 
   <%- include('partials/pwa-register') %>
+  <script src="/utils.js"></script>
+  <script src="/overlayAdmin.js"></script>
 </body>
 </html>

@@ -213,9 +213,9 @@
               <td>
                 <div class="actions">
                   <% if (isAdmin && isConnected) { %>
-                  <form method="POST" action="/admin/streams/twitch-disconnect/<%= s.id %>" class="inline-form-sm">
+                  <form method="POST" action="/admin/streams/twitch-disconnect/<%= s.id %>" class="inline-form-sm js-confirm-disconnect-twitch" data-twitch-name="<%= s.twitch_name %>">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                    <button type="submit" class="btn btn-ghost btn-sm" onclick="return confirm('Disconnect Twitch for <%= s.twitch_name %>?')">Disconnect</button>
+                    <button type="submit" class="btn btn-ghost btn-sm">Disconnect</button>
                   </form>
                   <% } %>
                   <form method="POST" action="/admin/streams/streamers/remove" class="inline-form-sm js-confirm-remove-streamer" data-streamer-name="<%= s.twitch_name ?? s.discord_id %>">
