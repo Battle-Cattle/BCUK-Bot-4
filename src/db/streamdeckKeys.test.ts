@@ -260,7 +260,7 @@ describe('requestApiKey', () => {
     expect(result.plain).toHaveLength(64); // 32 bytes as hex
     const [insertSql, insertParams] = pool.execute.mock.calls[1] as [string, unknown[]];
     expect(insertSql).toContain('(discord_id, key_hash, guild_id, status, requested_at, approved_at, approved_by)');
-    expect(insertSql).toMatch(/guild_id\s*=\s*IF\(status = 'denied', guild_id,\s*new_row\.guild_id\)/);
+    expect(insertSql).toMatch(/guild_id\s*=\s*IF\(streamdeck_api_keys\.status = 'denied', streamdeck_api_keys\.guild_id,\s*new_row\.guild_id\)/);
     expect(insertParams[2]).toBe('g1');
   });
 
@@ -290,5 +290,25 @@ describe('requestApiKey', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await requestApiKey('1', AccessLevel.MOD, 'g1');
     expect(result.plain).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('qualifies every bare column reference in the upsert IF() conditions to avoid ambiguity with new_row', async () => {
+    const pool = {
+      execute: vi.fn()
+        .mockResolvedValueOnce([[]])
+        .mockResolvedValueOnce([[]])
+        .mockResolvedValueOnce([[{
+          discord_id: '1', guild_id: 'g1', status: 'pending', requested_at: new Date(), approved_at: null, approved_by: null, user_name: null, approver_name: null,
+        }]]),
+    };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await requestApiKey('1', AccessLevel.USER, 'g1');
+    const [insertSql] = pool.execute.mock.calls[1] as [string, unknown[]];
+    const updateClause = insertSql.slice(insertSql.indexOf('ON DUPLICATE KEY UPDATE'));
+    // every "IF(" condition must reference the base table, not a bare column, to avoid
+    // "Column 'status' in field list is ambiguous" against the new_row alias
+    for (const match of updateClause.matchAll(/IF\(([^,]+),/g)) {
+      expect(match[1]).toContain('streamdeck_api_keys.');
+    }
   });
 });
