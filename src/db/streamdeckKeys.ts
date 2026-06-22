@@ -15,6 +15,11 @@ export interface StreamdeckKeyRow {
   approver_name: string | null;
 }
 
+/**
+ * Maps a raw `streamdeck_api_keys` row (joined with user/approver names) to a {@link StreamdeckKeyRow}.
+ * @param r Raw row from a `streamdeck_api_keys` query.
+ * @returns The mapped key row.
+ */
 function mapRow(r: mysql.RowDataPacket): StreamdeckKeyRow {
   return {
     discord_id: String(r.discord_id),
@@ -113,6 +118,13 @@ export async function getApiKeyStatus(discordId: string): Promise<StreamdeckKeyR
   return rows.length === 0 ? null : mapRow(rows[0]);
 }
 
+/**
+ * Approves a pending Streamdeck API key request.
+ *
+ * @param discordId Requester's Discord snowflake.
+ * @param approvedBy Approver's Discord snowflake.
+ * @returns A promise that resolves once the update completes; a no-op if the request isn't pending.
+ */
 export async function approveApiKey(discordId: string, approvedBy: string): Promise<void> {
   await getPool().execute(
     `UPDATE streamdeck_api_keys
@@ -122,6 +134,12 @@ export async function approveApiKey(discordId: string, approvedBy: string): Prom
   );
 }
 
+/**
+ * Denies a pending Streamdeck API key request, permanently blocking future requests from this user.
+ *
+ * @param discordId Requester's Discord snowflake.
+ * @returns A promise that resolves once the update completes; a no-op if the request isn't pending.
+ */
 export async function denyApiKey(discordId: string): Promise<void> {
   await getPool().execute(
     `UPDATE streamdeck_api_keys SET status = 'denied' WHERE discord_id = ? AND status = 'pending'`,
@@ -129,6 +147,12 @@ export async function denyApiKey(discordId: string): Promise<void> {
   );
 }
 
+/**
+ * Revokes a Discord user's Streamdeck API key, regardless of its current status.
+ *
+ * @param discordId User's Discord snowflake.
+ * @returns A promise that resolves once the update completes.
+ */
 export async function revokeApiKey(discordId: string): Promise<void> {
   await getPool().execute(
     `UPDATE streamdeck_api_keys SET status = 'revoked' WHERE discord_id = ?`,
@@ -156,7 +180,7 @@ export async function getPendingRequests(): Promise<StreamdeckKeyRow[]> {
 /**
  * Lists all Streamdeck API keys.
  *
- * @returns Key rows, including requester/approver names and guild bindings.
+ * @returns Key rows, including requester/approver names and guild bindings, ordered by status then request time.
  */
 export async function getAllApiKeys(): Promise<StreamdeckKeyRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(

@@ -26,6 +26,7 @@ function getApiKeyGuildId(req: Request, res: Response): string | null {
   return guildId;
 }
 
+/** Lists all SFX triggers available to play via Streamdeck. */
 router.get('/sfx', requireApiKey, async (_req, res) => {
   try {
     const triggers = await getAllSfxTriggers();
@@ -36,6 +37,7 @@ router.get('/sfx', requireApiKey, async (_req, res) => {
   }
 });
 
+/** Plays a random weighted sound file for the SFX trigger named in the request body. */
 router.post('/sfx', requireApiKey, async (req, res) => {
   const { command } = req.body as { command?: unknown };
   if (typeof command !== 'string' || !command.trim()) {
@@ -88,6 +90,7 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   }
 });
 
+/** Lists voice channels the bot can join, scoped to the API key's bound guild. */
 router.get('/voice/channels', requireApiKey, async (req, res) => {
   const guildId = getApiKeyGuildId(req, res);
   if (!guildId) return;
@@ -100,6 +103,7 @@ router.get('/voice/channels', requireApiKey, async (req, res) => {
   }
 });
 
+/** Disconnects any existing voice connection and joins the voice channel named in the request body. */
 router.post('/voice/join', requireApiKey, async (req, res) => {
   const guildId = getApiKeyGuildId(req, res);
   if (!guildId) return;
@@ -131,6 +135,7 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
   }
 });
 
+/** Disconnects the bot from its current voice channel in the API key's bound guild. */
 router.post('/voice/leave', requireApiKey, (req, res) => {
   const guildId = getApiKeyGuildId(req, res);
   if (!guildId) return;
