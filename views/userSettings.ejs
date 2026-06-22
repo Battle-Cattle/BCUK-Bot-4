@@ -116,9 +116,9 @@
                 Sub/resub/gift notifications <% if (!isConnected) { %><span class="hint">(requires Twitch connection)</span><% } %>
               </label>
               <p class="hint hint-compact">New sub — variables: <code>{username} {display_name} {tier} {tier_name}</code></p>
-              <textarea class="input stream-textarea" name="sub_message" rows="2" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.sub_message) ? cfg.sub_message : 'Thanks {display_name} for subscribing! (Tier {tier})' %></textarea>
+              <textarea class="input stream-textarea" name="sub_message" rows="2" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.sub_message) ? cfg.sub_message : 'Thanks {display_name} for subscribing! ({tier_name})' %></textarea>
               <p class="hint hint-compact" style="margin-top:0.4rem;">Resub — variables: <code>{username} {display_name} {tier} {tier_name} {months} {streak}</code></p>
-              <textarea class="input stream-textarea" name="resub_message" rows="2" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.resub_message) ? cfg.resub_message : 'Thanks {display_name} for {months} months! (Tier {tier})' %></textarea>
+              <textarea class="input stream-textarea" name="resub_message" rows="2" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.resub_message) ? cfg.resub_message : 'Thanks {display_name} for {months} months! ({tier_name})' %></textarea>
               <p class="hint hint-compact" style="margin-top:0.4rem;">Gift sub — variables: <code>{gifter} {gifter_display} {count} {tier} {tier_name}</code></p>
               <textarea class="input stream-textarea" name="giftsub_message" rows="2" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.giftsub_message) ? cfg.giftsub_message : '{gifter_display} gifted {count} sub(s) to the community!' %></textarea>
             </div>
