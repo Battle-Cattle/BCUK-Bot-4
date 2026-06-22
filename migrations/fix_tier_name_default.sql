@@ -4,8 +4,8 @@
 -- that still use the raw placeholder.
 
 ALTER TABLE streamer_event_config
-  MODIFY COLUMN sub_message   VARCHAR(500) NOT NULL DEFAULT 'Thanks {display_name} for subscribing! (Tier {tier_name})',
-  MODIFY COLUMN resub_message VARCHAR(500) NOT NULL DEFAULT 'Thanks {display_name} for {months} months! (Tier {tier_name})';
+  MODIFY COLUMN sub_message   VARCHAR(500) NOT NULL DEFAULT 'Thanks {display_name} for subscribing! ({tier_name})',
+  MODIFY COLUMN resub_message VARCHAR(500) NOT NULL DEFAULT 'Thanks {display_name} for {months} months! ({tier_name})';
 
 UPDATE streamer_event_config
 SET sub_message = REPLACE(sub_message, '{tier}', '{tier_name}')
