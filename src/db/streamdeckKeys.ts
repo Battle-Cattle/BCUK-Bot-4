@@ -60,12 +60,12 @@ export async function requestApiKey(
        (discord_id, key_hash, guild_id, status, requested_at, approved_at, approved_by)
      VALUES (?, ?, ?, ?, ?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE
-       key_hash     = IF(status = 'denied', key_hash,     new_row.key_hash),
-       guild_id     = IF(status = 'denied', guild_id,     new_row.guild_id),
-       status       = IF(status = 'denied', status,       new_row.status),
-       requested_at = IF(status = 'denied', requested_at, new_row.requested_at),
-       approved_at  = IF(status = 'denied', approved_at,  new_row.approved_at),
-       approved_by  = IF(status = 'denied', approved_by,  new_row.approved_by)`,
+       key_hash     = IF(streamdeck_api_keys.status = 'denied', streamdeck_api_keys.key_hash,     new_row.key_hash),
+       guild_id     = IF(streamdeck_api_keys.status = 'denied', streamdeck_api_keys.guild_id,     new_row.guild_id),
+       status       = IF(streamdeck_api_keys.status = 'denied', streamdeck_api_keys.status,       new_row.status),
+       requested_at = IF(streamdeck_api_keys.status = 'denied', streamdeck_api_keys.requested_at, new_row.requested_at),
+       approved_at  = IF(streamdeck_api_keys.status = 'denied', streamdeck_api_keys.approved_at,  new_row.approved_at),
+       approved_by  = IF(streamdeck_api_keys.status = 'denied', streamdeck_api_keys.approved_by,  new_row.approved_by)`,
     [discordId, hash, guildId, status, now, approvedAt, approvedBy],
   );
 
