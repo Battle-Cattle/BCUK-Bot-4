@@ -54,10 +54,10 @@
                       <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
                       <button type="submit" class="btn btn-sm">Approve</button>
                     </form>
-                    <form method="POST" action="/admin/streamdeck-keys/deny" class="inline-form-sm">
+                    <form method="POST" action="/admin/streamdeck-keys/deny" class="inline-form-sm js-confirm-deny-key">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
-                      <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Are you sure you want to deny this request?')">Deny</button>
+                      <button type="submit" class="btn btn-sm btn-ghost">Deny</button>
                     </form>
                   </div>
                 </td>
@@ -125,17 +125,17 @@
                       <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
                       <button type="submit" class="btn btn-sm">Approve</button>
                     </form>
-                    <form method="POST" action="/admin/streamdeck-keys/deny" class="inline-form-sm">
+                    <form method="POST" action="/admin/streamdeck-keys/deny" class="inline-form-sm js-confirm-deny-key">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
-                      <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Are you sure you want to deny this request?')">Deny</button>
+                      <button type="submit" class="btn btn-sm btn-ghost">Deny</button>
                     </form>
                   </div>
                   <% } else if (row.status === 'approved') { %>
-                  <form method="POST" action="/admin/streamdeck-keys/revoke" class="inline-form-sm">
+                  <form method="POST" action="/admin/streamdeck-keys/revoke" class="inline-form-sm js-confirm-revoke-key-admin">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
-                    <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Revoke this key? It will stop working immediately.')">Revoke</button>
+                    <button type="submit" class="btn btn-sm btn-ghost">Revoke</button>
                   </form>
                   <% } else { %>
                   <em class="muted">—</em>
@@ -151,5 +151,7 @@
     </section>
   </main>
   <%- include('partials/pwa-register') %>
+  <script src="/utils.js"></script>
+  <script src="/streamdeck-keys-admin.js"></script>
 </body>
 </html>
