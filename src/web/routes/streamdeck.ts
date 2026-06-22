@@ -1,10 +1,9 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { findTrigger, findSoundFiles, getAllSfxTriggers } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
-import { DISCORD_GUILD_ID } from '../../shared/config';
 import { requireApiKey } from '../middleware';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
@@ -13,6 +12,19 @@ import { normalizeDiscordId } from './shared';
 
 const log = createLogger('Streamdeck');
 const router = Router();
+
+/**
+ * Returns the guild ID the API key is bound to. Sends 503 and returns null
+ * if the key is not bound to a guild.
+ */
+function getApiKeyGuildId(req: Request, res: Response): string | null {
+  const guildId = req.apiKeyGuildId ?? null;
+  if (!guildId) {
+    res.status(503).json({ ok: false, error: 'API key has no guild binding' });
+    return null;
+  }
+  return guildId;
+}
 
 router.get('/sfx', requireApiKey, async (_req, res) => {
   try {
@@ -76,9 +88,11 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   }
 });
 
-router.get('/voice/channels', requireApiKey, async (_req, res) => {
+router.get('/voice/channels', requireApiKey, async (req, res) => {
+  const guildId = getApiKeyGuildId(req, res);
+  if (!guildId) return;
   try {
-    const channels = await getAvailableVoiceChannels(DISCORD_GUILD_ID);
+    const channels = await getAvailableVoiceChannels(guildId);
     res.json({ ok: true, channels });
   } catch (err) {
     log.error('Failed to list voice channels:', err);
@@ -87,6 +101,9 @@ router.get('/voice/channels', requireApiKey, async (_req, res) => {
 });
 
 router.post('/voice/join', requireApiKey, async (req, res) => {
+  const guildId = getApiKeyGuildId(req, res);
+  if (!guildId) return;
+
   const { channelId } = req.body as { channelId?: unknown };
   if (typeof channelId !== 'string') {
     res.status(400).json({ ok: false, error: 'Missing or invalid "channelId" field' });
@@ -105,8 +122,8 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
   }
 
   try {
-    disconnect(DISCORD_GUILD_ID);
-    await connect(discordClient, DISCORD_GUILD_ID, normalizedChannelId);
+    disconnect(guildId);
+    await connect(discordClient, guildId, normalizedChannelId);
     res.json({ ok: true });
   } catch (err) {
     log.error('Voice join failed:', err);
@@ -114,8 +131,10 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
   }
 });
 
-router.post('/voice/leave', requireApiKey, (_req, res) => {
-  disconnect(DISCORD_GUILD_ID);
+router.post('/voice/leave', requireApiKey, (req, res) => {
+  const guildId = getApiKeyGuildId(req, res);
+  if (!guildId) return;
+  disconnect(guildId);
   res.json({ ok: true });
 });
 

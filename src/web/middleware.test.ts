@@ -201,12 +201,13 @@ describe('requireApiKey', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('sets req.apiKeyOwner and calls next() when key is valid', async () => {
-    vi.mocked(findApprovedKeyByHash).mockResolvedValue({ discord_id: 'user42' } as any);
+  it('sets req.apiKeyOwner, req.apiKeyGuildId, and calls next() when key is valid', async () => {
+    vi.mocked(findApprovedKeyByHash).mockResolvedValue({ discord_id: 'user42', guild_id: 'guild99' } as any);
     const req = makeReq({ headers: { authorization: 'Bearer validtoken' } });
     const res = makeRes();
     await requireApiKey(req, res, next);
     expect(req.apiKeyOwner).toBe('user42');
+    expect(req.apiKeyGuildId).toBe('guild99');
     expect(next).toHaveBeenCalled();
     expect(res.status).not.toHaveBeenCalled();
   });

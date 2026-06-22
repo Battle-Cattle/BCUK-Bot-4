@@ -101,9 +101,9 @@ describe('server route wiring', () => {
     expect(res.body).toEqual({ label: 'streams' });
     // requireAuth also runs for the two earlier '/' mounts (streamdeckKeys, sfx) that match
     // every path, plus adminRouter's and streamsRouter's own '/admin' stacks: 2 + 2 = 4.
-    // requireGuildContext only runs for the two '/admin' stacks: 2.
+    // requireGuildContext runs for streamdeckKeys' '/' mount plus the two '/admin' stacks: 3.
     expect(requireAuth).toHaveBeenCalledTimes(4);
-    expect(requireGuildContext).toHaveBeenCalledTimes(2);
+    expect(requireGuildContext).toHaveBeenCalledTimes(3);
   });
 
   it('mounts the /admin eventsub router behind both requireAuth and requireGuildContext', async () => {
@@ -112,8 +112,9 @@ describe('server route wiring', () => {
     expect(res.body).toEqual({ label: 'eventsubAdmin' });
     // Same two leading '/' mounts, plus all three '/admin' stacks (admin, streams,
     // eventsubAdmin) run before the eventsubAdmin route responds: 2 + 3 = 5.
+    // requireGuildContext runs for streamdeckKeys' '/' mount plus all three '/admin' stacks: 4.
     expect(requireAuth).toHaveBeenCalledTimes(5);
-    expect(requireGuildContext).toHaveBeenCalledTimes(3);
+    expect(requireGuildContext).toHaveBeenCalledTimes(4);
   });
 
   it('mounts the dashboard root behind both requireAuth and requireGuildContext', async () => {

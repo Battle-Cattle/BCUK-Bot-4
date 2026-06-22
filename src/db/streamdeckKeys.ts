@@ -5,6 +5,8 @@ import { AccessLevel } from './users';
 
 export interface StreamdeckKeyRow {
   discord_id: string;
+  /** The guild this key acts on. */
+  guild_id: string | null;
   status: 'pending' | 'approved' | 'revoked' | 'denied';
   requested_at: Date;
   approved_at: Date | null;
@@ -16,6 +18,7 @@ export interface StreamdeckKeyRow {
 function mapRow(r: mysql.RowDataPacket): StreamdeckKeyRow {
   return {
     discord_id: String(r.discord_id),
+    guild_id: r.guild_id === null ? null : String(r.guild_id),
     status: r.status as StreamdeckKeyRow['status'],
     requested_at: r.requested_at,
     approved_at: r.approved_at ?? null,
@@ -25,9 +28,20 @@ function mapRow(r: mysql.RowDataPacket): StreamdeckKeyRow {
   };
 }
 
+/**
+ * Requests (or re-requests) a Streamdeck API key for a user, scoped to one guild.
+ * Manager+ access levels are auto-approved; everyone else is queued as pending.
+ * Throws if a previous request for this user was denied.
+ *
+ * @param discordId Requesting user's Discord snowflake.
+ * @param accessLevel The user's effective access level in `guildId`, used to decide auto-approval.
+ * @param guildId The guild the key will act on.
+ * @returns The plaintext key (only ever returned here — only the hash is stored) and its status.
+ */
 export async function requestApiKey(
   discordId: string,
   accessLevel: number,
+  guildId: string,
 ): Promise<{ plain: string; status: 'pending' | 'approved' }> {
   const existing = await getApiKeyStatus(discordId);
   if (existing?.status === 'denied') {
@@ -43,15 +57,16 @@ export async function requestApiKey(
 
   await getPool().execute(
     `INSERT INTO streamdeck_api_keys
-       (discord_id, key_hash, status, requested_at, approved_at, approved_by)
-     VALUES (?, ?, ?, ?, ?, ?) AS new_row
+       (discord_id, key_hash, guild_id, status, requested_at, approved_at, approved_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE
        key_hash     = IF(status = 'denied', key_hash,     new_row.key_hash),
+       guild_id     = IF(status = 'denied', guild_id,     new_row.guild_id),
        status       = IF(status = 'denied', status,       new_row.status),
        requested_at = IF(status = 'denied', requested_at, new_row.requested_at),
        approved_at  = IF(status = 'denied', approved_at,  new_row.approved_at),
        approved_by  = IF(status = 'denied', approved_by,  new_row.approved_by)`,
-    [discordId, hash, status, now, approvedAt, approvedBy],
+    [discordId, hash, guildId, status, now, approvedAt, approvedBy],
   );
 
   const after = await getApiKeyStatus(discordId);
@@ -62,9 +77,15 @@ export async function requestApiKey(
   return { plain, status };
 }
 
+/**
+ * Finds an approved Streamdeck API key by its SHA-256 hash.
+ *
+ * @param hash SHA-256 hash of the submitted plaintext key.
+ * @returns The approved key row, including its guild binding, or null when not found.
+ */
 export async function findApprovedKeyByHash(hash: string): Promise<StreamdeckKeyRow | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT discord_id, key_hash, status, requested_at, approved_at, approved_by
+    `SELECT discord_id, key_hash, guild_id, status, requested_at, approved_at, approved_by
      FROM streamdeck_api_keys
      WHERE key_hash = ? AND status = 'approved'`,
     [hash],
@@ -76,9 +97,15 @@ export async function findApprovedKeyByHash(hash: string): Promise<StreamdeckKey
   return mapRow(rows[0]);
 }
 
+/**
+ * Gets the current Streamdeck API key status for a Discord user.
+ *
+ * @param discordId Requesting user's Discord snowflake.
+ * @returns The key row, including its guild binding, or null when no request exists.
+ */
 export async function getApiKeyStatus(discordId: string): Promise<StreamdeckKeyRow | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT discord_id, status, requested_at, approved_at, approved_by
+    `SELECT discord_id, guild_id, status, requested_at, approved_at, approved_by
      FROM streamdeck_api_keys
      WHERE discord_id = ?`,
     [discordId],
@@ -109,9 +136,14 @@ export async function revokeApiKey(discordId: string): Promise<void> {
   );
 }
 
+/**
+ * Lists pending Streamdeck API key requests.
+ *
+ * @returns Pending key rows, including requester names and guild bindings, oldest first.
+ */
 export async function getPendingRequests(): Promise<StreamdeckKeyRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT k.discord_id, k.status, k.requested_at, k.approved_at, k.approved_by,
+    `SELECT k.discord_id, k.guild_id, k.status, k.requested_at, k.approved_at, k.approved_by,
             u.discord_name AS user_name, NULL AS approver_name
      FROM streamdeck_api_keys k
      LEFT JOIN \`user\` u ON u.discord_id = k.discord_id
@@ -121,9 +153,14 @@ export async function getPendingRequests(): Promise<StreamdeckKeyRow[]> {
   return rows.map(mapRow);
 }
 
+/**
+ * Lists all Streamdeck API keys.
+ *
+ * @returns Key rows, including requester/approver names and guild bindings.
+ */
 export async function getAllApiKeys(): Promise<StreamdeckKeyRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT k.discord_id, k.status, k.requested_at, k.approved_at, k.approved_by,
+    `SELECT k.discord_id, k.guild_id, k.status, k.requested_at, k.approved_at, k.approved_by,
             u.discord_name AS user_name, a.discord_name AS approver_name
      FROM streamdeck_api_keys k
      LEFT JOIN \`user\` u ON u.discord_id = k.discord_id
