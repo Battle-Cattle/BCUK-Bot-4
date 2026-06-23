@@ -157,4 +157,42 @@ describe('triggerImmediateLiveCheck', () => {
       expect.anything(), expect.anything(), expect.objectContaining({ game_name: 'Valorant' }), 'new_game_message',
     );
   });
+
+  it('logs and resolves without throwing when the Twitch API call fails', async () => {
+    vi.mocked(getStreams).mockRejectedValueOnce(new Error('API down'));
+
+    await expect(triggerImmediateLiveCheck('teststreamer')).resolves.toBeUndefined();
+
+    expect(getLiveStates()).toHaveLength(0);
+  });
+});
+
+// Drives the 60s poll interval set up by startTwitchMonitor: pollStreams() dispatches
+// the full streamer list to dispatchStreamerPolls() on each tick, separately from the
+// single-streamer triggerImmediateLiveCheck() path exercised above.
+describe('60s poll interval', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient() as any);
+    await startTwitchMonitor();
+  });
+
+  afterEach(async () => {
+    await stopTwitchMonitor();
+    vi.useRealTimers();
+  });
+
+  it('polls every streamer on each tick and records newly-live streamers', async () => {
+    vi.mocked(getStreams).mockResolvedValue([makeStream()] as any);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(getStreams).toHaveBeenCalledWith(['uid-5']);
+    const states = getLiveStates();
+    expect(states).toHaveLength(1);
+    expect(states[0].login).toBe('teststreamer');
+  });
 });
