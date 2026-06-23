@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { getAllStreamersWithGroups, DbStreamerFull } from '../../db';
-import { getUsers, getStreams, TwitchStream } from '../twitchApi';
+import { getUsers, getStreams } from '../twitchApi';
 import { LiveState } from './twitchMonitorTypes';
 import {
   DiscordMessagePreview,
@@ -13,17 +13,9 @@ import {
   buildMultiTwitchContext,
   getMultitwitchPreview,
 } from './twitchMonitorMultitwitch';
-import {
-  postAnnouncement,
-  editAnnouncement,
-  deleteAnnouncement,
-} from './twitchMonitorAnnouncements';
-import {
-  cancelOfflineTimersForLogin,
-  handleStreamOffline,
-} from './twitchMonitorOffline';
-import { setTwitchChannelLive } from '../../shared/statusStore';
+import { deleteAnnouncement } from './twitchMonitorAnnouncements';
 import { performStartupLiveCheck } from './twitchMonitorStartup';
+import { handlePollStreamer, dispatchStreamerPolls } from './twitchMonitorPoll';
 
 const log = createLogger('TwitchMonitor');
 
@@ -42,79 +34,6 @@ let currentPollPromise: Promise<void> = Promise.resolve();
 
 // ─── Polling ───────────────────────────────────────────────────────────────
 
-async function handlePollStreamer(
-  streamer: DbStreamerFull,
-  liveByUserId: Map<string, TwitchStream>,
-): Promise<void> {
-  const loginKey = streamer.twitch_name?.toLowerCase();
-  if (!loginKey) return;
-  const stateKey = String(streamer.id);
-  const userId = loginToUserId.get(loginKey);
-  if (!userId) return;
-
-  const pollStream = liveByUserId.get(userId);
-  const existing = liveStates.get(stateKey);
-
-  if (pollStream) {
-    if (existing?.offlineTimer) {
-      // Came back during grace period — cancel offline timers for all groups this login belongs to
-      cancelOfflineTimersForLogin(liveStates, loginKey);
-      log.info(`${loginKey} came back — offline timer(s) cancelled`);
-    }
-    setTwitchChannelLive(loginKey, true);
-    const isNew = !liveStates.has(stateKey);
-    if (isNew || (existing && !existing.messageId)) {
-      // Went live, or state exists with no Discord message (e.g. Discord wasn't ready at startup)
-      await postAnnouncement(liveStates, streamer, pollStream);
-      if (isNew) log.info(`${loginKey} went live in group ${streamer.group.name}`);
-    } else if (existing && existing.currentGame !== pollStream.game_name) {
-      // Game changed
-      await editAnnouncement(liveStates, existing, pollStream, 'new_game_message');
-      log.info(`${loginKey} game changed to ${pollStream.game_name}`);
-    } else if (existing && existing.title !== pollStream.title) {
-      // Title-only change — refresh the existing post without re-announcing a game change
-      await editAnnouncement(liveStates, existing, pollStream, 'live_message');
-      log.info(`${loginKey} title changed`);
-    } else if (existing) {
-      // Still live, nothing changed — keep currentStream in sync (e.g. thumbnail refresh)
-      existing.currentGame = pollStream.game_name;
-      existing.title = pollStream.title;
-      existing.currentStream = pollStream;
-    }
-  } else if (existing && !existing.offlineTimer) {
-    // Appears offline — start grace period (handleStreamOffline handles all groups for this login)
-    await handleStreamOffline(liveStates, loginToUserId, loginKey);
-  }
-}
-
-async function dispatchStreamerPolls(
-  streamers: DbStreamerFull[],
-  liveByUserId: Map<string, TwitchStream>,
-): Promise<void> {
-  // Group rows by login so same-login rows are serialized (shared offline-timer
-  // state); different logins run in parallel via Promise.allSettled.
-  const byLogin = new Map<string, DbStreamerFull[]>();
-  for (const streamer of streamers) {
-    const key = streamer.twitch_name?.toLowerCase() ?? '';
-    if (!key) continue;
-    const existing = byLogin.get(key);
-    if (existing) existing.push(streamer);
-    else byLogin.set(key, [streamer]);
-  }
-
-  await Promise.allSettled(
-    Array.from(byLogin.values()).map(async (group) => {
-      for (const streamer of group) {
-        try {
-          await handlePollStreamer(streamer, liveByUserId);
-        } catch (err) {
-          log.error(`Error handling streamer poll for ${streamer.twitch_name ?? 'unknown'} in group ${streamer.group.name}:`, err);
-        }
-      }
-    }),
-  );
-}
-
 async function pollStreams(): Promise<void> {
   if (pollRunning || streamersData.length === 0) return;
   pollRunning = true;
@@ -127,7 +46,7 @@ async function pollStreams(): Promise<void> {
       const liveByUserId = new Map(
         liveStreams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
       );
-      await dispatchStreamerPolls(streamersData, liveByUserId);
+      await dispatchStreamerPolls(liveStates, loginToUserId, streamersData, liveByUserId);
     } catch (err) {
       log.error('Poll error:', err);
     } finally {
@@ -160,7 +79,7 @@ export async function triggerImmediateLiveCheck(login: string): Promise<void> {
       streams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
     );
     for (const streamer of matching) {
-      await handlePollStreamer(streamer, liveByUserId);
+      await handlePollStreamer(liveStates, loginToUserId, streamer, liveByUserId);
     }
   } catch (err) {
     log.error(`Immediate live check failed for ${loginKey}:`, err);
