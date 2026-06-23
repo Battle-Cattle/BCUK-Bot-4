@@ -26,6 +26,8 @@
         assign_failed: 'Failed to assign that user to the command.',
         unassign_failed: 'Failed to unassign that user from the command.',
         invalid_assignment_user: 'The selected user cannot be assigned to this command.',
+        override_failed: 'Failed to save the server override.',
+        override_reset_failed: 'Failed to reset the server override.',
       }; %>
       <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
         <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
@@ -79,6 +81,7 @@
                 <th scope="col">Output</th>
                 <th scope="col">Discord</th>
                 <th scope="col">Multi-Twitch</th>
+                <th scope="col">This Server</th>
                 <th scope="col">Assigned Twitch Users</th>
                 <th scope="col">Actions</th>
               </tr>
@@ -102,6 +105,18 @@
                 <td class="command-output-cell"><%= command.output %></td>
                 <td><span class="badge <%= command.is_discord_enabled ? 'badge-active' : 'badge-offline' %>"><%= command.is_discord_enabled ? 'Enabled' : 'Off' %></span></td>
                 <td><span class="badge <%= command.is_multi_twitch ? 'badge-active' : 'badge-offline' %>"><%= command.is_multi_twitch ? 'Enabled' : 'Off' %></span></td>
+                <td>
+                  <% if (!user || !user.currentGuildId) { %>
+                    <span class="muted">—</span>
+                  <% } else if (command.guildOverride && command.guildOverride.is_disabled) { %>
+                    <span class="badge badge-offline">Disabled</span>
+                    <% if (command.guildOverride.output !== null) { %><span class="badge badge">Custom output</span><% } %>
+                  <% } else if (command.guildOverride && command.guildOverride.output !== null) { %>
+                    <span class="badge badge">Custom output</span>
+                  <% } else { %>
+                    <span class="muted">Catalog default</span>
+                  <% } %>
+                </td>
                 <td class="assigned-users-cell">
                   <% if (command.assigned_users.length > 0) { %>
                     <div class="badge-list-wrap">
@@ -133,7 +148,7 @@
                 </td>
               </tr>
               <tr class="files-row is-hidden" id="command-edit-<%= command.command_id %>">
-                <td colspan="6">
+                <td colspan="7">
                   <div class="command-edit-panel">
                     <form method="POST" action="/commands/update" class="stack-gap-md">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -201,13 +216,46 @@
                       <div class="empty-msg">No users with a Twitch name are available for assignment.</div>
                       <% } %>
                     </div>
+
+                    <% if (user && user.currentGuildId) { %>
+                    <div class="command-guild-override-shell">
+                      <h3 class="command-assignment-title">Server Override</h3>
+                      <% var guildOverride = command.guildOverride; %>
+                      <form method="POST" action="/commands/guild-override" class="stack-gap-md">
+                        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                        <input type="hidden" name="command_id" value="<%= command.command_id %>">
+                        <div class="form-row-wrap">
+                          <label class="input checkbox-input-label">
+                            <input type="checkbox" name="is_disabled" value="1" <%= guildOverride && guildOverride.is_disabled ? 'checked' : '' %>> Disable for this server
+                          </label>
+                          <label class="input checkbox-input-label">
+                            <input type="checkbox" name="clear_output" value="1"> Clear custom output
+                          </label>
+                        </div>
+                        <div class="form-section-gap">
+                          <label for="guild_output_<%= command.command_id %>" class="form-label">Custom output for this server <span class="muted">(leave empty to use catalog output)</span></label>
+                          <textarea id="guild_output_<%= command.command_id %>" class="input stream-textarea" name="output" rows="2"><%= guildOverride && guildOverride.output !== null ? guildOverride.output : '' %></textarea>
+                        </div>
+                        <div class="button-row-wrap">
+                          <button type="submit" class="btn">Save Server Override</button>
+                        </div>
+                      </form>
+                      <% if (guildOverride) { %>
+                      <form method="POST" action="/commands/guild-override/reset" class="inline-form-sm">
+                        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                        <input type="hidden" name="command_id" value="<%= command.command_id %>">
+                        <button type="submit" class="btn btn-ghost btn-sm">Reset to Catalog Default</button>
+                      </form>
+                      <% } %>
+                    </div>
+                    <% } %>
                   </div>
                 </td>
               </tr>
               <% }) %>
               <% if (commands.length === 0) { %>
               <tr>
-                <td colspan="6" class="empty-msg">No custom commands configured yet.</td>
+                <td colspan="7" class="empty-msg">No custom commands configured yet.</td>
               </tr>
               <% } %>
             </tbody>
