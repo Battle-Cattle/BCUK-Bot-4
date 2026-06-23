@@ -3,10 +3,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../../db', () => ({ getVideosForReward: vi.fn() }));
 vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
+vi.mock('../monitor/twitchMonitor', () => ({ triggerImmediateLiveCheck: vi.fn().mockResolvedValue(undefined) }));
 
-import { handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption, registerEventSubOverlayRuntime, registerEventSubTwitchRuntime } from './twitchEventSubHandler';
+import {
+  handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
+  handleStreamOnline, handleStreamOffline, handleChannelUpdate,
+  registerEventSubOverlayRuntime, registerEventSubTwitchRuntime,
+} from './twitchEventSubHandler';
 import { getVideosForReward } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
+import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 
 const mockSend = vi.fn<(channel: string, message: string) => Promise<void>>();
 registerEventSubTwitchRuntime({ send: mockSend });
@@ -263,5 +269,29 @@ describe('handleRedemption', () => {
     expect(getVideosForReward).toHaveBeenCalledWith('reward-abc', streamerId);
     expect(pickWeightedRandom).toHaveBeenCalledWith(videos);
     expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip2.mp4');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleStreamOnline / handleStreamOffline
+// ---------------------------------------------------------------------------
+describe('handleStreamOnline', () => {
+  it('triggers an immediate live-check for the broadcaster login', async () => {
+    await handleStreamOnline('streamer');
+    expect(triggerImmediateLiveCheck).toHaveBeenCalledWith('streamer');
+  });
+});
+
+describe('handleStreamOffline', () => {
+  it('triggers an immediate live-check for the broadcaster login', async () => {
+    await handleStreamOffline('streamer');
+    expect(triggerImmediateLiveCheck).toHaveBeenCalledWith('streamer');
+  });
+});
+
+describe('handleChannelUpdate', () => {
+  it('triggers an immediate live-check for the broadcaster login', async () => {
+    await handleChannelUpdate('streamer');
+    expect(triggerImmediateLiveCheck).toHaveBeenCalledWith('streamer');
   });
 });

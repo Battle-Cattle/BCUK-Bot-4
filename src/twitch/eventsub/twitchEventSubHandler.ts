@@ -2,6 +2,7 @@ import type { EventSubConfig } from '../../db';
 import { getVideosForReward } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { createLogger } from '../../shared/logger';
+import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 
 const log = createLogger('EventSubHandler');
 
@@ -228,4 +229,43 @@ export async function handleRedemption(
   const videoPath = `/overlay/videos/${streamerId}/${filename}`;
   _overlayRuntime?.pushOverlayEvent(login, videoPath);
   log.info(`Overlay triggered for ${login}: reward="${event.reward.title}" video=${filename}`);
+}
+
+/**
+ * Handle a stream.online EventSub notification by triggering an immediate live-check
+ * for the broadcaster, bypassing the Twitch monitor's 60s poll interval. The poller
+ * still runs as a fallback for streamers without EventSub connected, and re-checking
+ * here is harmless if it already caught the change first.
+ *
+ * @param login - Broadcaster login name.
+ * @returns Resolves after triggering the immediate live-check.
+ */
+export async function handleStreamOnline(login: string): Promise<void> {
+  await triggerImmediateLiveCheck(login);
+}
+
+/**
+ * Handle a stream.offline EventSub notification by triggering an immediate live-check
+ * for the broadcaster. This starts the same 5-minute offline grace period the poller
+ * uses before removing the live announcement, since both paths share the same
+ * `liveStates` map.
+ *
+ * @param login - Broadcaster login name.
+ * @returns Resolves after triggering the immediate live-check.
+ */
+export async function handleStreamOffline(login: string): Promise<void> {
+  await triggerImmediateLiveCheck(login);
+}
+
+/**
+ * Handle a channel.update EventSub notification (title/category change) by triggering
+ * an immediate live-check for the broadcaster. Reuses the same poll-and-decide logic
+ * as stream.online/offline, so a title or game change posted via Twitch is reflected
+ * on Discord without waiting for the next 60s poll.
+ *
+ * @param login - Broadcaster login name.
+ * @returns Resolves after triggering the immediate live-check.
+ */
+export async function handleChannelUpdate(login: string): Promise<void> {
+  await triggerImmediateLiveCheck(login);
 }
