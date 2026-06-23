@@ -34,6 +34,7 @@ let currentPollPromise: Promise<void> = Promise.resolve();
 
 // ─── Polling ───────────────────────────────────────────────────────────────
 
+/** Polls the Twitch API for all monitored streamers' live status and dispatches the results. No-ops if a poll is already in flight or there are no streamers configured. */
 async function pollStreams(): Promise<void> {
   if (pollRunning || streamersData.length === 0) return;
   pollRunning = true;
