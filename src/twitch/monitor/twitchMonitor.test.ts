@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 vi.mock('../../shared/statusStore', () => ({ setTwitchChannelLive: vi.fn() }));
-vi.mock('../../discord/discordBot', () => ({ getDiscordClient: vi.fn().mockReturnValue(null) }));
+vi.mock('../../discord/discordBot', () => ({ getDiscordClient: vi.fn() }));
 vi.mock('../../db', () => ({
   getAllStreamersWithGroups: vi.fn(),
   setStreamerLive: vi.fn().mockResolvedValue(undefined),
@@ -25,6 +25,22 @@ import { startTwitchMonitor, stopTwitchMonitor, triggerImmediateLiveCheck, getLi
 import { getAllStreamersWithGroups } from '../../db';
 import { getUsers, getStreams } from '../twitchApi';
 import { cancelOfflineTimersForLogin, handleStreamOffline } from './twitchMonitorOffline';
+import { getDiscordClient } from '../../discord/discordBot';
+import * as twitchMonitorAnnouncements from './twitchMonitorAnnouncements';
+
+function makeTextChannel(msgOverrides: Record<string, unknown> = {}) {
+  const message = { id: 'msg1', channelId: '111', delete: vi.fn().mockResolvedValue(undefined), edit: vi.fn().mockResolvedValue(undefined), ...msgOverrides };
+  return {
+    isTextBased: () => true,
+    send: vi.fn().mockResolvedValue({ id: 'msg1', channelId: '111' }),
+    messages: { fetch: vi.fn().mockResolvedValue(message) },
+    _message: message,
+  };
+}
+
+function makeDiscordClient(channel: ReturnType<typeof makeTextChannel> = makeTextChannel()) {
+  return { channels: { fetch: vi.fn().mockResolvedValue(channel) } };
+}
 
 function makeStreamer(overrides: Record<string, unknown> = {}) {
   return {
@@ -46,7 +62,7 @@ function makeStreamer(overrides: Record<string, unknown> = {}) {
 function makeStream(overrides: Record<string, unknown> = {}) {
   return {
     user_id: 'uid-5', user_login: 'teststreamer', game_name: 'Just Chatting',
-    title: 'hello', thumbnail_url: '', type: 'live',
+    title: 'hello', thumbnail_url: 'https://example.com/thumb-{width}x{height}.jpg', type: 'live',
     ...overrides,
   };
 }
@@ -55,10 +71,13 @@ function makeStream(overrides: Record<string, unknown> = {}) {
 // the same poll-and-decide logic the 60s poller uses for a single streamer, so EventSub
 // can short-circuit the poll interval without duplicating any announcement/grace-period code.
 describe('triggerImmediateLiveCheck', () => {
+  const editAnnouncementSpy = vi.spyOn(twitchMonitorAnnouncements, 'editAnnouncement');
+
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
     vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient() as any);
     await startTwitchMonitor();
   });
 
@@ -112,5 +131,30 @@ describe('triggerImmediateLiveCheck', () => {
     await triggerImmediateLiveCheck('teststreamer'); // back online before grace period ends
 
     expect(cancelOfflineTimersForLogin).toHaveBeenCalledWith(expect.anything(), 'teststreamer');
+  });
+
+  it('edits the announcement with the live_message template on a title-only change', async () => {
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream()] as any);
+    await triggerImmediateLiveCheck('teststreamer'); // first check: goes live
+
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ title: 'New title' })] as any);
+    await triggerImmediateLiveCheck('teststreamer'); // second check: title changed, game unchanged
+
+    expect(editAnnouncementSpy).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.objectContaining({ title: 'New title' }), 'live_message',
+    );
+    expect(getLiveStates()[0].title).toBe('New title');
+  });
+
+  it('edits the announcement with the new_game_message template on a game change', async () => {
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream()] as any);
+    await triggerImmediateLiveCheck('teststreamer'); // first check: goes live
+
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ game_name: 'Valorant' })] as any);
+    await triggerImmediateLiveCheck('teststreamer'); // second check: game changed
+
+    expect(editAnnouncementSpy).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.objectContaining({ game_name: 'Valorant' }), 'new_game_message',
+    );
   });
 });

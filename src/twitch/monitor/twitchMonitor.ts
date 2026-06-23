@@ -71,8 +71,12 @@ async function handlePollStreamer(
       // Game changed
       await editAnnouncement(liveStates, existing, pollStream, 'new_game_message');
       log.info(`${loginKey} game changed to ${pollStream.game_name}`);
+    } else if (existing && existing.title !== pollStream.title) {
+      // Title-only change — refresh the existing post without re-announcing a game change
+      await editAnnouncement(liveStates, existing, pollStream, 'live_message');
+      log.info(`${loginKey} title changed`);
     } else if (existing) {
-      // Still live — keep title in sync
+      // Still live, nothing changed — keep currentStream in sync (e.g. thumbnail refresh)
       existing.currentGame = pollStream.game_name;
       existing.title = pollStream.title;
       existing.currentStream = pollStream;

@@ -7,7 +7,7 @@ vi.mock('../monitor/twitchMonitor', () => ({ triggerImmediateLiveCheck: vi.fn().
 
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
-  handleStreamOnline, handleStreamOffline,
+  handleStreamOnline, handleStreamOffline, handleChannelUpdate,
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime,
 } from './twitchEventSubHandler';
 import { getVideosForReward } from '../../db';
@@ -285,6 +285,13 @@ describe('handleStreamOnline', () => {
 describe('handleStreamOffline', () => {
   it('triggers an immediate live-check for the broadcaster login', async () => {
     await handleStreamOffline('streamer');
+    expect(triggerImmediateLiveCheck).toHaveBeenCalledWith('streamer');
+  });
+});
+
+describe('handleChannelUpdate', () => {
+  it('triggers an immediate live-check for the broadcaster login', async () => {
+    await handleChannelUpdate('streamer');
     expect(triggerImmediateLiveCheck).toHaveBeenCalledWith('streamer');
   });
 });

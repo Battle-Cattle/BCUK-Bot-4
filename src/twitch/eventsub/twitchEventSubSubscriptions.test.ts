@@ -24,6 +24,7 @@ vi.mock('./twitchEventSubHandler', () => ({
   handleRedemption: vi.fn(),
   handleStreamOnline: vi.fn().mockResolvedValue(undefined),
   handleStreamOffline: vi.fn().mockResolvedValue(undefined),
+  handleChannelUpdate: vi.fn().mockResolvedValue(undefined),
 }));
 
 import {
@@ -37,7 +38,7 @@ import { getAllEventSubStreamers } from '../../db';
 import { getValidToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
-import { handleStreamOnline, handleStreamOffline } from './twitchEventSubHandler';
+import { handleStreamOnline, handleStreamOffline, handleChannelUpdate } from './twitchEventSubHandler';
 
 // ---------------------------------------------------------------------------
 // hasAuthFailedSubs / clearAuthFailedSubs
@@ -244,9 +245,12 @@ describe('subscribeForStreamer', () => {
     expect(createEventSubSubscription).toHaveBeenCalledWith(
       'stream.offline', '1', { broadcaster_user_id: 'uid-live' }, 'sess-live', 'tok-live',
     );
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.update', '2', { broadcaster_user_id: 'uid-live' }, 'sess-live', 'tok-live',
+    );
   });
 
-  it('does not subscribe to stream.online/offline when config is null', async () => {
+  it('does not subscribe to stream.online/offline/channel.update when config is null', async () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
@@ -261,6 +265,9 @@ describe('subscribeForStreamer', () => {
 
     expect(createEventSubSubscription).not.toHaveBeenCalledWith(
       'stream.online', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+    );
+    expect(createEventSubSubscription).not.toHaveBeenCalledWith(
+      'channel.update', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
     );
   });
 });
@@ -293,5 +300,10 @@ describe('dispatchNotification routes stream.online/offline', () => {
   it('calls handleStreamOffline for a stream.offline notification', () => {
     dispatchNotification('stream.offline', {}, { broadcaster_user_id: 'uid-dispatch' });
     expect(handleStreamOffline).toHaveBeenCalledWith('liveStreamer');
+  });
+
+  it('calls handleChannelUpdate for a channel.update notification', () => {
+    dispatchNotification('channel.update', {}, { broadcaster_user_id: 'uid-dispatch' });
+    expect(handleChannelUpdate).toHaveBeenCalledWith('liveStreamer');
   });
 });

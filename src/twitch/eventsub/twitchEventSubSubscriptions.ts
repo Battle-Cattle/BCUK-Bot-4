@@ -7,7 +7,7 @@ import { normalizeTwitchChannelName } from '../twitchChannelName';
 import { createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, getValidToken, TwitchAuthError } from './twitchApiEventSub';
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
-  handleStreamOnline, handleStreamOffline,
+  handleStreamOnline, handleStreamOffline, handleChannelUpdate,
   FollowEvent, SubEvent, ResubEvent, GiftSubEvent, RaidEvent, RedemptionEvent,
 } from './twitchEventSubHandler';
 
@@ -49,6 +49,7 @@ const notificationHandlers = new Map<string, NotificationHandler>([
   ['channel.channel_points_custom_reward_redemption.add',  (l, e, c, sid) => handleRedemption(l, e as RedemptionEvent, c, sid)],
   ['stream.online',                                    (l) => handleStreamOnline(l)],
   ['stream.offline',                                   (l) => handleStreamOffline(l)],
+  ['channel.update',                                    (l) => handleChannelUpdate(l)],
 ]);
 
 async function deleteStaleSubscriptions(uid: string, desired: Set<string>, userToken: string | null): Promise<void> {
@@ -133,16 +134,18 @@ interface LiveEventsParams {
   sid: string; uid: string; token: string | null; config: EventSubConfig | null; name: string; desired: Set<string>;
 }
 
-// stream.online/offline require no scope beyond a valid token, so subscribe
-// whenever EventSub is connected at all — this drives an immediate live-check
+// stream.online/offline and channel.update require no scope beyond a valid token, so
+// subscribe whenever EventSub is connected at all — this drives an immediate live-check
 // that supplements (not replaces) the 60s poller.
 async function subscribeToLiveEvents(params: LiveEventsParams): Promise<void> {
   const { sid, uid, token, config, name, desired } = params;
   if (!config || !token) return;
   desired.add('stream.online');
   desired.add('stream.offline');
+  desired.add('channel.update');
   await subscribe(sid, { type: 'stream.online', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
   await subscribe(sid, { type: 'stream.offline', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
+  await subscribe(sid, { type: 'channel.update', version: '2', condition: { broadcaster_user_id: uid } }, token, name);
 }
 
 /** Data bundle passed to a StreamerConnection for setting up EventSub subscriptions. */

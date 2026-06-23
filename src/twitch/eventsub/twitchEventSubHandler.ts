@@ -254,3 +254,15 @@ export async function handleStreamOnline(login: string): Promise<void> {
 export async function handleStreamOffline(login: string): Promise<void> {
   await triggerImmediateLiveCheck(login);
 }
+
+/**
+ * Handle a channel.update EventSub notification (title/category change) by triggering
+ * an immediate live-check for the broadcaster. Reuses the same poll-and-decide logic
+ * as stream.online/offline, so a title or game change posted via Twitch is reflected
+ * on Discord without waiting for the next 60s poll.
+ *
+ * @param login - Broadcaster login name.
+ */
+export async function handleChannelUpdate(login: string): Promise<void> {
+  await triggerImmediateLiveCheck(login);
+}
