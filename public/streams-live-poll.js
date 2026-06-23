@@ -31,6 +31,11 @@ document.addEventListener('click', function (event) {
   }
 });
 
+/** Returns the confirmation message for disconnecting a streamer's Twitch connection. */
+function getDisconnectTwitchConfirmationMessage(t) {
+  return 'Disconnect Twitch for ' + (t.dataset.twitchName || 'this streamer') + '?';
+}
+
 document.addEventListener('submit', function (event) {
   if (confirmSubmit(event, 'js-confirm-remove-group', function (t) {
     return 'Remove group "' + (t.dataset.groupName || 'this group') + '" and all its streamers?';
@@ -38,9 +43,7 @@ document.addEventListener('submit', function (event) {
   if (confirmSubmit(event, 'js-confirm-remove-streamer', function (t) {
     return 'Remove streamer "' + (t.dataset.streamerName || 'this streamer') + '"?';
   })) return;
-  confirmSubmit(event, 'js-confirm-disconnect-twitch', function (t) {
-    return 'Disconnect Twitch for ' + (t.dataset.twitchName || 'this streamer') + '?';
-  });
+  confirmSubmit(event, 'js-confirm-disconnect-twitch', getDisconnectTwitchConfirmationMessage);
 });
 
 var liveNowInflight = false;
