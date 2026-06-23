@@ -267,6 +267,9 @@ describe('subscribeForStreamer', () => {
       'stream.online', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
     );
     expect(createEventSubSubscription).not.toHaveBeenCalledWith(
+      'stream.offline', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+    );
+    expect(createEventSubSubscription).not.toHaveBeenCalledWith(
       'channel.update', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
     );
   });
