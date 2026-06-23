@@ -99,21 +99,11 @@
       <p style="color:var(--muted);font-size:0.875rem;margin-bottom:1.5rem;">Please reconnect your Twitch account to restore full functionality.</p>
       <div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap;">
         <a href="/user/settings/twitch-connect" class="btn">Reconnect Twitch</a>
-        <button onclick="dismissReconnectModal()" class="btn btn-ghost">Dismiss</button>
+        <button id="dismiss-reconnect-modal" class="btn btn-ghost">Dismiss</button>
       </div>
     </div>
   </div>
-  <script>
-    (function () {
-      if (sessionStorage.getItem('twitch_reconnect_dismissed')) {
-        document.getElementById('reconnect-modal').style.display = 'none';
-      }
-    })();
-    function dismissReconnectModal() {
-      sessionStorage.setItem('twitch_reconnect_dismissed', '1');
-      document.getElementById('reconnect-modal').style.display = 'none';
-    }
-  </script>
+  <script src="/dashboard-reconnect.js"></script>
   <% } %>
 </body>
 </html>

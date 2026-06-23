@@ -29,7 +29,7 @@
         <p><strong>&#10003; Your API key has been generated.</strong> Copy it now — it will not be shown again.</p>
         <div style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
           <code class="mono" id="new-key" style="font-size:.85rem;word-break:break-all;flex:1;min-width:0;"><%= newKey %></code>
-          <button type="button" class="btn btn-sm" onclick="copyKey(event)">Copy</button>
+          <button type="button" class="btn btn-sm" id="copy-key-btn">Copy</button>
         </div>
         <% if (keyRow && keyRow.status === 'pending') { %>
         <p style="margin-top:.75rem;" class="muted">Your key is pending admin approval. It will become active once an Admin approves your request.</p>
@@ -79,9 +79,9 @@
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
             <button type="submit" class="btn btn-sm">Generate New Key</button>
           </form>
-          <form method="POST" action="/streamdeck-key/revoke">
+          <form method="POST" action="/streamdeck-key/revoke" class="js-confirm-revoke-key">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-            <button type="submit" class="btn btn-sm btn-ghost" onclick="return confirm('Revoke your API key? It will stop working immediately.')">Revoke Key</button>
+            <button type="submit" class="btn btn-sm btn-ghost">Revoke Key</button>
           </form>
         </div>
 
@@ -143,6 +143,7 @@
     </section>
   </main>
   <%- include('partials/pwa-register') %>
+  <script src="/utils.js"></script>
   <script src="/streamdeck-keys.js"></script>
 </body>
 </html>
