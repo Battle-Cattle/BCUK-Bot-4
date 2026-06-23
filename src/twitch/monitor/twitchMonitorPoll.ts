@@ -8,6 +8,23 @@ import { setTwitchChannelLive } from '../../shared/statusStore';
 
 const log = createLogger('TwitchMonitor');
 
+// Per-login chain of pending operations — ensures the poll loop and EventSub-triggered
+// immediate checks never call handlePollStreamer concurrently for the same login.
+const loginQueues = new Map<string, Promise<void>>();
+
+/**
+ * Runs `fn` after any previously queued operation for `login` has settled, so callers
+ * from different entrypoints (60s poll loop vs. triggerImmediateLiveCheck) never race on
+ * the same login's liveStates entry. A failure in `fn` rejects the caller's promise but
+ * does not block subsequent operations queued for the same login.
+ */
+export function withLoginLock<T>(login: string, fn: () => Promise<T>): Promise<T> {
+  const previous = loginQueues.get(login) ?? Promise.resolve();
+  const run = previous.then(() => fn());
+  loginQueues.set(login, run.then(() => undefined, () => undefined));
+  return run;
+}
+
 /** Params bundle for {@link handleLiveStreamer} — groups the per-streamer poll context into a single argument. */
 interface LiveStreamerParams {
   liveStates: Map<string, LiveState>;
@@ -89,10 +106,10 @@ export async function dispatchStreamerPolls(
   }
 
   await Promise.allSettled(
-    Array.from(byLogin.values()).map(async (group) => {
+    Array.from(byLogin.entries()).map(async ([loginKey, group]) => {
       for (const streamer of group) {
         try {
-          await handlePollStreamer(liveStates, loginToUserId, streamer, liveByUserId);
+          await withLoginLock(loginKey, () => handlePollStreamer(liveStates, loginToUserId, streamer, liveByUserId));
         } catch (err) {
           log.error(`Error handling streamer poll for ${streamer.twitch_name ?? 'unknown'} in group ${streamer.group.name}:`, err);
         }

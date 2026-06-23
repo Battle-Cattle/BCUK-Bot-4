@@ -15,7 +15,7 @@ import {
 } from './twitchMonitorMultitwitch';
 import { deleteAnnouncement } from './twitchMonitorAnnouncements';
 import { performStartupLiveCheck } from './twitchMonitorStartup';
-import { handlePollStreamer, dispatchStreamerPolls } from './twitchMonitorPoll';
+import { handlePollStreamer, dispatchStreamerPolls, withLoginLock } from './twitchMonitorPoll';
 
 const log = createLogger('TwitchMonitor');
 
@@ -60,9 +60,9 @@ async function pollStreams(): Promise<void> {
  * Immediately re-checks a single streamer's live status against the Twitch API,
  * bypassing the poll interval. Used by EventSub stream.online/offline notifications
  * to react faster than the 60s poll while reusing the same announcement and
- * offline-grace-period logic as the poller, so the two triggers can never disagree
- * on state — whichever fires first wins, the other is a no-op against the same
- * `liveStates` entry.
+ * offline-grace-period logic as the poller. The per-login `withLoginLock` ensures this
+ * never runs concurrently with a 60s poll tick (or another immediate check) for the same
+ * login, so the two triggers can't race on the same `liveStates` entry.
  *
  * @param login - Twitch login name of the streamer to check.
  */
@@ -79,7 +79,7 @@ export async function triggerImmediateLiveCheck(login: string): Promise<void> {
       streams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
     );
     for (const streamer of matching) {
-      await handlePollStreamer(liveStates, loginToUserId, streamer, liveByUserId);
+      await withLoginLock(loginKey, () => handlePollStreamer(liveStates, loginToUserId, streamer, liveByUserId));
     }
   } catch (err) {
     log.error(`Immediate live check failed for ${loginKey}:`, err);

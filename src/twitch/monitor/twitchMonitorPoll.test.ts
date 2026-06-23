@@ -11,7 +11,7 @@ vi.mock('./twitchMonitorOffline', () => ({
   handleStreamOffline: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { handlePollStreamer, dispatchStreamerPolls } from './twitchMonitorPoll';
+import { handlePollStreamer, dispatchStreamerPolls, withLoginLock } from './twitchMonitorPoll';
 import { postAnnouncement, editAnnouncement } from './twitchMonitorAnnouncements';
 import { cancelOfflineTimersForLogin, handleStreamOffline } from './twitchMonitorOffline';
 import { setTwitchChannelLive } from '../../shared/statusStore';
@@ -159,5 +159,55 @@ describe('dispatchStreamerPolls', () => {
     const loginToUserId = new Map<string, string>();
     await dispatchStreamerPolls(liveStates, loginToUserId, [makeStreamer({ twitch_name: null })], new Map());
     expect(postAnnouncement).not.toHaveBeenCalled();
+  });
+});
+
+// ─── withLoginLock ────────────────────────────────────────────────────────────
+// Guards against the poll loop and triggerImmediateLiveCheck racing on the same
+// login's liveStates entry (CodeRabbit review finding on PR #303).
+
+describe('withLoginLock', () => {
+  it('serializes operations queued for the same login', async () => {
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const first = withLoginLock('alice', () => new Promise<void>((resolve) => {
+      releaseFirst = () => { order.push('first'); resolve(); };
+    }));
+    const second = withLoginLock('alice', async () => { order.push('second'); });
+
+    await Promise.resolve(); // let microtasks settle without releasing the first op
+    expect(order).toEqual([]);
+
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first', 'second']);
+  });
+
+  it('does not block operations queued for a different login', async () => {
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const first = withLoginLock('alice', () => new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    }));
+    const second = withLoginLock('bob', async () => { order.push('bob'); });
+
+    await second;
+    expect(order).toEqual(['bob']);
+
+    releaseFirst();
+    await first;
+  });
+
+  it('still processes the next queued operation after a failure', async () => {
+    await expect(withLoginLock('alice', async () => { throw new Error('boom'); })).rejects.toThrow('boom');
+
+    const order: string[] = [];
+    await withLoginLock('alice', async () => { order.push('after-failure'); });
+    expect(order).toEqual(['after-failure']);
+  });
+
+  it('resolves with the wrapped function\'s return value', async () => {
+    const result = await withLoginLock('alice', async () => 42);
+    expect(result).toBe(42);
   });
 });
