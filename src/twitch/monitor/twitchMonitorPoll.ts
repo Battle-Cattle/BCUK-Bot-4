@@ -8,15 +8,19 @@ import { setTwitchChannelLive } from '../../shared/statusStore';
 
 const log = createLogger('TwitchMonitor');
 
+/** Params bundle for {@link handleLiveStreamer} — groups the per-streamer poll context into a single argument. */
+interface LiveStreamerParams {
+  liveStates: Map<string, LiveState>;
+  streamer: DbStreamerFull;
+  loginKey: string;
+  existing: LiveState | undefined;
+  pollStream: TwitchStream;
+}
+
 /** Posts, edits, or no-ops the Discord announcement for a streamer who is currently live. */
-async function handleLiveStreamer(
-  liveStates: Map<string, LiveState>,
-  streamer: DbStreamerFull,
-  stateKey: string,
-  loginKey: string,
-  existing: LiveState | undefined,
-  pollStream: TwitchStream,
-): Promise<void> {
+async function handleLiveStreamer(params: LiveStreamerParams): Promise<void> {
+  const { liveStates, streamer, loginKey, existing, pollStream } = params;
+  const stateKey = String(streamer.id);
   const isNew = !liveStates.has(stateKey);
   if (isNew || (existing && !existing.messageId)) {
     // Went live, or state exists with no Discord message (e.g. Discord wasn't ready at startup)
@@ -61,7 +65,7 @@ export async function handlePollStreamer(
       log.info(`${loginKey} came back — offline timer(s) cancelled`);
     }
     setTwitchChannelLive(loginKey, true);
-    await handleLiveStreamer(liveStates, streamer, stateKey, loginKey, existing, pollStream);
+    await handleLiveStreamer({ liveStates, streamer, loginKey, existing, pollStream });
   } else if (existing && !existing.offlineTimer) {
     // Appears offline — start grace period (handleStreamOffline handles all groups for this login)
     await handleStreamOffline(liveStates, loginToUserId, loginKey);
