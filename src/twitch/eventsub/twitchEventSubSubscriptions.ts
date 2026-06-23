@@ -123,17 +123,22 @@ async function createSubscriptionsForStreamer(
     }, token, name);
   }
 
-  // stream.online/offline require no scope beyond a valid token, so subscribe
-  // whenever EventSub is connected at all — this drives an immediate live-check
-  // that supplements (not replaces) the 60s poller.
-  if (config && token) {
-    desired.add('stream.online');
-    desired.add('stream.offline');
-    await subscribe(sid, { type: 'stream.online', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
-    await subscribe(sid, { type: 'stream.offline', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
-  }
+  await subscribeToLiveEvents(sid, uid, token, config, name, desired);
 
   return desired;
+}
+
+// stream.online/offline require no scope beyond a valid token, so subscribe
+// whenever EventSub is connected at all — this drives an immediate live-check
+// that supplements (not replaces) the 60s poller.
+async function subscribeToLiveEvents(
+  sid: string, uid: string, token: string | null, config: EventSubConfig | null, name: string, desired: Set<string>,
+): Promise<void> {
+  if (!config || !token) return;
+  desired.add('stream.online');
+  desired.add('stream.offline');
+  await subscribe(sid, { type: 'stream.online', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
+  await subscribe(sid, { type: 'stream.offline', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
 }
 
 /** Data bundle passed to a StreamerConnection for setting up EventSub subscriptions. */
