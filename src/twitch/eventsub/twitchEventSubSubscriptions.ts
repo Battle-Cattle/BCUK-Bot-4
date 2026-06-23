@@ -7,6 +7,7 @@ import { normalizeTwitchChannelName } from '../twitchChannelName';
 import { createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, getValidToken, TwitchAuthError } from './twitchApiEventSub';
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
+  handleStreamOnline, handleStreamOffline,
   FollowEvent, SubEvent, ResubEvent, GiftSubEvent, RaidEvent, RedemptionEvent,
 } from './twitchEventSubHandler';
 
@@ -46,6 +47,8 @@ const notificationHandlers = new Map<string, NotificationHandler>([
   ['channel.subscription.gift',                        (l, e, c) => handleGiftSub(l, e as GiftSubEvent, c)],
   ['channel.raid',                                     (l, e, c) => handleRaid(l, e as RaidEvent, c)],
   ['channel.channel_points_custom_reward_redemption.add',  (l, e, c, sid) => handleRedemption(l, e as RedemptionEvent, c, sid)],
+  ['stream.online',                                    (l) => handleStreamOnline(l)],
+  ['stream.offline',                                   (l) => handleStreamOffline(l)],
 ]);
 
 async function deleteStaleSubscriptions(uid: string, desired: Set<string>, userToken: string | null): Promise<void> {
@@ -118,6 +121,16 @@ async function createSubscriptionsForStreamer(
       version: '1',
       condition: { broadcaster_user_id: uid },
     }, token, name);
+  }
+
+  // stream.online/offline require no scope beyond a valid token, so subscribe
+  // whenever EventSub is connected at all — this drives an immediate live-check
+  // that supplements (not replaces) the 60s poller.
+  if (config && token) {
+    desired.add('stream.online');
+    desired.add('stream.offline');
+    await subscribe(sid, { type: 'stream.online', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
+    await subscribe(sid, { type: 'stream.offline', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
   }
 
   return desired;

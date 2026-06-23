@@ -22,6 +22,8 @@ vi.mock('./twitchEventSubHandler', () => ({
   handleGiftSub: vi.fn(),
   handleRaid: vi.fn(),
   handleRedemption: vi.fn(),
+  handleStreamOnline: vi.fn().mockResolvedValue(undefined),
+  handleStreamOffline: vi.fn().mockResolvedValue(undefined),
 }));
 
 import {
@@ -29,11 +31,13 @@ import {
   clearAuthFailedSubs,
   loadStreamersForEventSub,
   subscribeForStreamer,
+  dispatchNotification,
 } from './twitchEventSubSubscriptions';
 import { getAllEventSubStreamers } from '../../db';
 import { getValidToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
+import { handleStreamOnline, handleStreamOffline } from './twitchEventSubHandler';
 
 // ---------------------------------------------------------------------------
 // hasAuthFailedSubs / clearAuthFailedSubs
@@ -218,5 +222,76 @@ describe('subscribeForStreamer', () => {
     });
 
     expect(deleteEventSubSubscription).toHaveBeenCalledWith('stale-sub', 'tok-z');
+  });
+
+  it('subscribes to stream.online and stream.offline whenever config and token are present', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+
+    await subscribeForStreamer('sess-live', {
+      uid: 'uid-live',
+      token: 'tok-live',
+      name: 'botInChannel',
+      // No chat-alert features enabled — stream.online/offline should still subscribe.
+      config: { follow_enabled: false, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 22,
+    });
+
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'stream.online', '1', { broadcaster_user_id: 'uid-live' }, 'sess-live', 'tok-live',
+    );
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'stream.offline', '1', { broadcaster_user_id: 'uid-live' }, 'sess-live', 'tok-live',
+    );
+  });
+
+  it('does not subscribe to stream.online/offline when config is null', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+
+    await subscribeForStreamer('sess-nocfg', {
+      uid: 'uid-nocfg',
+      token: 'tok-nocfg',
+      name: 'botInChannel',
+      config: null,
+      streamerId: 23,
+    });
+
+    expect(createEventSubSubscription).not.toHaveBeenCalledWith(
+      'stream.online', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dispatchNotification — stream.online / stream.offline routing
+// ---------------------------------------------------------------------------
+describe('dispatchNotification routes stream.online/offline', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    clearAuthFailedSubs('liveStreamer');
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['livestreamer']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+    // Populate streamerMap with a known config so dispatchNotification doesn't early-exit.
+    await subscribeForStreamer('sess-dispatch', {
+      uid: 'uid-dispatch',
+      token: 'tok-dispatch',
+      name: 'liveStreamer',
+      config: { follow_enabled: false, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 30,
+    });
+  });
+
+  it('calls handleStreamOnline for a stream.online notification', () => {
+    dispatchNotification('stream.online', {}, { broadcaster_user_id: 'uid-dispatch' });
+    expect(handleStreamOnline).toHaveBeenCalledWith('liveStreamer');
+  });
+
+  it('calls handleStreamOffline for a stream.offline notification', () => {
+    dispatchNotification('stream.offline', {}, { broadcaster_user_id: 'uid-dispatch' });
+    expect(handleStreamOffline).toHaveBeenCalledWith('liveStreamer');
   });
 });

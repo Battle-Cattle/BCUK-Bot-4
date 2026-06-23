@@ -133,6 +133,36 @@ async function pollStreams(): Promise<void> {
   await currentPollPromise;
 }
 
+/**
+ * Immediately re-checks a single streamer's live status against the Twitch API,
+ * bypassing the poll interval. Used by EventSub stream.online/offline notifications
+ * to react faster than the 60s poll while reusing the same announcement and
+ * offline-grace-period logic as the poller, so the two triggers can never disagree
+ * on state — whichever fires first wins, the other is a no-op against the same
+ * `liveStates` entry.
+ *
+ * @param login - Twitch login name of the streamer to check.
+ */
+export async function triggerImmediateLiveCheck(login: string): Promise<void> {
+  const loginKey = login.toLowerCase();
+  const userId = loginToUserId.get(loginKey);
+  if (!userId) return;
+  const matching = streamersData.filter((s) => s.twitch_name?.toLowerCase() === loginKey);
+  if (matching.length === 0) return;
+
+  try {
+    const streams = await getStreams([userId]);
+    const liveByUserId = new Map(
+      streams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
+    );
+    for (const streamer of matching) {
+      await handlePollStreamer(streamer, liveByUserId);
+    }
+  } catch (err) {
+    log.error(`Immediate live check failed for ${loginKey}:`, err);
+  }
+}
+
 // ─── Internal teardown ────────────────────────────────────────────────────────
 
 async function teardown(): Promise<void> {
