@@ -80,7 +80,11 @@ export async function triggerImmediateLiveCheck(login: string): Promise<void> {
       streams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
     );
     for (const streamer of matching) {
-      await withLoginLock(loginKey, () => handlePollStreamer(liveStates, loginToUserId, streamer, liveByUserId));
+      try {
+        await withLoginLock(loginKey, () => handlePollStreamer(liveStates, loginToUserId, streamer, liveByUserId));
+      } catch (err) {
+        log.error(`Immediate live check failed for ${loginKey} in group ${streamer.group.name}:`, err);
+      }
     }
   } catch (err) {
     log.error(`Immediate live check failed for ${loginKey}:`, err);

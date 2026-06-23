@@ -167,6 +167,38 @@ describe('triggerImmediateLiveCheck', () => {
   });
 });
 
+// A login can map to multiple monitored streamer rows (the same Twitch name posted
+// to several Discord groups) — a failure for one must not skip the others.
+describe('triggerImmediateLiveCheck with multiple streamer rows for one login', () => {
+  const postAnnouncementSpy = vi.spyOn(twitchMonitorAnnouncements, 'postAnnouncement');
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer({ id: 5, group: { id: 1, name: 'GroupA', discord_channel: '111', live_message: 'live', new_game_message: 'game', multi_twitch: false, delete_old_posts: false } }),
+      makeStreamer({ id: 6, group: { id: 2, name: 'GroupB', discord_channel: '222', live_message: 'live', new_game_message: 'game', multi_twitch: false, delete_old_posts: false } }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient() as any);
+    await startTwitchMonitor();
+  });
+
+  afterEach(async () => {
+    await stopTwitchMonitor();
+  });
+
+  it('still processes the second streamer row after the first one fails', async () => {
+    vi.mocked(getStreams).mockResolvedValue([makeStream()] as any);
+    postAnnouncementSpy.mockRejectedValueOnce(new Error('discord down'));
+
+    await triggerImmediateLiveCheck('teststreamer');
+
+    expect(postAnnouncementSpy).toHaveBeenCalledTimes(2);
+    const states = getLiveStates();
+    expect(states.map((s) => s.streamerId)).toContain(6);
+  });
+});
+
 // Drives the 60s poll interval set up by startTwitchMonitor: pollStreams() dispatches
 // the full streamer list to dispatchStreamerPolls() on each tick, separately from the
 // single-streamer triggerImmediateLiveCheck() path exercised above.

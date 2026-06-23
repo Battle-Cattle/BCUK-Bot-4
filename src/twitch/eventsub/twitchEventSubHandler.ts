@@ -238,6 +238,7 @@ export async function handleRedemption(
  * here is harmless if it already caught the change first.
  *
  * @param login - Broadcaster login name.
+ * @returns Resolves after triggering the immediate live-check.
  */
 export async function handleStreamOnline(login: string): Promise<void> {
   await triggerImmediateLiveCheck(login);
@@ -250,6 +251,7 @@ export async function handleStreamOnline(login: string): Promise<void> {
  * `liveStates` map.
  *
  * @param login - Broadcaster login name.
+ * @returns Resolves after triggering the immediate live-check.
  */
 export async function handleStreamOffline(login: string): Promise<void> {
   await triggerImmediateLiveCheck(login);
@@ -262,6 +264,7 @@ export async function handleStreamOffline(login: string): Promise<void> {
  * on Discord without waiting for the next 60s poll.
  *
  * @param login - Broadcaster login name.
+ * @returns Resolves after triggering the immediate live-check.
  */
 export async function handleChannelUpdate(login: string): Promise<void> {
   await triggerImmediateLiveCheck(login);
