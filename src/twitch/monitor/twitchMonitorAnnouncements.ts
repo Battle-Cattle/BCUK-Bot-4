@@ -85,8 +85,8 @@ export async function editAnnouncement(
     const textChannel = channel as TextChannel;
 
     if (group.delete_old_posts) {
-      await tryDeleteDiscordMessage(state.channelId, state.messageId);
       const msg = await textChannel.send({ content, embeds: [embed] });
+      await tryDeleteDiscordMessage(state.channelId, state.messageId);
       state.messageId = msg.id;
       state.channelId = msg.channelId;
     } else {

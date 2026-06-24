@@ -178,13 +178,14 @@ describe('editAnnouncement', () => {
   it('posts a fresh message when the existing message is gone and delete_old_posts is false', async () => {
     const notFoundErr = new Error('Unknown Message');
     const channel = makeTextChannel();
+    channel.send.mockResolvedValue({ id: 'msg2', channelId: 'ch1' });
     channel.messages.fetch.mockRejectedValue(notFoundErr);
     vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
     vi.mocked(isDiscordNotFoundError).mockReturnValue(true);
     const state = makeLiveState({ group: makeGroup({ delete_old_posts: false }) });
     await editAnnouncement(new Map(), state, makeStream(), 'live_message');
     expect(channel.send).toHaveBeenCalled();
-    expect(state.messageId).toBe('msg1');
+    expect(state.messageId).toBe('msg2');
     expect(setStreamerLive).toHaveBeenCalled();
   });
 
