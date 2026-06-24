@@ -34,14 +34,14 @@ async function getGuild(guildId: string): Promise<Guild> {
  * Returns null if the client is not ready, the guild is unavailable, or the member is not found.
  *
  * @param discordId - Discord user snowflake ID to look up.
- * @param force - When true, bypasses the guild member cache and fetches fresh from the API.
  * @param guildId - Guild to look the member up in.
+ * @param force - When true, bypasses the guild member cache and fetches fresh from the API.
  * @returns The member's server display name, or null on any failure.
  */
 export async function fetchMemberDisplayName(
   discordId: string,
-  force = false,
   guildId: string,
+  force = false,
 ): Promise<string | null> {
   if (!client) return null;
   try {

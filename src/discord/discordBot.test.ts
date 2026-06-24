@@ -96,7 +96,7 @@ describe('getDiscordClient', () => {
 
 describe('fetchMemberDisplayName', () => {
   it('returns null when client is not ready', async () => {
-    expect(await mod.fetchMemberDisplayName('123', false, 'guild-id')).toBeNull();
+    expect(await mod.fetchMemberDisplayName('123', 'guild-id', false)).toBeNull();
   });
 
   it('returns the member displayName when client is ready and fetch succeeds', async () => {
@@ -104,7 +104,7 @@ describe('fetchMemberDisplayName', () => {
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await readyCb(mockInstance);  // fires clientReady → sets client
 
-    const result = await mod.fetchMemberDisplayName('user123', false, 'guild-id');
+    const result = await mod.fetchMemberDisplayName('user123', 'guild-id', false);
     expect(result).toBe('Alice');
   });
 
@@ -114,7 +114,7 @@ describe('fetchMemberDisplayName', () => {
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await readyCb(mockInstance);
 
-    const result = await mod.fetchMemberDisplayName('missing', false, 'guild-id');
+    const result = await mod.fetchMemberDisplayName('missing', 'guild-id', false);
     expect(result).toBeNull();
   });
 });
