@@ -51,6 +51,14 @@ function getFriendlyError(key: string): string {
 
 // ─── View ─────────────────────────────────────────────────────────────────────
 
+/**
+ * GET /streams — renders the streams page with stream groups, streamers, and
+ * (admin only) EventSub status per streamer.
+ * @param req - Express request; reads `req.session.user`, `error`, and `success`
+ *   query params.
+ * @param res - Express response; renders the `streams` view, or a 500 error page
+ *   if loading streams data fails.
+ */
 router.get('/streams', requireManager, csrfProtection, async (req, res) => {
   try {
     const isAdmin = (req.session.user?.accessLevel ?? 0) >= AccessLevel.ADMIN;
@@ -91,12 +99,28 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
 
 // ─── Live state snapshot ──────────────────────────────────────────────────────
 
+/**
+ * GET /streams/live — JSON snapshot of current live states, polled by the
+ * streams page frontend.
+ * @param _req - Express request (unused).
+ * @param res - Express response; returns `{ streams }` from `getLiveStates()`.
+ */
 router.get('/streams/live', requireManager, (_req, res) => {
   res.json({ streams: getLiveStates() });
 });
 
 // ─── Groups ───────────────────────────────────────────────────────────────────
 
+/**
+ * POST /streams/groups/add — creates a new stream group (Discord channel, live
+ * and new-game messages, multi-twitch/delete-old-posts flags) and restarts the
+ * Twitch monitor.
+ * @param req - Express request; reads `name`, `discord_channel`, `live_message`,
+ *   `new_game_message`, `multi_twitch`, and `delete_old_posts` from `req.body`.
+ * @param res - Express response; redirects to `/admin/streams` on success, or to
+ *   `/admin/streams?error=<code>` for missing fields (`missing_fields`) or a DB
+ *   failure (`add_group_failed`).
+ */
 router.post('/streams/groups/add', requireManager, csrfProtection, async (req, res) => {
   const { name, discord_channel, live_message, new_game_message } = req.body as Record<string, string | undefined>;
   const multi_twitch = req.body.multi_twitch === 'on';
@@ -123,6 +147,16 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
   res.redirect('/admin/streams');
 });
 
+/**
+ * POST /streams/groups/update — updates an existing stream group's channel,
+ * messages, and flags, then restarts the Twitch monitor.
+ * @param req - Express request; reads `group_id`, `name`, `discord_channel`,
+ *   `live_message`, `new_game_message`, `multi_twitch`, and `delete_old_posts`
+ *   from `req.body`.
+ * @param res - Express response; redirects to `/admin/streams` on success, or to
+ *   `/admin/streams?error=<code>` for missing fields (`missing_fields`), a
+ *   malformed `group_id` (`invalid_id`), or a DB failure (`update_group_failed`).
+ */
 router.post('/streams/groups/update', requireManager, csrfProtection, async (req, res) => {
   const { group_id, name, discord_channel, live_message, new_game_message } = req.body as Record<string, string | undefined>;
   const multi_twitch = req.body.multi_twitch === 'on';
@@ -153,6 +187,14 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
   res.redirect('/admin/streams');
 });
 
+/**
+ * POST /streams/groups/remove — deletes a stream group, first removing its
+ * streamers to avoid FK constraint errors, then restarts the Twitch monitor.
+ * @param req - Express request; reads `group_id` from `req.body`.
+ * @param res - Express response; redirects to `/admin/streams` on success, or to
+ *   `/admin/streams?error=<code>` if `group_id` is malformed (`invalid_id`) or the
+ *   delete fails (`remove_group_failed`).
+ */
 router.post('/streams/groups/remove', requireManager, csrfProtection, async (req, res) => {
   const { group_id } = req.body as { group_id?: string };
   if (!group_id) return res.redirect('/admin/streams');
@@ -173,6 +215,16 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
 
 // ─── Streamers ────────────────────────────────────────────────────────────────
 
+/**
+ * POST /streams/streamers/add — adds a user (who must already have a Twitch
+ * name) as a streamer in a stream group, then restarts the Twitch monitor.
+ * @param req - Express request; reads `discord_id` and `group_id` from
+ *   `req.body`.
+ * @param res - Express response; redirects to `/admin/streams` on success, or to
+ *   `/admin/streams?error=<code>` for missing/invalid fields or no Twitch name
+ *   (`missing_fields`), a malformed `group_id` (`invalid_id`), or a DB failure
+ *   (`add_streamer_failed`).
+ */
 router.post('/streams/streamers/add', requireManager, csrfProtection, async (req, res) => {
   const { discord_id, group_id } = req.body as { discord_id?: string | string[]; group_id?: string | string[] };
   const discordId = normalizeDiscordId(typeof discord_id === 'string' ? discord_id : undefined);
@@ -194,6 +246,14 @@ router.post('/streams/streamers/add', requireManager, csrfProtection, async (req
   res.redirect('/admin/streams');
 });
 
+/**
+ * POST /streams/streamers/remove — removes a streamer, then restarts the
+ * Twitch monitor.
+ * @param req - Express request; reads `streamer_id` from `req.body`.
+ * @param res - Express response; redirects to `/admin/streams` on success, or to
+ *   `/admin/streams?error=<code>` if `streamer_id` is malformed (`invalid_id`) or
+ *   the delete fails (`remove_streamer_failed`).
+ */
 router.post('/streams/streamers/remove', requireManager, csrfProtection, async (req, res) => {
   const { streamer_id } = req.body as { streamer_id?: string };
   if (!streamer_id) return res.redirect('/admin/streams');

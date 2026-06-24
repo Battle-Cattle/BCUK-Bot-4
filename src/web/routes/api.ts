@@ -29,12 +29,24 @@ function getSessionGuildId(req: Request, res: Response): string | null {
   return guildId;
 }
 
-// Live status JSON — polled by the dashboard frontend every few seconds
+/**
+ * GET /status — live bot status JSON, polled by the dashboard frontend every
+ * few seconds.
+ * @param _req - Express request (unused).
+ * @param res - Express response; returns `getStatus()`.
+ */
 router.get('/status', requireAuth, (_req, res) => {
   res.json(getStatus());
 });
 
-// Get available voice channels for the current guild — Mod and above
+/**
+ * GET /voice/channels — lists the current guild's available voice channels
+ * along with the configured default and currently-connected channel (Mod+).
+ * @param req - Express request; guild is taken from the session.
+ * @param res - Express response; JSON `{ ok: true, channels, defaultChannelId,
+ *   currentChannelId }` on success, 400 if no guild is selected, or 500 on
+ *   failure.
+ */
 router.get('/voice/channels', requireMod, async (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
@@ -55,7 +67,15 @@ router.get('/voice/channels', requireMod, async (req, res) => {
   }
 });
 
-// Join a specific voice channel, or the guild's configured default — Mod and above
+/**
+ * POST /voice/join — joins a specific voice channel, or the guild's configured
+ * default channel if none is supplied (Mod+).
+ * @param req - Express request; reads `channelId` from `req.body`; guild is
+ *   taken from the session.
+ * @param res - Express response; JSON `{ ok: true }` on success, 400 if no
+ *   guild is selected, `channelId` is malformed, or no channel is resolvable,
+ *   503 if the Discord client isn't ready, or 500 on failure.
+ */
 router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
@@ -92,7 +112,13 @@ router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
   }
 });
 
-// Leave the current guild's voice channel — Mod and above
+/**
+ * POST /voice/leave — disconnects from the current guild's voice channel
+ * (Mod+).
+ * @param req - Express request; guild is taken from the session.
+ * @param res - Express response; JSON `{ ok: true }` on success, or 400 if no
+ *   guild is selected.
+ */
 router.post('/voice/leave', requireMod, csrfProtection, (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
