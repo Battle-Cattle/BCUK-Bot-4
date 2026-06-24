@@ -21,6 +21,14 @@ const log = createLogger('Web');
 const router = Router();
 
 // ─── Redirect to Discord OAuth2 ─────────────────────────────────────────────
+
+/**
+ * GET /auth/discord — starts the Discord OAuth2 flow. Generates a CSRF state
+ * token, stores it on the session with a 10-minute expiry, then redirects the
+ * browser to Discord's authorize URL.
+ * @param req - Express request; receives the generated `oauthState` on its session.
+ * @param res - Express response; redirects to discord.com's OAuth2 authorize endpoint.
+ */
 router.get('/discord', (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
   req.session.oauthState = { value: state, expiresAt: Date.now() + 10 * 60 * 1000 };
@@ -37,12 +45,23 @@ router.get('/discord', (req, res) => {
 });
 
 // ─── OAuth2 callback ─────────────────────────────────────────────────────────
+
 /**
- * Discord OAuth2 callback. Exchanges the code for an access token, then either:
- * creates/refreshes the dashboard session as usual, or — if this login was
+ * GET /auth/discord/callback — completes the Discord OAuth2 flow. Validates the
+ * `state` param against the session, exchanges the `code` for an access token,
+ * fetches the Discord profile, and checks the user whitelist. Then either:
+ * creates/refreshes the dashboard session as usual (resolving accessible guilds,
+ * syncing the display name, regenerating the session), or — if this login was
  * initiated via the companion app's loopback flow (`req.session.companionOAuth`
  * set by companionAuth.ts) — skips session creation entirely and redirects to
  * the companion app's `redirectUri` with a one-time code instead.
+ * @param req - Express request; reads `code`/`state` query params and the stored
+ *   `oauthState` session value.
+ * @param res - Express response; redirects to `/` on success, or to the
+ *   companion app's `redirectUri` for the loopback flow. Renders a 400 error
+ *   page when the OAuth state is invalid or missing, a 403 error page when the
+ *   user is not whitelisted or has no accessible guild, or a 500 error page if any
+ *   step of the exchange/profile-fetch/session-save fails.
  */
 router.get('/discord/callback', async (req, res) => {
   const { code, state } = req.query as { code?: string; state?: string };
@@ -173,11 +192,24 @@ router.get('/discord/callback', async (req, res) => {
 
 // ─── Logout ───────────────────────────────────────────────────────────────────
 // POST-only and CSRF-protected to prevent cross-site triggered logouts.
+
+/**
+ * POST /auth/logout — destroys the current session, logging the user out.
+ * @param req - Express request; requires an authenticated session.
+ * @param res - Express response; always redirects to `/auth/login`.
+ */
 router.post('/logout', requireAuth, csrfProtection, (req, res) => {
   req.session.destroy(() => res.redirect('/auth/login'));
 });
 
 // ─── Login page ───────────────────────────────────────────────────────────────
+
+/**
+ * GET /auth/login — renders the login page.
+ * @param req - Express request; checked for an existing `session.user`.
+ * @param res - Express response; redirects to `/` if already logged in, otherwise
+ *   renders the `login` view.
+ */
 router.get('/login', (req, res) => {
   if (req.session.user) return res.redirect('/');
   res.render('login', { user: null });

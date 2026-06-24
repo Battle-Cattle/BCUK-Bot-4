@@ -9,6 +9,14 @@ import { renderError } from './shared';
 const log = createLogger('Web');
 const router = Router();
 
+/**
+ * GET / — renders the main dashboard page. Includes overall bot status and, for
+ * logged-in users with a connected Twitch streamer, whether their EventSub
+ * subscriptions need reconnecting (auth failed).
+ * @param req - Express request; reads `req.session.user` if present.
+ * @param res - Express response; renders the `dashboard` view on success, or a
+ *   500 error page if loading status/streamer data fails.
+ */
 router.get('/', csrfProtection, async (req, res) => {
   try {
     const status = getStatus();
