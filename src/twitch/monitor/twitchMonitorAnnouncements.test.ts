@@ -146,32 +146,23 @@ describe('editAnnouncement', () => {
     expect(setStreamerLive).toHaveBeenCalled();
   });
 
-  it('deletes old message and sends new one when delete_old_posts is true', async () => {
+  it('deletes old message via tryDeleteDiscordMessage and sends new one when delete_old_posts is true', async () => {
     const channel = makeTextChannel();
     vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
     const state = makeLiveState({ group: makeGroup({ delete_old_posts: true }) });
     await editAnnouncement(new Map(), state, makeStream(), 'live_message');
-    expect(channel._message.delete).toHaveBeenCalled();
+    expect(tryDeleteDiscordMessage).toHaveBeenCalledWith('ch1', 'msg1');
     expect(channel.send).toHaveBeenCalled();
     expect(setStreamerLive).toHaveBeenCalled();
   });
 
-  it('swallows DiscordNotFoundError when deleting old message', async () => {
-    const notFoundErr = new Error('Unknown Message');
-    const channel = makeTextChannel({ delete: vi.fn().mockRejectedValue(notFoundErr) });
+  it('logs and does not update state when tryDeleteDiscordMessage rejects', async () => {
+    vi.mocked(tryDeleteDiscordMessage).mockRejectedValueOnce(new Error('network'));
+    const channel = makeTextChannel();
     vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
-    vi.mocked(isDiscordNotFoundError).mockReturnValue(true);
     const state = makeLiveState({ group: makeGroup({ delete_old_posts: true }) });
     await expect(editAnnouncement(new Map(), state, makeStream(), 'live_message')).resolves.not.toThrow();
-  });
-
-  it('re-throws non-DiscordNotFoundError when deleting old message', async () => {
-    const channel = makeTextChannel({ delete: vi.fn().mockRejectedValue(new Error('network')) });
-    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
-    vi.mocked(isDiscordNotFoundError).mockReturnValue(false);
-    const state = makeLiveState({ group: makeGroup({ delete_old_posts: true }) });
-    await expect(editAnnouncement(new Map(), state, makeStream(), 'live_message')).resolves.not.toThrow();
-    // Error is caught by outer try/catch and logged, not rethrown to caller
+    expect(setStreamerLive).not.toHaveBeenCalled();
   });
 
   it('updates state currentGame and title from stream', async () => {
@@ -182,6 +173,30 @@ describe('editAnnouncement', () => {
     await editAnnouncement(new Map(), state, newStream, 'new_game_message');
     expect(state.currentGame).toBe('Minecraft');
     expect(state.title).toBe('New Title');
+  });
+
+  it('posts a fresh message when the existing message is gone and delete_old_posts is false', async () => {
+    const notFoundErr = new Error('Unknown Message');
+    const channel = makeTextChannel();
+    channel.messages.fetch.mockRejectedValue(notFoundErr);
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    vi.mocked(isDiscordNotFoundError).mockReturnValue(true);
+    const state = makeLiveState({ group: makeGroup({ delete_old_posts: false }) });
+    await editAnnouncement(new Map(), state, makeStream(), 'live_message');
+    expect(channel.send).toHaveBeenCalled();
+    expect(state.messageId).toBe('msg1');
+    expect(setStreamerLive).toHaveBeenCalled();
+  });
+
+  it('rethrows non-NotFound fetch errors when delete_old_posts is false', async () => {
+    const channel = makeTextChannel();
+    channel.messages.fetch.mockRejectedValue(new Error('network'));
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    vi.mocked(isDiscordNotFoundError).mockReturnValue(false);
+    const state = makeLiveState({ group: makeGroup({ delete_old_posts: false }) });
+    await expect(editAnnouncement(new Map(), state, makeStream(), 'live_message')).resolves.not.toThrow();
+    // Error is caught by outer try/catch and logged; state is not updated.
+    expect(setStreamerLive).not.toHaveBeenCalled();
   });
 });
 
@@ -205,6 +220,15 @@ describe('deleteAnnouncement', () => {
     const liveStates = new Map([['k', makeLiveState({ messageId: 'msg1', channelId: 'ch1', streamerId: 10, groupId: 1 })]]);
     await deleteAnnouncement(liveStates, 'k');
     expect(tryDeleteDiscordMessage).toHaveBeenCalledWith('ch1', 'msg1');
+    expect(clearStreamerLive).toHaveBeenCalledWith(10);
+    expect(updateMultitwitch).toHaveBeenCalledWith(1, liveStates);
+    expect(liveStates.has('k')).toBe(false);
+  });
+
+  it('still clears DB and map state when tryDeleteDiscordMessage rejects', async () => {
+    vi.mocked(tryDeleteDiscordMessage).mockRejectedValueOnce(new Error('network'));
+    const liveStates = new Map([['k', makeLiveState({ messageId: 'msg1', channelId: 'ch1', streamerId: 10, groupId: 1 })]]);
+    await expect(deleteAnnouncement(liveStates, 'k')).resolves.not.toThrow();
     expect(clearStreamerLive).toHaveBeenCalledWith(10);
     expect(updateMultitwitch).toHaveBeenCalledWith(1, liveStates);
     expect(liveStates.has('k')).toBe(false);
