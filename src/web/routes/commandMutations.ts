@@ -59,6 +59,18 @@ async function assignUsersToNewCommand(commandId: number, discordIds: string[]):
   return null;
 }
 
+/**
+ * POST /commands/add — creates a custom command and optionally assigns it to one or
+ * more Twitch-linked Discord users. If any assignment fails, the just-created command
+ * is deleted to avoid a partially-assigned state.
+ * @param req - Express request; reads `trigger_string`, `output`, `is_discord_enabled`,
+ *   `is_multi_twitch`, and `discord_ids` from `req.body`.
+ * @param res - Express response; redirects to `/commands` on success, or to
+ *   `/commands?error=<code>` if required fields are missing (`missing_fields`), the
+ *   trigger is reserved (`reserved_command`) or already taken (`command_taken`), the
+ *   command insert fails (`add_failed`), or an assignment fails (`command_taken` or
+ *   `assign_failed`).
+ */
 router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
   const { trigger_string, output } = req.body as Record<string, string | undefined>;
   const isDiscordEnabled = req.body.is_discord_enabled === 'on';
@@ -90,6 +102,17 @@ router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
   res.redirect('/commands');
 });
 
+/**
+ * POST /commands/update — updates an existing custom command's trigger, output,
+ * and Discord/multi-Twitch flags.
+ * @param req - Express request; reads `command_id`, `trigger_string`, `output`,
+ *   `is_discord_enabled`, and `is_multi_twitch` from `req.body`.
+ * @param res - Express response; redirects to `/commands` on success, or to
+ *   `/commands?error=<code>` if required fields are missing (`missing_fields`),
+ *   `command_id` is malformed (`invalid_id`), the command no longer exists
+ *   (`command_not_found`), the trigger is reserved (`reserved_command`) or already
+ *   taken (`command_taken`), or the update fails (`update_failed`).
+ */
 router.post('/commands/update', requireMod, csrfProtection, async (req, res) => {
   const { command_id, trigger_string, output } = req.body as Record<string, string | undefined>;
   const isDiscordEnabled = req.body.is_discord_enabled === 'on';
@@ -120,6 +143,13 @@ router.post('/commands/update', requireMod, csrfProtection, async (req, res) => 
   res.redirect('/commands');
 });
 
+/**
+ * POST /commands/remove — deletes a custom command.
+ * @param req - Express request; reads `command_id` from `req.body`.
+ * @param res - Express response; redirects to `/commands` on success or if
+ *   `command_id` is absent, or to `/commands?error=<code>` if it's malformed
+ *   (`invalid_id`) or the delete fails (`remove_failed`).
+ */
 router.post('/commands/remove', requireMod, csrfProtection, async (req, res) => {
   const { command_id } = req.body as { command_id?: string };
   if (!command_id) return res.redirect('/commands');
