@@ -6,15 +6,18 @@ const { TikTokLiveConnectionMock, getConnection, setConnectImpl } = vi.hoisted((
   const connectionsByUsername = new Map<string, any>();
   const connectImpls = new Map<string, () => Promise<unknown>>();
 
+  /** Builds a mock TikTokLiveConnection for `username`, consuming any one-shot connect() override set via setConnectImpl. */
   function makeConnection(username: string) {
     const handlers: Record<string, (...args: any[]) => any> = {};
     const impl = connectImpls.get(username);
+    connectImpls.delete(username);
     const conn = {
       on: vi.fn((event: string, handler: (...args: any[]) => any) => {
         handlers[event] = handler;
       }),
       connect: vi.fn(impl ?? (() => Promise.resolve({ roomId: `room-${username}` }))),
       disconnect: vi.fn(() => Promise.resolve(undefined)),
+      /** Invokes the handler registered for `event` via `.on()`, simulating the library emitting it. */
       emit(event: string, ...args: any[]) {
         handlers[event]?.(...args);
       },
@@ -23,12 +26,14 @@ const { TikTokLiveConnectionMock, getConnection, setConnectImpl } = vi.hoisted((
     return conn;
   }
 
+  /** Mock constructor standing in for the real `TikTokLiveConnection` class. */
   const TikTokLiveConnectionMock = vi.fn(function (username: string) {
     return makeConnection(username);
   });
 
   return {
     TikTokLiveConnectionMock,
+    /** Returns the mock connection created for `username`, or undefined if none exists yet. */
     getConnection: (username: string) => connectionsByUsername.get(username),
     /** Overrides connect() for the *next* connection created for this username. */
     setConnectImpl: (username: string, impl: () => Promise<unknown>) => {
@@ -87,12 +92,14 @@ async function setup(
 
 let activeBot: TikTokBotModule | undefined;
 
+/** Clears mock state and switches to fake timers before each test. */
 beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers();
   activeBot = undefined;
 });
 
+/** Stops the bot started by the current test and restores real timers. */
 afterEach(async () => {
   await activeBot?.stopTikTokBot();
   vi.useRealTimers();
