@@ -1,11 +1,11 @@
 import { Client, GatewayIntentBits, Guild } from 'discord.js';
-import { DISCORD_TOKEN, DISCORD_GUILD_ID } from '../shared/config';
+import { DISCORD_TOKEN } from '../shared/config';
 import { handleCommand } from '../commands/commandRouter';
 import { executeCustomCommandForDiscord } from '../commands/customCommandHandler';
 import { executeCounterCommandForDiscord } from '../commands/counterHandler';
 import { setDiscordReady } from '../shared/statusStore';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
-import { upsertGuild } from '../db';
+import { upsertGuild, getAllGuilds } from '../db';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('Discord');
@@ -34,16 +34,14 @@ async function getGuild(guildId: string): Promise<Guild> {
  * Returns null if the client is not ready, the guild is unavailable, or the member is not found.
  *
  * @param discordId - Discord user snowflake ID to look up.
+ * @param guildId - Guild to look the member up in.
  * @param force - When true, bypasses the guild member cache and fetches fresh from the API.
- * @param guildId - Guild to look the member up in. Defaults to the legacy configured guild
- *   so existing single-guild callers (e.g. web login) keep working until the web panel
- *   threads its own guild context through in a later phase.
  * @returns The member's server display name, or null on any failure.
  */
 export async function fetchMemberDisplayName(
   discordId: string,
+  guildId: string,
   force = false,
-  guildId: string = DISCORD_GUILD_ID,
 ): Promise<string | null> {
   if (!client) return null;
   try {
@@ -125,8 +123,9 @@ export function startDiscordBot(): void {
     client = c;
     log.info(`Logged in as ${c.user.tag}`);
     try {
-      const guild = await getGuild(DISCORD_GUILD_ID);
-      setDiscordReady(c.user.tag, guild.name);
+      const registeredGuilds = await getAllGuilds();
+      const names = registeredGuilds.map((g) => g.name).join(', ') || 'Unknown';
+      setDiscordReady(c.user.tag, names);
     } catch (err) {
       log.error('Failed to initialise:', err);
     }

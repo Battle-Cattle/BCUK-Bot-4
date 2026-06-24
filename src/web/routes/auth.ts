@@ -101,7 +101,7 @@ router.get('/discord/callback', async (req, res) => {
     // in Discord; we use a best-effort lookup against one guild at login time).
     let syncedDiscordName = dbUser.discord_name?.trim() || profile.username;
     try {
-      const displayName = await fetchMemberDisplayName(profile.id, true, accessibleGuilds[0].guild_id);
+      const displayName = await fetchMemberDisplayName(profile.id, accessibleGuilds[0].guild_id, true);
       const trimmedDisplayName = displayName?.trim();
       if (trimmedDisplayName) {
         syncedDiscordName = trimmedDisplayName;

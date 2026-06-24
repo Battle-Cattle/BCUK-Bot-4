@@ -2,8 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../shared/config', () => ({
   DISCORD_TOKEN: 'mock-token',
-  DISCORD_GUILD_ID: 'guild-id',
-  DISCORD_VOICE_CHANNEL_ID: 'vc-id',
   SFX_FOLDER: '/tmp/sfx',
   OVERLAY_FOLDER: '/tmp/overlay',
   GLOBAL_COOLDOWN_MS: 0,
@@ -18,7 +16,10 @@ vi.mock('./guildRegistry', () => ({
   isRegisteredGuild: vi.fn((id: string) => id === 'guild-id'),
   reloadGuildRegistry: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../db', () => ({ upsertGuild: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../db', () => ({
+  upsertGuild: vi.fn().mockResolvedValue(undefined),
+  getAllGuilds: vi.fn().mockResolvedValue([{ guild_id: 'guild-id', name: 'TestGuild', voice_channel_id: null }]),
+}));
 vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 vi.mock('discord.js', () => ({
   Client: vi.fn(),
@@ -95,15 +96,15 @@ describe('getDiscordClient', () => {
 
 describe('fetchMemberDisplayName', () => {
   it('returns null when client is not ready', async () => {
-    expect(await mod.fetchMemberDisplayName('123')).toBeNull();
+    expect(await mod.fetchMemberDisplayName('123', 'guild-id', false)).toBeNull();
   });
 
   it('returns the member displayName when client is ready and fetch succeeds', async () => {
     mod.startDiscordBot();
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await readyCb(mockInstance);  // fires clientReady → sets client and cachedGuild
+    await readyCb(mockInstance);  // fires clientReady → sets client
 
-    const result = await mod.fetchMemberDisplayName('user123');
+    const result = await mod.fetchMemberDisplayName('user123', 'guild-id', false);
     expect(result).toBe('Alice');
   });
 
@@ -113,7 +114,7 @@ describe('fetchMemberDisplayName', () => {
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await readyCb(mockInstance);
 
-    const result = await mod.fetchMemberDisplayName('missing');
+    const result = await mod.fetchMemberDisplayName('missing', 'guild-id', false);
     expect(result).toBeNull();
   });
 });
@@ -195,11 +196,20 @@ describe('startDiscordBot — guildCreate handler', () => {
 // ─── startDiscordBot — clientReady error path ─────────────────────────────────
 
 describe('startDiscordBot — clientReady error path', () => {
-  it('catches guild fetch errors without crashing', async () => {
-    mockInstance.guilds.fetch.mockRejectedValueOnce(new Error('guild unavailable'));
+  it('catches getAllGuilds errors without crashing', async () => {
+    const db = await import('../db.js');
+    vi.mocked(db.getAllGuilds).mockRejectedValueOnce(new Error('guild unavailable'));
     mod.startDiscordBot();
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await expect(readyCb(mockInstance)).resolves.toBeUndefined();
+  });
+
+  it('sets ready state with DB guild names on clientReady success', async () => {
+    const status = await import('../shared/statusStore.js');
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    expect(vi.mocked(status.setDiscordReady)).toHaveBeenCalledWith('Bot#1234', 'TestGuild');
   });
 });
 

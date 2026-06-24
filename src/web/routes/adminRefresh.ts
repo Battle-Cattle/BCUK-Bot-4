@@ -49,7 +49,7 @@ async function runDiscordNameRefresh(guildId: string): Promise<void> {
 
     for (const user of users) {
       try {
-        const name = await fetchMemberDisplayName(user.discord_id, true, guildId);
+        const name = await fetchMemberDisplayName(user.discord_id, guildId, true);
         if (name == null) {
           failureCount++;
           state.failureCount = failureCount;
