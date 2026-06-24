@@ -38,19 +38,41 @@ export function pushOverlayEvent(login: string, videoPath: string): void {
   log.info(`Pushed overlay event to ${clients.size} client(s) for ${login}`);
 }
 
-// GET /overlay/controller — Forza/gamepad controller browser source (no auth, opened by OBS)
+/**
+ * GET /overlay/controller — renders the Forza/gamepad controller browser
+ * source page (no auth, opened directly by OBS).
+ * @param _req - Express request (unused).
+ * @param res - Express response; renders the `controllerOverlay` view.
+ */
 router.get('/controller', (_req, res) => {
   res.render('controllerOverlay');
 });
 
-// GET /overlay/:login — browser source HTML page (no auth, opened by OBS)
+/**
+ * GET /overlay/:login — renders the video-overlay browser source HTML page
+ * for a Twitch channel login (no auth, opened directly by OBS).
+ * @param req - Express request; reads the `login` route param.
+ * @param res - Express response; renders the `overlaySource` view, or calls
+ *   `next()` to fall through to later routes if `login` is malformed or
+ *   reserved (e.g. `settings`, `videos`, `controller`).
+ */
 router.get('/:login', (req, res, next) => {
   const { login } = req.params;
   if (!LOGIN_RE.test(login) || RESERVED_LOGINS.has(login.toLowerCase())) { next(); return; }
   res.render('overlaySource', { login: login.toLowerCase() });
 });
 
-// GET /overlay/:login/events — SSE endpoint
+/**
+ * GET /overlay/:login/events — SSE endpoint that streams `pushOverlayEvent`
+ * video notifications to a connected browser source for a channel login (no
+ * auth, opened directly by OBS).
+ * @param req - Express request; reads the `login` route param.
+ * @param res - Express response; on a valid login, upgrades to an
+ *   `text/event-stream` connection kept alive with periodic pings and torn
+ *   down on client disconnect; replies 429 if the channel's connection limit
+ *   (`MAX_SSE_CONNECTIONS_PER_CHANNEL`) is exceeded, or calls `next()` if
+ *   `login` is malformed or reserved.
+ */
 router.get('/:login/events', (req, res, next) => {
   const { login } = req.params;
   if (!LOGIN_RE.test(login) || RESERVED_LOGINS.has(login.toLowerCase())) { next(); return; }
@@ -95,7 +117,15 @@ router.get('/:login/events', (req, res, next) => {
   });
 });
 
-// GET /overlay/videos/:streamerId/:filename — serve video files (no auth)
+/**
+ * GET /overlay/videos/:streamerId/:filename — serves an overlay video file
+ * from disk (no auth; URLs are unguessable UUID filenames).
+ * @param req - Express request; reads the `streamerId` and `filename` route
+ *   params.
+ * @param res - Express response; sends the file on success, or replies 400 if
+ *   `streamerId`/`filename` are malformed or the resolved path is unsafe, or
+ *   404 if the file doesn't exist.
+ */
 router.get('/videos/:streamerId/:filename', async (req, res) => {
   const { streamerId, filename } = req.params;
 
