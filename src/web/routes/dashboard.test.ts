@@ -32,6 +32,11 @@ import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscript
 
 const STATUS = { discord: { ready: true }, voice: {}, twitch: {}, tiktok: {} };
 
+/**
+ * Builds a minimal Express app with the dashboard router mounted, a stubbed session, and res.render captured as JSON.
+ * @param sessionUser - The session user to attach to each request, or undefined for an anonymous session.
+ * @returns The configured Express app, ready to be driven with supertest.
+ */
 function buildApp(sessionUser: any = undefined) {
   const app = express();
   app.use((req: any, res: any, next: any) => {

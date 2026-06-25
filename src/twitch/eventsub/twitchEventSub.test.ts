@@ -19,6 +19,11 @@ const connectionInstances: Array<{
 }> = [];
 
 vi.mock('./twitchEventSubConnection', () => ({
+  /**
+   * Fake StreamerConnection constructor that records each created instance for assertions.
+   * @param data - The streamer fixture passed to the real constructor.
+   * @returns A stub instance with spy methods, also pushed onto connectionInstances.
+   */
   StreamerConnection: vi.fn().mockImplementation(function (data: { uid: string }) {
     const instance = {
       uid: data.uid,
@@ -35,7 +40,11 @@ vi.mock('./twitchEventSubConnection', () => ({
 import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitchEventSub';
 import { loadStreamersForEventSub } from './twitchEventSubSubscriptions';
 
-/** Builds a minimal streamer fixture for the given uid, shaped like loadStreamersForEventSub's return value. */
+/**
+ * Builds a minimal streamer fixture, shaped like loadStreamersForEventSub's return value.
+ * @param uid - The Twitch user id to assign to the fixture.
+ * @returns A streamer-shaped object suitable for mocking loadStreamersForEventSub.
+ */
 function makeStreamer(uid: string) {
   return { uid, token: 'token', name: uid, config: null, streamerId: 1 };
 }

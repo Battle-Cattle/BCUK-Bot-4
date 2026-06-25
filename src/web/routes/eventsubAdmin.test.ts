@@ -32,6 +32,11 @@ import router from './eventsubAdmin';
 import { clearStreamerToken } from '../../db';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 
+/**
+ * Builds a minimal Express app with the eventsub admin router mounted, a stubbed session, and res.render captured as JSON.
+ * @param accessLevel - The access level to assign to the session user (defaults to Admin).
+ * @returns The configured Express app, ready to be driven with supertest.
+ */
 function buildApp(accessLevel = 3) {
   const app = express();
   app.use((req: any, res: any, next: any) => {
