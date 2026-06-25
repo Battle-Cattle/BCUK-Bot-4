@@ -219,6 +219,13 @@ describe('POST /sfx/trigger/remove', () => {
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledTimes(2);
   });
 
+  it('still redirects success when a file fails to delete from disk', async () => {
+    vi.mocked(deleteSfxTrigger).mockResolvedValue({ files: ['a.mp3'] });
+    vi.mocked(fs.promises.rm).mockRejectedValue(new Error('EACCES'));
+    const res = await supertest(buildApp()).post('/sfx/trigger/remove').send('trigger_id=7');
+    expect(res.headers.location).toBe('/sfx?success=trigger_removed');
+  });
+
   it('redirects with remove_failed on an unexpected DB error', async () => {
     vi.mocked(deleteSfxTrigger).mockRejectedValue(new Error('boom'));
     const res = await supertest(buildApp()).post('/sfx/trigger/remove').send('trigger_id=7');
@@ -300,6 +307,31 @@ describe('POST /sfx/file/upload', () => {
       .attach('sound', MP3_ID3, { filename: 'clap.mp3', contentType: 'audio/mpeg' });
     expect(res.headers.location).toBe('/sfx?error=invalid_path');
     expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
+  });
+
+  it('redirects with upload_failed when the write fails for a reason other than a name collision', async () => {
+    vi.mocked(fs.promises.writeFile).mockRejectedValue(
+      Object.assign(new Error('disk full'), { code: 'ENOSPC' }),
+    );
+    const res = await supertest(buildApp())
+      .post('/sfx/file/upload')
+      .field('trigger_id', '5')
+      .field('weight', '1')
+      .attach('sound', MP3_ID3, { filename: 'clap.mp3', contentType: 'audio/mpeg' });
+    expect(res.headers.location).toBe('/sfx?error=upload_failed');
+    expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
+  });
+
+  it('still redirects with upload_failed when the rollback cleanup itself throws', async () => {
+    vi.mocked(addSfxFile).mockRejectedValue(new Error('DB error'));
+    vi.mocked(fs.promises.rm).mockRejectedValue(new Error('rm failed'));
+    const res = await supertest(buildApp())
+      .post('/sfx/file/upload')
+      .field('trigger_id', '5')
+      .field('weight', '1')
+      .attach('sound', OGG_BUF, { filename: 'clap.ogg', contentType: 'audio/ogg' });
+    expect(res.headers.location).toBe('/sfx?error=upload_failed');
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalled();
   });
 
   // End-to-end: locks the uploadSound → handleUploadError wiring so the route still
