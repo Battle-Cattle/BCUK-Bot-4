@@ -14,6 +14,7 @@ const KNOWN_ERRORS = new Set([
   'invalid_id',
   'invalid_file',
   'invalid_path',
+  'file_too_large',
   'command_taken',
   'add_failed',
   'update_failed',

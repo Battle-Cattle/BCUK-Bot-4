@@ -240,8 +240,11 @@ describe('POST /sfx/file/upload', () => {
     expect(vi.mocked(addSfxFile)).toHaveBeenCalledWith(5n, 'airhorn.mp3', 3, false);
   });
 
-  it('appends a suffix when the filename already exists', async () => {
-    vi.mocked(fs.existsSync).mockReturnValueOnce(true).mockReturnValue(false);
+  it('appends a suffix when the first exclusive write hits an existing file', async () => {
+    // 'wx' write of clap.wav fails EEXIST; the retry for clap-1.wav succeeds.
+    vi.mocked(fs.promises.writeFile).mockRejectedValueOnce(
+      Object.assign(new Error('exists'), { code: 'EEXIST' }),
+    );
     await supertest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
@@ -261,13 +264,14 @@ describe('POST /sfx/file/upload', () => {
   });
 
   it('redirects with invalid_path when every candidate filename collides', async () => {
-    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.promises.writeFile).mockRejectedValue(
+      Object.assign(new Error('exists'), { code: 'EEXIST' }),
+    );
     const res = await supertest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
       .attach('sound', MP3_ID3, { filename: 'clap.mp3', contentType: 'audio/mpeg' });
     expect(res.headers.location).toBe('/sfx?error=invalid_path');
-    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
     expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
   });
 });

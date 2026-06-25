@@ -1,5 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -72,19 +73,28 @@ export function buildStoredName(originalName: string, ext: 'mp3' | 'ogg' | 'wav'
 }
 
 /**
- * Resolve a collision-free absolute path within SFX_FOLDER for `name`. If the
- * file already exists, appends `-1`, `-2`, … before the extension so an upload
- * never silently overwrites an existing sound. Returns the resolved absolute
- * path and the final relative filename, or null if the path escapes SFX_FOLDER.
+ * Write `buffer` into SFX_FOLDER under a filename derived from `name`, preserving
+ * it so the on-disk name keeps its context. Writes with the exclusive-create flag
+ * (`wx`) and, on an `EEXIST` collision, retries with `-1`, `-2`, … suffixes — this
+ * closes the check-then-write race so two concurrent uploads of the same name can
+ * never overwrite each other. Returns the stored relative filename, or null if the
+ * path escapes SFX_FOLDER or no free name is found within the retry budget.
  */
-function resolveUniquePath(name: string): { fullPath: string; storedName: string } | null {
+async function writeUniqueSound(name: string, buffer: Buffer): Promise<string | null> {
   const ext = path.extname(name);
   const stem = name.slice(0, name.length - ext.length);
+  await fs.promises.mkdir(SFX_FOLDER, { recursive: true });
   for (let i = 0; i < 1000; i++) {
     const candidate = i === 0 ? name : `${stem}-${i}${ext}`;
     const fullPath = safeResolve(SFX_FOLDER, candidate);
     if (!fullPath) return null;
-    if (!fs.existsSync(fullPath)) return { fullPath, storedName: candidate };
+    try {
+      await fs.promises.writeFile(fullPath, buffer, { flag: 'wx' });
+      return candidate;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') continue;
+      throw err;
+    }
   }
   return null;
 }
@@ -95,10 +105,38 @@ function parseWeight(value: unknown): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
-// csrfProtection runs BEFORE upload.single so a bad token is rejected before Multer
+/**
+ * Translate a Multer error into a user-facing redirect. Returns true when it
+ * handled `err` (so the caller should stop), false when there was no error.
+ * An oversized file (`LIMIT_FILE_SIZE`) gets its own `file_too_large` code;
+ * anything else falls back to `upload_failed` rather than the generic 500 page.
+ */
+export function handleUploadError(err: unknown, res: Response): boolean {
+  if (!err) return false;
+  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+    res.redirect('/sfx?error=file_too_large');
+    return true;
+  }
+  log.error('SFX upload middleware error:', err);
+  res.redirect('/sfx?error=upload_failed');
+  return true;
+}
+
+/**
+ * Run Multer's single-file parser, redirecting on its errors (e.g. an oversized
+ * file) instead of letting them fall through to the centralised error handler.
+ */
+function uploadSound(req: Request, res: Response, next: NextFunction): void {
+  upload.single('sound')(req, res, (err: unknown) => {
+    if (handleUploadError(err, res)) return;
+    next();
+  });
+}
+
+// csrfProtection runs BEFORE uploadSound so a bad token is rejected before Multer
 // buffers the file. The CSRF token is passed in the URL query string (?_csrf=…) so
 // it is available before body parsing.
-router.post('/sfx/file/upload', requireMod, csrfProtection, upload.single('sound'), async (req, res) => {
+router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (req, res) => {
   const triggerId = parsePositiveIntId(req.body.trigger_id);
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
   if (!req.file) return res.redirect('/sfx?error=invalid_file');
@@ -109,24 +147,25 @@ router.post('/sfx/file/upload', requireMod, csrfProtection, upload.single('sound
   const weight = parseWeight(req.body.weight);
   const hidden = req.body.file_hidden === 'on';
 
-  const resolved = resolveUniquePath(buildStoredName(req.file.originalname, ext));
-  if (!resolved) return res.redirect('/sfx?error=invalid_path');
-
+  let storedName: string | null;
   try {
-    await fs.promises.mkdir(SFX_FOLDER, { recursive: true });
-    await fs.promises.writeFile(resolved.fullPath, req.file.buffer);
-    try {
-      await addSfxFile(BigInt(triggerId), resolved.storedName, weight, hidden);
-    } catch (dbErr) {
-      await fs.promises.rm(resolved.fullPath, { force: true });
-      throw dbErr;
-    }
+    storedName = await writeUniqueSound(buildStoredName(req.file.originalname, ext), req.file.buffer);
   } catch (err) {
     log.error('Upload SFX file error:', err);
     return res.redirect('/sfx?error=upload_failed');
   }
+  if (!storedName) return res.redirect('/sfx?error=invalid_path');
 
-  log.info(`SFX file uploaded for trigger ${triggerId}: ${resolved.storedName}`);
+  try {
+    await addSfxFile(BigInt(triggerId), storedName, weight, hidden);
+  } catch (err) {
+    const fullPath = safeResolve(SFX_FOLDER, storedName);
+    if (fullPath) await fs.promises.rm(fullPath, { force: true });
+    log.error('Upload SFX file error:', err);
+    return res.redirect('/sfx?error=upload_failed');
+  }
+
+  log.info(`SFX file uploaded for trigger ${triggerId}: ${storedName}`);
   res.redirect('/sfx?success=file_uploaded');
 });
 
