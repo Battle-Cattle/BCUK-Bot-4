@@ -149,6 +149,14 @@ describe('POST /sfx/trigger/add', () => {
     expect(vi.mocked(createSfxTrigger)).not.toHaveBeenCalled();
   });
 
+  it('rejects a non-string (repeated) category_id rather than treating it as unset', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/trigger/add')
+      .send('trigger_command=!clap&category_id=1&category_id=2');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+    expect(vi.mocked(createSfxTrigger)).not.toHaveBeenCalled();
+  });
+
   it('maps a duplicate-entry DB error to command_taken', async () => {
     vi.mocked(createSfxTrigger).mockRejectedValue(Object.assign(new Error('dup'), { code: 'ER_DUP_ENTRY' }));
     const res = await supertest(buildApp()).post('/sfx/trigger/add').send('trigger_command=!clap');
@@ -226,6 +234,13 @@ describe('POST /sfx/trigger/remove', () => {
     expect(res.headers.location).toBe('/sfx?success=trigger_removed');
   });
 
+  it('redirects with invalid_id when the trigger row did not exist', async () => {
+    vi.mocked(deleteSfxTrigger).mockResolvedValue(null);
+    const res = await supertest(buildApp()).post('/sfx/trigger/remove').send('trigger_id=7');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+    expect(vi.mocked(fs.promises.rm)).not.toHaveBeenCalled();
+  });
+
   it('redirects with remove_failed on an unexpected DB error', async () => {
     vi.mocked(deleteSfxTrigger).mockRejectedValue(new Error('boom'));
     const res = await supertest(buildApp()).post('/sfx/trigger/remove').send('trigger_id=7');
@@ -269,6 +284,17 @@ describe('POST /sfx/file/upload', () => {
     const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0][0] as string;
     expect(writtenPath).toContain('airhorn.mp3');
     expect(vi.mocked(addSfxFile)).toHaveBeenCalledWith(5n, 'airhorn.mp3', 3, false);
+  });
+
+  it('accepts valid audio sent with a generic application/octet-stream content type', async () => {
+    // Browsers sometimes send octet-stream for audio; the magic bytes are authoritative.
+    const res = await supertest(buildApp())
+      .post('/sfx/file/upload')
+      .field('trigger_id', '5')
+      .field('weight', '1')
+      .attach('sound', OGG_BUF, { filename: 'clap.ogg', contentType: 'application/octet-stream' });
+    expect(res.headers.location).toBe('/sfx?success=file_uploaded');
+    expect(vi.mocked(addSfxFile)).toHaveBeenCalledWith(5n, 'clap.ogg', 1, false);
   });
 
   it('appends a suffix when the first exclusive write hits an existing file', async () => {
@@ -377,6 +403,14 @@ describe('POST /sfx/file/update', () => {
     const res = await supertest(buildApp())
       .post('/sfx/file/update')
       .send('file_id=11&weight=0&file_hidden=on');
+    expect(res.headers.location).toBe('/sfx?error=invalid_weight');
+    expect(vi.mocked(updateSfxFile)).not.toHaveBeenCalled();
+  });
+
+  it('rejects a partially-numeric weight rather than truncating it', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/file/update')
+      .send('file_id=11&weight=1.5');
     expect(res.headers.location).toBe('/sfx?error=invalid_weight');
     expect(vi.mocked(updateSfxFile)).not.toHaveBeenCalled();
   });

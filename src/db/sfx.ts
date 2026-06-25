@@ -182,10 +182,12 @@ export async function updateSfxTrigger(
 /**
  * Delete an SFX trigger and all of its sound-file rows in a single transaction.
  * Returns the relative paths of the deleted sound files so the caller can remove
- * them from disk.
+ * them from disk, or null if no trigger with that id existed (so a stale id can
+ * be surfaced as `invalid_id` rather than reported as a successful delete),
+ * mirroring `deleteSfxFile`.
  * @param id Trigger id.
  */
-export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] }> {
+export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } | null> {
   const conn = await getPool().getConnection();
   try {
     await conn.beginTransaction();
@@ -195,7 +197,14 @@ export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] }>
     );
     const files = rows.map((r) => r.file as string);
     await conn.execute(`DELETE FROM sfx WHERE trigger_id = ?`, [id.toString()]);
-    await conn.execute(`DELETE FROM sfxtrigger WHERE id = ?`, [id.toString()]);
+    const [result] = await conn.execute<mysql.ResultSetHeader>(
+      `DELETE FROM sfxtrigger WHERE id = ?`,
+      [id.toString()],
+    );
+    if (result.affectedRows === 0) {
+      await conn.rollback();
+      return null;
+    }
     await conn.commit();
     return { files };
   } catch (err) {

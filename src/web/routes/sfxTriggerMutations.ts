@@ -20,14 +20,17 @@ const log = createLogger('Web');
 const router = Router();
 
 /**
- * Parse an optional category id form field. An explicit unset (empty/"none") maps
- * to null; a malformed value maps to undefined so callers can reject it with
- * `invalid_id` rather than silently clearing the trigger's category.
+ * Parse an optional category id form field. An unset value — the field being
+ * absent (undefined), empty, or "none" — maps to null. A present-but-malformed
+ * value, including a non-string such as a repeated/tampered field arriving as an
+ * array, maps to undefined so callers can reject it with `invalid_id` rather than
+ * silently clearing the trigger's category.
  * @param value Raw `category_id` form field.
- * @returns null for an explicit unset, a positive id, or undefined when malformed.
+ * @returns null for an unset value, a positive id, or undefined when malformed.
  */
 function parseCategoryId(value: unknown): number | null | undefined {
-  if (typeof value !== 'string' || value === '' || value === 'none') return null;
+  if (value === undefined || value === '' || value === 'none') return null;
+  if (typeof value !== 'string') return undefined;
   const parsed = parsePositiveIntId(value);
   return parsed === null ? undefined : parsed;
 }
@@ -84,8 +87,9 @@ router.post('/sfx/trigger/remove', requireMod, csrfProtection, async (req, res) 
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
 
   try {
-    const { files } = await deleteSfxTrigger(BigInt(triggerId));
-    await removeSfxFiles(files);
+    const result = await deleteSfxTrigger(BigInt(triggerId));
+    if (result === null) return res.redirect('/sfx?error=invalid_id');
+    await removeSfxFiles(result.files);
   } catch (err) {
     log.error('Remove SFX trigger error:', err);
     return res.redirect('/sfx?error=remove_failed');

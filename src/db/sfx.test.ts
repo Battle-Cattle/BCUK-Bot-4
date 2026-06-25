@@ -289,6 +289,21 @@ describe('deleteSfxTrigger', () => {
     expect(pool._conn.release).toHaveBeenCalled();
   });
 
+  it('rolls back and returns null when no trigger row was deleted', async () => {
+    const pool = makeTxPool();
+    pool._conn.execute
+      .mockResolvedValueOnce([[], []]) // SELECT files (none)
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]) // DELETE sfx
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]); // DELETE trigger — missing row
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    const result = await deleteSfxTrigger(7n);
+    expect(result).toBeNull();
+    expect(pool._conn.rollback).toHaveBeenCalled();
+    expect(pool._conn.commit).not.toHaveBeenCalled();
+    expect(pool._conn.release).toHaveBeenCalled();
+  });
+
   it('rolls back and rethrows on error', async () => {
     const pool = makeTxPool();
     pool._conn.execute.mockRejectedValueOnce(new Error('boom'));

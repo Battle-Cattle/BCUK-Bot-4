@@ -17,13 +17,14 @@ const router = Router();
 
 const MAX_FILE_BYTES = SFX_MAX_FILE_MB * 1024 * 1024;
 
+// No MIME-based fileFilter: the client-supplied Content-Type is unreliable
+// (browsers send `application/octet-stream` for some audio files), and
+// storeUploadedSound() validates the actual bytes via detectAudioType. Filtering
+// on mimetype here would reject valid audio with a generic/incorrect header.
 /** Multer instance buffering a single uploaded sound in memory, capped at SFX_MAX_FILE_MB. */
 export const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES },
-  fileFilter: (_req, file, cb) => {
-    cb(null, file.mimetype.startsWith('audio/'));
-  },
 });
 
 /**
