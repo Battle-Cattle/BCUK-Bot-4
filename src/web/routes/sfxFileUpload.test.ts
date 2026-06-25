@@ -11,7 +11,7 @@ vi.mock('../middleware', () => ({ requireMod: (_req: any, _res: any, next: any) 
 vi.mock('../../db', () => ({ addSfxFile: vi.fn(), updateSfxFile: vi.fn(), deleteSfxFile: vi.fn() }));
 
 import multer from 'multer';
-import { detectAudioType, buildStoredName, handleUploadError } from './sfxFileMutations';
+import { detectAudioType, buildStoredName, handleUploadError } from './sfxFileUpload';
 
 /** Minimal res stub capturing the redirect target. */
 function makeRes() {

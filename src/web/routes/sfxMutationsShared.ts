@@ -21,3 +21,16 @@ export async function removeSfxFiles(files: string[]): Promise<void> {
     }
   }
 }
+
+/**
+ * Parse a weight form field into a positive integer, or null when the value is
+ * missing/non-numeric/non-positive. Returning null (rather than defaulting to 1)
+ * lets callers reject a malformed update instead of silently overwriting the
+ * stored weight with 1.
+ * @param value Raw `weight` form field.
+ * @returns A positive integer weight, or null when invalid.
+ */
+export function parseWeight(value: unknown): number | null {
+  const parsed = typeof value === 'string' ? parseInt(value, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
