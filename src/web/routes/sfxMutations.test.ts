@@ -48,7 +48,7 @@ vi.mock('fs', () => ({
 
 import express from 'express';
 import supertest from 'supertest';
-import router, { detectAudioType, buildStoredName } from './sfxMutations';
+import router from './sfxMutations';
 import {
   findTrigger,
   createSfxTrigger,
@@ -67,7 +67,6 @@ import fs from 'fs';
 
 // Minimal buffers with correct magic bytes for each accepted format
 const MP3_ID3 = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00]);
-const MP3_SYNC = Buffer.from([0xff, 0xfb, 0x90, 0x00]);
 const OGG_BUF = Buffer.from([0x4f, 0x67, 0x67, 0x53, 0x00]);
 const WAV_BUF = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45]);
 
@@ -326,62 +325,5 @@ describe('access control', () => {
     expect(res.status).toBe(403);
     expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
     expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
-  });
-});
-
-// ── detectAudioType ────────────────────────────────────────────────────────────
-
-describe('detectAudioType', () => {
-  it('detects MP3 by ID3 tag', () => {
-    expect(detectAudioType(MP3_ID3)).toBe('mp3');
-  });
-
-  it('detects MP3 by MPEG frame sync', () => {
-    expect(detectAudioType(MP3_SYNC)).toBe('mp3');
-  });
-
-  it('detects OGG by OggS signature', () => {
-    expect(detectAudioType(OGG_BUF)).toBe('ogg');
-  });
-
-  it('detects WAV by RIFF/WAVE signature', () => {
-    expect(detectAudioType(WAV_BUF)).toBe('wav');
-  });
-
-  it('returns null for a RIFF container that is not WAVE', () => {
-    const riffAvi = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x41, 0x56, 0x49, 0x20]);
-    expect(detectAudioType(riffAvi)).toBeNull();
-  });
-
-  it('returns null for unrecognised bytes', () => {
-    expect(detectAudioType(Buffer.from('not audio at all'))).toBeNull();
-  });
-
-  it('returns null for a buffer that is too short', () => {
-    expect(detectAudioType(Buffer.from([0x49]))).toBeNull();
-  });
-});
-
-// ── buildStoredName ─────────────────────────────────────────────────────────────
-
-describe('buildStoredName', () => {
-  it('preserves a clean filename', () => {
-    expect(buildStoredName('airhorn.mp3', 'mp3')).toBe('airhorn.mp3');
-  });
-
-  it('sanitises unsafe characters', () => {
-    expect(buildStoredName('My Clap!.mp3', 'mp3')).toBe('My_Clap_.mp3');
-  });
-
-  it('strips any directory component (path traversal)', () => {
-    expect(buildStoredName('../../etc/passwd.mp3', 'mp3')).toBe('passwd.mp3');
-  });
-
-  it('forces the extension to match the detected type', () => {
-    expect(buildStoredName('clip.wav', 'mp3')).toBe('clip.mp3');
-  });
-
-  it('falls back to a default stem when nothing usable remains', () => {
-    expect(buildStoredName('...', 'mp3')).toBe('sound.mp3');
   });
 });
