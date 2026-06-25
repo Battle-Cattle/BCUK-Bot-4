@@ -35,6 +35,7 @@ vi.mock('./twitchEventSubConnection', () => ({
 import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitchEventSub';
 import { loadStreamersForEventSub } from './twitchEventSubSubscriptions';
 
+/** Builds a minimal streamer fixture for the given uid, shaped like loadStreamersForEventSub's return value. */
 function makeStreamer(uid: string) {
   return { uid, token: 'token', name: uid, config: null, streamerId: 1 };
 }
