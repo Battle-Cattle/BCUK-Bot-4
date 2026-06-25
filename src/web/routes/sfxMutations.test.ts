@@ -32,7 +32,9 @@ vi.mock('../middleware', () => ({
 
 vi.mock('../../shared/config', () => ({
   SFX_FOLDER: '/app/sfx',
-  SFX_MAX_FILE_MB: 10,
+  // 1 MB so the oversized-upload test can trigger Multer's LIMIT_FILE_SIZE with a
+  // just-over-1 MB buffer. Every other upload test uses a few-byte buffer.
+  SFX_MAX_FILE_MB: 1,
 }));
 
 vi.mock('fs', () => ({
@@ -272,6 +274,19 @@ describe('POST /sfx/file/upload', () => {
       .field('trigger_id', '5')
       .attach('sound', MP3_ID3, { filename: 'clap.mp3', contentType: 'audio/mpeg' });
     expect(res.headers.location).toBe('/sfx?error=invalid_path');
+    expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
+  });
+
+  // End-to-end: locks the uploadSound → handleUploadError wiring so the route still
+  // redirects (rather than 500s) if the middleware chain or ordering ever changes.
+  it('redirects an oversized upload to file_too_large via the route middleware', async () => {
+    const oversized = Buffer.alloc(1024 * 1024 + 1024, 1); // > 1 MB limit set in the config mock
+    const res = await supertest(buildApp())
+      .post('/sfx/file/upload')
+      .field('trigger_id', '5')
+      .attach('sound', oversized, { filename: 'big.mp3', contentType: 'audio/mpeg' });
+    expect(res.headers.location).toBe('/sfx?error=file_too_large');
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
     expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
   });
 });
