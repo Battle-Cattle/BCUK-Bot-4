@@ -256,6 +256,7 @@ describe('detectVideoType', () => {
 // --- handleUploadError unit tests ---
 
 describe('handleUploadError', () => {
+  /** Minimal Express response stub capturing the redirect target. */
   function makeRes() {
     return { redirect: vi.fn() } as any;
   }

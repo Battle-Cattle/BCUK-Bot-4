@@ -43,7 +43,15 @@ function handleOverlayUploadSubmit(event) {
     body: new FormData(form),
   })
     .then(function (res) {
-      window.location.assign(res.url || '/overlay/settings');
+      // Only follow an actual server redirect (success/error → /overlay/settings?…).
+      // A non-redirect response (e.g. 403 CSRF, 500) keeps res.url at the POST-only
+      // upload route, so treat any non-OK response as a failure instead.
+      if (res.redirected && res.url) {
+        window.location.assign(res.url);
+        return;
+      }
+      if (!res.ok) throw new Error('Upload failed');
+      window.location.assign('/overlay/settings');
     })
     .catch(function () {
       window.location.assign('/overlay/settings?error=upload_failed');

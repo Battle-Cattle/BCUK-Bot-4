@@ -67,10 +67,13 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.
 }
 
 /**
- * Translate a Multer error into a user-facing redirect. Returns true when it
- * handled `err` (so the caller should stop), false when there was no error.
- * An oversized file (`LIMIT_FILE_SIZE`) gets the `file_too_large` code; anything
- * else falls back to `upload_failed` rather than the generic 500 page.
+ * Translate a Multer error into a user-facing redirect, instead of letting it
+ * reach the centralised 500 handler. An oversized file (`LIMIT_FILE_SIZE`) gets
+ * the `file_too_large` code; any other error falls back to `upload_failed`.
+ * @param err - The error passed by Multer's callback, or null/undefined if none.
+ * @param res - Express response used to issue the redirect when an error occurred.
+ * @returns true when `err` was an error and a redirect was sent (caller should
+ *   stop); false when there was no error (caller should continue).
  */
 export function handleUploadError(err: unknown, res: Response): boolean {
   if (!err) return false;
