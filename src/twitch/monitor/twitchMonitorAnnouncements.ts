@@ -86,7 +86,11 @@ export async function editAnnouncement(
 
     if (group.delete_old_posts) {
       const msg = await textChannel.send({ content, embeds: [embed] });
-      await tryDeleteDiscordMessage(state.channelId, state.messageId);
+      try {
+        await tryDeleteDiscordMessage(state.channelId, state.messageId);
+      } catch (err) {
+        log.error(`Failed to delete old announcement for ${state.login}, continuing:`, err);
+      }
       state.messageId = msg.id;
       state.channelId = msg.channelId;
     } else {

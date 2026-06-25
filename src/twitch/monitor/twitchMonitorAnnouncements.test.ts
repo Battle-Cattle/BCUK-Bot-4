@@ -156,13 +156,15 @@ describe('editAnnouncement', () => {
     expect(setStreamerLive).toHaveBeenCalled();
   });
 
-  it('logs and does not update state when tryDeleteDiscordMessage rejects', async () => {
+  it('treats old-message delete failure as best-effort and still commits the new message', async () => {
     vi.mocked(tryDeleteDiscordMessage).mockRejectedValueOnce(new Error('network'));
     const channel = makeTextChannel();
+    channel.send.mockResolvedValue({ id: 'msg2', channelId: 'ch1' });
     vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
     const state = makeLiveState({ group: makeGroup({ delete_old_posts: true }) });
     await expect(editAnnouncement(new Map(), state, makeStream(), 'live_message')).resolves.not.toThrow();
-    expect(setStreamerLive).not.toHaveBeenCalled();
+    expect(state.messageId).toBe('msg2');
+    expect(setStreamerLive).toHaveBeenCalled();
   });
 
   it('updates state currentGame and title from stream', async () => {
