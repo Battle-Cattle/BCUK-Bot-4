@@ -6,6 +6,24 @@ function confirmSubmit(event, className, buildMessage) {
   return true;
 }
 
+/** Wires a button to copy the text content of another element to the clipboard, with brief "Copied!" feedback and a fallback alert when the Clipboard API is unavailable or the write is rejected. */
+function registerCopyToClipboardHandler(buttonId, sourceId, idleLabel) {
+  var button = document.getElementById(buttonId);
+  if (!button) return;
+  button.addEventListener('click', function () {
+    var sourceEl = document.getElementById(sourceId);
+    var text = sourceEl ? sourceEl.textContent : '';
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+      alert('Could not copy automatically — please copy it manually.');
+      return;
+    }
+    navigator.clipboard.writeText(text).then(function () {
+      button.textContent = 'Copied!';
+      setTimeout(function () { button.textContent = idleLabel; }, 2000);
+    }).catch(function () { alert('Could not copy automatically — please copy it manually.'); });
+  });
+}
+
 function registerToggleEditHandler(buttonClass, idAttr, rowPrefix) {
   document.addEventListener('click', function (event) {
     var target = event.target;
