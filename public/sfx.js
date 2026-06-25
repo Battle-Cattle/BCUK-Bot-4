@@ -70,6 +70,35 @@ document.addEventListener('click', (event) => {
   }
 });
 
+/* ── Sound upload (CSRF token via header, not URL) ─────────── */
+
+// The upload form carries no _csrf in its action so the session token never
+// lands in the URL/history/Referer. We submit via fetch with the token in an
+// X-CSRF-Token header, which csrfProtection validates before Multer parses the
+// multipart body. fetch follows the server's redirect; we then navigate to the
+// resulting /sfx?success=… or ?error=… page.
+document.addEventListener('submit', (event) => {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || !form.classList.contains('js-sfx-upload')) return;
+  event.preventDefault();
+
+  const token = (document.body && document.body.dataset.csrfToken) || '';
+  const submitBtn = form.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+
+  fetch(form.action, {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': token },
+    body: new FormData(form),
+  })
+    .then((res) => {
+      window.location.assign(res.url || '/sfx');
+    })
+    .catch(() => {
+      window.location.assign('/sfx?error=upload_failed');
+    });
+});
+
 /* ── Confirm destructive actions ───────────────────────────── */
 
 document.addEventListener('submit', (event) => {

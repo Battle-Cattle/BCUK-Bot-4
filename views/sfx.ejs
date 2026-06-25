@@ -183,7 +183,9 @@
 
                 <% if (canManage) { %>
                 <div class="command-edit-panel">
-                  <form method="POST" action="/sfx/file/upload?_csrf=<%= csrfToken %>" enctype="multipart/form-data">
+                  <!-- Submitted via fetch in sfx.js with the CSRF token in an X-CSRF-Token
+                       header, so the session token is never placed in the URL (history/Referer). -->
+                  <form method="POST" action="/sfx/file/upload" enctype="multipart/form-data" class="js-sfx-upload">
                     <input type="hidden" name="trigger_id" value="<%= t.triggerId %>">
                     <div class="form-row-wrap form-section-gap" style="align-items:flex-end;">
                       <div class="form-col-grow">

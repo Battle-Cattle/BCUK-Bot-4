@@ -134,8 +134,8 @@ function uploadSound(req: Request, res: Response, next: NextFunction): void {
 }
 
 // csrfProtection runs BEFORE uploadSound so a bad token is rejected before Multer
-// buffers the file. The CSRF token is passed in the URL query string (?_csrf=…) so
-// it is available before body parsing.
+// buffers the file. The client (sfx.js) sends the token in an X-CSRF-Token header
+// — available before body parsing and never placed in the URL.
 router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (req, res) => {
   const triggerId = parsePositiveIntId(req.body.trigger_id);
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
