@@ -113,6 +113,63 @@ function parseWeight(value: unknown): number | null {
 }
 
 /**
+ * Validate an uploaded buffer's audio type and write it to disk under a unique,
+ * sanitized name. Isolates the upload route's file-storage branch so the route
+ * handler itself only deals with the trigger/weight validation and persistence.
+ * @param file Multer's in-memory file (buffer + originalname).
+ * @returns The stored relative filename, or an error code for the caller to redirect with.
+ */
+async function storeUploadedSound(
+  file: Express.Multer.File,
+): Promise<{ storedName: string } | { errorCode: 'invalid_file' | 'invalid_path' | 'upload_failed' }> {
+  const ext = detectAudioType(file.buffer);
+  if (!ext) return { errorCode: 'invalid_file' };
+
+  let storedName: string | null;
+  try {
+    storedName = await writeUniqueSound(buildStoredName(file.originalname, ext), file.buffer);
+  } catch (err) {
+    log.error('Upload SFX file error:', err);
+    return { errorCode: 'upload_failed' };
+  }
+  if (!storedName) return { errorCode: 'invalid_path' };
+  return { storedName };
+}
+
+/**
+ * Persist an already-stored sound file's DB row. On failure, rolls back the
+ * on-disk file (guarding the cleanup itself so a failed `rm()` can't escape
+ * this function and turn the caller's intended redirect into a 500).
+ * @param triggerId Owning trigger id.
+ * @param storedName Relative filename already written under SFX_FOLDER.
+ * @param weight Weighted-random selection weight.
+ * @param hidden Whether the file is hidden from the public listing.
+ * @returns true on success, false if the DB insert failed (and was rolled back).
+ */
+async function persistUploadedSound(
+  triggerId: number,
+  storedName: string,
+  weight: number,
+  hidden: boolean,
+): Promise<boolean> {
+  try {
+    await addSfxFile(BigInt(triggerId), storedName, weight, hidden);
+    return true;
+  } catch (err) {
+    const fullPath = safeResolve(SFX_FOLDER, storedName);
+    if (fullPath) {
+      try {
+        await fs.promises.rm(fullPath, { force: true });
+      } catch (cleanupErr) {
+        log.error(`Failed to roll back uploaded SFX file ${storedName}:`, cleanupErr);
+      }
+    }
+    log.error('Upload SFX file error:', err);
+    return false;
+  }
+}
+
+/**
  * Translate a Multer error into a user-facing redirect, instead of letting it
  * reach the centralised 500 handler. An oversized file (`LIMIT_FILE_SIZE`) gets
  * its own `file_too_large` code; any other error falls back to `upload_failed`.
@@ -156,40 +213,17 @@ router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
   if (!req.file) return res.redirect('/sfx?error=invalid_file');
 
-  const ext = detectAudioType(req.file.buffer);
-  if (!ext) return res.redirect('/sfx?error=invalid_file');
-
   const weight = parseWeight(req.body.weight);
   if (weight === null) return res.redirect('/sfx?error=invalid_weight');
   const hidden = req.body.file_hidden === 'on';
 
-  let storedName: string | null;
-  try {
-    storedName = await writeUniqueSound(buildStoredName(req.file.originalname, ext), req.file.buffer);
-  } catch (err) {
-    log.error('Upload SFX file error:', err);
-    return res.redirect('/sfx?error=upload_failed');
-  }
-  if (!storedName) return res.redirect('/sfx?error=invalid_path');
+  const stored = await storeUploadedSound(req.file);
+  if ('errorCode' in stored) return res.redirect(`/sfx?error=${stored.errorCode}`);
 
-  try {
-    await addSfxFile(BigInt(triggerId), storedName, weight, hidden);
-  } catch (err) {
-    // Guard the compensating cleanup so a failed rm() can't escape this catch and
-    // turn the intended redirect into a 500.
-    const fullPath = safeResolve(SFX_FOLDER, storedName);
-    if (fullPath) {
-      try {
-        await fs.promises.rm(fullPath, { force: true });
-      } catch (cleanupErr) {
-        log.error(`Failed to roll back uploaded SFX file ${storedName}:`, cleanupErr);
-      }
-    }
-    log.error('Upload SFX file error:', err);
-    return res.redirect('/sfx?error=upload_failed');
-  }
+  const persisted = await persistUploadedSound(triggerId, stored.storedName, weight, hidden);
+  if (!persisted) return res.redirect('/sfx?error=upload_failed');
 
-  log.info(`SFX file uploaded for trigger ${triggerId}: ${storedName}`);
+  log.info(`SFX file uploaded for trigger ${triggerId}: ${stored.storedName}`);
   res.redirect('/sfx?success=file_uploaded');
 });
 

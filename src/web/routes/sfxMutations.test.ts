@@ -246,6 +246,7 @@ describe('POST /sfx/file/upload', () => {
     const res = await supertest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
+      .field('weight', '1')
       .attach('sound', Buffer.from('not audio'), { filename: 'evil.mp3', contentType: 'audio/mpeg' });
     expect(res.headers.location).toBe('/sfx?error=invalid_file');
     expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
