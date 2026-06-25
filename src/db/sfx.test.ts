@@ -343,4 +343,14 @@ describe('deleteSfxFile', () => {
     expect(pool._conn.rollback).toHaveBeenCalled();
     expect(pool._conn.commit).not.toHaveBeenCalled();
   });
+
+  it('rolls back, releases and rethrows on error', async () => {
+    const pool = makeTxPool();
+    pool._conn.execute.mockRejectedValueOnce(new Error('boom'));
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(deleteSfxFile(11)).rejects.toThrow('boom');
+    expect(pool._conn.rollback).toHaveBeenCalled();
+    expect(pool._conn.release).toHaveBeenCalled();
+  });
 });

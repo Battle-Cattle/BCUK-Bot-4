@@ -139,6 +139,12 @@ describe('POST /sfx/trigger/add', () => {
     const res = await supertest(buildApp()).post('/sfx/trigger/add').send('trigger_command=!clap');
     expect(res.headers.location).toBe('/sfx?error=command_taken');
   });
+
+  it('redirects with add_failed on an unexpected DB error', async () => {
+    vi.mocked(createSfxTrigger).mockRejectedValue(new Error('boom'));
+    const res = await supertest(buildApp()).post('/sfx/trigger/add').send('trigger_command=!clap');
+    expect(res.headers.location).toBe('/sfx?error=add_failed');
+  });
 });
 
 describe('POST /sfx/trigger/update', () => {
@@ -166,6 +172,14 @@ describe('POST /sfx/trigger/update', () => {
     expect(res.headers.location).toBe('/sfx?success=trigger_updated');
     expect(vi.mocked(updateSfxTrigger)).toHaveBeenCalledWith(5n, '!clap', 2, null, false);
   });
+
+  it('redirects with update_failed on an unexpected DB error', async () => {
+    vi.mocked(updateSfxTrigger).mockRejectedValue(new Error('boom'));
+    const res = await supertest(buildApp())
+      .post('/sfx/trigger/update')
+      .send('trigger_id=5&trigger_command=!clap');
+    expect(res.headers.location).toBe('/sfx?error=update_failed');
+  });
 });
 
 describe('POST /sfx/trigger/remove', () => {
@@ -180,6 +194,12 @@ describe('POST /sfx/trigger/remove', () => {
     expect(res.headers.location).toBe('/sfx?success=trigger_removed');
     expect(vi.mocked(deleteSfxTrigger)).toHaveBeenCalledWith(7n);
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledTimes(2);
+  });
+
+  it('redirects with remove_failed on an unexpected DB error', async () => {
+    vi.mocked(deleteSfxTrigger).mockRejectedValue(new Error('boom'));
+    const res = await supertest(buildApp()).post('/sfx/trigger/remove').send('trigger_id=7');
+    expect(res.headers.location).toBe('/sfx?error=remove_failed');
   });
 });
 
@@ -239,6 +259,17 @@ describe('POST /sfx/file/upload', () => {
     const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0][0] as string;
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
   });
+
+  it('redirects with invalid_path when every candidate filename collides', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const res = await supertest(buildApp())
+      .post('/sfx/file/upload')
+      .field('trigger_id', '5')
+      .attach('sound', MP3_ID3, { filename: 'clap.mp3', contentType: 'audio/mpeg' });
+    expect(res.headers.location).toBe('/sfx?error=invalid_path');
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /sfx/file/update', () => {
@@ -253,6 +284,12 @@ describe('POST /sfx/file/update', () => {
       .send('file_id=11&weight=0&file_hidden=on');
     expect(res.headers.location).toBe('/sfx?success=file_updated');
     expect(vi.mocked(updateSfxFile)).toHaveBeenCalledWith(11, 1, true);
+  });
+
+  it('redirects with update_failed on an unexpected DB error', async () => {
+    vi.mocked(updateSfxFile).mockRejectedValue(new Error('boom'));
+    const res = await supertest(buildApp()).post('/sfx/file/update').send('file_id=11&weight=2');
+    expect(res.headers.location).toBe('/sfx?error=update_failed');
   });
 });
 
@@ -274,6 +311,12 @@ describe('POST /sfx/file/remove', () => {
     const res = await supertest(buildApp()).post('/sfx/file/remove').send('file_id=11');
     expect(res.headers.location).toBe('/sfx?success=file_removed');
     expect(vi.mocked(fs.promises.rm)).not.toHaveBeenCalled();
+  });
+
+  it('redirects with remove_failed on an unexpected DB error', async () => {
+    vi.mocked(deleteSfxFile).mockRejectedValue(new Error('boom'));
+    const res = await supertest(buildApp()).post('/sfx/file/remove').send('file_id=11');
+    expect(res.headers.location).toBe('/sfx?error=remove_failed');
   });
 });
 
@@ -303,6 +346,24 @@ describe('category routes', () => {
     const res = await supertest(buildApp()).post('/sfx/category/remove').send('category_id=3');
     expect(res.headers.location).toBe('/sfx?success=category_removed');
     expect(vi.mocked(deleteCategory)).toHaveBeenCalledWith(3);
+  });
+
+  it('redirects with add_failed when createCategory throws', async () => {
+    vi.mocked(createCategory).mockRejectedValue(new Error('boom'));
+    const res = await supertest(buildApp()).post('/sfx/category/add').send('name=Reactions');
+    expect(res.headers.location).toBe('/sfx?error=add_failed');
+  });
+
+  it('redirects with update_failed when renameCategory throws', async () => {
+    vi.mocked(renameCategory).mockRejectedValue(new Error('boom'));
+    const res = await supertest(buildApp()).post('/sfx/category/rename').send('category_id=3&name=Alerts');
+    expect(res.headers.location).toBe('/sfx?error=update_failed');
+  });
+
+  it('redirects with remove_failed when deleteCategory throws', async () => {
+    vi.mocked(deleteCategory).mockRejectedValue(new Error('boom'));
+    const res = await supertest(buildApp()).post('/sfx/category/remove').send('category_id=3');
+    expect(res.headers.location).toBe('/sfx?error=remove_failed');
   });
 });
 
