@@ -11,6 +11,7 @@ vi.mock('../../db', () => ({
   getAllGuilds: vi.fn().mockResolvedValue([]),
   getGuildsForMember: vi.fn().mockResolvedValue([]),
   getEffectiveAccessLevel: vi.fn().mockResolvedValue(0),
+  createCode: vi.fn().mockResolvedValue('plain-auth-code'),
   AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 vi.mock('../../discord/discordBot', () => ({
@@ -35,6 +36,7 @@ import {
   getAllGuilds,
   getGuildsForMember,
   getEffectiveAccessLevel,
+  createCode,
   AccessLevel,
 } from '../../db';
 import { fetchMemberDisplayName } from '../../discord/discordBot';
@@ -80,6 +82,7 @@ beforeEach(() => {
   vi.mocked(getAllGuilds).mockResolvedValue([]);
   vi.mocked(getGuildsForMember).mockResolvedValue([]);
   vi.mocked(getEffectiveAccessLevel).mockResolvedValue(0);
+  vi.mocked(createCode).mockResolvedValue('plain-auth-code');
 });
 
 // ─── GET /discord ─────────────────────────────────────────────────────────────
@@ -237,6 +240,60 @@ describe('GET /discord/callback', () => {
       .get('/discord/callback?code=code&state=state123');
     expect(res.status).toBe(302);
     expect(updateDiscordName).toHaveBeenCalledWith('111', 'NewDisplayName');
+  });
+
+  it('redirects to the companion app redirect_uri with a code and state when companionOAuth is pending, without creating a dashboard session', async () => {
+    mockFetch([
+      { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
+      { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
+    ]);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER, is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: '555', name: 'Guild', voice_channel_id: null }] as any);
+    vi.mocked(createCode).mockResolvedValue('plain-auth-code');
+
+    let capturedSession: any;
+    const app = express();
+    app.use((req: any, _res: any, next: any) => {
+      req.session = {
+        oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 },
+        companionOAuth: { redirectUri: 'http://127.0.0.1:9999/callback', appState: 'appstate1', expiresAt: Date.now() + 60_000 },
+        user: undefined,
+        destroy: vi.fn((cb: () => void) => cb()),
+        regenerate: vi.fn((cb: (err: null) => void) => cb(null)),
+        save: vi.fn((cb: (err: null) => void) => cb(null)),
+      };
+      capturedSession = req.session;
+      next();
+    });
+    app.use((req: any, res: any, next: any) => {
+      res.render = (view: string, locals: unknown) =>
+        res.status((res as any).statusCode || 200).json({ view, locals });
+      next();
+    });
+    app.use(router);
+    const res = await supertest(app).get('/discord/callback?code=code&state=state123');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('http://127.0.0.1:9999/callback?code=plain-auth-code&state=appstate1');
+    expect(createCode).toHaveBeenCalledWith('111');
+    expect(capturedSession.user).toBeUndefined();
+    expect(capturedSession.companionOAuth).toBeUndefined();
+  });
+
+  it('does not branch into the companion flow when companionOAuth is absent (existing dashboard-login behavior)', async () => {
+    mockFetch([
+      { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
+      { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
+    ]);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER, is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: '555', name: 'Guild', voice_channel_id: null }] as any);
+
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
+      .get('/discord/callback?code=code&state=state123');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/');
+    expect(createCode).not.toHaveBeenCalled();
   });
 });
 

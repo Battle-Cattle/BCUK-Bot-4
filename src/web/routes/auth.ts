@@ -8,6 +8,7 @@ import {
   getAllGuilds,
   getGuildsForMember,
   getEffectiveAccessLevel,
+  createCode,
   AccessLevel,
   type DbGuild,
 } from '../../db';
@@ -96,6 +97,20 @@ router.get('/discord/callback', async (req, res) => {
         undefined,
       );
     }
+
+    // 4b. If this login was initiated by the companion app's loopback OAuth flow,
+    // skip dashboard session creation entirely — hand back a one-time code via the
+    // app's redirect_uri instead, which it exchanges server-side for a long-lived token.
+    const companionOAuth = req.session.companionOAuth;
+    if (companionOAuth && Date.now() <= companionOAuth.expiresAt) {
+      delete req.session.companionOAuth;
+      const authCode = await createCode(profile.id);
+      const redirectUrl = new URL(companionOAuth.redirectUri);
+      redirectUrl.searchParams.set('code', authCode);
+      redirectUrl.searchParams.set('state', companionOAuth.appState);
+      return res.redirect(redirectUrl.toString());
+    }
+    delete req.session.companionOAuth;
 
     // Sync display name using the first accessible guild (display names are per-guild
     // in Discord; we use a best-effort lookup against one guild at login time).

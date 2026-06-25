@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../db', () => ({ getVideosForReward: vi.fn() }));
+vi.mock('../../db', () => ({ getVideosForReward: vi.fn(), getStreamerById: vi.fn() }));
 vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 vi.mock('../monitor/twitchMonitor', () => ({ triggerImmediateLiveCheck: vi.fn().mockResolvedValue(undefined) }));
@@ -8,9 +8,9 @@ vi.mock('../monitor/twitchMonitor', () => ({ triggerImmediateLiveCheck: vi.fn().
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
   handleStreamOnline, handleStreamOffline, handleChannelUpdate,
-  registerEventSubOverlayRuntime, registerEventSubTwitchRuntime,
+  registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
 } from './twitchEventSubHandler';
-import { getVideosForReward } from '../../db';
+import { getVideosForReward, getStreamerById } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 
@@ -19,6 +19,9 @@ registerEventSubTwitchRuntime({ send: mockSend });
 
 const mockPushOverlayEvent = vi.fn();
 registerEventSubOverlayRuntime({ pushOverlayEvent: mockPushOverlayEvent });
+
+const mockPushCompanionEvent = vi.fn();
+registerEventSubCompanionRuntime({ pushCompanionEvent: mockPushCompanionEvent });
 
 // Minimal EventSubConfig helper — avoids importing from db/eventSub
 function makeConfig(overrides: Partial<{
@@ -253,6 +256,10 @@ describe('handleRedemption', () => {
   };
   const streamerId = 7;
 
+  beforeEach(() => {
+    vi.mocked(getStreamerById).mockResolvedValue({ discord_id: '999888777' } as any);
+  });
+
   it('does not call pushOverlayEvent when getVideosForReward returns an empty array', async () => {
     vi.mocked(getVideosForReward).mockResolvedValue([]);
     await handleRedemption('streamer', event, makeConfig(), streamerId);
@@ -269,6 +276,43 @@ describe('handleRedemption', () => {
     expect(getVideosForReward).toHaveBeenCalledWith('reward-abc', streamerId);
     expect(pickWeightedRandom).toHaveBeenCalledWith(videos);
     expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip2.mp4');
+  });
+
+  it('pushes a companion event keyed by the streamer discord_id even when no videos are configured', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await handleRedemption('streamer', event, makeConfig(), streamerId);
+
+    expect(getStreamerById).toHaveBeenCalledWith(streamerId);
+    expect(mockPushCompanionEvent).toHaveBeenCalledWith('999888777', {
+      type: 'channel_points_redemption',
+      rewardId: 'reward-abc',
+      rewardTitle: 'Cool Reward',
+      userLogin: 'redeemer',
+      userName: 'Redeemer',
+      userInput: '',
+      redeemedAt: expect.any(String),
+    });
+  });
+
+  it('pushes a companion event in addition to triggering the overlay when videos are configured', async () => {
+    const videos = [{ filename: 'clip1.mp4', weight: 1 }] as any[];
+    vi.mocked(getVideosForReward).mockResolvedValue(videos);
+    vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
+
+    await handleRedemption('streamer', event, makeConfig(), streamerId);
+
+    expect(mockPushCompanionEvent).toHaveBeenCalledWith('999888777', expect.objectContaining({ type: 'channel_points_redemption' }));
+    expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
+  });
+
+  it('does not push a companion event when the streamer cannot be found', async () => {
+    vi.mocked(getStreamerById).mockResolvedValue(null);
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await handleRedemption('streamer', event, makeConfig(), streamerId);
+
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
   });
 });
 

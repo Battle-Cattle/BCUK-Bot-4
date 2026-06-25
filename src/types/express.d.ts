@@ -32,6 +32,8 @@ declare module 'express-session' {
     csrfToken?: string;
     eventsubOAuthState?: { value: string; expiresAt: number };
     eventsubStreamerId?: number;
+    /** Pending companion-app loopback OAuth login, set by /companion/login. */
+    companionOAuth?: { redirectUri: string; appState: string; expiresAt: number };
   }
 }
 
@@ -41,6 +43,8 @@ declare module 'express-serve-static-core' {
     apiKeyOwner?: string;
     /** The guild the Streamdeck API key is bound to, set by requireApiKey. */
     apiKeyGuildId?: string | null;
+    /** Discord ID owning the companion app token, set by requireCompanionKey. */
+    companionDiscordId?: string;
   }
 }
 
