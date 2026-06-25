@@ -169,6 +169,7 @@ describe('reloadEventSubSubscriptions', () => {
     vi.mocked(loadStreamersForEventSub).mockRejectedValue(new Error('DB down'));
     expect(() => reloadEventSubSubscriptions()).not.toThrow();
     await flushMicrotasks();
+    expect(connectionInstances).toHaveLength(0);
   });
 
   it('serialises concurrent reload calls through the reload chain', async () => {
