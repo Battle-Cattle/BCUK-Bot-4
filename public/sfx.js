@@ -5,6 +5,19 @@ const sfxTable    = document.getElementById('sfx-table');
 const noResults   = document.getElementById('no-results');
 const cmdCount    = document.getElementById('cmd-count');
 
+/** Collapse every expandable detail row belonging to a trigger and reset its toggle buttons. */
+function collapseDetailRows(triggerId) {
+  document.querySelectorAll('.detail-row[data-parent="' + triggerId + '"]').forEach((row) => {
+    row.classList.add('is-hidden');
+  });
+  document
+    .querySelectorAll('.sfx-row[data-trigger-id="' + triggerId + '"] [aria-expanded]')
+    .forEach((btn) => {
+      btn.setAttribute('aria-expanded', 'false');
+      if (btn.classList.contains('btn-toggle-files')) btn.textContent = '▶ Sounds';
+    });
+}
+
 if (searchInput && sfxTable) {
   searchInput.addEventListener('input', () => {
     const q = searchInput.value.toLowerCase().trim();
@@ -15,18 +28,14 @@ if (searchInput && sfxTable) {
       const cmd = row.dataset.command || '';
       const cat = row.dataset.category || '';
       const match = !q || cmd.includes(q) || cat.includes(q);
-      const filesRow = row.nextElementSibling;
+      const triggerId = row.dataset.triggerId;
 
       if (match) {
         row.style.display = '';
         visible++;
       } else {
         row.style.display = 'none';
-        if (filesRow && filesRow.classList.contains('files-row')) {
-          filesRow.classList.add('is-hidden');
-          const toggleBtn = row.querySelector('.btn-toggle-files');
-          if (toggleBtn) toggleBtn.textContent = '▶ Files';
-        }
+        if (triggerId) collapseDetailRows(triggerId);
       }
     });
 
@@ -35,23 +44,39 @@ if (searchInput && sfxTable) {
   });
 }
 
-/* ── Toggle file list ──────────────────────────────────── */
-
-function toggleFiles(btn) {
-  const sfxRow   = btn.closest('tr.sfx-row');
-  const filesRow = sfxRow && sfxRow.nextElementSibling;
-  if (!filesRow || !filesRow.classList.contains('files-row')) return;
-
-  const shown = !filesRow.classList.contains('is-hidden');
-  filesRow.classList.toggle('is-hidden', shown);
-  btn.textContent = shown ? '▶ Files' : '▼ Files';
-}
+/* ── Toggle expandable rows (sounds + edit panels) ─────────── */
 
 document.addEventListener('click', (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
-  const toggleBtn = target.closest('.btn-toggle-files');
-  if (toggleBtn instanceof HTMLElement) {
-    toggleFiles(toggleBtn);
+  const toggleBtn = target.closest('.btn-toggle-files, .btn-toggle-detail');
+  if (!(toggleBtn instanceof HTMLElement)) return;
+
+  const id = toggleBtn.getAttribute('data-target');
+  if (!id) return;
+  const row = document.getElementById(id);
+  if (!(row instanceof HTMLElement)) return;
+
+  const shown = !row.classList.contains('is-hidden');
+  row.classList.toggle('is-hidden', shown);
+
+  // Keep the opener button (the one with aria-expanded) in sync.
+  const opener = document.querySelector('.btn-toggle-files[data-target="' + id + '"][aria-expanded], .btn-toggle-detail[data-target="' + id + '"][aria-expanded]');
+  if (opener instanceof HTMLElement) {
+    opener.setAttribute('aria-expanded', shown ? 'false' : 'true');
+    if (opener.classList.contains('btn-toggle-files')) {
+      opener.textContent = shown ? '▶ Sounds' : '▼ Sounds';
+    }
   }
+});
+
+/* ── Confirm destructive actions ───────────────────────────── */
+
+document.addEventListener('submit', (event) => {
+  if (confirmSubmit(event, 'js-confirm-remove-trigger', (t) =>
+    'Remove trigger ' + (t.dataset.triggerCommand || 'this trigger') + ' and all its sounds?')) return;
+  if (confirmSubmit(event, 'js-confirm-remove-file', (t) =>
+    'Remove sound ' + (t.dataset.fileName || 'this sound') + '?')) return;
+  confirmSubmit(event, 'js-confirm-remove-category', (t) =>
+    'Remove category ' + (t.dataset.categoryName || 'this category') + '? Its triggers stay, but become uncategorised.');
 });

@@ -1,0 +1,387 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('../../shared/logger', () => ({
+  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
+}));
+
+vi.mock('../../db', () => ({
+  findTrigger: vi.fn(),
+  createSfxTrigger: vi.fn(),
+  updateSfxTrigger: vi.fn(),
+  deleteSfxTrigger: vi.fn(),
+  addSfxFile: vi.fn(),
+  updateSfxFile: vi.fn(),
+  deleteSfxFile: vi.fn(),
+  createCategory: vi.fn(),
+  renameCategory: vi.fn(),
+  deleteCategory: vi.fn(),
+  isMysqlDuplicateEntryError: (err: unknown) =>
+    !!err && typeof err === 'object' && (err as { code?: string }).code === 'ER_DUP_ENTRY',
+}));
+
+vi.mock('../csrf', () => ({
+  csrfProtection: vi.fn((req: any, _res: any, next: any) => {
+    req.csrfToken = () => 'test-csrf-token';
+    next();
+  }),
+}));
+
+vi.mock('../middleware', () => ({
+  requireMod: vi.fn((_req: any, _res: any, next: any) => next()),
+}));
+
+vi.mock('../../shared/config', () => ({
+  SFX_FOLDER: '/app/sfx',
+  SFX_MAX_FILE_MB: 10,
+}));
+
+vi.mock('fs', () => ({
+  default: {
+    existsSync: vi.fn(() => false),
+    promises: {
+      mkdir: vi.fn(),
+      writeFile: vi.fn(),
+      rm: vi.fn(),
+    },
+  },
+}));
+
+import express from 'express';
+import supertest from 'supertest';
+import router, { detectAudioType, buildStoredName } from './sfxMutations';
+import {
+  findTrigger,
+  createSfxTrigger,
+  updateSfxTrigger,
+  deleteSfxTrigger,
+  addSfxFile,
+  updateSfxFile,
+  deleteSfxFile,
+  createCategory,
+  renameCategory,
+  deleteCategory,
+} from '../../db';
+import { requireMod } from '../middleware';
+import { csrfProtection } from '../csrf';
+import fs from 'fs';
+
+// Minimal buffers with correct magic bytes for each accepted format
+const MP3_ID3 = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00]);
+const MP3_SYNC = Buffer.from([0xff, 0xfb, 0x90, 0x00]);
+const OGG_BUF = Buffer.from([0x4f, 0x67, 0x67, 0x53, 0x00]);
+const WAV_BUF = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45]);
+
+function buildApp() {
+  const app = express();
+  app.use(express.urlencoded({ extended: false }));
+  app.use((req: any, _res: any, next: any) => {
+    req.session = { user: { discordId: '1', accessLevel: 1 } };
+    next();
+  });
+  app.use(router);
+  return app;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(findTrigger).mockResolvedValue(null);
+  vi.mocked(createSfxTrigger).mockResolvedValue(1n);
+  vi.mocked(updateSfxTrigger).mockResolvedValue(undefined);
+  vi.mocked(deleteSfxTrigger).mockResolvedValue({ files: [] });
+  vi.mocked(addSfxFile).mockResolvedValue(1);
+  vi.mocked(updateSfxFile).mockResolvedValue(undefined);
+  vi.mocked(deleteSfxFile).mockResolvedValue(null);
+  vi.mocked(createCategory).mockResolvedValue(1);
+  vi.mocked(renameCategory).mockResolvedValue(undefined);
+  vi.mocked(deleteCategory).mockResolvedValue(undefined);
+  vi.mocked(requireMod).mockImplementation((_req: any, _res: any, next: any) => next());
+  vi.mocked(fs.existsSync).mockReturnValue(false);
+  vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined as any);
+  vi.mocked(fs.promises.writeFile).mockResolvedValue(undefined);
+  vi.mocked(fs.promises.rm).mockResolvedValue(undefined);
+});
+
+// ── Triggers ────────────────────────────────────────────────────────────────
+
+describe('POST /sfx/trigger/add', () => {
+  it('rejects a missing command', async () => {
+    const res = await supertest(buildApp()).post('/sfx/trigger/add').send('trigger_command=');
+    expect(res.headers.location).toBe('/sfx?error=missing_fields');
+    expect(vi.mocked(createSfxTrigger)).not.toHaveBeenCalled();
+  });
+
+  it('rejects a multi-word command', async () => {
+    const res = await supertest(buildApp()).post('/sfx/trigger/add').send('trigger_command=!two words');
+    expect(res.headers.location).toBe('/sfx?error=missing_fields');
+  });
+
+  it('rejects a command already taken', async () => {
+    vi.mocked(findTrigger).mockResolvedValue({ id: 5n } as any);
+    const res = await supertest(buildApp()).post('/sfx/trigger/add').send('trigger_command=!clap');
+    expect(res.headers.location).toBe('/sfx?error=command_taken');
+    expect(vi.mocked(createSfxTrigger)).not.toHaveBeenCalled();
+  });
+
+  it('creates a trigger with category, description and hidden flag', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/trigger/add')
+      .send('trigger_command=!clap&category_id=3&description=Clap&hidden=on');
+    expect(res.headers.location).toBe('/sfx?success=trigger_added');
+    expect(vi.mocked(createSfxTrigger)).toHaveBeenCalledWith('!clap', 3, 'Clap', true);
+  });
+
+  it('treats category "none" as null and absent hidden as false', async () => {
+    await supertest(buildApp()).post('/sfx/trigger/add').send('trigger_command=!bang&category_id=none');
+    expect(vi.mocked(createSfxTrigger)).toHaveBeenCalledWith('!bang', null, null, false);
+  });
+
+  it('maps a duplicate-entry DB error to command_taken', async () => {
+    vi.mocked(createSfxTrigger).mockRejectedValue(Object.assign(new Error('dup'), { code: 'ER_DUP_ENTRY' }));
+    const res = await supertest(buildApp()).post('/sfx/trigger/add').send('trigger_command=!clap');
+    expect(res.headers.location).toBe('/sfx?error=command_taken');
+  });
+});
+
+describe('POST /sfx/trigger/update', () => {
+  it('rejects an invalid id', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/trigger/update')
+      .send('trigger_id=abc&trigger_command=!clap');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+  });
+
+  it('rejects when the command belongs to a different trigger', async () => {
+    vi.mocked(findTrigger).mockResolvedValue({ id: 99n } as any);
+    const res = await supertest(buildApp())
+      .post('/sfx/trigger/update')
+      .send('trigger_id=5&trigger_command=!clap');
+    expect(res.headers.location).toBe('/sfx?error=command_taken');
+    expect(vi.mocked(updateSfxTrigger)).not.toHaveBeenCalled();
+  });
+
+  it('allows keeping the same command on the same trigger', async () => {
+    vi.mocked(findTrigger).mockResolvedValue({ id: 5n } as any);
+    const res = await supertest(buildApp())
+      .post('/sfx/trigger/update')
+      .send('trigger_id=5&trigger_command=!clap&category_id=2');
+    expect(res.headers.location).toBe('/sfx?success=trigger_updated');
+    expect(vi.mocked(updateSfxTrigger)).toHaveBeenCalledWith(5n, '!clap', 2, null, false);
+  });
+});
+
+describe('POST /sfx/trigger/remove', () => {
+  it('rejects an invalid id', async () => {
+    const res = await supertest(buildApp()).post('/sfx/trigger/remove').send('trigger_id=0');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+  });
+
+  it('removes the trigger and deletes its files from disk', async () => {
+    vi.mocked(deleteSfxTrigger).mockResolvedValue({ files: ['a.mp3', 'b.mp3'] });
+    const res = await supertest(buildApp()).post('/sfx/trigger/remove').send('trigger_id=7');
+    expect(res.headers.location).toBe('/sfx?success=trigger_removed');
+    expect(vi.mocked(deleteSfxTrigger)).toHaveBeenCalledWith(7n);
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── Sound files ──────────────────────────────────────────────────────────────
+
+describe('POST /sfx/file/upload', () => {
+  it('rejects when trigger_id is invalid', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/file/upload')
+      .field('trigger_id', 'x')
+      .attach('sound', MP3_ID3, { filename: 'clap.mp3', contentType: 'audio/mpeg' });
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+  });
+
+  it('rejects when no file is uploaded', async () => {
+    const res = await supertest(buildApp()).post('/sfx/file/upload').field('trigger_id', '5');
+    expect(res.headers.location).toBe('/sfx?error=invalid_file');
+  });
+
+  it('rejects a file with no recognised magic bytes', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/file/upload')
+      .field('trigger_id', '5')
+      .attach('sound', Buffer.from('not audio'), { filename: 'evil.mp3', contentType: 'audio/mpeg' });
+    expect(res.headers.location).toBe('/sfx?error=invalid_file');
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+  });
+
+  it('uploads a valid mp3, preserving the filename', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/file/upload')
+      .field('trigger_id', '5')
+      .field('weight', '3')
+      .attach('sound', MP3_ID3, { filename: 'airhorn.mp3', contentType: 'audio/mpeg' });
+    expect(res.headers.location).toBe('/sfx?success=file_uploaded');
+    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0][0] as string;
+    expect(writtenPath).toContain('airhorn.mp3');
+    expect(vi.mocked(addSfxFile)).toHaveBeenCalledWith(5n, 'airhorn.mp3', 3, false);
+  });
+
+  it('appends a suffix when the filename already exists', async () => {
+    vi.mocked(fs.existsSync).mockReturnValueOnce(true).mockReturnValue(false);
+    await supertest(buildApp())
+      .post('/sfx/file/upload')
+      .field('trigger_id', '5')
+      .attach('sound', WAV_BUF, { filename: 'clap.wav', contentType: 'audio/wav' });
+    expect(vi.mocked(addSfxFile)).toHaveBeenCalledWith(5n, 'clap-1.wav', 1, false);
+  });
+
+  it('removes the written file when the DB insert fails', async () => {
+    vi.mocked(addSfxFile).mockRejectedValue(new Error('DB error'));
+    const res = await supertest(buildApp())
+      .post('/sfx/file/upload')
+      .field('trigger_id', '5')
+      .attach('sound', OGG_BUF, { filename: 'clap.ogg', contentType: 'audio/ogg' });
+    expect(res.headers.location).toBe('/sfx?error=upload_failed');
+    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0][0] as string;
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
+  });
+});
+
+describe('POST /sfx/file/update', () => {
+  it('rejects an invalid id', async () => {
+    const res = await supertest(buildApp()).post('/sfx/file/update').send('file_id=0&weight=2');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+  });
+
+  it('updates weight and hidden, defaulting an invalid weight to 1', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/file/update')
+      .send('file_id=11&weight=0&file_hidden=on');
+    expect(res.headers.location).toBe('/sfx?success=file_updated');
+    expect(vi.mocked(updateSfxFile)).toHaveBeenCalledWith(11, 1, true);
+  });
+});
+
+describe('POST /sfx/file/remove', () => {
+  it('rejects an invalid id', async () => {
+    const res = await supertest(buildApp()).post('/sfx/file/remove').send('file_id=x');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+  });
+
+  it('deletes the row and removes the file from disk', async () => {
+    vi.mocked(deleteSfxFile).mockResolvedValue('clap.mp3');
+    const res = await supertest(buildApp()).post('/sfx/file/remove').send('file_id=11');
+    expect(res.headers.location).toBe('/sfx?success=file_removed');
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalled();
+  });
+
+  it('skips disk removal when the row did not exist', async () => {
+    vi.mocked(deleteSfxFile).mockResolvedValue(null);
+    const res = await supertest(buildApp()).post('/sfx/file/remove').send('file_id=11');
+    expect(res.headers.location).toBe('/sfx?success=file_removed');
+    expect(vi.mocked(fs.promises.rm)).not.toHaveBeenCalled();
+  });
+});
+
+// ── Categories ───────────────────────────────────────────────────────────────
+
+describe('category routes', () => {
+  it('rejects an empty category name', async () => {
+    const res = await supertest(buildApp()).post('/sfx/category/add').send('name=');
+    expect(res.headers.location).toBe('/sfx?error=missing_fields');
+  });
+
+  it('adds a category', async () => {
+    const res = await supertest(buildApp()).post('/sfx/category/add').send('name=Reactions');
+    expect(res.headers.location).toBe('/sfx?success=category_added');
+    expect(vi.mocked(createCategory)).toHaveBeenCalledWith('Reactions');
+  });
+
+  it('renames a category', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/category/rename')
+      .send('category_id=3&name=Alerts');
+    expect(res.headers.location).toBe('/sfx?success=category_updated');
+    expect(vi.mocked(renameCategory)).toHaveBeenCalledWith(3, 'Alerts');
+  });
+
+  it('removes a category', async () => {
+    const res = await supertest(buildApp()).post('/sfx/category/remove').send('category_id=3');
+    expect(res.headers.location).toBe('/sfx?success=category_removed');
+    expect(vi.mocked(deleteCategory)).toHaveBeenCalledWith(3);
+  });
+});
+
+// ── Access control & CSRF ─────────────────────────────────────────────────────
+
+describe('access control', () => {
+  it('mutations are gated behind requireMod', async () => {
+    vi.mocked(requireMod).mockImplementationOnce((_req: any, res: any) => res.status(403).send('denied'));
+    const res = await supertest(buildApp()).post('/sfx/trigger/add').send('trigger_command=!clap');
+    expect(res.status).toBe(403);
+    expect(vi.mocked(createSfxTrigger)).not.toHaveBeenCalled();
+  });
+
+  it('uploads run csrfProtection before Multer buffers the file', async () => {
+    vi.mocked(csrfProtection).mockImplementationOnce((_req: any, res: any) => res.status(403).send('bad csrf'));
+    const res = await supertest(buildApp())
+      .post('/sfx/file/upload')
+      .field('trigger_id', '5')
+      .attach('sound', MP3_ID3, { filename: 'clap.mp3', contentType: 'audio/mpeg' });
+    expect(res.status).toBe(403);
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
+  });
+});
+
+// ── detectAudioType ────────────────────────────────────────────────────────────
+
+describe('detectAudioType', () => {
+  it('detects MP3 by ID3 tag', () => {
+    expect(detectAudioType(MP3_ID3)).toBe('mp3');
+  });
+
+  it('detects MP3 by MPEG frame sync', () => {
+    expect(detectAudioType(MP3_SYNC)).toBe('mp3');
+  });
+
+  it('detects OGG by OggS signature', () => {
+    expect(detectAudioType(OGG_BUF)).toBe('ogg');
+  });
+
+  it('detects WAV by RIFF/WAVE signature', () => {
+    expect(detectAudioType(WAV_BUF)).toBe('wav');
+  });
+
+  it('returns null for a RIFF container that is not WAVE', () => {
+    const riffAvi = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x41, 0x56, 0x49, 0x20]);
+    expect(detectAudioType(riffAvi)).toBeNull();
+  });
+
+  it('returns null for unrecognised bytes', () => {
+    expect(detectAudioType(Buffer.from('not audio at all'))).toBeNull();
+  });
+
+  it('returns null for a buffer that is too short', () => {
+    expect(detectAudioType(Buffer.from([0x49]))).toBeNull();
+  });
+});
+
+// ── buildStoredName ─────────────────────────────────────────────────────────────
+
+describe('buildStoredName', () => {
+  it('preserves a clean filename', () => {
+    expect(buildStoredName('airhorn.mp3', 'mp3')).toBe('airhorn.mp3');
+  });
+
+  it('sanitises unsafe characters', () => {
+    expect(buildStoredName('My Clap!.mp3', 'mp3')).toBe('My_Clap_.mp3');
+  });
+
+  it('strips any directory component (path traversal)', () => {
+    expect(buildStoredName('../../etc/passwd.mp3', 'mp3')).toBe('passwd.mp3');
+  });
+
+  it('forces the extension to match the detected type', () => {
+    expect(buildStoredName('clip.wav', 'mp3')).toBe('clip.mp3');
+  });
+
+  it('falls back to a default stem when nothing usable remains', () => {
+    expect(buildStoredName('...', 'mp3')).toBe('sound.mp3');
+  });
+});

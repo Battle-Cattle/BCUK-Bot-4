@@ -35,6 +35,9 @@ export const DB_PASSWORD = require_env('DB_PASSWORD');
 export const DB_NAME = require_env('DB_NAME');
 
 export const SFX_FOLDER = process.env.SFX_FOLDER ?? './sfx';
+const _SFX_MAX_FILE_MB = parseInt(process.env.SFX_MAX_FILE_MB ?? '10', 10);
+export const SFX_MAX_FILE_MB =
+  Number.isFinite(_SFX_MAX_FILE_MB) && _SFX_MAX_FILE_MB > 0 ? _SFX_MAX_FILE_MB : 10;
 export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER ?? './overlay-videos';
 const _COOLDOWN = parseInt(process.env.GLOBAL_COOLDOWN_MS ?? '3000', 10);
 if (Number.isNaN(_COOLDOWN)) throw new Error('Invalid GLOBAL_COOLDOWN_MS: must be a number');

@@ -130,8 +130,13 @@ export type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 
 // ─── SFX ────────────────────────────────────────────────────────────────────
 
-export type { SfxTrigger, SfxFile, SfxTriggerRow, PublicSfxTrigger } from './db/sfx';
-export { findTrigger, findSoundFiles, getAllSfxTriggers, getPublicSfxTriggers } from './db/sfx';
+export type { SfxTrigger, SfxFile, SfxTriggerRow, PublicSfxTrigger, SfxCategory } from './db/sfx';
+export {
+  findTrigger, findSoundFiles, getAllSfxTriggers, getPublicSfxTriggers,
+  getAllCategories, createCategory, renameCategory, deleteCategory,
+  createSfxTrigger, updateSfxTrigger, deleteSfxTrigger,
+  addSfxFile, updateSfxFile, deleteSfxFile,
+} from './db/sfx';
 
 // ─── Overlay videos ─────────────────────────────────────────────────────────
 
