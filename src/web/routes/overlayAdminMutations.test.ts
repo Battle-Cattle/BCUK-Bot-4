@@ -1,4 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+
+// Shrink the upload size limit to 1 MB before the route module reads
+// OVERLAY_MAX_FILE_MB at import time, so an oversized-upload test can trigger
+// Multer's LIMIT_FILE_SIZE with a small buffer. Existing tests use tiny buffers,
+// so they are unaffected. Restored in afterAll to avoid leaking to other files.
+vi.hoisted(() => {
+  process.env.OVERLAY_MAX_FILE_MB = '1';
+});
+afterAll(() => {
+  delete process.env.OVERLAY_MAX_FILE_MB;
+});
 
 vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
@@ -141,6 +152,19 @@ describe('POST /settings/videos/upload', () => {
       .attach('video', Buffer.from('not a real video'), { filename: 'evil.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=invalid_file');
     expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+  });
+
+  // End-to-end: locks the uploadVideo → handleUploadError wiring so the route still
+  // redirects (rather than 500s) if the middleware chain or ordering ever changes.
+  it('redirects an oversized upload to file_too_large via the route middleware', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const oversized = Buffer.alloc(1024 * 1024 + 1024, 1); // > 1 MB limit set above
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', oversized, { filename: 'big.mp4', contentType: 'video/mp4' });
+    expect(res.headers.location).toBe('/overlay/settings?error=file_too_large');
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
   });
 });
 

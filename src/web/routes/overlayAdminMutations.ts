@@ -87,8 +87,13 @@ export function handleUploadError(err: unknown, res: Response): boolean {
 }
 
 /**
- * Run Multer's single-file parser, redirecting on its errors (e.g. an oversized
- * file) instead of letting them fall through to the centralised error handler.
+ * Express middleware that runs Multer's single-file (`video`) parser and, on a
+ * Multer error (e.g. an oversized file), redirects via `handleUploadError`
+ * instead of letting it fall through to the centralised 500 handler.
+ * @param req - Express request carrying the multipart upload.
+ * @param res - Express response (used for the error redirect).
+ * @param next - Called to continue to the route handler when parsing succeeds.
+ * @returns {void}
  */
 function uploadVideo(req: Request, res: Response, next: NextFunction): void {
   upload.single('video')(req, res, (err: unknown) => {
