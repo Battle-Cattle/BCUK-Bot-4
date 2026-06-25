@@ -19,3 +19,35 @@ function handleOverlayAdminSubmit(event) {
 }
 
 document.addEventListener('submit', handleOverlayAdminSubmit);
+
+/**
+ * Submit the video upload form via fetch with the CSRF token in an X-CSRF-Token
+ * header, so the session token is never placed in the URL (history/Referer).
+ * csrfProtection validates the header before Multer parses the multipart body.
+ * fetch follows the server redirect; we then navigate to the resulting page.
+ * @param {SubmitEvent} event - The form submit event.
+ * @returns {void}
+ */
+function handleOverlayUploadSubmit(event) {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || !form.classList.contains('js-overlay-upload')) return;
+  event.preventDefault();
+
+  const token = (document.body && document.body.dataset.csrfToken) || '';
+  const submitBtn = form.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+
+  fetch(form.action, {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': token },
+    body: new FormData(form),
+  })
+    .then(function (res) {
+      window.location.assign(res.url || '/overlay/settings');
+    })
+    .catch(function () {
+      window.location.assign('/overlay/settings?error=upload_failed');
+    });
+}
+
+document.addEventListener('submit', handleOverlayUploadSubmit);

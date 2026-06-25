@@ -40,7 +40,8 @@ vi.mock('fs', () => ({
 
 import express from 'express';
 import supertest from 'supertest';
-import { router, detectVideoType } from './overlayAdminMutations';
+import multer from 'multer';
+import { router, detectVideoType, handleUploadError } from './overlayAdminMutations';
 import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
 import { AccessLevel } from '../../db/users';
 import fs from 'fs';
@@ -249,5 +250,32 @@ describe('detectVideoType', () => {
 
   it('returns null for a buffer that is too short', () => {
     expect(detectVideoType(Buffer.from([0x1a, 0x45]))).toBeNull();
+  });
+});
+
+// --- handleUploadError unit tests ---
+
+describe('handleUploadError', () => {
+  function makeRes() {
+    return { redirect: vi.fn() } as any;
+  }
+
+  it('returns false and does not redirect when there is no error', () => {
+    const res = makeRes();
+    expect(handleUploadError(null, res)).toBe(false);
+    expect(res.redirect).not.toHaveBeenCalled();
+  });
+
+  it('redirects oversized files to file_too_large', () => {
+    const res = makeRes();
+    const err = new multer.MulterError('LIMIT_FILE_SIZE', 'video');
+    expect(handleUploadError(err, res)).toBe(true);
+    expect(res.redirect).toHaveBeenCalledWith('/overlay/settings?error=file_too_large');
+  });
+
+  it('redirects other multer/unknown errors to upload_failed', () => {
+    const res = makeRes();
+    expect(handleUploadError(new Error('boom'), res)).toBe(true);
+    expect(res.redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_failed');
   });
 });
