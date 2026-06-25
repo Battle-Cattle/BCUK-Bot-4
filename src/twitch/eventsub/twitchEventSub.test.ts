@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { flushMicrotasks } from '../../test-utils/flushMicrotasks';
+import { deferred } from '../../test-utils/deferredPromise';
 
 vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
@@ -165,9 +166,26 @@ describe('reloadEventSubSubscriptions', () => {
     startEventSub();
     await flushMicrotasks();
 
-    vi.mocked(loadStreamersForEventSub).mockResolvedValue([makeStreamer('uid-a')]);
+    // Gate both loads on deferred promises so we can prove the second reload's
+    // loadStreamersForEventSub call doesn't fire until the first one settles.
+    const first = deferred<ReturnType<typeof makeStreamer>[]>();
+    const second = deferred<ReturnType<typeof makeStreamer>[]>();
+    const loadCallOrder: number[] = [];
+    vi.mocked(loadStreamersForEventSub)
+      .mockImplementationOnce(() => { loadCallOrder.push(1); return first.promise; })
+      .mockImplementationOnce(() => { loadCallOrder.push(2); return second.promise; });
+
     reloadEventSubSubscriptions();
     reloadEventSubSubscriptions();
+    await flushMicrotasks();
+
+    expect(loadCallOrder).toEqual([1]);
+
+    first.resolve([]);
+    await flushMicrotasks();
+    expect(loadCallOrder).toEqual([1, 2]);
+
+    second.resolve([makeStreamer('uid-a')]);
     await flushMicrotasks();
 
     expect(connectionInstances).toHaveLength(1);

@@ -56,8 +56,14 @@ describe('POST /streams/twitch-disconnect/:streamerId', () => {
     expect(clearStreamerToken).not.toHaveBeenCalled();
   });
 
-  it('redirects with invalid_id for a zero/negative id', async () => {
+  it('redirects with invalid_id for a zero id', async () => {
     const res = await supertest(buildApp()).post('/streams/twitch-disconnect/0');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/admin/streams?error=invalid_id');
+  });
+
+  it('redirects with invalid_id for a negative id', async () => {
+    const res = await supertest(buildApp()).post('/streams/twitch-disconnect/-1');
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/admin/streams?error=invalid_id');
   });
