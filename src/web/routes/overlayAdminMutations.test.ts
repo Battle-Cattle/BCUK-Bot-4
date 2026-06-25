@@ -1,4 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+
+// Shrink the upload size limit to 1 MB before the route module reads
+// OVERLAY_MAX_FILE_MB at import time, so an oversized-upload test can trigger
+// Multer's LIMIT_FILE_SIZE with a small buffer. Existing tests use tiny buffers,
+// so they are unaffected. Restored in afterAll to avoid leaking to other files.
+vi.hoisted(() => {
+  process.env.OVERLAY_MAX_FILE_MB = '1';
+});
+afterAll(() => {
+  delete process.env.OVERLAY_MAX_FILE_MB;
+});
 
 vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
@@ -40,7 +51,8 @@ vi.mock('fs', () => ({
 
 import express from 'express';
 import supertest from 'supertest';
-import { router, detectVideoType } from './overlayAdminMutations';
+import multer from 'multer';
+import { router, detectVideoType, handleUploadError } from './overlayAdminMutations';
 import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
 import { AccessLevel } from '../../db/users';
 import fs from 'fs';
@@ -140,6 +152,19 @@ describe('POST /settings/videos/upload', () => {
       .attach('video', Buffer.from('not a real video'), { filename: 'evil.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=invalid_file');
     expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+  });
+
+  // End-to-end: locks the uploadVideo → handleUploadError wiring so the route still
+  // redirects (rather than 500s) if the middleware chain or ordering ever changes.
+  it('redirects an oversized upload to file_too_large via the route middleware', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const oversized = Buffer.alloc(1024 * 1024 + 1024, 1); // > 1 MB limit set above
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', oversized, { filename: 'big.mp4', contentType: 'video/mp4' });
+    expect(res.headers.location).toBe('/overlay/settings?error=file_too_large');
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
   });
 });
 
@@ -249,5 +274,33 @@ describe('detectVideoType', () => {
 
   it('returns null for a buffer that is too short', () => {
     expect(detectVideoType(Buffer.from([0x1a, 0x45]))).toBeNull();
+  });
+});
+
+// --- handleUploadError unit tests ---
+
+describe('handleUploadError', () => {
+  /** Minimal Express response stub capturing the redirect target. */
+  function makeRes() {
+    return { redirect: vi.fn() } as any;
+  }
+
+  it('returns false and does not redirect when there is no error', () => {
+    const res = makeRes();
+    expect(handleUploadError(null, res)).toBe(false);
+    expect(res.redirect).not.toHaveBeenCalled();
+  });
+
+  it('redirects oversized files to file_too_large', () => {
+    const res = makeRes();
+    const err = new multer.MulterError('LIMIT_FILE_SIZE', 'video');
+    expect(handleUploadError(err, res)).toBe(true);
+    expect(res.redirect).toHaveBeenCalledWith('/overlay/settings?error=file_too_large');
+  });
+
+  it('redirects other multer/unknown errors to upload_failed', () => {
+    const res = makeRes();
+    expect(handleUploadError(new Error('boom'), res)).toBe(true);
+    expect(res.redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_failed');
   });
 });

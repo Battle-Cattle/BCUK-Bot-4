@@ -1,5 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -65,10 +66,47 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.
   log.info(`Overlay video uploaded for ${streamer.twitch_name}: ${filename}`);
 }
 
+/**
+ * Translate a Multer error into a user-facing redirect, instead of letting it
+ * reach the centralised 500 handler. An oversized file (`LIMIT_FILE_SIZE`) gets
+ * the `file_too_large` code; any other error falls back to `upload_failed`.
+ * @param err - The error passed by Multer's callback, or null/undefined if none.
+ * @param res - Express response used to issue the redirect when an error occurred.
+ * @returns true when `err` was an error and a redirect was sent (caller should
+ *   stop); false when there was no error (caller should continue).
+ */
+export function handleUploadError(err: unknown, res: Response): boolean {
+  if (!err) return false;
+  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+    res.redirect('/overlay/settings?error=file_too_large');
+    return true;
+  }
+  log.error('Overlay upload middleware error:', err);
+  res.redirect('/overlay/settings?error=upload_failed');
+  return true;
+}
+
+/**
+ * Express middleware that runs Multer's single-file (`video`) parser and, on a
+ * Multer error (e.g. an oversized file), redirects via `handleUploadError`
+ * instead of letting it fall through to the centralised 500 handler.
+ * @param req - Express request carrying the multipart upload.
+ * @param res - Express response (used for the error redirect).
+ * @param next - Called to continue to the route handler when parsing succeeds.
+ * @returns {void}
+ */
+function uploadVideo(req: Request, res: Response, next: NextFunction): void {
+  upload.single('video')(req, res, (err: unknown) => {
+    if (handleUploadError(err, res)) return;
+    next();
+  });
+}
+
 // POST /overlay/settings/videos/upload
-// csrfProtection runs BEFORE upload.single so a bad token is rejected before Multer buffers the file.
-// The CSRF token is passed in the URL query string (?_csrf=…) so it is available before body parsing.
-router.post('/settings/videos/upload', requireAuth, csrfProtection, upload.single('video'), async (req, res) => {
+// csrfProtection runs BEFORE uploadVideo so a bad token is rejected before Multer
+// buffers the file. The client (overlayAdmin.js) sends the token in an X-CSRF-Token
+// header — available before body parsing and never placed in the URL.
+router.post('/settings/videos/upload', requireAuth, csrfProtection, uploadVideo, async (req, res) => {
   try {
     const streamer = await requireStreamer(req, res);
     if (!streamer) return;
