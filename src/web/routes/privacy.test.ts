@@ -1,0 +1,42 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import express from 'express';
+import supertest from 'supertest';
+import privacyRouter from './privacy';
+
+function buildApp(sessionUser: unknown = null) {
+  const app = express();
+  app.use((req: any, _res: any, next: any) => {
+    req.session = { user: sessionUser };
+    next();
+  });
+  app.use((req: any, res: any, next: any) => {
+    res.render = (view: string, locals: unknown) => res.json({ view, locals });
+    next();
+  });
+  app.use(privacyRouter);
+  return app;
+}
+
+describe('GET /privacy', () => {
+  beforeEach(() => {
+    // no-op: each test builds its own app/session
+  });
+
+  it('renders the privacy page for anonymous visitors', async () => {
+    const res = await supertest(buildApp(null)).get('/privacy');
+    expect(res.status).toBe(200);
+    expect((res.body as any).view).toBe('privacy');
+    expect((res.body as any).locals.user).toBeNull();
+    expect((res.body as any).locals.csrfToken).toBe('');
+  });
+
+  it('renders the privacy page for signed-in users with a csrf token', async () => {
+    const user = { discordId: '42', discordName: 'Alice', accessLevel: 0 };
+    const res = await supertest(buildApp(user)).get('/privacy');
+    expect(res.status).toBe(200);
+    expect((res.body as any).view).toBe('privacy');
+    expect((res.body as any).locals.user).toEqual(user);
+    expect(typeof (res.body as any).locals.csrfToken).toBe('string');
+    expect((res.body as any).locals.csrfToken.length).toBeGreaterThan(0);
+  });
+});
