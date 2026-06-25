@@ -19,10 +19,17 @@ import { removeSfxFiles } from './sfxMutationsShared';
 const log = createLogger('Web');
 const router = Router();
 
-/** Parse an optional category id form field. Empty/"none" → null; invalid → null. */
-function parseCategoryId(value: unknown): number | null {
+/**
+ * Parse an optional category id form field. An explicit unset (empty/"none") maps
+ * to null; a malformed value maps to undefined so callers can reject it with
+ * `invalid_id` rather than silently clearing the trigger's category.
+ * @param value Raw `category_id` form field.
+ * @returns null for an explicit unset, a positive id, or undefined when malformed.
+ */
+function parseCategoryId(value: unknown): number | null | undefined {
   if (typeof value !== 'string' || value === '' || value === 'none') return null;
-  return parsePositiveIntId(value);
+  const parsed = parsePositiveIntId(value);
+  return parsed === null ? undefined : parsed;
 }
 
 router.post('/sfx/trigger/add', requireMod, csrfProtection, async (req, res) => {
@@ -30,6 +37,7 @@ router.post('/sfx/trigger/add', requireMod, csrfProtection, async (req, res) => 
   if (!command) return res.redirect('/sfx?error=missing_fields');
 
   const categoryId = parseCategoryId(req.body.category_id);
+  if (categoryId === undefined) return res.redirect('/sfx?error=invalid_id');
   const description = normalizeRequiredText(req.body.description);
   const hidden = req.body.hidden === 'on';
 
@@ -52,6 +60,7 @@ router.post('/sfx/trigger/update', requireMod, csrfProtection, async (req, res) 
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
 
   const categoryId = parseCategoryId(req.body.category_id);
+  if (categoryId === undefined) return res.redirect('/sfx?error=invalid_id');
   const description = normalizeRequiredText(req.body.description);
   const hidden = req.body.hidden === 'on';
 

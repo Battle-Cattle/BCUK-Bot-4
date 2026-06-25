@@ -99,10 +99,17 @@ async function writeUniqueSound(name: string, buffer: Buffer): Promise<string | 
   return null;
 }
 
-/** Parse a weight form field into a positive integer, defaulting to 1. */
-function parseWeight(value: unknown): number {
+/**
+ * Parse a weight form field into a positive integer, or null when the value is
+ * missing/non-numeric/non-positive. Returning null (rather than defaulting to 1)
+ * lets callers reject a malformed update instead of silently overwriting the
+ * stored weight with 1.
+ * @param value Raw `weight` form field.
+ * @returns A positive integer weight, or null when invalid.
+ */
+function parseWeight(value: unknown): number | null {
   const parsed = typeof value === 'string' ? parseInt(value, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 /**
@@ -153,6 +160,7 @@ router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (
   if (!ext) return res.redirect('/sfx?error=invalid_file');
 
   const weight = parseWeight(req.body.weight);
+  if (weight === null) return res.redirect('/sfx?error=invalid_weight');
   const hidden = req.body.file_hidden === 'on';
 
   let storedName: string | null;
@@ -167,8 +175,16 @@ router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (
   try {
     await addSfxFile(BigInt(triggerId), storedName, weight, hidden);
   } catch (err) {
+    // Guard the compensating cleanup so a failed rm() can't escape this catch and
+    // turn the intended redirect into a 500.
     const fullPath = safeResolve(SFX_FOLDER, storedName);
-    if (fullPath) await fs.promises.rm(fullPath, { force: true });
+    if (fullPath) {
+      try {
+        await fs.promises.rm(fullPath, { force: true });
+      } catch (cleanupErr) {
+        log.error(`Failed to roll back uploaded SFX file ${storedName}:`, cleanupErr);
+      }
+    }
     log.error('Upload SFX file error:', err);
     return res.redirect('/sfx?error=upload_failed');
   }
@@ -182,6 +198,7 @@ router.post('/sfx/file/update', requireMod, csrfProtection, async (req, res) => 
   if (fileId === null) return res.redirect('/sfx?error=invalid_id');
 
   const weight = parseWeight(req.body.weight);
+  if (weight === null) return res.redirect('/sfx?error=invalid_weight');
   const hidden = req.body.file_hidden === 'on';
 
   try {

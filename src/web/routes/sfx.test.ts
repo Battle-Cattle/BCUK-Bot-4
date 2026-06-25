@@ -24,6 +24,13 @@ import router from './sfx';
 import { getAllSfxTriggers, getAllCategories } from '../../db';
 import { AccessLevel } from '../../db/users';
 
+/**
+ * Build a supertest GET request against the SFX view router with a stubbed session
+ * and a render mock that echoes the view name and locals as JSON.
+ * @param sessionUser Session user to attach to the request (defaults to a level-0 user).
+ * @param query Optional query string appended to `/sfx` (e.g. `?error=invalid_id`).
+ * @returns A supertest request for `GET /sfx`.
+ */
 function buildApp(sessionUser: any = { discordId: '1', accessLevel: AccessLevel.USER }, query = '') {
   const app = express();
   app.use((req: any, _res: any, next: any) => {

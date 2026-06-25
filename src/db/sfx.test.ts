@@ -11,6 +11,7 @@ import {
   addSfxFile, updateSfxFile, deleteSfxFile,
 } from './sfx';
 
+/** Pool whose top-level execute returns row data (for SELECT queries). */
 function makePool(rows: unknown[] = []) {
   return { execute: vi.fn().mockResolvedValue([[...rows], []]) };
 }

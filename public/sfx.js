@@ -46,6 +46,11 @@ if (searchInput && sfxTable) {
 
 /* ── Toggle expandable rows (sounds + edit panels) ─────────── */
 
+/**
+ * Toggle the detail row targeted by a clicked `.btn-toggle-files`/`.btn-toggle-detail`
+ * button, keeping the opener's aria-expanded state and label in sync.
+ * @param {Event} event The delegated click event.
+ */
 document.addEventListener('click', (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
@@ -77,6 +82,11 @@ document.addEventListener('click', (event) => {
 // X-CSRF-Token header, which csrfProtection validates before Multer parses the
 // multipart body. fetch follows the server's redirect; we then navigate to the
 // resulting /sfx?success=… or ?error=… page.
+/**
+ * Submit a `.js-sfx-upload` form via fetch with the CSRF token in an X-CSRF-Token
+ * header (never the URL), then navigate to the server's redirect target.
+ * @param {Event} event The delegated submit event.
+ */
 document.addEventListener('submit', (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement) || !form.classList.contains('js-sfx-upload')) return;
@@ -109,6 +119,11 @@ document.addEventListener('submit', (event) => {
 
 /* ── Confirm destructive actions ───────────────────────────── */
 
+/**
+ * Intercept submits of the destructive-action forms (remove trigger/file/category)
+ * and require a confirmation prompt before they proceed.
+ * @param {Event} event The delegated submit event.
+ */
 document.addEventListener('submit', (event) => {
   if (confirmSubmit(event, 'js-confirm-remove-trigger', (t) =>
     'Remove trigger ' + (t.dataset.triggerCommand || 'this trigger') + ' and all its sounds?')) return;

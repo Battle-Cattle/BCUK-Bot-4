@@ -118,7 +118,11 @@ export async function createCategory(name: string): Promise<number> {
   return result.insertId;
 }
 
-/** Rename an existing SFX category. */
+/**
+ * Rename an existing SFX category.
+ * @param id Category id.
+ * @param name New category name.
+ */
 export async function renameCategory(id: number, name: string): Promise<void> {
   await getPool().execute(`UPDATE sfxcategory SET name = ? WHERE id = ?`, [name, id]);
 }
@@ -155,6 +159,10 @@ export async function createSfxTrigger(
 /**
  * Update an existing SFX trigger's command, category, description and hidden flag.
  * @param id Trigger id.
+ * @param command Full prefixed command string, e.g. `!clap`.
+ * @param categoryId Category id, or null for uncategorised.
+ * @param description Optional public description, or null.
+ * @param hidden Whether the trigger is hidden from the public listing.
  */
 export async function updateSfxTrigger(
   id: bigint,
@@ -221,6 +229,8 @@ export async function addSfxFile(
 /**
  * Update a sound file's weight and hidden flag.
  * @param id sfx row id.
+ * @param weight Weighted-random selection weight (>= 1).
+ * @param hidden Whether the file is hidden from the public listing.
  */
 export async function updateSfxFile(id: number, weight: number, hidden: boolean): Promise<void> {
   await getPool().execute(`UPDATE sfx SET weight = ?, hidden = ? WHERE id = ?`, [

@@ -72,6 +72,11 @@ const MP3_ID3 = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00]);
 const OGG_BUF = Buffer.from([0x4f, 0x67, 0x67, 0x53, 0x00]);
 const WAV_BUF = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45]);
 
+/**
+ * Build an Express app mounting the SFX mutation router with a stubbed Mod session,
+ * for driving the routes with supertest.
+ * @returns The configured Express app.
+ */
 function buildApp() {
   const app = express();
   app.use(express.urlencoded({ extended: false }));
@@ -136,6 +141,14 @@ describe('POST /sfx/trigger/add', () => {
     expect(vi.mocked(createSfxTrigger)).toHaveBeenCalledWith('!bang', null, null, false);
   });
 
+  it('rejects a malformed category_id instead of clearing the category', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/trigger/add')
+      .send('trigger_command=!clap&category_id=abc');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+    expect(vi.mocked(createSfxTrigger)).not.toHaveBeenCalled();
+  });
+
   it('maps a duplicate-entry DB error to command_taken', async () => {
     vi.mocked(createSfxTrigger).mockRejectedValue(Object.assign(new Error('dup'), { code: 'ER_DUP_ENTRY' }));
     const res = await supertest(buildApp()).post('/sfx/trigger/add').send('trigger_command=!clap');
@@ -173,6 +186,14 @@ describe('POST /sfx/trigger/update', () => {
       .send('trigger_id=5&trigger_command=!clap&category_id=2');
     expect(res.headers.location).toBe('/sfx?success=trigger_updated');
     expect(vi.mocked(updateSfxTrigger)).toHaveBeenCalledWith(5n, '!clap', 2, null, false);
+  });
+
+  it('rejects a malformed category_id instead of clearing the category', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/trigger/update')
+      .send('trigger_id=5&trigger_command=!clap&category_id=abc');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+    expect(vi.mocked(updateSfxTrigger)).not.toHaveBeenCalled();
   });
 
   it('redirects with update_failed on an unexpected DB error', async () => {
@@ -250,6 +271,7 @@ describe('POST /sfx/file/upload', () => {
     await supertest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
+      .field('weight', '1')
       .attach('sound', WAV_BUF, { filename: 'clap.wav', contentType: 'audio/wav' });
     expect(vi.mocked(addSfxFile)).toHaveBeenCalledWith(5n, 'clap-1.wav', 1, false);
   });
@@ -259,6 +281,7 @@ describe('POST /sfx/file/upload', () => {
     const res = await supertest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
+      .field('weight', '1')
       .attach('sound', OGG_BUF, { filename: 'clap.ogg', contentType: 'audio/ogg' });
     expect(res.headers.location).toBe('/sfx?error=upload_failed');
     const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0][0] as string;
@@ -272,6 +295,7 @@ describe('POST /sfx/file/upload', () => {
     const res = await supertest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
+      .field('weight', '1')
       .attach('sound', MP3_ID3, { filename: 'clap.mp3', contentType: 'audio/mpeg' });
     expect(res.headers.location).toBe('/sfx?error=invalid_path');
     expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
@@ -289,6 +313,17 @@ describe('POST /sfx/file/upload', () => {
     expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
     expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
   });
+
+  it('rejects a non-positive weight before writing the file', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/file/upload')
+      .field('trigger_id', '5')
+      .field('weight', '0')
+      .attach('sound', MP3_ID3, { filename: 'clap.mp3', contentType: 'audio/mpeg' });
+    expect(res.headers.location).toBe('/sfx?error=invalid_weight');
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /sfx/file/update', () => {
@@ -297,12 +332,20 @@ describe('POST /sfx/file/update', () => {
     expect(res.headers.location).toBe('/sfx?error=invalid_id');
   });
 
-  it('updates weight and hidden, defaulting an invalid weight to 1', async () => {
+  it('updates weight and hidden', async () => {
+    const res = await supertest(buildApp())
+      .post('/sfx/file/update')
+      .send('file_id=11&weight=4&file_hidden=on');
+    expect(res.headers.location).toBe('/sfx?success=file_updated');
+    expect(vi.mocked(updateSfxFile)).toHaveBeenCalledWith(11, 4, true);
+  });
+
+  it('rejects a non-positive weight instead of overwriting with 1', async () => {
     const res = await supertest(buildApp())
       .post('/sfx/file/update')
       .send('file_id=11&weight=0&file_hidden=on');
-    expect(res.headers.location).toBe('/sfx?success=file_updated');
-    expect(vi.mocked(updateSfxFile)).toHaveBeenCalledWith(11, 1, true);
+    expect(res.headers.location).toBe('/sfx?error=invalid_weight');
+    expect(vi.mocked(updateSfxFile)).not.toHaveBeenCalled();
   });
 
   it('redirects with update_failed on an unexpected DB error', async () => {
