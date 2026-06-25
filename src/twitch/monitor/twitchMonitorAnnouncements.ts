@@ -10,6 +10,11 @@ import { LiveState, makeLiveState } from './twitchMonitorTypes';
 import { buildEmbed, fillTemplate, templateVars } from './twitchMonitorEmbed';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
 
+/**
+ * Posts a new "now live" announcement message for a streamer and records the
+ * resulting message location in both the in-memory live-state map and the DB.
+ * No-ops (storing a state with null message fields) if the Discord client isn't ready.
+ */
 export async function postAnnouncement(
   liveStates: Map<string, LiveState>,
   streamerData: DbStreamerFull,
@@ -47,6 +52,12 @@ export async function postAnnouncement(
   }
 }
 
+/**
+ * Updates an existing "now live" announcement in place (or replaces it, if the
+ * group is configured to delete old posts) to reflect a new game/title. If the
+ * previously-announced message is gone, falls back to posting a fresh one
+ * instead of silently failing on every subsequent call.
+ */
 export async function editAnnouncement(
   liveStates: Map<string, LiveState>,
   state: LiveState,
@@ -74,18 +85,24 @@ export async function editAnnouncement(
     const textChannel = channel as TextChannel;
 
     if (group.delete_old_posts) {
-      try {
-        const old = await textChannel.messages.fetch(state.messageId);
-        await old.delete();
-      } catch (err) {
-        if (!isDiscordNotFoundError(err)) throw err;
-      }
       const msg = await textChannel.send({ content, embeds: [embed] });
+      try {
+        await tryDeleteDiscordMessage(state.channelId, state.messageId);
+      } catch (err) {
+        log.error(`Failed to delete old announcement for ${state.login}, continuing:`, err);
+      }
       state.messageId = msg.id;
       state.channelId = msg.channelId;
     } else {
-      const message = await textChannel.messages.fetch(state.messageId);
-      await message.edit({ content, embeds: [embed] });
+      try {
+        const message = await textChannel.messages.fetch(state.messageId);
+        await message.edit({ content, embeds: [embed] });
+      } catch (err) {
+        if (!isDiscordNotFoundError(err)) throw err;
+        const msg = await textChannel.send({ content, embeds: [embed] });
+        state.messageId = msg.id;
+        state.channelId = msg.channelId;
+      }
     }
 
     await setStreamerLive(state.streamerId, state.messageId!, state.channelId!, stream.game_name);
@@ -95,6 +112,13 @@ export async function editAnnouncement(
   }
 }
 
+/**
+ * Removes a streamer's "now live" announcement when they go offline: deletes
+ * the Discord message (best-effort) and clears live state from the DB and
+ * the in-memory map. DB/state cleanup always runs even if Discord message
+ * deletion fails, so a transient Discord API error can't leave the streamer
+ * stuck marked as live.
+ */
 export async function deleteAnnouncement(
   liveStates: Map<string, LiveState>,
   stateKey: string,
@@ -105,7 +129,11 @@ export async function deleteAnnouncement(
     return;
   }
 
-  await tryDeleteDiscordMessage(state.channelId, state.messageId);
+  try {
+    await tryDeleteDiscordMessage(state.channelId, state.messageId);
+  } catch (err) {
+    log.error(`Failed to delete announcement message for streamer ${state.streamerId}, continuing cleanup:`, err);
+  }
 
   await clearStreamerLive(state.streamerId);
   const groupId = state.groupId;
