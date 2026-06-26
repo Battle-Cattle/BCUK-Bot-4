@@ -297,6 +297,11 @@ export async function updateSfxFile(id: number, weight: number, hidden: boolean)
 /**
  * Delete a sound file row. Returns its relative path for filesystem cleanup, or
  * null if no such row existed.
+ *
+ * Locks the row with `SELECT … FOR UPDATE` before the snapshot, so a concurrent
+ * delete of the same row can't slip in between the snapshot and this function's
+ * own `DELETE` — that would otherwise still commit and return the filename even
+ * though nothing was actually removed.
  * @param id sfx row id.
  */
 export async function deleteSfxFile(id: number): Promise<string | null> {
@@ -304,7 +309,7 @@ export async function deleteSfxFile(id: number): Promise<string | null> {
   try {
     await conn.beginTransaction();
     const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT file FROM sfx WHERE id = ?`,
+      `SELECT file FROM sfx WHERE id = ? FOR UPDATE`,
       [id],
     );
     if (rows.length === 0) {
@@ -312,7 +317,11 @@ export async function deleteSfxFile(id: number): Promise<string | null> {
       return null;
     }
     const file: string = rows[0].file;
-    await conn.execute(`DELETE FROM sfx WHERE id = ?`, [id]);
+    const [result] = await conn.execute<mysql.ResultSetHeader>(`DELETE FROM sfx WHERE id = ?`, [id]);
+    if (result.affectedRows === 0) {
+      await conn.rollback();
+      return null;
+    }
     await conn.commit();
     return file;
   } catch (err) {

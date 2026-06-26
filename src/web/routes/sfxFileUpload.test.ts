@@ -21,8 +21,26 @@ function makeRes() {
 // ── detectAudioType ────────────────────────────────────────────────────────────
 
 describe('detectAudioType', () => {
-  it('detects MP3 by ID3 tag', () => {
-    expect(detectAudioType(Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00]))).toBe('mp3');
+  it('detects MP3 by a complete ID3v2 header', () => {
+    expect(
+      detectAudioType(Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])),
+    ).toBe('mp3');
+  });
+
+  it('rejects a truncated ID3 tag that is too short to be a full header', () => {
+    expect(detectAudioType(Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00]))).toBeNull();
+  });
+
+  it('rejects an ID3 tag with an invalid (0xFF) version byte', () => {
+    expect(
+      detectAudioType(Buffer.from([0x49, 0x44, 0x33, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])),
+    ).toBeNull();
+  });
+
+  it('rejects an ID3 tag with a non-syncsafe size byte', () => {
+    expect(
+      detectAudioType(Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00])),
+    ).toBeNull();
   });
 
   it('detects MP3 by a valid MPEG frame sync', () => {

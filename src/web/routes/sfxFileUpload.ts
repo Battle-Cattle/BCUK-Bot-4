@@ -32,7 +32,8 @@ export const upload = multer({
  * client-supplied MIME type. Supports the three accepted formats.
  * - WAV: `RIFF` at offset 0 and `WAVE` at offset 8
  * - OGG: `OggS` at offset 0
- * - MP3: `ID3` tag at offset 0, or a valid MPEG audio frame header (see below)
+ * - MP3: a complete 10-byte ID3v2 header at offset 0, or a valid MPEG audio
+ *   frame header (see below)
  */
 export function detectAudioType(buf: Buffer): 'mp3' | 'ogg' | 'wav' | null {
   if (
@@ -45,7 +46,19 @@ export function detectAudioType(buf: Buffer): 'mp3' | 'ogg' | 'wav' | null {
   if (buf.length >= 4 && buf.subarray(0, 4).equals(Buffer.from([0x4f, 0x67, 0x67, 0x53]))) {
     return 'ogg';
   }
-  if (buf.length >= 3 && buf.subarray(0, 3).equals(Buffer.from([0x49, 0x44, 0x33]))) {
+  // ID3v2 header: "ID3" tag, version byte != 0xFF, and a syncsafe size (each of
+  // the 4 size bytes has its top bit clear). Checking the full 10-byte header
+  // — not just the 3-byte tag — avoids misidentifying truncated/junk payloads.
+  if (
+    buf.length >= 10 &&
+    buf.subarray(0, 3).equals(Buffer.from([0x49, 0x44, 0x33])) &&
+    buf[3] !== 0xff &&
+    buf[4] !== 0xff &&
+    (buf[6] & 0x80) === 0 &&
+    (buf[7] & 0x80) === 0 &&
+    (buf[8] & 0x80) === 0 &&
+    (buf[9] & 0x80) === 0
+  ) {
     return 'mp3';
   }
   // MPEG audio frame: 11-bit sync (0xFF then top 3 bits of byte 1) followed by a

@@ -13,6 +13,7 @@ import {
   normalizeRequiredText,
   normalizeSingleTokenRequiredText,
   parsePositiveIntId,
+  parsePositiveBigIntId,
 } from './shared';
 import { removeSfxFiles } from './sfxMutationsShared';
 
@@ -57,7 +58,7 @@ router.post('/sfx/trigger/add', requireMod, csrfProtection, async (req, res) => 
 });
 
 router.post('/sfx/trigger/update', requireMod, csrfProtection, async (req, res) => {
-  const triggerId = parsePositiveIntId(req.body.trigger_id);
+  const triggerId = parsePositiveBigIntId(req.body.trigger_id);
   const command = normalizeSingleTokenRequiredText(req.body.trigger_command);
   if (!command) return res.redirect('/sfx?error=missing_fields');
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
@@ -69,10 +70,10 @@ router.post('/sfx/trigger/update', requireMod, csrfProtection, async (req, res) 
 
   try {
     const existing = await findTrigger(command);
-    if (existing && existing.id !== BigInt(triggerId)) {
+    if (existing && existing.id !== triggerId) {
       return res.redirect('/sfx?error=command_taken');
     }
-    const updated = await updateSfxTrigger(BigInt(triggerId), command, categoryId, description, hidden);
+    const updated = await updateSfxTrigger(triggerId, command, categoryId, description, hidden);
     if (!updated) return res.redirect('/sfx?error=invalid_id');
   } catch (err) {
     if (isMysqlDuplicateEntryError(err)) return res.redirect('/sfx?error=command_taken');
@@ -84,11 +85,11 @@ router.post('/sfx/trigger/update', requireMod, csrfProtection, async (req, res) 
 });
 
 router.post('/sfx/trigger/remove', requireMod, csrfProtection, async (req, res) => {
-  const triggerId = parsePositiveIntId(req.body.trigger_id);
+  const triggerId = parsePositiveBigIntId(req.body.trigger_id);
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
 
   try {
-    const result = await deleteSfxTrigger(BigInt(triggerId));
+    const result = await deleteSfxTrigger(triggerId);
     if (result === null) return res.redirect('/sfx?error=invalid_id');
     await removeSfxFiles(result.files);
   } catch (err) {

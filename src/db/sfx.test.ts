@@ -426,6 +426,19 @@ describe('deleteSfxFile', () => {
     expect(pool._conn.commit).not.toHaveBeenCalled();
   });
 
+  it('returns null and rolls back when the row is deleted concurrently between the locked SELECT and DELETE', async () => {
+    const pool = makeTxPool();
+    pool._conn.execute
+      .mockResolvedValueOnce([[{ file: 'clap.mp3' }], []]) // SELECT FOR UPDATE — row still present
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]); // DELETE — already removed by a concurrent transaction
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    const file = await deleteSfxFile(11);
+    expect(file).toBeNull();
+    expect(pool._conn.rollback).toHaveBeenCalled();
+    expect(pool._conn.commit).not.toHaveBeenCalled();
+  });
+
   it('rolls back, releases and rethrows on error', async () => {
     const pool = makeTxPool();
     pool._conn.execute.mockRejectedValueOnce(new Error('boom'));

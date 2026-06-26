@@ -8,6 +8,14 @@ export function parsePositiveIntId(value: string | string[] | undefined): number
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+/** Parse a positive BIGINT id form field directly to `bigint`, avoiding precision loss above `Number.MAX_SAFE_INTEGER`. */
+export function parsePositiveBigIntId(value: string | string[] | undefined): bigint | null {
+  const str = Array.isArray(value) ? value[0] : value;
+  if (typeof str !== 'string' || !/^\d+$/.test(str)) return null;
+  const parsed = BigInt(str);
+  return parsed > 0n ? parsed : null;
+}
+
 export function trimField(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
