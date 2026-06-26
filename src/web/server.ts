@@ -19,6 +19,7 @@ import dashboardRouter from './routes/dashboard';
 import adminRouter from './routes/admin';
 import apiRouter from './routes/api';
 import sfxRouter from './routes/sfx';
+import sfxMutationsRouter from './routes/sfxMutations';
 import sfxPublicRouter from './routes/sfxPublic';
 import streamsRouter from './routes/streams';
 import commandsRouter from './routes/commands';
@@ -162,6 +163,10 @@ app.use('/guild', requireAuth, guildRouter);
 app.use('/api', requireAuth, apiRouter);
 app.use('/', requireAuth, requireGuildContext, streamdeckKeysRouter);
 app.use('/', requireAuth, sfxRouter);
+// requireGuildContext refreshes req.session.user.accessLevel for the current guild;
+// the mutation routers gate on requireMod, which reads that level, so it must run
+// here (not just requireAuth) or a stale/missing level could bypass the Mod check.
+app.use('/', requireAuth, requireGuildContext, sfxMutationsRouter);
 app.use('/admin', requireAuth, requireGuildContext, adminRouter);
 app.use('/admin', requireAuth, requireGuildContext, streamsRouter);
 app.use('/admin', requireAuth, requireGuildContext, eventsubAdminRouter);

@@ -12,6 +12,80 @@
 
   <main class="container">
 
+    <% if (error) { %>
+    <% const errorMessages = {
+      missing_fields: 'Please fill in all required fields.',
+      invalid_id: 'The selected record is invalid.',
+      invalid_file: 'That file is not a supported audio format (mp3, ogg, wav).',
+      invalid_path: 'The file could not be stored safely.',
+      invalid_weight: 'Weight must be a whole number of 1 or more.',
+      file_too_large: `That file is too large (max ${maxUploadMb}MB).`,
+      command_taken: 'That command is already in use by another SFX trigger.',
+      add_failed: 'Failed to add the item.',
+      update_failed: 'Failed to update the item.',
+      remove_failed: 'Failed to remove the item.',
+      upload_failed: 'Failed to upload the sound file.',
+    }; %>
+    <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
+      <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
+    </div>
+    <% } %>
+
+    <% if (success) { %>
+    <% const successMessages = {
+      trigger_added: 'Trigger added.',
+      trigger_updated: 'Trigger updated.',
+      trigger_removed: 'Trigger removed.',
+      file_uploaded: 'Sound uploaded.',
+      file_updated: 'Sound updated.',
+      file_removed: 'Sound removed.',
+      category_added: 'Category added.',
+      category_updated: 'Category updated.',
+      category_removed: 'Category removed.',
+    }; %>
+    <div class="card card-alert-success" role="status" aria-live="polite" aria-atomic="true">
+      <span class="text-success">&#10003; <%= successMessages[success] || 'Done.' %></span>
+    </div>
+    <% } %>
+
+    <% if (canManage) { %>
+    <!-- ── Add Trigger ── -->
+    <section class="section">
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add SFX Trigger</span></div>
+        <div class="card-body">
+          <form method="POST" action="/sfx/trigger/add">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="form-row-wrap form-section-gap">
+              <div class="form-col-grow">
+                <label for="trigger_command" class="form-label">Command</label>
+                <input id="trigger_command" class="input full-width" type="text" name="trigger_command" placeholder="e.g. !clap" required>
+              </div>
+              <div class="form-col-grow">
+                <label for="category_id" class="form-label">Category</label>
+                <select id="category_id" class="input full-width" name="category_id">
+                  <option value="none">Uncategorised</option>
+                  <% categories.forEach(function(c) { %>
+                  <option value="<%= c.id %>"><%= c.name %></option>
+                  <% }) %>
+                </select>
+              </div>
+              <label class="input checkbox-input-label">
+                <input type="checkbox" name="hidden"> Hidden from public list
+              </label>
+            </div>
+            <div class="form-section-gap">
+              <label for="description" class="form-label">Description <span class="muted">(optional)</span></label>
+              <input id="description" class="input full-width" type="text" name="description" placeholder="Shown on the public SFX list">
+            </div>
+            <button type="submit" class="btn">Add Trigger</button>
+          </form>
+          <p class="hint hint-compact">Add sounds to a trigger by expanding it in the table below.</p>
+        </div>
+      </div>
+    </section>
+    <% } %>
+
     <!-- ── SFX Commands ── -->
     <section class="section">
       <div class="section-header">
@@ -29,12 +103,12 @@
               <th scope="col">Category</th>
               <th scope="col">Files</th>
               <th scope="col">Status</th>
-              <th scope="col"></th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
             <% triggers.forEach(function(t) { %>
-            <tr class="sfx-row<%= t.hidden ? ' row-hidden' : '' %>" data-command="<%= t.triggerCommand.toLowerCase() %>" data-category="<%= (t.categoryName || '').toLowerCase() %>">
+            <tr class="sfx-row<%= t.hidden ? ' row-hidden' : '' %>" data-trigger-id="<%= t.triggerId %>" data-command="<%= t.triggerCommand.toLowerCase() %>" data-category="<%= (t.categoryName || '').toLowerCase() %>">
               <td class="mono"><%= t.triggerCommand %></td>
               <td><% if (t.categoryName) { %><%= t.categoryName %><% } else { %><em class="muted">None</em><% } %></td>
               <td><%= t.files.length %> file<%= t.files.length !== 1 ? 's' : '' %></td>
@@ -46,30 +120,137 @@
                 <% } %>
               </td>
               <td>
-                <% if (t.files.length > 0) { %>
-                <button type="button" class="btn btn-xs btn-toggle-files" aria-label="Toggle file list">▶ Files</button>
-                <% } %>
+                <div class="actions">
+                  <button type="button" class="btn btn-xs btn-toggle-files" data-target="files-<%= t.triggerId %>" aria-controls="files-<%= t.triggerId %>" aria-expanded="false">▶ Sounds</button>
+                  <% if (canManage) { %>
+                  <button type="button" class="btn btn-xs btn-ghost btn-toggle-detail" data-target="trigger-edit-<%= t.triggerId %>" aria-controls="trigger-edit-<%= t.triggerId %>" aria-expanded="false">✏️ Edit</button>
+                  <form method="POST" action="/sfx/trigger/remove" class="inline-form-sm js-confirm-remove-trigger" data-trigger-command="<%= t.triggerCommand %>">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" name="trigger_id" value="<%= t.triggerId %>">
+                    <button type="submit" class="btn btn-danger btn-xs">Remove</button>
+                  </form>
+                  <% } %>
+                </div>
               </td>
             </tr>
-            <% if (t.files.length > 0) { %>
-            <tr class="files-row is-hidden">
+
+            <!-- Sounds (read-only for everyone; management controls for Mod+) -->
+            <tr class="files-row detail-row is-hidden" id="files-<%= t.triggerId %>" data-parent="<%= t.triggerId %>">
               <td colspan="5">
+                <% if (t.files.length > 0) { %>
                 <table class="inner-table">
-                  <thead><tr><th scope="col">File</th><th scope="col">Weight</th><th scope="col">Status</th></tr></thead>
+                  <thead><tr><th scope="col">File</th><th scope="col">Weight</th><th scope="col">Status</th><% if (canManage) { %><th scope="col">Actions</th><% } %></tr></thead>
                   <tbody>
                     <% t.files.forEach(function(f) { %>
                     <tr>
+                      <% if (canManage) { %>
+                      <td colspan="<%= canManage ? 4 : 3 %>">
+                        <form method="POST" action="/sfx/file/update" class="form-row-wrap" style="align-items:flex-end;gap:0.5rem;">
+                          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                          <input type="hidden" name="file_id" value="<%= f.id %>">
+                          <span class="mono form-col-grow"><%= f.file %></span>
+                          <label class="form-label">Weight
+                            <input class="input" type="number" name="weight" min="1" value="<%= f.weight %>" style="width:6rem;">
+                          </label>
+                          <label class="input checkbox-input-label">
+                            <input type="checkbox" name="file_hidden" <%= f.hidden ? 'checked' : '' %>> Hidden
+                          </label>
+                          <button type="submit" class="btn btn-sm">Save</button>
+                        </form>
+                      </td>
+                      <% } else { %>
                       <td class="mono"><%= f.file %></td>
                       <td><%= f.weight %></td>
                       <td><% if (f.hidden) { %><span class="badge badge-hidden">Hidden</span><% } else { %><span class="badge badge-active">Active</span><% } %></td>
+                      <% } %>
                     </tr>
+                    <% if (canManage) { %>
+                    <tr>
+                      <td colspan="4" style="padding-top:0;">
+                        <form method="POST" action="/sfx/file/remove" class="inline-form-sm js-confirm-remove-file" data-file-name="<%= f.file %>">
+                          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                          <input type="hidden" name="file_id" value="<%= f.id %>">
+                          <button type="submit" class="btn btn-danger btn-xs">Remove sound</button>
+                        </form>
+                      </td>
+                    </tr>
+                    <% } %>
                     <% }) %>
                   </tbody>
                 </table>
+                <% } else { %>
+                <p class="empty-msg empty-msg-padded">No sounds yet.</p>
+                <% } %>
+
+                <% if (canManage) { %>
+                <div class="command-edit-panel">
+                  <!-- Submitted via fetch in sfx.js with the CSRF token in an X-CSRF-Token
+                       header, so the session token is never placed in the URL (history/Referer). -->
+                  <form method="POST" action="/sfx/file/upload" enctype="multipart/form-data" class="js-sfx-upload">
+                    <input type="hidden" name="trigger_id" value="<%= t.triggerId %>">
+                    <div class="form-row-wrap form-section-gap" style="align-items:flex-end;">
+                      <div class="form-col-grow">
+                        <label class="form-label">Add sound <span class="muted">(mp3, ogg, wav — max <%= maxUploadMb %>MB)</span>
+                          <input class="input full-width" type="file" name="sound" accept=".mp3,.ogg,.wav,audio/mpeg,audio/ogg,audio/wav" required>
+                        </label>
+                      </div>
+                      <label class="form-label">Weight
+                        <input class="input" type="number" name="weight" min="1" value="1" style="width:6rem;">
+                      </label>
+                      <label class="input checkbox-input-label">
+                        <input type="checkbox" name="file_hidden"> Hidden
+                      </label>
+                      <button type="submit" class="btn">Upload</button>
+                    </div>
+                  </form>
+                </div>
+                <% } %>
+              </td>
+            </tr>
+
+            <% if (canManage) { %>
+            <!-- Edit trigger -->
+            <tr class="files-row detail-row is-hidden" id="trigger-edit-<%= t.triggerId %>" data-parent="<%= t.triggerId %>">
+              <td colspan="5">
+                <div class="command-edit-panel">
+                  <form method="POST" action="/sfx/trigger/update" class="stack-gap-md">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" name="trigger_id" value="<%= t.triggerId %>">
+                    <div class="form-row-wrap form-section-gap">
+                      <div class="form-col-grow">
+                        <label for="trigger_command_<%= t.triggerId %>" class="form-label">Command</label>
+                        <input id="trigger_command_<%= t.triggerId %>" class="input full-width" type="text" name="trigger_command" value="<%= t.triggerCommand %>" required>
+                      </div>
+                      <div class="form-col-grow">
+                        <label for="category_id_<%= t.triggerId %>" class="form-label">Category</label>
+                        <select id="category_id_<%= t.triggerId %>" class="input full-width" name="category_id">
+                          <option value="none" <%= t.categoryId === null ? 'selected' : '' %>>Uncategorised</option>
+                          <% categories.forEach(function(c) { %>
+                          <option value="<%= c.id %>" <%= t.categoryId === c.id ? 'selected' : '' %>><%= c.name %></option>
+                          <% }) %>
+                        </select>
+                      </div>
+                      <label class="input checkbox-input-label">
+                        <input type="checkbox" name="hidden" <%= t.hidden ? 'checked' : '' %>> Hidden from public list
+                      </label>
+                    </div>
+                    <div class="form-section-gap">
+                      <label for="description_<%= t.triggerId %>" class="form-label">Description <span class="muted">(optional)</span></label>
+                      <input id="description_<%= t.triggerId %>" class="input full-width" type="text" name="description" value="<%= t.description || '' %>">
+                    </div>
+                    <div class="button-row-wrap">
+                      <button type="submit" class="btn">Save Changes</button>
+                      <button type="button" class="btn btn-ghost btn-toggle-detail" data-target="trigger-edit-<%= t.triggerId %>">Cancel</button>
+                    </div>
+                  </form>
+                </div>
               </td>
             </tr>
             <% } %>
             <% }) %>
+            <% if (triggers.length === 0) { %>
+            <tr><td colspan="5" class="empty-msg">No SFX triggers configured yet.</td></tr>
+            <% } %>
           </tbody>
         </table>
         </div>
@@ -77,9 +258,59 @@
       </div>
     </section>
 
+    <% if (canManage) { %>
+    <!-- ── Categories ── -->
+    <section class="section">
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">🏷️</span><span class="card-label">Categories</span></div>
+        <div class="card-body">
+          <form method="POST" action="/sfx/category/add" class="form-row-wrap form-section-gap" style="align-items:flex-end;">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="form-col-grow">
+              <label for="category_name" class="form-label">New Category</label>
+              <input id="category_name" class="input full-width" type="text" name="name" placeholder="e.g. Reactions" required>
+            </div>
+            <button type="submit" class="btn">Add Category</button>
+          </form>
+
+          <% if (categories.length > 0) { %>
+          <table class="table" aria-label="SFX categories">
+            <thead><tr><th scope="col">Name</th><th scope="col">Actions</th></tr></thead>
+            <tbody>
+              <% categories.forEach(function(c) { %>
+              <tr>
+                <td>
+                  <form method="POST" action="/sfx/category/rename" class="form-row-wrap" style="align-items:flex-end;gap:0.5rem;">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" name="category_id" value="<%= c.id %>">
+                    <input class="input form-col-grow" type="text" name="name" value="<%= c.name %>" aria-label="Category name" required>
+                    <button type="submit" class="btn btn-sm">Rename</button>
+                  </form>
+                </td>
+                <td>
+                  <form method="POST" action="/sfx/category/remove" class="inline-form-sm js-confirm-remove-category" data-category-name="<%= c.name %>">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" name="category_id" value="<%= c.id %>">
+                    <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+                  </form>
+                </td>
+              </tr>
+              <% }) %>
+            </tbody>
+          </table>
+          <p class="hint hint-compact">Removing a category leaves its triggers uncategorised — it does not delete them.</p>
+          <% } else { %>
+          <p class="empty-msg empty-msg-padded">No categories yet.</p>
+          <% } %>
+        </div>
+      </div>
+    </section>
+    <% } %>
+
   </main>
 
   <%- include('partials/pwa-register') %>
+  <script src="/utils.js"></script>
   <script src="/sfx.js"></script>
 </body>
 </html>

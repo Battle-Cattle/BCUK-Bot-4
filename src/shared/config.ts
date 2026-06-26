@@ -35,6 +35,11 @@ export const DB_PASSWORD = require_env('DB_PASSWORD');
 export const DB_NAME = require_env('DB_NAME');
 
 export const SFX_FOLDER = process.env.SFX_FOLDER ?? './sfx';
+// Use Number (not parseInt) so malformed values like `1024MB` or `1.5` fall back
+// to the safe default instead of being silently truncated to a valid-looking cap.
+const _SFX_MAX_FILE_MB = Number(process.env.SFX_MAX_FILE_MB ?? '10');
+export const SFX_MAX_FILE_MB =
+  Number.isInteger(_SFX_MAX_FILE_MB) && _SFX_MAX_FILE_MB > 0 ? _SFX_MAX_FILE_MB : 10;
 export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER ?? './overlay-videos';
 const _COOLDOWN = parseInt(process.env.GLOBAL_COOLDOWN_MS ?? '3000', 10);
 if (Number.isNaN(_COOLDOWN)) throw new Error('Invalid GLOBAL_COOLDOWN_MS: must be a number');
