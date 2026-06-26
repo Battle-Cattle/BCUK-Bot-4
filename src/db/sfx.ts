@@ -122,17 +122,30 @@ export async function createCategory(name: string): Promise<number> {
  * Rename an existing SFX category.
  * @param id Category id.
  * @param name New category name.
+ * @returns true if a row was updated, false if no category with that id existed
+ *   (so a stale id can be surfaced as `invalid_id` rather than a false success).
  */
-export async function renameCategory(id: number, name: string): Promise<void> {
-  await getPool().execute(`UPDATE sfxcategory SET name = ? WHERE id = ?`, [name, id]);
+export async function renameCategory(id: number, name: string): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    `UPDATE sfxcategory SET name = ? WHERE id = ?`,
+    [name, id],
+  );
+  return result.affectedRows > 0;
 }
 
 /**
  * Delete an SFX category. Triggers/sounds referencing it keep working — the FK
  * is ON DELETE SET NULL, so their category_id becomes NULL (uncategorised).
+ * @param id Category id.
+ * @returns true if a row was deleted, false if no category with that id existed
+ *   (so a stale id can be surfaced as `invalid_id` rather than a false success).
  */
-export async function deleteCategory(id: number): Promise<void> {
-  await getPool().execute(`DELETE FROM sfxcategory WHERE id = ?`, [id]);
+export async function deleteCategory(id: number): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    `DELETE FROM sfxcategory WHERE id = ?`,
+    [id],
+  );
+  return result.affectedRows > 0;
 }
 
 /**
@@ -163,6 +176,9 @@ export async function createSfxTrigger(
  * @param categoryId Category id, or null for uncategorised.
  * @param description Optional public description, or null.
  * @param hidden Whether the trigger is hidden from the public listing.
+ * @returns true if a row was updated, false if no trigger with that id existed
+ *   (so a stale id can be surfaced as `invalid_id` rather than a false success,
+ *   mirroring `deleteSfxTrigger`).
  */
 export async function updateSfxTrigger(
   id: bigint,
@@ -170,13 +186,14 @@ export async function updateSfxTrigger(
   categoryId: number | null,
   description: string | null,
   hidden: boolean,
-): Promise<void> {
-  await getPool().execute(
+): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `UPDATE sfxtrigger
      SET trigger_command = ?, category_id = ?, description = ?, hidden = ?
      WHERE id = ?`,
     [command, categoryId, description, hidden ? 1 : 0, id.toString()],
   );
+  return result.affectedRows > 0;
 }
 
 /**
@@ -185,26 +202,32 @@ export async function updateSfxTrigger(
  * them from disk, or null if no trigger with that id existed (so a stale id can
  * be surfaced as `invalid_id` rather than reported as a successful delete),
  * mirroring `deleteSfxFile`.
+ *
+ * Locks the trigger row with `SELECT … FOR UPDATE` before snapshotting its files,
+ * so a concurrent `addSfxFile` can't insert a new sound between the snapshot and
+ * the child `DELETE` — that row would be removed from the DB but its filename
+ * never returned, orphaning the file on disk.
  * @param id Trigger id.
  */
 export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } | null> {
   const conn = await getPool().getConnection();
   try {
     await conn.beginTransaction();
+    const [triggerRows] = await conn.execute<mysql.RowDataPacket[]>(
+      `SELECT id FROM sfxtrigger WHERE id = ? FOR UPDATE`,
+      [id.toString()],
+    );
+    if (triggerRows.length === 0) {
+      await conn.rollback();
+      return null;
+    }
     const [rows] = await conn.execute<mysql.RowDataPacket[]>(
       `SELECT file FROM sfx WHERE trigger_id = ?`,
       [id.toString()],
     );
     const files = rows.map((r) => r.file as string);
     await conn.execute(`DELETE FROM sfx WHERE trigger_id = ?`, [id.toString()]);
-    const [result] = await conn.execute<mysql.ResultSetHeader>(
-      `DELETE FROM sfxtrigger WHERE id = ?`,
-      [id.toString()],
-    );
-    if (result.affectedRows === 0) {
-      await conn.rollback();
-      return null;
-    }
+    await conn.execute(`DELETE FROM sfxtrigger WHERE id = ?`, [id.toString()]);
     await conn.commit();
     return { files };
   } catch (err) {
@@ -240,13 +263,15 @@ export async function addSfxFile(
  * @param id sfx row id.
  * @param weight Weighted-random selection weight (>= 1).
  * @param hidden Whether the file is hidden from the public listing.
+ * @returns true if a row was updated, false if no sfx row with that id existed
+ *   (so a stale id can be surfaced as `invalid_id` rather than a false success).
  */
-export async function updateSfxFile(id: number, weight: number, hidden: boolean): Promise<void> {
-  await getPool().execute(`UPDATE sfx SET weight = ?, hidden = ? WHERE id = ?`, [
-    weight,
-    hidden ? 1 : 0,
-    id,
-  ]);
+export async function updateSfxFile(id: number, weight: number, hidden: boolean): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    `UPDATE sfx SET weight = ?, hidden = ? WHERE id = ?`,
+    [weight, hidden ? 1 : 0, id],
+  );
+  return result.affectedRows > 0;
 }
 
 /**

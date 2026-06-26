@@ -25,8 +25,18 @@ describe('detectAudioType', () => {
     expect(detectAudioType(Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00]))).toBe('mp3');
   });
 
-  it('detects MP3 by MPEG frame sync', () => {
+  it('detects MP3 by a valid MPEG frame sync', () => {
     expect(detectAudioType(Buffer.from([0xff, 0xfb, 0x90, 0x00]))).toBe('mp3');
+  });
+
+  it('rejects a frame-sync false positive with a reserved layer (0xff 0xe0 0x00 0x00)', () => {
+    // Only the 11-bit sync matches; the version/layer/bitrate/sample-rate bits are
+    // all-zero (reserved), so this must not be accepted as MP3.
+    expect(detectAudioType(Buffer.from([0xff, 0xe0, 0x00, 0x00]))).toBeNull();
+  });
+
+  it('rejects a frame-sync header that is too short to validate', () => {
+    expect(detectAudioType(Buffer.from([0xff, 0xfb]))).toBeNull();
   });
 
   it('detects OGG by OggS signature', () => {

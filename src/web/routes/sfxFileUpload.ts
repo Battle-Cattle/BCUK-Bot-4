@@ -32,7 +32,7 @@ export const upload = multer({
  * client-supplied MIME type. Supports the three accepted formats.
  * - WAV: `RIFF` at offset 0 and `WAVE` at offset 8
  * - OGG: `OggS` at offset 0
- * - MP3: `ID3` tag at offset 0, or an MPEG frame-sync (0xFF followed by 0b111xxxxx)
+ * - MP3: `ID3` tag at offset 0, or a valid MPEG audio frame header (see below)
  */
 export function detectAudioType(buf: Buffer): 'mp3' | 'ogg' | 'wav' | null {
   if (
@@ -48,8 +48,23 @@ export function detectAudioType(buf: Buffer): 'mp3' | 'ogg' | 'wav' | null {
   if (buf.length >= 3 && buf.subarray(0, 3).equals(Buffer.from([0x49, 0x44, 0x33]))) {
     return 'mp3';
   }
-  if (buf.length >= 2 && buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) {
-    return 'mp3';
+  // MPEG audio frame: 11-bit sync (0xFF then top 3 bits of byte 1) followed by a
+  // valid version/layer/bitrate/sample-rate. Validate the full 4-byte header and
+  // reject the reserved bit combinations so junk like `FF E0 00 00` — which only
+  // matches the sync — isn't mistaken for MP3.
+  if (buf.length >= 4 && buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) {
+    const versionBits = (buf[1] >> 3) & 0x03; // 0x01 = reserved MPEG version
+    const layerBits = (buf[1] >> 1) & 0x03; // 0x00 = reserved layer
+    const bitrateBits = (buf[2] >> 4) & 0x0f; // 0x0f = bad/invalid bitrate
+    const sampleRateBits = (buf[2] >> 2) & 0x03; // 0x03 = reserved sample rate
+    if (
+      versionBits !== 0x01 &&
+      layerBits !== 0x00 &&
+      bitrateBits !== 0x0f &&
+      sampleRateBits !== 0x03
+    ) {
+      return 'mp3';
+    }
   }
   return null;
 }
@@ -196,6 +211,14 @@ function uploadSound(req: Request, res: Response, next: NextFunction): void {
 // csrfProtection runs BEFORE uploadSound so a bad token is rejected before Multer
 // buffers the file. The client (sfx.js) sends the token in an X-CSRF-Token header
 // — available before body parsing and never placed in the URL.
+/**
+ * POST /sfx/file/upload — validate and store an uploaded sound, then insert its
+ * DB row. Rejects a missing/invalid trigger id, file, or weight with the matching
+ * error code, stores the buffer via `storeUploadedSound`, persists the row via
+ * `persistUploadedSound`, and redirects `success=file_uploaded` on success.
+ * @param req Express request; reads `trigger_id`, `weight`, `file_hidden` and `req.file`.
+ * @param res Express response; always issues a redirect.
+ */
 router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (req, res) => {
   const triggerId = parsePositiveIntId(req.body.trigger_id);
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');

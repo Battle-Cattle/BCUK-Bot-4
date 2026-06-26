@@ -9,6 +9,14 @@ import { removeSfxFiles, parseWeight } from './sfxMutationsShared';
 const log = createLogger('Web');
 const router = Router();
 
+/**
+ * POST /sfx/file/update — update a sound file's weight and hidden flag. Rejects a
+ * missing/invalid id or weight with `invalid_id`/`invalid_weight`, surfaces a
+ * stale id (no row updated) as `invalid_id`, and redirects `success=file_updated`
+ * on success.
+ * @param req Express request; reads `file_id`, `weight`, `file_hidden` from the body.
+ * @param res Express response; always issues a redirect.
+ */
 router.post('/sfx/file/update', requireMod, csrfProtection, async (req, res) => {
   const fileId = parsePositiveIntId(req.body.file_id);
   if (fileId === null) return res.redirect('/sfx?error=invalid_id');
@@ -18,7 +26,8 @@ router.post('/sfx/file/update', requireMod, csrfProtection, async (req, res) => 
   const hidden = req.body.file_hidden === 'on';
 
   try {
-    await updateSfxFile(fileId, weight, hidden);
+    const updated = await updateSfxFile(fileId, weight, hidden);
+    if (!updated) return res.redirect('/sfx?error=invalid_id');
   } catch (err) {
     log.error('Update SFX file error:', err);
     return res.redirect('/sfx?error=update_failed');
@@ -27,13 +36,21 @@ router.post('/sfx/file/update', requireMod, csrfProtection, async (req, res) => 
   res.redirect('/sfx?success=file_updated');
 });
 
+/**
+ * POST /sfx/file/remove — delete a sound file row and its on-disk file. Rejects a
+ * missing/invalid id with `invalid_id`, surfaces a stale id (no row deleted) as
+ * `invalid_id`, and redirects `success=file_removed` on success.
+ * @param req Express request; reads `file_id` from the body.
+ * @param res Express response; always issues a redirect.
+ */
 router.post('/sfx/file/remove', requireMod, csrfProtection, async (req, res) => {
   const fileId = parsePositiveIntId(req.body.file_id);
   if (fileId === null) return res.redirect('/sfx?error=invalid_id');
 
   try {
     const file = await deleteSfxFile(fileId);
-    if (file) await removeSfxFiles([file]);
+    if (file === null) return res.redirect('/sfx?error=invalid_id');
+    await removeSfxFiles([file]);
   } catch (err) {
     log.error('Remove SFX file error:', err);
     return res.redirect('/sfx?error=remove_failed');

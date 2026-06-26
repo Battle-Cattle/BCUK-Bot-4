@@ -5,7 +5,11 @@ const sfxTable    = document.getElementById('sfx-table');
 const noResults   = document.getElementById('no-results');
 const cmdCount    = document.getElementById('cmd-count');
 
-/** Collapse every expandable detail row belonging to a trigger and reset its toggle buttons. */
+/**
+ * Collapse every expandable detail row belonging to a trigger and reset its toggle buttons.
+ * @param {string} triggerId The trigger id whose detail rows should be collapsed.
+ * @returns {void}
+ */
 function collapseDetailRows(triggerId) {
   document.querySelectorAll('.detail-row[data-parent="' + triggerId + '"]').forEach((row) => {
     row.classList.add('is-hidden');
@@ -50,6 +54,7 @@ if (searchInput && sfxTable) {
  * Toggle the detail row targeted by a clicked `.btn-toggle-files`/`.btn-toggle-detail`
  * button, keeping the opener's aria-expanded state and label in sync.
  * @param {Event} event The delegated click event.
+ * @returns {void}
  */
 document.addEventListener('click', (event) => {
   const target = event.target;
@@ -86,6 +91,7 @@ document.addEventListener('click', (event) => {
  * Submit a `.js-sfx-upload` form via fetch with the CSRF token in an X-CSRF-Token
  * header (never the URL), then navigate to the server's redirect target.
  * @param {Event} event The delegated submit event.
+ * @returns {void}
  */
 document.addEventListener('submit', (event) => {
   const form = event.target;
@@ -123,6 +129,7 @@ document.addEventListener('submit', (event) => {
  * Intercept submits of the destructive-action forms (remove trigger/file/category)
  * and require a confirmation prompt before they proceed.
  * @param {Event} event The delegated submit event.
+ * @returns {void}
  */
 document.addEventListener('submit', (event) => {
   if (confirmSubmit(event, 'js-confirm-remove-trigger', (t) =>

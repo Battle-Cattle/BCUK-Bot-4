@@ -231,18 +231,32 @@ describe('categories', () => {
     expect(pool.execute.mock.calls[0][1]).toEqual(['Memes']);
   });
 
-  it('renameCategory passes name then id', async () => {
-    const pool = makeResultPool();
+  it('renameCategory passes name then id and returns true when a row matched', async () => {
+    const pool = makeResultPool({ affectedRows: 1 });
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await renameCategory(3, 'Renamed');
+    const ok = await renameCategory(3, 'Renamed');
+    expect(ok).toBe(true);
     expect(pool.execute.mock.calls[0][1]).toEqual(['Renamed', 3]);
   });
 
-  it('deleteCategory passes the id', async () => {
-    const pool = makeResultPool();
+  it('renameCategory returns false when no row matched', async () => {
+    const pool = makeResultPool({ affectedRows: 0 });
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await deleteCategory(4);
+    expect(await renameCategory(999, 'Nope')).toBe(false);
+  });
+
+  it('deleteCategory passes the id and returns true when a row matched', async () => {
+    const pool = makeResultPool({ affectedRows: 1 });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const ok = await deleteCategory(4);
+    expect(ok).toBe(true);
     expect(pool.execute.mock.calls[0][1]).toEqual([4]);
+  });
+
+  it('deleteCategory returns false when no row matched', async () => {
+    const pool = makeResultPool({ affectedRows: 0 });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await deleteCategory(999)).toBe(false);
   });
 });
 
@@ -266,18 +280,26 @@ describe('createSfxTrigger', () => {
 });
 
 describe('updateSfxTrigger', () => {
-  it('passes fields with id stringified last', async () => {
-    const pool = makeResultPool();
+  it('passes fields with id stringified last and returns true when a row matched', async () => {
+    const pool = makeResultPool({ affectedRows: 1 });
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await updateSfxTrigger(5n, '!clap', 2, 'desc', false);
+    const ok = await updateSfxTrigger(5n, '!clap', 2, 'desc', false);
+    expect(ok).toBe(true);
     expect(pool.execute.mock.calls[0][1]).toEqual(['!clap', 2, 'desc', 0, '5']);
+  });
+
+  it('returns false when no row matched (stale id)', async () => {
+    const pool = makeResultPool({ affectedRows: 0 });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await updateSfxTrigger(999n, '!clap', null, null, false)).toBe(false);
   });
 });
 
 describe('deleteSfxTrigger', () => {
-  it('returns the files of the trigger and deletes within a transaction', async () => {
+  it('locks the trigger row, returns its files and deletes within a transaction', async () => {
     const pool = makeTxPool();
     pool._conn.execute
+      .mockResolvedValueOnce([[{ id: '7' }], []]) // SELECT id FOR UPDATE
       .mockResolvedValueOnce([[{ file: 'a.mp3' }, { file: 'b.mp3' }], []]) // SELECT files
       .mockResolvedValueOnce([{ affectedRows: 2 }, []]) // DELETE sfx
       .mockResolvedValueOnce([{ affectedRows: 1 }, []]); // DELETE trigger
@@ -285,16 +307,15 @@ describe('deleteSfxTrigger', () => {
 
     const result = await deleteSfxTrigger(7n);
     expect(result).toEqual({ files: ['a.mp3', 'b.mp3'] });
+    // The locking read must run first, before the file snapshot.
+    expect(pool._conn.execute.mock.calls[0][0]).toContain('FOR UPDATE');
     expect(pool._conn.commit).toHaveBeenCalled();
     expect(pool._conn.release).toHaveBeenCalled();
   });
 
-  it('rolls back and returns null when no trigger row was deleted', async () => {
+  it('rolls back and returns null when the trigger row does not exist', async () => {
     const pool = makeTxPool();
-    pool._conn.execute
-      .mockResolvedValueOnce([[], []]) // SELECT files (none)
-      .mockResolvedValueOnce([{ affectedRows: 0 }, []]) // DELETE sfx
-      .mockResolvedValueOnce([{ affectedRows: 0 }, []]); // DELETE trigger — missing row
+    pool._conn.execute.mockResolvedValueOnce([[], []]); // SELECT id FOR UPDATE — missing row
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     const result = await deleteSfxTrigger(7n);
@@ -302,6 +323,8 @@ describe('deleteSfxTrigger', () => {
     expect(pool._conn.rollback).toHaveBeenCalled();
     expect(pool._conn.commit).not.toHaveBeenCalled();
     expect(pool._conn.release).toHaveBeenCalled();
+    // No child queries should run once the lock finds no trigger.
+    expect(pool._conn.execute).toHaveBeenCalledTimes(1);
   });
 
   it('rolls back and rethrows on error', async () => {
@@ -328,11 +351,18 @@ describe('addSfxFile', () => {
 });
 
 describe('updateSfxFile', () => {
-  it('passes weight, hidden and id', async () => {
-    const pool = makeResultPool();
+  it('passes weight, hidden and id and returns true when a row matched', async () => {
+    const pool = makeResultPool({ affectedRows: 1 });
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await updateSfxFile(11, 3, true);
+    const ok = await updateSfxFile(11, 3, true);
+    expect(ok).toBe(true);
     expect(pool.execute.mock.calls[0][1]).toEqual([3, 1, 11]);
+  });
+
+  it('returns false when no row matched (stale id)', async () => {
+    const pool = makeResultPool({ affectedRows: 0 });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await updateSfxFile(999, 3, true)).toBe(false);
   });
 });
 

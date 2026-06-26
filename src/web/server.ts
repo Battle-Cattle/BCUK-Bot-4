@@ -163,7 +163,10 @@ app.use('/guild', requireAuth, guildRouter);
 app.use('/api', requireAuth, apiRouter);
 app.use('/', requireAuth, requireGuildContext, streamdeckKeysRouter);
 app.use('/', requireAuth, sfxRouter);
-app.use('/', requireAuth, sfxMutationsRouter);
+// requireGuildContext refreshes req.session.user.accessLevel for the current guild;
+// the mutation routers gate on requireMod, which reads that level, so it must run
+// here (not just requireAuth) or a stale/missing level could bypass the Mod check.
+app.use('/', requireAuth, requireGuildContext, sfxMutationsRouter);
 app.use('/admin', requireAuth, requireGuildContext, adminRouter);
 app.use('/admin', requireAuth, requireGuildContext, streamsRouter);
 app.use('/admin', requireAuth, requireGuildContext, eventsubAdminRouter);

@@ -29,7 +29,8 @@ router.post('/sfx/category/rename', requireMod, csrfProtection, async (req, res)
   if (!name) return res.redirect('/sfx?error=missing_fields');
 
   try {
-    await renameCategory(id, name);
+    const renamed = await renameCategory(id, name);
+    if (!renamed) return res.redirect('/sfx?error=invalid_id');
   } catch (err) {
     log.error('Rename SFX category error:', err);
     return res.redirect('/sfx?error=update_failed');
@@ -43,7 +44,8 @@ router.post('/sfx/category/remove', requireMod, csrfProtection, async (req, res)
   if (id === null) return res.redirect('/sfx?error=invalid_id');
 
   try {
-    await deleteCategory(id);
+    const removed = await deleteCategory(id);
+    if (!removed) return res.redirect('/sfx?error=invalid_id');
   } catch (err) {
     log.error('Remove SFX category error:', err);
     return res.redirect('/sfx?error=remove_failed');

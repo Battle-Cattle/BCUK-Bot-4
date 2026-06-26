@@ -72,7 +72,8 @@ router.post('/sfx/trigger/update', requireMod, csrfProtection, async (req, res) 
     if (existing && existing.id !== BigInt(triggerId)) {
       return res.redirect('/sfx?error=command_taken');
     }
-    await updateSfxTrigger(BigInt(triggerId), command, categoryId, description, hidden);
+    const updated = await updateSfxTrigger(BigInt(triggerId), command, categoryId, description, hidden);
+    if (!updated) return res.redirect('/sfx?error=invalid_id');
   } catch (err) {
     if (isMysqlDuplicateEntryError(err)) return res.redirect('/sfx?error=command_taken');
     log.error('Update SFX trigger error:', err);

@@ -92,14 +92,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(findTrigger).mockResolvedValue(null);
   vi.mocked(createSfxTrigger).mockResolvedValue(1n);
-  vi.mocked(updateSfxTrigger).mockResolvedValue(undefined);
+  vi.mocked(updateSfxTrigger).mockResolvedValue(true);
   vi.mocked(deleteSfxTrigger).mockResolvedValue({ files: [] });
   vi.mocked(addSfxFile).mockResolvedValue(1);
-  vi.mocked(updateSfxFile).mockResolvedValue(undefined);
+  vi.mocked(updateSfxFile).mockResolvedValue(true);
   vi.mocked(deleteSfxFile).mockResolvedValue(null);
   vi.mocked(createCategory).mockResolvedValue(1);
-  vi.mocked(renameCategory).mockResolvedValue(undefined);
-  vi.mocked(deleteCategory).mockResolvedValue(undefined);
+  vi.mocked(renameCategory).mockResolvedValue(true);
+  vi.mocked(deleteCategory).mockResolvedValue(true);
   vi.mocked(requireMod).mockImplementation((_req: any, _res: any, next: any) => next());
   vi.mocked(fs.existsSync).mockReturnValue(false);
   vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined as any);
@@ -202,6 +202,14 @@ describe('POST /sfx/trigger/update', () => {
       .send('trigger_id=5&trigger_command=!clap&category_id=abc');
     expect(res.headers.location).toBe('/sfx?error=invalid_id');
     expect(vi.mocked(updateSfxTrigger)).not.toHaveBeenCalled();
+  });
+
+  it('redirects with invalid_id when no trigger row was updated (stale id)', async () => {
+    vi.mocked(updateSfxTrigger).mockResolvedValue(false);
+    const res = await supertest(buildApp())
+      .post('/sfx/trigger/update')
+      .send('trigger_id=5&trigger_command=!clap');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
   });
 
   it('redirects with update_failed on an unexpected DB error', async () => {
@@ -415,6 +423,12 @@ describe('POST /sfx/file/update', () => {
     expect(vi.mocked(updateSfxFile)).not.toHaveBeenCalled();
   });
 
+  it('redirects with invalid_id when no file row was updated (stale id)', async () => {
+    vi.mocked(updateSfxFile).mockResolvedValue(false);
+    const res = await supertest(buildApp()).post('/sfx/file/update').send('file_id=11&weight=2');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+  });
+
   it('redirects with update_failed on an unexpected DB error', async () => {
     vi.mocked(updateSfxFile).mockRejectedValue(new Error('boom'));
     const res = await supertest(buildApp()).post('/sfx/file/update').send('file_id=11&weight=2');
@@ -435,10 +449,10 @@ describe('POST /sfx/file/remove', () => {
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalled();
   });
 
-  it('skips disk removal when the row did not exist', async () => {
+  it('redirects with invalid_id and skips disk removal when the row did not exist', async () => {
     vi.mocked(deleteSfxFile).mockResolvedValue(null);
     const res = await supertest(buildApp()).post('/sfx/file/remove').send('file_id=11');
-    expect(res.headers.location).toBe('/sfx?success=file_removed');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
     expect(vi.mocked(fs.promises.rm)).not.toHaveBeenCalled();
   });
 
@@ -481,6 +495,18 @@ describe('category routes', () => {
     vi.mocked(createCategory).mockRejectedValue(new Error('boom'));
     const res = await supertest(buildApp()).post('/sfx/category/add').send('name=Reactions');
     expect(res.headers.location).toBe('/sfx?error=add_failed');
+  });
+
+  it('redirects rename with invalid_id when no category row matched (stale id)', async () => {
+    vi.mocked(renameCategory).mockResolvedValue(false);
+    const res = await supertest(buildApp()).post('/sfx/category/rename').send('category_id=3&name=Alerts');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+  });
+
+  it('redirects remove with invalid_id when no category row matched (stale id)', async () => {
+    vi.mocked(deleteCategory).mockResolvedValue(false);
+    const res = await supertest(buildApp()).post('/sfx/category/remove').send('category_id=3');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
   });
 
   it('redirects with update_failed when renameCategory throws', async () => {

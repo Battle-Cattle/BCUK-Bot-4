@@ -191,7 +191,7 @@
                     <div class="form-row-wrap form-section-gap" style="align-items:flex-end;">
                       <div class="form-col-grow">
                         <label class="form-label">Add sound <span class="muted">(mp3, ogg, wav — max <%= maxUploadMb %>MB)</span>
-                          <input class="input full-width" type="file" name="sound" accept="audio/*" required>
+                          <input class="input full-width" type="file" name="sound" accept=".mp3,.ogg,.wav,audio/mpeg,audio/ogg,audio/wav" required>
                         </label>
                       </div>
                       <label class="form-label">Weight
@@ -283,7 +283,7 @@
                   <form method="POST" action="/sfx/category/rename" class="form-row-wrap" style="align-items:flex-end;gap:0.5rem;">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <input type="hidden" name="category_id" value="<%= c.id %>">
-                    <input class="input form-col-grow" type="text" name="name" value="<%= c.name %>" required>
+                    <input class="input form-col-grow" type="text" name="name" value="<%= c.name %>" aria-label="Category name" required>
                     <button type="submit" class="btn btn-sm">Rename</button>
                   </form>
                 </td>
