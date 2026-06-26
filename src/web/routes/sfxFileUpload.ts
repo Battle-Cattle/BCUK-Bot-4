@@ -28,6 +28,20 @@ export const upload = multer({
 });
 
 /**
+ * True if `buf` starts with a complete, well-formed 10-byte ID3v2 header:
+ * the "ID3" tag, a version byte that isn't the reserved 0xFF, and a syncsafe
+ * size (each of the 4 size bytes has its top bit clear). Checking the full
+ * header — not just the 3-byte tag — avoids misidentifying truncated/junk
+ * payloads as MP3.
+ */
+function isValidId3Header(buf: Buffer): boolean {
+  if (buf.length < 10) return false;
+  if (!buf.subarray(0, 3).equals(Buffer.from([0x49, 0x44, 0x33]))) return false;
+  if (buf[3] === 0xff || buf[4] === 0xff) return false;
+  return (buf[6] & 0x80) === 0 && (buf[7] & 0x80) === 0 && (buf[8] & 0x80) === 0 && (buf[9] & 0x80) === 0;
+}
+
+/**
  * Detect an audio file's type from its magic bytes, independent of the
  * client-supplied MIME type. Supports the three accepted formats.
  * - WAV: `RIFF` at offset 0 and `WAVE` at offset 8
@@ -46,19 +60,7 @@ export function detectAudioType(buf: Buffer): 'mp3' | 'ogg' | 'wav' | null {
   if (buf.length >= 4 && buf.subarray(0, 4).equals(Buffer.from([0x4f, 0x67, 0x67, 0x53]))) {
     return 'ogg';
   }
-  // ID3v2 header: "ID3" tag, version byte != 0xFF, and a syncsafe size (each of
-  // the 4 size bytes has its top bit clear). Checking the full 10-byte header
-  // — not just the 3-byte tag — avoids misidentifying truncated/junk payloads.
-  if (
-    buf.length >= 10 &&
-    buf.subarray(0, 3).equals(Buffer.from([0x49, 0x44, 0x33])) &&
-    buf[3] !== 0xff &&
-    buf[4] !== 0xff &&
-    (buf[6] & 0x80) === 0 &&
-    (buf[7] & 0x80) === 0 &&
-    (buf[8] & 0x80) === 0 &&
-    (buf[9] & 0x80) === 0
-  ) {
+  if (isValidId3Header(buf)) {
     return 'mp3';
   }
   // MPEG audio frame: 11-bit sync (0xFF then top 3 bits of byte 1) followed by a
