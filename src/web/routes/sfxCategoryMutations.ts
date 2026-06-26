@@ -8,6 +8,7 @@ import { normalizeRequiredText, parsePositiveIntId } from './shared';
 const log = createLogger('Web');
 const router = Router();
 
+/** Create a new SFX category from the `name` form field, then redirect back to `/sfx`. */
 router.post('/sfx/category/add', requireMod, csrfProtection, async (req, res) => {
   const name = normalizeRequiredText(req.body.name);
   if (!name) return res.redirect('/sfx?error=missing_fields');
@@ -22,6 +23,7 @@ router.post('/sfx/category/add', requireMod, csrfProtection, async (req, res) =>
   res.redirect('/sfx?success=category_added');
 });
 
+/** Rename the SFX category identified by `category_id` to the `name` form field, then redirect back to `/sfx`. */
 router.post('/sfx/category/rename', requireMod, csrfProtection, async (req, res) => {
   const id = parsePositiveIntId(req.body.category_id);
   const name = normalizeRequiredText(req.body.name);
@@ -39,6 +41,7 @@ router.post('/sfx/category/rename', requireMod, csrfProtection, async (req, res)
   res.redirect('/sfx?success=category_updated');
 });
 
+/** Delete the SFX category identified by `category_id`, then redirect back to `/sfx`. */
 router.post('/sfx/category/remove', requireMod, csrfProtection, async (req, res) => {
   const id = parsePositiveIntId(req.body.category_id);
   if (id === null) return res.redirect('/sfx?error=invalid_id');

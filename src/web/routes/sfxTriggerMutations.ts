@@ -36,6 +36,7 @@ function parseCategoryId(value: unknown): number | null | undefined {
   return parsed === null ? undefined : parsed;
 }
 
+/** Create a new SFX trigger from the form fields (command, category, description, hidden), then redirect back to `/sfx`. */
 router.post('/sfx/trigger/add', requireMod, csrfProtection, async (req, res) => {
   const command = normalizeSingleTokenRequiredText(req.body.trigger_command);
   if (!command) return res.redirect('/sfx?error=missing_fields');
@@ -57,6 +58,7 @@ router.post('/sfx/trigger/add', requireMod, csrfProtection, async (req, res) => 
   res.redirect('/sfx?success=trigger_added');
 });
 
+/** Update the SFX trigger identified by `trigger_id` with the submitted form fields, then redirect back to `/sfx`. */
 router.post('/sfx/trigger/update', requireMod, csrfProtection, async (req, res) => {
   const triggerId = parsePositiveBigIntId(req.body.trigger_id);
   const command = normalizeSingleTokenRequiredText(req.body.trigger_command);
@@ -84,6 +86,7 @@ router.post('/sfx/trigger/update', requireMod, csrfProtection, async (req, res) 
   res.redirect('/sfx?success=trigger_updated');
 });
 
+/** Delete the SFX trigger identified by `trigger_id` and its sound files (DB rows and disk files), then redirect back to `/sfx`. */
 router.post('/sfx/trigger/remove', requireMod, csrfProtection, async (req, res) => {
   const triggerId = parsePositiveBigIntId(req.body.trigger_id);
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
