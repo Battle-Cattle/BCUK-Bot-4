@@ -122,15 +122,23 @@ export async function createCategory(name: string): Promise<number> {
  * Rename an existing SFX category.
  * @param id Category id.
  * @param name New category name.
- * @returns true if a row was updated, false if no category with that id existed
- *   (so a stale id can be surfaced as `invalid_id` rather than a false success).
+ * @returns true if the category exists (whether or not the name actually changed),
+ *   false if no category with that id existed (so a stale id can be surfaced as
+ *   `invalid_id` rather than a false success). `affectedRows` is 0 for a no-op
+ *   update (new name === old name), so a 0 falls back to an existence check
+ *   rather than being treated as "not found".
  */
 export async function renameCategory(id: number, name: string): Promise<boolean> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `UPDATE sfxcategory SET name = ? WHERE id = ?`,
     [name, id],
   );
-  return result.affectedRows > 0;
+  if (result.affectedRows > 0) return true;
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT id FROM sfxcategory WHERE id = ?`,
+    [id],
+  );
+  return rows.length > 0;
 }
 
 /**
@@ -176,9 +184,11 @@ export async function createSfxTrigger(
  * @param categoryId Category id, or null for uncategorised.
  * @param description Optional public description, or null.
  * @param hidden Whether the trigger is hidden from the public listing.
- * @returns true if a row was updated, false if no trigger with that id existed
- *   (so a stale id can be surfaced as `invalid_id` rather than a false success,
- *   mirroring `deleteSfxTrigger`).
+ * @returns true if the trigger exists (whether or not any field actually changed),
+ *   false if no trigger with that id existed (so a stale id can be surfaced as
+ *   `invalid_id` rather than a false success, mirroring `deleteSfxTrigger`).
+ *   `affectedRows` is 0 for a no-op update (all fields unchanged), so a 0 falls
+ *   back to an existence check rather than being treated as "not found".
  */
 export async function updateSfxTrigger(
   id: bigint,
@@ -193,7 +203,12 @@ export async function updateSfxTrigger(
      WHERE id = ?`,
     [command, categoryId, description, hidden ? 1 : 0, id.toString()],
   );
-  return result.affectedRows > 0;
+  if (result.affectedRows > 0) return true;
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT id FROM sfxtrigger WHERE id = ?`,
+    [id.toString()],
+  );
+  return rows.length > 0;
 }
 
 /**
@@ -263,15 +278,20 @@ export async function addSfxFile(
  * @param id sfx row id.
  * @param weight Weighted-random selection weight (>= 1).
  * @param hidden Whether the file is hidden from the public listing.
- * @returns true if a row was updated, false if no sfx row with that id existed
- *   (so a stale id can be surfaced as `invalid_id` rather than a false success).
+ * @returns true if the sfx row exists (whether or not weight/hidden actually
+ *   changed), false if no sfx row with that id existed (so a stale id can be
+ *   surfaced as `invalid_id` rather than a false success). `affectedRows` is 0
+ *   for a no-op update (weight and hidden unchanged), so a 0 falls back to an
+ *   existence check rather than being treated as "not found".
  */
 export async function updateSfxFile(id: number, weight: number, hidden: boolean): Promise<boolean> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `UPDATE sfx SET weight = ?, hidden = ? WHERE id = ?`,
     [weight, hidden ? 1 : 0, id],
   );
-  return result.affectedRows > 0;
+  if (result.affectedRows > 0) return true;
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT id FROM sfx WHERE id = ?`, [id]);
+  return rows.length > 0;
 }
 
 /**

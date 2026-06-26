@@ -239,10 +239,22 @@ describe('categories', () => {
     expect(pool.execute.mock.calls[0][1]).toEqual(['Renamed', 3]);
   });
 
-  it('renameCategory returns false when no row matched', async () => {
-    const pool = makeResultPool({ affectedRows: 0 });
+  it('renameCategory returns false when no row matched and the id does not exist', async () => {
+    const pool = { execute: vi.fn() };
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]) // UPDATE
+      .mockResolvedValueOnce([[], []]); // fallback SELECT — id not found
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await renameCategory(999, 'Nope')).toBe(false);
+  });
+
+  it('renameCategory returns true on a no-op update (name unchanged) when the row exists', async () => {
+    const pool = { execute: vi.fn() };
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]) // UPDATE — no-op, name unchanged
+      .mockResolvedValueOnce([[{ id: 3 }], []]); // fallback SELECT — id exists
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await renameCategory(3, 'Same')).toBe(true);
   });
 
   it('deleteCategory passes the id and returns true when a row matched', async () => {
@@ -289,9 +301,21 @@ describe('updateSfxTrigger', () => {
   });
 
   it('returns false when no row matched (stale id)', async () => {
-    const pool = makeResultPool({ affectedRows: 0 });
+    const pool = { execute: vi.fn() };
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]) // UPDATE
+      .mockResolvedValueOnce([[], []]); // fallback SELECT — id not found
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await updateSfxTrigger(999n, '!clap', null, null, false)).toBe(false);
+  });
+
+  it('returns true on a no-op update (all fields unchanged) when the row exists', async () => {
+    const pool = { execute: vi.fn() };
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]) // UPDATE — no-op
+      .mockResolvedValueOnce([[{ id: '5' }], []]); // fallback SELECT — id exists
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await updateSfxTrigger(5n, '!clap', 2, 'desc', false)).toBe(true);
   });
 });
 
@@ -360,9 +384,21 @@ describe('updateSfxFile', () => {
   });
 
   it('returns false when no row matched (stale id)', async () => {
-    const pool = makeResultPool({ affectedRows: 0 });
+    const pool = { execute: vi.fn() };
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]) // UPDATE
+      .mockResolvedValueOnce([[], []]); // fallback SELECT — id not found
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await updateSfxFile(999, 3, true)).toBe(false);
+  });
+
+  it('returns true on a no-op update (weight/hidden unchanged) when the row exists', async () => {
+    const pool = { execute: vi.fn() };
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]) // UPDATE — no-op
+      .mockResolvedValueOnce([[{ id: 11 }], []]); // fallback SELECT — id exists
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await updateSfxFile(11, 3, true)).toBe(true);
   });
 });
 
