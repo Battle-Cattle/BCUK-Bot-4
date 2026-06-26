@@ -161,21 +161,43 @@ app.use('/', sfxPublicRouter);
 app.use('/overlay', overlaySourceRouter);
 app.use('/guild', requireAuth, guildRouter);
 app.use('/api', requireAuth, apiRouter);
-app.use('/', requireAuth, requireGuildContext, streamdeckKeysRouter);
-app.use('/', requireAuth, sfxRouter);
+
+// All of the routers below share the same '/' mount point, so registering each one
+// behind its own app.use(path, ...middleware, router) call made requireAuth (and, for
+// some, requireGuildContext) run once per sibling mount per request — not once per
+// request — since every '/'-mounted layer matches every path and falls through via
+// next() until a route inside actually matches. Nesting them under shared Router()
+// instances collapses that to one middleware pass per group.
+//
 // requireGuildContext refreshes req.session.user.accessLevel for the current guild;
-// the mutation routers gate on requireMod, which reads that level, so it must run
-// here (not just requireAuth) or a stale/missing level could bypass the Mod check.
-app.use('/', requireAuth, requireGuildContext, sfxMutationsRouter);
-app.use('/admin', requireAuth, requireGuildContext, adminRouter);
-app.use('/admin', requireAuth, requireGuildContext, streamsRouter);
-app.use('/admin', requireAuth, requireGuildContext, eventsubAdminRouter);
+// sfxMutationsRouter gates on requireMod, which reads that level, so it must run
+// behind requireGuildContext (not just requireAuth) or a stale/missing level could
+// bypass the Mod check.
+const rootGuildRouter = express.Router();
+rootGuildRouter.use(requireGuildContext);
+rootGuildRouter.use(streamdeckKeysRouter);
+rootGuildRouter.use(dashboardRouter);
+rootGuildRouter.use(sfxMutationsRouter);
+
+const rootAuthedRouter = express.Router();
+rootAuthedRouter.use(requireAuth);
+rootAuthedRouter.use(sfxRouter);
+rootAuthedRouter.use(commandsRouter);
+rootAuthedRouter.use(countersRouter);
+rootAuthedRouter.use(commandMonitorRouter);
+rootAuthedRouter.use(rootGuildRouter);
+app.use('/', rootAuthedRouter);
+
+// Same redundancy as above for the '/admin'-mounted routers.
+const adminGuildRouter = express.Router();
+adminGuildRouter.use(requireAuth, requireGuildContext);
+adminGuildRouter.use(adminRouter);
+adminGuildRouter.use(streamsRouter);
+adminGuildRouter.use(eventsubAdminRouter);
+app.use('/admin', adminGuildRouter);
+
 app.use('/user/settings', requireAuth, userSettingsRouter);
 app.use('/overlay', requireAuth, overlayAdminRouter);
-app.use('/', requireAuth, commandsRouter);
-app.use('/', requireAuth, countersRouter);
-app.use('/', requireAuth, commandMonitorRouter);
-app.use('/', requireAuth, requireGuildContext, dashboardRouter);
 
 // 404 handler
 app.use((req, res) => {

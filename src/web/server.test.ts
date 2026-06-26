@@ -103,24 +103,22 @@ describe('server route wiring', () => {
     const res = await request(app).get('/admin/__marker_streams');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ label: 'streams' });
-    // requireAuth also runs for the three earlier '/' mounts (streamdeckKeys, sfx, sfxMutations)
-    // that match every path, plus adminRouter's and streamsRouter's own '/admin' stacks: 3 + 2 = 5.
-    // requireGuildContext runs for the streamdeckKeys and sfxMutations '/' mounts plus the
-    // two '/admin' stacks: 2 + 2 = 4.
-    expect(requireAuth).toHaveBeenCalledTimes(5);
-    expect(requireGuildContext).toHaveBeenCalledTimes(4);
+    // The '/'-mounted group runs once (requireAuth, then requireGuildContext when none
+    // of its requireAuth-only routers match), then the '/admin' group runs once more
+    // (requireAuth + requireGuildContext together) before streamsRouter responds: 2 + 2.
+    expect(requireAuth).toHaveBeenCalledTimes(2);
+    expect(requireGuildContext).toHaveBeenCalledTimes(2);
   });
 
   it('mounts the /admin eventsub router behind both requireAuth and requireGuildContext', async () => {
     const res = await request(app).get('/admin/__marker_eventsubAdmin');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ label: 'eventsubAdmin' });
-    // Same three leading '/' mounts, plus all three '/admin' stacks (admin, streams,
-    // eventsubAdmin) run before the eventsubAdmin route responds: 3 + 3 = 6.
-    // requireGuildContext runs for the streamdeckKeys and sfxMutations '/' mounts plus
-    // all three '/admin' stacks: 2 + 3 = 5.
-    expect(requireAuth).toHaveBeenCalledTimes(6);
-    expect(requireGuildContext).toHaveBeenCalledTimes(5);
+    // Same as above: which '/admin' sub-router ends up matching doesn't add extra
+    // requireAuth/requireGuildContext calls, since the group's middleware runs once
+    // before dispatching to admin/streams/eventsubAdmin in turn.
+    expect(requireAuth).toHaveBeenCalledTimes(2);
+    expect(requireGuildContext).toHaveBeenCalledTimes(2);
   });
 
   it('mounts the dashboard root behind both requireAuth and requireGuildContext', async () => {
