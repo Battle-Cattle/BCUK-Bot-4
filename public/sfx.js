@@ -97,6 +97,10 @@ document.addEventListener('submit', (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement) || !form.classList.contains('js-sfx-upload')) return;
   event.preventDefault();
+  // Guard against a second submit (Enter key, double-click, scripted resubmit) while
+  // the fetch above is still pending — disabling the button alone doesn't block those.
+  if (form.dataset.submitting === 'true') return;
+  form.dataset.submitting = 'true';
 
   const token = (document.body && document.body.dataset.csrfToken) || '';
   const submitBtn = form.querySelector('button[type="submit"]');
@@ -120,6 +124,9 @@ document.addEventListener('submit', (event) => {
     })
     .catch(() => {
       window.location.assign('/sfx?error=upload_failed');
+    })
+    .finally(() => {
+      delete form.dataset.submitting;
     });
 });
 

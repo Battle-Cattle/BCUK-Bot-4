@@ -324,15 +324,17 @@ describe('deleteSfxTrigger', () => {
     const pool = makeTxPool();
     pool._conn.execute
       .mockResolvedValueOnce([[{ id: '7' }], []]) // SELECT id FOR UPDATE
-      .mockResolvedValueOnce([[{ file: 'a.mp3' }, { file: 'b.mp3' }], []]) // SELECT files
+      .mockResolvedValueOnce([[{ file: 'a.mp3' }, { file: 'b.mp3' }], []]) // SELECT files FOR UPDATE
       .mockResolvedValueOnce([{ affectedRows: 2 }, []]) // DELETE sfx
       .mockResolvedValueOnce([{ affectedRows: 1 }, []]); // DELETE trigger
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     const result = await deleteSfxTrigger(7n);
     expect(result).toEqual({ files: ['a.mp3', 'b.mp3'] });
-    // The locking read must run first, before the file snapshot.
+    // Both reads must lock their rows — the trigger first, then its child sound files —
+    // so a concurrent addSfxFile/deleteSfxFile can't change the set after the snapshot.
     expect(pool._conn.execute.mock.calls[0][0]).toContain('FOR UPDATE');
+    expect(pool._conn.execute.mock.calls[1][0]).toContain('FOR UPDATE');
     expect(pool._conn.commit).toHaveBeenCalled();
     expect(pool._conn.release).toHaveBeenCalled();
   });

@@ -218,10 +218,11 @@ export async function updateSfxTrigger(
  * be surfaced as `invalid_id` rather than reported as a successful delete),
  * mirroring `deleteSfxFile`.
  *
- * Locks the trigger row with `SELECT … FOR UPDATE` before snapshotting its files,
- * so a concurrent `addSfxFile` can't insert a new sound between the snapshot and
- * the child `DELETE` — that row would be removed from the DB but its filename
- * never returned, orphaning the file on disk.
+ * Locks the trigger row and its child `sfx` rows with `SELECT … FOR UPDATE` before
+ * snapshotting their filenames, so a concurrent `addSfxFile`/`deleteSfxFile` can't
+ * insert or remove a row between the snapshot and the child `DELETE` — either case
+ * would otherwise return a filename list that the transaction's own delete never
+ * matched.
  * @param id Trigger id.
  */
 export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } | null> {
@@ -237,7 +238,7 @@ export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } 
       return null;
     }
     const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT file FROM sfx WHERE trigger_id = ?`,
+      `SELECT file FROM sfx WHERE trigger_id = ? FOR UPDATE`,
       [id.toString()],
     );
     const files = rows.map((r) => r.file as string);

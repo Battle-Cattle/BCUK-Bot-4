@@ -534,10 +534,13 @@ describe('access control', () => {
 
   it('uploads run csrfProtection before Multer buffers the file', async () => {
     vi.mocked(csrfProtection).mockImplementationOnce((_req: any, res: any) => res.status(403).send('bad csrf'));
+    // Oversized so the assertion actually distinguishes ordering: if Multer ran first,
+    // it would reject with LIMIT_FILE_SIZE (a different status) instead of csrfProtection's 403.
+    const oversized = Buffer.alloc(1024 * 1024 + 1024, 1);
     const res = await supertest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
-      .attach('sound', MP3_ID3, { filename: 'clap.mp3', contentType: 'audio/mpeg' });
+      .attach('sound', oversized, { filename: 'clap.mp3', contentType: 'audio/mpeg' });
     expect(res.status).toBe(403);
     expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
     expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
