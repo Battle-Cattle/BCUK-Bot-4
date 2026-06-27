@@ -132,16 +132,17 @@ describe('setupConnectionHandlers — disconnected handler', () => {
     expect(deps.scheduleReconnect).toHaveBeenCalledWith('disconnected');
   });
 
-  it('does not clear the connection slot if a newer connection has already replaced it', async () => {
+  it('does not clear the connection slot if a newer connection replaces it during the grace window', async () => {
     vi.mocked(entersState).mockRejectedValue(new Error('timeout'));
     const conn = makeConnection();
     const otherConn = makeConnection();
-    const deps = makeDeps({ getConnection: vi.fn(() => otherConn as any) });
+    const getConnection = vi.fn().mockReturnValueOnce(conn as any).mockReturnValue(otherConn as any);
+    const deps = makeDeps({ getConnection });
     setupConnectionHandlers(conn as any, 1, deps);
 
     await conn._handlers.get('disconnected')!();
 
-    // Stale relative to the active connection — bails out before any cleanup.
+    // Current at entry, but replaced by the time the grace window times out — bails out before cleanup.
     expect(conn.destroy).not.toHaveBeenCalled();
     expect(deps.setConnection).not.toHaveBeenCalled();
     expect(deps.tearDown).not.toHaveBeenCalled();
