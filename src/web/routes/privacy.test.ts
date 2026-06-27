@@ -3,6 +3,7 @@ import express from 'express';
 import supertest from 'supertest';
 import privacyRouter from './privacy';
 
+/** Builds a minimal Express app wired with the privacy router, a fake session, and a `res.render` stub that echoes its arguments as JSON instead of rendering EJS. */
 function buildApp(sessionUser: unknown = null) {
   const app = express();
   app.use((req: any, _res: any, next: any) => {
@@ -18,6 +19,7 @@ function buildApp(sessionUser: unknown = null) {
 }
 
 describe('GET /privacy', () => {
+  /** No shared state to reset; each test builds its own app/session via buildApp. */
   beforeEach(() => {
     // no-op: each test builds its own app/session
   });
