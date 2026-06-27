@@ -131,4 +131,14 @@ describe('server route wiring', () => {
     expect(requireAuth).toHaveBeenCalled();
     expect(requireGuildContext).toHaveBeenCalled();
   });
+
+  it('does not apply the 10/min auth rate limiter to unrelated routes mounted at "/"', async () => {
+    // companionAuthRouter is mounted at '/', so authLimiter must live inside that
+    // router (applied per-route) rather than on the app.use('/', ...) call itself —
+    // otherwise it rate-limits every request on the site after only 10/min.
+    for (let i = 0; i < 15; i++) {
+      const res = await request(app).get('/__marker_dashboard');
+      expect(res.status).toBe(200);
+    }
+  });
 });

@@ -2,6 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { exchangeCodeForToken } from '../../db';
 import { renderError } from './shared';
+import { authLimiter } from '../rateLimits';
 
 const log = createLogger('CompanionAuth');
 const router = Router();
@@ -34,7 +35,7 @@ function isLoopbackRedirectUri(redirectUri: string): boolean {
  * @param req.query.redirect_uri - Loopback URL the companion app is listening on.
  * @param req.query.state - Opaque value echoed back to the app for CSRF binding.
  */
-router.get('/companion/login', (req, res) => {
+router.get('/companion/login', authLimiter, (req, res) => {
   const { redirect_uri: redirectUri, state } = req.query as { redirect_uri?: string; state?: string };
   if (!redirectUri || !state || !isLoopbackRedirectUri(redirectUri)) {
     return renderError(res, 400, 'Invalid or missing loopback redirect_uri/state.', undefined);
@@ -57,7 +58,7 @@ router.get('/companion/login', (req, res) => {
  * @param req.body.code - Plaintext one-time code from the loopback redirect.
  * @returns `{ token }` on success, or a 400/500 JSON error response.
  */
-router.post('/api/companion/oauth/token', async (req, res) => {
+router.post('/api/companion/oauth/token', authLimiter, async (req, res) => {
   const { code } = req.body as { code?: string };
   if (!code || typeof code !== 'string') {
     res.status(400).json({ ok: false, error: 'Missing code' });
