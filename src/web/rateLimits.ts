@@ -1,5 +1,21 @@
-import { ipKeyGenerator } from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Request } from 'express';
+
+/**
+ * Tighter limit for auth endpoints to protect against OAuth quota exhaustion.
+ * Shared between `/auth/*` (mounted as a path-scoped middleware in server.ts) and
+ * the companion app's OAuth routes (applied per-route in companionAuth.ts, since
+ * that router is mounted at '/' and a blanket `.use()` there would rate-limit
+ * every request on the site, not just companion-auth ones).
+ */
+export const authLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: ipKey,
+  message: 'Too many requests, please try again shortly.',
+});
 
 /**
  * Derives a rate-limit key from the request's IP address.

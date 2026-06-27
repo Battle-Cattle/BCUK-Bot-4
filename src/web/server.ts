@@ -38,6 +38,7 @@ import tosRouter from './routes/tos';
 import { requireAuth, requireGuildContext } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
 import {
+  authLimiter,
   ipKey,
   generalLimiterSkip,
   sessionLimiterKey,
@@ -87,15 +88,6 @@ const generalLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: ipKey,
   skip: generalLimiterSkip,
-});
-// Tighter limit for auth endpoints to protect against OAuth quota exhaustion
-const authLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 10,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  keyGenerator: ipKey,
-  message: 'Too many requests, please try again shortly.',
 });
 // Generous limit for the Streamdeck API — keyed by Bearer token so each API key gets
 // its own bucket regardless of which IP the request originates from.
@@ -166,7 +158,10 @@ app.use('/', sfxPublicRouter);
 app.use('/', privacyRouter);
 app.use('/', tosRouter);
 app.use('/overlay', overlaySourceRouter);
-app.use('/', authLimiter, companionAuthRouter);
+// authLimiter is applied per-route inside companionAuthRouter, not here — this
+// router is mounted at '/', so a blanket limiter here would rate-limit every
+// request on the site, not just the companion app's OAuth routes.
+app.use('/', companionAuthRouter);
 app.use('/api/companion', companionEventsRouter);
 app.use('/guild', requireAuth, guildRouter);
 app.use('/api', requireAuth, apiRouter);

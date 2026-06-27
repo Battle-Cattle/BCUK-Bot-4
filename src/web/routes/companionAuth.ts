@@ -2,6 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { exchangeCodeForToken } from '../../db';
 import { renderError } from './shared';
+import { authLimiter } from '../rateLimits';
 
 const log = createLogger('CompanionAuth');
 const router = Router();
@@ -31,10 +32,11 @@ function isLoopbackRedirectUri(redirectUri: string): boolean {
  * Validates the loopback redirect_uri, stashes it (with the app's state) on the
  * session, then hands off to the existing Discord OAuth login; the callback
  * branches back here on success and redirects to redirectUri with a one-time code.
+ * Rate-limited by `authLimiter`, which responds 429 before this handler runs.
  * @param req.query.redirect_uri - Loopback URL the companion app is listening on.
  * @param req.query.state - Opaque value echoed back to the app for CSRF binding.
  */
-router.get('/companion/login', (req, res) => {
+router.get('/companion/login', authLimiter, (req, res) => {
   const { redirect_uri: redirectUri, state } = req.query as { redirect_uri?: string; state?: string };
   if (!redirectUri || !state || !isLoopbackRedirectUri(redirectUri)) {
     return renderError(res, 400, 'Invalid or missing loopback redirect_uri/state.', undefined);
@@ -55,9 +57,10 @@ router.get('/companion/login', (req, res) => {
  * The exchange runs in a single DB transaction (see `exchangeCodeForToken`), so a
  * failure issuing the token doesn't permanently burn the one-time code.
  * @param req.body.code - Plaintext one-time code from the loopback redirect.
- * @returns `{ token }` on success, or a 400/500 JSON error response.
+ * @returns `{ token }` on success, or a 400/429/500 JSON error response —
+ *   429 comes from `authLimiter` and short-circuits before this handler runs.
  */
-router.post('/api/companion/oauth/token', async (req, res) => {
+router.post('/api/companion/oauth/token', authLimiter, async (req, res) => {
   const { code } = req.body as { code?: string };
   if (!code || typeof code !== 'string') {
     res.status(400).json({ ok: false, error: 'Missing code' });
