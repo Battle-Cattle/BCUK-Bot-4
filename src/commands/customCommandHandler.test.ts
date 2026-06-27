@@ -307,12 +307,14 @@ describe('resolveSharedChatSessionId', () => {
     await resolveSharedChatSessionId('user-1');
     await Promise.resolve();
     await Promise.resolve();
+    const after = Date.now();
 
     const entry = sessionCache.get('user-1');
     expect(entry?.sessionId).toBe('stale');
-    // Pin the upper bound to the short retry window (5s), not just "before some later Date.now()",
-    // so this fails if the implementation falls back to the much longer normal cache TTL instead.
-    expect(entry!.expiry).toBeGreaterThan(before);
-    expect(entry!.expiry).toBeLessThanOrEqual(before + 5_000);
+    // Pin the bounds to the short retry window (5s) bracketed by [before, after], not just
+    // "before some later Date.now()", so this fails if the implementation falls back to the
+    // much longer normal cache TTL instead — while tolerating slow-CI timing jitter.
+    expect(entry!.expiry).toBeGreaterThanOrEqual(before + 5_000);
+    expect(entry!.expiry).toBeLessThanOrEqual(after + 5_000);
   });
 });
