@@ -20,6 +20,7 @@ import {
   subscribeForStreamer,
   dispatchNotification,
   handleRevocation,
+  removeStreamerFromMap,
 } from './twitchEventSubSubscriptions';
 
 // ---------------------------------------------------------------------------
@@ -159,8 +160,12 @@ function makeWelcomeMsg(sessionId = 'sess-1', msgId?: string): EventSubMessage {
 }
 
 // Suppress WebSocket construction in tests — we test handleMessage directly.
+// Listeners are captured by event name so lifecycle tests can invoke them manually.
 class MockWebSocket {
-  addEventListener = vi.fn();
+  listeners = new Map<string, (...args: any[]) => void>();
+  addEventListener = vi.fn((event: string, cb: (...args: any[]) => void) => {
+    this.listeners.set(event, cb);
+  });
   close = vi.fn();
 }
 
@@ -263,5 +268,139 @@ describe('StreamerConnection.handleMessage', () => {
     expect(() => (conn as any).handleMessage(msg)).not.toThrow();
     expect(dispatchNotification).not.toHaveBeenCalled();
     expect(handleRevocation).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// StreamerConnection lifecycle: connect/stop/reload/reconnect
+// ---------------------------------------------------------------------------
+
+describe('StreamerConnection lifecycle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(subscribeForStreamer).mockResolvedValue(1);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('start() opens a WebSocket and registers the four lifecycle listeners', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const ws = (conn as any).ws as MockWebSocket;
+    expect(ws.listeners.has('open')).toBe(true);
+    expect(ws.listeners.has('message')).toBe(true);
+    expect(ws.listeners.has('close')).toBe(true);
+    expect(ws.listeners.has('error')).toBe(true);
+  });
+
+  it('stop() closes the socket, clears timers, and removes the streamer from the map', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const ws = (conn as any).ws as MockWebSocket;
+
+    conn.stop();
+
+    expect(ws.close).toHaveBeenCalledWith(1000, 'shutdown');
+    expect((conn as any).ws).toBeNull();
+    expect(removeStreamerFromMap).toHaveBeenCalledWith('uid-123');
+  });
+
+  it('does not reconnect after a close once stopped', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const ws = (conn as any).ws as MockWebSocket;
+    conn.stop();
+
+    ws.listeners.get('close')!({ code: 1000, reason: 'shutdown' } as any);
+    vi.advanceTimersByTime(60_000);
+
+    expect((conn as any).ws).toBeNull();
+    expect((conn as any).reconnectTimer).toBeNull();
+  });
+
+  it('schedules a reconnect with exponential backoff when the socket closes unexpectedly', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstWs = (conn as any).ws as MockWebSocket;
+
+    firstWs.listeners.get('close')!({ code: 1006, reason: 'abnormal' } as any);
+    expect((conn as any).reconnectAttempts).toBe(1);
+
+    vi.advanceTimersByTime(1_000);
+    const secondWs = (conn as any).ws as MockWebSocket;
+    expect(secondWs).not.toBe(firstWs);
+
+    secondWs.listeners.get('close')!({ code: 1006, reason: 'abnormal' } as any);
+    vi.advanceTimersByTime(1_999);
+    expect((conn as any).ws).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect((conn as any).ws).not.toBeNull();
+  });
+
+  it('ignores a close event from a stale socket replaced during session migration', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const staleWs = (conn as any).ws as MockWebSocket;
+
+    // Simulate a session_reconnect: a new socket is opened, the old one is left dangling.
+    conn.connect('wss://eventsub.wss.twitch.tv/ws?session_id=new');
+    const currentWs = (conn as any).ws as MockWebSocket;
+    expect(currentWs).not.toBe(staleWs);
+
+    staleWs.listeners.get('close')!({ code: 1000, reason: 'reconnect' } as any);
+
+    expect((conn as any).ws).toBe(currentWs);
+  });
+
+  it('reload() connects immediately when there is no live session', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    const connectSpy = vi.spyOn(conn, 'connect');
+
+    conn.reload(makeStreamerData());
+
+    return vi.waitFor(() => expect(connectSpy).toHaveBeenCalled());
+  });
+
+  it('reload() re-subscribes on the live session and stops when no subscriptions remain', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-live'));
+    vi.mocked(subscribeForStreamer).mockResolvedValue(0);
+
+    conn.reload(makeStreamerData());
+    await vi.waitFor(() => expect(removeStreamerFromMap).toHaveBeenCalled());
+
+    expect(subscribeForStreamer).toHaveBeenCalledWith('sess-live', expect.objectContaining({ uid: 'uid-123' }));
+  });
+
+  it('serialises overlapping reload() calls through the reload chain', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-live'));
+
+    // First reload's subscribeForStreamer call stays pending until resolveFirst() fires,
+    // so we can prove the second reload's call doesn't start until the first one settles.
+    let resolveFirst!: (value: number) => void;
+    const firstDeferred = new Promise<number>((resolve) => { resolveFirst = resolve; });
+    vi.mocked(subscribeForStreamer)
+      .mockImplementationOnce(() => firstDeferred)
+      .mockResolvedValueOnce(1);
+
+    conn.reload(makeStreamerData());
+    conn.reload(makeStreamerData());
+
+    // Flush pending microtasks so the first reload's doReload() has had a chance to run.
+    await Promise.resolve();
+    await Promise.resolve();
+    // Only the welcome handshake + first reload have fired — the second reload is still
+    // chained behind the first's unresolved promise. If reloadChain didn't serialise the
+    // calls, the second reload would have fired immediately too, making this 3.
+    expect(subscribeForStreamer).toHaveBeenCalledTimes(2);
+
+    resolveFirst(1);
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(3));
   });
 });
