@@ -41,7 +41,12 @@ export function pushCompanionEvent(discordId: string, event: CompanionEvent): vo
   log.info(`Pushed companion event to ${clients.size} client(s) for discord ${discordId}`);
 }
 
-// GET /api/companion/events — SSE endpoint, bearer-token authenticated
+/**
+ * GET /api/companion/events — SSE endpoint, bearer-token authenticated via
+ * `requireCompanionKey`. Streams companion events for the authenticated Discord
+ * user until the client disconnects, sending a keepalive ping every 25s and
+ * capping concurrent connections per user at `MAX_SSE_CONNECTIONS_PER_TOKEN`.
+ */
 router.get('/events', requireCompanionKey, (req, res) => {
   const discordId = req.companionDiscordId!;
 
