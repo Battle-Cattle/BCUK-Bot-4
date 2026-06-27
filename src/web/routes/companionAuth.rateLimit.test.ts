@@ -32,11 +32,14 @@ beforeEach(() => {
 });
 
 describe('companion auth routes rate limiting', () => {
-  it('is rate-limited (real authLimiter is wired to both companion routes, not skipped)', async () => {
+  it.each([
+    ['POST', '/api/companion/oauth/token'] as const,
+    ['GET', '/companion/login?redirect_uri=http://127.0.0.1:9999/cb&state=abc'] as const,
+  ])('rate-limits repeated %s %s requests (authLimiter is wired, not skipped)', async (method, path) => {
     const app = buildApp();
     let sawRateLimited = false;
     for (let i = 0; i < 15; i++) {
-      const res = await supertest(app).post('/api/companion/oauth/token').send({});
+      const res = method === 'GET' ? await supertest(app).get(path) : await supertest(app).post(path).send({});
       if (res.status === 429) {
         sawRateLimited = true;
         break;
