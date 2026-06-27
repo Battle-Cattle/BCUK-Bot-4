@@ -14,8 +14,9 @@ import { registerCounterTwitchRuntime } from './commands/counterHandler';
 import { registerMultiTwitchRuntime } from './commands/multiCommandHandler';
 import { registerShoutoutRuntime } from './commands/shoutoutHandler';
 import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
-import { registerEventSubOverlayRuntime, registerEventSubTwitchRuntime } from './twitch/eventsub/twitchEventSubHandler';
+import { registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime } from './twitch/eventsub/twitchEventSubHandler';
 import { pushOverlayEvent } from './web/routes/overlaySource';
+import { pushCompanionEvent } from './web/routes/companionEvents';
 import { startCounterScheduler, stopCounterScheduler } from './commands/counterScheduler';
 import { createLogger } from './shared/logger';
 
@@ -64,6 +65,7 @@ async function main(): Promise<void> {
   registerShoutoutRuntime({ send: sayInChannel });
   registerCountdownTwitchRuntime({ send: sayInChannel });
   registerEventSubOverlayRuntime({ pushOverlayEvent });
+  registerEventSubCompanionRuntime({ pushCompanionEvent });
   registerEventSubTwitchRuntime({ send: sayInChannel });
 
   // Load the guild registry before the Discord client connects so the

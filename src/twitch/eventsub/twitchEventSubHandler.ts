@@ -1,5 +1,5 @@
 import type { EventSubConfig } from '../../db';
-import { getVideosForReward } from '../../db';
+import { getVideosForReward, getStreamerById } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { createLogger } from '../../shared/logger';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
@@ -28,6 +28,30 @@ let _overlayRuntime: EventSubOverlayRuntime | null = null;
 /** Register the overlay push function. Called from index.ts after startWebPanel(). */
 export function registerEventSubOverlayRuntime(runtime: EventSubOverlayRuntime): void {
   _overlayRuntime = runtime;
+}
+
+// Runtime injection for the companion app push function — same rationale as
+// EventSubOverlayRuntime above. Registered from index.ts before startWebPanel(),
+// since pushCompanionEvent is just a function reference and doesn't require the
+// HTTP server to be running yet.
+/**
+ * Public contract for the companion app runtime injection.
+ * Passed to {@link registerEventSubCompanionRuntime} from index.ts.
+ */
+interface EventSubCompanionRuntime {
+  /**
+   * Push a companion event to the named Discord user's SSE stream.
+   * @param discordId - Discord snowflake of the streamer who owns the redemption.
+   * @param event - The companion event payload to deliver.
+   */
+  pushCompanionEvent: (discordId: string, event: import('../../web/routes/companionEvents').CompanionEvent) => void;
+}
+
+let _companionRuntime: EventSubCompanionRuntime | null = null;
+
+/** Register the companion app push function. Called from index.ts before startWebPanel(). */
+export function registerEventSubCompanionRuntime(runtime: EventSubCompanionRuntime): void {
+  _companionRuntime = runtime;
 }
 
 // Runtime injection for the Twitch chat send function — avoids a direct import
@@ -208,13 +232,17 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
 
 /**
  * Handle a channel.channel_points_custom_reward_redemption.add EventSub notification.
- * Looks up videos configured for the redeemed reward and triggers an overlay event if found.
- * No-ops when no videos are configured for the reward or `_overlayRuntime` is absent.
+ * Unconditionally forwards the redemption to the streamer's companion app (if any device
+ * is connected), then separately looks up videos configured for the redeemed reward and
+ * triggers an overlay event if found. The overlay push still no-ops when no videos are
+ * configured for the reward or `_overlayRuntime` is absent. The companion push is isolated
+ * in its own try/catch so a failure there (e.g. a DB error from `getStreamerById`) cannot
+ * prevent the independent overlay-video logic below from running.
  *
  * @param login - Broadcaster login name.
  * @param event - Redemption event payload including reward ID and user details.
  * @param _config - Streamer event config (unused for redemptions; reserved for future use).
- * @param streamerId - DB row ID of the streamer, used to scope video lookups.
+ * @param streamerId - DB row ID of the streamer, used to scope video lookups and resolve the owning Discord ID.
  */
 export async function handleRedemption(
   login: string,
@@ -222,6 +250,23 @@ export async function handleRedemption(
   _config: EventSubConfig,
   streamerId: number,
 ): Promise<void> {
+  try {
+    const streamer = await getStreamerById(streamerId);
+    if (streamer) {
+      _companionRuntime?.pushCompanionEvent(streamer.discord_id, {
+        type: 'channel_points_redemption',
+        rewardId: event.reward.id,
+        rewardTitle: event.reward.title,
+        userLogin: event.user_login,
+        userName: event.user_name,
+        userInput: event.user_input,
+        redeemedAt: new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    log.error('Failed to push companion event for redemption:', err);
+  }
+
   const videos = await getVideosForReward(event.reward.id, streamerId);
   if (videos.length === 0) return;
 

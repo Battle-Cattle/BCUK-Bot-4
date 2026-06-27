@@ -27,6 +27,9 @@ import countersRouter from './routes/counters';
 import commandMonitorRouter from './routes/commandMonitor';
 import streamdeckRouter from './routes/streamdeck';
 import streamdeckKeysRouter from './routes/streamdeckKeys';
+import companionAuthRouter from './routes/companionAuth';
+import companionEventsRouter from './routes/companionEvents';
+import companionKeysRouter from './routes/companionKeys';
 import userSettingsRouter from './routes/userSettings';
 import overlaySourceRouter from './routes/overlaySource';
 import overlayAdminRouter from './routes/overlayAdmin';
@@ -163,6 +166,8 @@ app.use('/', sfxPublicRouter);
 app.use('/', privacyRouter);
 app.use('/', tosRouter);
 app.use('/overlay', overlaySourceRouter);
+app.use('/', authLimiter, companionAuthRouter);
+app.use('/api/companion', companionEventsRouter);
 app.use('/guild', requireAuth, guildRouter);
 app.use('/api', requireAuth, apiRouter);
 
@@ -180,6 +185,7 @@ app.use('/api', requireAuth, apiRouter);
 const rootGuildRouter = express.Router();
 rootGuildRouter.use(requireGuildContext);
 rootGuildRouter.use(streamdeckKeysRouter);
+rootGuildRouter.use(companionKeysRouter);
 rootGuildRouter.use(dashboardRouter);
 rootGuildRouter.use(sfxMutationsRouter);
 

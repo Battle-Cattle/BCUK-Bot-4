@@ -74,6 +74,9 @@ vi.mock('./routes/streamdeckKeys', () => ({ default: emptyRouter() }));
 vi.mock('./routes/userSettings', () => ({ default: emptyRouter() }));
 vi.mock('./routes/overlaySource', () => ({ default: emptyRouter() }));
 vi.mock('./routes/overlayAdmin', () => ({ default: emptyRouter() }));
+vi.mock('./routes/companionAuth', () => ({ default: emptyRouter() }));
+vi.mock('./routes/companionEvents', () => ({ default: emptyRouter() }));
+vi.mock('./routes/companionKeys', () => ({ default: emptyRouter() }));
 
 import { app } from './server';
 import { requireAuth, requireGuildContext } from './middleware';
