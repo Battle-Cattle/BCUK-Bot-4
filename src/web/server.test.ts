@@ -11,6 +11,8 @@ vi.mock('../shared/config', () => ({
   DB_USER: 'user',
   DB_PASSWORD: 'pass',
   DB_NAME: 'db',
+  SFX_FOLDER: './sfx',
+  SFX_MAX_FILE_MB: 10,
 }));
 
 vi.mock('express-mysql-session', () => ({
@@ -39,6 +41,7 @@ vi.mock('./csrf', () => ({
 vi.mock('./middleware', () => ({
   requireAuth: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
   requireGuildContext: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
+  requireMod: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
 }));
 
 // Each marker path is unique per router so a request only matches the router under
@@ -60,6 +63,7 @@ vi.mock('./routes/dashboard', () => ({ default: markerRouter('dashboard') }));
 vi.mock('./routes/admin', () => ({ default: markerRouter('admin') }));
 vi.mock('./routes/api', () => ({ default: emptyRouter() }));
 vi.mock('./routes/sfx', () => ({ default: emptyRouter() }));
+vi.mock('./routes/sfxMutations', () => ({ default: emptyRouter() }));
 vi.mock('./routes/sfxPublic', () => ({ default: emptyRouter() }));
 vi.mock('./routes/streams', () => ({ default: markerRouter('streams') }));
 vi.mock('./routes/commands', () => ({ default: emptyRouter() }));
@@ -70,6 +74,9 @@ vi.mock('./routes/streamdeckKeys', () => ({ default: emptyRouter() }));
 vi.mock('./routes/userSettings', () => ({ default: emptyRouter() }));
 vi.mock('./routes/overlaySource', () => ({ default: emptyRouter() }));
 vi.mock('./routes/overlayAdmin', () => ({ default: emptyRouter() }));
+vi.mock('./routes/companionAuth', () => ({ default: emptyRouter() }));
+vi.mock('./routes/companionEvents', () => ({ default: emptyRouter() }));
+vi.mock('./routes/companionKeys', () => ({ default: emptyRouter() }));
 
 import { app } from './server';
 import { requireAuth, requireGuildContext } from './middleware';
@@ -122,5 +129,15 @@ describe('server route wiring', () => {
     expect(res.body).toEqual({ label: 'dashboard' });
     expect(requireAuth).toHaveBeenCalled();
     expect(requireGuildContext).toHaveBeenCalled();
+  });
+
+  it('does not apply the 10/min auth rate limiter to unrelated routes mounted at "/"', async () => {
+    // companionAuthRouter is mounted at '/', so authLimiter must live inside that
+    // router (applied per-route) rather than on the app.use('/', ...) call itself —
+    // otherwise it rate-limits every request on the site after only 10/min.
+    for (let i = 0; i < 15; i++) {
+      const res = await request(app).get('/__marker_dashboard');
+      expect(res.status).toBe(200);
+    }
   });
 });

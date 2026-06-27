@@ -19,6 +19,7 @@ import dashboardRouter from './routes/dashboard';
 import adminRouter from './routes/admin';
 import apiRouter from './routes/api';
 import sfxRouter from './routes/sfx';
+import sfxMutationsRouter from './routes/sfxMutations';
 import sfxPublicRouter from './routes/sfxPublic';
 import streamsRouter from './routes/streams';
 import commandsRouter from './routes/commands';
@@ -26,12 +27,18 @@ import countersRouter from './routes/counters';
 import commandMonitorRouter from './routes/commandMonitor';
 import streamdeckRouter from './routes/streamdeck';
 import streamdeckKeysRouter from './routes/streamdeckKeys';
+import companionAuthRouter from './routes/companionAuth';
+import companionEventsRouter from './routes/companionEvents';
+import companionKeysRouter from './routes/companionKeys';
 import userSettingsRouter from './routes/userSettings';
 import overlaySourceRouter from './routes/overlaySource';
 import overlayAdminRouter from './routes/overlayAdmin';
+import privacyRouter from './routes/privacy';
+import tosRouter from './routes/tos';
 import { requireAuth, requireGuildContext } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
 import {
+  authLimiter,
   ipKey,
   generalLimiterSkip,
   sessionLimiterKey,
@@ -81,15 +88,6 @@ const generalLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: ipKey,
   skip: generalLimiterSkip,
-});
-// Tighter limit for auth endpoints to protect against OAuth quota exhaustion
-const authLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 10,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  keyGenerator: ipKey,
-  message: 'Too many requests, please try again shortly.',
 });
 // Generous limit for the Streamdeck API — keyed by Bearer token so each API key gets
 // its own bucket regardless of which IP the request originates from.
@@ -157,20 +155,54 @@ app.use('/auth', authLimiter, authRouter);
 app.use('/auth', authLimiter, eventsubCallbackRouter);
 app.use('/api/streamdeck', streamdeckLimiter, streamdeckRouter);
 app.use('/', sfxPublicRouter);
+app.use('/', privacyRouter);
+app.use('/', tosRouter);
 app.use('/overlay', overlaySourceRouter);
+// authLimiter is applied per-route inside companionAuthRouter, not here — this
+// router is mounted at '/', so a blanket limiter here would rate-limit every
+// request on the site, not just the companion app's OAuth routes.
+app.use('/', companionAuthRouter);
+app.use('/api/companion', companionEventsRouter);
 app.use('/guild', requireAuth, guildRouter);
 app.use('/api', requireAuth, apiRouter);
-app.use('/', requireAuth, requireGuildContext, streamdeckKeysRouter);
-app.use('/', requireAuth, sfxRouter);
-app.use('/admin', requireAuth, requireGuildContext, adminRouter);
-app.use('/admin', requireAuth, requireGuildContext, streamsRouter);
-app.use('/admin', requireAuth, requireGuildContext, eventsubAdminRouter);
+
+// All of the routers below share the same '/' mount point, so registering each one
+// behind its own app.use(path, ...middleware, router) call made requireAuth (and, for
+// some, requireGuildContext) run once per sibling mount per request — not once per
+// request — since every '/'-mounted layer matches every path and falls through via
+// next() until a route inside actually matches. Nesting them under shared Router()
+// instances collapses that to one middleware pass per group.
+//
+// requireGuildContext refreshes req.session.user.accessLevel for the current guild;
+// sfxMutationsRouter gates on requireMod, which reads that level, so it must run
+// behind requireGuildContext (not just requireAuth) or a stale/missing level could
+// bypass the Mod check.
+const rootGuildRouter = express.Router();
+rootGuildRouter.use(requireGuildContext);
+rootGuildRouter.use(streamdeckKeysRouter);
+rootGuildRouter.use(companionKeysRouter);
+rootGuildRouter.use(dashboardRouter);
+rootGuildRouter.use(sfxMutationsRouter);
+
+const rootAuthedRouter = express.Router();
+rootAuthedRouter.use(requireAuth);
+rootAuthedRouter.use(sfxRouter);
+rootAuthedRouter.use(commandsRouter);
+rootAuthedRouter.use(countersRouter);
+rootAuthedRouter.use(commandMonitorRouter);
+rootAuthedRouter.use(rootGuildRouter);
+app.use('/', rootAuthedRouter);
+
+// Same redundancy as above for the '/admin'-mounted routers.
+const adminGuildRouter = express.Router();
+adminGuildRouter.use(requireAuth, requireGuildContext);
+adminGuildRouter.use(adminRouter);
+adminGuildRouter.use(streamsRouter);
+adminGuildRouter.use(eventsubAdminRouter);
+app.use('/admin', adminGuildRouter);
+
 app.use('/user/settings', requireAuth, userSettingsRouter);
 app.use('/overlay', requireAuth, overlayAdminRouter);
-app.use('/', requireAuth, commandsRouter);
-app.use('/', requireAuth, countersRouter);
-app.use('/', requireAuth, commandMonitorRouter);
-app.use('/', requireAuth, requireGuildContext, dashboardRouter);
 
 // 404 handler
 app.use((req, res) => {

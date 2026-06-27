@@ -146,24 +146,35 @@ describe('editAnnouncement', () => {
     expect(setStreamerLive).toHaveBeenCalled();
   });
 
-  it('deletes old message via tryDeleteDiscordMessage and sends new one when delete_old_posts is true', async () => {
+  it('deletes old message via tryDeleteDiscordMessage and sends new one when delete_old_posts is true and game changed', async () => {
     const channel = makeTextChannel();
     vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
     const state = makeLiveState({ group: makeGroup({ delete_old_posts: true }) });
-    await editAnnouncement(new Map(), state, makeStream(), 'live_message');
+    await editAnnouncement(new Map(), state, makeStream(), 'new_game_message');
     expect(tryDeleteDiscordMessage).toHaveBeenCalledWith('ch1', 'msg1');
     expect(channel.send).toHaveBeenCalled();
     expect(setStreamerLive).toHaveBeenCalled();
   });
 
-  it('treats old-message delete failure as best-effort and still commits the new message', async () => {
+  it('treats old-message delete failure as best-effort and still commits the new message on a game change', async () => {
     vi.mocked(tryDeleteDiscordMessage).mockRejectedValueOnce(new Error('network'));
     const channel = makeTextChannel();
     channel.send.mockResolvedValue({ id: 'msg2', channelId: 'ch1' });
     vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
     const state = makeLiveState({ group: makeGroup({ delete_old_posts: true }) });
-    await expect(editAnnouncement(new Map(), state, makeStream(), 'live_message')).resolves.not.toThrow();
+    await expect(editAnnouncement(new Map(), state, makeStream(), 'new_game_message')).resolves.not.toThrow();
     expect(state.messageId).toBe('msg2');
+    expect(setStreamerLive).toHaveBeenCalled();
+  });
+
+  it('edits the existing message in place for a title-only change even when delete_old_posts is true', async () => {
+    const channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    const state = makeLiveState({ group: makeGroup({ delete_old_posts: true }) });
+    await editAnnouncement(new Map(), state, makeStream(), 'live_message');
+    expect(channel._message.edit).toHaveBeenCalled();
+    expect(channel.send).not.toHaveBeenCalled();
+    expect(tryDeleteDiscordMessage).not.toHaveBeenCalled();
     expect(setStreamerLive).toHaveBeenCalled();
   });
 

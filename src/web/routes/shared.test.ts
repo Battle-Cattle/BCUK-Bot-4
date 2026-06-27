@@ -40,16 +40,12 @@ describe('parsePositiveIntId', () => {
     expect(parsePositiveIntId('42')).toBe(42);
   });
 
-  it('accepts a single-element array', () => {
-    expect(parsePositiveIntId(['7'])).toBe(7);
+  it('returns null for a single-element array (repeated field)', () => {
+    expect(parsePositiveIntId(['7'])).toBeNull();
   });
 
-  it('takes the first element of a multi-element array', () => {
-    expect(parsePositiveIntId(['3', '9'])).toBe(3);
-  });
-
-  it('returns null for an array containing an invalid value', () => {
-    expect(parsePositiveIntId(['abc'])).toBeNull();
+  it('returns null for a multi-element array (repeated field)', () => {
+    expect(parsePositiveIntId(['3', '9'])).toBeNull();
   });
 });
 

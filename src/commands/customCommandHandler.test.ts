@@ -28,12 +28,14 @@ import {
   executeCustomCommandForTwitch,
   registerTwitchChatRuntime,
   purgeExpiredSessionCache,
+  resolveSharedChatSessionId,
   sessionCache,
 } from './customCommandHandler';
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from '../db';
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { isDiscordNotFoundError } from '../discord/discordUtils';
 import { getMultiTwitchDataForChannel } from '../twitch/monitor/twitchMonitor';
+import { getSharedChatSession } from '../twitch/twitchApi';
 
 function mockMsg(content: string) {
   return {
@@ -227,5 +229,92 @@ describe('purgeExpiredSessionCache', () => {
     purgeExpiredSessionCache();
 
     expect(sessionCache.size).toBe(0);
+  });
+});
+
+// ─── resolveSharedChatSessionId ───────────────────────────────────────────────
+
+describe('resolveSharedChatSessionId', () => {
+  beforeEach(() => {
+    sessionCache.clear();
+    vi.mocked(getSharedChatSession).mockReset();
+  });
+
+  it('fetches and caches the session id on a cold cache', async () => {
+    vi.mocked(getSharedChatSession).mockResolvedValue({ session_id: 'sess-1' } as any);
+
+    const result = await resolveSharedChatSessionId('user-1');
+
+    expect(result).toBe('sess-1');
+    expect(getSharedChatSession).toHaveBeenCalledWith('user-1');
+    expect(sessionCache.get('user-1')?.sessionId).toBe('sess-1');
+  });
+
+  it('caches a null session id and retries sooner on fetch failure', async () => {
+    vi.mocked(getSharedChatSession).mockRejectedValue(new Error('helix down'));
+
+    const result = await resolveSharedChatSessionId('user-1');
+
+    expect(result).toBeNull();
+    expect(sessionCache.get('user-1')?.sessionId).toBeNull();
+  });
+
+  it('returns the cached value without fetching while still fresh', async () => {
+    sessionCache.set('user-1', { sessionId: 'cached', expiry: Date.now() + 60_000 });
+
+    const result = await resolveSharedChatSessionId('user-1');
+
+    expect(result).toBe('cached');
+    expect(getSharedChatSession).not.toHaveBeenCalled();
+  });
+
+  it('serves the stale cached value immediately and refreshes in the background', async () => {
+    sessionCache.set('user-1', { sessionId: 'stale', expiry: Date.now() - 1 });
+    let resolveFetch: (v: any) => void;
+    vi.mocked(getSharedChatSession).mockReturnValue(
+      new Promise((resolve) => { resolveFetch = resolve; }),
+    );
+
+    const result = await resolveSharedChatSessionId('user-1');
+
+    expect(result).toBe('stale');
+    expect(getSharedChatSession).toHaveBeenCalledWith('user-1');
+
+    resolveFetch!({ session_id: 'fresh' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sessionCache.get('user-1')?.sessionId).toBe('fresh');
+  });
+
+  it('coalesces concurrent background refreshes for the same user into one call', async () => {
+    sessionCache.set('user-1', { sessionId: 'stale', expiry: Date.now() - 1 });
+    vi.mocked(getSharedChatSession).mockResolvedValue({ session_id: 'fresh' } as any);
+
+    await Promise.all([
+      resolveSharedChatSessionId('user-1'),
+      resolveSharedChatSessionId('user-1'),
+    ]);
+
+    expect(getSharedChatSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the last known value but shortens the retry window when a background refresh fails', async () => {
+    sessionCache.set('user-1', { sessionId: 'stale', expiry: Date.now() - 1 });
+    vi.mocked(getSharedChatSession).mockRejectedValue(new Error('helix down'));
+
+    const before = Date.now();
+    await resolveSharedChatSessionId('user-1');
+    await Promise.resolve();
+    await Promise.resolve();
+    const after = Date.now();
+
+    const entry = sessionCache.get('user-1');
+    expect(entry?.sessionId).toBe('stale');
+    // Pin the bounds to the short retry window (5s) bracketed by [before, after], not just
+    // "before some later Date.now()", so this fails if the implementation falls back to the
+    // much longer normal cache TTL instead — while tolerating slow-CI timing jitter.
+    expect(entry!.expiry).toBeGreaterThanOrEqual(before + 5_000);
+    expect(entry!.expiry).toBeLessThanOrEqual(after + 5_000);
   });
 });

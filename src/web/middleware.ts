@@ -4,6 +4,7 @@ import { ensureSessionCsrfToken } from './csrf';
 import {
   AccessLevel,
   findApprovedKeyByHash,
+  findDiscordIdByTokenHash,
   findUser,
   getAllGuilds,
   getEffectiveAccessLevel,
@@ -147,6 +148,36 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
     }
     req.apiKeyOwner = row.discord_id;
     req.apiKeyGuildId = row.guild_id;
+    next();
+  } catch {
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+}
+
+/**
+ * Authenticates a companion app request via a `Bearer` token, hashing it and looking it
+ * up against active (non-revoked) companion tokens. On success, attaches the token
+ * owner's Discord ID to the request.
+ * @param req - Express request; reads the `Authorization` header.
+ * @param res - Express response; used to respond 401/500 on failure.
+ * @param next - Called once `req.companionDiscordId` has been set.
+ * @returns A promise that resolves once `next()` or an error response has been issued.
+ */
+export async function requireCompanionKey(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Unauthorized' });
+    return;
+  }
+  const hash = createHash('sha256').update(token).digest('hex');
+  try {
+    const discordId = await findDiscordIdByTokenHash(hash);
+    if (!discordId) {
+      res.status(401).json({ ok: false, error: 'Unauthorized' });
+      return;
+    }
+    req.companionDiscordId = discordId;
     next();
   } catch {
     res.status(500).json({ ok: false, error: 'Internal server error' });

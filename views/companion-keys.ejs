@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Companion App</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body>
+  <%- include('partials/nav') %>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Companion App</h2>
+
+      <% if (error) { %>
+      <% const errorMessages = {
+        request_failed: 'Failed to generate companion app token. Please try again.',
+        revoke_failed:  'Failed to revoke companion app token. Please try again.',
+      }; %>
+      <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
+        <span class="text-danger">&#9888; <%= errorMessages[error] || 'Operation failed: ' + error.replace(/_/g, ' ') %></span>
+      </div>
+      <% } %>
+
+      <% if (newToken) { %>
+      <div class="card card-alert-success" role="alert">
+        <p><strong>&#10003; Your companion app token has been generated.</strong> Copy it now — it will not be shown again.</p>
+        <div style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+          <code class="mono" id="new-token" style="font-size:.85rem;word-break:break-all;flex:1;min-width:0;"><%= newToken %></code>
+          <button type="button" class="btn btn-sm" id="copy-token-btn">Copy</button>
+        </div>
+      </div>
+      <% } %>
+
+      <div class="card card-spaced">
+        <div class="card-header">
+          <span class="card-icon">&#128273;</span>
+          <span class="card-label">Token Status</span>
+        </div>
+
+        <p class="muted">The companion app normally logs in itself via Discord — it opens your browser, you log in, and it receives a token automatically. You should not normally need to generate or paste a token by hand.</p>
+
+        <% if (!tokenStatus || !tokenStatus.hasToken) { %>
+        <p style="margin-top:.75rem;">You do not have an active companion app token.</p>
+        <form method="POST" action="/companion-key/request" style="margin-top:1rem;">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <button type="submit" class="btn btn-sm">Generate Token Manually (advanced)</button>
+        </form>
+
+        <% } else { %>
+        <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;">
+          <span class="badge badge-active">Active</span>
+          <span class="muted" style="font-size:.85rem;">Issued <%= tokenStatus.createdAt.toLocaleDateString() %></span>
+        </div>
+        <p>Your companion app token is active. It is read-only — it can only receive your own channel-point redemption events.</p>
+        <p class="muted">If you have lost your device or believe the token has leaked, you can revoke it. The companion app can log in again afterwards to get a fresh token.</p>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:1rem;">
+          <form method="POST" action="/companion-key/request">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <button type="submit" class="btn btn-sm">Generate New Token Manually (advanced)</button>
+          </form>
+          <form method="POST" action="/companion-key/revoke" class="js-confirm-revoke-token">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <button type="submit" class="btn btn-sm btn-ghost">Revoke Token</button>
+          </form>
+        </div>
+        <% } %>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header">
+          <span class="card-icon">&#128221;</span>
+          <span class="card-label">For Companion App Developers</span>
+        </div>
+
+        <p><strong>Login flow (loopback OAuth, RFC 8252):</strong></p>
+        <ol>
+          <li>Start a local HTTP listener on an ephemeral loopback port and generate a random <code>state</code> value.</li>
+          <li>Open the user's browser to <code>/companion/login?redirect_uri=http://127.0.0.1:&lt;port&gt;/callback&amp;state=&lt;state&gt;</code>.</li>
+          <li>The user logs in with Discord. On success, the browser is redirected back to your <code>redirect_uri</code> with <code>code</code> and <code>state</code> query parameters.</li>
+          <li>Verify <code>state</code> matches, then exchange the code directly (no browser involved): <code>POST /api/companion/oauth/token</code> with JSON body <code>{ "code": "..." }</code>. The response is <code>{ "token": "..." }</code> — store this token; it is shown only once.</li>
+        </ol>
+        <p class="muted">Only loopback redirect URIs (<code>http://127.0.0.1:*</code> or <code>http://localhost:*</code>) are accepted.</p>
+
+        <p style="margin-top:1rem;"><strong>Event feed:</strong></p>
+        <p>Connect to <code>GET /api/companion/events</code> with <code>Authorization: Bearer &lt;token&gt;</code>. This is a Server-Sent Events stream that delivers one event per line as it happens:</p>
+        <pre class="mono" style="font-size:.8rem;white-space:pre-wrap;">data: {"type":"channel_points_redemption","rewardId":"...","rewardTitle":"...","userLogin":"...","userName":"...","userInput":"...","redeemedAt":"2026-01-01T00:00:00.000Z"}</pre>
+        <p class="muted">Events are only sent for redemptions on your own channel. What the companion app does with an event (play a sound, run a script, show a notification) is entirely up to it.</p>
+      </div>
+    </section>
+  </main>
+  <%- include('partials/pwa-register') %>
+  <%- include('partials/footer') %>
+  <script src="/utils.js"></script>
+  <script src="/companion-keys.js"></script>
+</body>
+</html>
