@@ -381,9 +381,26 @@ describe('StreamerConnection lifecycle', () => {
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-live'));
 
+    // First reload's subscribeForStreamer call stays pending until resolveFirst() fires,
+    // so we can prove the second reload's call doesn't start until the first one settles.
+    let resolveFirst!: (value: number) => void;
+    const firstDeferred = new Promise<number>((resolve) => { resolveFirst = resolve; });
+    vi.mocked(subscribeForStreamer)
+      .mockImplementationOnce(() => firstDeferred)
+      .mockResolvedValueOnce(1);
+
     conn.reload(makeStreamerData());
     conn.reload(makeStreamerData());
-    // 1 call from the welcome handshake above + 1 per reload() = 3
+
+    // Flush pending microtasks so the first reload's doReload() has had a chance to run.
+    await Promise.resolve();
+    await Promise.resolve();
+    // Only the welcome handshake + first reload have fired — the second reload is still
+    // chained behind the first's unresolved promise. If reloadChain didn't serialise the
+    // calls, the second reload would have fired immediately too, making this 3.
+    expect(subscribeForStreamer).toHaveBeenCalledTimes(2);
+
+    resolveFirst(1);
     await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(3));
   });
 });
