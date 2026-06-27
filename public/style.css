@@ -65,6 +65,15 @@ a:hover { text-decoration: underline; }
 /* ── Container ─────────────────────────────────────────── */
 .container { max-width: 1280px; margin: 0 auto; padding: 1.5rem; }
 
+/* ── Footer ────────────────────────────────────────────── */
+.site-footer {
+  display: flex; gap: 1rem; justify-content: center;
+  padding: 1.25rem 1.5rem; margin-top: 1.5rem;
+  border-top: 1px solid var(--border); color: var(--muted); font-size: .8rem;
+}
+.site-footer a { color: var(--muted); }
+.site-footer a:hover { color: var(--text); }
+
 /* ── Section ───────────────────────────────────────────── */
 .section { margin-bottom: 2rem; }
 .section-title { font-size: 1rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 1rem; }
@@ -269,7 +278,7 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 .is-hidden  { display: none; }
 
 /* ── Login page ────────────────────────────────────────── */
-.login-page { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.login-page { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
 .login-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 2.5rem; width: min(360px, calc(100vw - 2rem)); text-align: center; }
 .login-logo { font-size: 3rem; margin-bottom: .5rem; }
 .login-title { font-size: 1.5rem; font-weight: 700; margin-bottom: .25rem; }
@@ -277,7 +286,7 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 .login-note { color: var(--muted); font-size: .78rem; margin-top: 1rem; }
 
 /* ── Error page ────────────────────────────────────────── */
-.error-page  { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.error-page  { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
 .error-card  { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 2.5rem; width: min(420px, calc(100vw - 2rem)); text-align: center; }
 .error-icon  { font-size: 3rem; margin-bottom: .75rem; }
 .error-title { font-size: 1.25rem; font-weight: 700; margin-bottom: .75rem; }

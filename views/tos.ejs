@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Terms of Service</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body>
+  <% if (user) { %><%- include('partials/nav') %><% } %>
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Terms of Service</h2>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">✅</span><span class="card-label">Acceptance of these terms</span></div>
+        <div class="card-body">
+          <p>By using the BCUK Bot Discord bot or this web dashboard, you agree to these terms. If you don't
+            agree, please don't use the bot or the dashboard.</p>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">🤖</span><span class="card-label">What the service is</span></div>
+        <div class="card-body">
+          <p>BCUK Bot is a community Discord bot with a companion web dashboard. Depending on what's enabled
+            on your server, it can run chat commands, play sound effects (SFX), post stream notifications,
+            drive a stream overlay, and integrate with a Stream Deck.</p>
+          <p>The service is provided for the benefit of the Discord communities that use it, on a best-effort
+            basis, free of charge.</p>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">📐</span><span class="card-label">Acceptable use</span></div>
+        <div class="card-body">
+          <p>Don't use the bot or dashboard to abuse, spam, or disrupt a Discord server, or to upload or
+            trigger sound effects, custom commands, or other content that is illegal, infringes someone
+            else's rights, or that you don't have permission to use.</p>
+          <p>You're responsible for any content you add through custom commands or SFX uploads. Server
+            admins and bot moderators may remove content or restrict access at their discretion.</p>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">🔑</span><span class="card-label">Access &amp; accounts</span></div>
+        <div class="card-body">
+          <p>You sign in to the dashboard with your Discord account. What you can see and do is controlled by
+            an access level set by the server's admins for each Discord server the bot is in. Access — to the
+            bot, the dashboard, or both — may be changed or revoked at any time, for any reason, by a server
+            admin or bot owner.</p>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">⚙️</span><span class="card-label">Availability</span></div>
+        <div class="card-body">
+          <p>The service is provided "as is," without warranties of any kind. We don't guarantee uptime,
+            and features may change, break, or be removed without notice. We're not liable for any loss or
+            damage arising from your use of, or inability to use, the bot or dashboard.</p>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">📝</span><span class="card-label">Changes to these terms</span></div>
+        <div class="card-body">
+          <p>We may update these terms from time to time. Continuing to use the bot or dashboard after an
+            update means you accept the revised terms.</p>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">🍪</span><span class="card-label">Your data</span></div>
+        <div class="card-body">
+          <p>See our <a href="/privacy">Privacy &amp; Cookies</a> page for details on what data we collect and
+            how it's used.</p>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">✉️</span><span class="card-label">Questions</span></div>
+        <div class="card-body">
+          <p>If you have questions about these terms, contact a server administrator.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <%- include('partials/pwa-register') %>
+  <%- include('partials/footer') %>
+</body>
+</html>
