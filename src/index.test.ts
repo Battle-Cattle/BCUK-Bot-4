@@ -53,8 +53,10 @@ vi.mock('./commands/countdownHandler', () => ({ registerCountdownTwitchRuntime: 
 vi.mock('./twitch/eventsub/twitchEventSubHandler', () => ({
   registerEventSubOverlayRuntime: vi.fn(),
   registerEventSubTwitchRuntime: vi.fn(),
+  registerEventSubCompanionRuntime: vi.fn(),
 }));
 vi.mock('./web/routes/overlaySource', () => ({ pushOverlayEvent: vi.fn() }));
+vi.mock('./web/routes/companionEvents', () => ({ pushCompanionEvent: vi.fn() }));
 vi.mock('./commands/counterScheduler', () => ({
   startCounterScheduler: vi.fn(),
   stopCounterScheduler: vi.fn(),
@@ -106,6 +108,15 @@ describe('startup — guild registry preload', () => {
     const [registryCallOrder] = vi.mocked(reloadGuildRegistry).mock.invocationCallOrder;
     const [botCallOrder] = vi.mocked(startDiscordBot).mock.invocationCallOrder;
     expect(registryCallOrder).toBeLessThan(botCallOrder);
+  });
+
+  it('registers the companion event runtime with pushCompanionEvent on a clean startup', async () => {
+    const { registerEventSubCompanionRuntime } = await import('./twitch/eventsub/twitchEventSubHandler.js');
+    const { pushCompanionEvent } = await import('./web/routes/companionEvents.js');
+
+    await runMain();
+
+    expect(vi.mocked(registerEventSubCompanionRuntime)).toHaveBeenCalledWith({ pushCompanionEvent });
   });
 
   it('calls process.exit(1) and does not start the bot when reloadGuildRegistry rejects', async () => {

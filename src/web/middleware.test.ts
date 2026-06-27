@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../db', () => ({
   findApprovedKeyByHash: vi.fn(),
+  findDiscordIdByTokenHash: vi.fn(),
   getEffectiveAccessLevel: vi.fn(),
   findUser: vi.fn(),
   getAllGuilds: vi.fn(),
@@ -12,8 +13,9 @@ vi.mock('./csrf', () => ({
   ensureSessionCsrfToken: vi.fn().mockReturnValue('csrf-token'),
 }));
 
-import { requireAuth, requireManager, requireMod, requireAdmin, requireApiKey, requireGuildContext } from './middleware';
-import { findApprovedKeyByHash, getEffectiveAccessLevel, findUser, getAllGuilds, getGuildsForMember, AccessLevel } from '../db';
+import { createHash } from 'crypto';
+import { requireAuth, requireManager, requireMod, requireAdmin, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
+import { findApprovedKeyByHash, findDiscordIdByTokenHash, getEffectiveAccessLevel, findUser, getAllGuilds, getGuildsForMember, AccessLevel } from '../db';
 
 function makeReq(overrides: object = {}): any {
   return {
@@ -227,6 +229,65 @@ describe('requireApiKey', () => {
     const req = makeReq({ headers: { authorization: 'Bearer tok' } });
     const res = makeRes();
     await requireApiKey(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'Internal server error' });
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+// ─── requireCompanionKey ─────────────────────────────────────────────────────
+
+describe('requireCompanionKey', () => {
+  it('returns 401 when Authorization header is absent', async () => {
+    const req = makeReq({ headers: {} });
+    const res = makeRes();
+    await requireCompanionKey(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'Unauthorized' });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when Authorization header does not start with Bearer', async () => {
+    const req = makeReq({ headers: { authorization: 'Basic abc' } });
+    const res = makeRes();
+    await requireCompanionKey(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when findDiscordIdByTokenHash returns null (missing/invalid/revoked)', async () => {
+    vi.mocked(findDiscordIdByTokenHash).mockResolvedValue(null);
+    const req = makeReq({ headers: { authorization: 'Bearer mytoken' } });
+    const res = makeRes();
+    await requireCompanionKey(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('sets req.companionDiscordId and calls next() when token is valid', async () => {
+    vi.mocked(findDiscordIdByTokenHash).mockResolvedValue('user42');
+    const req = makeReq({ headers: { authorization: 'Bearer validtoken' } });
+    const res = makeRes();
+    await requireCompanionKey(req, res, next);
+    expect(req.companionDiscordId).toBe('user42');
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('hashes the token before looking it up', async () => {
+    vi.mocked(findDiscordIdByTokenHash).mockResolvedValue('u1');
+    const req = makeReq({ headers: { authorization: 'Bearer mytoken' } });
+    await requireCompanionKey(req, makeRes(), next);
+    const passedHash: string = vi.mocked(findDiscordIdByTokenHash).mock.calls[0][0];
+    expect(passedHash).toBe(createHash('sha256').update('mytoken').digest('hex'));
+    expect(passedHash).not.toBe('mytoken');
+  });
+
+  it('returns 500 when findDiscordIdByTokenHash throws', async () => {
+    vi.mocked(findDiscordIdByTokenHash).mockRejectedValue(new Error('DB error'));
+    const req = makeReq({ headers: { authorization: 'Bearer tok' } });
+    const res = makeRes();
+    await requireCompanionKey(req, res, next);
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'Internal server error' });
     expect(next).not.toHaveBeenCalled();

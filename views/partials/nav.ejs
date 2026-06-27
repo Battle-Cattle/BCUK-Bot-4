@@ -15,7 +15,13 @@
           <% } %>
         </div>
       </div>
-      <a href="/streamdeck-key" class="nav-item">Streamdeck Key</a>
+      <div class="nav-group">
+        <button class="nav-group-label" aria-haspopup="true" aria-expanded="false">Devices <span class="nav-caret">▾</span></button>
+        <div class="nav-group-items">
+          <a href="/streamdeck-key" class="nav-item">Streamdeck Key</a>
+          <a href="/companion-key" class="nav-item">Companion App</a>
+        </div>
+      </div>
       <% if (user && user.accessLevel >= 2) { %>
       <div class="nav-group">
         <button class="nav-group-label" aria-haspopup="true" aria-expanded="false">Admin <span class="nav-caret">▾</span></button>

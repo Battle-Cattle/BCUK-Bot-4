@@ -281,4 +281,33 @@ CREATE TABLE IF NOT EXISTS streamdeck_api_keys (
   FOREIGN KEY (approved_by) REFERENCES `user`(discord_id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ---------------------------------------------------------------------------
+-- companion_app_tokens
+-- Self-service bearer token for the local companion app (one per user, no
+-- approval queue — read-only delivery of the user's own Twitch redemption events).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS companion_app_tokens (
+  discord_id   BIGINT       NOT NULL,
+  key_hash     VARCHAR(64)  NOT NULL,
+  created_at   DATETIME     NOT NULL,
+  revoked_at   DATETIME     NULL,
+  PRIMARY KEY (discord_id),
+  UNIQUE KEY uq_companion_app_tokens_key_hash (key_hash),
+  FOREIGN KEY (discord_id) REFERENCES `user`(discord_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- companion_oauth_codes
+-- Short-lived, single-use codes exchanged for a companion_app_tokens row during
+-- the companion app's loopback OAuth login flow.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS companion_oauth_codes (
+  code_hash    VARCHAR(64) NOT NULL,
+  discord_id   BIGINT      NOT NULL,
+  expires_at   DATETIME    NOT NULL,
+  used_at      DATETIME    NULL,
+  PRIMARY KEY (code_hash),
+  FOREIGN KEY (discord_id) REFERENCES `user`(discord_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

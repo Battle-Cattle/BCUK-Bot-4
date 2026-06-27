@@ -160,3 +160,14 @@ export {
   getPendingRequests,
   getAllApiKeys,
 } from './db/streamdeckKeys';
+
+// ─── Companion App ───────────────────────────────────────────────────────────
+
+export type { CompanionTokenStatus } from './db/companionTokens';
+export {
+  issueToken,
+  findDiscordIdByTokenHash,
+  getTokenStatus,
+  revokeToken,
+} from './db/companionTokens';
+export { createCode, consumeCode, exchangeCodeForToken } from './db/companionOAuthCodes';
