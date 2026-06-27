@@ -233,7 +233,9 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
  * Unconditionally forwards the redemption to the streamer's companion app (if any device
  * is connected), then separately looks up videos configured for the redeemed reward and
  * triggers an overlay event if found. The overlay push still no-ops when no videos are
- * configured for the reward or `_overlayRuntime` is absent.
+ * configured for the reward or `_overlayRuntime` is absent. The companion push is isolated
+ * in its own try/catch so a failure there (e.g. a DB error from `getStreamerById`) cannot
+ * prevent the independent overlay-video logic below from running.
  *
  * @param login - Broadcaster login name.
  * @param event - Redemption event payload including reward ID and user details.
@@ -246,17 +248,21 @@ export async function handleRedemption(
   _config: EventSubConfig,
   streamerId: number,
 ): Promise<void> {
-  const streamer = await getStreamerById(streamerId);
-  if (streamer) {
-    _companionRuntime?.pushCompanionEvent(streamer.discord_id, {
-      type: 'channel_points_redemption',
-      rewardId: event.reward.id,
-      rewardTitle: event.reward.title,
-      userLogin: event.user_login,
-      userName: event.user_name,
-      userInput: event.user_input,
-      redeemedAt: new Date().toISOString(),
-    });
+  try {
+    const streamer = await getStreamerById(streamerId);
+    if (streamer) {
+      _companionRuntime?.pushCompanionEvent(streamer.discord_id, {
+        type: 'channel_points_redemption',
+        rewardId: event.reward.id,
+        rewardTitle: event.reward.title,
+        userLogin: event.user_login,
+        userName: event.user_name,
+        userInput: event.user_input,
+        redeemedAt: new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    log.error('Failed to push companion event for redemption:', err);
   }
 
   const videos = await getVideosForReward(event.reward.id, streamerId);

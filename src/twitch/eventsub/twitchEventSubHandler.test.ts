@@ -314,6 +314,18 @@ describe('handleRedemption', () => {
 
     expect(mockPushCompanionEvent).not.toHaveBeenCalled();
   });
+
+  it('still triggers the overlay when the companion lookup throws', async () => {
+    vi.mocked(getStreamerById).mockRejectedValue(new Error('db unavailable'));
+    const videos = [{ filename: 'clip1.mp4', weight: 1 }] as any[];
+    vi.mocked(getVideosForReward).mockResolvedValue(videos);
+    vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
+
+    await handleRedemption('streamer', event, makeConfig(), streamerId);
+
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+    expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
+  });
 });
 
 // ---------------------------------------------------------------------------
