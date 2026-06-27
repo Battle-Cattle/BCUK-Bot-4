@@ -22,6 +22,7 @@ interface TwitchChatRuntime {
 
 let _twitchRuntime: TwitchChatRuntime | null = null;
 
+/** Stores the concrete Twitch chat runtime (send/getActiveChannels/getLoginUserIds) so Twitch custom commands can be sent and broadcast. Call once from index.ts after the Twitch bot is ready. */
 export function registerTwitchChatRuntime(runtime: TwitchChatRuntime): void {
   _twitchRuntime = runtime;
 }
@@ -33,6 +34,7 @@ interface LookupResult {
   isMultiTwitch: boolean;
 }
 
+/** Looks up `command` via the supplied platform-specific finder and returns its response/multi-twitch flag, or null if no custom command matches. */
 async function lookupCommand(
   command: string,
   findCustomCommand: (cmd: string) => Promise<{ output: string; is_multi_twitch: boolean } | null>,
@@ -69,6 +71,13 @@ export function purgeExpiredSessionCache(): void {
 // Purge expired entries so the cache does not grow without bound over long uptimes.
 setInterval(purgeExpiredSessionCache, SESSION_CACHE_TTL_MS).unref();
 
+/**
+ * Resolves the shared-chat session ID for a Twitch user, caching results for
+ * SESSION_CACHE_TTL_MS. A cache hit past its TTL is still returned immediately
+ * (stale-while-revalidate) and triggers at most one background refresh per
+ * user via `inFlightRefreshes`; a failed refresh keeps the last known value
+ * but shortens the retry window to SHORT_RETRY_TTL_MS.
+ */
 export async function resolveSharedChatSessionId(userId: string): Promise<string | null> {
   const now = Date.now();
   const cached = sessionCache.get(userId);
@@ -98,6 +107,13 @@ export async function resolveSharedChatSessionId(userId: string): Promise<string
   }
 }
 
+/**
+ * Sends a multi-twitch custom command's output to every active channel that has the
+ * command registered and is part of the source channel's multi-twitch group (falling
+ * back to the source channel only if it isn't currently in a group). Channels that
+ * share a Twitch shared-chat session are de-duplicated so only one message is sent
+ * per session. Returns true if at least one channel received the message.
+ */
 async function broadcastToActiveChannels(sourceChannel: string, command: string, output: string): Promise<boolean> {
   if (!_twitchRuntime) return false;
 
@@ -195,6 +211,16 @@ export async function executeCustomCommandForDiscord(
   }
 }
 
+/**
+ * Checks a Twitch chat message against the custom command catalog for `channel`
+ * and, if matched, sends the response — broadcasting to other active channels
+ * sharing a multi-twitch group when the command is flagged multi-twitch.
+ *
+ * @param channel - Twitch channel login the message was received on.
+ * @param rawMessage - Raw chat message text.
+ * @param username - Display name for the monitoring entry; null or omitted if unknown.
+ * @returns Resolves when the command is handled (or skipped).
+ */
 export async function executeCustomCommandForTwitch(
   channel: string,
   rawMessage: string,
