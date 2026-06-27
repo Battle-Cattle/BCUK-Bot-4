@@ -19,6 +19,11 @@ vi.mock('./guildRegistry', () => ({
 vi.mock('../db', () => ({
   upsertGuild: vi.fn().mockResolvedValue(undefined),
   getAllGuilds: vi.fn().mockResolvedValue([{ guild_id: 'guild-id', name: 'TestGuild', voice_channel_id: null }]),
+  getGuildById: vi.fn().mockResolvedValue(null),
+  findUser: vi.fn().mockResolvedValue(null),
+  upsertUser: vi.fn().mockResolvedValue(undefined),
+  setMemberAccessLevel: vi.fn().mockResolvedValue(undefined),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 vi.mock('discord.js', () => ({
@@ -162,21 +167,77 @@ describe('startDiscordBot — guildCreate handler', () => {
     return mockInstance.on.mock.calls.find(([event]: string[]) => event === 'guildCreate')?.[1] as Function;
   }
 
-  it('registers the guild row and reloads the registry (no auto-whitelist)', async () => {
+  function makeNewGuild(ownerId = 'owner-id') {
+    return {
+      id: 'new-guild',
+      name: 'New Server',
+      fetchOwner: vi.fn().mockResolvedValue({ id: ownerId, user: { username: 'OwnerName', tag: 'OwnerName#0001' } }),
+    };
+  }
+
+  it('registers a brand-new guild, grants its Discord owner Admin access, and reloads the registry', async () => {
     const guilds = await import('../db.js');
     const registry = await import('./guildRegistry.js');
+    const guild = makeNewGuild();
     const cb = getGuildCreateCb();
 
-    await cb({ id: 'new-guild', name: 'New Server' });
-    // Let the upsert → reload promise chain settle.
+    await cb(guild);
+    // Let the async guildCreate handler settle.
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(vi.mocked(guilds.upsertGuild)).toHaveBeenCalledWith('new-guild', 'New Server');
+    expect(vi.mocked(guilds.findUser)).toHaveBeenCalledWith('owner-id');
+    expect(vi.mocked(guilds.upsertUser)).toHaveBeenCalledWith('owner-id', 'OwnerName', guilds.AccessLevel.USER);
+    expect(vi.mocked(guilds.setMemberAccessLevel)).toHaveBeenCalledWith('new-guild', 'owner-id', guilds.AccessLevel.ADMIN);
     expect(vi.mocked(registry.reloadGuildRegistry)).toHaveBeenCalled();
 
     const [upsertOrder] = vi.mocked(guilds.upsertGuild).mock.invocationCallOrder;
+    const [grantOrder] = vi.mocked(guilds.setMemberAccessLevel).mock.invocationCallOrder;
     const [reloadOrder] = vi.mocked(registry.reloadGuildRegistry).mock.invocationCallOrder;
-    expect(upsertOrder).toBeLessThan(reloadOrder);
+    expect(upsertOrder).toBeLessThan(grantOrder);
+    expect(grantOrder).toBeLessThan(reloadOrder);
+  });
+
+  it('does not overwrite an already-whitelisted owner, but still grants them guild access', async () => {
+    const guilds = await import('../db.js');
+    vi.mocked(guilds.findUser).mockResolvedValueOnce({ discord_id: 'owner-id', discord_name: 'Existing', access_level: 2 } as any);
+    const guild = makeNewGuild();
+    const cb = getGuildCreateCb();
+
+    await cb(guild);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(guilds.upsertUser)).not.toHaveBeenCalled();
+    expect(vi.mocked(guilds.setMemberAccessLevel)).toHaveBeenCalledWith('new-guild', 'owner-id', guilds.AccessLevel.ADMIN);
+  });
+
+  it('does not grant owner access when the guild already exists (reconnect, not a new guild)', async () => {
+    const guilds = await import('../db.js');
+    const registry = await import('./guildRegistry.js');
+    vi.mocked(guilds.getGuildById).mockResolvedValueOnce({ guild_id: 'existing-guild', name: 'Existing', voice_channel_id: null });
+    const guild = { id: 'existing-guild', name: 'Existing', fetchOwner: vi.fn() };
+    const cb = getGuildCreateCb();
+
+    await cb(guild);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(guild.fetchOwner).not.toHaveBeenCalled();
+    expect(vi.mocked(guilds.setMemberAccessLevel)).not.toHaveBeenCalled();
+    expect(vi.mocked(registry.reloadGuildRegistry)).toHaveBeenCalled();
+  });
+
+  it('swallows fetchOwner errors during owner provisioning and still reloads the registry', async () => {
+    const guilds = await import('../db.js');
+    const registry = await import('./guildRegistry.js');
+    const guild = makeNewGuild();
+    vi.mocked(guild.fetchOwner).mockRejectedValueOnce(new Error('owner fetch failed'));
+    const cb = getGuildCreateCb();
+
+    await cb(guild);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(guilds.setMemberAccessLevel)).not.toHaveBeenCalled();
+    expect(vi.mocked(registry.reloadGuildRegistry)).toHaveBeenCalled();
   });
 
   it('swallows upsertGuild errors and does not call reloadGuildRegistry', async () => {
@@ -185,10 +246,11 @@ describe('startDiscordBot — guildCreate handler', () => {
     vi.mocked(guilds.upsertGuild).mockRejectedValueOnce(new Error('db error'));
     const cb = getGuildCreateCb();
 
-    cb({ id: 'new-guild', name: 'New Server' });
+    cb(makeNewGuild());
     // Let the promise chain's .catch branch execute.
     await new Promise((resolve) => setImmediate(resolve));
 
+    expect(vi.mocked(guilds.setMemberAccessLevel)).not.toHaveBeenCalled();
     expect(vi.mocked(registry.reloadGuildRegistry)).not.toHaveBeenCalled();
   });
 });
