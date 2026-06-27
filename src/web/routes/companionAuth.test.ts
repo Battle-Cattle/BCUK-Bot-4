@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../db', () => ({
-  consumeCode: vi.fn(),
-  issueToken: vi.fn(),
+  exchangeCodeForToken: vi.fn(),
 }));
 vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
@@ -11,7 +10,7 @@ vi.mock('../../shared/logger', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router from './companionAuth';
-import { consumeCode, issueToken } from '../../db';
+import { exchangeCodeForToken } from '../../db';
 
 function buildApp(sessionOverrides: Record<string, unknown> = {}) {
   const app = express();
@@ -97,27 +96,25 @@ describe('POST /api/companion/oauth/token', () => {
   it('returns 400 when code is missing', async () => {
     const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({});
     expect(res.status).toBe(400);
-    expect(consumeCode).not.toHaveBeenCalled();
+    expect(exchangeCodeForToken).not.toHaveBeenCalled();
   });
 
-  it('returns 400 when consumeCode reports the code is invalid/expired/used', async () => {
-    vi.mocked(consumeCode).mockResolvedValue(null);
+  it('returns 400 when exchangeCodeForToken reports the code is invalid/expired/used', async () => {
+    vi.mocked(exchangeCodeForToken).mockResolvedValue(null);
     const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'bad' });
     expect(res.status).toBe(400);
-    expect(issueToken).not.toHaveBeenCalled();
   });
 
   it('returns a token when the code is valid', async () => {
-    vi.mocked(consumeCode).mockResolvedValue('42');
-    vi.mocked(issueToken).mockResolvedValue('plain-token-value');
+    vi.mocked(exchangeCodeForToken).mockResolvedValue('plain-token-value');
     const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good' });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ token: 'plain-token-value' });
-    expect(issueToken).toHaveBeenCalledWith('42');
+    expect(exchangeCodeForToken).toHaveBeenCalledWith('good');
   });
 
-  it('returns 500 when consumeCode throws', async () => {
-    vi.mocked(consumeCode).mockRejectedValue(new Error('DB error'));
+  it('returns 500 when exchangeCodeForToken throws', async () => {
+    vi.mocked(exchangeCodeForToken).mockRejectedValue(new Error('DB error'));
     const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good' });
     expect(res.status).toBe(500);
   });

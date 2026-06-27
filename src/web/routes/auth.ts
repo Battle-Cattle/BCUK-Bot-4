@@ -37,6 +37,13 @@ router.get('/discord', (req, res) => {
 });
 
 // ─── OAuth2 callback ─────────────────────────────────────────────────────────
+/**
+ * Discord OAuth2 callback. Exchanges the code for an access token, then either:
+ * creates/refreshes the dashboard session as usual, or — if this login was
+ * initiated via the companion app's loopback flow (`req.session.companionOAuth`
+ * set by companionAuth.ts) — skips session creation entirely and redirects to
+ * the companion app's `redirectUri` with a one-time code instead.
+ */
 router.get('/discord/callback', async (req, res) => {
   const { code, state } = req.query as { code?: string; state?: string };
 

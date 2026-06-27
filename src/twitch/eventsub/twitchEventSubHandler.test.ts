@@ -267,7 +267,7 @@ describe('handleRedemption', () => {
   });
 
   it('calls pickWeightedRandom and pushOverlayEvent with correct path when videos are available', async () => {
-    const videos = [{ filename: 'clip1.mp4', weight: 1 }, { filename: 'clip2.mp4', weight: 2 }] as any[];
+    const videos = [{ file: 'clip1.mp4', weight: 1 }, { file: 'clip2.mp4', weight: 2 }] as any[];
     vi.mocked(getVideosForReward).mockResolvedValue(videos);
     vi.mocked(pickWeightedRandom).mockReturnValue('clip2.mp4');
 
@@ -296,7 +296,7 @@ describe('handleRedemption', () => {
   });
 
   it('pushes a companion event in addition to triggering the overlay when videos are configured', async () => {
-    const videos = [{ filename: 'clip1.mp4', weight: 1 }] as any[];
+    const videos = [{ file: 'clip1.mp4', weight: 1 }] as any[];
     vi.mocked(getVideosForReward).mockResolvedValue(videos);
     vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
 
@@ -317,7 +317,7 @@ describe('handleRedemption', () => {
 
   it('still triggers the overlay when the companion lookup throws', async () => {
     vi.mocked(getStreamerById).mockRejectedValue(new Error('db unavailable'));
-    const videos = [{ filename: 'clip1.mp4', weight: 1 }] as any[];
+    const videos = [{ file: 'clip1.mp4', weight: 1 }] as any[];
     vi.mocked(getVideosForReward).mockResolvedValue(videos);
     vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
 

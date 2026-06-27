@@ -11,7 +11,7 @@ CREATE TABLE companion_app_tokens (
   PRIMARY KEY (discord_id),
   UNIQUE KEY uq_companion_app_tokens_key_hash (key_hash),
   FOREIGN KEY (discord_id) REFERENCES `user`(discord_id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE companion_oauth_codes (
   code_hash    VARCHAR(64) NOT NULL,
@@ -20,4 +20,4 @@ CREATE TABLE companion_oauth_codes (
   used_at      DATETIME    NULL,
   PRIMARY KEY (code_hash),
   FOREIGN KEY (discord_id) REFERENCES `user`(discord_id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

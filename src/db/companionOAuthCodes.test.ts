@@ -4,7 +4,7 @@ vi.mock('./pool', () => ({ getPool: vi.fn() }));
 vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
-import { createCode, consumeCode } from './companionOAuthCodes';
+import { createCode, consumeCode, exchangeCodeForToken } from './companionOAuthCodes';
 import { createHash } from 'crypto';
 
 function sha256hex(s: string) {
@@ -25,9 +25,10 @@ describe('createCode', () => {
     expect(plain).toMatch(/^[0-9a-f]{48}$/); // 24 bytes as hex
     const [sql, params] = execute.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('INSERT INTO companion_oauth_codes');
+    expect(sql).toContain('DATE_ADD(NOW(), INTERVAL ? SECOND)');
     expect(params[0]).toBe(sha256hex(plain));
     expect(params[1]).toBe('123');
-    expect(params[2]).toBeInstanceOf(Date);
+    expect(params[2]).toBe(60);
   });
 });
 
@@ -75,5 +76,82 @@ describe('consumeCode', () => {
     const second = await consumeCode('reused-code');
     expect(first).toBe('1');
     expect(second).toBeNull();
+  });
+});
+
+// ─── exchangeCodeForToken ───────────────────────────────────────────────────
+
+function buildConn(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    beginTransaction: vi.fn().mockResolvedValue(undefined),
+    commit: vi.fn().mockResolvedValue(undefined),
+    rollback: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn(),
+    execute: vi.fn(),
+    ...overrides,
+  };
+}
+
+describe('exchangeCodeForToken', () => {
+  it('rolls back and returns null when the UPDATE affects no rows (invalid/expired/used code)', async () => {
+    const conn = buildConn({ execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }]) });
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    const result = await exchangeCodeForToken('bad-code');
+
+    expect(result).toBeNull();
+    expect(conn.rollback).toHaveBeenCalledTimes(1);
+    expect(conn.commit).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls back and returns null if the follow-up SELECT finds no row', async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([[]]);
+    const conn = buildConn({ execute });
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    const result = await exchangeCodeForToken('good-code');
+
+    expect(result).toBeNull();
+    expect(conn.rollback).toHaveBeenCalledTimes(1);
+  });
+
+  it('commits and returns a plaintext token when the code is valid', async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([[{ discord_id: '42' }]])
+      .mockResolvedValueOnce([{}]);
+    const conn = buildConn({ execute });
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    const token = await exchangeCodeForToken('good-code');
+
+    expect(token).toMatch(/^[0-9a-f]{64}$/); // 32 bytes as hex
+    expect(conn.commit).toHaveBeenCalledTimes(1);
+    expect(conn.rollback).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalledTimes(1);
+    const [tokenSql, tokenParams] = execute.mock.calls[2] as [string, unknown[]];
+    expect(tokenSql).toContain('INSERT INTO companion_app_tokens');
+    expect(tokenParams[0]).toBe('42');
+  });
+
+  it('rolls back and rethrows if issuing the token fails, leaving the code unconsumed for retry', async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([[{ discord_id: '42' }]])
+      .mockRejectedValueOnce(new Error('insert failed'));
+    const conn = buildConn({ execute });
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    await expect(exchangeCodeForToken('good-code')).rejects.toThrow('insert failed');
+
+    expect(conn.rollback).toHaveBeenCalledTimes(1);
+    expect(conn.commit).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalledTimes(1);
   });
 });

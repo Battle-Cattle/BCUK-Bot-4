@@ -31,7 +31,9 @@ export function registerEventSubOverlayRuntime(runtime: EventSubOverlayRuntime):
 }
 
 // Runtime injection for the companion app push function — same rationale as
-// EventSubOverlayRuntime above. Registered from index.ts after startWebPanel().
+// EventSubOverlayRuntime above. Registered from index.ts before startWebPanel(),
+// since pushCompanionEvent is just a function reference and doesn't require the
+// HTTP server to be running yet.
 /**
  * Public contract for the companion app runtime injection.
  * Passed to {@link registerEventSubCompanionRuntime} from index.ts.
@@ -47,7 +49,7 @@ interface EventSubCompanionRuntime {
 
 let _companionRuntime: EventSubCompanionRuntime | null = null;
 
-/** Register the companion app push function. Called from index.ts after startWebPanel(). */
+/** Register the companion app push function. Called from index.ts before startWebPanel(). */
 export function registerEventSubCompanionRuntime(runtime: EventSubCompanionRuntime): void {
   _companionRuntime = runtime;
 }

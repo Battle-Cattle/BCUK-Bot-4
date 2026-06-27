@@ -6,7 +6,15 @@ function confirmSubmit(event, className, buildMessage) {
   return true;
 }
 
-/** Wires a button to copy the text content of another element to the clipboard, with brief "Copied!" feedback and a fallback alert when the Clipboard API is unavailable or the write is rejected. */
+/**
+ * Wires a button to copy the text content of another element to the clipboard,
+ * with brief "Copied!" feedback and a fallback alert when the Clipboard API is
+ * unavailable or the write is rejected.
+ * @param {string} buttonId - ID of the button element to attach the click handler to.
+ * @param {string} sourceId - ID of the element whose textContent will be copied.
+ * @param {string} idleLabel - Label to restore on the button after the "Copied!" feedback.
+ * @returns {void}
+ */
 function registerCopyToClipboardHandler(buttonId, sourceId, idleLabel) {
   var button = document.getElementById(buttonId);
   if (!button) return;

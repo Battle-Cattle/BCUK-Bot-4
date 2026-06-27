@@ -26,22 +26,38 @@ router.get('/companion-key', csrfProtection, async (req, res) => {
   }
 });
 
-/** Issues (or replaces) a companion app token for the current user — manual fallback to the OAuth login flow. */
+/**
+ * Issues (or replaces) a companion app token for the current user — manual fallback
+ * to the OAuth login flow. Only this section's failure can burn the user's one
+ * chance to see the new plaintext token, so the follow-up status refresh runs in
+ * its own try/catch with a locally-derived fallback rather than risking the
+ * already-issued token being lost behind a `request_failed` redirect.
+ */
 router.post('/companion-key/request', csrfProtection, async (req, res) => {
+  let plain: string;
   try {
-    const plain = await issueToken(req.session.user!.discordId);
-    const tokenStatus = await getTokenStatus(req.session.user!.discordId);
-    res.render('companion-keys', {
-      user: req.session.user,
-      csrfToken: req.csrfToken(),
-      tokenStatus,
-      newToken: plain,
-      error: null,
-    });
+    plain = await issueToken(req.session.user!.discordId);
   } catch (err) {
     log.error('Companion key request error:', err);
     res.redirect('/companion-key?error=request_failed');
+    return;
   }
+
+  let tokenStatus;
+  try {
+    tokenStatus = await getTokenStatus(req.session.user!.discordId);
+  } catch (err) {
+    log.error('Companion key status refresh after issue failed:', err);
+    tokenStatus = { hasToken: true, createdAt: new Date() };
+  }
+
+  res.render('companion-keys', {
+    user: req.session.user,
+    csrfToken: req.csrfToken(),
+    tokenStatus,
+    newToken: plain,
+    error: null,
+  });
 });
 
 /** Revokes the current user's companion app token. */

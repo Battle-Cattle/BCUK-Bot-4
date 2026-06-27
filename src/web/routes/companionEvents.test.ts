@@ -62,29 +62,36 @@ describe('GET /events — connection limit', () => {
 
   it('accepts a connection when below the limit', async () => {
     const req = supertest(buildApp()).get('/events').set('x-test-discord-id', 'user1');
-    const p = new Promise<number>((resolve) => {
+    const p = new Promise<{ status: number; close: () => void }>((resolve) => {
       req
         .buffer(false)
         .parse((_res, _cb) => {
-          resolve(_res.statusCode ?? 0);
+          resolve({ status: _res.statusCode ?? 0, close: () => (_res as any).req.emit('close') });
           (_res as any).resume();
         })
         .end();
     });
-    const status = await p;
+    const { status, close } = await p;
     expect(status).toBe(200);
+    close();
   });
 });
 
 describe('GET /events — keepalive ping and connection close cleanup', () => {
-  /** Opens an SSE connection and resolves once headers arrive, leaving the stream open. */
+  /**
+   * Opens an SSE connection and resolves once headers arrive, leaving the stream open.
+   * @param discordId - Value sent via the `x-test-discord-id` header to drive the stubbed auth.
+   * @returns The response status plus a `close()` callback that emits `'close'` on the
+   * underlying request, so tests can release the connection (and its keepalive interval)
+   * instead of leaving it open for the rest of the suite.
+   */
   function connect(discordId: string) {
     const req = supertest(buildApp()).get('/events').set('x-test-discord-id', discordId);
-    return new Promise<number>((resolve) => {
+    return new Promise<{ status: number; close: () => void }>((resolve) => {
       req
         .buffer(false)
         .parse((_res, _cb) => {
-          resolve(_res.statusCode ?? 0);
+          resolve({ status: _res.statusCode ?? 0, close: () => (_res as any).req.emit('close') });
           (_res as any).resume();
         })
         .end();
@@ -94,7 +101,7 @@ describe('GET /events — keepalive ping and connection close cleanup', () => {
   it('clears the interval and drops the connection when a keepalive ping write throws', async () => {
     const setIntervalSpy = vi.spyOn(global, 'setInterval');
 
-    const status = await connect('user1');
+    const { status } = await connect('user1');
     expect(status).toBe(200);
 
     const keepaliveCallback = setIntervalSpy.mock.calls[0][0] as () => void;
@@ -111,7 +118,7 @@ describe('GET /events — keepalive ping and connection close cleanup', () => {
   it('leaves other connections for the same discord ID intact when only one ping fails', async () => {
     const setIntervalSpy = vi.spyOn(global, 'setInterval');
 
-    const status1 = await connect('user1');
+    const { status: status1 } = await connect('user1');
     expect(status1).toBe(200);
     const keepaliveCallback1 = setIntervalSpy.mock.calls[0][0] as () => void;
     const [deadRes] = Array.from(connections.get('user1')!);
@@ -119,7 +126,7 @@ describe('GET /events — keepalive ping and connection close cleanup', () => {
       throw new Error('client gone');
     });
 
-    const status2 = await connect('user1');
+    const { status: status2, close: close2 } = await connect('user1');
     expect(status2).toBe(200);
 
     keepaliveCallback1();
@@ -127,10 +134,12 @@ describe('GET /events — keepalive ping and connection close cleanup', () => {
     const remaining = connections.get('user1');
     expect(remaining?.has(deadRes)).toBe(false);
     expect(remaining?.size).toBe(1);
+
+    close2();
   });
 
   it('removes the connection when the underlying request closes', async () => {
-    const status = await connect('user1');
+    const { status } = await connect('user1');
     expect(status).toBe(200);
     expect(connections.has('user1')).toBe(true);
 
@@ -141,7 +150,7 @@ describe('GET /events — keepalive ping and connection close cleanup', () => {
   });
 
   it('does nothing on close if the discord ID has already been removed from the map', async () => {
-    const status = await connect('user1');
+    const { status } = await connect('user1');
     expect(status).toBe(200);
 
     const [res] = Array.from(connections.get('user1')!);

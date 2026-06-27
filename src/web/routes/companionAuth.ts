@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { consumeCode, issueToken } from '../../db';
+import { exchangeCodeForToken } from '../../db';
 import { renderError } from './shared';
 
 const log = createLogger('CompanionAuth');
@@ -26,9 +26,14 @@ function isLoopbackRedirectUri(redirectUri: string): boolean {
   return parsed.protocol === 'http:' && (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost');
 }
 
-// GET /companion/login — entry point for the companion app's loopback OAuth flow.
-// Validates the loopback redirect_uri, stashes it on the session, then hands off
-// to the existing Discord OAuth login (the callback branches back here on success).
+/**
+ * GET /companion/login — entry point for the companion app's loopback OAuth flow.
+ * Validates the loopback redirect_uri, stashes it (with the app's state) on the
+ * session, then hands off to the existing Discord OAuth login; the callback
+ * branches back here on success and redirects to redirectUri with a one-time code.
+ * @param req.query.redirect_uri - Loopback URL the companion app is listening on.
+ * @param req.query.state - Opaque value echoed back to the app for CSRF binding.
+ */
 router.get('/companion/login', (req, res) => {
   const { redirect_uri: redirectUri, state } = req.query as { redirect_uri?: string; state?: string };
   if (!redirectUri || !state || !isLoopbackRedirectUri(redirectUri)) {
@@ -44,8 +49,14 @@ router.get('/companion/login', (req, res) => {
   res.redirect('/auth/discord');
 });
 
-// POST /api/companion/oauth/token — exchanges a one-time authorization code (issued
-// by the /auth/discord/callback companion branch) for a long-lived companion token.
+/**
+ * POST /api/companion/oauth/token — exchanges a one-time authorization code (issued
+ * by the /auth/discord/callback companion branch) for a long-lived companion token.
+ * The exchange runs in a single DB transaction (see `exchangeCodeForToken`), so a
+ * failure issuing the token doesn't permanently burn the one-time code.
+ * @param req.body.code - Plaintext one-time code from the loopback redirect.
+ * @returns `{ token }` on success, or a 400/500 JSON error response.
+ */
 router.post('/api/companion/oauth/token', async (req, res) => {
   const { code } = req.body as { code?: string };
   if (!code || typeof code !== 'string') {
@@ -54,12 +65,11 @@ router.post('/api/companion/oauth/token', async (req, res) => {
   }
 
   try {
-    const discordId = await consumeCode(code);
-    if (!discordId) {
+    const token = await exchangeCodeForToken(code);
+    if (!token) {
       res.status(400).json({ ok: false, error: 'Invalid or expired code' });
       return;
     }
-    const token = await issueToken(discordId);
     res.json({ token });
   } catch (err) {
     log.error('Companion token exchange failed:', err);

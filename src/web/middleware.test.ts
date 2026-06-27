@@ -13,6 +13,7 @@ vi.mock('./csrf', () => ({
   ensureSessionCsrfToken: vi.fn().mockReturnValue('csrf-token'),
 }));
 
+import { createHash } from 'crypto';
 import { requireAuth, requireManager, requireMod, requireAdmin, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
 import { findApprovedKeyByHash, findDiscordIdByTokenHash, getEffectiveAccessLevel, findUser, getAllGuilds, getGuildsForMember, AccessLevel } from '../db';
 
@@ -278,7 +279,7 @@ describe('requireCompanionKey', () => {
     const req = makeReq({ headers: { authorization: 'Bearer mytoken' } });
     await requireCompanionKey(req, makeRes(), next);
     const passedHash: string = vi.mocked(findDiscordIdByTokenHash).mock.calls[0][0];
-    expect(passedHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(passedHash).toBe(createHash('sha256').update('mytoken').digest('hex'));
     expect(passedHash).not.toBe('mytoken');
   });
 

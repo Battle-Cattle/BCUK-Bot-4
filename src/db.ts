@@ -170,4 +170,4 @@ export {
   getTokenStatus,
   revokeToken,
 } from './db/companionTokens';
-export { createCode, consumeCode } from './db/companionOAuthCodes';
+export { createCode, consumeCode, exchangeCodeForToken } from './db/companionOAuthCodes';
