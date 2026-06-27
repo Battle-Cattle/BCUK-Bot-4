@@ -30,6 +30,7 @@ import streamdeckKeysRouter from './routes/streamdeckKeys';
 import userSettingsRouter from './routes/userSettings';
 import overlaySourceRouter from './routes/overlaySource';
 import overlayAdminRouter from './routes/overlayAdmin';
+import privacyRouter from './routes/privacy';
 import { requireAuth, requireGuildContext } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
 import {
@@ -158,6 +159,7 @@ app.use('/auth', authLimiter, authRouter);
 app.use('/auth', authLimiter, eventsubCallbackRouter);
 app.use('/api/streamdeck', streamdeckLimiter, streamdeckRouter);
 app.use('/', sfxPublicRouter);
+app.use('/', privacyRouter);
 app.use('/overlay', overlaySourceRouter);
 app.use('/guild', requireAuth, guildRouter);
 app.use('/api', requireAuth, apiRouter);
