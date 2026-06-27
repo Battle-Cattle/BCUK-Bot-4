@@ -53,10 +53,13 @@ export async function postAnnouncement(
 }
 
 /**
- * Updates an existing "now live" announcement in place (or replaces it, if the
- * group is configured to delete old posts) to reflect a new game/title. If the
- * previously-announced message is gone, falls back to posting a fresh one
- * instead of silently failing on every subsequent call.
+ * Updates an existing "now live" announcement to reflect a new game/title.
+ * Delete+repost (when the group has `delete_old_posts` enabled) is reserved
+ * for actual game changes (`templateKey === 'new_game_message'`) — title-only
+ * changes are always edited in place so a burst of Twitch `channel.update`
+ * notifications during stream start-up can't repeatedly delete and repost the
+ * announcement. If the previously-announced message is gone, falls back to
+ * posting a fresh one instead of silently failing on every subsequent call.
  */
 export async function editAnnouncement(
   liveStates: Map<string, LiveState>,
@@ -84,7 +87,7 @@ export async function editAnnouncement(
     if (!channel || !channel.isTextBased()) return;
     const textChannel = channel as TextChannel;
 
-    if (group.delete_old_posts) {
+    if (group.delete_old_posts && templateKey === 'new_game_message') {
       const msg = await textChannel.send({ content, embeds: [embed] });
       try {
         await tryDeleteDiscordMessage(state.channelId, state.messageId);

@@ -1,11 +1,28 @@
 import type { Response } from 'express';
 import type { SessionUser } from '../../types/express';
 
+/**
+ * Parse a positive integer id form field. A repeated field (arriving as an array) is
+ * rejected rather than silently taking the first value, so a duplicated/tampered id
+ * can't slip past validation — mirrors `parsePositiveBigIntId`.
+ */
 export function parsePositiveIntId(value: string | string[] | undefined): number | null {
-  const str = Array.isArray(value) ? value[0] : value;
-  if (typeof str !== 'string' || !/^\d+$/.test(str)) return null;
-  const parsed = Number(str);
+  if (Array.isArray(value)) return null;
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+/**
+ * Parse a positive BIGINT id form field directly to `bigint`, avoiding precision loss above
+ * `Number.MAX_SAFE_INTEGER`. A repeated field (arriving as an array) is rejected rather than
+ * silently taking the first value, so a duplicated/tampered id can't slip past validation.
+ */
+export function parsePositiveBigIntId(value: string | string[] | undefined): bigint | null {
+  if (Array.isArray(value)) return null;
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
+  const parsed = BigInt(value);
+  return parsed > 0n ? parsed : null;
 }
 
 export function trimField(value: unknown): string {

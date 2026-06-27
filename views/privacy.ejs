@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Privacy &amp; Cookies</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body>
+  <% if (user) { %><%- include('partials/nav') %><% } %>
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Privacy &amp; Cookies</h2>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">🍪</span><span class="card-label">Cookies</span></div>
+        <div class="card-body">
+          <p>This site sets a single cookie, <code>connect.sid</code>, which keeps you signed in between
+            page loads. It does not track you across other sites, and we don't use it for analytics or
+            advertising.</p>
+          <p>This cookie is <strong>strictly necessary</strong> — it only exists to keep your login session
+            and protect against cross-site request forgery (CSRF) once you sign in. Strictly necessary
+            cookies are exempt from cookie consent requirements under UK PECR/GDPR, so you won't see a
+            cookie consent banner here. The cookie expires automatically after 24 hours, is marked
+            <code>HttpOnly</code> (inaccessible to page scripts) and is sent over HTTPS only in production.</p>
+          <p>We don't use any analytics, advertising, or third-party tracking cookies anywhere on this site.</p>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">📋</span><span class="card-label">What we collect</span></div>
+        <div class="card-body">
+          <p>When you sign in with Discord, we receive and store your Discord ID, display name, and avatar
+            so you can use the control panel. We also store the access level assigned to you in each Discord
+            server the bot is added to.</p>
+          <p>If you connect a Twitch account for stream notifications, we store your Twitch user ID and the
+            OAuth access/refresh tokens needed to receive that data. Those tokens are encrypted at rest and
+            are never stored in plain text.</p>
+          <p>If you generate a Streamdeck API key, we store only a one-way hash of it — never the key itself.</p>
+          <p>We do not record or transcribe voice channel audio, and we do not store the content of Discord
+            messages or chat logs. A short list of the most recent bot command executions is kept in memory
+            for moderators to review, but it is not written to a database and is lost on restart.</p>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">🔗</span><span class="card-label">Third parties</span></div>
+        <div class="card-body">
+          <p>To provide the service we exchange data with Discord (for login and avatars) and Twitch (for
+            stream notifications you opt into). We don't share your data with any analytics, advertising, or
+            marketing services — we don't use any.</p>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">🗑️</span><span class="card-label">Retention &amp; deletion</span></div>
+        <div class="card-body">
+          <p>Login sessions expire after 24 hours of being issued. Server logs are kept for 14 days and then
+            deleted. If your account is removed from the system, your stored Discord/Twitch data — including
+            any encrypted Twitch tokens — is deleted along with it. Any Streamdeck API key you generated is
+            not automatically deleted; contact a server administrator to have it revoked.</p>
+          <p>To request deletion of your data, contact a server administrator.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <%- include('partials/pwa-register') %>
+</body>
+</html>

@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/style.css">
   <%- include('partials/pwa-head') %>
 </head>
-<body>
+<body data-csrf-token="<%= csrfToken %>">
   <%- include('partials/nav') %>
 
   <main class="container">
@@ -23,6 +23,7 @@
         no_videos_selected:'Select at least one video to assign to the reward.',
         save_failed:      'Failed to save — please try again.',
         invalid_id:       'Invalid request.',
+        file_too_large:   `That file is too large (max ${maxFileMb} MB).`,
       }; %>
       <%= errorMessages[error] ?? `An error occurred (${error}).` %>
     </div>
@@ -81,7 +82,10 @@
 
       <div class="card card-spaced">
         <div class="card-body">
-          <form method="POST" action="/overlay/settings/videos/upload?_csrf=<%= encodeURIComponent(csrfToken) %>" enctype="multipart/form-data">
+          <!-- Submitted via fetch in overlayAdmin.js with the CSRF token in an
+               X-CSRF-Token header, so the session token is never placed in the URL
+               (browser history / Referer). -->
+          <form method="POST" action="/overlay/settings/videos/upload" enctype="multipart/form-data" class="js-overlay-upload">
             <div class="form-row-wrap" style="align-items:flex-end;">
               <div style="flex:1;">
                 <label class="hint hint-compact" for="video-name">Name</label>
