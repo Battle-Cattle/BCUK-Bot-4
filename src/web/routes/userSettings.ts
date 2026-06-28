@@ -101,8 +101,8 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
  * GET /user/twitch-connect — starts the Twitch OAuth flow for the logged-in user's
  * streamer record. Stores the OAuth state and streamer ID on the session, then
  * redirects to Twitch's authorize URL.
- * @param req - Express request; receives `eventsubOAuthState` and `eventsubStreamerId`
- *   on its session.
+ * @param req - Express request; reads `req.session.user` and writes
+ *   `eventsubOAuthState` and `eventsubStreamerId` to the session for the callback.
  * @param res - Express response; redirects to id.twitch.tv's OAuth2 authorize endpoint
  *   on success, or to `/user/settings?error=<code>` if the user has no streamer record,
  *   the Twitch bot isn't enabled for them, EventSub config is missing, or an
