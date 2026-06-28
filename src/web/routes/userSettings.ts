@@ -44,6 +44,16 @@ function getFriendlyError(key: string): string {
 }
 
 // GET /user/settings
+
+/**
+ * GET /user/settings — renders the logged-in user's settings page, including their
+ * Twitch connection status, EventSub config, and any `error`/`success` query-param
+ * banner from a prior redirect.
+ * @param req - Express request; reads `req.session.user`, `error`, `success`, and
+ *   `expected` query params.
+ * @param res - Express response; renders the `userSettings` view, or a 500 error
+ *   page if loading the user/streamer record fails.
+ */
 router.get('/', requireAuth, csrfProtection, async (req, res) => {
   try {
     const discordId = req.session.user!.discordId;
@@ -86,6 +96,18 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
 });
 
 // GET /user/twitch-connect — initiates Twitch OAuth for the logged-in user
+
+/**
+ * GET /user/twitch-connect — starts the Twitch OAuth flow for the logged-in user's
+ * streamer record. Stores the OAuth state and streamer ID on the session, then
+ * redirects to Twitch's authorize URL.
+ * @param req - Express request; reads `req.session.user` and writes
+ *   `eventsubOAuthState` and `eventsubStreamerId` to the session for the callback.
+ * @param res - Express response; redirects to id.twitch.tv's OAuth2 authorize endpoint
+ *   on success, or to `/user/settings?error=<code>` if the user has no streamer record,
+ *   the Twitch bot isn't enabled for them, EventSub config is missing, or an
+ *   unexpected error occurs (`error=eventsub_config_failed`).
+ */
 router.get('/twitch-connect', requireAuth, async (req, res) => {
   try {
     const discordId = req.session.user!.discordId;
@@ -124,6 +146,15 @@ router.get('/twitch-connect', requireAuth, async (req, res) => {
 });
 
 // POST /user/twitch-disconnect
+
+/**
+ * POST /user/twitch-disconnect — clears the logged-in user's stored Twitch OAuth
+ * token and reloads EventSub subscriptions so the disconnect takes effect immediately.
+ * @param req - Express request; reads `req.session.user.discordId`.
+ * @param res - Express response; redirects to `/user/settings` on success, or to
+ *   `/user/settings?error=<code>` if the user has no streamer record
+ *   (`error=no_streamer_record`) or the token clear fails (`error=eventsub_disconnect_failed`).
+ */
 router.post('/twitch-disconnect', requireAuth, csrfProtection, async (req, res) => {
   try {
     const discordId = req.session.user!.discordId;
@@ -140,6 +171,20 @@ router.post('/twitch-disconnect', requireAuth, csrfProtection, async (req, res) 
 });
 
 // POST /user/eventsub-config
+
+/**
+ * POST /user/eventsub-config — saves the logged-in user's EventSub notification
+ * config (follow/sub/resub/giftsub/raid toggles and message templates), falling
+ * back to existing values for any field omitted from the body, then reloads
+ * EventSub subscriptions.
+ * @param req - Express request; reads `req.session.user.discordId` and the
+ *   notification-config fields from `req.body`.
+ * @param res - Express response; redirects to `/user/settings` on success, or to
+ *   `/user/settings?error=<code>` if the user has no streamer record
+ *   (`error=no_streamer_record`), the Twitch bot isn't enabled for them
+ *   (`error=eventsub_not_bot_enabled`), a message field exceeds the length limit, or
+ *   saving fails (`error=eventsub_config_failed`).
+ */
 router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) => {
   try {
     const discordId = req.session.user!.discordId;

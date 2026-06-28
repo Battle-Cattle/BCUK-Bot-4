@@ -12,6 +12,24 @@ const router = Router();
 // GET /auth/twitch/eventsub/callback
 // No requireAuth — Twitch redirects here outside the normal session flow.
 // CSRF is handled via the session state set during OAuth initiation.
+
+/**
+ * GET /auth/twitch/eventsub/callback — completes the Twitch OAuth flow started by
+ * `/user/twitch-connect`. Validates the OAuth state and streamer ownership, exchanges
+ * the code for tokens, verifies the connecting Twitch account matches the expected
+ * streamer login, saves the token, initializes EventSub config, and reloads
+ * subscriptions.
+ * @param req - Express request; reads `code`/`state`/`error` query params and the
+ *   stored `eventsubOAuthState`/`eventsubStreamerId` session values.
+ * @param res - Express response; redirects to `/user/settings?success=twitch_connected`
+ *   on success, or to `/user/settings?error=<code>` if Twitch denied authorization
+ *   (`error=eventsub_oauth_denied`), the OAuth state/streamer is missing or mismatched
+ *   (`error=eventsub_oauth_state_mismatch`), config is missing (`error=eventsub_config_failed`),
+ *   the streamer record can't be found (`error=invalid_id`), the token exchange fails
+ *   (`error=eventsub_token_invalid`), the connecting account doesn't match the expected
+ *   streamer (`error=eventsub_wrong_account`), or any other error occurs
+ *   (`error=eventsub_config_failed`).
+ */
 router.get('/twitch/eventsub/callback', async (req, res) => {
   const { code, state, error } = req.query as Record<string, string | undefined>;
 
