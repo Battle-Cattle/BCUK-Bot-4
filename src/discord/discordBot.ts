@@ -60,24 +60,34 @@ export async function fetchMemberDisplayName(
  * called for a guild's first-ever appearance (see the `guildCreate` handler in
  * {@link startDiscordBot}) — never on a reconnect — so a deliberately
  * de-provisioned guild is never silently re-granted. Never overwrites an
- * existing user's identity/legacy fields, and never throws — failures are logged
- * so a transient Discord API error doesn't block guild registration.
+ * existing user's identity/legacy fields.
+ *
+ * Only a failure to fetch the guild owner from Discord is swallowed here (logged,
+ * then returns) — that's the one step expected to fail transiently. DB failures
+ * while granting access are allowed to propagate to the caller, since by that
+ * point the guild row already exists and the next `guildCreate` will treat this
+ * guild as pre-existing and skip provisioning; surfacing the error as a guild
+ * registration failure (rather than swallowing it silently) makes that case
+ * visible instead of leaving the guild inert with no record of why.
  *
  * @param guild - The discord.js Guild that was just joined for the first time.
- * @returns Resolves once the owner's access is granted (or the failure is logged).
+ * @returns Resolves once the owner's access is granted, or once an owner-fetch
+ *   failure has been logged. Rejects if granting DB access fails.
  */
 async function provisionGuildOwner(guild: Guild): Promise<void> {
+  let owner;
   try {
-    const owner = await guild.fetchOwner();
-    const existingUser = await findUser(owner.id);
-    if (!existingUser) {
-      await upsertUser(owner.id, owner.user.username, AccessLevel.USER);
-    }
-    await setMemberAccessLevel(guild.id, owner.id, AccessLevel.ADMIN);
-    log.info(`Granted Admin access to server owner ${owner.user.tag} (${owner.id}) for guild '${guild.name}' (${guild.id}).`);
+    owner = await guild.fetchOwner();
   } catch (err) {
-    log.error(`Failed to grant owner access for guild ${guild.id}:`, err);
+    log.error(`Failed to fetch owner for guild ${guild.id}:`, err);
+    return;
   }
+  const existingUser = await findUser(owner.id);
+  if (!existingUser) {
+    await upsertUser(owner.id, owner.user.username, AccessLevel.USER);
+  }
+  await setMemberAccessLevel(guild.id, owner.id, AccessLevel.ADMIN);
+  log.info(`Granted Admin access to server owner ${owner.user.tag} (${owner.id}) for guild '${guild.name}' (${guild.id}).`);
 }
 
 /**

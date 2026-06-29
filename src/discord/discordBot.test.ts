@@ -167,6 +167,7 @@ describe('startDiscordBot — guildCreate handler', () => {
     return mockInstance.on.mock.calls.find(([event]: string[]) => event === 'guildCreate')?.[1] as Function;
   }
 
+  /** Builds a minimal discord.js Guild-like object for a brand-new guild, with a mocked `fetchOwner`. */
   function makeNewGuild(ownerId = 'owner-id') {
     return {
       id: 'new-guild',
@@ -238,6 +239,18 @@ describe('startDiscordBot — guildCreate handler', () => {
 
     expect(vi.mocked(guilds.setMemberAccessLevel)).not.toHaveBeenCalled();
     expect(vi.mocked(registry.reloadGuildRegistry)).toHaveBeenCalled();
+  });
+
+  it('propagates a DB failure during the owner grant and does not call reloadGuildRegistry', async () => {
+    const guilds = await import('../db.js');
+    const registry = await import('./guildRegistry.js');
+    vi.mocked(guilds.setMemberAccessLevel).mockRejectedValueOnce(new Error('db error'));
+    const cb = getGuildCreateCb();
+
+    cb(makeNewGuild());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(registry.reloadGuildRegistry)).not.toHaveBeenCalled();
   });
 
   it('swallows upsertGuild errors and does not call reloadGuildRegistry', async () => {
