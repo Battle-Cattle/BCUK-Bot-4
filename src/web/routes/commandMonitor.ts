@@ -8,6 +8,13 @@ import { renderError } from './shared';
 const log = createLogger('Web');
 const router = Router();
 
+/**
+ * GET /command-monitor — renders the command monitor page showing recently
+ * triggered command test entries.
+ * @param req - Express request; reads `req.session.user`.
+ * @param res - Express response; renders the `command-monitor` view, or a 500
+ *   error page if loading recent entries fails.
+ */
 router.get('/command-monitor', requireManager, csrfProtection, (req, res) => {
   try {
     const recentEntries = getRecentCommandTestEntries();
@@ -22,6 +29,13 @@ router.get('/command-monitor', requireManager, csrfProtection, (req, res) => {
   }
 });
 
+/**
+ * GET /command-monitor/recent — polling endpoint returning recent command test
+ * entries as JSON, for live-refreshing the command monitor page.
+ * @param _req - Express request (unused).
+ * @param res - Express response; responds 200 with `{ entries }` on success, or
+ *   500 with `{ entries: [] }` if fetching entries fails.
+ */
 router.get('/command-monitor/recent', requireManager, (_req, res) => {
   try {
     res.json({ entries: getRecentCommandTestEntries() });

@@ -14,6 +14,15 @@ import { parsePositiveIntId, normalizeDiscordId } from './shared';
 const log = createLogger('Web');
 const router = Router();
 
+/**
+ * POST /commands/assign — assigns a Twitch-linked Discord user to a custom command.
+ * @param req - Express request; reads `command_id` and `discord_id` from `req.body`.
+ * @param res - Express response; redirects to `/commands` on success, or to
+ *   `/commands?error=<code>` if fields are missing (`missing_fields`), IDs are
+ *   malformed (`invalid_id`), the user doesn't exist or has no linked Twitch name
+ *   (`invalid_assignment_user`), the command is already assigned (`command_taken`),
+ *   or the assignment write fails (`assign_failed`).
+ */
 router.post('/commands/assign', requireMod, csrfProtection, async (req, res) => {
   const { command_id, discord_id } = req.body as { command_id?: string; discord_id?: string };
   if (!command_id || !discord_id) {
@@ -46,6 +55,13 @@ router.post('/commands/assign', requireMod, csrfProtection, async (req, res) => 
   res.redirect('/commands');
 });
 
+/**
+ * POST /commands/unassign — removes a user's assignment from a custom command.
+ * @param req - Express request; reads `command_id` and `discord_id` from `req.body`.
+ * @param res - Express response; redirects to `/commands` on success, or to
+ *   `/commands?error=<code>` if fields are missing (`missing_fields`), IDs are
+ *   malformed (`invalid_id`), or the unassign write fails (`unassign_failed`).
+ */
 router.post('/commands/unassign', requireMod, csrfProtection, async (req, res) => {
   const { command_id, discord_id } = req.body as { command_id?: string; discord_id?: string };
   if (!command_id || !discord_id) {
