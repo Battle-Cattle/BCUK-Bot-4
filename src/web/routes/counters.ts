@@ -91,6 +91,13 @@ function validateAndNormalizeCounterForm(
   };
 }
 
+/**
+ * GET /counters — renders the counters page listing every counter.
+ * @param req - Express request; reads `req.session.user`, `error`, and `reset`
+ *   query params.
+ * @param res - Express response; renders the `counters` view, or a 500 error page
+ *   if loading counters fails.
+ */
 router.get('/counters', requireAuth, csrfProtection, async (req, res) => {
   try {
     const counters = await getAllCounters();
@@ -108,6 +115,16 @@ router.get('/counters', requireAuth, csrfProtection, async (req, res) => {
   }
 });
 
+/**
+ * POST /counters/add — creates a new counter with a trigger command, check command,
+ * increment/check messages, and yearly-reset flag.
+ * @param req - Express request; reads `trigger_command`, `check_command`, `message`,
+ *   `increment_message`, and `reset_yearly` from `req.body`.
+ * @param res - Express response; redirects to `/counters` on success, or to
+ *   `/counters?error=<code>` for validation failures (`missing_fields`,
+ *   `same_commands`, `duplicate_command`, `reserved_command`) or a DB failure
+ *   (`add_failed`).
+ */
 router.post('/counters/add', requireMod, csrfProtection, async (req, res) => {
   const form = validateAndNormalizeCounterForm(req.body as Record<string, string | undefined>);
   if (form.error) {
@@ -139,6 +156,17 @@ router.post('/counters/add', requireMod, csrfProtection, async (req, res) => {
   res.redirect('/counters');
 });
 
+/**
+ * POST /counters/update — updates an existing counter's commands, messages, and
+ * yearly-reset flag.
+ * @param req - Express request; reads `id`, `trigger_command`, `check_command`,
+ *   `message`, `increment_message`, and `reset_yearly` from `req.body`.
+ * @param res - Express response; redirects to `/counters` on success, or to
+ *   `/counters?error=<code>` for validation failures (`missing_fields`,
+ *   `same_commands`, `invalid_id`, `duplicate_command`, `reserved_command`), if the
+ *   counter no longer exists (`counter_not_found`), or the update fails
+ *   (`update_failed`).
+ */
 router.post('/counters/update', requireMod, csrfProtection, async (req, res) => {
   const { id } = req.body as Record<string, string | undefined>;
 
@@ -181,6 +209,13 @@ router.post('/counters/update', requireMod, csrfProtection, async (req, res) => 
   res.redirect('/counters');
 });
 
+/**
+ * POST /counters/remove — deletes a counter.
+ * @param req - Express request; reads `id` from `req.body`.
+ * @param res - Express response; redirects to `/counters` on success, or to
+ *   `/counters?error=<code>` if `id` is malformed (`invalid_id`), the counter
+ *   doesn't exist (`counter_not_found`), or the delete fails (`remove_failed`).
+ */
 router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => {
   const { id } = req.body as { id?: string };
   const parsedId = parsePositiveIntId(id);
@@ -203,6 +238,14 @@ router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => 
   res.redirect('/counters');
 });
 
+/**
+ * POST /counters/reset/:id — resets a counter's current value back to zero
+ * (Manager+).
+ * @param req - Express request; reads the `id` route param.
+ * @param res - Express response; redirects to `/counters?reset=1` on success, or
+ *   to `/counters?error=<code>` if `id` is malformed (`invalid_id`), the counter
+ *   doesn't exist (`counter_not_found`), or the reset fails (`reset_failed`).
+ */
 router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, res) => {
   const rawId = req.params.id;
   const parsedId = parsePositiveIntId(typeof rawId === 'string' ? rawId : undefined);
