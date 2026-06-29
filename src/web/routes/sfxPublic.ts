@@ -23,6 +23,13 @@ async function getCachedData(): Promise<PublicSfxTrigger[]> {
   return inFlight;
 }
 
+/**
+ * GET /sfx-list — renders the public SFX list page, served from a 5-minute
+ * in-memory cache (with single-flight dedup) to avoid repeated DB hits.
+ * @param req - Express request; reads `req.session.user`, used only if present.
+ * @param res - Express response; renders the `sfx-public` view, or a 500 error
+ *   page if loading triggers fails.
+ */
 router.get('/sfx-list', async (req, res) => {
   try {
     const triggers = await getCachedData();
