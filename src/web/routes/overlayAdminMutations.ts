@@ -102,10 +102,21 @@ function uploadVideo(req: Request, res: Response, next: NextFunction): void {
   });
 }
 
-// POST /overlay/settings/videos/upload
-// csrfProtection runs BEFORE uploadVideo so a bad token is rejected before Multer
-// buffers the file. The client (overlayAdmin.js) sends the token in an X-CSRF-Token
-// header — available before body parsing and never placed in the URL.
+/**
+ * POST /overlay/settings/videos/upload — uploads a video file (webm/mp4,
+ * validated by magic bytes) for the requesting streamer. csrfProtection runs
+ * BEFORE uploadVideo so a bad token is rejected before Multer buffers the
+ * file; the client (overlayAdmin.js) sends the token in an X-CSRF-Token
+ * header — available before body parsing and never placed in the URL.
+ * @param req - Express request; reads `name` and the `video` file from
+ *   `req.body`/`req.file`.
+ * @param res - Express response; redirects to `/overlay/settings?success=video_uploaded`
+ *   on success, or to `/overlay/settings?error=<code>` if the requester isn't a
+ *   streamer (`not_a_streamer`), no file was uploaded or it failed magic-byte
+ *   validation (`invalid_file`), the resolved storage path is unsafe
+ *   (`invalid_path`), the file exceeds the size limit (`file_too_large`,
+ *   redirected by `handleUploadError`), or saving fails (`upload_failed`).
+ */
 router.post('/settings/videos/upload', requireAuth, csrfProtection, uploadVideo, async (req, res) => {
   try {
     const streamer = await requireStreamer(req, res);
@@ -123,7 +134,15 @@ router.post('/settings/videos/upload', requireAuth, csrfProtection, uploadVideo,
   }
 });
 
-// POST /overlay/settings/videos/:id/delete
+/**
+ * POST /overlay/settings/videos/:id/delete — deletes a video belonging to the
+ * requesting streamer, removing both its DB row and file on disk.
+ * @param req - Express request; reads the `id` route param.
+ * @param res - Express response; redirects to `/overlay/settings?success=video_deleted`
+ *   on success, or to `/overlay/settings?error=<code>` if the requester isn't a
+ *   streamer (`not_a_streamer`), `id` is malformed (`invalid_id`), or the delete
+ *   fails (`delete_failed`).
+ */
 router.post('/settings/videos/:id/delete', requireAuth, csrfProtection, async (req, res) => {
   try {
     const streamer = await requireStreamer(req, res);

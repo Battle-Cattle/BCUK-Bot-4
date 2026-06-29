@@ -9,7 +9,17 @@ import { requireStreamer, toStringArray, parseWeight } from './overlayAdminShare
 const log = createLogger('OverlayAdminReward');
 export const router = Router();
 
-// POST /overlay/settings/rewards — create or update a reward assignment
+/**
+ * POST /overlay/settings/rewards — creates or updates a reward assignment,
+ * linking a Twitch custom reward (by UUID) to a weighted set of overlay videos.
+ * @param req - Express request; reads `twitch_reward_id`, `video_ids`, and
+ *   `weight_<videoId>` fields from `req.body`.
+ * @param res - Express response; redirects to `/overlay/settings?success=reward_saved`
+ *   on success, or to `/overlay/settings?error=<code>` if the requester isn't a
+ *   streamer (`not_a_streamer`), the reward ID isn't a valid UUID
+ *   (`invalid_reward_id`), no videos were selected (`no_videos_selected`), or
+ *   saving fails (`save_failed`).
+ */
 router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) => {
   try {
     const streamer = await requireStreamer(req, res);
@@ -40,7 +50,15 @@ router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) =
   }
 });
 
-// POST /overlay/settings/rewards/:id/delete
+/**
+ * POST /overlay/settings/rewards/:id/delete — deletes a reward assignment
+ * belonging to the requesting streamer.
+ * @param req - Express request; reads the `id` route param.
+ * @param res - Express response; redirects to `/overlay/settings?success=reward_deleted`
+ *   on success, or to `/overlay/settings?error=<code>` if the requester isn't a
+ *   streamer (`not_a_streamer`), `id` is malformed (`invalid_id`), or the delete
+ *   fails (`delete_failed`).
+ */
 router.post('/settings/rewards/:id/delete', requireAuth, csrfProtection, async (req, res) => {
   try {
     const streamer = await requireStreamer(req, res);

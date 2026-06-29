@@ -36,7 +36,15 @@ async function fetchTwitchRewards(streamer: DbStreamerEventSub): Promise<TwitchC
   }
 }
 
-// GET /overlay/settings
+/**
+ * GET /overlay/settings — renders the overlay settings page with the user's
+ * uploaded videos, configured rewards, and live Twitch custom rewards (if the
+ * user is a streamer).
+ * @param req - Express request; reads `req.session.user`, `error`, and
+ *   `success` query params.
+ * @param res - Express response; renders the `overlayAdmin` view, or a 500
+ *   error page if loading settings fails.
+ */
 router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
   try {
     const streamer = await getStreamerByDiscordId(req.session.user!.discordId);
