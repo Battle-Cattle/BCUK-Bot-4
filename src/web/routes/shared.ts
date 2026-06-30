@@ -60,3 +60,21 @@ export function renderError(
 export function filterQueryParam(value: unknown, allowed: ReadonlySet<string>): string | null {
   return typeof value === 'string' && allowed.has(value) ? value : null;
 }
+
+/**
+ * Returns true if `redirectUri` is a loopback HTTP URL (127.0.0.1 or localhost,
+ * any port). Per RFC 8252 §7.3, only loopback redirects are accepted for the
+ * companion app's OAuth flow — anything else risks leaking the authorization
+ * code to an attacker-controlled host.
+ * @param redirectUri - The redirect URI string to validate.
+ * @returns Whether the URI is a permitted loopback redirect target.
+ */
+export function isLoopbackRedirectUri(redirectUri: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(redirectUri);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === 'http:' && (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost');
+}
