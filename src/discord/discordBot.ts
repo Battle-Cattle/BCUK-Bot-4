@@ -5,7 +5,7 @@ import { executeCustomCommandForDiscord } from '../commands/customCommandHandler
 import { executeCounterCommandForDiscord } from '../commands/counterHandler';
 import { setDiscordReady } from '../shared/statusStore';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
-import { upsertGuild, getAllGuilds } from '../db';
+import { upsertGuild, getAllGuilds, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('Discord');
@@ -55,6 +55,42 @@ export async function fetchMemberDisplayName(
 }
 
 /**
+ * Grants the Discord server's owner Admin access to a brand-new guild, creating
+ * their whitelist `user` row first if they don't already have one. Only ever
+ * called for a guild's first-ever appearance (see the `guildCreate` handler in
+ * {@link startDiscordBot}) — never on a reconnect — so a deliberately
+ * de-provisioned guild is never silently re-granted. Never overwrites an
+ * existing user's identity/legacy fields.
+ *
+ * Only a failure to fetch the guild owner from Discord is swallowed here (logged,
+ * then returns) — that's the one step expected to fail transiently. DB failures
+ * while granting access are allowed to propagate to the caller, since by that
+ * point the guild row already exists and the next `guildCreate` will treat this
+ * guild as pre-existing and skip provisioning; surfacing the error as a guild
+ * registration failure (rather than swallowing it silently) makes that case
+ * visible instead of leaving the guild inert with no record of why.
+ *
+ * @param guild - The discord.js Guild that was just joined for the first time.
+ * @returns Resolves once the owner's access is granted, or once an owner-fetch
+ *   failure has been logged. Rejects if granting DB access fails.
+ */
+async function provisionGuildOwner(guild: Guild): Promise<void> {
+  let owner;
+  try {
+    owner = await guild.fetchOwner();
+  } catch (err) {
+    log.error(`Failed to fetch owner for guild ${guild.id}:`, err);
+    return;
+  }
+  const existingUser = await findUser(owner.id);
+  if (!existingUser) {
+    await upsertUser(owner.id, owner.user.username, AccessLevel.USER);
+  }
+  await setMemberAccessLevel(guild.id, owner.id, AccessLevel.ADMIN);
+  log.info(`Granted Admin access to server owner ${owner.user.tag} (${owner.id}) for guild '${guild.name}' (${guild.id}).`);
+}
+
+/**
  * Create and connect a Discord client. No-op if a client is already running or
  * booting — call {@link stopDiscordBot} first to replace it.
  *
@@ -99,18 +135,26 @@ export function startDiscordBot(): void {
     );
   });
 
-  // Bootstrap Option B: when the bot is added to a server, record the guild row
-  // only — no auto-whitelisting. The guild is NOT served until the Owner
-  // provisions its first guild_member through the panel (the registry gates on
-  // member presence, see guildRegistry / getProvisionedGuilds). guildCreate also
-  // fires on reconnect, so upsertGuild is insert-if-not-exists and never wipes
-  // existing per-guild config; and because a bare guild row isn't served, a
-  // reconnect cannot silently re-enable a guild whose members were removed.
+  // Bootstrap: when the bot is added to a server for the first time, record the
+  // guild row and auto-grant the Discord server's owner Admin access to it, so
+  // they can self-serve the panel without the bot owner manually provisioning the
+  // first member. guildCreate also fires on reconnect, and `guild` rows are never
+  // deleted on leave, so the owner grant runs only the first time a guild_id is
+  // ever seen (detected via getGuildById returning null beforehand) — never on a
+  // reconnect or a kick-then-reinvite. This preserves the existing invariant that
+  // a deliberately de-provisioned guild (all members removed) stays inert until
+  // someone manually re-provisions it; upsertGuild itself is insert-if-not-exists
+  // and never wipes existing per-guild config.
   localClient.on('guildCreate', (guild) => {
-    upsertGuild(guild.id, guild.name)
-      .then(() => reloadGuildRegistry())
-      .then(() => log.info(`Registered guild '${guild.name}' (${guild.id}).`))
-      .catch((err) => log.error(`Failed to register guild ${guild.id}:`, err));
+    (async () => {
+      const isNewGuild = (await getGuildById(guild.id)) === null;
+      await upsertGuild(guild.id, guild.name);
+      if (isNewGuild) {
+        await provisionGuildOwner(guild);
+      }
+      await reloadGuildRegistry();
+      log.info(`Registered guild '${guild.name}' (${guild.id}).`);
+    })().catch((err) => log.error(`Failed to register guild ${guild.id}:`, err));
   });
 
   localClient.once('clientReady', async (c) => {
