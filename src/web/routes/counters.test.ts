@@ -41,6 +41,7 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './counters';
 import {
+  getAllCounters,
   addCounter,
   updateCounter,
   removeCounter,
@@ -85,12 +86,36 @@ const VALID_UPDATE = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getAllCounters).mockResolvedValue([]);
   vi.mocked(addCounter).mockResolvedValue(undefined);
   vi.mocked(updateCounter).mockResolvedValue(undefined);
   vi.mocked(removeCounter).mockResolvedValue(undefined);
   vi.mocked(resetCounterCurrentValue).mockResolvedValue(undefined);
   vi.mocked(isCounterCommandTaken).mockResolvedValue(false);
   vi.mocked(isMysqlDuplicateEntryError).mockReturnValue(false);
+});
+
+// --- GET /counters ---
+
+describe('GET /counters', () => {
+  it('renders the counters view with the loaded counters', async () => {
+    const counters = [{ id: 1, trigger_command: '!hits', check_command: '!count' }];
+    vi.mocked(getAllCounters).mockResolvedValue(counters as any);
+
+    const res = await supertest(buildApp()).get('/counters');
+
+    expect(res.status).toBe(200);
+    expect(res.text).toBe('rendered:counters');
+  });
+
+  it('renders a 500 error page when loading counters fails', async () => {
+    vi.mocked(getAllCounters).mockRejectedValue(new Error('db down'));
+
+    const res = await supertest(buildApp()).get('/counters');
+
+    expect(res.status).toBe(500);
+    expect(res.text).toBe('rendered:error');
+  });
 });
 
 // --- POST /counters/add ---

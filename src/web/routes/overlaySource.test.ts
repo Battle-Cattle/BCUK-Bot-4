@@ -51,6 +51,25 @@ describe('GET /controller', () => {
   });
 });
 
+describe('GET /:login', () => {
+  it('renders the overlaySource view with the lowercased login', async () => {
+    const res = await supertest(buildApp()).get('/SomeChannel');
+    expect(res.status).toBe(200);
+    expect(res.body.view).toBe('overlaySource');
+    expect(res.body.login).toBe('somechannel');
+  });
+
+  it('falls through (404) for a reserved login', async () => {
+    const res = await supertest(buildApp()).get('/settings');
+    expect(res.status).toBe(404);
+  });
+
+  it('falls through (404) for a malformed login', async () => {
+    const res = await supertest(buildApp()).get('/not-valid!');
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('MAX_SSE_CONNECTIONS_PER_CHANNEL', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
