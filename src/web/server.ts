@@ -37,6 +37,7 @@ import privacyRouter from './routes/privacy';
 import tosRouter from './routes/tos';
 import { requireAuth, requireGuildContext } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
+import { renderView } from './routes/shared';
 import {
   authLimiter,
   ipKey,
@@ -206,7 +207,8 @@ app.use('/overlay', requireAuth, overlayAdminRouter);
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).render('error', {
+  res.status(404);
+  renderView(res, 'error', {
     message: 'Page not found.',
     user: req.session.user ?? null,
     csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
@@ -229,7 +231,8 @@ const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
     return;
   }
 
-  res.status(403).render('error', {
+  res.status(403);
+  renderView(res, 'error', {
     message: 'Your form session expired or the request could not be verified. Please reload the page and try again.',
     user: req.session.user ?? null,
     csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
@@ -241,7 +244,8 @@ app.use(csrfErrorHandler);
 // Centralised error handler
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   log.error('Unhandled error:', err);
-  res.status(500).render('error', {
+  res.status(500);
+  renderView(res, 'error', {
     message: 'An unexpected error occurred.',
     user: req.session.user ?? null,
     csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',

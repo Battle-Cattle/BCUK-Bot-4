@@ -17,7 +17,7 @@ import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { restartTwitchMonitor, getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db';
-import { parsePositiveIntId, filterQueryParam, normalizeDiscordId } from './shared';
+import { parsePositiveIntId, filterQueryParam, normalizeDiscordId, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -79,7 +79,7 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
       (u) => u.twitch_name && !existingStreamerIds.has(u.discord_id),
     );
 
-    res.render('streams', {
+    renderView(res, 'streams', {
       user: req.session.user,
       groups,
       streamers,
@@ -93,7 +93,8 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
     });
   } catch (err) {
     log.error('Streams page error:', err);
-    res.status(500).render('error', { message: 'Failed to load streams page.', user: req.session.user ?? null });
+    res.status(500);
+    renderView(res, 'error', { message: 'Failed to load streams page.', user: req.session.user ?? null });
   }
 });
 

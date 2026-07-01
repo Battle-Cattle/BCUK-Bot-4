@@ -12,6 +12,7 @@ import {
   normalizeSingleTokenRequiredText,
   normalizeDiscordId,
   renderError,
+  renderView,
   filterQueryParam,
 } from './shared';
 
@@ -165,11 +166,35 @@ describe('normalizeDiscordId', () => {
   });
 });
 
+describe('renderView', () => {
+  function mockRes() {
+    const render = vi.fn();
+    return { res: { render } as unknown as Response, render };
+  }
+
+  it('forwards a known view and data to res.render unchanged', () => {
+    const { res, render } = mockRes();
+    renderView(res, 'error', { message: 'hi' });
+    expect(render).toHaveBeenCalledWith('error', { message: 'hi' });
+  });
+
+  it('throws for a view name with no matching .ejs file under views/', () => {
+    const { res } = mockRes();
+    expect(() => renderView(res, 'not-a-real-view')).toThrow(/unknown view/);
+  });
+
+  it('does not call res.render when the view is unknown', () => {
+    const { res, render } = mockRes();
+    expect(() => renderView(res, '../../etc/passwd')).toThrow();
+    expect(render).not.toHaveBeenCalled();
+  });
+});
+
 describe('renderError', () => {
   function mockRes() {
     const render = vi.fn();
-    const status = vi.fn().mockReturnValue({ render });
-    return { res: { status } as unknown as Response, render, status };
+    const status = vi.fn();
+    return { res: { status, render } as unknown as Response, render, status };
   }
 
   it('calls res.status with the given status code', () => {

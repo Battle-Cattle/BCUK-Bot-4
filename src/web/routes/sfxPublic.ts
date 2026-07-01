@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { getPublicSfxTriggers } from '../../db';
 import type { PublicSfxTrigger } from '../../db';
-import { renderError } from './shared';
+import { renderError, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -33,7 +33,7 @@ async function getCachedData(): Promise<PublicSfxTrigger[]> {
 router.get('/sfx-list', async (req, res) => {
   try {
     const triggers = await getCachedData();
-    res.render('sfx-public', {
+    renderView(res, 'sfx-public', {
       user: req.session.user ?? null,
       triggers,
     });

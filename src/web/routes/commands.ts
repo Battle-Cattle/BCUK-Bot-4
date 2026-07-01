@@ -10,7 +10,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { renderError, filterQueryParam } from './shared';
+import { renderError, filterQueryParam, renderView } from './shared';
 import commandMutationsRouter from './commandMutations';
 import commandAssignmentsRouter from './commandAssignments';
 import commandGuildOverridesRouter from './commandGuildOverrides';
@@ -63,7 +63,7 @@ router.get('/commands', requireAuth, csrfProtection, async (req, res) => {
       };
     });
 
-    res.render('commands', {
+    renderView(res, 'commands', {
       user: req.session.user,
       commands: commandsForView,
       assignableUsers,

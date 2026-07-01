@@ -9,7 +9,10 @@ vi.mock('../../shared/config', () => ({
 }));
 
 vi.mock('fs', () => ({
-  default: { promises: { access: vi.fn() } },
+  default: {
+    promises: { access: vi.fn() },
+    readdirSync: () => ['controllerOverlay.ejs', 'overlaySource.ejs'],
+  },
 }));
 
 import express from 'express';

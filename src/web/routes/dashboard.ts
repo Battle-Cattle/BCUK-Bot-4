@@ -4,7 +4,7 @@ import { getStatus } from '../../shared/statusStore';
 import { csrfProtection } from '../csrf';
 import { getStreamerByDiscordId } from '../../db';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
-import { renderError } from './shared';
+import { renderError, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -25,7 +25,7 @@ router.get('/', csrfProtection, async (req, res) => {
       const streamer = await getStreamerByDiscordId(req.session.user.discordId);
       needsReconnect = !!(streamer?.eventsub_access_token && streamer.twitch_name && hasAuthFailedSubs(streamer.twitch_name));
     }
-    res.render('dashboard', {
+    renderView(res, 'dashboard', {
       user: req.session.user,
       status,
       csrfToken: req.csrfToken(),

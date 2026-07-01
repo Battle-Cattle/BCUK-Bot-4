@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { AccessLevel, findUser, getAllGuilds, getEffectiveAccessLevel, getGuildsForMember } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { normalizeDiscordId } from './shared';
+import { normalizeDiscordId, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -25,7 +25,7 @@ router.get('/select', requireAuth, csrfProtection, (req, res) => {
   if (user.guilds.length <= 1) {
     return res.redirect('/');
   }
-  res.render('guildSelect', {
+  renderView(res, 'guildSelect', {
     user,
     guilds: user.guilds,
     csrfToken: req.csrfToken(),

@@ -4,7 +4,7 @@ import { getAllSfxTriggers, getAllCategories } from '../../db';
 import { csrfProtection } from '../csrf';
 import { SFX_MAX_FILE_MB } from '../../shared/config';
 import { AccessLevel } from '../../db/users';
-import { filterQueryParam, renderError } from './shared';
+import { filterQueryParam, renderError, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -44,7 +44,7 @@ router.get('/sfx', csrfProtection, async (req, res) => {
   try {
     const [triggers, categories] = await Promise.all([getAllSfxTriggers(), getAllCategories()]);
     const canManage = (req.session.user?.accessLevel ?? 0) >= AccessLevel.MOD;
-    res.render('sfx', {
+    renderView(res, 'sfx', {
       user: req.session.user,
       triggers,
       categories,
