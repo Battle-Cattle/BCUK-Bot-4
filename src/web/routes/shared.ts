@@ -25,29 +25,56 @@ export function parsePositiveBigIntId(value: string | string[] | undefined): big
   return parsed > 0n ? parsed : null;
 }
 
+/**
+ * Returns `value` trimmed if it is a string, or an empty string otherwise.
+ * @param value - Any value from a form or request body.
+ * @returns Trimmed string, or `''` for non-string inputs.
+ */
 export function trimField(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+/**
+ * Trims `value` and returns it if non-empty, or `null` if blank/missing.
+ * @param value - Raw string from a form field.
+ * @returns Non-empty trimmed string, or `null`.
+ */
 export function normalizeRequiredText(value: string | undefined): string | null {
   if (typeof value !== 'string') return null;
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
 }
 
+/**
+ * Normalizes a required single-word (no whitespace) text field to lowercase.
+ * Returns `null` if the value is blank or contains whitespace.
+ * @param value - Raw string from a form field.
+ * @returns Lowercased single-token string, or `null`.
+ */
 export function normalizeSingleTokenRequiredText(value: string | undefined): string | null {
   const normalized = normalizeRequiredText(value);
   if (!normalized || /\s/.test(normalized)) return null;
   return normalized.toLowerCase();
 }
 
-// Discord snowflake IDs are always 17–20 digits.
+/**
+ * Validates and returns a Discord snowflake ID (17–20 digits), or `null` if invalid.
+ * @param value - Raw string from a form field.
+ * @returns The trimmed snowflake string, or `null`.
+ */
 export function normalizeDiscordId(value: string | undefined): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return /^\d{17,20}$/.test(trimmed) ? trimmed : null;
 }
 
+/**
+ * Renders the `error` EJS view with the given HTTP status and message.
+ * @param res - Express response object.
+ * @param status - HTTP status code to set.
+ * @param message - Human-readable error message shown to the user.
+ * @param sessionUser - Current session user, or `undefined` if unauthenticated.
+ */
 export function renderError(
   res: Response,
   status: number,
@@ -57,6 +84,31 @@ export function renderError(
   res.status(status).render('error', { message, user: sessionUser ?? null, csrfToken: '' });
 }
 
+/**
+ * Returns `value` if it is a string present in `allowed`, otherwise `null`.
+ * Used to sanitize query parameters against an explicit allowlist.
+ * @param value - Raw query parameter value.
+ * @param allowed - Set of permitted string values.
+ * @returns The matched string, or `null`.
+ */
 export function filterQueryParam(value: unknown, allowed: ReadonlySet<string>): string | null {
   return typeof value === 'string' && allowed.has(value) ? value : null;
+}
+
+/**
+ * Returns true if `redirectUri` is a loopback HTTP URL (127.0.0.1 or localhost,
+ * any port). Per RFC 8252 §7.3, only loopback redirects are accepted for the
+ * companion app's OAuth flow — anything else risks leaking the authorization
+ * code to an attacker-controlled host.
+ * @param redirectUri - The redirect URI string to validate.
+ * @returns Whether the URI is a permitted loopback redirect target.
+ */
+export function isLoopbackRedirectUri(redirectUri: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(redirectUri);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === 'http:' && (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost');
 }

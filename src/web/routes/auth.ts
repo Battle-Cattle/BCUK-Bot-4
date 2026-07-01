@@ -15,7 +15,7 @@ import {
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { renderError } from './shared';
+import { renderError, isLoopbackRedirectUri } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -59,9 +59,10 @@ router.get('/discord', (req, res) => {
  *   `oauthState` session value.
  * @param res - Express response; redirects to `/` on success, or to the
  *   companion app's `redirectUri` for the loopback flow. Renders a 400 error
- *   page when the OAuth state is invalid or missing, a 403 error page when the
- *   user is not whitelisted or has no accessible guild, or a 500 error page if any
- *   step of the exchange/profile-fetch/session-save fails.
+ *   page when the OAuth state is invalid/missing or the companion redirectUri
+ *   fails the loopback re-validation check (defense-in-depth), a 403 error page
+ *   when the user is not whitelisted or has no accessible guild, or a 500 error
+ *   page if any step of the exchange/profile-fetch/session-save fails.
  */
 router.get('/discord/callback', async (req, res) => {
   const { code, state } = req.query as { code?: string; state?: string };
@@ -130,6 +131,10 @@ router.get('/discord/callback', async (req, res) => {
     const companionOAuth = req.session.companionOAuth;
     if (companionOAuth && Date.now() <= companionOAuth.expiresAt) {
       delete req.session.companionOAuth;
+      // Re-validate at point of use: defense-in-depth against session tampering.
+      if (!isLoopbackRedirectUri(companionOAuth.redirectUri)) {
+        return renderError(res, 400, 'Invalid companion redirect URI.', undefined);
+      }
       const authCode = await createCode(profile.id);
       const redirectUrl = new URL(companionOAuth.redirectUri);
       redirectUrl.searchParams.set('code', authCode);

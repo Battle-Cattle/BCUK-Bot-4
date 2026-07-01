@@ -280,6 +280,39 @@ describe('GET /discord/callback', () => {
     expect(capturedSession.companionOAuth).toBeUndefined();
   });
 
+  it('renders error 400 when companionOAuth.redirectUri in session is not a loopback URL (defense-in-depth)', async () => {
+    mockFetch([
+      { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
+      { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
+    ]);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER, is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: '555', name: 'Guild', voice_channel_id: null }] as any);
+
+    const app = express();
+    app.use((req: any, _res: any, next: any) => {
+      req.session = {
+        oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 },
+        companionOAuth: { redirectUri: 'https://evil.example/steal', appState: 'appstate1', expiresAt: Date.now() + 60_000 },
+        user: undefined,
+        destroy: vi.fn((cb: () => void) => cb()),
+        regenerate: vi.fn((cb: (err: null) => void) => cb(null)),
+        save: vi.fn((cb: (err: null) => void) => cb(null)),
+      };
+      next();
+    });
+    app.use((req: any, res: any, next: any) => {
+      res.render = (view: string, locals: unknown) =>
+        res.status((res as any).statusCode || 200).json({ view, locals });
+      next();
+    });
+    app.use(router);
+    const res = await supertest(app).get('/discord/callback?code=code&state=state123');
+
+    expect(res.status).toBe(400);
+    expect((res.body as any).view).toBe('error');
+    expect(createCode).not.toHaveBeenCalled();
+  });
+
   it('does not branch into the companion flow when companionOAuth is absent (existing dashboard-login behavior)', async () => {
     mockFetch([
       { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },

@@ -1,31 +1,13 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { exchangeCodeForToken } from '../../db';
-import { renderError } from './shared';
+import { renderError, isLoopbackRedirectUri } from './shared';
 import { authLimiter } from '../rateLimits';
 
 const log = createLogger('CompanionAuth');
 const router = Router();
 
 const COMPANION_OAUTH_TTL_MS = 10 * 60 * 1000;
-
-/**
- * Returns true if `redirectUri` is a loopback HTTP URL (127.0.0.1 or localhost,
- * any port). Per RFC 8252 §7.3, only loopback redirects are accepted for the
- * companion app's OAuth flow — anything else risks leaking the authorization
- * code to an attacker-controlled host.
- * @param redirectUri - The `redirect_uri` query parameter to validate.
- * @returns Whether the URI is a permitted loopback redirect target.
- */
-function isLoopbackRedirectUri(redirectUri: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(redirectUri);
-  } catch {
-    return false;
-  }
-  return parsed.protocol === 'http:' && (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost');
-}
 
 /**
  * GET /companion/login — entry point for the companion app's loopback OAuth flow.
