@@ -24,6 +24,7 @@ import supertest from 'supertest';
 import router from './commandMonitor';
 import { getRecentCommandTestEntries } from '../../commands/commandMonitorStore';
 
+/** Builds a minimal Express app wired with the command-monitor router and a fake session user. */
 function buildApp() {
   const app = express();
   app.use((_req: any, res: any, next: any) => {

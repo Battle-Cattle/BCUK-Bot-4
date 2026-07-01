@@ -44,18 +44,26 @@ vi.mock('./middleware', () => ({
   requireMod: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
 }));
 
-// Each marker path is unique per router so a request only matches the router under
-// test, even though several real routers are mounted at the same '/' or '/admin' prefix.
+/** An empty router, standing in for a real route module whose internals aren't under test. */
 function emptyRouter() {
   return Router();
 }
+
+/**
+ * A router exposing a single `/__marker_${label}` route, so a request only matches the
+ * router under test even though several real routers are mounted at the same '/' or
+ * '/admin' prefix.
+ */
 function markerRouter(label: string) {
   const router = Router();
   router.get(`/__marker_${label}`, (_req, res) => res.json({ label }));
   return router;
 }
-// Exposes routes that hand an error to `next()`, to drive the csrfErrorHandler and
-// centralised error handler in server.ts without needing a real CSRF/unhandled failure.
+
+/**
+ * Exposes routes that hand an error to `next()`, to drive the csrfErrorHandler and
+ * centralised error handler in server.ts without needing a real CSRF/unhandled failure.
+ */
 function errorTriggerRouter() {
   const router = Router();
   router.get('/__trigger_csrf_error', (_req, _res, next) => {
