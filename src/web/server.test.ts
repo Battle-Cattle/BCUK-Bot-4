@@ -44,14 +44,35 @@ vi.mock('./middleware', () => ({
   requireMod: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
 }));
 
-// Each marker path is unique per router so a request only matches the router under
-// test, even though several real routers are mounted at the same '/' or '/admin' prefix.
+/** An empty router, standing in for a real route module whose internals aren't under test. */
 function emptyRouter() {
   return Router();
 }
+
+/**
+ * A router exposing a single `/__marker_${label}` route, so a request only matches the
+ * router under test even though several real routers are mounted at the same '/' or
+ * '/admin' prefix.
+ */
 function markerRouter(label: string) {
   const router = Router();
   router.get(`/__marker_${label}`, (_req, res) => res.json({ label }));
+  return router;
+}
+
+/**
+ * Exposes routes that hand an error to `next()`, to drive the csrfErrorHandler and
+ * centralised error handler in server.ts without needing a real CSRF/unhandled failure.
+ */
+function errorTriggerRouter() {
+  const router = Router();
+  router.get('/__trigger_csrf_error', (_req, _res, next) => {
+    const err = Object.assign(new Error('invalid csrf token'), { code: 'EBADCSRFTOKEN' });
+    next(err);
+  });
+  router.get('/__trigger_error', (_req, _res, next) => {
+    next(new Error('boom'));
+  });
   return router;
 }
 
@@ -59,9 +80,16 @@ vi.mock('./routes/auth', () => ({ default: emptyRouter() }));
 vi.mock('./routes/guild', () => ({ default: markerRouter('guild') }));
 vi.mock('./routes/eventsubCallback', () => ({ default: emptyRouter() }));
 vi.mock('./routes/eventsubAdmin', () => ({ default: markerRouter('eventsubAdmin') }));
-vi.mock('./routes/dashboard', () => ({ default: markerRouter('dashboard') }));
+vi.mock('./routes/dashboard', () => ({
+  default: (() => {
+    const router = Router();
+    router.use(markerRouter('dashboard'));
+    router.use(errorTriggerRouter());
+    return router;
+  })(),
+}));
 vi.mock('./routes/admin', () => ({ default: markerRouter('admin') }));
-vi.mock('./routes/api', () => ({ default: emptyRouter() }));
+vi.mock('./routes/api', () => ({ default: errorTriggerRouter() }));
 vi.mock('./routes/sfx', () => ({ default: emptyRouter() }));
 vi.mock('./routes/sfxMutations', () => ({ default: emptyRouter() }));
 vi.mock('./routes/sfxPublic', () => ({ default: emptyRouter() }));
@@ -139,5 +167,36 @@ describe('server route wiring', () => {
       const res = await request(app).get('/__marker_dashboard');
       expect(res.status).toBe(200);
     }
+  });
+});
+
+describe('404 handler', () => {
+  it('renders the error view with a 404 status for an unmatched route', async () => {
+    const res = await request(app).get('/__this_route_does_not_exist');
+    expect(res.status).toBe(404);
+    expect(res.text).toContain('Page not found.');
+  });
+});
+
+describe('csrfErrorHandler', () => {
+  it('renders the error view with a 403 status for a CSRF failure outside /api', async () => {
+    const res = await request(app).get('/__trigger_csrf_error');
+    expect(res.status).toBe(403);
+    expect(res.text).toContain('Your form session expired');
+  });
+
+  it('responds with JSON for a CSRF failure under /api', async () => {
+    const res = await request(app).get('/api/__trigger_csrf_error');
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({
+      ok: false,
+      error: 'Your form session expired or the request could not be verified. Please reload the page and try again.',
+    });
+  });
+
+  it('forwards non-CSRF errors to the centralised error handler', async () => {
+    const res = await request(app).get('/__trigger_error');
+    expect(res.status).toBe(500);
+    expect(res.text).toContain('An unexpected error occurred.');
   });
 });

@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { issueToken, getTokenStatus, revokeToken } from '../../db';
 import { csrfProtection } from '../csrf';
-import { renderError, filterQueryParam } from './shared';
+import { renderError, filterQueryParam, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -13,7 +13,7 @@ const KNOWN_ERRORS = new Set(['request_failed', 'revoke_failed']);
 router.get('/companion-key', csrfProtection, async (req, res) => {
   try {
     const tokenStatus = await getTokenStatus(req.session.user!.discordId);
-    res.render('companion-keys', {
+    renderView(res, 'companion-keys', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
       tokenStatus,
@@ -51,7 +51,7 @@ router.post('/companion-key/request', csrfProtection, async (req, res) => {
     tokenStatus = { hasToken: true, createdAt: new Date() };
   }
 
-  res.render('companion-keys', {
+  renderView(res, 'companion-keys', {
     user: req.session.user,
     csrfToken: req.csrfToken(),
     tokenStatus,

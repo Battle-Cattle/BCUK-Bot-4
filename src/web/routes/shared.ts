@@ -1,5 +1,22 @@
+import fs from 'fs';
+import path from 'path';
 import type { Response } from 'express';
 import type { SessionUser } from '../../types/express';
+
+const VIEWS_DIR = path.join(__dirname, '../../../views');
+let knownViews: Set<string> | undefined;
+
+/** Lazily reads and caches the set of view names from the `.ejs` files under `views/`. */
+function getKnownViews(): Set<string> {
+  if (!knownViews) {
+    knownViews = new Set(
+      fs.readdirSync(VIEWS_DIR)
+        .filter((f) => f.endsWith('.ejs'))
+        .map((f) => f.slice(0, -'.ejs'.length)),
+    );
+  }
+  return knownViews;
+}
 
 /**
  * Parse a positive integer id form field. A repeated field (arriving as an array) is
@@ -69,6 +86,21 @@ export function normalizeDiscordId(value: string | undefined): string | null {
 }
 
 /**
+ * Renders an EJS view after checking `view` against the actual `.ejs` files present
+ * under `views/`. Throws if `view` isn't a real template, so a template name can never
+ * be attacker-controlled or silently mistyped.
+ * @param res - Express response object.
+ * @param view - Name of the view to render (without the `.ejs` extension).
+ * @param data - Template data, forwarded to `res.render` unchanged.
+ */
+export function renderView(res: Response, view: string, data?: Record<string, unknown>): void {
+  if (!getKnownViews().has(view)) {
+    throw new Error(`renderView: unknown view "${view}"`);
+  }
+  res.render(view, data);
+}
+
+/**
  * Renders the `error` EJS view with the given HTTP status and message.
  * @param res - Express response object.
  * @param status - HTTP status code to set.
@@ -81,7 +113,8 @@ export function renderError(
   message: string,
   sessionUser: SessionUser | undefined,
 ): void {
-  res.status(status).render('error', { message, user: sessionUser ?? null, csrfToken: '' });
+  res.status(status);
+  renderView(res, 'error', { message, user: sessionUser ?? null, csrfToken: '' });
 }
 
 /**

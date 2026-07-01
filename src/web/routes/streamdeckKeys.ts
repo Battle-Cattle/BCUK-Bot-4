@@ -12,7 +12,7 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
 import { WEB_PORT } from '../../shared/config';
-import { normalizeDiscordId, renderError, filterQueryParam } from './shared';
+import { normalizeDiscordId, renderError, filterQueryParam, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -25,7 +25,7 @@ const USER_KNOWN_ERRORS = new Set(['request_failed', 'revoke_failed']);
 router.get('/streamdeck-key', csrfProtection, async (req, res) => {
   try {
     const keyRow = await getApiKeyStatus(req.session.user!.discordId);
-    res.render('streamdeck-keys', {
+    renderView(res, 'streamdeck-keys', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
       keyRow,
@@ -48,7 +48,7 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
       req.session.user!.currentGuildId!,
     );
     const keyRow = await getApiKeyStatus(req.session.user!.discordId);
-    res.render('streamdeck-keys', {
+    renderView(res, 'streamdeck-keys', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
       keyRow,
@@ -81,7 +81,7 @@ const ADMIN_KNOWN_ERRORS = new Set(['approve_failed', 'deny_failed', 'revoke_fai
 router.get('/admin/streamdeck-keys', requireAdmin, csrfProtection, async (req, res) => {
   try {
     const [pending, all] = await Promise.all([getPendingRequests(), getAllApiKeys()]);
-    res.render('streamdeck-keys-admin', {
+    renderView(res, 'streamdeck-keys-admin', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
       pending,

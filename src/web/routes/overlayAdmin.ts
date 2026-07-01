@@ -8,7 +8,7 @@ import { getVideosForStreamer, getRewardsForStreamer } from '../../db';
 import { PUBLIC_URL } from '../../shared/config';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { filterQueryParam } from './shared';
+import { filterQueryParam, renderError, renderView } from './shared';
 import { router as mutationsRouter, MAX_UPLOAD_MB } from './overlayAdminMutations';
 import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';
 
@@ -56,7 +56,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
         ])
       : [[], [], []];
 
-    res.render('overlayAdmin', {
+    renderView(res, 'overlayAdmin', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
       streamer: streamer ?? null,
@@ -70,7 +70,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
     });
   } catch (err) {
     log.error('Overlay settings page error:', err);
-    res.status(500).render('error', { message: 'Failed to load overlay settings.', user: req.session.user ?? null, csrfToken: '' });
+    renderError(res, 500, 'Failed to load overlay settings.', req.session.user);
   }
 });
 

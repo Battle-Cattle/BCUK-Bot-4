@@ -10,7 +10,7 @@ import {
 import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { csrfProtection } from '../csrf';
 import { requireManager, requireAdmin } from '../middleware';
-import { trimField, renderError, filterQueryParam } from './shared';
+import { trimField, renderError, filterQueryParam, renderView } from './shared';
 import { userMutationQueue } from './adminUserMutationQueue';
 import adminRefreshRouter, { getRefreshState } from './adminRefresh';
 import {
@@ -51,7 +51,7 @@ router.get('/users', requireManager, csrfProtection, async (req, res) => {
   const guildId = req.session.user!.currentGuildId!;
   try {
     const users = await getGuildMemberUsers(guildId);
-    res.render('admin', {
+    renderView(res, 'admin', {
       user: req.session.user,
       users,
       csrfToken: req.csrfToken(),

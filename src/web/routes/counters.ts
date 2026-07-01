@@ -21,6 +21,7 @@ import {
   parsePositiveIntId,
   renderError,
   filterQueryParam,
+  renderView,
 } from './shared';
 
 const log = createLogger('Web');
@@ -102,7 +103,7 @@ router.get('/counters', requireAuth, csrfProtection, async (req, res) => {
   try {
     const counters = await getAllCounters();
 
-    res.render('counters', {
+    renderView(res, 'counters', {
       user: req.session.user,
       counters,
       csrfToken: req.csrfToken(),

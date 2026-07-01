@@ -3,6 +3,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import { OVERLAY_FOLDER } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
+import { renderView } from './shared';
 
 const log = createLogger('OverlaySource');
 const router = Router();
@@ -45,7 +46,7 @@ export function pushOverlayEvent(login: string, videoPath: string): void {
  * @param res - Express response; renders the `controllerOverlay` view.
  */
 router.get('/controller', (_req, res) => {
-  res.render('controllerOverlay');
+  renderView(res, 'controllerOverlay');
 });
 
 /**
@@ -59,7 +60,7 @@ router.get('/controller', (_req, res) => {
 router.get('/:login', (req, res, next) => {
   const { login } = req.params;
   if (!LOGIN_RE.test(login) || RESERVED_LOGINS.has(login.toLowerCase())) { next(); return; }
-  res.render('overlaySource', { login: login.toLowerCase() });
+  renderView(res, 'overlaySource', { login: login.toLowerCase() });
 });
 
 /**

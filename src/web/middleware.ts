@@ -10,6 +10,7 @@ import {
   getEffectiveAccessLevel,
   getGuildsForMember,
 } from '../db';
+import { renderView } from './routes/shared';
 
 /**
  * Ensures the request has a logged-in session user, redirecting to login otherwise.
@@ -93,13 +94,12 @@ export function requireManager(req: Request, res: Response, next: NextFunction):
   if (req.session.user && req.session.user.accessLevel >= AccessLevel.MANAGER) {
     next();
   } else {
-    res
-      .status(403)
-      .render('error', {
-        message: 'Access denied — Manager or above required.',
-        user: req.session.user ?? null,
-        csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
-      });
+    res.status(403);
+    renderView(res, 'error', {
+      message: 'Access denied — Manager or above required.',
+      user: req.session.user ?? null,
+      csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
+    });
   }
 }
 
@@ -114,13 +114,12 @@ export function requireMod(req: Request, res: Response, next: NextFunction): voi
   if (req.session.user && req.session.user.accessLevel >= AccessLevel.MOD) {
     next();
   } else {
-    res
-      .status(403)
-      .render('error', {
-        message: 'Access denied — Mod or above required.',
-        user: req.session.user ?? null,
-        csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
-      });
+    res.status(403);
+    renderView(res, 'error', {
+      message: 'Access denied — Mod or above required.',
+      user: req.session.user ?? null,
+      csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
+    });
   }
 }
 
@@ -195,12 +194,11 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
   if (req.session.user && req.session.user.accessLevel >= AccessLevel.ADMIN) {
     next();
   } else {
-    res
-      .status(403)
-      .render('error', {
-        message: 'Access denied — Admin required.',
-        user: req.session.user ?? null,
-        csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
-      });
+    res.status(403);
+    renderView(res, 'error', {
+      message: 'Access denied — Admin required.',
+      user: req.session.user ?? null,
+      csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
+    });
   }
 }

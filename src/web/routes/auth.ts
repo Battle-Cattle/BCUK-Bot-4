@@ -15,7 +15,7 @@ import {
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { renderError, isLoopbackRedirectUri } from './shared';
+import { renderError, isLoopbackRedirectUri, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -217,7 +217,7 @@ router.post('/logout', requireAuth, csrfProtection, (req, res) => {
  */
 router.get('/login', (req, res) => {
   if (req.session.user) return res.redirect('/');
-  res.render('login', { user: null });
+  renderView(res, 'login', { user: null });
 });
 
 export default router;

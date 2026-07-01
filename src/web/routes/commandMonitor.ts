@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { getRecentCommandTestEntries } from '../../commands/commandMonitorStore';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
-import { renderError } from './shared';
+import { renderError, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -18,7 +18,7 @@ const router = Router();
 router.get('/command-monitor', requireManager, csrfProtection, (req, res) => {
   try {
     const recentEntries = getRecentCommandTestEntries();
-    res.render('command-monitor', {
+    renderView(res, 'command-monitor', {
       user: req.session.user,
       recentEntries,
       csrfToken: req.csrfToken(),
