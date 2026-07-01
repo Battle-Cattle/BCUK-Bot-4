@@ -170,6 +170,15 @@ describe('server route wiring', () => {
   });
 });
 
+describe('CSP header', () => {
+  it('restricts font-src to self, without falling back to helmet defaults', async () => {
+    const res = await request(app).get('/__marker_dashboard');
+    const csp = res.headers['content-security-policy'];
+    expect(csp).toContain("font-src 'self'");
+    expect(csp).not.toMatch(/font-src[^;]*https:/);
+  });
+});
+
 describe('404 handler', () => {
   it('renders the error view with a 404 status for an unmatched route', async () => {
     const res = await request(app).get('/__this_route_does_not_exist');
