@@ -205,7 +205,11 @@ app.use('/admin', adminGuildRouter);
 app.use('/user/settings', requireAuth, userSettingsRouter);
 app.use('/overlay', requireAuth, overlayAdminRouter);
 
-// 404 handler
+/**
+ * 404 handler — catches any request that fell through every mounted router.
+ * @param req - Express request; reads `req.session.user` if present.
+ * @param res - Express response; renders the `error` view with a 404 status.
+ */
 app.use((req, res) => {
   res.status(404);
   renderView(res, 'error', {
@@ -215,6 +219,15 @@ app.use((req, res) => {
   });
 });
 
+/**
+ * Catches CSRF token validation failures raised by `csrfProtection` middleware.
+ * Responds with JSON for `/api` requests, or renders the `error` view otherwise.
+ * Delegates to `next(err)` for any other error type.
+ * @param err - The error thrown by the request pipeline.
+ * @param req - Express request; reads `req.originalUrl` and `req.session.user`.
+ * @param res - Express response; renders/responds with a 403 on a CSRF failure.
+ * @param next - Called with the original error when it isn't a CSRF failure.
+ */
 const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
   if ((err as { code?: string } | undefined)?.code !== 'EBADCSRFTOKEN') {
     next(err);
@@ -241,7 +254,13 @@ const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
 
 app.use(csrfErrorHandler);
 
-// Centralised error handler
+/**
+ * Centralised error handler — catches anything unhandled by earlier middleware/routes.
+ * @param err - The unhandled error.
+ * @param req - Express request; reads `req.session.user` if present.
+ * @param res - Express response; renders the `error` view with a 500 status.
+ * @param _next - Unused, but required for Express to recognize this as an error handler.
+ */
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   log.error('Unhandled error:', err);
   res.status(500);

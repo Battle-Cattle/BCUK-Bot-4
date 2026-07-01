@@ -17,7 +17,7 @@ import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { restartTwitchMonitor, getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db';
-import { parsePositiveIntId, filterQueryParam, normalizeDiscordId, renderView } from './shared';
+import { parsePositiveIntId, filterQueryParam, normalizeDiscordId, renderView, renderError } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -93,8 +93,7 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
     });
   } catch (err) {
     log.error('Streams page error:', err);
-    res.status(500);
-    renderView(res, 'error', { message: 'Failed to load streams page.', user: req.session.user ?? null });
+    renderError(res, 500, 'Failed to load streams page.', req.session.user);
   }
 });
 
