@@ -130,6 +130,22 @@ describe('normalizeSingleTokenRequiredText', () => {
   it('trims surrounding whitespace before checking for tokens', () => {
     expect(normalizeSingleTokenRequiredText('  !cmd  ')).toBe('!cmd');
   });
+
+  it('returns null for a trigger containing angle brackets', () => {
+    expect(normalizeSingleTokenRequiredText('!<test>')).toBeNull();
+  });
+
+  it('returns null for a trigger containing an ampersand', () => {
+    expect(normalizeSingleTokenRequiredText('!test&me')).toBeNull();
+  });
+
+  it('returns null for a trigger with only a prefix character', () => {
+    expect(normalizeSingleTokenRequiredText('!')).toBeNull();
+  });
+
+  it('allows valid triggers with hyphens and underscores', () => {
+    expect(normalizeSingleTokenRequiredText('!my-cmd_1')).toBe('!my-cmd_1');
+  });
 });
 
 describe('normalizeDiscordId', () => {
