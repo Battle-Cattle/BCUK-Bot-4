@@ -16,9 +16,45 @@ vi.mock('fs', () => ({
   },
 }));
 
+vi.mock('../../shared/pathUtils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../shared/pathUtils')>();
+  return { safeResolve: vi.fn(actual.safeResolve) };
+});
+
+import fs from 'fs';
 import express from 'express';
 import supertest from 'supertest';
-import router, { MAX_SSE_CONNECTIONS_PER_CHANNEL, connections } from './overlaySource';
+import router, { MAX_SSE_CONNECTIONS_PER_CHANNEL, connections, pushOverlayEvent } from './overlaySource';
+import { safeResolve } from '../../shared/pathUtils';
+
+/** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely — needed to control fake timers and the request's 'close' event deterministically. */
+function getRouteHandler(routePath: string): (req: any, res: any, next: any) => void {
+  const layer = (router as any).stack.find((l: any) => l.route?.path === routePath);
+  return layer.route.stack[0].handle;
+}
+
+function makeSseRes() {
+  return {
+    setHeader: vi.fn(),
+    flushHeaders: vi.fn(),
+    write: vi.fn(),
+    status: vi.fn().mockReturnThis(),
+    end: vi.fn(),
+  };
+}
+
+function makeSseReq(login: string) {
+  let closeCb: (() => void) | undefined;
+  return {
+    req: {
+      params: { login },
+      on: (event: string, cb: () => void) => {
+        if (event === 'close') closeCb = cb;
+      },
+    },
+    triggerClose: () => closeCb?.(),
+  };
+}
 
 function buildApp() {
   const app = express();
@@ -26,6 +62,7 @@ function buildApp() {
   app.use((req, res, next) => {
     (res as any).render = (view: string, locals?: Record<string, unknown>) =>
       res.json({ view, ...(locals ?? {}) });
+    (res as any).sendFile = (filePath: string) => res.json({ sentFile: filePath });
     next();
   });
   app.use(router);
@@ -111,5 +148,192 @@ describe('GET /:login/events — SSE connection limit', () => {
     const status = await p;
     expect(status).not.toBe(429);
     expect(status).toBe(200);
+  });
+
+  it('falls through (404) for a reserved login', async () => {
+    const res = await supertest(buildApp()).get('/settings/events');
+    expect(res.status).toBe(404);
+  });
+
+  it('falls through (404) for a malformed login', async () => {
+    const res = await supertest(buildApp()).get('/not-valid!/events');
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /:login/events — connection lifecycle (direct handler invocation)', () => {
+  it('registers a new Set for a channel with no prior connections', () => {
+    const handler = getRouteHandler('/:login/events');
+    const res = makeSseRes();
+    const { req } = makeSseReq('freshchannel');
+
+    handler(req, res, vi.fn());
+
+    expect(connections.get('freshchannel')?.has(res as any)).toBe(true);
+    expect(res.write).toHaveBeenCalledWith(': connected\n\n');
+  });
+
+  it('sends a ping every 25 seconds', () => {
+    vi.useFakeTimers();
+    try {
+      const handler = getRouteHandler('/:login/events');
+      const res = makeSseRes();
+      const { req } = makeSseReq('pingchannel');
+
+      handler(req, res, vi.fn());
+      res.write.mockClear();
+
+      vi.advanceTimersByTime(25_000);
+      expect(res.write).toHaveBeenCalledWith(': ping\n\n');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears the interval and evicts the client when a ping write fails', () => {
+    vi.useFakeTimers();
+    try {
+      const handler = getRouteHandler('/:login/events');
+      const res = makeSseRes();
+      const { req } = makeSseReq('brokenpipe');
+
+      handler(req, res, vi.fn());
+      res.write.mockImplementation(() => {
+        throw new Error('broken pipe');
+      });
+
+      vi.advanceTimersByTime(25_000);
+
+      // Only client for this channel — eviction empties the Set, which deletes the map entry.
+      expect(connections.get('brokenpipe')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not throw on a failed ping when the channel entry is already gone', () => {
+    vi.useFakeTimers();
+    try {
+      const handler = getRouteHandler('/:login/events');
+      const res = makeSseRes();
+      const { req } = makeSseReq('alreadygone');
+
+      handler(req, res, vi.fn());
+      connections.delete('alreadygone');
+
+      res.write.mockImplementation(() => {
+        throw new Error('broken pipe');
+      });
+
+      expect(() => vi.advanceTimersByTime(25_000)).not.toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('removes the client (and empty Set) when the request closes', () => {
+    const handler = getRouteHandler('/:login/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('closingchannel');
+
+    handler(req, res, vi.fn());
+    expect(connections.get('closingchannel')?.has(res as any)).toBe(true);
+
+    triggerClose();
+    expect(connections.get('closingchannel')).toBeUndefined();
+  });
+
+  it('removes only the closing client, keeping the channel entry when others remain', () => {
+    const handler = getRouteHandler('/:login/events');
+    const res1 = makeSseRes();
+    const res2 = makeSseRes();
+    const { req: req1, triggerClose: closeReq1 } = makeSseReq('sharedchannel');
+    const { req: req2 } = makeSseReq('sharedchannel');
+
+    handler(req1, res1, vi.fn());
+    handler(req2, res2, vi.fn());
+
+    closeReq1();
+    expect(connections.get('sharedchannel')?.has(res1 as any)).toBe(false);
+    expect(connections.get('sharedchannel')?.has(res2 as any)).toBe(true);
+  });
+});
+
+describe('pushOverlayEvent', () => {
+  it('does nothing when there are no connections for the channel', () => {
+    expect(() => pushOverlayEvent('nobody', '/video.mp4')).not.toThrow();
+  });
+
+  it('writes the video payload to every connected client', () => {
+    const res1 = { write: vi.fn() };
+    const res2 = { write: vi.fn() };
+    connections.set('livechannel', new Set([res1, res2] as any));
+
+    pushOverlayEvent('LiveChannel', '/videos/1/clip.mp4');
+
+    const expectedPayload = `data: ${JSON.stringify({ video: '/videos/1/clip.mp4' })}\n\n`;
+    expect(res1.write).toHaveBeenCalledWith(expectedPayload);
+    expect(res2.write).toHaveBeenCalledWith(expectedPayload);
+  });
+
+  it('drops a client whose write throws but keeps the others', () => {
+    const good = { write: vi.fn() };
+    const dead = { write: vi.fn(() => { throw new Error('broken pipe'); }) };
+    connections.set('mixedchannel', new Set([good, dead] as any));
+
+    pushOverlayEvent('mixedchannel', '/video.mp4');
+
+    const clients = connections.get('mixedchannel');
+    expect(clients?.has(good as any)).toBe(true);
+    expect(clients?.has(dead as any)).toBe(false);
+  });
+
+  it('deletes the map entry once every client has been dropped', () => {
+    const dead = { write: vi.fn(() => { throw new Error('broken pipe'); }) };
+    connections.set('emptiedchannel', new Set([dead] as any));
+
+    pushOverlayEvent('emptiedchannel', '/video.mp4');
+
+    expect(connections.has('emptiedchannel')).toBe(false);
+  });
+});
+
+describe('GET /videos/:streamerId/:filename', () => {
+  beforeEach(() => {
+    vi.mocked(safeResolve).mockClear();
+  });
+
+  it('returns 400 for a non-numeric streamerId', async () => {
+    const res = await supertest(buildApp()).get('/videos/abc/clip.mp4');
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for a malformed filename', async () => {
+    const res = await supertest(buildApp()).get('/videos/123/cl%20ip.mp4');
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for a filename with a disallowed extension', async () => {
+    const res = await supertest(buildApp()).get('/videos/123/clip.exe');
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when safeResolve rejects the path as unsafe', async () => {
+    vi.mocked(safeResolve).mockReturnValueOnce(null);
+    const res = await supertest(buildApp()).get('/videos/123/clip.mp4');
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 404 when the file does not exist on disk', async () => {
+    vi.mocked(fs.promises.access).mockRejectedValueOnce(new Error('ENOENT'));
+    const res = await supertest(buildApp()).get('/videos/123/clip.mp4');
+    expect(res.status).toBe(404);
+  });
+
+  it('sends the resolved file when it exists', async () => {
+    vi.mocked(fs.promises.access).mockResolvedValueOnce(undefined);
+    const res = await supertest(buildApp()).get('/videos/123/clip.mp4');
+    expect(res.status).toBe(200);
+    expect(res.body.sentFile).toBe('/app/overlay-videos/123/clip.mp4');
   });
 });
