@@ -55,12 +55,14 @@ app.use(
       ? { maxAge: 31536000, includeSubDomains: true }
       : false,
     contentSecurityPolicy: {
+      useDefaults: false,
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
         scriptSrcAttr: ["'none'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'https://cdn.discordapp.com', 'https://static-cdn.jtvnw.net'],
+        fontSrc: ["'self'"],
         connectSrc: ["'self'"],
         mediaSrc: ["'self'"],
         objectSrc: ["'none'"],
