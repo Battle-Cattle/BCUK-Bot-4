@@ -6,8 +6,14 @@
   <title>BCUK Bot — Dashboard</title>
   <link rel="stylesheet" href="/style.css">
   <%- include('partials/pwa-head') %>
+<%
+function htmlAttrJson(value) {
+  const replacements = { '&': '&amp;', '"': '&quot;', "'": '&#39;', '<': '&lt;', '>': '&gt;' };
+  return JSON.stringify(value).replace(/[&"'<>]/g, function(char) { return replacements[char] || char; });
+}
+%>
 </head>
-<body data-initial-status='<%- JSON.stringify(status).replace(/'/g, "&#39;") %>' data-csrf-token="<%= csrfToken %>">
+<body data-initial-status="<%- htmlAttrJson(status) %>" data-csrf-token="<%= csrfToken %>">
   <%- include('partials/nav') %>
 
   <main class="container">
