@@ -63,15 +63,26 @@ export function normalizeRequiredText(value: string | undefined): string | null 
 }
 
 /**
- * Normalizes a required single-word (no whitespace) text field to lowercase.
- * Returns `null` if the value is blank or contains whitespace.
+ * Allowlist regex for valid trigger strings (e.g. `!clap`, `!my-cmd_1`).
+ * Permits an optional single-char prefix (`!`, `?`, `#`, `@`), then one alphanumeric
+ * character, followed by zero or more alphanumeric, underscore, or hyphen characters.
+ * Rejects HTML-special characters such as `<`, `>`, `&`, and `"`.
+ */
+const TRIGGER_RE = /^[!?#@]?[a-z0-9][a-z0-9_-]*$/;
+
+/**
+ * Normalizes a required single-word (no whitespace) text field to lowercase and
+ * validates it against the trigger-name allowlist (`TRIGGER_RE`).
+ * Returns `null` if the value is blank, contains whitespace, or contains characters
+ * outside the safe allowlist (e.g. HTML-special chars like `<`, `>`, `&`, `"`).
  * @param value - Raw string from a form field.
- * @returns Lowercased single-token string, or `null`.
+ * @returns Lowercased, allowlist-validated single-token string, or `null`.
  */
 export function normalizeSingleTokenRequiredText(value: string | undefined): string | null {
   const normalized = normalizeRequiredText(value);
   if (!normalized || /\s/.test(normalized)) return null;
-  return normalized.toLowerCase();
+  const lower = normalized.toLowerCase();
+  return TRIGGER_RE.test(lower) ? lower : null;
 }
 
 /**
