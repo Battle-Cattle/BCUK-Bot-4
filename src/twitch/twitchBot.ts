@@ -77,12 +77,10 @@ function onConnected(addr: string, port: number): void {
 function onDisconnected(reason: string): void {
   connected = false;
   setConnected(false);
-  // Clear tmi.js's confirmed-channel list so it doesn't replay those
-  // channels in its auto-rejoin queue on the next connect. All joining
-  // is handled by reconcileJoinedChannels after 'connected' fires.
-  // tmi.js doesn't expose `channels` in its public types, but it is a real
-  // internal array. Clearing it prevents tmi.js from auto-rejoining stale
-  // channels on the next connect — all joins are handled by reconcileJoinedChannels.
+  // tmi.js ^1.8.5 does not clear its internal confirmed-channel list on
+  // disconnect, so without this reset the client would re-join every channel
+  // twice on reconnect (once from its own queue, once from reconcileJoinedChannels).
+  // `channels` is not part of the public type surface but is a real internal array.
   (client as any).channels = [];
   log.warn(`Disconnected: ${reason}`);
   getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
