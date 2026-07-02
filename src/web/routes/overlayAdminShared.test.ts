@@ -83,20 +83,20 @@ describe('toStringArray', () => {
 // ─── parseWeight ─────────────────────────────────────────────────────────────
 
 describe('parseWeight', () => {
-  it('returns 1 for undefined', () => {
-    expect(parseWeight(undefined)).toBe(1);
+  it('returns null for undefined', () => {
+    expect(parseWeight(undefined)).toBeNull();
   });
 
-  it('returns 1 for a non-numeric string', () => {
-    expect(parseWeight('abc')).toBe(1);
+  it('returns null for a non-numeric string', () => {
+    expect(parseWeight('abc')).toBeNull();
   });
 
-  it('returns 1 for zero', () => {
-    expect(parseWeight('0')).toBe(1);
+  it('returns null for zero', () => {
+    expect(parseWeight('0')).toBeNull();
   });
 
-  it('returns 1 for a negative number', () => {
-    expect(parseWeight('-5')).toBe(1);
+  it('returns null for a negative number', () => {
+    expect(parseWeight('-5')).toBeNull();
   });
 
   it('returns the parsed integer for a valid positive number', () => {
@@ -111,19 +111,23 @@ describe('parseWeight', () => {
     expect(parseWeight('2.99')).toBe(2);
   });
 
-  it('uses the first element of an array', () => {
-    expect(parseWeight(['7', '99'])).toBe(7);
+  it('returns null for an array (repeated field)', () => {
+    expect(parseWeight(['7', '99'])).toBeNull();
   });
 
-  it('returns 1 for an array with a non-numeric first element', () => {
-    expect(parseWeight(['abc'])).toBe(1);
+  it('returns null for an array with a non-numeric first element', () => {
+    expect(parseWeight(['abc'])).toBeNull();
   });
 
-  it('returns 1 for an empty array', () => {
-    expect(parseWeight([])).toBe(1);
+  it('returns null for an empty array', () => {
+    expect(parseWeight([])).toBeNull();
   });
 
-  it('returns 1 for Infinity (not finite)', () => {
-    expect(parseWeight('Infinity')).toBe(1);
+  it('returns null for Infinity (not finite)', () => {
+    expect(parseWeight('Infinity')).toBeNull();
+  });
+
+  it('returns null for a single-element array (repeated field)', () => {
+    expect(parseWeight(['7'])).toBeNull();
   });
 });
