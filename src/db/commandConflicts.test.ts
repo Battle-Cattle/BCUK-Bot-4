@@ -31,9 +31,11 @@ import {
   getCommandTriggerStringById,
   getUserTwitchEligibility,
   insertUserCommandAssignment,
+  assignUserToCommandWithinTransaction,
 } from './commandConflicts';
 import { CommandConflictError } from './commandStringUtils';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
+import { acquireNamedLock, releaseNamedLock, isDeadlockError } from './commandLocks';
 
 // Cast to any to satisfy SqlExecutor (Pool | PoolConnection) without importing full mysql types
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -221,5 +223,152 @@ describe('insertUserCommandAssignment', () => {
     expect(sql).toContain('INSERT INTO twitch_user_commands');
     expect(params).toContain(5);
     expect(params).toContain('user123');
+  });
+});
+
+// ─── assignUserToCommandWithinTransaction ─────────────────────────────────────
+
+describe('assignUserToCommandWithinTransaction', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function makeConnection(executeResults: unknown[][]): any {
+    const execute = vi.fn();
+    for (const result of executeResults) {
+      execute.mockResolvedValueOnce([result, []]);
+    }
+    return {
+      execute,
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  it('skips the conflict check and commits for a twitch-ineligible user', async () => {
+    const connection = makeConnection([
+      [{ trigger_string: '!clap' }], // getCommandTriggerStringById
+      [{ twitch_name: null, is_twitch_bot_enabled: 0 }], // getUserTwitchEligibility
+      [], // insertUserCommandAssignment
+    ]);
+
+    await assignUserToCommandWithinTransaction(connection, 1, 'user1');
+
+    expect(connection.beginTransaction).toHaveBeenCalledOnce();
+    expect(connection.commit).toHaveBeenCalledOnce();
+    expect(connection.rollback).not.toHaveBeenCalled();
+    expect(connection.execute).toHaveBeenCalledTimes(3);
+    expect(acquireNamedLock).toHaveBeenCalledOnce();
+    expect(releaseNamedLock).toHaveBeenCalledOnce();
+  });
+
+  it('runs the channel trigger conflict check for an eligible user, then commits', async () => {
+    const connection = makeConnection([
+      [{ trigger_string: '!clap' }],
+      [{ twitch_name: 'alice', is_twitch_bot_enabled: 1 }],
+      [], // no conflict rows
+      [], // insert
+    ]);
+
+    await assignUserToCommandWithinTransaction(connection, 1, 'user1');
+
+    expect(connection.commit).toHaveBeenCalledOnce();
+    expect(connection.execute).toHaveBeenCalledTimes(4);
+  });
+
+  it('rolls back and throws CommandConflictError when a channel trigger conflict exists', async () => {
+    const connection = makeConnection([
+      [{ trigger_string: '!clap' }],
+      [{ twitch_name: 'alice', is_twitch_bot_enabled: 1 }],
+      [{ command_id: 99 }], // conflict row found
+    ]);
+
+    await expect(assignUserToCommandWithinTransaction(connection, 1, 'user1')).rejects.toBeInstanceOf(CommandConflictError);
+    expect(connection.rollback).toHaveBeenCalledOnce();
+    expect(connection.commit).not.toHaveBeenCalled();
+    expect(releaseNamedLock).toHaveBeenCalledOnce();
+  });
+
+  it('retries once on a deadlock and succeeds on the second attempt, acquiring the lock only once', async () => {
+    const deadlockErr = new Error('deadlock');
+    const execute = vi.fn()
+      .mockResolvedValueOnce([[{ trigger_string: '!clap' }], []]) // attempt 1: trigger
+      .mockResolvedValueOnce([[{ twitch_name: null, is_twitch_bot_enabled: 0 }], []]) // attempt 1: eligibility
+      .mockRejectedValueOnce(deadlockErr) // attempt 1: insert fails
+      .mockResolvedValueOnce([[{ trigger_string: '!clap' }], []]) // attempt 2: trigger
+      .mockResolvedValueOnce([[{ twitch_name: null, is_twitch_bot_enabled: 0 }], []]) // attempt 2: eligibility
+      .mockResolvedValueOnce([[], []]); // attempt 2: insert succeeds
+    const connection = {
+      execute,
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.mocked(isDeadlockError).mockReturnValueOnce(true);
+
+    await assignUserToCommandWithinTransaction(connection as any, 1, 'user1');
+
+    expect(connection.beginTransaction).toHaveBeenCalledTimes(2);
+    expect(connection.rollback).toHaveBeenCalledOnce();
+    expect(connection.commit).toHaveBeenCalledOnce();
+    expect(acquireNamedLock).toHaveBeenCalledOnce();
+  });
+
+  it('rethrows the original error after exhausting all retry attempts (no further retry)', async () => {
+    const deadlockErr = new Error('deadlock');
+    const eligibilityRow = [{ twitch_name: null, is_twitch_bot_enabled: 0 }];
+    const triggerRow = [{ trigger_string: '!clap' }];
+    const execute = vi.fn()
+      .mockResolvedValueOnce([triggerRow, []]).mockResolvedValueOnce([eligibilityRow, []]).mockRejectedValueOnce(deadlockErr)
+      .mockResolvedValueOnce([triggerRow, []]).mockResolvedValueOnce([eligibilityRow, []]).mockRejectedValueOnce(deadlockErr)
+      .mockResolvedValueOnce([triggerRow, []]).mockResolvedValueOnce([eligibilityRow, []]).mockRejectedValueOnce(deadlockErr);
+    const connection = {
+      execute,
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+    };
+    // Called on every failed attempt (including the last, where the attempt-count guard
+    // short-circuits the retry regardless of this value).
+    vi.mocked(isDeadlockError).mockReturnValueOnce(true).mockReturnValueOnce(true);
+
+    await expect(assignUserToCommandWithinTransaction(connection as any, 1, 'user1')).rejects.toBe(deadlockErr);
+
+    expect(connection.beginTransaction).toHaveBeenCalledTimes(3);
+    expect(connection.rollback).toHaveBeenCalledTimes(3);
+    expect(connection.commit).not.toHaveBeenCalled();
+    expect(acquireNamedLock).toHaveBeenCalledOnce();
+  });
+
+  it('rethrows a non-deadlock error immediately without retrying', async () => {
+    const connection = makeConnection([
+      [{ trigger_string: '!clap' }],
+      [{ twitch_name: null, is_twitch_bot_enabled: 0 }],
+    ]);
+    connection.execute.mockRejectedValueOnce(new Error('unexpected failure'));
+
+    await expect(assignUserToCommandWithinTransaction(connection, 1, 'user1')).rejects.toThrow('unexpected failure');
+    expect(connection.beginTransaction).toHaveBeenCalledOnce();
+    expect(connection.rollback).toHaveBeenCalledOnce();
+  });
+
+  it('still releases the lock in the finally block when acquiring it failed', async () => {
+    const connection = makeConnection([
+      [{ trigger_string: '!clap' }],
+    ]);
+    vi.mocked(acquireNamedLock).mockRejectedValueOnce(new Error('lock timeout'));
+
+    await expect(assignUserToCommandWithinTransaction(connection, 1, 'user1')).rejects.toThrow('lock timeout');
+    expect(connection.rollback).toHaveBeenCalledOnce();
+    expect(releaseNamedLock).toHaveBeenCalledOnce();
+  });
+
+  it('swallows a releaseNamedLock failure in the finally block without masking the result', async () => {
+    const connection = makeConnection([
+      [{ trigger_string: '!clap' }],
+      [{ twitch_name: null, is_twitch_bot_enabled: 0 }],
+      [],
+    ]);
+    vi.mocked(releaseNamedLock).mockRejectedValueOnce(new Error('release failed'));
+
+    await expect(assignUserToCommandWithinTransaction(connection, 1, 'user1')).resolves.toBeUndefined();
   });
 });

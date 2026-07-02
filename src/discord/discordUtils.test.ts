@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('./logger', () => ({ createLogger: () => ({ warn: vi.fn(), error: vi.fn() }) }));
+vi.mock('../shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), error: vi.fn() }) }));
 vi.mock('./discordBot', () => ({ getDiscordClient: vi.fn() }));
 
 vi.mock('discord.js', () => {
@@ -28,8 +28,14 @@ const UNKNOWN_MESSAGE = 10008;
 const UNKNOWN_CHANNEL = 10003;
 const MISSING_ACCESS = 50001;
 
-import { isDiscordNotFoundError, isPermanentVoiceMisconfigurationError } from './discordUtils';
+import {
+  isDiscordNotFoundError,
+  isPermanentVoiceMisconfigurationError,
+  tryDeleteDiscordMessage,
+  getAvailableVoiceChannels,
+} from './discordUtils';
 import { DiscordAPIError } from 'discord.js';
+import { getDiscordClient } from './discordBot';
 
 // The mock above replaces DiscordAPIError with a simpler single-arg constructor.
 // Cast here so TypeScript accepts the mock's signature without casting at every call site.
@@ -107,5 +113,107 @@ describe('isPermanentVoiceMisconfigurationError', () => {
   it('returns false for non-Error values', () => {
     expect(isPermanentVoiceMisconfigurationError(null)).toBe(false);
     expect(isPermanentVoiceMisconfigurationError('string error')).toBe(false);
+  });
+});
+
+describe('tryDeleteDiscordMessage', () => {
+  beforeEach(() => {
+    vi.mocked(getDiscordClient).mockReset();
+  });
+
+  it('returns without fetching anything when there is no client', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue(null);
+    await expect(tryDeleteDiscordMessage('chan1', 'msg1')).resolves.toBeUndefined();
+  });
+
+  it('returns early when the channel is not text-based', async () => {
+    const fetchMessages = vi.fn();
+    const channelsFetch = vi.fn().mockResolvedValue({ isTextBased: () => false, messages: { fetch: fetchMessages } });
+    vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: channelsFetch } } as any);
+
+    await tryDeleteDiscordMessage('chan1', 'msg1');
+    expect(fetchMessages).not.toHaveBeenCalled();
+  });
+
+  it('returns early when the channel fetch resolves to null', async () => {
+    const channelsFetch = vi.fn().mockResolvedValue(null);
+    vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: channelsFetch } } as any);
+
+    await expect(tryDeleteDiscordMessage('chan1', 'msg1')).resolves.toBeUndefined();
+  });
+
+  it('fetches and deletes the message when the channel is text-based', async () => {
+    const deleteMessage = vi.fn().mockResolvedValue(undefined);
+    const fetchMessage = vi.fn().mockResolvedValue({ delete: deleteMessage });
+    const channelsFetch = vi.fn().mockResolvedValue({ isTextBased: () => true, messages: { fetch: fetchMessage } });
+    vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: channelsFetch } } as any);
+
+    await tryDeleteDiscordMessage('chan1', 'msg1');
+    expect(channelsFetch).toHaveBeenCalledWith('chan1');
+    expect(fetchMessage).toHaveBeenCalledWith('msg1');
+    expect(deleteMessage).toHaveBeenCalledOnce();
+  });
+
+  it('swallows a not-found error without throwing', async () => {
+    const notFoundErr = new MockedDiscordAPIError({ code: UNKNOWN_MESSAGE, status: 200 });
+    const channelsFetch = vi.fn().mockRejectedValue(notFoundErr);
+    vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: channelsFetch } } as any);
+
+    await expect(tryDeleteDiscordMessage('chan1', 'msg1')).resolves.toBeUndefined();
+  });
+
+  it('rethrows an unrelated error', async () => {
+    const otherErr = new Error('network blip');
+    const channelsFetch = vi.fn().mockRejectedValue(otherErr);
+    vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: channelsFetch } } as any);
+
+    await expect(tryDeleteDiscordMessage('chan1', 'msg1')).rejects.toThrow('network blip');
+  });
+});
+
+describe('getAvailableVoiceChannels', () => {
+  beforeEach(() => {
+    vi.mocked(getDiscordClient).mockReset();
+  });
+
+  it('returns an empty array when there is no client', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue(null);
+    await expect(getAvailableVoiceChannels('guild1')).resolves.toEqual([]);
+  });
+
+  it('returns voice channels sorted alphabetically, filtering out non-voice/null entries', async () => {
+    // discord.js Collection#fetch() resolves to a Collection, which (like the array used
+    // here) exposes filter/map/sort — the code under test only relies on those methods.
+    const channels = [
+      { id: '1', name: 'Zeta', type: 2 },
+      { id: '2', name: 'General Text', type: 0 },
+      { id: '3', name: 'Alpha', type: 2 },
+      null,
+    ];
+    const guildsFetch = vi.fn().mockResolvedValue({ channels: { fetch: vi.fn().mockResolvedValue(channels) } });
+    vi.mocked(getDiscordClient).mockReturnValue({ guilds: { fetch: guildsFetch } } as any);
+
+    const result = await getAvailableVoiceChannels('guild1');
+    expect(guildsFetch).toHaveBeenCalledWith('guild1');
+    expect(result).toEqual([
+      { id: '3', name: 'Alpha' },
+      { id: '1', name: 'Zeta' },
+    ]);
+  });
+
+  it('rethrows a not-found error (logged as warn instead of error)', async () => {
+    const notFoundErr = new MockedDiscordAPIError({ code: UNKNOWN_CHANNEL, status: 200 });
+    const guildsFetch = vi.fn().mockRejectedValue(notFoundErr);
+    vi.mocked(getDiscordClient).mockReturnValue({ guilds: { fetch: guildsFetch } } as any);
+
+    await expect(getAvailableVoiceChannels('missing-guild')).rejects.toBe(notFoundErr);
+  });
+
+  it('rethrows an unrelated error', async () => {
+    const otherErr = new Error('api down');
+    const guildsFetch = vi.fn().mockRejectedValue(otherErr);
+    vi.mocked(getDiscordClient).mockReturnValue({ guilds: { fetch: guildsFetch } } as any);
+
+    await expect(getAvailableVoiceChannels('guild1')).rejects.toThrow('api down');
   });
 });
