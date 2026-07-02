@@ -40,7 +40,7 @@ router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) =
     await setRewardVideos(
       rewardId,
       streamer.id,
-      videoIds.map((videoId) => ({ videoId, weight: parseWeight(body[`weight_${videoId}`]) })),
+      videoIds.map((videoId) => ({ videoId, weight: parseWeight(body[`weight_${videoId}`]) ?? 1 })),
     );
 
     res.redirect('/overlay/settings?success=reward_saved');
