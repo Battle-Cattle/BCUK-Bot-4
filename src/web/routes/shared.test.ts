@@ -146,6 +146,11 @@ describe('normalizeSingleTokenRequiredText', () => {
   it('allows valid triggers with hyphens and underscores', () => {
     expect(normalizeSingleTokenRequiredText('!my-cmd_1')).toBe('!my-cmd_1');
   });
+
+  it('returns null for a trigger containing quote characters', () => {
+    expect(normalizeSingleTokenRequiredText("!it's")).toBeNull();
+    expect(normalizeSingleTokenRequiredText('!say"hi"')).toBeNull();
+  });
 });
 
 describe('normalizeDiscordId', () => {
