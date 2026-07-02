@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { describe, it, expect, vi } from 'vitest';
 import type { Request } from 'express';
 import type { SessionUser } from '../types/express';
@@ -134,8 +135,15 @@ describe('sessionLimiterKey', () => {
 // streamdeckLimiterKey
 // ---------------------------------------------------------------------------
 describe('streamdeckLimiterKey', () => {
-  it('returns the Bearer token when a valid Authorization header is present', () => {
-    expect(streamdeckLimiterKey(makeReq({ authHeader: 'Bearer my-secret-token' }))).toBe('my-secret-token');
+  it('returns the SHA-256 hash of the Bearer token when a valid Authorization header is present', () => {
+    const expected = createHash('sha256').update('my-secret-token').digest('hex');
+    expect(streamdeckLimiterKey(makeReq({ authHeader: 'Bearer my-secret-token' }))).toBe(expected);
+  });
+
+  it('keys different tokens to different hash buckets', () => {
+    const key1 = streamdeckLimiterKey(makeReq({ authHeader: 'Bearer token-a' }));
+    const key2 = streamdeckLimiterKey(makeReq({ authHeader: 'Bearer token-b' }));
+    expect(key1).not.toBe(key2);
   });
 
   it('falls back to req.ip when no Authorization header is present', () => {
