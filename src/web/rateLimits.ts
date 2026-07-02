@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Request } from 'express';
 
@@ -63,12 +64,15 @@ export function sessionLimiterSkip(req: Request): boolean {
 /**
  * Generates a rate-limit key for the Streamdeck API.
  * Keys by Bearer token so each API key gets its own bucket regardless of IP.
+ * The token is SHA-256-hashed before use as the key so that plaintext API
+ * tokens are never stored in the rate-limit store (e.g. in memory dumps).
  * Falls back to IP-based keying when no Bearer token is present.
  * @param req - Express request object
- * @returns Bearer token value, or IP-based fallback key
+ * @returns SHA-256 hash of the Bearer token, or IP-based fallback key
  */
 export function streamdeckLimiterKey(req: Request): string {
   const auth = req.headers['authorization'];
   const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-  return token ?? ipKeyGenerator(req.ip ?? req.socket?.remoteAddress ?? 'unknown');
+  if (token) return createHash('sha256').update(token).digest('hex');
+  return ipKeyGenerator(req.ip ?? req.socket?.remoteAddress ?? 'unknown');
 }
