@@ -24,13 +24,12 @@ const parsedMaxMb = parseInt(process.env.OVERLAY_MAX_FILE_MB ?? '100', 10);
 export const MAX_UPLOAD_MB = Number.isFinite(parsedMaxMb) && parsedMaxMb > 0 ? parsedMaxMb : 100;
 const MAX_FILE_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
+// No fileFilter: client-supplied MIME type is unreliable (some browsers send
+// application/octet-stream). detectVideoType() validates via magic bytes instead,
+// mirroring the audio upload approach.
 export const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES },
-  fileFilter: (_req, file, cb) => {
-    const allowed = ['video/webm', 'video/mp4'];
-    cb(null, allowed.includes(file.mimetype));
-  },
 });
 
 /**
