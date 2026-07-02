@@ -201,7 +201,7 @@ describe('getAvailableVoiceChannels', () => {
     ]);
   });
 
-  it('swallows a not-found error and returns nothing thrown, but rethrows (logged as warn)', async () => {
+  it('rethrows a not-found error (logged as warn instead of error)', async () => {
     const notFoundErr = new MockedDiscordAPIError({ code: UNKNOWN_CHANNEL, status: 200 });
     const guildsFetch = vi.fn().mockRejectedValue(notFoundErr);
     vi.mocked(getDiscordClient).mockReturnValue({ guilds: { fetch: guildsFetch } } as any);

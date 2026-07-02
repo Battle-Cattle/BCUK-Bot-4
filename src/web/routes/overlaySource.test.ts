@@ -165,12 +165,14 @@ describe('GET /:login/events — connection lifecycle (direct handler invocation
   it('registers a new Set for a channel with no prior connections', () => {
     const handler = getRouteHandler('/:login/events');
     const res = makeSseRes();
-    const { req } = makeSseReq('freshchannel');
+    const { req, triggerClose } = makeSseReq('freshchannel');
 
     handler(req, res, vi.fn());
 
     expect(connections.get('freshchannel')?.has(res as any)).toBe(true);
     expect(res.write).toHaveBeenCalledWith(': connected\n\n');
+
+    triggerClose(); // clears the 25s keepalive interval so it doesn't leak into other tests
   });
 
   it('sends a ping every 25 seconds', () => {
@@ -178,13 +180,14 @@ describe('GET /:login/events — connection lifecycle (direct handler invocation
     try {
       const handler = getRouteHandler('/:login/events');
       const res = makeSseRes();
-      const { req } = makeSseReq('pingchannel');
+      const { req, triggerClose } = makeSseReq('pingchannel');
 
       handler(req, res, vi.fn());
       res.write.mockClear();
 
       vi.advanceTimersByTime(25_000);
       expect(res.write).toHaveBeenCalledWith(': ping\n\n');
+      triggerClose(); // clears the keepalive interval before switching timer modes
     } finally {
       vi.useRealTimers();
     }
@@ -204,7 +207,8 @@ describe('GET /:login/events — connection lifecycle (direct handler invocation
 
       vi.advanceTimersByTime(25_000);
 
-      // Only client for this channel — eviction empties the Set, which deletes the map entry.
+      // Only client for this channel — eviction empties the Set, which deletes the map entry
+      // and clears the interval, so there's nothing left to close.
       expect(connections.get('brokenpipe')).toBeUndefined();
     } finally {
       vi.useRealTimers();
@@ -225,6 +229,8 @@ describe('GET /:login/events — connection lifecycle (direct handler invocation
         throw new Error('broken pipe');
       });
 
+      // The failed write's catch block clears the interval unconditionally, so there's
+      // no leaked interval here even though the channel entry was removed beforehand.
       expect(() => vi.advanceTimersByTime(25_000)).not.toThrow();
     } finally {
       vi.useRealTimers();
