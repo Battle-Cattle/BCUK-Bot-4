@@ -6,6 +6,7 @@ vi.mock('../../shared/logger', () => ({
 
 vi.mock('../../shared/config', () => ({
   OVERLAY_FOLDER: '/app/overlay-videos',
+  OVERLAY_MAX_SSE_PER_CHANNEL: 10,
 }));
 
 vi.mock('fs', () => ({
@@ -71,16 +72,8 @@ describe('GET /:login', () => {
 });
 
 describe('MAX_SSE_CONNECTIONS_PER_CHANNEL', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.resetModules();
-  });
-
-  it('defaults to 10', async () => {
-    vi.stubEnv('OVERLAY_MAX_SSE_PER_CHANNEL', '');
-    vi.resetModules();
-    const { MAX_SSE_CONNECTIONS_PER_CHANNEL: limit } = await import('./overlaySource.js');
-    expect(limit).toBe(10);
+  it('re-exports the value from config', () => {
+    expect(MAX_SSE_CONNECTIONS_PER_CHANNEL).toBe(10);
   });
 });
 

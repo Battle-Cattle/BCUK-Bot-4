@@ -9,7 +9,7 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import type { DbStreamerEventSub } from '../../db';
 import { addVideo, deleteVideo } from '../../db';
-import { OVERLAY_FOLDER } from '../../shared/config';
+import { OVERLAY_FOLDER, OVERLAY_MAX_FILE_MB } from '../../shared/config';
 import { parsePositiveIntId } from './shared';
 import { safeResolve } from '../../shared/pathUtils';
 import { requireStreamer } from './overlayAdminShared';
@@ -19,9 +19,8 @@ export { requireStreamer, toStringArray, parseWeight } from './overlayAdminShare
 const log = createLogger('OverlayAdmin');
 export const router = Router();
 
-const parsedMaxMb = parseInt(process.env.OVERLAY_MAX_FILE_MB ?? '100', 10);
 /** Maximum upload size in megabytes, passed to templates to avoid direct process.env access in EJS. */
-export const MAX_UPLOAD_MB = Number.isFinite(parsedMaxMb) && parsedMaxMb > 0 ? parsedMaxMb : 100;
+export const MAX_UPLOAD_MB = OVERLAY_MAX_FILE_MB;
 const MAX_FILE_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
 export const upload = multer({

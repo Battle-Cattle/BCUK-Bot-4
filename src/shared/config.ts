@@ -34,13 +34,19 @@ export const DB_USER = require_env('DB_USER');
 export const DB_PASSWORD = require_env('DB_PASSWORD');
 export const DB_NAME = require_env('DB_NAME');
 
-export const SFX_FOLDER = process.env.SFX_FOLDER ?? './sfx';
 // Use Number (not parseInt) so malformed values like `1024MB` or `1.5` fall back
 // to the safe default instead of being silently truncated to a valid-looking cap.
-const _SFX_MAX_FILE_MB = Number(process.env.SFX_MAX_FILE_MB ?? '10');
-export const SFX_MAX_FILE_MB =
-  Number.isInteger(_SFX_MAX_FILE_MB) && _SFX_MAX_FILE_MB > 0 ? _SFX_MAX_FILE_MB : 10;
+function parsePositiveIntEnv(envVar: string | undefined, fallback: number): number {
+  const parsed = Number(envVar);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export const SFX_FOLDER = process.env.SFX_FOLDER ?? './sfx';
+export const SFX_MAX_FILE_MB = parsePositiveIntEnv(process.env.SFX_MAX_FILE_MB, 10);
 export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER ?? './overlay-videos';
+export const OVERLAY_MAX_FILE_MB = parsePositiveIntEnv(process.env.OVERLAY_MAX_FILE_MB, 100);
+export const COMPANION_MAX_SSE_PER_TOKEN = parsePositiveIntEnv(process.env.COMPANION_MAX_SSE_PER_TOKEN, 3);
+export const OVERLAY_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.OVERLAY_MAX_SSE_PER_CHANNEL, 10);
 const _COOLDOWN = parseInt(process.env.GLOBAL_COOLDOWN_MS ?? '3000', 10);
 if (Number.isNaN(_COOLDOWN)) throw new Error('Invalid GLOBAL_COOLDOWN_MS: must be a number');
 export const GLOBAL_COOLDOWN_MS = _COOLDOWN;
