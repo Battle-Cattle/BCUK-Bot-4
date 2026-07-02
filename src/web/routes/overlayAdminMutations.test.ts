@@ -1,15 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
-
-// Shrink the upload size limit to 1 MB before the route module reads
-// OVERLAY_MAX_FILE_MB at import time, so an oversized-upload test can trigger
-// Multer's LIMIT_FILE_SIZE with a small buffer. Existing tests use tiny buffers,
-// so they are unaffected. Restored in afterAll to avoid leaking to other files.
-vi.hoisted(() => {
-  process.env.OVERLAY_MAX_FILE_MB = '1';
-});
-afterAll(() => {
-  delete process.env.OVERLAY_MAX_FILE_MB;
-});
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
@@ -37,6 +26,8 @@ vi.mock('../middleware', () => ({
 
 vi.mock('../../shared/config', () => ({
   OVERLAY_FOLDER: '/app/overlay-videos',
+  // Use 1 MB so the oversized-upload test can trigger Multer's LIMIT_FILE_SIZE with a small buffer.
+  OVERLAY_MAX_FILE_MB: 1,
 }));
 
 vi.mock('fs', () => ({

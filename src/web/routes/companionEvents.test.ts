@@ -7,6 +7,10 @@ vi.mock('../../shared/logger', () => ({
 // Stub auth: tests drive it via the `x-test-discord-id` header instead of a real token,
 // so SSE route behaviour can be exercised without re-testing requireCompanionKey itself
 // (that's covered in middleware.test.ts).
+vi.mock('../../shared/config', () => ({
+  COMPANION_MAX_SSE_PER_TOKEN: 3,
+}));
+
 vi.mock('../middleware', () => ({
   requireCompanionKey: (req: any, res: any, next: any) => {
     const id = req.headers['x-test-discord-id'];

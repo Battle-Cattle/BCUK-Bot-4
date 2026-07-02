@@ -1,6 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
+import { COMPANION_MAX_SSE_PER_TOKEN } from '../../shared/config';
 
 const log = createLogger('CompanionEvents');
 const router = Router();
@@ -19,9 +20,7 @@ export interface CompanionEvent {
 // In-memory map of active SSE connections keyed by Discord ID.
 export const connections = new Map<string, Set<import('express').Response>>();
 
-const parsedMaxSse = parseInt(process.env.COMPANION_MAX_SSE_PER_TOKEN ?? '3', 10);
-export const MAX_SSE_CONNECTIONS_PER_TOKEN =
-  Number.isFinite(parsedMaxSse) && parsedMaxSse > 0 ? parsedMaxSse : 3;
+export const MAX_SSE_CONNECTIONS_PER_TOKEN = COMPANION_MAX_SSE_PER_TOKEN;
 
 /** Push a companion event to all of a Discord user's connected companion app instances. */
 export function pushCompanionEvent(discordId: string, event: CompanionEvent): void {

@@ -1,7 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import fs from 'fs';
-import { OVERLAY_FOLDER } from '../../shared/config';
+import { OVERLAY_FOLDER, OVERLAY_MAX_SSE_PER_CHANNEL } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
 import { renderView } from './shared';
 
@@ -16,9 +16,7 @@ const RESERVED_LOGINS = new Set(['settings', 'videos', 'controller']);
 // In-memory map of active SSE connections keyed by Twitch channel login (lowercase).
 export const connections = new Map<string, Set<import('express').Response>>();
 
-const parsedMaxSse = parseInt(process.env.OVERLAY_MAX_SSE_PER_CHANNEL ?? '10', 10);
-export const MAX_SSE_CONNECTIONS_PER_CHANNEL =
-  Number.isFinite(parsedMaxSse) && parsedMaxSse > 0 ? parsedMaxSse : 10;
+export const MAX_SSE_CONNECTIONS_PER_CHANNEL = OVERLAY_MAX_SSE_PER_CHANNEL;
 
 /** Push a video URL to all browser sources connected for this channel. */
 export function pushOverlayEvent(login: string, videoPath: string): void {
