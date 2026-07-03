@@ -54,6 +54,7 @@
             <div class="form-section-gap">
               <label for="output" class="form-label">Output</label>
               <p class="hint hint-compact">Reply text to send when the trigger matches.</p>
+              <p class="hint hint-compact">Variables: <code>{user} {args} {arg}</code></p>
               <textarea id="output" class="input stream-textarea" name="output" rows="3" placeholder="Hello chat!" required></textarea>
             </div>
             <% if (assignableUsers.length > 0) { %>
@@ -167,6 +168,7 @@
                       </div>
                       <div class="form-section-gap">
                         <label for="output_<%= command.command_id %>" class="form-label">Output</label>
+                        <p class="hint hint-compact">Variables: <code>{user} {args} {arg}</code></p>
                         <textarea id="output_<%= command.command_id %>" class="input stream-textarea" name="output" rows="3" required><%= command.output %></textarea>
                       </div>
                       <div class="button-row-wrap">
