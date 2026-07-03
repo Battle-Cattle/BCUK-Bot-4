@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS streamer_event_config (
   giftsub_message VARCHAR(500) NOT NULL DEFAULT '{gifter_display} gifted {count} sub(s) to the community!',
   raid_enabled    TINYINT(1)   NOT NULL DEFAULT 0,
   raid_message    VARCHAR(500) NOT NULL DEFAULT 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!',
+  raid_shoutout_enabled TINYINT(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (streamer_id),
   FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

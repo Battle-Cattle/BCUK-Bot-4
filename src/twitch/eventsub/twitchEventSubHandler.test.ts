@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../db', () => ({ getVideosForReward: vi.fn(), getStreamerById: vi.fn() }));
 vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
+vi.mock('../../commands/shoutoutHandler', () => ({ buildShoutoutMessage: vi.fn() }));
+vi.mock('../../commands/commandMonitorStore', () => ({ recordCommandTestEntry: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 vi.mock('../monitor/twitchMonitor', () => ({ triggerImmediateLiveCheck: vi.fn().mockResolvedValue(undefined) }));
 
@@ -12,6 +14,8 @@ import {
 } from './twitchEventSubHandler';
 import { getVideosForReward, getStreamerById } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
+import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
+import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 
 const mockSend = vi.fn<(channel: string, message: string) => Promise<void>>();
@@ -33,6 +37,7 @@ function makeConfig(overrides: Partial<{
   giftsub_message: string;
   raid_enabled: boolean;
   raid_message: string;
+  raid_shoutout_enabled: boolean;
 }> = {}) {
   return {
     follow_enabled: false,
@@ -43,6 +48,7 @@ function makeConfig(overrides: Partial<{
     giftsub_message: 'Gift from {gifter} ({gifter_display}) count={count} tier={tier} tier_name={tier_name}',
     raid_enabled: false,
     raid_message: 'Raid from {from_channel} ({from_display}) viewers={viewers}',
+    raid_shoutout_enabled: false,
     ...overrides,
   } as any;
 }
@@ -239,6 +245,59 @@ describe('handleRaid', () => {
       raid_message: '{from_channel} ({from_display}) viewers={viewers}',
     }));
     expect(mockSend).toHaveBeenCalledWith('streamer', 'raider (RaiderDisplay) viewers=42');
+  });
+
+  it('sends the shoutout for the raiding channel when raid_shoutout_enabled is true, even if raid_enabled is false', async () => {
+    vi.mocked(buildShoutoutMessage).mockResolvedValue('Go check out @raider!');
+
+    await handleRaid('streamer', event, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }));
+
+    expect(buildShoutoutMessage).toHaveBeenCalledWith('raider');
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'Go check out @raider!');
+  });
+
+  it('records the auto-shoutout via recordCommandTestEntry for monitor-panel visibility', async () => {
+    vi.mocked(buildShoutoutMessage).mockResolvedValue('Go check out @raider!');
+
+    await handleRaid('streamer', event, makeConfig({ raid_shoutout_enabled: true }));
+
+    expect(recordCommandTestEntry).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'twitch',
+      command: '!so (raid)',
+      response: 'Go check out @raider!',
+      channel: 'streamer',
+      user: 'raider',
+    }));
+  });
+
+  it('sends both the welcome message and the shoutout when both toggles are on (independent)', async () => {
+    vi.mocked(buildShoutoutMessage).mockResolvedValue('Go check out @raider!');
+
+    await handleRaid('streamer', event, makeConfig({
+      raid_enabled: true,
+      raid_message: 'Welcome {from_channel}!',
+      raid_shoutout_enabled: true,
+    }));
+
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'Welcome raider!');
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'Go check out @raider!');
+    expect(mockSend).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not send a shoutout when raid_shoutout_enabled is true but the raiding channel is not found on Twitch', async () => {
+    vi.mocked(buildShoutoutMessage).mockResolvedValue(null);
+
+    await handleRaid('streamer', event, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }));
+
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(recordCommandTestEntry).not.toHaveBeenCalled();
+  });
+
+  it('does not look up a shoutout when raid_shoutout_enabled is false', async () => {
+    await handleRaid('streamer', event, makeConfig({ raid_enabled: true, raid_shoutout_enabled: false }));
+
+    expect(buildShoutoutMessage).not.toHaveBeenCalled();
   });
 });
 

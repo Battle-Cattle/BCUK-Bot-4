@@ -163,6 +163,24 @@ describe('loadStreamersForEventSub', () => {
     expect(result).toHaveLength(1);
     expect(result[0].uid).toBe('uid-raid');
   });
+
+  it('falls back to Helix getUsers for shoutout-only streamers (raid_enabled off, raid_shoutout_enabled on) without stored UID', async () => {
+    const fakeStreamer = {
+      id: 13,
+      twitch_name: 'shoutoutOnly',
+      twitch_user_id: null,
+      config: { raid_enabled: false, raid_shoutout_enabled: true },
+    };
+    vi.mocked(getAllEventSubStreamers).mockResolvedValue([fakeStreamer] as any);
+    vi.mocked(getValidToken).mockResolvedValue('tok-13');
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'shoutoutonly', id: 'uid-shoutout' }] as any);
+
+    const result = await loadStreamersForEventSub();
+
+    expect(getUsers).toHaveBeenCalledWith(['shoutoutOnly']);
+    expect(result).toHaveLength(1);
+    expect(result[0].uid).toBe('uid-shoutout');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -271,6 +289,42 @@ describe('subscribeForStreamer', () => {
     );
     expect(createEventSubSubscription).not.toHaveBeenCalledWith(
       'channel.update', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+    );
+  });
+
+  it('subscribes to channel.raid when only raid_shoutout_enabled is set (raid_enabled off)', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+
+    await subscribeForStreamer('sess-shoutout', {
+      uid: 'uid-shoutout',
+      token: 'tok-shoutout',
+      name: 'botInChannel',
+      config: { follow_enabled: false, sub_enabled: false, raid_enabled: false, raid_shoutout_enabled: true } as any,
+      streamerId: 24,
+    });
+
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.raid', '1', { to_broadcaster_user_id: 'uid-shoutout' }, 'sess-shoutout', 'tok-shoutout',
+    );
+  });
+
+  it('does not subscribe to channel.raid when both raid_enabled and raid_shoutout_enabled are false', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+
+    await subscribeForStreamer('sess-noraid', {
+      uid: 'uid-noraid',
+      token: 'tok-noraid',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false, raid_shoutout_enabled: false } as any,
+      streamerId: 25,
+    });
+
+    expect(createEventSubSubscription).not.toHaveBeenCalledWith(
+      'channel.raid', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
     );
   });
 });

@@ -45,6 +45,7 @@ function makeRow(overrides: object = {}): Record<string, unknown> {
     giftsub_message: null,
     raid_enabled: null,
     raid_message: null,
+    raid_shoutout_enabled: null,
     ...overrides,
   };
 }
@@ -59,6 +60,7 @@ function makeRowWithConfig(overrides: object = {}): Record<string, unknown> {
     giftsub_message: 'Gift msg',
     raid_enabled: 1,
     raid_message: 'Raid msg',
+    raid_shoutout_enabled: 1,
     ...overrides,
   });
 }
@@ -91,15 +93,17 @@ describe('getAllEventSubStreamers', () => {
     expect(s.config!.follow_enabled).toBe(true);
     expect(s.config!.sub_enabled).toBe(false);
     expect(s.config!.raid_enabled).toBe(true);
+    expect(s.config!.raid_shoutout_enabled).toBe(true);
   });
 
   it('maps BIT(1) config flags as Buffer correctly', async () => {
-    const row = makeRowWithConfig({ follow_enabled: Buffer.from([1]), sub_enabled: Buffer.from([0]), raid_enabled: Buffer.from([0]) });
+    const row = makeRowWithConfig({ follow_enabled: Buffer.from([1]), sub_enabled: Buffer.from([0]), raid_enabled: Buffer.from([0]), raid_shoutout_enabled: Buffer.from([1]) });
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getAllEventSubStreamers();
     expect(s.config!.follow_enabled).toBe(true);
     expect(s.config!.sub_enabled).toBe(false);
     expect(s.config!.raid_enabled).toBe(false);
+    expect(s.config!.raid_shoutout_enabled).toBe(true);
   });
 
   it('decrypts access and refresh tokens via maybeDecrypt', async () => {
@@ -257,6 +261,15 @@ describe('initEventConfig', () => {
     await initEventConfig(42);
     expect(pool.execute.mock.calls[0][1]).toContain(42);
   });
+
+  it('includes raid_shoutout_enabled (defaulting to disabled/0) in the SQL and params', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await initEventConfig(3);
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('raid_shoutout_enabled');
+    expect(params[params.length - 1]).toBe(0);
+  });
 });
 
 // ─── saveEventConfig ──────────────────────────────────────────────────────────
@@ -271,6 +284,7 @@ describe('saveEventConfig', () => {
     giftsub_message: 'gift!',
     raid_enabled: true,
     raid_message: 'raid!',
+    raid_shoutout_enabled: true,
   };
 
   it('uses ON DUPLICATE KEY UPDATE in the SQL', async () => {
@@ -301,5 +315,18 @@ describe('saveEventConfig', () => {
     expect(params).toContain('resub!');
     expect(params).toContain('gift!');
     expect(params).toContain('raid!');
+  });
+
+  it('includes raid_shoutout_enabled in the SQL and params, converted to 1/0', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await saveEventConfig(1, eventConfig);
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('raid_shoutout_enabled');
+
+    await saveEventConfig(1, { ...eventConfig, raid_shoutout_enabled: false });
+    const paramsOff: unknown[] = pool.execute.mock.calls[1][1];
+    expect(params[params.length - 1]).toBe(1);
+    expect(paramsOff[paramsOff.length - 1]).toBe(0);
   });
 });

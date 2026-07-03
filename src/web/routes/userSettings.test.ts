@@ -318,6 +318,7 @@ describe('POST /eventsub-config', () => {
         giftsub_message: 'Gift message',
         raid_enabled: 'on',
         raid_message: 'Raid message',
+        raid_shoutout_enabled: 'on',
       });
 
     expect(res.status).toBe(302);
@@ -331,8 +332,34 @@ describe('POST /eventsub-config', () => {
       giftsub_message: 'Gift message',
       raid_enabled: true,
       raid_message: 'Raid message',
+      raid_shoutout_enabled: true,
     });
     expect(reloadEventSubSubscriptions).toHaveBeenCalledOnce();
+  });
+
+  it('persists raid_shoutout_enabled independently of raid_enabled (shoutout on, welcome message off)', async () => {
+    vi.mocked(findUser).mockResolvedValue({ is_twitch_bot_enabled: true } as any);
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+    vi.mocked(saveEventConfig).mockResolvedValue(undefined);
+
+    const res = await supertest(buildApp())
+      .post('/eventsub-config')
+      .type('form')
+      .send({
+        follow_message: 'Thanks {display_name}!',
+        sub_message: 'Sub message',
+        resub_message: 'Resub message',
+        giftsub_message: 'Gift message',
+        raid_message: 'Raid message',
+        raid_shoutout_enabled: 'on',
+        // raid_enabled intentionally omitted — checkbox unchecked
+      });
+
+    expect(res.status).toBe(302);
+    expect(saveEventConfig).toHaveBeenCalledWith(9, expect.objectContaining({
+      raid_enabled: false,
+      raid_shoutout_enabled: true,
+    }));
   });
 
   it('falls back to existing config values for fields omitted from the body', async () => {
@@ -349,6 +376,7 @@ describe('POST /eventsub-config', () => {
         giftsub_message: 'Existing giftsub message',
         raid_enabled: true,
         raid_message: 'Existing raid message',
+        raid_shoutout_enabled: true,
       },
     } as any);
     vi.mocked(saveEventConfig).mockResolvedValue(undefined);
@@ -369,6 +397,7 @@ describe('POST /eventsub-config', () => {
       giftsub_message: 'Existing giftsub message',
       raid_enabled: true,
       raid_message: 'Existing raid message',
+      raid_shoutout_enabled: true,
     });
   });
 

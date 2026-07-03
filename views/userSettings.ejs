@@ -130,6 +130,11 @@
               </label>
               <p class="hint hint-compact">Variables: <code>{from_channel} {from_display} {viewers}</code></p>
               <textarea class="input stream-textarea" name="raid_message" rows="2" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.raid_message) ? cfg.raid_message : 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!' %></textarea>
+              <label class="input checkbox-input-label" style="margin-top:0.4rem;">
+                <input type="checkbox" name="raid_shoutout_enabled" <%= (cfg && cfg.raid_shoutout_enabled) ? 'checked' : '' %> <%= !isConnected ? 'disabled' : '' %>>
+                Auto-shoutout raiders <% if (!isConnected) { %><span class="hint">(requires Twitch connection)</span><% } %>
+              </label>
+              <p class="hint hint-compact">Independent of the raid welcome message above — sends a <code>!so</code>-style shoutout for the raiding channel.</p>
             </div>
 
             <div class="button-row-wrap">
