@@ -50,6 +50,14 @@ export function authHeaders(token: string): Record<string, string> {
   };
 }
 
+/**
+ * Clears the cached app token on a 401 response, so the next call re-fetches rather than
+ * reusing an invalidated token until `appTokenExpiry`. No-ops for any other status.
+ */
+function invalidateAppTokenIfUnauthorized(res: Response): void {
+  if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
+}
+
 function chunks<T>(arr: T[], size: number): T[][] {
   if (size <= 0) throw new Error(`chunks: size must be > 0, got ${size}`);
   const result: T[][] = [];
@@ -101,9 +109,7 @@ export async function getUsers(logins: string[]): Promise<TwitchUser[]> {
     const params = batch.map((l) => `login=${encodeURIComponent(l)}`).join('&');
     const res = await fetchHelixWithRetry(`https://api.twitch.tv/helix/users?${params}`, authHeaders(token));
     if (!res.ok) {
-      // Clear the cached token on 401 so the next call re-fetches rather than
-      // reusing an invalidated token until appTokenExpiry.
-      if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
+      invalidateAppTokenIfUnauthorized(res);
       throw new Error(`[TwitchAPI] getUsers failed: ${res.status}`);
     }
     const data = await res.json() as { data: Array<{ login: string; id: string }> };
@@ -130,7 +136,7 @@ export async function getStreams(userIds: string[]): Promise<TwitchStream[]> {
     const params = batch.map((id) => `user_id=${encodeURIComponent(id)}`).join('&');
     const res = await fetchHelixWithRetry(`https://api.twitch.tv/helix/streams?${params}&first=100`, authHeaders(token));
     if (!res.ok) {
-      if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
+      invalidateAppTokenIfUnauthorized(res);
       throw new Error(`[TwitchAPI] getStreams failed: ${res.status}`);
     }
     const data = await res.json() as { data: TwitchStream[] };
@@ -154,7 +160,7 @@ export async function getChannelInfo(broadcasterIds: string[]): Promise<TwitchCh
     const params = batch.map((id) => `broadcaster_id=${encodeURIComponent(id)}`).join('&');
     const res = await fetchHelixWithRetry(`https://api.twitch.tv/helix/channels?${params}`, authHeaders(token));
     if (!res.ok) {
-      if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
+      invalidateAppTokenIfUnauthorized(res);
       throw new Error(`[TwitchAPI] getChannelInfo failed: ${res.status}`);
     }
     const data = await res.json() as { data: TwitchChannelInfo[] };
@@ -265,7 +271,7 @@ export async function getSharedChatSession(broadcasterId: string): Promise<Share
   );
   if (res.status === 404 || res.status === 403) return null;
   if (!res.ok) {
-    if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
+    invalidateAppTokenIfUnauthorized(res);
     throw new Error(`[TwitchAPI] getSharedChatSession failed: ${res.status}`);
   }
   const data = await res.json() as { data: SharedChatSession[] };
