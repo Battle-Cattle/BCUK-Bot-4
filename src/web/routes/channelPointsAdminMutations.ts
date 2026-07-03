@@ -52,6 +52,11 @@ async function handleRewardDeleteAction(
   }
 }
 
+/** True unless `condition` holds without `requirement` also holding — e.g. a limit's checkbox is checked but its numeric field is missing. */
+function impliesTruth(condition: boolean, requirement: boolean): boolean {
+  return !condition || requirement;
+}
+
 /**
  * Parses and validates the full set of Twitch custom reward fields shared by the create and
  * edit forms. Returns `null` if any field is invalid — including cross-field rules Twitch
@@ -74,11 +79,11 @@ function parseRewardFields(body: Record<string, string | string[] | undefined>):
   const isValid = title !== '' && title.length <= TITLE_MAX_LENGTH
     && cost !== null
     && prompt.length <= PROMPT_MAX_LENGTH
-    && !(isUserInputRequired && prompt === '')
     && backgroundColor !== null
-    && !(isMaxPerStreamEnabled && maxPerStream === null)
-    && !(isMaxPerUserPerStreamEnabled && maxPerUserPerStream === null)
-    && !(isGlobalCooldownEnabled && globalCooldownSeconds === null);
+    && impliesTruth(isUserInputRequired, prompt !== '')
+    && impliesTruth(isMaxPerStreamEnabled, maxPerStream !== null)
+    && impliesTruth(isMaxPerUserPerStreamEnabled, maxPerUserPerStream !== null)
+    && impliesTruth(isGlobalCooldownEnabled, globalCooldownSeconds !== null);
   if (!isValid) return null;
 
   return {
