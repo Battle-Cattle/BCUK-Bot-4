@@ -6,6 +6,7 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 import { getPool } from './pool';
 import {
   getPricingForReward,
+  getPricingConfigById,
   getPricingConfigsForStreamer,
   getAllEnabledPricingRows,
   upsertPricingConfig,
@@ -78,6 +79,27 @@ describe('getPricingForReward', () => {
     vi.mocked(getPool).mockReturnValue(makePool([{ ...sampleRow, last_pushed_cost: null }]) as any);
     const row = await getPricingForReward(7, 'rwd-abc');
     expect(row!.last_pushed_cost).toBeNull();
+  });
+});
+
+describe('getPricingConfigById', () => {
+  it('returns null when no row found', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([]) as any);
+    expect(await getPricingConfigById(1, 7)).toBeNull();
+  });
+
+  it('returns the mapped row when found', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([sampleRow]) as any);
+    const row = await getPricingConfigById(1, 7);
+    expect(row!.id).toBe(1);
+    expect(row!.twitch_reward_id).toBe('rwd-abc');
+  });
+
+  it('queries with id and streamerId', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getPricingConfigById(1, 7);
+    expect(pool.execute.mock.calls[0][1]).toEqual([1, 7]);
   });
 });
 

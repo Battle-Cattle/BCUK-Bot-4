@@ -17,7 +17,7 @@
       <% const errorMessages = {
         not_a_streamer:   'You are not configured as a monitored streamer.',
         invalid_reward_id:'Invalid reward ID format.',
-        invalid_config:   'Base cost, cooldown, max multiplier, and curve must all be valid, positive numbers.',
+        invalid_config:   'Base cost, cooldown, and curve must be positive numbers, and max multiplier must be zero or greater.',
         save_failed:      'Failed to save — please try again.',
         invalid_id:       'Invalid request.',
         delete_failed:    'Delete failed — please try again.',
@@ -131,23 +131,23 @@
                 Enabled
               </label>
               <div>
-                <label class="hint hint-compact">Base cost</label>
-                <input class="input" type="number" min="1" name="base_cost" style="width:7rem;"
+                <label class="hint hint-compact" for="base-cost-<%= r.rewardId %>">Base cost</label>
+                <input id="base-cost-<%= r.rewardId %>" class="input" type="number" min="1" name="base_cost" style="width:7rem;"
                   value="<%= r.config ? r.config.base_cost : r.twitchReward.cost %>" required>
               </div>
               <div>
-                <label class="hint hint-compact">Cooldown (s)</label>
-                <input class="input" type="number" min="1" name="cooldown_seconds" style="width:7rem;"
+                <label class="hint hint-compact" for="cooldown-<%= r.rewardId %>">Cooldown (s)</label>
+                <input id="cooldown-<%= r.rewardId %>" class="input" type="number" min="1" name="cooldown_seconds" style="width:7rem;"
                   value="<%= r.config ? r.config.cooldown_seconds : 60 %>" required>
               </div>
               <div>
-                <label class="hint hint-compact">Max multiplier</label>
-                <input class="input" type="number" step="0.1" min="0" name="max_multiplier" style="width:7rem;"
+                <label class="hint hint-compact" for="max-mult-<%= r.rewardId %>">Max multiplier</label>
+                <input id="max-mult-<%= r.rewardId %>" class="input" type="number" step="0.1" min="0" name="max_multiplier" style="width:7rem;"
                   value="<%= r.config ? r.config.max_multiplier : 1 %>" required>
               </div>
               <div>
-                <label class="hint hint-compact">Curve</label>
-                <input class="input" type="number" step="0.1" min="0.1" name="curve" style="width:7rem;"
+                <label class="hint hint-compact" for="curve-<%= r.rewardId %>">Curve</label>
+                <input id="curve-<%= r.rewardId %>" class="input" type="number" step="0.1" min="0.1" name="curve" style="width:7rem;"
                   value="<%= r.config ? r.config.curve : 1 %>" required>
               </div>
               <div>

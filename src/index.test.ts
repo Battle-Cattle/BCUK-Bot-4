@@ -167,6 +167,10 @@ describe('startup — reward pricing scheduler', () => {
 
     expect(vi.mocked(db.initGlobalPricingSettings)).toHaveBeenCalledOnce();
     expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
+
+    const [initCallOrder] = vi.mocked(db.initGlobalPricingSettings).mock.invocationCallOrder;
+    const [schedulerCallOrder] = vi.mocked(startRewardPricingScheduler).mock.invocationCallOrder;
+    expect(initCallOrder).toBeLessThan(schedulerCallOrder);
   });
 
   it('logs an error and continues starting up when initGlobalPricingSettings rejects', async () => {

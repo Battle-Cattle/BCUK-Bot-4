@@ -2,12 +2,16 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { upsertPricingConfig, deletePricingConfig, saveGlobalPricingSettings } from '../../db';
+import {
+  upsertPricingConfig, deletePricingConfig, getPricingConfigById, getStreamerById, saveGlobalPricingSettings,
+} from '../../db';
 import { logAndRedirectError, parsePositiveIntId } from './shared';
 import {
   requireStreamer, parsePositiveIntField, parseNonNegativeNumberField, parsePositiveNumberField,
 } from './pricingAdminShared';
 import { applyDecayTick } from '../../twitch/pricing/rewardPricingService';
+import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { updateRewardCost } from '../../twitch/twitchApi';
 
 const log = createLogger('PricingAdminMutations');
 export const router = Router();
@@ -62,7 +66,10 @@ router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) =
 
 /**
  * POST /pricing/settings/rewards/:id/delete — deletes a reward's pricing config
- * belonging to the requesting streamer.
+ * belonging to the requesting streamer. Best-effort resets the reward's Twitch-side
+ * cost back to its base_cost first (skipped if the reward was marked unsupported),
+ * since deleting the DB row alone would otherwise leave Twitch permanently stuck at
+ * whatever price dynamic pricing last pushed.
  * @param req - Express request; reads the `id` route param.
  * @param res - Express response; redirects to `/pricing?success=pricing_deleted` on success,
  *   or to `/pricing?error=<code>` if the requester isn't a streamer (`not_a_streamer`),
@@ -75,6 +82,19 @@ router.post('/settings/rewards/:id/delete', requireAuth, csrfProtection, async (
 
     const id = parsePositiveIntId(req.params.id);
     if (id === null) return res.redirect('/pricing?error=invalid_id');
+
+    const config = await getPricingConfigById(id, streamer.id);
+    if (config && !config.twitch_unsupported) {
+      try {
+        const owner = await getStreamerById(streamer.id);
+        const token = owner ? await getValidToken(owner) : null;
+        if (owner?.twitch_user_id && token) {
+          await updateRewardCost(owner.twitch_user_id, config.twitch_reward_id, config.base_cost, token);
+        }
+      } catch (err) {
+        log.warn('Failed to reset Twitch reward cost before deleting pricing config:', err);
+      }
+    }
 
     await deletePricingConfig(id, streamer.id);
     res.redirect('/pricing?success=pricing_deleted');

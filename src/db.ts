@@ -152,7 +152,7 @@ export {
 
 export type { RewardPricingRow, RewardPricingInput, GlobalPricingSettings } from './db/rewardPricing';
 export {
-  getPricingForReward, getPricingConfigsForStreamer, getAllEnabledPricingRows,
+  getPricingForReward, getPricingConfigById, getPricingConfigsForStreamer, getAllEnabledPricingRows,
   upsertPricingConfig, recordPricingUpdate, deletePricingConfig, markPricingUnsupported,
   initGlobalPricingSettings, getGlobalPricingSettings, saveGlobalPricingSettings,
 } from './db/rewardPricing';

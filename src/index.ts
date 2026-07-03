@@ -23,6 +23,10 @@ import { createLogger } from './shared/logger';
 
 const log = createLogger('Bot');
 
+/**
+ * Gracefully stops schedulers and bot connections, closes the DB pool, and exits the process.
+ * @param signal - The name of the signal that triggered shutdown (e.g. `SIGINT`).
+ */
 async function shutdown(signal: string): Promise<void> {
   log.info(`${signal} received — disconnecting from voice and shutting down.`);
   stopCounterScheduler();

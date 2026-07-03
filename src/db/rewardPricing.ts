@@ -76,6 +76,21 @@ export async function getPricingForReward(streamerId: number, twitchRewardId: st
 }
 
 /**
+ * Look up a single reward's pricing config by its primary key, scoped to the owning
+ * streamer, or null if not found.
+ *
+ * @param id - Primary key of the `reward_pricing` row.
+ * @param streamerId - DB row ID of the owning streamer.
+ */
+export async function getPricingConfigById(id: number, streamerId: number): Promise<RewardPricingRow | null> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT ${REWARD_PRICING_SELECT} FROM reward_pricing WHERE id = ? AND streamer_id = ?`,
+    [id, streamerId],
+  );
+  return rows.length === 0 ? null : mapRow(rows[0]);
+}
+
+/**
  * List every reward pricing row (configured or not yet enabled) belonging to a streamer.
  *
  * @param streamerId - DB row ID of the streamer.

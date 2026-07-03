@@ -29,6 +29,16 @@ interface PricingRewardRow {
   previewPrice: number | null;
 }
 
+/** Computes the live preview price for a reward's current demand, from its pricing config. */
+function previewPriceFor(config: RewardPricingRow): number {
+  return computePrice(config.demand, {
+    baseCost: config.base_cost,
+    cooldownSeconds: config.cooldown_seconds,
+    maxMultiplier: config.max_multiplier,
+    curve: config.curve,
+  });
+}
+
 /** Fetches the streamer's live Twitch custom rewards, or an empty list if not connected or on any failure. */
 async function fetchTwitchRewards(streamer: DbStreamerEventSub): Promise<TwitchCustomReward[]> {
   if (!streamer.twitch_user_id) return [];
@@ -61,15 +71,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
 
     const rewards: PricingRewardRow[] = twitchRewards.map((tr) => {
       const config = configByRewardId.get(tr.id) ?? null;
-      const previewPrice = config
-        ? computePrice(config.demand, {
-            baseCost: config.base_cost,
-            cooldownSeconds: config.cooldown_seconds,
-            maxMultiplier: config.max_multiplier,
-            curve: config.curve,
-          })
-        : null;
-      return { rewardId: tr.id, twitchReward: tr, config, previewPrice };
+      return { rewardId: tr.id, twitchReward: tr, config, previewPrice: config ? previewPriceFor(config) : null };
     });
 
     // Configs whose reward no longer appears on Twitch (deleted, or the streamer's token
@@ -77,17 +79,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     // as "unlinked" rows so they aren't invisible/unmanageable from this page.
     for (const config of pricingConfigs) {
       if (matchedRewardIds.has(config.twitch_reward_id)) continue;
-      rewards.push({
-        rewardId: config.twitch_reward_id,
-        twitchReward: null,
-        config,
-        previewPrice: computePrice(config.demand, {
-          baseCost: config.base_cost,
-          cooldownSeconds: config.cooldown_seconds,
-          maxMultiplier: config.max_multiplier,
-          curve: config.curve,
-        }),
-      });
+      rewards.push({ rewardId: config.twitch_reward_id, twitchReward: null, config, previewPrice: previewPriceFor(config) });
     }
 
     const isOwner = req.session.user?.isOwner ?? false;
