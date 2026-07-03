@@ -6,7 +6,6 @@ vi.mock('../../shared/logger', () => ({
 
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
-  getStreamerById: vi.fn(),
   getPricingConfigById: vi.fn(),
   upsertPricingConfig: vi.fn(),
   deletePricingConfig: vi.fn(),
@@ -24,19 +23,18 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../twitch/pricing/rewardPricingService', () => ({ applyDecayTick: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({ getValidToken: vi.fn() }));
-vi.mock('../../twitch/twitchApi', () => ({ updateRewardCost: vi.fn() }));
+vi.mock('../../twitch/pricing/rewardPricingService', () => ({
+  applyDecayTick: vi.fn().mockResolvedValue(undefined),
+  resetAndDeletePricing: vi.fn().mockResolvedValue(undefined),
+}));
 
 import express from 'express';
 import supertest from 'supertest';
 import { router } from './pricingAdminMutations';
 import {
-  getStreamerByDiscordId, getStreamerById, getPricingConfigById, upsertPricingConfig, deletePricingConfig, saveGlobalPricingSettings,
+  getStreamerByDiscordId, getPricingConfigById, upsertPricingConfig, deletePricingConfig, saveGlobalPricingSettings,
 } from '../../db';
-import { applyDecayTick } from '../../twitch/pricing/rewardPricingService';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { updateRewardCost } from '../../twitch/twitchApi';
+import { applyDecayTick, resetAndDeletePricing } from '../../twitch/pricing/rewardPricingService';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3; isOwner: boolean };
 const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: 0, isOwner: false };
@@ -60,13 +58,12 @@ function buildApp(sessionUser: SessionUser = USER) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
-  vi.mocked(getStreamerById).mockResolvedValue(MOCK_STREAMER as any);
   vi.mocked(getPricingConfigById).mockResolvedValue(null);
-  vi.mocked(getValidToken).mockResolvedValue('user-token');
-  vi.mocked(updateRewardCost).mockResolvedValue(undefined);
   vi.mocked(upsertPricingConfig).mockResolvedValue(undefined);
   vi.mocked(deletePricingConfig).mockResolvedValue(undefined);
   vi.mocked(saveGlobalPricingSettings).mockResolvedValue(undefined);
+  vi.mocked(applyDecayTick).mockResolvedValue(undefined);
+  vi.mocked(resetAndDeletePricing).mockResolvedValue(undefined);
 });
 
 describe('POST /settings/rewards', () => {
@@ -166,7 +163,7 @@ describe('POST /settings/rewards/:id/delete', () => {
     expect(deletePricingConfig).toHaveBeenCalledWith(5, MOCK_STREAMER.id);
   });
 
-  it('resets the Twitch reward cost to base_cost before deleting', async () => {
+  it('delegates the reset-and-delete to resetAndDeletePricing when a config exists', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(getPricingConfigById).mockResolvedValue({
       id: 5, twitch_reward_id: VALID_REWARD_ID, base_cost: 200, twitch_unsupported: false,
@@ -175,52 +172,34 @@ describe('POST /settings/rewards/:id/delete', () => {
     const res = await supertest(buildApp()).post('/settings/rewards/5/delete');
 
     expect(res.headers.location).toBe('/pricing?success=pricing_deleted');
-    expect(updateRewardCost).toHaveBeenCalledWith(MOCK_STREAMER.twitch_user_id, VALID_REWARD_ID, 200, 'user-token');
-    expect(deletePricingConfig).toHaveBeenCalledWith(5, MOCK_STREAMER.id);
-    const [resetCallOrder] = vi.mocked(updateRewardCost).mock.invocationCallOrder;
-    const [deleteCallOrder] = vi.mocked(deletePricingConfig).mock.invocationCallOrder;
-    expect(resetCallOrder).toBeLessThan(deleteCallOrder);
+    expect(resetAndDeletePricing).toHaveBeenCalledWith(5, MOCK_STREAMER.id, VALID_REWARD_ID);
+    expect(deletePricingConfig).not.toHaveBeenCalled();
   });
 
-  it('skips the Twitch reset for a reward already marked unsupported', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(getPricingConfigById).mockResolvedValue({
-      id: 5, twitch_reward_id: VALID_REWARD_ID, base_cost: 200, twitch_unsupported: true,
-    } as any);
-
-    await supertest(buildApp()).post('/settings/rewards/5/delete');
-
-    expect(updateRewardCost).not.toHaveBeenCalled();
-    expect(deletePricingConfig).toHaveBeenCalledWith(5, MOCK_STREAMER.id);
-  });
-
-  it('still deletes when the Twitch reset fails', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(getPricingConfigById).mockResolvedValue({
-      id: 5, twitch_reward_id: VALID_REWARD_ID, base_cost: 200, twitch_unsupported: false,
-    } as any);
-    vi.mocked(updateRewardCost).mockRejectedValueOnce(new Error('twitch down'));
-
-    const res = await supertest(buildApp()).post('/settings/rewards/5/delete');
-
-    expect(res.headers.location).toBe('/pricing?success=pricing_deleted');
-    expect(deletePricingConfig).toHaveBeenCalledWith(5, MOCK_STREAMER.id);
-  });
-
-  it('skips the Twitch reset (but still deletes) when no config is found', async () => {
+  it('deletes directly (no resetAndDeletePricing) when no config is found', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(getPricingConfigById).mockResolvedValue(null);
 
     const res = await supertest(buildApp()).post('/settings/rewards/5/delete');
 
     expect(res.headers.location).toBe('/pricing?success=pricing_deleted');
-    expect(updateRewardCost).not.toHaveBeenCalled();
+    expect(resetAndDeletePricing).not.toHaveBeenCalled();
     expect(deletePricingConfig).toHaveBeenCalledWith(5, MOCK_STREAMER.id);
   });
 
   it('redirects with delete_failed when deletePricingConfig throws', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(deletePricingConfig).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp()).post('/settings/rewards/5/delete');
+    expect(res.headers.location).toBe('/pricing?error=delete_failed');
+  });
+
+  it('redirects with delete_failed when resetAndDeletePricing throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(getPricingConfigById).mockResolvedValue({
+      id: 5, twitch_reward_id: VALID_REWARD_ID, base_cost: 200, twitch_unsupported: false,
+    } as any);
+    vi.mocked(resetAndDeletePricing).mockRejectedValueOnce(new Error('DB down'));
     const res = await supertest(buildApp()).post('/settings/rewards/5/delete');
     expect(res.headers.location).toBe('/pricing?error=delete_failed');
   });

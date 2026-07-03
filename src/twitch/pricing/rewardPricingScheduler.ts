@@ -41,8 +41,12 @@ export async function runDecayTick(): Promise<void> {
   return currentTickPromise;
 }
 
-/** Starts the periodic decay-tick interval. Call once at bot startup. */
+/**
+ * Starts the periodic decay-tick interval. Call once at bot startup.
+ * No-ops if already started, so a second call can't leak the original interval handle.
+ */
 export function startRewardPricingScheduler(): void {
+  if (tickTimer) return;
   tickTimer = setInterval(() => {
     runDecayTick().catch((err) => log.error('Decay tick error:', err));
   }, DECAY_POLL_INTERVAL_MS);

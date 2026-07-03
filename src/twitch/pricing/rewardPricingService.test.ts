@@ -6,6 +6,7 @@ vi.mock('../../db', () => ({
   getPricingForReward: vi.fn(),
   recordPricingUpdate: vi.fn(),
   markPricingUnsupported: vi.fn(),
+  deletePricingConfig: vi.fn(),
   getGlobalPricingSettings: vi.fn(),
   getStreamerById: vi.fn(),
 }));
@@ -17,11 +18,12 @@ vi.mock('../twitchApi', () => {
 });
 
 import {
-  getPricingForReward, recordPricingUpdate, markPricingUnsupported, getGlobalPricingSettings, getStreamerById,
+  getPricingForReward, recordPricingUpdate, markPricingUnsupported, deletePricingConfig,
+  getGlobalPricingSettings, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
 import { updateRewardCost, TwitchRewardUnsupportedError } from '../twitchApi';
-import { applyRedemptionPricing, applyDecayTick } from './rewardPricingService';
+import { applyRedemptionPricing, applyDecayTick, resetAndDeletePricing } from './rewardPricingService';
 
 const settings = { decay_half_life_periods: 3, redemption_increment: 0.1 };
 const streamer = { id: 1, twitch_user_id: 'bc1', eventsub_access_token: 'tok' } as any;
@@ -49,6 +51,7 @@ beforeEach(() => {
   vi.mocked(getGlobalPricingSettings).mockResolvedValue(settings);
   vi.mocked(getStreamerById).mockResolvedValue(streamer);
   vi.mocked(getValidToken).mockResolvedValue('user-token');
+  vi.mocked(deletePricingConfig).mockResolvedValue(undefined);
 });
 
 describe('applyRedemptionPricing', () => {
@@ -156,5 +159,69 @@ describe('applyDecayTick', () => {
     const [, , demandArg] = vi.mocked(recordPricingUpdate).mock.calls[0];
     // decay(0.5, 300, 300, 3) = 0.5 * 2^(-1/3) ≈ 0.39700
     expect(demandArg).toBeCloseTo(0.397, 2);
+  });
+});
+
+describe('resetAndDeletePricing', () => {
+  it('resets the Twitch cost to base_cost, then deletes the config', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ base_cost: 200 }));
+    await resetAndDeletePricing(42, 1, 'rwd1');
+    expect(updateRewardCost).toHaveBeenCalledWith('bc1', 'rwd1', 200, 'user-token');
+    expect(deletePricingConfig).toHaveBeenCalledWith(42, 1);
+    const [resetOrder] = vi.mocked(updateRewardCost).mock.invocationCallOrder;
+    const [deleteOrder] = vi.mocked(deletePricingConfig).mock.invocationCallOrder;
+    expect(resetOrder).toBeLessThan(deleteOrder);
+  });
+
+  it('skips the reset (but still deletes) when the reward is marked unsupported', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ twitch_unsupported: true }));
+    await resetAndDeletePricing(42, 1, 'rwd1');
+    expect(updateRewardCost).not.toHaveBeenCalled();
+    expect(deletePricingConfig).toHaveBeenCalledWith(42, 1);
+  });
+
+  it('skips the reset (but still deletes) when the row no longer exists', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(null);
+    await resetAndDeletePricing(42, 1, 'rwd1');
+    expect(updateRewardCost).not.toHaveBeenCalled();
+    expect(deletePricingConfig).toHaveBeenCalledWith(42, 1);
+  });
+
+  it('still deletes when the Twitch reset fails', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow());
+    vi.mocked(updateRewardCost).mockRejectedValueOnce(new Error('twitch down'));
+    await expect(resetAndDeletePricing(42, 1, 'rwd1')).resolves.toBeUndefined();
+    expect(deletePricingConfig).toHaveBeenCalledWith(42, 1);
+  });
+
+  it('serializes with a concurrent applyDecayTick on the same reward key', async () => {
+    const order: string[] = [];
+    let resolveFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { resolveFirst = resolve; });
+
+    vi.mocked(getPricingForReward).mockImplementation(async () => {
+      order.push('read');
+      if (order.filter((o) => o === 'read').length === 1) {
+        await firstGate; // the decay tick's read blocks here until released
+      }
+      return makeRow();
+    });
+    vi.mocked(deletePricingConfig).mockImplementation(async () => {
+      order.push('delete');
+    });
+    vi.mocked(recordPricingUpdate).mockImplementation(async () => {
+      order.push('write');
+    });
+
+    const decayTick = applyDecayTick(1, 'rwd1');
+    const del = resetAndDeletePricing(42, 1, 'rwd1'); // same key — must wait for the decay tick to finish
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual(['read']); // the delete's read hasn't happened yet — it's queued behind the decay tick
+
+    resolveFirst();
+    await Promise.all([decayTick, del]);
+    expect(order).toEqual(['read', 'write', 'read', 'delete']);
   });
 });

@@ -1,6 +1,7 @@
 import { createMutationQueue } from '../../shared/mutationQueue';
 import {
-  getPricingForReward, recordPricingUpdate, markPricingUnsupported, getGlobalPricingSettings, getStreamerById,
+  getPricingForReward, recordPricingUpdate, markPricingUnsupported, deletePricingConfig,
+  getGlobalPricingSettings, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
 import { updateRewardCost, TwitchRewardUnsupportedError } from '../twitchApi';
@@ -96,4 +97,34 @@ export async function applyRedemptionPricing(streamerId: number, twitchRewardId:
  */
 export async function applyDecayTick(streamerId: number, twitchRewardId: string): Promise<void> {
   await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, false));
+}
+
+/**
+ * Resets a reward's Twitch-side cost to its base_cost, then deletes its pricing config —
+ * both inside the same queued operation as `applyRedemptionPricing`/`applyDecayTick` for this
+ * reward, so a concurrent redemption or decay tick can never push a new price into the gap
+ * between the reset and the delete (which would otherwise leave Twitch at a stale cost with
+ * no config left to ever reconcile it). Skips the reset (but still deletes) when the reward
+ * was marked unsupported, since Twitch would just reject the reset too.
+ *
+ * @param id - Primary key of the `reward_pricing` row to delete.
+ * @param streamerId - DB row ID of the owning streamer.
+ * @param twitchRewardId - Twitch reward UUID.
+ */
+export async function resetAndDeletePricing(id: number, streamerId: number, twitchRewardId: string): Promise<void> {
+  await pricingQueue.run(queueKey(streamerId, twitchRewardId), async () => {
+    const row = await getPricingForReward(streamerId, twitchRewardId);
+    if (row && !row.twitch_unsupported) {
+      try {
+        const streamer = await getStreamerById(streamerId);
+        const token = streamer ? await getValidToken(streamer) : null;
+        if (streamer?.twitch_user_id && token) {
+          await updateRewardCost(streamer.twitch_user_id, twitchRewardId, row.base_cost, token);
+        }
+      } catch (err) {
+        log.warn(`Failed to reset Twitch reward cost before deleting pricing config for reward ${twitchRewardId}:`, err);
+      }
+    }
+    await deletePricingConfig(id, streamerId);
+  });
 }

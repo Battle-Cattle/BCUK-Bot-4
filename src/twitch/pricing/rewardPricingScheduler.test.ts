@@ -90,6 +90,20 @@ describe('startRewardPricingScheduler / stopRewardPricingScheduler', () => {
     expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(2);
   });
 
+  it('does not leak the interval when started twice without stopping', async () => {
+    vi.mocked(getAllEnabledPricingRows).mockResolvedValue([]);
+    startRewardPricingScheduler();
+    startRewardPricingScheduler(); // second call should no-op, not replace the tracked handle
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    // If the second call had leaked a duplicate interval, this would be 2.
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+
+    await stopRewardPricingScheduler();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1); // fully stopped, no orphaned timer still firing
+  });
+
   it('stop prevents further ticks', async () => {
     vi.mocked(getAllEnabledPricingRows).mockResolvedValue([]);
     startRewardPricingScheduler();
