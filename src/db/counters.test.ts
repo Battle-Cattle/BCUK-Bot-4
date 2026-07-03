@@ -44,6 +44,7 @@ import {
   resetCounterCurrentValue,
   incrementCounter,
   archiveAndResetYearlyCounters,
+  invalidateArchiveColumnsCache,
   CounterNotFoundError,
 } from './counters';
 import { runSerializedCommandWrite } from './commandLocks';
@@ -68,6 +69,11 @@ function makePool(rows: unknown[] = [], meta: unknown = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The archive-columns cache is a module-level singleton (5-minute TTL in
+  // production) so it must be reset between tests, or a later test's
+  // getCounterHistory call would silently reuse an earlier test's cached columns
+  // instead of hitting its own `pool.query` mock.
+  invalidateArchiveColumnsCache();
 });
 
 // ─── CounterNotFoundError ────────────────────────────────────────────────────
@@ -199,6 +205,18 @@ describe('getCounterHistory', () => {
     const [sql] = pool.query.mock.calls[0];
     expect(sql).toContain('information_schema.COLUMNS');
     expect(sql).toContain("TABLE_NAME = 'counter'");
+  });
+
+  it('caches the existing-columns lookup so browsing multiple counters only queries information_schema once', async () => {
+    const pool = makePool([{ id: 1 }]);
+    pool.query.mockResolvedValue([[{ COLUMN_NAME: 'value2025' }], {}]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await getCounterHistory(1);
+    await getCounterHistory(2);
+    await getCounterHistory(3);
+
+    expect(pool.query).toHaveBeenCalledTimes(1);
   });
 });
 

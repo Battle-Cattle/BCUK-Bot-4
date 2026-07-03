@@ -5,6 +5,7 @@ import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
 import { fromBit } from './utils';
 import { invalidateCounterLookupCache } from './counterCache';
+import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
 
 // ─── Archive column allowlist ─────────────────────────────────────────────────
 // MySQL does not support parameterised column names. Rather than building the
@@ -110,22 +111,51 @@ export async function getAllCounters(): Promise<DbCounter[]> {
  * @returns The counter and its history (years with a non-null archived value, newest
  *   first), or `null` if no counter exists with the given id.
  */
+// ─── Archive column existence cache ───────────────────────────────────────────
+// `value<year>` columns are only ever added via yearly migrations (see
+// DATABASE-SCHEMA.md), so a short TTL is enough to turn "one information_schema
+// round-trip per getCounterHistory call" into "one per 5 minutes", which matters
+// when an admin browses several counters' histories in one session.
+
+interface ArchiveColumnsCache extends RefreshingLookupCache {
+  columns: string[];
+}
+
+const archiveColumnsCacheState = createManagedLookupCache<ArchiveColumnsCache>({
+  cacheName: 'counter archive columns cache',
+  ttlMs: 300_000,
+  refreshFailureBackoffMs: 5_000,
+  refreshFailureMaxBackoffMs: 60_000,
+  createEmptyCache: () => ({ loadedAt: 0, columns: [] }),
+  loadCache: async () => {
+    const [rows] = await getPool().query<mysql.RowDataPacket[]>(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'counter' AND COLUMN_NAME LIKE 'value2%'`,
+    );
+    const knownColumns = new Set(ARCHIVE_YEAR_COLUMNS.values());
+    const columns = rows
+      .map((row) => row.COLUMN_NAME as string)
+      .filter((columnName) => knownColumns.has(columnName));
+    return { loadedAt: Date.now(), columns };
+  },
+});
+
+/** Marks the archive-columns cache as stale so the next read re-queries `information_schema`. */
+export function invalidateArchiveColumnsCache(): void {
+  archiveColumnsCacheState.invalidate();
+}
+
 /**
  * Returns the `value<year>` archive columns that actually exist on the `counter`
- * table right now. Per `DATABASE-SCHEMA.md`, these columns are added incrementally
- * over time (one per year, as each year's archive becomes needed) — `ARCHIVE_YEAR_COLUMNS`
- * is a fixed allowlist of *theoretically valid* years, not a guarantee that every
+ * table right now (cached for 5 minutes — see `archiveColumnsCacheState`). Per
+ * `DATABASE-SCHEMA.md`, these columns are added incrementally over time (one per
+ * year, as each year's archive becomes needed) — `ARCHIVE_YEAR_COLUMNS` is a
+ * fixed allowlist of *theoretically valid* years, not a guarantee that every
  * column in it has been created yet, so callers must not assume the full range exists.
  */
 async function getExistingArchiveColumns(): Promise<string[]> {
-  const [rows] = await getPool().query<mysql.RowDataPacket[]>(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'counter' AND COLUMN_NAME LIKE 'value2%'`,
-  );
-  const knownColumns = new Set(ARCHIVE_YEAR_COLUMNS.values());
-  return rows
-    .map((row) => row.COLUMN_NAME as string)
-    .filter((columnName) => knownColumns.has(columnName));
+  const cache = await archiveColumnsCacheState.getCache();
+  return cache.columns;
 }
 
 /**
