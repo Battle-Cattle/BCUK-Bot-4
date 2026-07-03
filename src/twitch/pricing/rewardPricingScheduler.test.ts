@@ -1,0 +1,92 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
+vi.mock('../../db', () => ({ getAllEnabledPricingRows: vi.fn() }));
+vi.mock('./rewardPricingService', () => ({ applyDecayTick: vi.fn() }));
+
+import { getAllEnabledPricingRows } from '../../db';
+import { applyDecayTick } from './rewardPricingService';
+import { runDecayTick, startRewardPricingScheduler, stopRewardPricingScheduler } from './rewardPricingScheduler';
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.useFakeTimers();
+});
+
+afterEach(async () => {
+  await stopRewardPricingScheduler();
+  vi.useRealTimers();
+});
+
+describe('runDecayTick', () => {
+  it('calls applyDecayTick for every enabled row', async () => {
+    vi.mocked(getAllEnabledPricingRows).mockResolvedValue([
+      { streamer_id: 1, twitch_reward_id: 'r1' },
+      { streamer_id: 2, twitch_reward_id: 'r2' },
+    ] as any);
+    vi.mocked(applyDecayTick).mockResolvedValue(undefined);
+
+    await runDecayTick();
+
+    expect(applyDecayTick).toHaveBeenCalledWith(1, 'r1');
+    expect(applyDecayTick).toHaveBeenCalledWith(2, 'r2');
+  });
+
+  it('continues to the next row when one fails', async () => {
+    vi.mocked(getAllEnabledPricingRows).mockResolvedValue([
+      { streamer_id: 1, twitch_reward_id: 'r1' },
+      { streamer_id: 2, twitch_reward_id: 'r2' },
+    ] as any);
+    vi.mocked(applyDecayTick).mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce(undefined);
+
+    await expect(runDecayTick()).resolves.toBeUndefined();
+    expect(applyDecayTick).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not throw when loading rows fails', async () => {
+    vi.mocked(getAllEnabledPricingRows).mockRejectedValue(new Error('db down'));
+    await expect(runDecayTick()).resolves.toBeUndefined();
+  });
+});
+
+describe('startRewardPricingScheduler / stopRewardPricingScheduler', () => {
+  it('fires runDecayTick on the configured interval', async () => {
+    vi.mocked(getAllEnabledPricingRows).mockResolvedValue([]);
+    startRewardPricingScheduler();
+
+    expect(getAllEnabledPricingRows).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(2);
+  });
+
+  it('stop prevents further ticks', async () => {
+    vi.mocked(getAllEnabledPricingRows).mockResolvedValue([]);
+    startRewardPricingScheduler();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+
+    await stopRewardPricingScheduler();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+  });
+
+  it('a reentrancy guard prevents overlapping ticks', async () => {
+    let resolveFirst!: () => void;
+    const gate = new Promise<void>((resolve) => { resolveFirst = resolve; });
+    vi.mocked(getAllEnabledPricingRows).mockImplementation(async () => {
+      await gate;
+      return [];
+    });
+
+    const first = runDecayTick();
+    const second = runDecayTick(); // should not trigger a second getAllEnabledPricingRows call
+
+    resolveFirst();
+    await Promise.all([first, second]);
+
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+  });
+});

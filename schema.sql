@@ -264,6 +264,42 @@ CREATE TABLE IF NOT EXISTS overlay_reward_video (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- reward_pricing
+-- Dynamic Channel Point Pricing: per-reward config/demand. Independent of
+-- overlay_reward — a reward can have dynamic pricing without overlay videos.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS reward_pricing (
+  id                INT          NOT NULL AUTO_INCREMENT,
+  streamer_id       INT          NOT NULL,
+  twitch_reward_id  VARCHAR(255) NOT NULL,
+  enabled           TINYINT(1)   NOT NULL DEFAULT 0,
+  base_cost         INT          NOT NULL,
+  cooldown_seconds  INT          NOT NULL DEFAULT 60,
+  max_multiplier    DECIMAL(6,3) NOT NULL DEFAULT 1.000,
+  curve             DECIMAL(5,3) NOT NULL DEFAULT 1.000,
+  demand            DECIMAL(9,6) NOT NULL DEFAULT 0.000000,
+  demand_updated_at BIGINT       NOT NULL,
+  last_pushed_cost  INT          NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_reward_pricing (streamer_id, twitch_reward_id),
+  KEY idx_reward_pricing_enabled (enabled),
+  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- pricing_global_settings
+-- Single global row (id pinned to 1) — bot-wide decay/increment settings
+-- shared by every reward_pricing row.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS pricing_global_settings (
+  id                       TINYINT      NOT NULL DEFAULT 1,
+  decay_half_life_periods DECIMAL(8,3) NOT NULL DEFAULT 3.000,
+  redemption_increment     DECIMAL(6,4) NOT NULL DEFAULT 0.1000,
+  PRIMARY KEY (id),
+  CONSTRAINT chk_pricing_global_settings_singleton CHECK (id = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
 -- streamdeck_api_keys
 -- key_hash is a hex-encoded SHA-256 of the plain API key (64 chars).
 -- approved_by is nullable; SET NULL if the approver's user row is deleted.

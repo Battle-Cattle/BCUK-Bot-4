@@ -148,6 +148,15 @@ export {
   getVideosForReward,
 } from './db/overlayVideos';
 
+// ─── Channel point pricing ───────────────────────────────────────────────────
+
+export type { RewardPricingRow, RewardPricingInput, GlobalPricingSettings } from './db/rewardPricing';
+export {
+  getPricingForReward, getPricingConfigsForStreamer, getAllEnabledPricingRows,
+  upsertPricingConfig, recordPricingUpdate, deletePricingConfig,
+  initGlobalPricingSettings, getGlobalPricingSettings, saveGlobalPricingSettings,
+} from './db/rewardPricing';
+
 // ─── Streamdeck API keys ─────────────────────────────────────────────────────
 
 export type { StreamdeckKeyRow } from './db/streamdeckKeys';

@@ -34,6 +34,7 @@ import companionKeysRouter from './routes/companionKeys';
 import userSettingsRouter from './routes/userSettings';
 import overlaySourceRouter from './routes/overlaySource';
 import overlayAdminRouter from './routes/overlayAdmin';
+import pricingAdminRouter from './routes/pricingAdmin';
 import privacyRouter from './routes/privacy';
 import tosRouter from './routes/tos';
 import { requireAuth, requireGuildContext } from './middleware';
@@ -208,6 +209,7 @@ app.use('/admin', adminGuildRouter);
 
 app.use('/user/settings', requireAuth, userSettingsRouter);
 app.use('/overlay', requireAuth, overlayAdminRouter);
+app.use('/pricing', requireAuth, pricingAdminRouter);
 
 /**
  * 404 handler — catches any request that fell through every mounted router.

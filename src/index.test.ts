@@ -12,6 +12,7 @@ vi.mock('./db', () => ({
     }),
   })),
   closePool: vi.fn().mockResolvedValue(undefined),
+  initGlobalPricingSettings: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./discord/discordBot', () => ({
   startDiscordBot: vi.fn(),
@@ -60,6 +61,10 @@ vi.mock('./web/routes/companionEvents', () => ({ pushCompanionEvent: vi.fn() }))
 vi.mock('./commands/counterScheduler', () => ({
   startCounterScheduler: vi.fn(),
   stopCounterScheduler: vi.fn(),
+}));
+vi.mock('./twitch/pricing/rewardPricingScheduler', () => ({
+  startRewardPricingScheduler: vi.fn(),
+  stopRewardPricingScheduler: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),

@@ -4,6 +4,7 @@ import { pickWeightedRandom } from '../../commands/soundSelector';
 import { createLogger } from '../../shared/logger';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 import { fillTemplate } from '../../shared/textTemplate';
+import { applyRedemptionPricing } from '../pricing/rewardPricingService';
 
 const log = createLogger('EventSubHandler');
 
@@ -230,11 +231,13 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
 /**
  * Handle a channel.channel_points_custom_reward_redemption.add EventSub notification.
  * Unconditionally forwards the redemption to the streamer's companion app (if any device
- * is connected), then separately looks up videos configured for the redeemed reward and
- * triggers an overlay event if found. The overlay push still no-ops when no videos are
- * configured for the reward or `_overlayRuntime` is absent. The companion push is isolated
- * in its own try/catch so a failure there (e.g. a DB error from `getStreamerById`) cannot
- * prevent the independent overlay-video logic below from running.
+ * is connected), applies dynamic pricing for the redeemed reward (a no-op if the reward
+ * doesn't have dynamic pricing enabled), then separately looks up videos configured for
+ * the redeemed reward and triggers an overlay event if found. The overlay push still
+ * no-ops when no videos are configured for the reward or `_overlayRuntime` is absent.
+ * The companion push and the pricing update are each isolated in their own try/catch so a
+ * failure in either (e.g. a DB error, or a failed Twitch price push) cannot prevent the
+ * independent overlay-video logic below from running.
  *
  * @param login - Broadcaster login name.
  * @param event - Redemption event payload including reward ID and user details.
@@ -262,6 +265,12 @@ export async function handleRedemption(
     }
   } catch (err) {
     log.error('Failed to push companion event for redemption:', err);
+  }
+
+  try {
+    await applyRedemptionPricing(streamerId, event.reward.id);
+  } catch (err) {
+    log.error('Failed to apply dynamic pricing for redemption:', err);
   }
 
   const videos = await getVideosForReward(event.reward.id, streamerId);
