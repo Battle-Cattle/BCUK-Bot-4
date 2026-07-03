@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { issueToken, getTokenStatus, revokeToken } from '../../db';
 import { csrfProtection } from '../csrf';
-import { renderError, filterQueryParam, renderView } from './shared';
+import { logAndRedirectError, renderError, filterQueryParam, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -38,8 +38,7 @@ router.post('/companion-key/request', csrfProtection, async (req, res) => {
   try {
     plain = await issueToken(req.session.user!.discordId);
   } catch (err) {
-    log.error('Companion key request error:', err);
-    res.redirect('/companion-key?error=request_failed');
+    logAndRedirectError({ res, log, logLabel: 'Companion key request error:', err, basePath: '/companion-key', errorCode: 'request_failed' });
     return;
   }
 
@@ -66,8 +65,7 @@ router.post('/companion-key/revoke', csrfProtection, async (req, res) => {
     await revokeToken(req.session.user!.discordId);
     res.redirect('/companion-key');
   } catch (err) {
-    log.error('Companion key revoke error:', err);
-    res.redirect('/companion-key?error=revoke_failed');
+    logAndRedirectError({ res, log, logLabel: 'Companion key revoke error:', err, basePath: '/companion-key', errorCode: 'revoke_failed' });
   }
 });
 

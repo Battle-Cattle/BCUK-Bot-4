@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { upsertReward, setRewardVideos, deleteReward } from '../../db';
-import { parsePositiveIntId } from './shared';
+import { logAndRedirectError, parsePositiveIntId } from './shared';
 import { requireStreamer, toStringArray, parseWeight } from './overlayAdminShared';
 
 const log = createLogger('OverlayAdminReward');
@@ -45,8 +45,7 @@ router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) =
 
     res.redirect('/overlay/settings?success=reward_saved');
   } catch (err) {
-    log.error('Overlay reward save error:', err);
-    res.redirect('/overlay/settings?error=save_failed');
+    logAndRedirectError({ res, log, logLabel: 'Overlay reward save error:', err, basePath: '/overlay/settings', errorCode: 'save_failed' });
   }
 });
 
@@ -70,7 +69,6 @@ router.post('/settings/rewards/:id/delete', requireAuth, csrfProtection, async (
     await deleteReward(rewardId, streamer.id);
     res.redirect('/overlay/settings?success=reward_deleted');
   } catch (err) {
-    log.error('Overlay reward delete error:', err);
-    res.redirect('/overlay/settings?error=delete_failed');
+    logAndRedirectError({ res, log, logLabel: 'Overlay reward delete error:', err, basePath: '/overlay/settings', errorCode: 'delete_failed' });
   }
 });
