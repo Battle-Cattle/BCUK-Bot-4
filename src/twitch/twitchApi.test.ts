@@ -8,7 +8,7 @@ vi.mock('../shared/config', () => ({
 
 import {
   getUsers, getStreams, getChannelInfo, getSharedChatSession, getAppToken,
-  updateRewardCost, TwitchRewardUnsupportedError,
+  updateRewardCost, TwitchRewardUnsupportedError, TwitchRewardAuthError,
 } from './twitchApi';
 
 const TOKEN_RESPONSE = { access_token: 'test-token', expires_in: 3600 };
@@ -187,5 +187,15 @@ describe('updateRewardCost', () => {
   it('does not throw TwitchRewardUnsupportedError for other non-OK statuses', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(400, {}));
     await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.not.toBeInstanceOf(TwitchRewardUnsupportedError);
+  });
+
+  it('throws TwitchRewardAuthError specifically on a 401 response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(401, {}));
+    await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.toBeInstanceOf(TwitchRewardAuthError);
+  });
+
+  it('does not throw TwitchRewardAuthError for other non-OK statuses', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(400, {}));
+    await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.not.toBeInstanceOf(TwitchRewardAuthError);
   });
 });

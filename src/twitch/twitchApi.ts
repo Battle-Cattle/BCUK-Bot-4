@@ -194,10 +194,24 @@ export class TwitchRewardUnsupportedError extends Error {
 }
 
 /**
+ * Thrown when Twitch returns 401 for a reward cost update — the broadcaster token is
+ * invalid, or (most commonly) lacks the `channel:manage:redemptions` scope. Unlike
+ * `TwitchRewardUnsupportedError`, this is not permanent for the reward: reconnecting the
+ * streamer's Twitch account (to grant the scope, or replace a revoked token) resolves it.
+ */
+export class TwitchRewardAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TwitchRewardAuthError';
+  }
+}
+
+/**
  * Updates a custom reward's cost on Twitch via Helix. Requires a broadcaster user token
- * (app tokens cannot manage custom rewards). Not wrapped in fetchHelixWithRetry — the
- * caller (dynamic pricing sync) already tolerates a failed push by retrying on the next
- * redemption/decay tick, so retrying here would just duplicate that behaviour.
+ * with the channel:manage:redemptions scope (app tokens cannot manage custom rewards).
+ * Not wrapped in fetchHelixWithRetry — the caller (dynamic pricing sync) already tolerates
+ * a failed push by retrying on the next redemption/decay tick, so retrying here would just
+ * duplicate that behaviour.
  *
  * @param broadcasterId - Twitch user ID of the reward's broadcaster.
  * @param rewardId - Twitch reward UUID to update.
@@ -205,6 +219,8 @@ export class TwitchRewardUnsupportedError extends Error {
  * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
  * @throws {TwitchRewardUnsupportedError} When Twitch returns 403 (reward created by a
  *   different client_id, or channel points aren't available for the broadcaster).
+ * @throws {TwitchRewardAuthError} When Twitch returns 401 (invalid token, or missing the
+ *   channel:manage:redemptions scope).
  */
 export async function updateRewardCost(broadcasterId: string, rewardId: string, cost: number, userToken: string): Promise<void> {
   const res = await twitchFetch(
@@ -216,6 +232,7 @@ export async function updateRewardCost(broadcasterId: string, rewardId: string, 
     },
   );
   if (res.status === 403) throw new TwitchRewardUnsupportedError(`[TwitchAPI] updateRewardCost: reward ${rewardId} cannot be managed by this app (403)`);
+  if (res.status === 401) throw new TwitchRewardAuthError(`[TwitchAPI] updateRewardCost: broadcaster token invalid or missing scope for reward ${rewardId} (401)`);
   if (!res.ok) throw new Error(`[TwitchAPI] updateRewardCost failed: ${res.status}`);
 }
 

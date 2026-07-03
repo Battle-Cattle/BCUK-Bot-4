@@ -12,7 +12,7 @@ import { TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, EVENTSUB_TOKEN_SECRET }
 const log = createLogger('Web');
 const router = Router();
 
-const TWITCH_OAUTH_SCOPE = 'moderator:read:followers channel:read:subscriptions channel:read:redemptions';
+const TWITCH_OAUTH_SCOPE = 'moderator:read:followers channel:read:subscriptions channel:read:redemptions channel:manage:redemptions';
 
 const KNOWN_ERRORS = new Set([
   'no_streamer_record',

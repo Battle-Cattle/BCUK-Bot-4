@@ -4,7 +4,7 @@ import {
   getGlobalPricingSettings, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
-import { updateRewardCost, TwitchRewardUnsupportedError } from '../twitchApi';
+import { updateRewardCost, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
 import { computePrice, decayDemand, applyRedemption } from './rewardPricingMath';
 import { createLogger } from '../../shared/logger';
 
@@ -28,7 +28,11 @@ function queueKey(streamerId: number, twitchRewardId: string): string {
  * demand is still persisted so the price is simply retried on the next redemption/decay tick.
  * A 403 from Twitch (the reward was created outside this app and can never be managed by it)
  * is treated as permanent instead: the row is disabled via `markPricingUnsupported` and demand
- * is intentionally not persisted, since the row won't be read again until re-enabled.
+ * is intentionally not persisted, since the row won't be read again until re-enabled. A 401
+ * (invalid token, or missing the channel:manage:redemptions scope) is logged with an actionable
+ * message but otherwise treated like any other transient push failure — the token is shared
+ * with other bot features, so it's never cleared from here; reconnecting Twitch in User
+ * Settings (to grant the scope, or replace a revoked token) is what actually resolves it.
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
@@ -69,7 +73,11 @@ async function syncRewardPrice(streamerId: number, twitchRewardId: string, apply
         await markPricingUnsupported(streamerId, twitchRewardId);
         return; // markPricingUnsupported already disabled the row; no need to also record demand.
       }
-      log.error(`Failed to push new price for reward ${twitchRewardId}:`, err);
+      if (err instanceof TwitchRewardAuthError) {
+        log.warn(`Broadcaster token for streamer ${streamerId} is invalid or missing the channel:manage:redemptions scope — reconnect Twitch in User Settings to fix reward ${twitchRewardId}:`, err);
+      } else {
+        log.error(`Failed to push new price for reward ${twitchRewardId}:`, err);
+      }
     }
   }
 
