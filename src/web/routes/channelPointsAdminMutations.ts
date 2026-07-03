@@ -1,8 +1,8 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { upsertPricingConfig, saveGlobalPricingSettings } from '../../db';
+import { upsertPricingConfig, saveGlobalPricingSettings, DbStreamerEventSub } from '../../db';
 import { createCustomReward, updateCustomReward, CustomRewardInput } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { logAndRedirectError, trimField } from './shared';
@@ -26,6 +26,33 @@ function parseRewardIdParam(value: string | string[]): string | null {
 }
 
 /**
+ * Shared body for the two reward-scoped "delete" routes: resolves the requester's streamer
+ * record and the `:twitchRewardId` route param, runs `action`, then redirects to
+ * `/channel-points` with `success=<successCode>` or (on a thrown error) `error=<errorCode>`
+ * via `logAndRedirectError`.
+ */
+async function handleRewardDeleteAction(
+  req: Request,
+  res: Response,
+  action: (streamer: DbStreamerEventSub, twitchRewardId: string) => Promise<void>,
+  opts: { successCode: string; errorLogLabel: string; errorCode: string },
+): Promise<void> {
+  try {
+    const streamer = await requireStreamer(req, res);
+    if (!streamer) return;
+
+    const twitchRewardId = parseRewardIdParam(req.params.twitchRewardId);
+    if (twitchRewardId === null) return res.redirect('/channel-points?error=invalid_reward_id');
+
+    await action(streamer, twitchRewardId);
+
+    res.redirect(`/channel-points?success=${opts.successCode}`);
+  } catch (err) {
+    logAndRedirectError({ res, log, logLabel: opts.errorLogLabel, err, basePath: '/channel-points', errorCode: opts.errorCode });
+  }
+}
+
+/**
  * Parses and validates the full set of Twitch custom reward fields shared by the create and
  * edit forms. Returns `null` if any field is invalid — including cross-field rules Twitch
  * itself enforces (a prompt is required when user input is required; a limit's numeric value
@@ -33,38 +60,33 @@ function parseRewardIdParam(value: string | string[]): string | null {
  */
 function parseRewardFields(body: Record<string, string | string[] | undefined>): CustomRewardInput | null {
   const title = trimField(body.title);
-  if (title === '' || title.length > TITLE_MAX_LENGTH) return null;
-
   const cost = parsePositiveIntField(body.cost);
-  if (cost === null) return null;
-
   const prompt = trimField(body.prompt);
-  if (prompt.length > PROMPT_MAX_LENGTH) return null;
-
   const isUserInputRequired = parseCheckboxField(body.is_user_input_required);
-  if (isUserInputRequired && prompt === '') return null;
-
-  const backgroundColor = parseHexColorField(body.background_color);
-  if (backgroundColor === null) return null; // null = malformed; undefined = not provided (fine)
-
+  const backgroundColor = parseHexColorField(body.background_color); // null = malformed; undefined = not provided (fine)
   const isMaxPerStreamEnabled = parseCheckboxField(body.is_max_per_stream_enabled);
   const maxPerStream = parsePositiveIntField(body.max_per_stream);
-  if (isMaxPerStreamEnabled && maxPerStream === null) return null;
-
   const isMaxPerUserPerStreamEnabled = parseCheckboxField(body.is_max_per_user_per_stream_enabled);
   const maxPerUserPerStream = parsePositiveIntField(body.max_per_user_per_stream);
-  if (isMaxPerUserPerStreamEnabled && maxPerUserPerStream === null) return null;
-
   const isGlobalCooldownEnabled = parseCheckboxField(body.is_global_cooldown_enabled);
   const globalCooldownSeconds = parsePositiveIntField(body.global_cooldown_seconds);
-  if (isGlobalCooldownEnabled && globalCooldownSeconds === null) return null;
+
+  const isValid = title !== '' && title.length <= TITLE_MAX_LENGTH
+    && cost !== null
+    && prompt.length <= PROMPT_MAX_LENGTH
+    && !(isUserInputRequired && prompt === '')
+    && backgroundColor !== null
+    && !(isMaxPerStreamEnabled && maxPerStream === null)
+    && !(isMaxPerUserPerStreamEnabled && maxPerUserPerStream === null)
+    && !(isGlobalCooldownEnabled && globalCooldownSeconds === null);
+  if (!isValid) return null;
 
   return {
     title,
-    cost,
+    cost: cost!,
     prompt: prompt || undefined,
     is_enabled: parseCheckboxField(body.is_enabled),
-    background_color: backgroundColor,
+    background_color: backgroundColor ?? undefined,
     is_user_input_required: isUserInputRequired,
     is_max_per_stream_enabled: isMaxPerStreamEnabled,
     max_per_stream: isMaxPerStreamEnabled ? maxPerStream! : undefined,
@@ -147,21 +169,12 @@ router.post('/rewards/:twitchRewardId', requireAuth, csrfProtection, async (req,
  *   or to `/channel-points?error=<code>` if the requester isn't a streamer (`not_a_streamer`),
  *   the reward ID isn't a valid UUID (`invalid_reward_id`), or the delete fails (`delete_failed`).
  */
-router.post('/rewards/:twitchRewardId/delete', requireAuth, csrfProtection, async (req, res) => {
-  try {
-    const streamer = await requireStreamer(req, res);
-    if (!streamer) return;
-
-    const twitchRewardId = parseRewardIdParam(req.params.twitchRewardId);
-    if (twitchRewardId === null) return res.redirect('/channel-points?error=invalid_reward_id');
-
-    await deleteRewardAndPricing(streamer.id, twitchRewardId);
-
-    res.redirect('/channel-points?success=reward_deleted');
-  } catch (err) {
-    logAndRedirectError({ res, log, logLabel: 'Reward delete error:', err, basePath: '/channel-points', errorCode: 'delete_failed' });
-  }
-});
+router.post('/rewards/:twitchRewardId/delete', requireAuth, csrfProtection, (req, res) =>
+  handleRewardDeleteAction(
+    req, res,
+    (streamer, twitchRewardId) => deleteRewardAndPricing(streamer.id, twitchRewardId),
+    { successCode: 'reward_deleted', errorLogLabel: 'Reward delete error:', errorCode: 'delete_failed' },
+  ));
 
 /**
  * POST /channel-points/rewards/:twitchRewardId/pricing — creates or updates a reward's dynamic
@@ -219,21 +232,12 @@ router.post('/rewards/:twitchRewardId/pricing', requireAuth, csrfProtection, asy
  *   or to `/channel-points?error=<code>` if the requester isn't a streamer (`not_a_streamer`),
  *   the reward ID isn't a valid UUID (`invalid_reward_id`), or the delete fails (`delete_failed`).
  */
-router.post('/rewards/:twitchRewardId/pricing/delete', requireAuth, csrfProtection, async (req, res) => {
-  try {
-    const streamer = await requireStreamer(req, res);
-    if (!streamer) return;
-
-    const twitchRewardId = parseRewardIdParam(req.params.twitchRewardId);
-    if (twitchRewardId === null) return res.redirect('/channel-points?error=invalid_reward_id');
-
-    await resetAndDeletePricing(streamer.id, twitchRewardId);
-
-    res.redirect('/channel-points?success=pricing_deleted');
-  } catch (err) {
-    logAndRedirectError({ res, log, logLabel: 'Pricing config delete error:', err, basePath: '/channel-points', errorCode: 'delete_failed' });
-  }
-});
+router.post('/rewards/:twitchRewardId/pricing/delete', requireAuth, csrfProtection, (req, res) =>
+  handleRewardDeleteAction(
+    req, res,
+    (streamer, twitchRewardId) => resetAndDeletePricing(streamer.id, twitchRewardId),
+    { successCode: 'pricing_deleted', errorLogLabel: 'Pricing config delete error:', errorCode: 'delete_failed' },
+  ));
 
 /**
  * POST /channel-points/settings/global — updates the bot-wide decay/increment settings shared by
