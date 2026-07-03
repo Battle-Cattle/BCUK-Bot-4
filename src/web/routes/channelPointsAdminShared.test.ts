@@ -5,7 +5,8 @@ vi.mock('../../db', () => ({ getStreamerByDiscordId: vi.fn() }));
 import { getStreamerByDiscordId } from '../../db';
 import {
   requireStreamer, parsePositiveIntField, parseNonNegativeNumberField, parsePositiveNumberField,
-} from './pricingAdminShared';
+  parseCheckboxField, parseHexColorField,
+} from './channelPointsAdminShared';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -27,12 +28,12 @@ describe('requireStreamer', () => {
     expect(res.redirect).not.toHaveBeenCalled();
   });
 
-  it('redirects to /pricing?error=not_a_streamer and returns null when not found', async () => {
+  it('redirects to /channel-points?error=not_a_streamer and returns null when not found', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
     const { req, res } = makeReqRes();
     const result = await requireStreamer(req, res);
     expect(result).toBeNull();
-    expect(res.redirect).toHaveBeenCalledWith('/pricing?error=not_a_streamer');
+    expect(res.redirect).toHaveBeenCalledWith('/channel-points?error=not_a_streamer');
   });
 });
 
@@ -123,5 +124,53 @@ describe('parsePositiveNumberField', () => {
 
   it('rejects a whitespace-only string instead of silently coercing to 0', () => {
     expect(parsePositiveNumberField('   ')).toBeNull();
+  });
+});
+
+describe('parseCheckboxField', () => {
+  it('returns true when the value is "on"', () => {
+    expect(parseCheckboxField('on')).toBe(true);
+  });
+
+  it('returns false when undefined (checkbox unchecked)', () => {
+    expect(parseCheckboxField(undefined)).toBe(false);
+  });
+
+  it('returns false for an array (repeated field)', () => {
+    expect(parseCheckboxField(['on', 'on'])).toBe(false);
+  });
+
+  it('returns false for any other string value', () => {
+    expect(parseCheckboxField('off')).toBe(false);
+  });
+});
+
+describe('parseHexColorField', () => {
+  it('accepts a valid 6-digit hex color', () => {
+    expect(parseHexColorField('#00E5CB')).toBe('#00E5CB');
+  });
+
+  it('trims surrounding whitespace before validating', () => {
+    expect(parseHexColorField('  #00e5cb  ')).toBe('#00e5cb');
+  });
+
+  it('returns undefined for a blank value (no preference)', () => {
+    expect(parseHexColorField('')).toBeUndefined();
+  });
+
+  it('returns undefined for undefined', () => {
+    expect(parseHexColorField(undefined)).toBeUndefined();
+  });
+
+  it('returns null for an array (repeated field)', () => {
+    expect(parseHexColorField(['#000000', '#111111'])).toBeNull();
+  });
+
+  it('returns null for a malformed color', () => {
+    expect(parseHexColorField('not-a-color')).toBeNull();
+  });
+
+  it('returns null for a hex string missing the leading #', () => {
+    expect(parseHexColorField('00E5CB')).toBeNull();
   });
 });

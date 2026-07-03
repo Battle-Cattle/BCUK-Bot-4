@@ -3,17 +3,39 @@ import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 
 /**
- * Loads the requesting user's streamer record, redirecting to `/pricing?error=not_a_streamer`
- * if they aren't one. Kept separate from overlayAdminShared's requireStreamer (which redirects
- * to `/overlay/settings`), so the two admin pages stay fully decoupled.
+ * Loads the requesting user's streamer record, redirecting to
+ * `/channel-points?error=not_a_streamer` if they aren't one. Kept separate from
+ * overlayAdminShared's requireStreamer (which redirects to `/overlay/settings`), so the two
+ * admin pages stay fully decoupled.
  */
 export async function requireStreamer(req: Request, res: Response): Promise<DbStreamerEventSub | null> {
   const streamer = await getStreamerByDiscordId(req.session.user!.discordId);
   if (!streamer) {
-    res.redirect('/pricing?error=not_a_streamer');
+    res.redirect('/channel-points?error=not_a_streamer');
     return null;
   }
   return streamer;
+}
+
+/**
+ * Parses an HTML checkbox field: present and `'on'` means checked. Absent (checkbox
+ * unchecked) or an array (repeated field) is treated as unchecked.
+ */
+export function parseCheckboxField(value: string | string[] | undefined): boolean {
+  return !Array.isArray(value) && value === 'on';
+}
+
+/**
+ * Parses an optional `#rrggbb` hex color form field. Blank/missing input is valid and means
+ * "no preference" (`undefined`, so the field is omitted from the Twitch API call). An array
+ * (repeated field) or a non-blank value that doesn't match the hex format is a validation
+ * error (`null`) — distinct from "not provided" so the caller can reject the whole form.
+ */
+export function parseHexColorField(value: string | string[] | undefined): string | null | undefined {
+  if (Array.isArray(value)) return null;
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (trimmed === '') return undefined;
+  return /^#[0-9A-Fa-f]{6}$/.test(trimmed) ? trimmed : null;
 }
 
 /**
