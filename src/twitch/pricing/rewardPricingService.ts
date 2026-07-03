@@ -4,7 +4,7 @@ import {
   getGlobalPricingSettings, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
-import { updateRewardCost, TwitchRewardUnsupportedError } from '../twitchApi';
+import { updateRewardCost, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
 import { computePrice, decayDemand, applyRedemption } from './rewardPricingMath';
 import { createLogger } from '../../shared/logger';
 
@@ -19,16 +19,66 @@ function queueKey(streamerId: number, twitchRewardId: string): string {
   return `${streamerId}:${twitchRewardId}`;
 }
 
+/** Outcome of {@link pushRewardCostUpdate}. */
+interface PushCostResult {
+  /** The cost to persist as `last_pushed_cost` — the new cost on success, otherwise unchanged. */
+  lastPushedCost: number | null;
+  /** True when the reward was found to be permanently unsupported (403) — `markPricingUnsupported` has already run. */
+  unsupported: boolean;
+}
+
+/**
+ * Resolves the streamer's broadcaster token and pushes a recomputed cost to Twitch for one
+ * reward. A 403 (the reward was created outside this app and can never be managed by it) is
+ * treated as permanent: the row is disabled via `markPricingUnsupported`. A 401 (invalid
+ * token, or missing the channel:manage:redemptions scope) is logged with an actionable message
+ * but otherwise treated like any other transient failure — the token is shared with other bot
+ * features, so it's never cleared from here; reconnecting Twitch in User Settings (to grant
+ * the scope, or replace a revoked token) is what actually resolves it. Any other failure is
+ * also logged and swallowed. In every failure case, `previousLastPushedCost` is returned
+ * unchanged so the price is simply retried on the next redemption/decay tick.
+ *
+ * @param streamerId - DB row ID of the owning streamer.
+ * @param twitchRewardId - Twitch reward UUID.
+ * @param newCost - The recomputed cost to push.
+ * @param previousLastPushedCost - The reward's current `last_pushed_cost`, returned unchanged on failure.
+ */
+async function pushRewardCostUpdate(
+  streamerId: number, twitchRewardId: string, newCost: number, previousLastPushedCost: number | null,
+): Promise<PushCostResult> {
+  try {
+    const streamer = await getStreamerById(streamerId);
+    const token = streamer ? await getValidToken(streamer) : null;
+    if (!streamer?.twitch_user_id || !token) {
+      log.warn(`No valid broadcaster token for streamer ${streamerId} — skipping Twitch price push for reward ${twitchRewardId}`);
+      return { lastPushedCost: previousLastPushedCost, unsupported: false };
+    }
+    await updateRewardCost(streamer.twitch_user_id, twitchRewardId, newCost, token);
+    return { lastPushedCost: newCost, unsupported: false };
+  } catch (err) {
+    if (err instanceof TwitchRewardUnsupportedError) {
+      log.warn(`Reward ${twitchRewardId} (streamer ${streamerId}) can't be managed by this app — disabling dynamic pricing:`, err);
+      await markPricingUnsupported(streamerId, twitchRewardId);
+      return { lastPushedCost: previousLastPushedCost, unsupported: true };
+    }
+    if (err instanceof TwitchRewardAuthError) {
+      log.warn(`Broadcaster token for streamer ${streamerId} is invalid or missing the channel:manage:redemptions scope — reconnect Twitch in User Settings to fix reward ${twitchRewardId}:`, err);
+    } else {
+      log.error(`Failed to push new price for reward ${twitchRewardId}:`, err);
+    }
+    return { lastPushedCost: previousLastPushedCost, unsupported: false };
+  }
+}
+
 /**
  * Recomputes demand and price for one reward and persists the result, pushing the new
  * cost to Twitch only when it differs from the last pushed cost. No-ops entirely (no DB
  * write, no Twitch call) when the reward has no pricing config or dynamic pricing is
- * disabled for it — this is where "optional per reward" is enforced. A transient failure
- * resolving the streamer's token or pushing to Twitch is caught and logged; the recalculated
- * demand is still persisted so the price is simply retried on the next redemption/decay tick.
- * A 403 from Twitch (the reward was created outside this app and can never be managed by it)
- * is treated as permanent instead: the row is disabled via `markPricingUnsupported` and demand
- * is intentionally not persisted, since the row won't be read again until re-enabled.
+ * disabled for it — this is where "optional per reward" is enforced. Demand is always
+ * persisted, even when the Twitch push fails, so the price is simply retried on the next
+ * redemption/decay tick — except when the reward turns out to be permanently unsupported
+ * (see {@link pushRewardCostUpdate}), in which case demand is intentionally not persisted
+ * since the row won't be read again until re-enabled.
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
@@ -54,23 +104,9 @@ async function syncRewardPrice(streamerId: number, twitchRewardId: string, apply
 
   let lastPushedCost = row.last_pushed_cost;
   if (newCost !== row.last_pushed_cost) {
-    try {
-      const streamer = await getStreamerById(streamerId);
-      const token = streamer ? await getValidToken(streamer) : null;
-      if (streamer?.twitch_user_id && token) {
-        await updateRewardCost(streamer.twitch_user_id, twitchRewardId, newCost, token);
-        lastPushedCost = newCost;
-      } else {
-        log.warn(`No valid broadcaster token for streamer ${streamerId} — skipping Twitch price push for reward ${twitchRewardId}`);
-      }
-    } catch (err) {
-      if (err instanceof TwitchRewardUnsupportedError) {
-        log.warn(`Reward ${twitchRewardId} (streamer ${streamerId}) can't be managed by this app — disabling dynamic pricing:`, err);
-        await markPricingUnsupported(streamerId, twitchRewardId);
-        return; // markPricingUnsupported already disabled the row; no need to also record demand.
-      }
-      log.error(`Failed to push new price for reward ${twitchRewardId}:`, err);
-    }
+    const result = await pushRewardCostUpdate(streamerId, twitchRewardId, newCost, row.last_pushed_cost);
+    if (result.unsupported) return; // markPricingUnsupported already disabled the row; no need to also record demand.
+    lastPushedCost = result.lastPushedCost;
   }
 
   await recordPricingUpdate(streamerId, twitchRewardId, newDemand, now, lastPushedCost);

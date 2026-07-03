@@ -14,7 +14,8 @@ vi.mock('../../db', () => ({
 vi.mock('../eventsub/twitchApiEventSub', () => ({ getValidToken: vi.fn() }));
 vi.mock('../twitchApi', () => {
   class TwitchRewardUnsupportedError extends Error {}
-  return { updateRewardCost: vi.fn(), TwitchRewardUnsupportedError };
+  class TwitchRewardAuthError extends Error {}
+  return { updateRewardCost: vi.fn(), TwitchRewardUnsupportedError, TwitchRewardAuthError };
 });
 
 import {
@@ -22,7 +23,7 @@ import {
   getGlobalPricingSettings, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
-import { updateRewardCost, TwitchRewardUnsupportedError } from '../twitchApi';
+import { updateRewardCost, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
 import { applyRedemptionPricing, applyDecayTick, resetAndDeletePricing } from './rewardPricingService';
 
 const settings = { decay_half_life_periods: 3, redemption_increment: 0.1 };
@@ -52,6 +53,10 @@ beforeEach(() => {
   vi.mocked(getStreamerById).mockResolvedValue(streamer);
   vi.mocked(getValidToken).mockResolvedValue('user-token');
   vi.mocked(deletePricingConfig).mockResolvedValue(undefined);
+  // clearAllMocks() resets call history but not mockResolvedValue/mockRejectedValue
+  // implementations, so reset this explicitly — otherwise a test that rejects
+  // updateRewardCost without ...Once leaks that rejection into later tests.
+  vi.mocked(updateRewardCost).mockResolvedValue(undefined);
 });
 
 describe('applyRedemptionPricing', () => {
@@ -78,10 +83,18 @@ describe('applyRedemptionPricing', () => {
 
   it('marks the reward unsupported and disables it on a 403, without recording demand', async () => {
     vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
-    vi.mocked(updateRewardCost).mockRejectedValue(new TwitchRewardUnsupportedError('403'));
+    vi.mocked(updateRewardCost).mockRejectedValueOnce(new TwitchRewardUnsupportedError('403'));
     await applyRedemptionPricing(1, 'rwd1');
     expect(markPricingUnsupported).toHaveBeenCalledWith(1, 'rwd1');
     expect(recordPricingUpdate).not.toHaveBeenCalled();
+  });
+
+  it('on a 401, does not mark the reward unsupported but still persists the recalculated demand', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
+    vi.mocked(updateRewardCost).mockRejectedValueOnce(new TwitchRewardAuthError('401'));
+    await applyRedemptionPricing(1, 'rwd1');
+    expect(markPricingUnsupported).not.toHaveBeenCalled();
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), null);
   });
 
   it('skips the Twitch call when the recomputed price equals last_pushed_cost', async () => {
@@ -96,7 +109,7 @@ describe('applyRedemptionPricing', () => {
 
   it('swallows a Twitch push failure but still persists the recalculated demand', async () => {
     vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
-    vi.mocked(updateRewardCost).mockRejectedValue(new Error('Twitch down'));
+    vi.mocked(updateRewardCost).mockRejectedValueOnce(new Error('Twitch down'));
     await expect(applyRedemptionPricing(1, 'rwd1')).resolves.toBeUndefined();
     expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), null);
   });
