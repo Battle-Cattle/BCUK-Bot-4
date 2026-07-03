@@ -5,8 +5,11 @@ vi.mock('../../db', () => ({ getStreamerByDiscordId: vi.fn() }));
 import { getStreamerByDiscordId } from '../../db';
 import {
   requireStreamer, parsePositiveIntField, parseNonNegativeNumberField, parsePositiveNumberField,
-  parseCheckboxField, parseHexColorField,
+  parseCheckboxField, parseHexColorField, parseRewardIdParam, parseRewardFields,
 } from './channelPointsAdminShared';
+
+const VALID_REWARD_ID = '12345678-1234-1234-8234-123456789abc';
+const VALID_REWARD_FORM = { title: 'Cool Reward', cost: '200', prompt: '', background_color: '' };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -172,5 +175,95 @@ describe('parseHexColorField', () => {
 
   it('returns null for a hex string missing the leading #', () => {
     expect(parseHexColorField('00E5CB')).toBeNull();
+  });
+});
+
+describe('parseRewardIdParam', () => {
+  it('accepts a valid UUID', () => {
+    expect(parseRewardIdParam(VALID_REWARD_ID)).toBe(VALID_REWARD_ID);
+  });
+
+  it('rejects an array (repeated param)', () => {
+    expect(parseRewardIdParam([VALID_REWARD_ID, VALID_REWARD_ID])).toBeNull();
+  });
+
+  it('rejects a malformed string', () => {
+    expect(parseRewardIdParam('not-a-uuid')).toBeNull();
+  });
+});
+
+describe('parseRewardFields', () => {
+  it('accepts a minimal valid form and defaults optional fields', () => {
+    const result = parseRewardFields(VALID_REWARD_FORM);
+    expect(result).toEqual({
+      title: 'Cool Reward',
+      cost: 200,
+      prompt: undefined,
+      is_enabled: false,
+      background_color: undefined,
+      is_user_input_required: false,
+      is_max_per_stream_enabled: false,
+      max_per_stream: undefined,
+      is_max_per_user_per_stream_enabled: false,
+      max_per_user_per_stream: undefined,
+      is_global_cooldown_enabled: false,
+      global_cooldown_seconds: undefined,
+      should_redemptions_skip_request_queue: false,
+    });
+  });
+
+  it('rejects a blank title', () => {
+    expect(parseRewardFields({ ...VALID_REWARD_FORM, title: '  ' })).toBeNull();
+  });
+
+  it('rejects a title over 45 characters', () => {
+    expect(parseRewardFields({ ...VALID_REWARD_FORM, title: 'x'.repeat(46) })).toBeNull();
+  });
+
+  it('rejects an invalid cost', () => {
+    expect(parseRewardFields({ ...VALID_REWARD_FORM, cost: '0' })).toBeNull();
+  });
+
+  it('rejects a prompt over 200 characters', () => {
+    expect(parseRewardFields({ ...VALID_REWARD_FORM, prompt: 'x'.repeat(201) })).toBeNull();
+  });
+
+  it('rejects user-input-required with a blank prompt', () => {
+    expect(parseRewardFields({ ...VALID_REWARD_FORM, is_user_input_required: 'on', prompt: '' })).toBeNull();
+  });
+
+  it('accepts user-input-required with a non-blank prompt', () => {
+    const result = parseRewardFields({ ...VALID_REWARD_FORM, is_user_input_required: 'on', prompt: 'Say something' });
+    expect(result).not.toBeNull();
+    expect(result?.is_user_input_required).toBe(true);
+    expect(result?.prompt).toBe('Say something');
+  });
+
+  it('rejects a malformed background color', () => {
+    expect(parseRewardFields({ ...VALID_REWARD_FORM, background_color: 'not-a-color' })).toBeNull();
+  });
+
+  it('rejects a per-stream limit enabled without a value', () => {
+    expect(parseRewardFields({ ...VALID_REWARD_FORM, is_max_per_stream_enabled: 'on', max_per_stream: '' })).toBeNull();
+  });
+
+  it('accepts a per-stream limit enabled with a value', () => {
+    const result = parseRewardFields({ ...VALID_REWARD_FORM, is_max_per_stream_enabled: 'on', max_per_stream: '3' });
+    expect(result?.is_max_per_stream_enabled).toBe(true);
+    expect(result?.max_per_stream).toBe(3);
+  });
+
+  it('rejects a per-user-per-stream limit enabled without a value', () => {
+    expect(parseRewardFields({ ...VALID_REWARD_FORM, is_max_per_user_per_stream_enabled: 'on', max_per_user_per_stream: '' })).toBeNull();
+  });
+
+  it('rejects a global cooldown enabled without a value', () => {
+    expect(parseRewardFields({ ...VALID_REWARD_FORM, is_global_cooldown_enabled: 'on', global_cooldown_seconds: '' })).toBeNull();
+  });
+
+  it('accepts a global cooldown enabled with a value', () => {
+    const result = parseRewardFields({ ...VALID_REWARD_FORM, is_global_cooldown_enabled: 'on', global_cooldown_seconds: '60' });
+    expect(result?.is_global_cooldown_enabled).toBe(true);
+    expect(result?.global_cooldown_seconds).toBe(60);
   });
 });

@@ -1,6 +1,8 @@
 import type { Request, Response } from 'express';
 import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
+import type { CustomRewardInput } from '../../twitch/twitchApi';
+import { trimField } from './shared';
 
 /**
  * Loads the requesting user's streamer record, redirecting to
@@ -69,4 +71,67 @@ export function parsePositiveNumberField(value: string | string[] | undefined): 
   if (typeof value !== 'string' || value.trim() === '') return null;
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+const REWARD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const TITLE_MAX_LENGTH = 45; // Twitch's own limit for a custom reward's title
+const PROMPT_MAX_LENGTH = 200; // Twitch's own limit for a custom reward's prompt
+
+/** Extracts and validates a `:twitchRewardId` route param, or null if malformed/repeated. */
+export function parseRewardIdParam(value: string | string[]): string | null {
+  if (Array.isArray(value)) return null;
+  return REWARD_ID_RE.test(value) ? value : null;
+}
+
+/** True unless `condition` holds without `requirement` also holding — e.g. a limit's checkbox is checked but its numeric field is missing. */
+function impliesTruth(condition: boolean, requirement: boolean): boolean {
+  return !condition || requirement;
+}
+
+/**
+ * Parses and validates the full set of Twitch custom reward fields shared by the create and
+ * edit forms. Returns `null` if any field is invalid — including cross-field rules Twitch
+ * itself enforces (a prompt is required when user input is required; a limit's numeric value
+ * is required when that limit's "enabled" checkbox is checked).
+ */
+export function parseRewardFields(body: Record<string, string | string[] | undefined>): CustomRewardInput | null {
+  const title = trimField(body.title);
+  const cost = parsePositiveIntField(body.cost);
+  const prompt = trimField(body.prompt);
+  const isUserInputRequired = parseCheckboxField(body.is_user_input_required);
+  const backgroundColor = parseHexColorField(body.background_color); // null = malformed; undefined = not provided (fine)
+  const isMaxPerStreamEnabled = parseCheckboxField(body.is_max_per_stream_enabled);
+  const maxPerStream = parsePositiveIntField(body.max_per_stream);
+  const isMaxPerUserPerStreamEnabled = parseCheckboxField(body.is_max_per_user_per_stream_enabled);
+  const maxPerUserPerStream = parsePositiveIntField(body.max_per_user_per_stream);
+  const isGlobalCooldownEnabled = parseCheckboxField(body.is_global_cooldown_enabled);
+  const globalCooldownSeconds = parsePositiveIntField(body.global_cooldown_seconds);
+
+  const isValid = [
+    title !== '' && title.length <= TITLE_MAX_LENGTH,
+    cost !== null,
+    prompt.length <= PROMPT_MAX_LENGTH,
+    backgroundColor !== null,
+    impliesTruth(isUserInputRequired, prompt !== ''),
+    impliesTruth(isMaxPerStreamEnabled, maxPerStream !== null),
+    impliesTruth(isMaxPerUserPerStreamEnabled, maxPerUserPerStream !== null),
+    impliesTruth(isGlobalCooldownEnabled, globalCooldownSeconds !== null),
+  ].every(Boolean);
+  if (!isValid) return null;
+
+  return {
+    title,
+    cost: cost!,
+    prompt: prompt || undefined,
+    is_enabled: parseCheckboxField(body.is_enabled),
+    background_color: backgroundColor ?? undefined,
+    is_user_input_required: isUserInputRequired,
+    is_max_per_stream_enabled: isMaxPerStreamEnabled,
+    max_per_stream: isMaxPerStreamEnabled ? maxPerStream! : undefined,
+    is_max_per_user_per_stream_enabled: isMaxPerUserPerStreamEnabled,
+    max_per_user_per_stream: isMaxPerUserPerStreamEnabled ? maxPerUserPerStream! : undefined,
+    is_global_cooldown_enabled: isGlobalCooldownEnabled,
+    global_cooldown_seconds: isGlobalCooldownEnabled ? globalCooldownSeconds! : undefined,
+    should_redemptions_skip_request_queue: parseCheckboxField(body.should_redemptions_skip_request_queue),
+  };
 }

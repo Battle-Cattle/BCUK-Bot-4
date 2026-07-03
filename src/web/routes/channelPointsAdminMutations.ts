@@ -3,27 +3,17 @@ import { Router, Request, Response } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { upsertPricingConfig, saveGlobalPricingSettings, DbStreamerEventSub } from '../../db';
-import { createCustomReward, updateCustomReward, CustomRewardInput } from '../../twitch/twitchApi';
+import { createCustomReward, updateCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { logAndRedirectError, trimField } from './shared';
+import { logAndRedirectError } from './shared';
 import {
   requireStreamer, parsePositiveIntField, parseNonNegativeNumberField, parsePositiveNumberField,
-  parseCheckboxField, parseHexColorField,
+  parseCheckboxField, parseRewardIdParam, parseRewardFields,
 } from './channelPointsAdminShared';
 import { applyDecayTick, resetAndDeletePricing, deleteRewardAndPricing } from '../../twitch/pricing/rewardPricingService';
 
 const log = createLogger('ChannelPointsAdminMutations');
 export const router = Router();
-
-const REWARD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const TITLE_MAX_LENGTH = 45; // Twitch's own limit for a custom reward's title
-const PROMPT_MAX_LENGTH = 200; // Twitch's own limit for a custom reward's prompt
-
-/** Extracts and validates the `:twitchRewardId` route param, or null if malformed/repeated. */
-function parseRewardIdParam(value: string | string[]): string | null {
-  if (Array.isArray(value)) return null;
-  return REWARD_ID_RE.test(value) ? value : null;
-}
 
 /**
  * Shared body for the two reward-scoped "delete" routes: resolves the requester's streamer
@@ -50,57 +40,6 @@ async function handleRewardDeleteAction(
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: opts.errorLogLabel, err, basePath: '/channel-points', errorCode: opts.errorCode });
   }
-}
-
-/** True unless `condition` holds without `requirement` also holding — e.g. a limit's checkbox is checked but its numeric field is missing. */
-function impliesTruth(condition: boolean, requirement: boolean): boolean {
-  return !condition || requirement;
-}
-
-/**
- * Parses and validates the full set of Twitch custom reward fields shared by the create and
- * edit forms. Returns `null` if any field is invalid — including cross-field rules Twitch
- * itself enforces (a prompt is required when user input is required; a limit's numeric value
- * is required when that limit's "enabled" checkbox is checked).
- */
-function parseRewardFields(body: Record<string, string | string[] | undefined>): CustomRewardInput | null {
-  const title = trimField(body.title);
-  const cost = parsePositiveIntField(body.cost);
-  const prompt = trimField(body.prompt);
-  const isUserInputRequired = parseCheckboxField(body.is_user_input_required);
-  const backgroundColor = parseHexColorField(body.background_color); // null = malformed; undefined = not provided (fine)
-  const isMaxPerStreamEnabled = parseCheckboxField(body.is_max_per_stream_enabled);
-  const maxPerStream = parsePositiveIntField(body.max_per_stream);
-  const isMaxPerUserPerStreamEnabled = parseCheckboxField(body.is_max_per_user_per_stream_enabled);
-  const maxPerUserPerStream = parsePositiveIntField(body.max_per_user_per_stream);
-  const isGlobalCooldownEnabled = parseCheckboxField(body.is_global_cooldown_enabled);
-  const globalCooldownSeconds = parsePositiveIntField(body.global_cooldown_seconds);
-
-  const isValid = title !== '' && title.length <= TITLE_MAX_LENGTH
-    && cost !== null
-    && prompt.length <= PROMPT_MAX_LENGTH
-    && backgroundColor !== null
-    && impliesTruth(isUserInputRequired, prompt !== '')
-    && impliesTruth(isMaxPerStreamEnabled, maxPerStream !== null)
-    && impliesTruth(isMaxPerUserPerStreamEnabled, maxPerUserPerStream !== null)
-    && impliesTruth(isGlobalCooldownEnabled, globalCooldownSeconds !== null);
-  if (!isValid) return null;
-
-  return {
-    title,
-    cost: cost!,
-    prompt: prompt || undefined,
-    is_enabled: parseCheckboxField(body.is_enabled),
-    background_color: backgroundColor ?? undefined,
-    is_user_input_required: isUserInputRequired,
-    is_max_per_stream_enabled: isMaxPerStreamEnabled,
-    max_per_stream: isMaxPerStreamEnabled ? maxPerStream! : undefined,
-    is_max_per_user_per_stream_enabled: isMaxPerUserPerStreamEnabled,
-    max_per_user_per_stream: isMaxPerUserPerStreamEnabled ? maxPerUserPerStream! : undefined,
-    is_global_cooldown_enabled: isGlobalCooldownEnabled,
-    global_cooldown_seconds: isGlobalCooldownEnabled ? globalCooldownSeconds! : undefined,
-    should_redemptions_skip_request_queue: parseCheckboxField(body.should_redemptions_skip_request_queue),
-  };
 }
 
 /**
