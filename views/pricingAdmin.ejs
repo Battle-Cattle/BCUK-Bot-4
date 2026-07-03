@@ -100,10 +100,15 @@
         <div class="card-body">
           <div class="form-row-wrap" style="align-items:center;justify-content:space-between;">
             <div>
+              <% if (r.twitchReward) { %>
               <strong><%= r.twitchReward.title %></strong>
               <p class="hint hint-compact">Twitch cost: <%= r.twitchReward.cost.toLocaleString() %> pts<%= r.twitchReward.is_enabled ? '' : ' · disabled' %></p>
+              <% } else { %>
+              <strong>Unlinked reward</strong>
+              <p class="hint hint-compact">No longer found on Twitch (deleted, or not visible with the current connection) — reward ID: <code class="mono"><%= r.rewardId %></code></p>
+              <% } %>
               <% if (r.config) { %>
-              <p class="hint hint-compact">Demand: <%= (r.config.demand * 100).toFixed(1) %>% — current dynamic price: <%= r.previewPrice.toLocaleString() %> pts</p>
+              <p class="hint hint-compact">Demand: <%= (r.config.demand * 100).toFixed(1) %>% — computed price (may take up to 5 min to sync to Twitch): <%= r.previewPrice.toLocaleString() %> pts</p>
               <% } %>
             </div>
             <% if (r.config) { %>
@@ -114,9 +119,10 @@
             <% } %>
           </div>
 
+          <% if (r.twitchReward) { %>
           <form method="POST" action="/pricing/settings/rewards" style="margin-top:0.75rem;">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-            <input type="hidden" name="twitch_reward_id" value="<%= r.twitchReward.id %>">
+            <input type="hidden" name="twitch_reward_id" value="<%= r.rewardId %>">
             <div class="form-row-wrap" style="align-items:flex-end;">
               <label style="display:flex;align-items:center;gap:0.4rem;">
                 <input type="checkbox" name="enabled" <%= r.config && r.config.enabled ? 'checked' : '' %>>
@@ -147,6 +153,7 @@
               </div>
             </div>
           </form>
+          <% } %>
         </div>
       </div>
       <% } %>

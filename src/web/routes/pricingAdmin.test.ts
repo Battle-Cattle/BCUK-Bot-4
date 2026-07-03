@@ -106,6 +106,34 @@ describe('GET /', () => {
     expect(res.body.rewards).toEqual([]);
   });
 
+  it('renders with an empty reward list (not a 500) when getValidToken throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(getValidToken).mockRejectedValue(new Error('token refresh failed'));
+
+    const res = await supertest(buildApp()).get('/');
+    expect(res.status).toBe(200);
+    expect(res.body.rewards).toEqual([]);
+    expect(getCustomRewards).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a pricing config as an unlinked row when its reward no longer appears on Twitch', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(getCustomRewards).mockResolvedValue([]); // reward no longer listed by Twitch
+    vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([{
+      id: 1, streamer_id: 123, twitch_reward_id: 'orphaned-rwd', enabled: true,
+      base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5,
+      demand: 0.5, demand_updated_at: '1700000000000', last_pushed_cost: 300,
+    }] as any);
+
+    const res = await supertest(buildApp()).get('/');
+    expect(res.status).toBe(200);
+    expect(res.body.rewards).toHaveLength(1);
+    expect(res.body.rewards[0].twitchReward).toBeNull();
+    expect(res.body.rewards[0].rewardId).toBe('orphaned-rwd');
+    expect(res.body.rewards[0].config.id).toBe(1);
+    expect(res.body.rewards[0].previewPrice).not.toBeNull();
+  });
+
   it('leaves config/previewPrice null for a reward with no pricing config yet', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true }]);

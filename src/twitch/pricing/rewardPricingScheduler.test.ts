@@ -47,6 +47,34 @@ describe('runDecayTick', () => {
     vi.mocked(getAllEnabledPricingRows).mockRejectedValue(new Error('db down'));
     await expect(runDecayTick()).resolves.toBeUndefined();
   });
+
+  it('processes rows concurrently rather than waiting for each to finish in turn', async () => {
+    vi.mocked(getAllEnabledPricingRows).mockResolvedValue([
+      { streamer_id: 1, twitch_reward_id: 'r1' },
+      { streamer_id: 2, twitch_reward_id: 'r2' },
+    ] as any);
+
+    let resolveFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { resolveFirst = resolve; });
+    let secondStarted = false;
+
+    vi.mocked(applyDecayTick).mockImplementation(async (streamerId) => {
+      if (streamerId === 1) {
+        await firstGate; // blocks the first row until released below
+      } else {
+        secondStarted = true; // only reachable if the second row didn't wait for the first
+      }
+    });
+
+    const tick = runDecayTick();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(secondStarted).toBe(true); // second row started without waiting for the first to resolve
+
+    resolveFirst();
+    await tick;
+  });
 });
 
 describe('startRewardPricingScheduler / stopRewardPricingScheduler', () => {

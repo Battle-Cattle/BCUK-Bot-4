@@ -231,13 +231,14 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
 /**
  * Handle a channel.channel_points_custom_reward_redemption.add EventSub notification.
  * Unconditionally forwards the redemption to the streamer's companion app (if any device
- * is connected), applies dynamic pricing for the redeemed reward (a no-op if the reward
+ * is connected), fires off dynamic pricing for the redeemed reward (a no-op if the reward
  * doesn't have dynamic pricing enabled), then separately looks up videos configured for
  * the redeemed reward and triggers an overlay event if found. The overlay push still
  * no-ops when no videos are configured for the reward or `_overlayRuntime` is absent.
- * The companion push and the pricing update are each isolated in their own try/catch so a
- * failure in either (e.g. a DB error, or a failed Twitch price push) cannot prevent the
- * independent overlay-video logic below from running.
+ * The companion push is isolated in its own try/catch, and the pricing update is
+ * intentionally not awaited (its errors are caught via `.catch` instead), so a failure or
+ * network latency in either (e.g. a DB error, or a slow/failed Twitch price push) cannot
+ * delay or prevent the independent overlay-video logic below from running.
  *
  * @param login - Broadcaster login name.
  * @param event - Redemption event payload including reward ID and user details.
@@ -267,11 +268,11 @@ export async function handleRedemption(
     log.error('Failed to push companion event for redemption:', err);
   }
 
-  try {
-    await applyRedemptionPricing(streamerId, event.reward.id);
-  } catch (err) {
+  // Not awaited: applyRedemptionPricing drives a queued Twitch Helix call, and there's no
+  // correctness reason to make the overlay-trigger path below wait on that network latency.
+  applyRedemptionPricing(streamerId, event.reward.id).catch((err) => {
     log.error('Failed to apply dynamic pricing for redemption:', err);
-  }
+  });
 
   const videos = await getVideosForReward(event.reward.id, streamerId);
   if (videos.length === 0) return;

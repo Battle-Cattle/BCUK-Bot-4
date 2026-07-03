@@ -13,6 +13,9 @@ let currentTickPromise: Promise<void> = Promise.resolve();
 /**
  * Applies a decay-only pricing sync to every reward with dynamic pricing enabled, across
  * all streamers, pushing an updated Twitch cost for any reward whose price has drifted.
+ * Rows are processed concurrently — `applyDecayTick` already serializes work per reward via
+ * its own mutation queue, so different rows are independent and don't need to wait on each
+ * other, keeping tick duration from growing linearly with the number of enabled rewards.
  * No-ops (re-uses the in-flight promise) if a tick is already running, so a slow tick
  * can't overlap with the next interval firing.
  */
@@ -22,13 +25,13 @@ export async function runDecayTick(): Promise<void> {
   currentTickPromise = (async () => {
     try {
       const rows = await getAllEnabledPricingRows();
-      for (const row of rows) {
-        try {
-          await applyDecayTick(row.streamer_id, row.twitch_reward_id);
-        } catch (err) {
-          log.error(`Decay tick failed for reward ${row.twitch_reward_id} (streamer ${row.streamer_id}):`, err);
-        }
-      }
+      await Promise.allSettled(
+        rows.map((row) =>
+          applyDecayTick(row.streamer_id, row.twitch_reward_id).catch((err) => {
+            log.error(`Decay tick failed for reward ${row.twitch_reward_id} (streamer ${row.streamer_id}):`, err);
+          }),
+        ),
+      );
     } catch (err) {
       log.error('Failed to load enabled pricing rows:', err);
     } finally {

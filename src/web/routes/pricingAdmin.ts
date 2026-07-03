@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware';
 import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import { getPricingConfigsForStreamer, getGlobalPricingSettings } from '../../db';
+import type { RewardPricingRow } from '../../db';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { computePrice } from '../../twitch/pricing/rewardPricingMath';
@@ -20,12 +21,20 @@ const KNOWN_ERRORS = new Set([
 ]);
 const KNOWN_SUCCESSES = new Set(['pricing_saved', 'pricing_deleted', 'global_settings_saved']);
 
-/** Fetches the streamer's live Twitch custom rewards, or an empty list if not connected. */
+/** One row on the pricing admin page: a live Twitch reward, an "unlinked" orphaned config, or both merged. */
+interface PricingRewardRow {
+  rewardId: string;
+  twitchReward: TwitchCustomReward | null;
+  config: RewardPricingRow | null;
+  previewPrice: number | null;
+}
+
+/** Fetches the streamer's live Twitch custom rewards, or an empty list if not connected or on any failure. */
 async function fetchTwitchRewards(streamer: DbStreamerEventSub): Promise<TwitchCustomReward[]> {
   if (!streamer.twitch_user_id) return [];
-  const token = await getValidToken(streamer);
-  if (!token) return [];
   try {
+    const token = await getValidToken(streamer);
+    if (!token) return [];
     return await getCustomRewards(streamer.twitch_user_id, token);
   } catch (err) {
     log.warn('Failed to fetch Twitch custom rewards:', err);
@@ -48,7 +57,9 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       : [[], []];
 
     const configByRewardId = new Map(pricingConfigs.map((c) => [c.twitch_reward_id, c]));
-    const rewards = twitchRewards.map((tr) => {
+    const matchedRewardIds = new Set(twitchRewards.map((tr) => tr.id));
+
+    const rewards: PricingRewardRow[] = twitchRewards.map((tr) => {
       const config = configByRewardId.get(tr.id) ?? null;
       const previewPrice = config
         ? computePrice(config.demand, {
@@ -58,8 +69,26 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
             curve: config.curve,
           })
         : null;
-      return { twitchReward: tr, config, previewPrice };
+      return { rewardId: tr.id, twitchReward: tr, config, previewPrice };
     });
+
+    // Configs whose reward no longer appears on Twitch (deleted, or the streamer's token
+    // lacks the scope to list it) still get processed by the decay scheduler — surface them
+    // as "unlinked" rows so they aren't invisible/unmanageable from this page.
+    for (const config of pricingConfigs) {
+      if (matchedRewardIds.has(config.twitch_reward_id)) continue;
+      rewards.push({
+        rewardId: config.twitch_reward_id,
+        twitchReward: null,
+        config,
+        previewPrice: computePrice(config.demand, {
+          baseCost: config.base_cost,
+          cooldownSeconds: config.cooldown_seconds,
+          maxMultiplier: config.max_multiplier,
+          curve: config.curve,
+        }),
+      });
+    }
 
     const isOwner = req.session.user?.isOwner ?? false;
     const globalSettings = isOwner ? await getGlobalPricingSettings() : null;

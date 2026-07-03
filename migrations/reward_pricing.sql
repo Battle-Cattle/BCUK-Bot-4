@@ -14,8 +14,12 @@ CREATE TABLE reward_pricing (
   last_pushed_cost  INT          NULL,
   UNIQUE KEY uq_reward_pricing (streamer_id, twitch_reward_id),
   KEY idx_reward_pricing_enabled (enabled),
-  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE
-);
+  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE,
+  CONSTRAINT chk_reward_pricing_base_cost        CHECK (base_cost > 0),
+  CONSTRAINT chk_reward_pricing_cooldown_seconds CHECK (cooldown_seconds > 0),
+  CONSTRAINT chk_reward_pricing_max_multiplier   CHECK (max_multiplier >= 0),
+  CONSTRAINT chk_reward_pricing_curve            CHECK (curve > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Single global row (id pinned to 1) — bot-wide decay/increment settings shared by every reward.
 CREATE TABLE pricing_global_settings (
@@ -24,4 +28,4 @@ CREATE TABLE pricing_global_settings (
   redemption_increment     DECIMAL(6,4) NOT NULL DEFAULT 0.1000,
   PRIMARY KEY (id),
   CONSTRAINT chk_pricing_global_settings_singleton CHECK (id = 1)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

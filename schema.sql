@@ -283,7 +283,11 @@ CREATE TABLE IF NOT EXISTS reward_pricing (
   PRIMARY KEY (id),
   UNIQUE KEY uq_reward_pricing (streamer_id, twitch_reward_id),
   KEY idx_reward_pricing_enabled (enabled),
-  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE
+  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE,
+  CONSTRAINT chk_reward_pricing_base_cost        CHECK (base_cost > 0),
+  CONSTRAINT chk_reward_pricing_cooldown_seconds CHECK (cooldown_seconds > 0),
+  CONSTRAINT chk_reward_pricing_max_multiplier   CHECK (max_multiplier >= 0),
+  CONSTRAINT chk_reward_pricing_curve            CHECK (curve > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
