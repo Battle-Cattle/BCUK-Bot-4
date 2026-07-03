@@ -218,6 +218,38 @@ describe('getCounterHistory', () => {
 
     expect(pool.query).toHaveBeenCalledTimes(1);
   });
+
+  it('excludes the current year (and any future year) even if the column exists and holds a non-null value', async () => {
+    // archiveAndResetYearlyCounters only ever writes into the *previous*
+    // completed year's column, so the current/future year can never have valid
+    // archived data — this must be excluded outright, not just via NULL-filtering.
+    const currentYear = new Date().getFullYear();
+    const lastYear = currentYear - 1;
+    const row: Record<string, unknown> = {
+      id: 4,
+      trigger_command: '!streak',
+      check_command: '!checkstreak',
+      message: 'msg',
+      increment_message: 'inc',
+      reset_yearly: 1,
+      current_value: 3,
+      [`value${lastYear}`]: 42,
+      [`value${currentYear}`]: 99, // stray non-null value; must never surface as history
+    };
+    const pool = makePool([row]);
+    pool.query.mockResolvedValue([
+      [{ COLUMN_NAME: `value${lastYear}` }, { COLUMN_NAME: `value${currentYear}` }],
+      {},
+    ]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    const result = await getCounterHistory(4);
+
+    expect(result!.history).toEqual([{ year: lastYear, value: 42 }]);
+    const [sql] = pool.execute.mock.calls[0];
+    expect(sql).toContain(`\`value${lastYear}\``);
+    expect(sql).not.toContain(`value${currentYear}`);
+  });
 });
 
 // ─── addCounter ──────────────────────────────────────────────────────────────

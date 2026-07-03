@@ -132,10 +132,21 @@ const archiveColumnsCacheState = createManagedLookupCache<ArchiveColumnsCache>({
       `SELECT COLUMN_NAME FROM information_schema.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'counter' AND COLUMN_NAME LIKE 'value2%'`,
     );
-    const knownColumns = new Set(ARCHIVE_YEAR_COLUMNS.values());
+    // The current year (and any future year) can never have valid archived data —
+    // archiveAndResetYearlyCounters only ever writes into the *previous* completed
+    // year's column, on Jan 1. Exclude them even if the column already physically
+    // exists (e.g. pre-provisioned ahead of the year rolling over) and even if it
+    // somehow holds a non-null value, rather than relying solely on the NULL
+    // filter in getCounterHistory to hide it.
+    const currentYear = new Date().getFullYear();
+    const eligibleColumns = new Set(
+      Array.from(ARCHIVE_YEAR_COLUMNS.entries())
+        .filter(([year]) => year < currentYear)
+        .map(([, columnName]) => columnName),
+    );
     const columns = rows
       .map((row) => row.COLUMN_NAME as string)
-      .filter((columnName) => knownColumns.has(columnName));
+      .filter((columnName) => eligibleColumns.has(columnName));
     return { loadedAt: Date.now(), columns };
   },
 });
@@ -147,11 +158,14 @@ export function invalidateArchiveColumnsCache(): void {
 
 /**
  * Returns the `value<year>` archive columns that actually exist on the `counter`
- * table right now (cached for 5 minutes — see `archiveColumnsCacheState`). Per
- * `DATABASE-SCHEMA.md`, these columns are added incrementally over time (one per
- * year, as each year's archive becomes needed) — `ARCHIVE_YEAR_COLUMNS` is a
- * fixed allowlist of *theoretically valid* years, not a guarantee that every
- * column in it has been created yet, so callers must not assume the full range exists.
+ * table AND belong to a year strictly before the current calendar year (cached
+ * for 5 minutes — see `archiveColumnsCacheState`). Per `DATABASE-SCHEMA.md`,
+ * these columns are added incrementally over time (one per year, as each year's
+ * archive becomes needed) — `ARCHIVE_YEAR_COLUMNS` is a fixed allowlist of
+ * *theoretically valid* years, not a guarantee that every column in it has been
+ * created yet, so callers must not assume the full range exists. The current
+ * year and any future year are excluded outright, since they can never have
+ * valid archived data (see `archiveAndResetYearlyCounters`).
  */
 async function getExistingArchiveColumns(): Promise<string[]> {
   const cache = await archiveColumnsCacheState.getCache();
