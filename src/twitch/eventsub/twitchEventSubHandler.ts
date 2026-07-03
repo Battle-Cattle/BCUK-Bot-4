@@ -1,6 +1,8 @@
 import type { EventSubConfig } from '../../db';
 import { getVideosForReward, getStreamerById } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
+import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
+import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
 import { createLogger } from '../../shared/logger';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 import { fillTemplate } from '../../shared/textTemplate';
@@ -210,21 +212,43 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
 }
 
 /**
- * Handle a channel.raid EventSub notification.
- * No-ops when `config.raid_enabled` is false or `_twitchRuntime` is absent.
+ * Handle a channel.raid EventSub notification. Two independent behaviours are gated
+ * by their own config flags and neither depends on the other:
+ *  - `config.raid_enabled` — sends the configured welcome message.
+ *  - `config.raid_shoutout_enabled` — looks up the raiding channel via
+ *    {@link buildShoutoutMessage} (the same Helix lookup path as the `!so` command)
+ *    and sends the resulting shoutout, recording the match via `recordCommandTestEntry`
+ *    for monitor-panel visibility. No-ops silently if the raiding channel can't be
+ *    resolved on Twitch.
+ * Both branches no-op when `_twitchRuntime` has not been registered.
  *
  * @param login - Broadcaster login name (the raid target's channel).
  * @param event - Raid event payload including the raiding channel and viewer count.
  * @param config - Streamer's event response configuration.
  */
 export async function handleRaid(login: string, event: RaidEvent, config: EventSubConfig): Promise<void> {
-  if (!config.raid_enabled) return;
-  const msg = fillTemplate(config.raid_message, {
-    from_channel: event.from_broadcaster_user_login,
-    from_display: event.from_broadcaster_user_name,
-    viewers: String(event.viewers),
-  });
-  await _twitchRuntime?.send(login, msg);
+  if (config.raid_enabled) {
+    const msg = fillTemplate(config.raid_message, {
+      from_channel: event.from_broadcaster_user_login,
+      from_display: event.from_broadcaster_user_name,
+      viewers: String(event.viewers),
+    });
+    await _twitchRuntime?.send(login, msg);
+  }
+
+  if (config.raid_shoutout_enabled) {
+    const shoutoutMsg = await buildShoutoutMessage(event.from_broadcaster_user_login);
+    if (shoutoutMsg) {
+      await _twitchRuntime?.send(login, shoutoutMsg);
+      recordCommandTestEntry({
+        source: 'twitch',
+        command: '!so (raid)',
+        response: shoutoutMsg,
+        channel: login,
+        user: event.from_broadcaster_user_login,
+      });
+    }
+  }
 }
 
 /**

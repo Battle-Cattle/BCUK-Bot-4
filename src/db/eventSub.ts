@@ -13,6 +13,7 @@ export interface EventSubConfig {
   giftsub_message: string;
   raid_enabled: boolean;
   raid_message: string;
+  raid_shoutout_enabled: boolean;
 }
 
 export interface DbStreamerEventSub {
@@ -36,6 +37,7 @@ function mapConfig(r: mysql.RowDataPacket): EventSubConfig {
     giftsub_message: r.giftsub_message,
     raid_enabled: fromBit(r.raid_enabled),
     raid_message: r.raid_message,
+    raid_shoutout_enabled: fromBit(r.raid_shoutout_enabled),
   };
 }
 
@@ -68,7 +70,7 @@ const EVENT_SUB_SELECT = `
   s.eventsub_access_token, s.eventsub_refresh_token, s.eventsub_token_expiry,
   c.follow_enabled, c.follow_message,
   c.sub_enabled, c.sub_message, c.resub_message, c.giftsub_message,
-  c.raid_enabled, c.raid_message`;
+  c.raid_enabled, c.raid_message, c.raid_shoutout_enabled`;
 
 /** Return all Twitch-bot-enabled streamers with their EventSub OAuth tokens and event config. */
 export async function getAllEventSubStreamers(): Promise<DbStreamerEventSub[]> {
@@ -168,6 +170,7 @@ const DEFAULT_EVENT_CONFIG: EventSubConfig = {
   giftsub_message: '{gifter_display} gifted {count} sub(s) to the community!',
   raid_enabled: false,
   raid_message: 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!',
+  raid_shoutout_enabled: false,
 };
 
 /**
@@ -182,13 +185,13 @@ export async function initEventConfig(streamerId: number): Promise<void> {
     `INSERT IGNORE INTO streamer_event_config
        (streamer_id, follow_enabled, follow_message,
         sub_enabled, sub_message, resub_message, giftsub_message,
-        raid_enabled, raid_message)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        raid_enabled, raid_message, raid_shoutout_enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       streamerId,
       c.follow_enabled ? 1 : 0, c.follow_message,
       c.sub_enabled ? 1 : 0, c.sub_message, c.resub_message, c.giftsub_message,
-      c.raid_enabled ? 1 : 0, c.raid_message,
+      c.raid_enabled ? 1 : 0, c.raid_message, c.raid_shoutout_enabled ? 1 : 0,
     ],
   );
 }
@@ -205,18 +208,19 @@ export async function saveEventConfig(streamerId: number, config: EventSubConfig
     `INSERT INTO streamer_event_config
        (streamer_id, follow_enabled, follow_message,
         sub_enabled, sub_message, resub_message, giftsub_message,
-        raid_enabled, raid_message)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) AS new_row
+        raid_enabled, raid_message, raid_shoutout_enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE
        follow_enabled=new_row.follow_enabled, follow_message=new_row.follow_message,
        sub_enabled=new_row.sub_enabled, sub_message=new_row.sub_message,
        resub_message=new_row.resub_message, giftsub_message=new_row.giftsub_message,
-       raid_enabled=new_row.raid_enabled, raid_message=new_row.raid_message`,
+       raid_enabled=new_row.raid_enabled, raid_message=new_row.raid_message,
+       raid_shoutout_enabled=new_row.raid_shoutout_enabled`,
     [
       streamerId,
       config.follow_enabled ? 1 : 0, config.follow_message,
       config.sub_enabled ? 1 : 0, config.sub_message, config.resub_message, config.giftsub_message,
-      config.raid_enabled ? 1 : 0, config.raid_message,
+      config.raid_enabled ? 1 : 0, config.raid_message, config.raid_shoutout_enabled ? 1 : 0,
     ],
   );
 }

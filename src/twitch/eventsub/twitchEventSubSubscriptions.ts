@@ -65,10 +65,11 @@ async function deleteStaleSubscriptions(uid: string, desired: Set<string>, userT
 }
 
 /** Resolves the broadcaster's Twitch user ID. Uses the stored OAuth ID if available;
- *  falls back to a Helix lookup for raid-only streamers who haven't connected OAuth. */
+ *  falls back to a Helix lookup for raid-only streamers (welcome message and/or
+ *  auto-shoutout) who haven't connected OAuth. */
 async function resolveBroadcasterId(streamer: DbStreamerEventSub, config: EventSubConfig | null): Promise<string | null> {
   if (streamer.twitch_user_id) return streamer.twitch_user_id;
-  if (!config?.raid_enabled) return null;
+  if (!config?.raid_enabled && !config?.raid_shoutout_enabled) return null;
   if (!streamer.twitch_name) return null;
   try {
     const users = await getUsers([streamer.twitch_name]);
@@ -107,8 +108,10 @@ async function createSubscriptionsForStreamer(
   }
 
   // WebSocket transport requires a user token — app tokens only work with webhook transport.
-  // Raids therefore also require the broadcaster's OAuth token.
-  if (config?.raid_enabled && token) {
+  // Raids therefore also require the broadcaster's OAuth token. Subscribe when either the
+  // welcome message or the auto-shoutout toggle is on — handleRaid gates its own two
+  // behaviours independently, but the subscription itself must exist for either to fire.
+  if ((config?.raid_enabled || config?.raid_shoutout_enabled) && token) {
     desired.add('channel.raid');
     await subscribe(sid, { type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }, token, name);
   }

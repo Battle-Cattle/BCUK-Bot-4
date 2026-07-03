@@ -172,9 +172,9 @@ router.post('/twitch-disconnect', requireAuth, csrfProtection, async (req, res) 
 
 /**
  * POST /user/eventsub-config — saves the logged-in user's EventSub notification
- * config (follow/sub/resub/giftsub/raid toggles and message templates), falling
- * back to existing values for any field omitted from the body, then reloads
- * EventSub subscriptions.
+ * config (follow/sub/resub/giftsub/raid toggles, the independent raid-shoutout
+ * toggle, and message templates), falling back to existing values for any field
+ * omitted from the body, then reloads EventSub subscriptions.
  * @param req - Express request; reads `req.session.user.discordId` and the
  *   notification-config fields from `req.body`.
  * @param res - Express response; redirects to `/user/settings` on success, or to
@@ -220,6 +220,7 @@ router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) =>
       giftsub_message: bodyMsg('giftsub_message', '{gifter_display} gifted {count} sub(s) to the community!'),
       raid_enabled:    'raid_enabled' in body ? body.raid_enabled === 'on' : (current?.raid_enabled ?? false),
       raid_message:    bodyMsg('raid_message',    'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!'),
+      raid_shoutout_enabled: 'raid_shoutout_enabled' in body ? body.raid_shoutout_enabled === 'on' : (current?.raid_shoutout_enabled ?? false),
     };
 
     await saveEventConfig(streamer.id, config);

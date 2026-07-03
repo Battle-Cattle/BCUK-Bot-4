@@ -67,6 +67,34 @@ async function dispatchShoutout(channel: string, message: string): Promise<boole
 
 // ─── Execute ──────────────────────────────────────────────────────────────────
 
+/**
+ * Resolve a shoutout target on Twitch and build the message to send for them.
+ * Wraps `resolveShoutoutData` + `formatShoutoutMessage` behind a single call so every
+ * shoutout caller (the `!so` command handler and the automatic raid shoutout) shares
+ * one Helix lookup path instead of duplicating it.
+ *
+ * @param target - Twitch login to look up (already lowercased/stripped of a leading `@`).
+ * @returns The formatted shoutout message, or null if the target could not be found on Twitch.
+ */
+export async function buildShoutoutMessage(target: string): Promise<string | null> {
+  const data = await resolveShoutoutData(target);
+  if (!data) return null;
+  return formatShoutoutMessage(data.login, data.gameName, data.isLive);
+}
+
+/**
+ * Handle a `!so <target>` moderator command in Twitch chat: look up the target via
+ * {@link buildShoutoutMessage}, send the resulting message to the channel (or an
+ * "unknown user" note if the target wasn't found), and record the outcome for the
+ * monitor panel via `recordCommandTestEntry`. No-ops for non-`!so` messages or
+ * non-moderator callers.
+ *
+ * @param channel - Twitch channel the command was sent in (also the send target).
+ * @param rawMessage - Raw chat message text, e.g. `!so @someuser`.
+ * @param username - Twitch login of the command invoker, for monitor-panel logging.
+ * @param isModerator - Whether the invoker has moderator privileges; required to run.
+ * @returns Resolves once the shoutout (or failure) has been recorded.
+ */
 export async function executeShoutoutForTwitch(
   channel: string,
   rawMessage: string,
@@ -79,12 +107,9 @@ export async function executeShoutoutForTwitch(
   const target = rawTarget?.replace(/^@/, '').toLowerCase();
   if (!target) return;
 
-  const data = await resolveShoutoutData(target);
-  const response = data
-    ? formatShoutoutMessage(data.login, data.gameName, data.isLive)
-    : `(unknown user: ${target})`;
+  const response = await buildShoutoutMessage(target);
 
-  if (data) {
+  if (response) {
     const sent = await dispatchShoutout(channel, response);
     recordCommandTestEntry({
       source: 'twitch',
@@ -94,6 +119,7 @@ export async function executeShoutoutForTwitch(
       user: username,
     });
   } else {
-    recordCommandTestEntry({ source: 'twitch', command: SO_COMMAND, response, channel, user: username });
+    const unknown = `(unknown user: ${target})`;
+    recordCommandTestEntry({ source: 'twitch', command: SO_COMMAND, response: unknown, channel, user: username });
   }
 }

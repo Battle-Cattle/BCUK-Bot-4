@@ -14,6 +14,7 @@ vi.mock('./commandMonitorStore', () => ({
 
 import {
   executeShoutoutForTwitch,
+  buildShoutoutMessage,
   registerShoutoutRuntime,
 } from './shoutoutHandler';
 import { getUsers, getChannelInfo, getStreams } from '../twitch/twitchApi';
@@ -127,5 +128,45 @@ describe('executeShoutoutForTwitch', () => {
       '#chan',
       expect.stringContaining('Valorant'),
     );
+  });
+});
+
+describe('buildShoutoutMessage', () => {
+  it('returns null when the target is not found on Twitch', async () => {
+    vi.mocked(getUsers).mockResolvedValue([]);
+
+    const result = await buildShoutoutMessage('ghost');
+
+    expect(result).toBeNull();
+  });
+
+  it('returns a live shoutout message when the target is currently streaming', async () => {
+    vi.mocked(getUsers).mockResolvedValue([{ id: 'u1', login: 'streamer' } as any]);
+    vi.mocked(getChannelInfo).mockResolvedValue([{ game_name: 'Chess' } as any]);
+    vi.mocked(getStreams).mockResolvedValue([{ game_name: 'Chess' } as any]);
+
+    const result = await buildShoutoutMessage('streamer');
+
+    expect(result).toContain("they're live playing Chess");
+  });
+
+  it('returns an offline shoutout message with last-seen game when not live', async () => {
+    vi.mocked(getUsers).mockResolvedValue([{ id: 'u1', login: 'streamer' } as any]);
+    vi.mocked(getChannelInfo).mockResolvedValue([{ game_name: 'Minecraft' } as any]);
+    vi.mocked(getStreams).mockResolvedValue([]);
+
+    const result = await buildShoutoutMessage('streamer');
+
+    expect(result).toContain('last seen playing Minecraft');
+  });
+
+  it('does not call recordCommandTestEntry directly (caller is responsible for logging)', async () => {
+    vi.mocked(getUsers).mockResolvedValue([{ id: 'u1', login: 'streamer' } as any]);
+    vi.mocked(getChannelInfo).mockResolvedValue([]);
+    vi.mocked(getStreams).mockResolvedValue([]);
+
+    await buildShoutoutMessage('streamer');
+
+    expect(vi.mocked(recordCommandTestEntry)).not.toHaveBeenCalled();
   });
 });

@@ -186,8 +186,9 @@ Per-streamer EventSub notification message configuration. Applied once the strea
 | `giftsub_message` | `VARCHAR(500)` | Gift sub message template |
 | `raid_enabled` | `TINYINT(1)` | Whether raid notifications are sent |
 | `raid_message` | `VARCHAR(500)` | Raid message template |
+| `raid_shoutout_enabled` | `TINYINT(1)` | Whether an automatic `!so`-style shoutout is sent for the raiding channel. Independent of `raid_enabled` — either, both, or neither may be on. |
 
-Created by `migrations/twitch_eventsub.sql`.
+Created by `migrations/twitch_eventsub.sql`. `raid_shoutout_enabled` added by `migrations/raid_shoutout.sql`.
 
 ## `custom_command`
 
