@@ -169,11 +169,26 @@ export async function getChannelInfo(broadcasterIds: string[]): Promise<TwitchCh
   return results;
 }
 
+/** An optionally-enabled numeric limit on a custom reward (max redemptions, cooldown, etc). */
+export interface TwitchCustomRewardLimit {
+  is_enabled: boolean;
+  value: number;
+}
+
 export interface TwitchCustomReward {
   id: string;
   title: string;
   cost: number;
   is_enabled: boolean;
+  prompt: string;
+  is_user_input_required: boolean;
+  background_color: string;
+  is_paused: boolean;
+  is_in_stock: boolean;
+  should_redemptions_skip_request_queue: boolean;
+  max_per_stream_setting: TwitchCustomRewardLimit;
+  max_per_user_per_stream_setting: TwitchCustomRewardLimit;
+  global_cooldown_setting: TwitchCustomRewardLimit;
 }
 
 export async function getCustomRewards(broadcasterId: string, userToken: string): Promise<TwitchCustomReward[]> {
@@ -188,9 +203,10 @@ export async function getCustomRewards(broadcasterId: string, userToken: string)
 }
 
 /**
- * Thrown when Twitch returns 403 for a reward cost update — Twitch only allows the app that
- * created a reward to manage it, so this is permanent for a given reward, not a transient
- * failure worth retrying.
+ * Thrown when Twitch returns 403 for a reward create/update/delete/cost-update call — Twitch
+ * only allows the app that created a reward to manage it (or, on create, the broadcaster may
+ * not have channel points available), so this is permanent, not a transient failure worth
+ * retrying.
  */
 export class TwitchRewardUnsupportedError extends Error {
   constructor(message: string) {
@@ -200,10 +216,11 @@ export class TwitchRewardUnsupportedError extends Error {
 }
 
 /**
- * Thrown when Twitch returns 401 for a reward cost update — the broadcaster token is
- * invalid, or (most commonly) lacks the `channel:manage:redemptions` scope. Unlike
- * `TwitchRewardUnsupportedError`, this is not permanent for the reward: reconnecting the
- * streamer's Twitch account (to grant the scope, or replace a revoked token) resolves it.
+ * Thrown when Twitch returns 401 for a reward create/update/delete/cost-update call — the
+ * broadcaster token is invalid, or (most commonly) lacks the `channel:manage:redemptions`
+ * scope. Unlike `TwitchRewardUnsupportedError`, this is not permanent for the reward:
+ * reconnecting the streamer's Twitch account (to grant the scope, or replace a revoked
+ * token) resolves it.
  */
 export class TwitchRewardAuthError extends Error {
   constructor(message: string) {
@@ -212,12 +229,116 @@ export class TwitchRewardAuthError extends Error {
   }
 }
 
+/** Fields accepted by Twitch's create/update custom reward endpoints. */
+export interface CustomRewardInput {
+  title: string;
+  cost: number;
+  prompt?: string;
+  is_enabled?: boolean;
+  background_color?: string;
+  is_user_input_required?: boolean;
+  is_max_per_stream_enabled?: boolean;
+  max_per_stream?: number;
+  is_max_per_user_per_stream_enabled?: boolean;
+  max_per_user_per_stream?: number;
+  is_global_cooldown_enabled?: boolean;
+  global_cooldown_seconds?: number;
+  should_redemptions_skip_request_queue?: boolean;
+}
+
+/** Throws the standard reward-management errors for a non-OK Helix response; otherwise no-ops. */
+function throwForRewardManagementFailure(res: Response, label: string, rewardId?: string): void {
+  const suffix = rewardId ? ` reward ${rewardId}` : '';
+  if (res.status === 403) throw new TwitchRewardUnsupportedError(`[TwitchAPI] ${label}:${suffix} cannot be managed by this app (403)`);
+  if (res.status === 401) throw new TwitchRewardAuthError(`[TwitchAPI] ${label}: broadcaster token invalid or missing scope${suffix} (401)`);
+  if (!res.ok) throw new Error(`[TwitchAPI] ${label} failed: ${res.status}`);
+}
+
 /**
- * Updates a custom reward's cost on Twitch via Helix. Requires a broadcaster user token
- * with the channel:manage:redemptions scope (app tokens cannot manage custom rewards).
- * Not wrapped in fetchHelixWithRetry — the caller (dynamic pricing sync) already tolerates
- * a failed push by retrying on the next redemption/decay tick, so retrying here would just
- * duplicate that behaviour.
+ * Creates a new custom reward on Twitch via Helix. Requires a broadcaster user token with the
+ * channel:manage:redemptions scope (app tokens cannot manage custom rewards). Not wrapped in
+ * fetchHelixWithRetry — this is a synchronous admin action; on failure the caller shows an
+ * error and lets the streamer retry, rather than silently retrying in the background.
+ *
+ * @param broadcasterId - Twitch user ID to create the reward for.
+ * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
+ * @param input - The reward's fields (title/cost required, the rest optional).
+ * @throws {TwitchRewardUnsupportedError} When Twitch returns 403 (channel points aren't
+ *   available for the broadcaster, e.g. not affiliate/partner).
+ * @throws {TwitchRewardAuthError} When Twitch returns 401 (invalid token, or missing the
+ *   channel:manage:redemptions scope).
+ */
+export async function createCustomReward(broadcasterId: string, userToken: string, input: CustomRewardInput): Promise<TwitchCustomReward> {
+  const res = await twitchFetch(
+    `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(broadcasterId)}`,
+    {
+      method: 'POST',
+      headers: { ...authHeaders(userToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+  );
+  throwForRewardManagementFailure(res, 'createCustomReward');
+  const data = await res.json() as { data: TwitchCustomReward[] };
+  return data.data[0];
+}
+
+/**
+ * Updates any subset of a custom reward's fields on Twitch via Helix. Requires a broadcaster
+ * user token with the channel:manage:redemptions scope. Only rewards created by this app's
+ * client_id can be updated — Twitch returns 403 otherwise. Not wrapped in fetchHelixWithRetry,
+ * for the same reason as `createCustomReward`.
+ *
+ * @param broadcasterId - Twitch user ID of the reward's broadcaster.
+ * @param rewardId - Twitch reward UUID to update.
+ * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
+ * @param input - The fields to update; omitted fields are left unchanged on Twitch.
+ * @throws {TwitchRewardUnsupportedError} When Twitch returns 403 (reward created by a
+ *   different client_id, or channel points aren't available for the broadcaster).
+ * @throws {TwitchRewardAuthError} When Twitch returns 401 (invalid token, or missing the
+ *   channel:manage:redemptions scope).
+ */
+export async function updateCustomReward(
+  broadcasterId: string, rewardId: string, userToken: string, input: Partial<CustomRewardInput>,
+): Promise<TwitchCustomReward> {
+  const res = await twitchFetch(
+    `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(broadcasterId)}&id=${encodeURIComponent(rewardId)}`,
+    {
+      method: 'PATCH',
+      headers: { ...authHeaders(userToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+  );
+  throwForRewardManagementFailure(res, 'updateCustomReward', rewardId);
+  const data = await res.json() as { data: TwitchCustomReward[] };
+  return data.data[0];
+}
+
+/**
+ * Deletes a custom reward from Twitch via Helix. Requires a broadcaster user token with the
+ * channel:manage:redemptions scope. Only rewards created by this app's client_id can be
+ * deleted — Twitch returns 403 otherwise.
+ *
+ * @param broadcasterId - Twitch user ID of the reward's broadcaster.
+ * @param rewardId - Twitch reward UUID to delete.
+ * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
+ * @throws {TwitchRewardUnsupportedError} When Twitch returns 403 (reward created by a
+ *   different client_id).
+ * @throws {TwitchRewardAuthError} When Twitch returns 401 (invalid token, or missing the
+ *   channel:manage:redemptions scope).
+ */
+export async function deleteCustomReward(broadcasterId: string, rewardId: string, userToken: string): Promise<void> {
+  const res = await twitchFetch(
+    `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(broadcasterId)}&id=${encodeURIComponent(rewardId)}`,
+    { method: 'DELETE', headers: authHeaders(userToken) },
+  );
+  throwForRewardManagementFailure(res, 'deleteCustomReward', rewardId);
+}
+
+/**
+ * Updates a custom reward's cost on Twitch via Helix. Thin wrapper over `updateCustomReward`
+ * kept for its narrower, unchanged signature — the dynamic pricing sync (`rewardPricingService.ts`)
+ * only ever needs to push a cost, and tolerates a failed push by retrying on the next
+ * redemption/decay tick.
  *
  * @param broadcasterId - Twitch user ID of the reward's broadcaster.
  * @param rewardId - Twitch reward UUID to update.
@@ -229,17 +350,7 @@ export class TwitchRewardAuthError extends Error {
  *   channel:manage:redemptions scope).
  */
 export async function updateRewardCost(broadcasterId: string, rewardId: string, cost: number, userToken: string): Promise<void> {
-  const res = await twitchFetch(
-    `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(broadcasterId)}&id=${encodeURIComponent(rewardId)}`,
-    {
-      method: 'PATCH',
-      headers: { ...authHeaders(userToken), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cost }),
-    },
-  );
-  if (res.status === 403) throw new TwitchRewardUnsupportedError(`[TwitchAPI] updateRewardCost: reward ${rewardId} cannot be managed by this app (403)`);
-  if (res.status === 401) throw new TwitchRewardAuthError(`[TwitchAPI] updateRewardCost: broadcaster token invalid or missing scope for reward ${rewardId} (401)`);
-  if (!res.ok) throw new Error(`[TwitchAPI] updateRewardCost failed: ${res.status}`);
+  await updateCustomReward(broadcasterId, rewardId, userToken, { cost });
 }
 
 export interface SharedChatParticipant {

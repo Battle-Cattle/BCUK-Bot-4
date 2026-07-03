@@ -8,7 +8,8 @@ vi.mock('../shared/config', () => ({
 
 import {
   getUsers, getStreams, getChannelInfo, getSharedChatSession, getAppToken,
-  updateRewardCost, TwitchRewardUnsupportedError, TwitchRewardAuthError,
+  updateRewardCost, createCustomReward, updateCustomReward, deleteCustomReward,
+  TwitchRewardUnsupportedError, TwitchRewardAuthError,
 } from './twitchApi';
 
 const TOKEN_RESPONSE = { access_token: 'test-token', expires_in: 3600 };
@@ -157,7 +158,7 @@ describe('getSharedChatSession', () => {
 
 describe('updateRewardCost', () => {
   it('sends a PATCH with broadcaster_id and id query params and the new cost in the body', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, {}));
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: [{ id: 'rwd1', cost: 500 }] }));
     await updateRewardCost('bc1', 'rwd1', 500, 'user-token');
 
     const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
@@ -170,7 +171,7 @@ describe('updateRewardCost', () => {
 
   it('throws with the response status on a non-OK response', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(400, {}));
-    await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.toThrow('updateRewardCost failed: 400');
+    await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.toThrow('updateCustomReward failed: 400');
   });
 
   it('does not retry on failure (single fetch call)', async () => {
@@ -197,5 +198,96 @@ describe('updateRewardCost', () => {
   it('does not throw TwitchRewardAuthError for other non-OK statuses', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(400, {}));
     await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.not.toBeInstanceOf(TwitchRewardAuthError);
+  });
+});
+
+describe('createCustomReward', () => {
+  const input = { title: 'Cool Reward', cost: 500 };
+
+  it('sends a POST with broadcaster_id and the input as the body, returning the created reward', async () => {
+    const created = { id: 'rwd1', title: 'Cool Reward', cost: 500 };
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: [created] }));
+
+    const result = await createCustomReward('bc1', 'user-token', input);
+
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(String(url)).toContain('broadcaster_id=bc1');
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toBe(JSON.stringify(input));
+    expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+    expect(result).toEqual(created);
+  });
+
+  it('throws TwitchRewardUnsupportedError on a 403 response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(403, {}));
+    await expect(createCustomReward('bc1', 'user-token', input)).rejects.toBeInstanceOf(TwitchRewardUnsupportedError);
+  });
+
+  it('throws TwitchRewardAuthError on a 401 response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(401, {}));
+    await expect(createCustomReward('bc1', 'user-token', input)).rejects.toBeInstanceOf(TwitchRewardAuthError);
+  });
+
+  it('throws a generic error for other non-OK statuses', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
+    await expect(createCustomReward('bc1', 'user-token', input)).rejects.toThrow('createCustomReward failed: 500');
+  });
+});
+
+describe('updateCustomReward', () => {
+  it('sends a PATCH with broadcaster_id and id query params and the partial input as the body, returning the updated reward', async () => {
+    const updated = { id: 'rwd1', title: 'New Title' };
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: [updated] }));
+
+    const result = await updateCustomReward('bc1', 'rwd1', 'user-token', { title: 'New Title' });
+
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(String(url)).toContain('broadcaster_id=bc1');
+    expect(String(url)).toContain('id=rwd1');
+    expect(init?.method).toBe('PATCH');
+    expect(init?.body).toBe(JSON.stringify({ title: 'New Title' }));
+    expect(result).toEqual(updated);
+  });
+
+  it('throws TwitchRewardUnsupportedError on a 403 response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(403, {}));
+    await expect(updateCustomReward('bc1', 'rwd1', 'user-token', { title: 'x' })).rejects.toBeInstanceOf(TwitchRewardUnsupportedError);
+  });
+
+  it('throws TwitchRewardAuthError on a 401 response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(401, {}));
+    await expect(updateCustomReward('bc1', 'rwd1', 'user-token', { title: 'x' })).rejects.toBeInstanceOf(TwitchRewardAuthError);
+  });
+
+  it('throws a generic error for other non-OK statuses', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
+    await expect(updateCustomReward('bc1', 'rwd1', 'user-token', { title: 'x' })).rejects.toThrow('updateCustomReward failed: 500');
+  });
+});
+
+describe('deleteCustomReward', () => {
+  it('sends a DELETE with broadcaster_id and id query params', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(204, {}));
+    await deleteCustomReward('bc1', 'rwd1', 'user-token');
+
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(String(url)).toContain('broadcaster_id=bc1');
+    expect(String(url)).toContain('id=rwd1');
+    expect(init?.method).toBe('DELETE');
+  });
+
+  it('throws TwitchRewardUnsupportedError on a 403 response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(403, {}));
+    await expect(deleteCustomReward('bc1', 'rwd1', 'user-token')).rejects.toBeInstanceOf(TwitchRewardUnsupportedError);
+  });
+
+  it('throws TwitchRewardAuthError on a 401 response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(401, {}));
+    await expect(deleteCustomReward('bc1', 'rwd1', 'user-token')).rejects.toBeInstanceOf(TwitchRewardAuthError);
+  });
+
+  it('throws a generic error for other non-OK statuses', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
+    await expect(deleteCustomReward('bc1', 'rwd1', 'user-token')).rejects.toThrow('deleteCustomReward failed: 500');
   });
 });
