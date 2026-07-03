@@ -169,10 +169,22 @@ export async function getChannelInfo(broadcasterIds: string[]): Promise<TwitchCh
   return results;
 }
 
-/** An optionally-enabled numeric limit on a custom reward (max redemptions, cooldown, etc). */
-export interface TwitchCustomRewardLimit {
+/** A custom reward's per-stream redemption limit, as returned by Twitch (`max_per_stream_setting`). */
+export interface TwitchMaxPerStreamSetting {
   is_enabled: boolean;
-  value: number;
+  max_per_stream: number;
+}
+
+/** A custom reward's per-user-per-stream redemption limit, as returned by Twitch (`max_per_user_per_stream_setting`). */
+export interface TwitchMaxPerUserPerStreamSetting {
+  is_enabled: boolean;
+  max_per_user_per_stream: number;
+}
+
+/** A custom reward's global cooldown, as returned by Twitch (`global_cooldown_setting`). */
+export interface TwitchGlobalCooldownSetting {
+  is_enabled: boolean;
+  global_cooldown_seconds: number;
 }
 
 export interface TwitchCustomReward {
@@ -186,9 +198,9 @@ export interface TwitchCustomReward {
   is_paused: boolean;
   is_in_stock: boolean;
   should_redemptions_skip_request_queue: boolean;
-  max_per_stream_setting: TwitchCustomRewardLimit;
-  max_per_user_per_stream_setting: TwitchCustomRewardLimit;
-  global_cooldown_setting: TwitchCustomRewardLimit;
+  max_per_stream_setting: TwitchMaxPerStreamSetting;
+  max_per_user_per_stream_setting: TwitchMaxPerUserPerStreamSetting;
+  global_cooldown_setting: TwitchGlobalCooldownSetting;
 }
 
 export async function getCustomRewards(broadcasterId: string, userToken: string): Promise<TwitchCustomReward[]> {
