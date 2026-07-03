@@ -92,10 +92,10 @@ async function main(): Promise<void> {
 
   try {
     await initGlobalPricingSettings();
-    startRewardPricingScheduler();
   } catch (err) {
-    log.error('RewardPricingScheduler startup error:', err);
+    log.error('initGlobalPricingSettings startup error:', err);
   }
+  startRewardPricingScheduler();
 
   startTwitchMonitor().catch((err) => log.error('TwitchMonitor startup error:', err));
   startEventSub();

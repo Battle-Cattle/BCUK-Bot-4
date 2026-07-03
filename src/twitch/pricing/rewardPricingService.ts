@@ -39,7 +39,8 @@ async function syncRewardPrice(streamerId: number, twitchRewardId: string, apply
   if (!row || !row.enabled) return;
 
   const settings = await getGlobalPricingSettings();
-  const elapsedSeconds = Math.max(0, (Date.now() - Number(row.demand_updated_at)) / 1000);
+  const now = Date.now();
+  const elapsedSeconds = Math.max(0, (now - Number(row.demand_updated_at)) / 1000);
   const newDemand = applyIncrement
     ? applyRedemption(row.demand, elapsedSeconds, row.cooldown_seconds, settings.decay_half_life_periods, settings.redemption_increment)
     : decayDemand(row.demand, elapsedSeconds, row.cooldown_seconds, settings.decay_half_life_periods);
@@ -72,7 +73,7 @@ async function syncRewardPrice(streamerId: number, twitchRewardId: string, apply
     }
   }
 
-  await recordPricingUpdate(streamerId, twitchRewardId, newDemand, Date.now(), lastPushedCost);
+  await recordPricingUpdate(streamerId, twitchRewardId, newDemand, now, lastPushedCost);
 }
 
 /**

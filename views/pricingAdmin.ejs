@@ -132,12 +132,12 @@
               </label>
               <div>
                 <label class="hint hint-compact" for="base-cost-<%= r.rewardId %>">Base cost</label>
-                <input id="base-cost-<%= r.rewardId %>" class="input" type="number" min="1" name="base_cost" style="width:7rem;"
+                <input id="base-cost-<%= r.rewardId %>" class="input" type="number" min="1" step="1" name="base_cost" style="width:7rem;"
                   value="<%= r.config ? r.config.base_cost : r.twitchReward.cost %>" required>
               </div>
               <div>
                 <label class="hint hint-compact" for="cooldown-<%= r.rewardId %>">Cooldown (s)</label>
-                <input id="cooldown-<%= r.rewardId %>" class="input" type="number" min="1" name="cooldown_seconds" style="width:7rem;"
+                <input id="cooldown-<%= r.rewardId %>" class="input" type="number" min="1" step="1" name="cooldown_seconds" style="width:7rem;"
                   value="<%= r.config ? r.config.cooldown_seconds : 60 %>" required>
               </div>
               <div>

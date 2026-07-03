@@ -173,7 +173,7 @@ describe('startup — reward pricing scheduler', () => {
     expect(initCallOrder).toBeLessThan(schedulerCallOrder);
   });
 
-  it('logs an error and continues starting up when initGlobalPricingSettings rejects', async () => {
+  it('still starts the scheduler and continues startup when initGlobalPricingSettings rejects', async () => {
     const db = await import('./db.js');
     const { startRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
     const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
@@ -181,8 +181,9 @@ describe('startup — reward pricing scheduler', () => {
 
     await runMain();
 
-    expect(vi.mocked(startRewardPricingScheduler)).not.toHaveBeenCalled();
-    // Startup continues past the failed try/catch to the rest of main() instead of aborting.
+    // A transient settings-bootstrap failure shouldn't disable decay for the process lifetime —
+    // the pricing read path falls back to defaults, so the scheduler starts regardless.
+    expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
     expect(exitSpy).not.toHaveBeenCalled();
   });
