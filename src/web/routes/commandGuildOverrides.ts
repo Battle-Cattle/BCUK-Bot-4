@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { upsertOverride, removeOverride } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod, requireGuildContext } from '../middleware';
-import { parsePositiveIntId, trimField } from './shared';
+import { logAndRedirectError, parsePositiveIntId, trimField } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -35,8 +35,7 @@ router.post('/commands/guild-override', requireGuildContext, requireMod, csrfPro
     }
     res.redirect('/commands');
   } catch (err) {
-    log.error('Guild command override upsert failed:', err);
-    res.redirect('/commands?error=override_failed');
+    logAndRedirectError(res, log, 'Guild command override upsert failed:', err, '/commands', 'override_failed');
   }
 });
 
@@ -54,8 +53,7 @@ router.post('/commands/guild-override/reset', requireGuildContext, requireMod, c
     await removeOverride(guildId, commandId);
     res.redirect('/commands');
   } catch (err) {
-    log.error('Guild command override reset failed:', err);
-    res.redirect('/commands?error=override_reset_failed');
+    logAndRedirectError(res, log, 'Guild command override reset failed:', err, '/commands', 'override_reset_failed');
   }
 });
 

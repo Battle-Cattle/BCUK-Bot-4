@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { updateSfxFile, deleteSfxFile } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
-import { parsePositiveIntId } from './shared';
+import { logAndRedirectError, parsePositiveIntId } from './shared';
 import { removeSfxFiles, parseWeight } from './sfxMutationsShared';
 
 const log = createLogger('Web');
@@ -29,8 +29,7 @@ router.post('/sfx/file/update', requireMod, csrfProtection, async (req, res) => 
     const updated = await updateSfxFile(fileId, weight, hidden);
     if (!updated) return res.redirect('/sfx?error=invalid_id');
   } catch (err) {
-    log.error('Update SFX file error:', err);
-    return res.redirect('/sfx?error=update_failed');
+    return logAndRedirectError(res, log, 'Update SFX file error:', err, '/sfx', 'update_failed');
   }
 
   res.redirect('/sfx?success=file_updated');
@@ -52,8 +51,7 @@ router.post('/sfx/file/remove', requireMod, csrfProtection, async (req, res) => 
     if (file === null) return res.redirect('/sfx?error=invalid_id');
     await removeSfxFiles([file]);
   } catch (err) {
-    log.error('Remove SFX file error:', err);
-    return res.redirect('/sfx?error=remove_failed');
+    return logAndRedirectError(res, log, 'Remove SFX file error:', err, '/sfx', 'remove_failed');
   }
 
   res.redirect('/sfx?success=file_removed');

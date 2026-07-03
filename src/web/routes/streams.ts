@@ -17,7 +17,7 @@ import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { restartTwitchMonitor, getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db';
-import { parsePositiveIntId, filterQueryParam, normalizeDiscordId, renderView, renderError } from './shared';
+import { logAndRedirectError, parsePositiveIntId, filterQueryParam, normalizeDiscordId, renderView, renderError } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -141,8 +141,7 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
     });
     triggerRestart();
   } catch (err) {
-    log.error('Add stream group error:', err);
-    return res.redirect('/admin/streams?error=add_group_failed');
+    return logAndRedirectError(res, log, 'Add stream group error:', err, '/admin/streams', 'add_group_failed');
   }
   res.redirect('/admin/streams');
 });
@@ -181,8 +180,7 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
     });
     triggerRestart();
   } catch (err) {
-    log.error('Update stream group error:', err);
-    return res.redirect('/admin/streams?error=update_group_failed');
+    return logAndRedirectError(res, log, 'Update stream group error:', err, '/admin/streams', 'update_group_failed');
   }
   res.redirect('/admin/streams');
 });
@@ -207,8 +205,7 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
     await removeStreamGroup(parsedGroupId);
     triggerRestart();
   } catch (err) {
-    log.error('Remove stream group error:', err);
-    return res.redirect('/admin/streams?error=remove_group_failed');
+    return logAndRedirectError(res, log, 'Remove stream group error:', err, '/admin/streams', 'remove_group_failed');
   }
   res.redirect('/admin/streams');
 });
@@ -240,8 +237,7 @@ router.post('/streams/streamers/add', requireManager, csrfProtection, async (req
     await addStreamer(discordId, parsedGroupId);
     triggerRestart();
   } catch (err) {
-    log.error('Add streamer error:', err);
-    return res.redirect('/admin/streams?error=add_streamer_failed');
+    return logAndRedirectError(res, log, 'Add streamer error:', err, '/admin/streams', 'add_streamer_failed');
   }
   res.redirect('/admin/streams');
 });
@@ -264,8 +260,7 @@ router.post('/streams/streamers/remove', requireManager, csrfProtection, async (
     await removeStreamer(parsedStreamerId);
     triggerRestart();
   } catch (err) {
-    log.error('Remove streamer error:', err);
-    return res.redirect('/admin/streams?error=remove_streamer_failed');
+    return logAndRedirectError(res, log, 'Remove streamer error:', err, '/admin/streams', 'remove_streamer_failed');
   }
   res.redirect('/admin/streams');
 });

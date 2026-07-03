@@ -16,6 +16,7 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireAuth, requireMod, requireManager } from '../middleware';
 import {
+  logAndRedirectError,
   normalizeRequiredText,
   normalizeSingleTokenRequiredText,
   parsePositiveIntId,
@@ -150,8 +151,7 @@ router.post('/counters/add', requireMod, csrfProtection, async (req, res) => {
     );
   } catch (err) {
     if (handleCounterWriteError(err, res)) return;
-    log.error('Add counter error:', err);
-    return res.redirect('/counters?error=add_failed');
+    return logAndRedirectError(res, log, 'Add counter error:', err, '/counters', 'add_failed');
   }
 
   res.redirect('/counters');
@@ -203,8 +203,7 @@ router.post('/counters/update', requireMod, csrfProtection, async (req, res) => 
       return res.redirect('/counters?error=counter_not_found');
     }
     if (handleCounterWriteError(err, res)) return;
-    log.error('Update counter error:', err);
-    return res.redirect('/counters?error=update_failed');
+    return logAndRedirectError(res, log, 'Update counter error:', err, '/counters', 'update_failed');
   }
 
   res.redirect('/counters');
@@ -232,8 +231,7 @@ router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => 
       return res.redirect('/counters?error=counter_not_found');
     }
 
-    log.error('Remove counter error:', err);
-    return res.redirect('/counters?error=remove_failed');
+    return logAndRedirectError(res, log, 'Remove counter error:', err, '/counters', 'remove_failed');
   }
 
   res.redirect('/counters');
@@ -261,8 +259,7 @@ router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, r
       return res.redirect('/counters?error=counter_not_found');
     }
 
-    log.error('Reset counter error:', err);
-    return res.redirect('/counters?error=reset_failed');
+    return logAndRedirectError(res, log, 'Reset counter error:', err, '/counters', 'reset_failed');
   }
 
   res.redirect('/counters?reset=1');

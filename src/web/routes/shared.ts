@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { Response } from 'express';
+import type { Logger } from 'winston';
 import type { SessionUser } from '../../types/express';
 
 const VIEWS_DIR = path.join(__dirname, '../../../views');
@@ -155,4 +156,27 @@ export function isLoopbackRedirectUri(redirectUri: string): boolean {
     return false;
   }
   return parsed.protocol === 'http:' && (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost');
+}
+
+/**
+ * Logs a caught error and redirects to `basePath` with `?error=<errorCode>`.
+ * Standardizes the generic `catch (err) { log.error(...); return res.redirect(...); }` tail
+ * repeated across POST route handlers.
+ * @param res - Express response object.
+ * @param log - Logger to record the error on (module-scoped `createLogger` instance).
+ * @param logLabel - Message prefix passed to `log.error`, matching the handler's existing wording.
+ * @param err - The caught error value, forwarded to `log.error` unchanged.
+ * @param basePath - Path to redirect to, without query string (e.g. `/sfx`).
+ * @param errorCode - Value for the `error` query parameter (e.g. `add_failed`).
+ */
+export function logAndRedirectError(
+  res: Response,
+  log: Logger,
+  logLabel: string,
+  err: unknown,
+  basePath: string,
+  errorCode: string,
+): void {
+  log.error(logLabel, err);
+  res.redirect(`${basePath}?error=${errorCode}`);
 }

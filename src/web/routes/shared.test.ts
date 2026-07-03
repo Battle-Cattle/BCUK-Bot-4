@@ -14,6 +14,7 @@ import {
   renderError,
   renderView,
   filterQueryParam,
+  logAndRedirectError,
 } from './shared';
 
 describe('parsePositiveIntId', () => {
@@ -279,5 +280,40 @@ describe('filterQueryParam', () => {
 
   it('returns null when the allowed set is empty', () => {
     expect(filterQueryParam('known_error', new Set())).toBeNull();
+  });
+});
+
+describe('logAndRedirectError', () => {
+  function mockRes() {
+    const redirect = vi.fn();
+    return { res: { redirect } as unknown as Response, redirect };
+  }
+
+  function mockLog() {
+    const error = vi.fn();
+    return { log: { error } as unknown as import('winston').Logger, error };
+  }
+
+  it('logs the error with the given label and forwards err unchanged', () => {
+    const { res } = mockRes();
+    const { log, error } = mockLog();
+    const err = new Error('boom');
+    logAndRedirectError(res, log, 'Add SFX category error:', err, '/sfx', 'add_failed');
+    expect(error).toHaveBeenCalledWith('Add SFX category error:', err);
+  });
+
+  it('redirects to basePath with the error query param', () => {
+    const { res, redirect } = mockRes();
+    const { log } = mockLog();
+    logAndRedirectError(res, log, 'Rename SFX category error:', new Error('x'), '/sfx', 'update_failed');
+    expect(redirect).toHaveBeenCalledWith('/sfx?error=update_failed');
+  });
+
+  it('works with a non-Error thrown value', () => {
+    const { res, redirect } = mockRes();
+    const { log, error } = mockLog();
+    logAndRedirectError(res, log, 'Remove error:', 'not an error object', '/counters', 'remove_failed');
+    expect(error).toHaveBeenCalledWith('Remove error:', 'not an error object');
+    expect(redirect).toHaveBeenCalledWith('/counters?error=remove_failed');
   });
 });

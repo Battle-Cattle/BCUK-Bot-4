@@ -10,7 +10,7 @@ import { requireAuth } from '../middleware';
 import type { DbStreamerEventSub } from '../../db';
 import { addVideo, deleteVideo } from '../../db';
 import { OVERLAY_FOLDER, OVERLAY_MAX_FILE_MB } from '../../shared/config';
-import { parsePositiveIntId } from './shared';
+import { logAndRedirectError, parsePositiveIntId } from './shared';
 import { safeResolve } from '../../shared/pathUtils';
 import { requireStreamer } from './overlayAdminShared';
 
@@ -127,8 +127,7 @@ router.post('/settings/videos/upload', requireAuth, csrfProtection, uploadVideo,
     const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
     if (code === 'invalid_path') return res.redirect('/overlay/settings?error=invalid_path');
     if (code === 'invalid_file') return res.redirect('/overlay/settings?error=invalid_file');
-    log.error('Overlay video upload error:', err);
-    res.redirect('/overlay/settings?error=upload_failed');
+    logAndRedirectError(res, log, 'Overlay video upload error:', err, '/overlay/settings', 'upload_failed');
   }
 });
 
@@ -157,7 +156,6 @@ router.post('/settings/videos/:id/delete', requireAuth, csrfProtection, async (r
 
     res.redirect('/overlay/settings?success=video_deleted');
   } catch (err) {
-    log.error('Overlay video delete error:', err);
-    res.redirect('/overlay/settings?error=delete_failed');
+    logAndRedirectError(res, log, 'Overlay video delete error:', err, '/overlay/settings', 'delete_failed');
   }
 });
