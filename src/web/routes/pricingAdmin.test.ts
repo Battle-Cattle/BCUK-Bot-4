@@ -97,6 +97,15 @@ describe('GET /', () => {
     expect(res.body.rewards[0].previewPrice).toBe(1000);
   });
 
+  it('renders with an empty reward list when getCustomRewards throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(getCustomRewards).mockRejectedValue(new Error('Twitch down'));
+
+    const res = await supertest(buildApp()).get('/');
+    expect(res.status).toBe(200);
+    expect(res.body.rewards).toEqual([]);
+  });
+
   it('leaves config/previewPrice null for a reward with no pricing config yet', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true }]);

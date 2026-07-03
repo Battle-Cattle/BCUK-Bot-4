@@ -128,6 +128,16 @@ describe('POST /settings/rewards', () => {
       .send({ twitch_reward_id: VALID_REWARD_ID, base_cost: '200', cooldown_seconds: '300', max_multiplier: '4', curve: '1.5' });
     expect(res.headers.location).toBe('/pricing?success=pricing_saved');
   });
+
+  it('redirects with save_failed when upsertPricingConfig throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(upsertPricingConfig).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp())
+      .post('/settings/rewards')
+      .type('form')
+      .send({ twitch_reward_id: VALID_REWARD_ID, base_cost: '200', cooldown_seconds: '300', max_multiplier: '4', curve: '1.5' });
+    expect(res.headers.location).toBe('/pricing?error=save_failed');
+  });
 });
 
 describe('POST /settings/rewards/:id/delete', () => {
@@ -142,6 +152,13 @@ describe('POST /settings/rewards/:id/delete', () => {
     const res = await supertest(buildApp()).post('/settings/rewards/5/delete');
     expect(res.headers.location).toBe('/pricing?success=pricing_deleted');
     expect(deletePricingConfig).toHaveBeenCalledWith(5, MOCK_STREAMER.id);
+  });
+
+  it('redirects with delete_failed when deletePricingConfig throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(deletePricingConfig).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp()).post('/settings/rewards/5/delete');
+    expect(res.headers.location).toBe('/pricing?error=delete_failed');
   });
 });
 
@@ -178,5 +195,14 @@ describe('POST /settings/global', () => {
       .send({ decay_half_life_periods: '4', redemption_increment: '0.2' });
     expect(res.headers.location).toBe('/pricing?success=global_settings_saved');
     expect(saveGlobalPricingSettings).toHaveBeenCalledWith({ decay_half_life_periods: 4, redemption_increment: 0.2 });
+  });
+
+  it('redirects with save_failed when saveGlobalPricingSettings throws', async () => {
+    vi.mocked(saveGlobalPricingSettings).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp(OWNER))
+      .post('/settings/global')
+      .type('form')
+      .send({ decay_half_life_periods: '4', redemption_increment: '0.2' });
+    expect(res.headers.location).toBe('/pricing?error=save_failed');
   });
 });
