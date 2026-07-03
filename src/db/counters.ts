@@ -128,6 +128,16 @@ async function getExistingArchiveColumns(): Promise<string[]> {
     .filter((columnName) => knownColumns.has(columnName));
 }
 
+/**
+ * Fetches a counter along with its archived yearly-reset history (the
+ * `value<year>` columns populated by `archiveAndResetYearlyCounters`). Only reads
+ * columns that actually exist on the `counter` table right now (see
+ * `getExistingArchiveColumns`), since not every year in `ARCHIVE_YEAR_COLUMNS` is
+ * guaranteed to be a physical column yet.
+ * @param id - The counter's numeric id.
+ * @returns The counter and its archived history (years with a non-null value,
+ *   newest first), or `null` if no counter exists with the given id.
+ */
 export async function getCounterHistory(
   id: number,
 ): Promise<{ counter: DbCounter; history: CounterHistoryEntry[] } | null> {
