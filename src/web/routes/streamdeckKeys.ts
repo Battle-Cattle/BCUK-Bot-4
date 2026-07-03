@@ -12,7 +12,7 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
 import { WEB_PORT } from '../../shared/config';
-import { normalizeDiscordId, renderError, filterQueryParam, renderView } from './shared';
+import { logAndRedirectError, normalizeDiscordId, renderError, filterQueryParam, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -57,8 +57,7 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
       webPort: WEB_PORT,
     });
   } catch (err) {
-    log.error('Streamdeck key request error:', err);
-    res.redirect('/streamdeck-key?error=request_failed');
+    logAndRedirectError({ res, log, logLabel: 'Streamdeck key request error:', err, basePath: '/streamdeck-key', errorCode: 'request_failed' });
   }
 });
 
@@ -68,8 +67,7 @@ router.post('/streamdeck-key/revoke', csrfProtection, async (req, res) => {
     await revokeApiKey(req.session.user!.discordId);
     res.redirect('/streamdeck-key');
   } catch (err) {
-    log.error('Streamdeck key revoke error:', err);
-    res.redirect('/streamdeck-key?error=revoke_failed');
+    logAndRedirectError({ res, log, logLabel: 'Streamdeck key revoke error:', err, basePath: '/streamdeck-key', errorCode: 'revoke_failed' });
   }
 });
 
@@ -102,8 +100,7 @@ router.post('/admin/streamdeck-keys/approve', requireAdmin, csrfProtection, asyn
     await approveApiKey(validId, req.session.user!.discordId);
     res.redirect('/admin/streamdeck-keys');
   } catch (err) {
-    log.error('Streamdeck key approve error:', err);
-    res.redirect('/admin/streamdeck-keys?error=approve_failed');
+    logAndRedirectError({ res, log, logLabel: 'Streamdeck key approve error:', err, basePath: '/admin/streamdeck-keys', errorCode: 'approve_failed' });
   }
 });
 
@@ -115,8 +112,7 @@ router.post('/admin/streamdeck-keys/deny', requireAdmin, csrfProtection, async (
     await denyApiKey(validId);
     res.redirect('/admin/streamdeck-keys');
   } catch (err) {
-    log.error('Streamdeck key deny error:', err);
-    res.redirect('/admin/streamdeck-keys?error=deny_failed');
+    logAndRedirectError({ res, log, logLabel: 'Streamdeck key deny error:', err, basePath: '/admin/streamdeck-keys', errorCode: 'deny_failed' });
   }
 });
 
@@ -128,8 +124,7 @@ router.post('/admin/streamdeck-keys/revoke', requireAdmin, csrfProtection, async
     await revokeApiKey(validId);
     res.redirect('/admin/streamdeck-keys');
   } catch (err) {
-    log.error('Streamdeck key admin revoke error:', err);
-    res.redirect('/admin/streamdeck-keys?error=revoke_failed');
+    logAndRedirectError({ res, log, logLabel: 'Streamdeck key admin revoke error:', err, basePath: '/admin/streamdeck-keys', errorCode: 'revoke_failed' });
   }
 });
 
