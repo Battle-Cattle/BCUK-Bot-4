@@ -181,6 +181,44 @@ export async function getCustomRewards(broadcasterId: string, userToken: string)
   return data.data;
 }
 
+/**
+ * Thrown when Twitch returns 403 for a reward cost update — Twitch only allows the app that
+ * created a reward to manage it, so this is permanent for a given reward, not a transient
+ * failure worth retrying.
+ */
+export class TwitchRewardUnsupportedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TwitchRewardUnsupportedError';
+  }
+}
+
+/**
+ * Updates a custom reward's cost on Twitch via Helix. Requires a broadcaster user token
+ * (app tokens cannot manage custom rewards). Not wrapped in fetchHelixWithRetry — the
+ * caller (dynamic pricing sync) already tolerates a failed push by retrying on the next
+ * redemption/decay tick, so retrying here would just duplicate that behaviour.
+ *
+ * @param broadcasterId - Twitch user ID of the reward's broadcaster.
+ * @param rewardId - Twitch reward UUID to update.
+ * @param cost - The new channel-point cost.
+ * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
+ * @throws {TwitchRewardUnsupportedError} When Twitch returns 403 (reward created by a
+ *   different client_id, or channel points aren't available for the broadcaster).
+ */
+export async function updateRewardCost(broadcasterId: string, rewardId: string, cost: number, userToken: string): Promise<void> {
+  const res = await twitchFetch(
+    `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(broadcasterId)}&id=${encodeURIComponent(rewardId)}`,
+    {
+      method: 'PATCH',
+      headers: { ...authHeaders(userToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cost }),
+    },
+  );
+  if (res.status === 403) throw new TwitchRewardUnsupportedError(`[TwitchAPI] updateRewardCost: reward ${rewardId} cannot be managed by this app (403)`);
+  if (!res.ok) throw new Error(`[TwitchAPI] updateRewardCost failed: ${res.status}`);
+}
+
 export interface SharedChatParticipant {
   broadcaster_id: string;
   broadcaster_login: string;

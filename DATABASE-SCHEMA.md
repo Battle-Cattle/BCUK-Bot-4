@@ -190,6 +190,39 @@ Per-streamer EventSub notification message configuration. Applied once the strea
 
 Created by `migrations/twitch_eventsub.sql`. `raid_shoutout_enabled` added by `migrations/raid_shoutout.sql`.
 
+## `reward_pricing`
+
+Dynamic Channel Point Pricing: per-reward config and demand state. Independent of `overlay_reward` — a reward can have dynamic pricing without overlay videos and vice versa. Optional/opt-in per reward via `enabled`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK, auto-increment | |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `twitch_reward_id` | `VARCHAR(255)` | Twitch reward UUID; unique per `(streamer_id, twitch_reward_id)` |
+| `enabled` | `TINYINT(1)` | Whether dynamic pricing is active for this reward |
+| `base_cost` | `INT` | Minimum price |
+| `cooldown_seconds` | `INT` | Used to normalize demand decay/increment across rewards |
+| `max_multiplier` | `DECIMAL(6,3)` | Max price = `base_cost * (1 + max_multiplier)` |
+| `curve` | `DECIMAL(5,3)` | Exponent controlling how aggressively price rises with demand |
+| `demand` | `DECIMAL(9,6)` | Current demand, in `[0,1]` |
+| `demand_updated_at` | `BIGINT` | Epoch ms the `demand` value was last computed as of |
+| `last_pushed_cost` | `INT` NULL | Last cost actually pushed to Twitch; used to skip redundant Helix calls |
+| `twitch_unsupported` | `TINYINT(1)` | Set (and `enabled` forced to 0) when Twitch returns 403 — the reward was created outside this app and can never be managed by it |
+
+Created by `migrations/reward_pricing.sql`.
+
+## `pricing_global_settings`
+
+Single global row (`id` pinned to 1) — bot-wide decay/increment settings shared by every `reward_pricing` row.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `TINYINT` PK | Always `1` (enforced by a CHECK constraint) |
+| `decay_half_life_periods` | `DECIMAL(8,3)` | Cooldown-periods of inactivity for demand to halve |
+| `redemption_increment` | `DECIMAL(6,4)` | Flat demand increase applied per redemption |
+
+Created by `migrations/reward_pricing.sql`.
+
 ## `custom_command`
 
 Stores custom text commands managed through the admin panel. This is a **global catalog** shared across all guilds (no `guild_id`); per-guild deviations (disable / output override) live in `guild_command_override`. On Discord, every catalog command is enabled by default in every guild.

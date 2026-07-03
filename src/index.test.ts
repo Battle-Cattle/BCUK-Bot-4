@@ -12,6 +12,7 @@ vi.mock('./db', () => ({
     }),
   })),
   closePool: vi.fn().mockResolvedValue(undefined),
+  initGlobalPricingSettings: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./discord/discordBot', () => ({
   startDiscordBot: vi.fn(),
@@ -61,6 +62,10 @@ vi.mock('./commands/counterScheduler', () => ({
   startCounterScheduler: vi.fn(),
   stopCounterScheduler: vi.fn(),
 }));
+vi.mock('./twitch/pricing/rewardPricingScheduler', () => ({
+  startRewardPricingScheduler: vi.fn(),
+  stopRewardPricingScheduler: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock('./shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
@@ -73,6 +78,11 @@ beforeEach(() => {
   // module cache but does not reset call counts. clearAllMocks() resets counts to 0
   // so failure-path assertions on mocks like startDiscordBot start from a clean slate.
   vi.clearAllMocks();
+  // Each import('./index.js') registers fresh SIGINT/SIGTERM listeners on the real
+  // process object; resetModules doesn't remove the old ones. Clear them so a test
+  // that emits a signal only triggers its own run's shutdown() closure.
+  process.removeAllListeners('SIGINT');
+  process.removeAllListeners('SIGTERM');
   // Throw on the first call so main() stops executing after a catch block calls
   // process.exit(1). Revert to a no-op on subsequent calls so the outer
   // main().catch() path — which also calls process.exit(1) after the inner throw
@@ -85,6 +95,8 @@ beforeEach(() => {
 
 afterEach(() => {
   exitSpy.mockRestore();
+  process.removeAllListeners('SIGINT');
+  process.removeAllListeners('SIGTERM');
 });
 
 /** Imports index.ts (which fires main() immediately) and waits for it to settle. */
@@ -141,5 +153,50 @@ describe('startup — guild registry preload', () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(vi.mocked(startDiscordBot)).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Reward pricing scheduler startup/shutdown ────────────────────────────────
+
+describe('startup — reward pricing scheduler', () => {
+  it('starts the scheduler after initializing global pricing settings', async () => {
+    const db = await import('./db.js');
+    const { startRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
+
+    await runMain();
+
+    expect(vi.mocked(db.initGlobalPricingSettings)).toHaveBeenCalledOnce();
+    expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
+
+    const [initCallOrder] = vi.mocked(db.initGlobalPricingSettings).mock.invocationCallOrder;
+    const [schedulerCallOrder] = vi.mocked(startRewardPricingScheduler).mock.invocationCallOrder;
+    expect(initCallOrder).toBeLessThan(schedulerCallOrder);
+  });
+
+  it('still starts the scheduler and continues startup when initGlobalPricingSettings rejects', async () => {
+    const db = await import('./db.js');
+    const { startRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
+    const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
+    vi.mocked(db.initGlobalPricingSettings).mockRejectedValueOnce(new Error('db down'));
+
+    await runMain();
+
+    // A transient settings-bootstrap failure shouldn't disable decay for the process lifetime —
+    // the pricing read path falls back to defaults, so the scheduler starts regardless.
+    expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
+    expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('shutdown', () => {
+  it('stops the reward pricing scheduler on SIGINT', async () => {
+    const { stopRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
+
+    await runMain();
+    process.emit('SIGINT');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(stopRewardPricingScheduler)).toHaveBeenCalledOnce();
   });
 });

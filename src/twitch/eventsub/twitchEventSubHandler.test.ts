@@ -6,6 +6,7 @@ vi.mock('../../commands/shoutoutHandler', () => ({ buildShoutoutMessage: vi.fn()
 vi.mock('../../commands/commandMonitorStore', () => ({ recordCommandTestEntry: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 vi.mock('../monitor/twitchMonitor', () => ({ triggerImmediateLiveCheck: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../pricing/rewardPricingService', () => ({ applyRedemptionPricing: vi.fn().mockResolvedValue(undefined) }));
 
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
@@ -17,6 +18,7 @@ import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
+import { applyRedemptionPricing } from '../pricing/rewardPricingService';
 
 const mockSend = vi.fn<(channel: string, message: string) => Promise<void>>();
 registerEventSubTwitchRuntime({ send: mockSend });
@@ -383,6 +385,25 @@ describe('handleRedemption', () => {
     await handleRedemption('streamer', event, makeConfig(), streamerId);
 
     expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+    expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
+  });
+
+  it('applies dynamic pricing for the redeemed reward', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await handleRedemption('streamer', event, makeConfig(), streamerId);
+
+    expect(applyRedemptionPricing).toHaveBeenCalledWith(streamerId, 'reward-abc');
+  });
+
+  it('still triggers the overlay lookup when applyRedemptionPricing throws', async () => {
+    vi.mocked(applyRedemptionPricing).mockRejectedValueOnce(new Error('pricing failed'));
+    const videos = [{ file: 'clip1.mp4', weight: 1 }] as any[];
+    vi.mocked(getVideosForReward).mockResolvedValue(videos);
+    vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
+
+    await handleRedemption('streamer', event, makeConfig(), streamerId);
+
     expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
   });
 });

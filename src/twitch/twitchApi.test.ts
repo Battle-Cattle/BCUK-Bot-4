@@ -6,7 +6,10 @@ vi.mock('../shared/config', () => ({
   TWITCH_CLIENT_SECRET: 'test-client-secret',
 }));
 
-import { getUsers, getStreams, getChannelInfo, getSharedChatSession, getAppToken } from './twitchApi';
+import {
+  getUsers, getStreams, getChannelInfo, getSharedChatSession, getAppToken,
+  updateRewardCost, TwitchRewardUnsupportedError,
+} from './twitchApi';
 
 const TOKEN_RESPONSE = { access_token: 'test-token', expires_in: 3600 };
 
@@ -149,5 +152,40 @@ describe('getSharedChatSession', () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, TOKEN_RESPONSE));
     await getAppToken();
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('updateRewardCost', () => {
+  it('sends a PATCH with broadcaster_id and id query params and the new cost in the body', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, {}));
+    await updateRewardCost('bc1', 'rwd1', 500, 'user-token');
+
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(String(url)).toContain('broadcaster_id=bc1');
+    expect(String(url)).toContain('id=rwd1');
+    expect(init?.method).toBe('PATCH');
+    expect(init?.body).toBe(JSON.stringify({ cost: 500 }));
+    expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+  });
+
+  it('throws with the response status on a non-OK response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(400, {}));
+    await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.toThrow('updateRewardCost failed: 400');
+  });
+
+  it('does not retry on failure (single fetch call)', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
+    await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.toThrow();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws TwitchRewardUnsupportedError specifically on a 403 response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(403, {}));
+    await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.toBeInstanceOf(TwitchRewardUnsupportedError);
+  });
+
+  it('does not throw TwitchRewardUnsupportedError for other non-OK statuses', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(400, {}));
+    await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.not.toBeInstanceOf(TwitchRewardUnsupportedError);
   });
 });

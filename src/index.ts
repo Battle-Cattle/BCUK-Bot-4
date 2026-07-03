@@ -1,5 +1,5 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
-import { getPool, closePool } from './db';
+import { getPool, closePool, initGlobalPricingSettings } from './db';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startDiscordBot, stopDiscordBot } from './discord/discordBot';
@@ -18,13 +18,19 @@ import { registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, register
 import { pushOverlayEvent } from './web/routes/overlaySource';
 import { pushCompanionEvent } from './web/routes/companionEvents';
 import { startCounterScheduler, stopCounterScheduler } from './commands/counterScheduler';
+import { startRewardPricingScheduler, stopRewardPricingScheduler } from './twitch/pricing/rewardPricingScheduler';
 import { createLogger } from './shared/logger';
 
 const log = createLogger('Bot');
 
+/**
+ * Gracefully stops schedulers and bot connections, closes the DB pool, and exits the process.
+ * @param signal - The name of the signal that triggered shutdown (e.g. `SIGINT`).
+ */
 async function shutdown(signal: string): Promise<void> {
   log.info(`${signal} received — disconnecting from voice and shutting down.`);
   stopCounterScheduler();
+  await stopRewardPricingScheduler();
   stopEventSub();
   await stopTwitchMonitor();
   stopTikTokBot();
@@ -83,6 +89,14 @@ async function main(): Promise<void> {
   await startTikTokBot();
   startWebPanel();
   startCounterScheduler();
+
+  try {
+    await initGlobalPricingSettings();
+  } catch (err) {
+    log.error('initGlobalPricingSettings startup error:', err);
+  }
+  startRewardPricingScheduler();
+
   startTwitchMonitor().catch((err) => log.error('TwitchMonitor startup error:', err));
   startEventSub();
 }
