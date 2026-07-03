@@ -6,7 +6,6 @@ vi.mock('../../db', () => {
   class ReservedCommandError extends Error {}
   return {
     getAllCounters: vi.fn().mockResolvedValue([]),
-    getCounterHistory: vi.fn().mockResolvedValue(null),
     addCounter: vi.fn().mockResolvedValue(undefined),
     updateCounter: vi.fn().mockResolvedValue(undefined),
     removeCounter: vi.fn().mockResolvedValue(undefined),
@@ -43,7 +42,6 @@ import supertest from 'supertest';
 import router from './counters';
 import {
   getAllCounters,
-  getCounterHistory,
   addCounter,
   updateCounter,
   removeCounter,
@@ -89,7 +87,6 @@ const VALID_UPDATE = {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getAllCounters).mockResolvedValue([]);
-  vi.mocked(getCounterHistory).mockResolvedValue(null);
   vi.mocked(addCounter).mockResolvedValue(undefined);
   vi.mocked(updateCounter).mockResolvedValue(undefined);
   vi.mocked(removeCounter).mockResolvedValue(undefined);
@@ -115,49 +112,6 @@ describe('GET /counters', () => {
     vi.mocked(getAllCounters).mockRejectedValue(new Error('db down'));
 
     const res = await supertest(buildApp()).get('/counters');
-
-    expect(res.status).toBe(500);
-    expect(res.text).toBe('rendered:error');
-  });
-});
-
-// --- GET /counters/:id/history ---
-
-describe('GET /counters/:id/history', () => {
-  it('renders the counterHistory view with the counter and history data', async () => {
-    vi.mocked(getCounterHistory).mockResolvedValue({
-      counter: { id: 1, trigger_command: '!hits', check_command: '!checkhits', message: 'm', increment_message: 'i', reset_yearly: false, current_value: 5 } as any,
-      history: [{ year: 2024, value: 20 }, { year: 2023, value: 10 }],
-    });
-
-    const res = await supertest(buildApp()).get('/counters/1/history');
-
-    expect(res.status).toBe(200);
-    expect(res.text).toBe('rendered:counterHistory');
-    expect(getCounterHistory).toHaveBeenCalledWith(1);
-  });
-
-  it('renders a 404 error page when id is non-numeric', async () => {
-    const res = await supertest(buildApp()).get('/counters/notanumber/history');
-
-    expect(res.status).toBe(404);
-    expect(res.text).toBe('rendered:error');
-    expect(getCounterHistory).not.toHaveBeenCalled();
-  });
-
-  it('renders a 404 error page when the counter does not exist', async () => {
-    vi.mocked(getCounterHistory).mockResolvedValue(null);
-
-    const res = await supertest(buildApp()).get('/counters/99/history');
-
-    expect(res.status).toBe(404);
-    expect(res.text).toBe('rendered:error');
-  });
-
-  it('renders a 500 error page when loading history fails', async () => {
-    vi.mocked(getCounterHistory).mockRejectedValue(new Error('db down'));
-
-    const res = await supertest(buildApp()).get('/counters/1/history');
 
     expect(res.status).toBe(500);
     expect(res.text).toBe('rendered:error');
