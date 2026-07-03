@@ -97,6 +97,7 @@
                 <td>
                   <div class="actions">
                     <button type="button" class="btn btn-sm btn-ghost btn-toggle-counter-edit" data-counter-id="<%= counter.id %>" aria-controls="counter-edit-<%= counter.id %>" aria-expanded="false">✏️ Edit</button>
+                    <a href="/counters/<%= counter.id %>/history" class="btn btn-sm btn-ghost">📜 History</a>
                     <form method="POST" action="/counters/reset/<%= counter.id %>" class="inline-form-sm js-confirm-reset-counter" data-counter-trigger="<%= counter.trigger_command %>">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <button type="submit" class="btn btn-sm">Reset</button>

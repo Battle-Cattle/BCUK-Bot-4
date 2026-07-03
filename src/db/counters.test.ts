@@ -37,12 +37,14 @@ const mockConnection = {
 import { getPool } from './pool';
 import {
   getAllCounters,
+  getCounterHistory,
   addCounter,
   updateCounter,
   removeCounter,
   resetCounterCurrentValue,
   incrementCounter,
   archiveAndResetYearlyCounters,
+  invalidateArchiveColumnsCache,
   CounterNotFoundError,
 } from './counters';
 import { runSerializedCommandWrite } from './commandLocks';
@@ -59,6 +61,7 @@ function makePool(rows: unknown[] = [], meta: unknown = {}) {
   };
   return {
     execute: vi.fn().mockResolvedValue([[...rows], meta]),
+    query: vi.fn().mockResolvedValue([[], meta]),
     getConnection: vi.fn().mockResolvedValue(conn),
     _conn: conn,
   };
@@ -66,6 +69,11 @@ function makePool(rows: unknown[] = [], meta: unknown = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The archive-columns cache is a module-level singleton (5-minute TTL in
+  // production) so it must be reset between tests, or a later test's
+  // getCounterHistory call would silently reuse an earlier test's cached columns
+  // instead of hitting its own `pool.query` mock.
+  invalidateArchiveColumnsCache();
 });
 
 // ─── CounterNotFoundError ────────────────────────────────────────────────────
@@ -104,6 +112,143 @@ describe('getAllCounters', () => {
     expect(result[0].reset_yearly).toBe(true);
     expect(result[1].reset_yearly).toBe(false);
     expect(result[0].current_value).toBe(5);
+  });
+});
+
+// ─── getCounterHistory ─────────────────────────────────────────────────────────
+
+describe('getCounterHistory', () => {
+  it('returns null when the counter does not exist', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([]) as any);
+    expect(await getCounterHistory(99)).toBeNull();
+  });
+
+  it('returns the counter and archived years newest-first, filtering out nulls', async () => {
+    const row = {
+      id: 1,
+      trigger_command: '!hits',
+      check_command: '!checkhits',
+      message: 'msg',
+      increment_message: 'inc',
+      reset_yearly: 1,
+      current_value: 5,
+      value2023: 10,
+      value2024: 20,
+      value2025: null,
+    };
+    const pool = makePool([row]);
+    pool.query.mockResolvedValue([
+      [{ COLUMN_NAME: 'value2023' }, { COLUMN_NAME: 'value2024' }, { COLUMN_NAME: 'value2025' }],
+      {},
+    ]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await getCounterHistory(1);
+    expect(result).not.toBeNull();
+    expect(result!.counter.id).toBe(1);
+    expect(result!.counter.reset_yearly).toBe(true);
+    expect(result!.history).toEqual([
+      { year: 2024, value: 20 },
+      { year: 2023, value: 10 },
+    ]);
+  });
+
+  it('returns an empty history array for a counter with no archived years', async () => {
+    const row = {
+      id: 2,
+      trigger_command: '!deaths',
+      check_command: '!checkdeaths',
+      message: 'msg',
+      increment_message: 'inc',
+      reset_yearly: 0,
+      current_value: 0,
+    };
+    vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
+    const result = await getCounterHistory(2);
+    expect(result).not.toBeNull();
+    expect(result!.history).toEqual([]);
+  });
+
+  it('only selects value<year> columns that actually exist on the table, ignoring the rest of the allowlist', async () => {
+    // Regression test: ARCHIVE_YEAR_COLUMNS spans 2020-2100 as an allowlist, but per
+    // DATABASE-SCHEMA.md the physical columns are added one year at a time — the schema
+    // may only have e.g. value2020..value2025. Querying the full allowlist blindly used
+    // to throw "Unknown column 'value2026' in 'field list'" in production.
+    const row = {
+      id: 3,
+      trigger_command: '!wins',
+      check_command: '!checkwins',
+      message: 'msg',
+      increment_message: 'inc',
+      reset_yearly: 1,
+      current_value: 1,
+      value2025: 7,
+    };
+    const pool = makePool([row]);
+    pool.query.mockResolvedValue([[{ COLUMN_NAME: 'value2025' }], {}]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    const result = await getCounterHistory(3);
+
+    expect(result!.history).toEqual([{ year: 2025, value: 7 }]);
+    const [sql] = pool.execute.mock.calls[0];
+    expect(sql).toContain('`value2025`');
+    expect(sql).not.toContain('value2026');
+    expect(sql).not.toContain('value2100');
+  });
+
+  it('queries information_schema scoped to the counter table for existing archive columns', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await getCounterHistory(1);
+
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).toContain('information_schema.COLUMNS');
+    expect(sql).toContain("TABLE_NAME = 'counter'");
+  });
+
+  it('caches the existing-columns lookup so browsing multiple counters only queries information_schema once', async () => {
+    const pool = makePool([{ id: 1 }]);
+    pool.query.mockResolvedValue([[{ COLUMN_NAME: 'value2025' }], {}]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await getCounterHistory(1);
+    await getCounterHistory(2);
+    await getCounterHistory(3);
+
+    expect(pool.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('excludes the current year (and any future year) even if the column exists and holds a non-null value', async () => {
+    // archiveAndResetYearlyCounters only ever writes into the *previous*
+    // completed year's column, so the current/future year can never have valid
+    // archived data — this must be excluded outright, not just via NULL-filtering.
+    const currentYear = new Date().getFullYear();
+    const lastYear = currentYear - 1;
+    const row: Record<string, unknown> = {
+      id: 4,
+      trigger_command: '!streak',
+      check_command: '!checkstreak',
+      message: 'msg',
+      increment_message: 'inc',
+      reset_yearly: 1,
+      current_value: 3,
+      [`value${lastYear}`]: 42,
+      [`value${currentYear}`]: 99, // stray non-null value; must never surface as history
+    };
+    const pool = makePool([row]);
+    pool.query.mockResolvedValue([
+      [{ COLUMN_NAME: `value${lastYear}` }, { COLUMN_NAME: `value${currentYear}` }],
+      {},
+    ]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    const result = await getCounterHistory(4);
+
+    expect(result!.history).toEqual([{ year: lastYear, value: 42 }]);
+    const [sql] = pool.execute.mock.calls[0];
+    expect(sql).toContain(`\`value${lastYear}\``);
+    expect(sql).not.toContain(`value${currentYear}`);
   });
 });
 

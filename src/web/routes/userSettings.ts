@@ -4,7 +4,7 @@ import { randomBytes } from 'crypto';
 import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, EventSubConfig } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { trimField, renderError, filterQueryParam, renderView } from './shared';
+import { logAndRedirectError, trimField, renderError, filterQueryParam, renderView } from './shared';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 import { TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, EVENTSUB_TOKEN_SECRET } from '../../shared/config';
@@ -140,8 +140,7 @@ router.get('/twitch-connect', requireAuth, async (req, res) => {
 
     res.redirect(`https://id.twitch.tv/oauth2/authorize?${params.toString()}`);
   } catch (err) {
-    log.error('Twitch connect error:', err);
-    res.redirect('/user/settings?error=eventsub_config_failed');
+    logAndRedirectError({ res, log, logLabel: 'Twitch connect error:', err, basePath: '/user/settings', errorCode: 'eventsub_config_failed' });
   }
 });
 
@@ -165,8 +164,7 @@ router.post('/twitch-disconnect', requireAuth, csrfProtection, async (req, res) 
     reloadEventSubSubscriptions();
     res.redirect('/user/settings');
   } catch (err) {
-    log.error('EventSub disconnect error:', err);
-    res.redirect('/user/settings?error=eventsub_disconnect_failed');
+    logAndRedirectError({ res, log, logLabel: 'EventSub disconnect error:', err, basePath: '/user/settings', errorCode: 'eventsub_disconnect_failed' });
   }
 });
 
@@ -229,8 +227,7 @@ router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) =>
     reloadEventSubSubscriptions();
     res.redirect('/user/settings');
   } catch (err) {
-    log.error('EventSub config save error:', err);
-    res.redirect('/user/settings?error=eventsub_config_failed');
+    logAndRedirectError({ res, log, logLabel: 'EventSub config save error:', err, basePath: '/user/settings', errorCode: 'eventsub_config_failed' });
   }
 });
 

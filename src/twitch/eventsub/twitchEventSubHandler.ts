@@ -5,6 +5,7 @@ import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
 import { createLogger } from '../../shared/logger';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
+import { fillTemplate } from '../../shared/textTemplate';
 
 const log = createLogger('EventSubHandler');
 
@@ -125,10 +126,6 @@ export interface RedemptionEvent {
   user_input: string;
 }
 
-function fill(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? '');
-}
-
 function tierName(tier: string): string {
   return ({ '1000': 'Tier 1', '2000': 'Tier 2', '3000': 'Tier 3' } as Record<string, string>)[tier] ?? tier;
 }
@@ -144,7 +141,7 @@ function tierName(tier: string): string {
  */
 export async function handleFollow(login: string, event: FollowEvent, config: EventSubConfig): Promise<void> {
   if (!config.follow_enabled) return;
-  const msg = fill(config.follow_message, {
+  const msg = fillTemplate(config.follow_message, {
     username: event.user_login,
     display_name: event.user_name,
   });
@@ -161,7 +158,7 @@ export async function handleFollow(login: string, event: FollowEvent, config: Ev
  */
 export async function handleSub(login: string, event: SubEvent, config: EventSubConfig): Promise<void> {
   if (!config.sub_enabled || event.is_gift) return;
-  const msg = fill(config.sub_message, {
+  const msg = fillTemplate(config.sub_message, {
     username: event.user_login,
     display_name: event.user_name,
     tier: event.tier,
@@ -180,7 +177,7 @@ export async function handleSub(login: string, event: SubEvent, config: EventSub
  */
 export async function handleResub(login: string, event: ResubEvent, config: EventSubConfig): Promise<void> {
   if (!config.sub_enabled) return;
-  const msg = fill(config.resub_message, {
+  const msg = fillTemplate(config.resub_message, {
     username: event.user_login,
     display_name: event.user_name,
     tier: event.tier,
@@ -204,7 +201,7 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
   if (!config.sub_enabled) return;
   const gifter = event.is_anonymous ? 'anonymous' : event.user_login;
   const gifterDisplay = event.is_anonymous ? 'Anonymous' : event.user_name;
-  const msg = fill(config.giftsub_message, {
+  const msg = fillTemplate(config.giftsub_message, {
     gifter,
     gifter_display: gifterDisplay,
     count: String(event.total),
@@ -231,7 +228,7 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
  */
 export async function handleRaid(login: string, event: RaidEvent, config: EventSubConfig): Promise<void> {
   if (config.raid_enabled) {
-    const msg = fill(config.raid_message, {
+    const msg = fillTemplate(config.raid_message, {
       from_channel: event.from_broadcaster_user_login,
       from_display: event.from_broadcaster_user_name,
       viewers: String(event.viewers),

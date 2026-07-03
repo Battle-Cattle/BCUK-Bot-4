@@ -5,6 +5,7 @@ import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
 import { fromBit } from './utils';
 import { invalidateCounterLookupCache } from './counterCache';
+import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
 
 // ─── Archive column allowlist ─────────────────────────────────────────────────
 // MySQL does not support parameterised column names. Rather than building the
@@ -47,6 +48,12 @@ export class CounterNotFoundError extends Error {
     super(`Counter not found: ${id}`);
     this.name = 'CounterNotFoundError';
   }
+}
+
+/** A single archived year's value for a counter, as returned by {@link getCounterHistory}. */
+export interface CounterHistoryEntry {
+  year: number;
+  value: number | null;
 }
 
 // ─── Row mapper ───────────────────────────────────────────────────────────────
@@ -95,6 +102,111 @@ export async function getAllCounters(): Promise<DbCounter[]> {
      ORDER BY trigger_command`,
   );
   return rows.map(mapCounter);
+}
+
+/**
+ * Fetches a counter along with its archived yearly-reset history (the
+ * `value2020`..`value2100` columns populated by `archiveAndResetYearlyCounters`).
+ * @param id - The counter's numeric id.
+ * @returns The counter and its history (years with a non-null archived value, newest
+ *   first), or `null` if no counter exists with the given id.
+ */
+// ─── Archive column existence cache ───────────────────────────────────────────
+// `value<year>` columns are only ever added via yearly migrations (see
+// DATABASE-SCHEMA.md), so a short TTL is enough to turn "one information_schema
+// round-trip per getCounterHistory call" into "one per 5 minutes", which matters
+// when an admin browses several counters' histories in one session.
+
+interface ArchiveColumnsCache extends RefreshingLookupCache {
+  columns: string[];
+}
+
+const archiveColumnsCacheState = createManagedLookupCache<ArchiveColumnsCache>({
+  cacheName: 'counter archive columns cache',
+  ttlMs: 300_000,
+  refreshFailureBackoffMs: 5_000,
+  refreshFailureMaxBackoffMs: 60_000,
+  createEmptyCache: () => ({ loadedAt: 0, columns: [] }),
+  loadCache: async () => {
+    const [rows] = await getPool().query<mysql.RowDataPacket[]>(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'counter' AND COLUMN_NAME LIKE 'value2%'`,
+    );
+    // The current year (and any future year) can never have valid archived data —
+    // archiveAndResetYearlyCounters only ever writes into the *previous* completed
+    // year's column, on Jan 1. Exclude them even if the column already physically
+    // exists (e.g. pre-provisioned ahead of the year rolling over) and even if it
+    // somehow holds a non-null value, rather than relying solely on the NULL
+    // filter in getCounterHistory to hide it.
+    const currentYear = new Date().getFullYear();
+    const eligibleColumns = new Set(
+      Array.from(ARCHIVE_YEAR_COLUMNS.entries())
+        .filter(([year]) => year < currentYear)
+        .map(([, columnName]) => columnName),
+    );
+    const columns = rows
+      .map((row) => row.COLUMN_NAME as string)
+      .filter((columnName) => eligibleColumns.has(columnName));
+    return { loadedAt: Date.now(), columns };
+  },
+});
+
+/** Marks the archive-columns cache as stale so the next read re-queries `information_schema`. */
+export function invalidateArchiveColumnsCache(): void {
+  archiveColumnsCacheState.invalidate();
+}
+
+/**
+ * Returns the `value<year>` archive columns that actually exist on the `counter`
+ * table AND belong to a year strictly before the current calendar year (cached
+ * for 5 minutes — see `archiveColumnsCacheState`). Per `DATABASE-SCHEMA.md`,
+ * these columns are added incrementally over time (one per year, as each year's
+ * archive becomes needed) — `ARCHIVE_YEAR_COLUMNS` is a fixed allowlist of
+ * *theoretically valid* years, not a guarantee that every column in it has been
+ * created yet, so callers must not assume the full range exists. The current
+ * year and any future year are excluded outright, since they can never have
+ * valid archived data (see `archiveAndResetYearlyCounters`).
+ */
+async function getExistingArchiveColumns(): Promise<string[]> {
+  const cache = await archiveColumnsCacheState.getCache();
+  return cache.columns;
+}
+
+/**
+ * Fetches a counter along with its archived yearly-reset history (the
+ * `value<year>` columns populated by `archiveAndResetYearlyCounters`). Only reads
+ * columns that actually exist on the `counter` table right now (see
+ * `getExistingArchiveColumns`), since not every year in `ARCHIVE_YEAR_COLUMNS` is
+ * guaranteed to be a physical column yet.
+ * @param id - The counter's numeric id.
+ * @returns The counter and its archived history (years with a non-null value,
+ *   newest first), or `null` if no counter exists with the given id.
+ */
+export async function getCounterHistory(
+  id: number,
+): Promise<{ counter: DbCounter; history: CounterHistoryEntry[] } | null> {
+  const existingColumns = await getExistingArchiveColumns();
+  const selectColumns = existingColumns.length > 0
+    ? `, ${existingColumns.map((col) => `\`${col}\``).join(', ')}`
+    : '';
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value${selectColumns}
+     FROM counter
+     WHERE id = ?
+     LIMIT 1`,
+    [id],
+  );
+  if (rows.length === 0) return null;
+
+  const row = rows[0];
+  const counter = mapCounter(row);
+  const existingColumnSet = new Set(existingColumns);
+  const history: CounterHistoryEntry[] = Array.from(ARCHIVE_YEAR_COLUMNS.entries())
+    .filter(([, columnName]) => existingColumnSet.has(columnName) && row[columnName] !== null && row[columnName] !== undefined)
+    .map(([year, columnName]) => ({ year, value: row[columnName] as number }))
+    .sort((a, b) => b.year - a.year);
+
+  return { counter, history };
 }
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────

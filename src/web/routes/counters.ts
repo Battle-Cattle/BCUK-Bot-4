@@ -16,6 +16,7 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireAuth, requireMod, requireManager } from '../middleware';
 import {
+  logAndRedirectError,
   normalizeRequiredText,
   normalizeSingleTokenRequiredText,
   parsePositiveIntId,
@@ -150,8 +151,7 @@ router.post('/counters/add', requireMod, csrfProtection, async (req, res) => {
     );
   } catch (err) {
     if (handleCounterWriteError(err, res)) return;
-    log.error('Add counter error:', err);
-    return res.redirect('/counters?error=add_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Add counter error:', err, basePath: '/counters', errorCode: 'add_failed' });
   }
 
   res.redirect('/counters');
@@ -203,8 +203,7 @@ router.post('/counters/update', requireMod, csrfProtection, async (req, res) => 
       return res.redirect('/counters?error=counter_not_found');
     }
     if (handleCounterWriteError(err, res)) return;
-    log.error('Update counter error:', err);
-    return res.redirect('/counters?error=update_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Update counter error:', err, basePath: '/counters', errorCode: 'update_failed' });
   }
 
   res.redirect('/counters');
@@ -232,8 +231,7 @@ router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => 
       return res.redirect('/counters?error=counter_not_found');
     }
 
-    log.error('Remove counter error:', err);
-    return res.redirect('/counters?error=remove_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Remove counter error:', err, basePath: '/counters', errorCode: 'remove_failed' });
   }
 
   res.redirect('/counters');
@@ -261,8 +259,7 @@ router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, r
       return res.redirect('/counters?error=counter_not_found');
     }
 
-    log.error('Reset counter error:', err);
-    return res.redirect('/counters?error=reset_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Reset counter error:', err, basePath: '/counters', errorCode: 'reset_failed' });
   }
 
   res.redirect('/counters?reset=1');

@@ -10,6 +10,7 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
 import {
+  logAndRedirectError,
   normalizeRequiredText,
   normalizeSingleTokenRequiredText,
   parsePositiveIntId,
@@ -51,8 +52,7 @@ router.post('/sfx/trigger/add', requireMod, csrfProtection, async (req, res) => 
     await createSfxTrigger(command, categoryId, description, hidden);
   } catch (err) {
     if (isMysqlDuplicateEntryError(err)) return res.redirect('/sfx?error=command_taken');
-    log.error('Add SFX trigger error:', err);
-    return res.redirect('/sfx?error=add_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Add SFX trigger error:', err, basePath: '/sfx', errorCode: 'add_failed' });
   }
 
   res.redirect('/sfx?success=trigger_added');
@@ -79,8 +79,7 @@ router.post('/sfx/trigger/update', requireMod, csrfProtection, async (req, res) 
     if (!updated) return res.redirect('/sfx?error=invalid_id');
   } catch (err) {
     if (isMysqlDuplicateEntryError(err)) return res.redirect('/sfx?error=command_taken');
-    log.error('Update SFX trigger error:', err);
-    return res.redirect('/sfx?error=update_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Update SFX trigger error:', err, basePath: '/sfx', errorCode: 'update_failed' });
   }
 
   res.redirect('/sfx?success=trigger_updated');
@@ -96,8 +95,7 @@ router.post('/sfx/trigger/remove', requireMod, csrfProtection, async (req, res) 
     if (result === null) return res.redirect('/sfx?error=invalid_id');
     await removeSfxFiles(result.files);
   } catch (err) {
-    log.error('Remove SFX trigger error:', err);
-    return res.redirect('/sfx?error=remove_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Remove SFX trigger error:', err, basePath: '/sfx', errorCode: 'remove_failed' });
   }
 
   res.redirect('/sfx?success=trigger_removed');

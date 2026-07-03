@@ -129,6 +129,46 @@ describe('executeCustomCommandForDiscord', () => {
     expect(vi.mocked(getCustomCommandForDiscord)).not.toHaveBeenCalled();
     expect(msg.reply).not.toHaveBeenCalled();
   });
+
+  it('substitutes {user}, {args}, and {arg} in the response before replying and recording', async () => {
+    vi.mocked(getCustomCommandForDiscord).mockResolvedValue({
+      output: '{user} said {args} (first: {arg})',
+      is_multi_twitch: false,
+    } as any);
+    const msg = mockMsg('!hello foo bar');
+
+    await executeCustomCommandForDiscord(msg as any, 'viewer1');
+
+    const expected = 'viewer1 said foo bar (first: foo)';
+    expect(msg.reply).toHaveBeenCalledWith(expected);
+    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalledWith(
+      expect.objectContaining({ response: expected }),
+    );
+  });
+
+  it('substitutes an unknown placeholder with an empty string', async () => {
+    vi.mocked(getCustomCommandForDiscord).mockResolvedValue({
+      output: 'Hi {user}, unknown: [{nope}]',
+      is_multi_twitch: false,
+    } as any);
+    const msg = mockMsg('!hello');
+
+    await executeCustomCommandForDiscord(msg as any, 'viewer1');
+
+    expect(msg.reply).toHaveBeenCalledWith('Hi viewer1, unknown: []');
+  });
+
+  it('substitutes {args} and {arg} as empty strings when no args are given', async () => {
+    vi.mocked(getCustomCommandForDiscord).mockResolvedValue({
+      output: 'args=[{args}] arg=[{arg}]',
+      is_multi_twitch: false,
+    } as any);
+    const msg = mockMsg('!hello');
+
+    await executeCustomCommandForDiscord(msg as any, 'viewer1');
+
+    expect(msg.reply).toHaveBeenCalledWith('args=[] arg=[]');
+  });
 });
 
 // ─── Twitch ───────────────────────────────────────────────────────────────────
@@ -190,6 +230,61 @@ describe('executeCustomCommandForTwitch', () => {
     // Falls back to source channel only
     expect(mockRuntime.send).toHaveBeenCalledTimes(1);
     expect(mockRuntime.send).toHaveBeenCalledWith('#a', 'Hi!');
+  });
+
+  it('substitutes {user}, {args}, and {arg} in the response before sending and recording', async () => {
+    vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({
+      output: '{user} said {args} (first: {arg})',
+      is_multi_twitch: false,
+    } as any);
+
+    await executeCustomCommandForTwitch('#chan', '!hey foo bar', 'viewer1');
+
+    const expected = 'viewer1 said foo bar (first: foo)';
+    expect(mockRuntime.send).toHaveBeenCalledWith('#chan', expected);
+    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalledWith(
+      expect.objectContaining({ response: expected }),
+    );
+  });
+
+  it('substitutes an unknown placeholder with an empty string', async () => {
+    vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({
+      output: 'Hi {user}, unknown: [{nope}]',
+      is_multi_twitch: false,
+    } as any);
+
+    await executeCustomCommandForTwitch('#chan', '!hey', 'viewer1');
+
+    expect(mockRuntime.send).toHaveBeenCalledWith('#chan', 'Hi viewer1, unknown: []');
+  });
+
+  it('substitutes {args} and {arg} as empty strings when no args are given', async () => {
+    vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({
+      output: 'args=[{args}] arg=[{arg}]',
+      is_multi_twitch: false,
+    } as any);
+
+    await executeCustomCommandForTwitch('#chan', '!hey', 'viewer1');
+
+    expect(mockRuntime.send).toHaveBeenCalledWith('#chan', 'args=[] arg=[]');
+  });
+
+  it('reuses the same filled response for every channel in a multi-twitch broadcast', async () => {
+    vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({
+      output: '{user} said {args}',
+      is_multi_twitch: true,
+    } as any);
+    vi.mocked(getMultiTwitchDataForChannel).mockReturnValue({
+      url: 'multitwitch.tv/a/b',
+      participants: ['#a', '#b'],
+    } as any);
+    mockRuntime.getActiveChannels.mockReturnValue(new Set(['#a', '#b']));
+
+    await executeCustomCommandForTwitch('#a', '!multi hello there', 'viewer1');
+
+    const expected = 'viewer1 said hello there';
+    expect(mockRuntime.send).toHaveBeenCalledWith('#a', expected);
+    expect(mockRuntime.send).toHaveBeenCalledWith('#b', expected);
   });
 });
 
