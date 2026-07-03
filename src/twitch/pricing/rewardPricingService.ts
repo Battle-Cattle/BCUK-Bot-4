@@ -1,9 +1,9 @@
 import { createMutationQueue } from '../../shared/mutationQueue';
 import {
-  getPricingForReward, recordPricingUpdate, getGlobalPricingSettings, getStreamerById,
+  getPricingForReward, recordPricingUpdate, markPricingUnsupported, getGlobalPricingSettings, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
-import { updateRewardCost } from '../twitchApi';
+import { updateRewardCost, TwitchRewardUnsupportedError } from '../twitchApi';
 import { computePrice, decayDemand, applyRedemption } from './rewardPricingMath';
 import { createLogger } from '../../shared/logger';
 
@@ -22,9 +22,12 @@ function queueKey(streamerId: number, twitchRewardId: string): string {
  * Recomputes demand and price for one reward and persists the result, pushing the new
  * cost to Twitch only when it differs from the last pushed cost. No-ops entirely (no DB
  * write, no Twitch call) when the reward has no pricing config or dynamic pricing is
- * disabled for it — this is where "optional per reward" is enforced. A failure resolving
- * the streamer's token or pushing to Twitch is caught and logged; the recalculated demand
- * is still persisted so the price is simply retried on the next redemption/decay tick.
+ * disabled for it — this is where "optional per reward" is enforced. A transient failure
+ * resolving the streamer's token or pushing to Twitch is caught and logged; the recalculated
+ * demand is still persisted so the price is simply retried on the next redemption/decay tick.
+ * A 403 from Twitch (the reward was created outside this app and can never be managed by it)
+ * is treated as permanent instead: the row is disabled via `markPricingUnsupported` and demand
+ * is intentionally not persisted, since the row won't be read again until re-enabled.
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
@@ -59,6 +62,11 @@ async function syncRewardPrice(streamerId: number, twitchRewardId: string, apply
         log.warn(`No valid broadcaster token for streamer ${streamerId} — skipping Twitch price push for reward ${twitchRewardId}`);
       }
     } catch (err) {
+      if (err instanceof TwitchRewardUnsupportedError) {
+        log.warn(`Reward ${twitchRewardId} (streamer ${streamerId}) can't be managed by this app — disabling dynamic pricing:`, err);
+        await markPricingUnsupported(streamerId, twitchRewardId);
+        return; // markPricingUnsupported already disabled the row; no need to also record demand.
+      }
       log.error(`Failed to push new price for reward ${twitchRewardId}:`, err);
     }
   }

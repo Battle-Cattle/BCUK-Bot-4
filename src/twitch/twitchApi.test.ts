@@ -6,7 +6,10 @@ vi.mock('../shared/config', () => ({
   TWITCH_CLIENT_SECRET: 'test-client-secret',
 }));
 
-import { getUsers, getStreams, getChannelInfo, getSharedChatSession, getAppToken, updateRewardCost } from './twitchApi';
+import {
+  getUsers, getStreams, getChannelInfo, getSharedChatSession, getAppToken,
+  updateRewardCost, TwitchRewardUnsupportedError,
+} from './twitchApi';
 
 const TOKEN_RESPONSE = { access_token: 'test-token', expires_in: 3600 };
 
@@ -174,5 +177,15 @@ describe('updateRewardCost', () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
     await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.toThrow();
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws TwitchRewardUnsupportedError specifically on a 403 response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(403, {}));
+    await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.toBeInstanceOf(TwitchRewardUnsupportedError);
+  });
+
+  it('does not throw TwitchRewardUnsupportedError for other non-OK statuses', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(400, {}));
+    await expect(updateRewardCost('bc1', 'rwd1', 500, 'user-token')).rejects.not.toBeInstanceOf(TwitchRewardUnsupportedError);
   });
 });

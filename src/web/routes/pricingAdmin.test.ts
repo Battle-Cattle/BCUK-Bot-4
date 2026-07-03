@@ -87,7 +87,7 @@ describe('GET /', () => {
     vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([{
       id: 1, streamer_id: 123, twitch_reward_id: 'rwd1', enabled: true,
       base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5,
-      demand: 1, demand_updated_at: '1700000000000', last_pushed_cost: 1000,
+      demand: 1, demand_updated_at: '1700000000000', last_pushed_cost: 1000, twitch_unsupported: false,
     }] as any);
 
     const res = await supertest(buildApp()).get('/');
@@ -122,7 +122,7 @@ describe('GET /', () => {
     vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([{
       id: 1, streamer_id: 123, twitch_reward_id: 'orphaned-rwd', enabled: true,
       base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5,
-      demand: 0.5, demand_updated_at: '1700000000000', last_pushed_cost: 300,
+      demand: 0.5, demand_updated_at: '1700000000000', last_pushed_cost: 300, twitch_unsupported: false,
     }] as any);
 
     const res = await supertest(buildApp()).get('/');
@@ -132,6 +132,20 @@ describe('GET /', () => {
     expect(res.body.rewards[0].rewardId).toBe('orphaned-rwd');
     expect(res.body.rewards[0].config.id).toBe(1);
     expect(res.body.rewards[0].previewPrice).not.toBeNull();
+  });
+
+  it('passes through twitch_unsupported so the view can show the disabled-by-Twitch message', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true }]);
+    vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([{
+      id: 1, streamer_id: 123, twitch_reward_id: 'rwd1', enabled: false,
+      base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5,
+      demand: 0.2, demand_updated_at: '1700000000000', last_pushed_cost: null, twitch_unsupported: true,
+    }] as any);
+
+    const res = await supertest(buildApp()).get('/');
+    expect(res.body.rewards[0].config.twitch_unsupported).toBe(true);
+    expect(res.body.rewards[0].config.enabled).toBe(false);
   });
 
   it('leaves config/previewPrice null for a reward with no pricing config yet', async () => {

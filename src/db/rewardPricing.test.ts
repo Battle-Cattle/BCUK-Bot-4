@@ -11,6 +11,7 @@ import {
   upsertPricingConfig,
   recordPricingUpdate,
   deletePricingConfig,
+  markPricingUnsupported,
   initGlobalPricingSettings,
   getGlobalPricingSettings,
   saveGlobalPricingSettings,
@@ -38,6 +39,7 @@ const sampleRow = {
   demand: '0.500000',
   demand_updated_at: '1700000000000',
   last_pushed_cost: 400,
+  twitch_unsupported: 0,
 };
 
 describe('getPricingForReward', () => {
@@ -61,6 +63,7 @@ describe('getPricingForReward', () => {
       demand: 0.5,
       demand_updated_at: '1700000000000',
       last_pushed_cost: 400,
+      twitch_unsupported: false,
     });
   });
 
@@ -117,6 +120,15 @@ describe('upsertPricingConfig', () => {
     expect(setClause).not.toContain('last_pushed_cost=');
   });
 
+  it('clears twitch_unsupported in the SET list, so an explicit save gives the reward another attempt', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await upsertPricingConfig(7, 'rwd-abc', { enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5 });
+    const sql: string = pool.execute.mock.calls[0][0];
+    const setClause = sql.split('ON DUPLICATE KEY UPDATE')[1];
+    expect(setClause).toContain('twitch_unsupported=0');
+  });
+
   it('passes converted enabled boolean and config fields', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
@@ -147,6 +159,17 @@ describe('recordPricingUpdate', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await recordPricingUpdate(7, 'rwd-abc', 0.1, 1700000000000, null);
     expect(pool.execute.mock.calls[0][1]).toEqual([0.1, 1700000000000, null, 7, 'rwd-abc']);
+  });
+});
+
+describe('markPricingUnsupported', () => {
+  it('disables the row and sets twitch_unsupported, scoped by streamerId and twitchRewardId', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await markPricingUnsupported(7, 'rwd-abc');
+    const sql: string = pool.execute.mock.calls[0][0];
+    expect(sql).toContain('SET enabled = 0, twitch_unsupported = 1');
+    expect(pool.execute.mock.calls[0][1]).toEqual([7, 'rwd-abc']);
   });
 });
 

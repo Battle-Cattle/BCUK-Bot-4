@@ -12,6 +12,9 @@ CREATE TABLE reward_pricing (
   demand            DECIMAL(9,6) NOT NULL DEFAULT 0.000000,
   demand_updated_at BIGINT       NOT NULL,
   last_pushed_cost  INT          NULL,
+  -- Set (and enabled forced to 0) when Twitch returns 403 on an update — the reward was
+  -- created outside this app (dashboard or another client_id) and can never be managed by it.
+  twitch_unsupported TINYINT(1)  NOT NULL DEFAULT 0,
   UNIQUE KEY uq_reward_pricing (streamer_id, twitch_reward_id),
   KEY idx_reward_pricing_enabled (enabled),
   FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE,

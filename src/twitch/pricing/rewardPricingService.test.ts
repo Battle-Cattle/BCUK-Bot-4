@@ -5,18 +5,22 @@ vi.mock('../../shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), er
 vi.mock('../../db', () => ({
   getPricingForReward: vi.fn(),
   recordPricingUpdate: vi.fn(),
+  markPricingUnsupported: vi.fn(),
   getGlobalPricingSettings: vi.fn(),
   getStreamerById: vi.fn(),
 }));
 
 vi.mock('../eventsub/twitchApiEventSub', () => ({ getValidToken: vi.fn() }));
-vi.mock('../twitchApi', () => ({ updateRewardCost: vi.fn() }));
+vi.mock('../twitchApi', () => {
+  class TwitchRewardUnsupportedError extends Error {}
+  return { updateRewardCost: vi.fn(), TwitchRewardUnsupportedError };
+});
 
 import {
-  getPricingForReward, recordPricingUpdate, getGlobalPricingSettings, getStreamerById,
+  getPricingForReward, recordPricingUpdate, markPricingUnsupported, getGlobalPricingSettings, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
-import { updateRewardCost } from '../twitchApi';
+import { updateRewardCost, TwitchRewardUnsupportedError } from '../twitchApi';
 import { applyRedemptionPricing, applyDecayTick } from './rewardPricingService';
 
 const settings = { decay_half_life_periods: 3, redemption_increment: 0.1 };
@@ -35,6 +39,7 @@ function makeRow(overrides: Partial<Record<string, unknown>> = {}) {
     demand: 0,
     demand_updated_at: String(Date.now()),
     last_pushed_cost: null,
+    twitch_unsupported: false,
     ...overrides,
   };
 }
@@ -66,6 +71,14 @@ describe('applyRedemptionPricing', () => {
     await applyRedemptionPricing(1, 'rwd1');
     expect(updateRewardCost).toHaveBeenCalledWith('bc1', 'rwd1', expect.any(Number), 'user-token');
     expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), expect.any(Number));
+  });
+
+  it('marks the reward unsupported and disables it on a 403, without recording demand', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
+    vi.mocked(updateRewardCost).mockRejectedValue(new TwitchRewardUnsupportedError('403'));
+    await applyRedemptionPricing(1, 'rwd1');
+    expect(markPricingUnsupported).toHaveBeenCalledWith(1, 'rwd1');
+    expect(recordPricingUpdate).not.toHaveBeenCalled();
   });
 
   it('skips the Twitch call when the recomputed price equals last_pushed_cost', async () => {

@@ -107,7 +107,9 @@
               <strong>Unlinked reward</strong>
               <p class="hint hint-compact">No longer found on Twitch (deleted, or not visible with the current connection) — reward ID: <code class="mono"><%= r.rewardId %></code></p>
               <% } %>
-              <% if (r.config) { %>
+              <% if (r.config && r.config.twitch_unsupported) { %>
+              <p class="hint hint-compact" style="color:var(--danger, #c0392b);">This reward can't be managed by the bot — it was created via the Twitch dashboard (or another app), and Twitch only allows the app that created a reward to change its cost. Dynamic pricing has been disabled.</p>
+              <% } else if (r.config) { %>
               <p class="hint hint-compact">Demand: <%= (r.config.demand * 100).toFixed(1) %>% — computed price (may take up to 5 min to sync to Twitch): <%= r.previewPrice.toLocaleString() %> pts</p>
               <% } %>
             </div>

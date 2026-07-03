@@ -16,6 +16,8 @@ export interface RewardPricingRow {
   /** Epoch ms as a string — BIGINT column; never coerce with Number() at this layer. */
   demand_updated_at: string;
   last_pushed_cost: number | null;
+  /** True once Twitch has returned 403 for this reward — it was created outside this app and can never be managed by it. */
+  twitch_unsupported: boolean;
 }
 
 /** Config fields a streamer can edit for one reward via the admin UI. */
@@ -51,12 +53,13 @@ function mapRow(r: mysql.RowDataPacket): RewardPricingRow {
     demand: Number(r.demand),
     demand_updated_at: String(r.demand_updated_at),
     last_pushed_cost: r.last_pushed_cost == null ? null : Number(r.last_pushed_cost),
+    twitch_unsupported: fromBit(r.twitch_unsupported),
   };
 }
 
 const REWARD_PRICING_SELECT = `
   id, streamer_id, twitch_reward_id, enabled, base_cost, cooldown_seconds,
-  max_multiplier, curve, demand, demand_updated_at, last_pushed_cost`;
+  max_multiplier, curve, demand, demand_updated_at, last_pushed_cost, twitch_unsupported`;
 
 /**
  * Look up a single reward's pricing config/demand row, or null if not configured.
@@ -101,6 +104,8 @@ export async function getAllEnabledPricingRows(): Promise<RewardPricingRow[]> {
  * (enabled/base_cost/cooldown_seconds/max_multiplier/curve) — demand, demand_updated_at,
  * and last_pushed_cost are left untouched on an update so editing config never resets
  * in-flight demand state. New rows start at demand=0 with demand_updated_at=now.
+ * Always clears `twitch_unsupported`, since an explicit save is the streamer opting back
+ * in and deserves another attempt (e.g. after recreating the reward via the bot).
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
@@ -117,12 +122,26 @@ export async function upsertPricingConfig(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE
        enabled=new_row.enabled, base_cost=new_row.base_cost, cooldown_seconds=new_row.cooldown_seconds,
-       max_multiplier=new_row.max_multiplier, curve=new_row.curve`,
+       max_multiplier=new_row.max_multiplier, curve=new_row.curve, twitch_unsupported=0`,
     [
       streamerId, twitchRewardId,
       input.enabled ? 1 : 0, input.base_cost, input.cooldown_seconds, input.max_multiplier, input.curve,
       Date.now(),
     ],
+  );
+}
+
+/**
+ * Marks a reward as permanently unsupported by Twitch (403 on cost update — created outside
+ * this app) and disables it, so the decay scheduler and redemption hook stop retrying.
+ *
+ * @param streamerId - DB row ID of the owning streamer.
+ * @param twitchRewardId - Twitch reward UUID.
+ */
+export async function markPricingUnsupported(streamerId: number, twitchRewardId: string): Promise<void> {
+  await getPool().execute(
+    `UPDATE reward_pricing SET enabled = 0, twitch_unsupported = 1 WHERE streamer_id = ? AND twitch_reward_id = ?`,
+    [streamerId, twitchRewardId],
   );
 }
 
