@@ -298,21 +298,21 @@ describe('logAndRedirectError', () => {
     const { res } = mockRes();
     const { log, error } = mockLog();
     const err = new Error('boom');
-    logAndRedirectError(res, log, 'Add SFX category error:', err, '/sfx', 'add_failed');
+    logAndRedirectError({ res, log, logLabel: 'Add SFX category error:', err, basePath: '/sfx', errorCode: 'add_failed' });
     expect(error).toHaveBeenCalledWith('Add SFX category error:', err);
   });
 
   it('redirects to basePath with the error query param', () => {
     const { res, redirect } = mockRes();
     const { log } = mockLog();
-    logAndRedirectError(res, log, 'Rename SFX category error:', new Error('x'), '/sfx', 'update_failed');
+    logAndRedirectError({ res, log, logLabel: 'Rename SFX category error:', err: new Error('x'), basePath: '/sfx', errorCode: 'update_failed' });
     expect(redirect).toHaveBeenCalledWith('/sfx?error=update_failed');
   });
 
   it('works with a non-Error thrown value', () => {
     const { res, redirect } = mockRes();
     const { log, error } = mockLog();
-    logAndRedirectError(res, log, 'Remove error:', 'not an error object', '/counters', 'remove_failed');
+    logAndRedirectError({ res, log, logLabel: 'Remove error:', err: 'not an error object', basePath: '/counters', errorCode: 'remove_failed' });
     expect(error).toHaveBeenCalledWith('Remove error:', 'not an error object');
     expect(redirect).toHaveBeenCalledWith('/counters?error=remove_failed');
   });

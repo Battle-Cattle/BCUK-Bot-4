@@ -45,7 +45,7 @@ router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) =
 
     res.redirect('/overlay/settings?success=reward_saved');
   } catch (err) {
-    logAndRedirectError(res, log, 'Overlay reward save error:', err, '/overlay/settings', 'save_failed');
+    logAndRedirectError({ res, log, logLabel: 'Overlay reward save error:', err, basePath: '/overlay/settings', errorCode: 'save_failed' });
   }
 });
 
@@ -69,6 +69,6 @@ router.post('/settings/rewards/:id/delete', requireAuth, csrfProtection, async (
     await deleteReward(rewardId, streamer.id);
     res.redirect('/overlay/settings?success=reward_deleted');
   } catch (err) {
-    logAndRedirectError(res, log, 'Overlay reward delete error:', err, '/overlay/settings', 'delete_failed');
+    logAndRedirectError({ res, log, logLabel: 'Overlay reward delete error:', err, basePath: '/overlay/settings', errorCode: 'delete_failed' });
   }
 });

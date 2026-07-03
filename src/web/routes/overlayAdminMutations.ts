@@ -127,7 +127,7 @@ router.post('/settings/videos/upload', requireAuth, csrfProtection, uploadVideo,
     const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
     if (code === 'invalid_path') return res.redirect('/overlay/settings?error=invalid_path');
     if (code === 'invalid_file') return res.redirect('/overlay/settings?error=invalid_file');
-    logAndRedirectError(res, log, 'Overlay video upload error:', err, '/overlay/settings', 'upload_failed');
+    logAndRedirectError({ res, log, logLabel: 'Overlay video upload error:', err, basePath: '/overlay/settings', errorCode: 'upload_failed' });
   }
 });
 
@@ -156,6 +156,6 @@ router.post('/settings/videos/:id/delete', requireAuth, csrfProtection, async (r
 
     res.redirect('/overlay/settings?success=video_deleted');
   } catch (err) {
-    logAndRedirectError(res, log, 'Overlay video delete error:', err, '/overlay/settings', 'delete_failed');
+    logAndRedirectError({ res, log, logLabel: 'Overlay video delete error:', err, basePath: '/overlay/settings', errorCode: 'delete_failed' });
   }
 });

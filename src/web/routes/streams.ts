@@ -141,7 +141,7 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
     });
     triggerRestart();
   } catch (err) {
-    return logAndRedirectError(res, log, 'Add stream group error:', err, '/admin/streams', 'add_group_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Add stream group error:', err, basePath: '/admin/streams', errorCode: 'add_group_failed' });
   }
   res.redirect('/admin/streams');
 });
@@ -180,7 +180,7 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
     });
     triggerRestart();
   } catch (err) {
-    return logAndRedirectError(res, log, 'Update stream group error:', err, '/admin/streams', 'update_group_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Update stream group error:', err, basePath: '/admin/streams', errorCode: 'update_group_failed' });
   }
   res.redirect('/admin/streams');
 });
@@ -205,7 +205,7 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
     await removeStreamGroup(parsedGroupId);
     triggerRestart();
   } catch (err) {
-    return logAndRedirectError(res, log, 'Remove stream group error:', err, '/admin/streams', 'remove_group_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Remove stream group error:', err, basePath: '/admin/streams', errorCode: 'remove_group_failed' });
   }
   res.redirect('/admin/streams');
 });
@@ -237,7 +237,7 @@ router.post('/streams/streamers/add', requireManager, csrfProtection, async (req
     await addStreamer(discordId, parsedGroupId);
     triggerRestart();
   } catch (err) {
-    return logAndRedirectError(res, log, 'Add streamer error:', err, '/admin/streams', 'add_streamer_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Add streamer error:', err, basePath: '/admin/streams', errorCode: 'add_streamer_failed' });
   }
   res.redirect('/admin/streams');
 });
@@ -260,7 +260,7 @@ router.post('/streams/streamers/remove', requireManager, csrfProtection, async (
     await removeStreamer(parsedStreamerId);
     triggerRestart();
   } catch (err) {
-    return logAndRedirectError(res, log, 'Remove streamer error:', err, '/admin/streams', 'remove_streamer_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Remove streamer error:', err, basePath: '/admin/streams', errorCode: 'remove_streamer_failed' });
   }
   res.redirect('/admin/streams');
 });

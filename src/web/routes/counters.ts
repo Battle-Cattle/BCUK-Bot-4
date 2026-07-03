@@ -151,7 +151,7 @@ router.post('/counters/add', requireMod, csrfProtection, async (req, res) => {
     );
   } catch (err) {
     if (handleCounterWriteError(err, res)) return;
-    return logAndRedirectError(res, log, 'Add counter error:', err, '/counters', 'add_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Add counter error:', err, basePath: '/counters', errorCode: 'add_failed' });
   }
 
   res.redirect('/counters');
@@ -203,7 +203,7 @@ router.post('/counters/update', requireMod, csrfProtection, async (req, res) => 
       return res.redirect('/counters?error=counter_not_found');
     }
     if (handleCounterWriteError(err, res)) return;
-    return logAndRedirectError(res, log, 'Update counter error:', err, '/counters', 'update_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Update counter error:', err, basePath: '/counters', errorCode: 'update_failed' });
   }
 
   res.redirect('/counters');
@@ -231,7 +231,7 @@ router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => 
       return res.redirect('/counters?error=counter_not_found');
     }
 
-    return logAndRedirectError(res, log, 'Remove counter error:', err, '/counters', 'remove_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Remove counter error:', err, basePath: '/counters', errorCode: 'remove_failed' });
   }
 
   res.redirect('/counters');
@@ -259,7 +259,7 @@ router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, r
       return res.redirect('/counters?error=counter_not_found');
     }
 
-    return logAndRedirectError(res, log, 'Reset counter error:', err, '/counters', 'reset_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Reset counter error:', err, basePath: '/counters', errorCode: 'reset_failed' });
   }
 
   res.redirect('/counters?reset=1');

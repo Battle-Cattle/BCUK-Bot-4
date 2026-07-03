@@ -88,7 +88,7 @@ router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
     commandId = await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
     if (handleCommandWriteError(err, res)) return;
-    return logAndRedirectError(res, log, 'Add custom command error:', err, '/commands', 'add_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Add custom command error:', err, basePath: '/commands', errorCode: 'add_failed' });
   }
 
   const rawDiscordIds = req.body.discord_ids;
@@ -136,7 +136,7 @@ router.post('/commands/update', requireMod, csrfProtection, async (req, res) => 
       return res.redirect('/commands?error=command_not_found');
     }
     if (handleCommandWriteError(err, res)) return;
-    return logAndRedirectError(res, log, 'Update custom command error:', err, '/commands', 'update_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Update custom command error:', err, basePath: '/commands', errorCode: 'update_failed' });
   }
 
   res.redirect('/commands');
@@ -161,7 +161,7 @@ router.post('/commands/remove', requireMod, csrfProtection, async (req, res) => 
   try {
     await removeCustomCommand(parsedCommandId);
   } catch (err) {
-    return logAndRedirectError(res, log, 'Remove custom command error:', err, '/commands', 'remove_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Remove custom command error:', err, basePath: '/commands', errorCode: 'remove_failed' });
   }
 
   res.redirect('/commands');

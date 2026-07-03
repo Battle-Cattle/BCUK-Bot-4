@@ -38,7 +38,7 @@ router.post('/companion-key/request', csrfProtection, async (req, res) => {
   try {
     plain = await issueToken(req.session.user!.discordId);
   } catch (err) {
-    logAndRedirectError(res, log, 'Companion key request error:', err, '/companion-key', 'request_failed');
+    logAndRedirectError({ res, log, logLabel: 'Companion key request error:', err, basePath: '/companion-key', errorCode: 'request_failed' });
     return;
   }
 
@@ -65,7 +65,7 @@ router.post('/companion-key/revoke', csrfProtection, async (req, res) => {
     await revokeToken(req.session.user!.discordId);
     res.redirect('/companion-key');
   } catch (err) {
-    logAndRedirectError(res, log, 'Companion key revoke error:', err, '/companion-key', 'revoke_failed');
+    logAndRedirectError({ res, log, logLabel: 'Companion key revoke error:', err, basePath: '/companion-key', errorCode: 'revoke_failed' });
   }
 });
 

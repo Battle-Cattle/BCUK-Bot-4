@@ -35,7 +35,7 @@ router.post('/commands/guild-override', requireGuildContext, requireMod, csrfPro
     }
     res.redirect('/commands');
   } catch (err) {
-    logAndRedirectError(res, log, 'Guild command override upsert failed:', err, '/commands', 'override_failed');
+    logAndRedirectError({ res, log, logLabel: 'Guild command override upsert failed:', err, basePath: '/commands', errorCode: 'override_failed' });
   }
 });
 
@@ -53,7 +53,7 @@ router.post('/commands/guild-override/reset', requireGuildContext, requireMod, c
     await removeOverride(guildId, commandId);
     res.redirect('/commands');
   } catch (err) {
-    logAndRedirectError(res, log, 'Guild command override reset failed:', err, '/commands', 'override_reset_failed');
+    logAndRedirectError({ res, log, logLabel: 'Guild command override reset failed:', err, basePath: '/commands', errorCode: 'override_reset_failed' });
   }
 });
 

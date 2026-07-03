@@ -29,7 +29,7 @@ router.post('/sfx/file/update', requireMod, csrfProtection, async (req, res) => 
     const updated = await updateSfxFile(fileId, weight, hidden);
     if (!updated) return res.redirect('/sfx?error=invalid_id');
   } catch (err) {
-    return logAndRedirectError(res, log, 'Update SFX file error:', err, '/sfx', 'update_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Update SFX file error:', err, basePath: '/sfx', errorCode: 'update_failed' });
   }
 
   res.redirect('/sfx?success=file_updated');
@@ -51,7 +51,7 @@ router.post('/sfx/file/remove', requireMod, csrfProtection, async (req, res) => 
     if (file === null) return res.redirect('/sfx?error=invalid_id');
     await removeSfxFiles([file]);
   } catch (err) {
-    return logAndRedirectError(res, log, 'Remove SFX file error:', err, '/sfx', 'remove_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Remove SFX file error:', err, basePath: '/sfx', errorCode: 'remove_failed' });
   }
 
   res.redirect('/sfx?success=file_removed');

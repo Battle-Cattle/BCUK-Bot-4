@@ -140,7 +140,7 @@ router.get('/twitch-connect', requireAuth, async (req, res) => {
 
     res.redirect(`https://id.twitch.tv/oauth2/authorize?${params.toString()}`);
   } catch (err) {
-    logAndRedirectError(res, log, 'Twitch connect error:', err, '/user/settings', 'eventsub_config_failed');
+    logAndRedirectError({ res, log, logLabel: 'Twitch connect error:', err, basePath: '/user/settings', errorCode: 'eventsub_config_failed' });
   }
 });
 
@@ -164,7 +164,7 @@ router.post('/twitch-disconnect', requireAuth, csrfProtection, async (req, res) 
     reloadEventSubSubscriptions();
     res.redirect('/user/settings');
   } catch (err) {
-    logAndRedirectError(res, log, 'EventSub disconnect error:', err, '/user/settings', 'eventsub_disconnect_failed');
+    logAndRedirectError({ res, log, logLabel: 'EventSub disconnect error:', err, basePath: '/user/settings', errorCode: 'eventsub_disconnect_failed' });
   }
 });
 
@@ -226,7 +226,7 @@ router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) =>
     reloadEventSubSubscriptions();
     res.redirect('/user/settings');
   } catch (err) {
-    logAndRedirectError(res, log, 'EventSub config save error:', err, '/user/settings', 'eventsub_config_failed');
+    logAndRedirectError({ res, log, logLabel: 'EventSub config save error:', err, basePath: '/user/settings', errorCode: 'eventsub_config_failed' });
   }
 });
 

@@ -16,7 +16,7 @@ router.post('/sfx/category/add', requireMod, csrfProtection, async (req, res) =>
   try {
     await createCategory(name);
   } catch (err) {
-    return logAndRedirectError(res, log, 'Add SFX category error:', err, '/sfx', 'add_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Add SFX category error:', err, basePath: '/sfx', errorCode: 'add_failed' });
   }
 
   res.redirect('/sfx?success=category_added');
@@ -33,7 +33,7 @@ router.post('/sfx/category/rename', requireMod, csrfProtection, async (req, res)
     const renamed = await renameCategory(id, name);
     if (!renamed) return res.redirect('/sfx?error=invalid_id');
   } catch (err) {
-    return logAndRedirectError(res, log, 'Rename SFX category error:', err, '/sfx', 'update_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Rename SFX category error:', err, basePath: '/sfx', errorCode: 'update_failed' });
   }
 
   res.redirect('/sfx?success=category_updated');
@@ -48,7 +48,7 @@ router.post('/sfx/category/remove', requireMod, csrfProtection, async (req, res)
     const removed = await deleteCategory(id);
     if (!removed) return res.redirect('/sfx?error=invalid_id');
   } catch (err) {
-    return logAndRedirectError(res, log, 'Remove SFX category error:', err, '/sfx', 'remove_failed');
+    return logAndRedirectError({ res, log, logLabel: 'Remove SFX category error:', err, basePath: '/sfx', errorCode: 'remove_failed' });
   }
 
   res.redirect('/sfx?success=category_removed');
