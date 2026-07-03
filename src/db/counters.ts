@@ -49,6 +49,12 @@ export class CounterNotFoundError extends Error {
   }
 }
 
+/** A single archived year's value for a counter, as returned by {@link getCounterHistory}. */
+export interface CounterHistoryEntry {
+  year: number;
+  value: number | null;
+}
+
 // ─── Row mapper ───────────────────────────────────────────────────────────────
 
 function mapCounter(row: mysql.RowDataPacket): DbCounter {
@@ -95,6 +101,37 @@ export async function getAllCounters(): Promise<DbCounter[]> {
      ORDER BY trigger_command`,
   );
   return rows.map(mapCounter);
+}
+
+/**
+ * Fetches a counter along with its archived yearly-reset history (the
+ * `value2020`..`value2100` columns populated by `archiveAndResetYearlyCounters`).
+ * @param id - The counter's numeric id.
+ * @returns The counter and its history (years with a non-null archived value, newest
+ *   first), or `null` if no counter exists with the given id.
+ */
+export async function getCounterHistory(
+  id: number,
+): Promise<{ counter: DbCounter; history: CounterHistoryEntry[] } | null> {
+  const archiveColumns = Array.from(ARCHIVE_YEAR_COLUMNS.values());
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value,
+            ${archiveColumns.map((col) => `\`${col}\``).join(', ')}
+     FROM counter
+     WHERE id = ?
+     LIMIT 1`,
+    [id],
+  );
+  if (rows.length === 0) return null;
+
+  const row = rows[0];
+  const counter = mapCounter(row);
+  const history: CounterHistoryEntry[] = Array.from(ARCHIVE_YEAR_COLUMNS.entries())
+    .filter(([, columnName]) => row[columnName] !== null && row[columnName] !== undefined)
+    .map(([year, columnName]) => ({ year, value: row[columnName] as number }))
+    .sort((a, b) => b.year - a.year);
+
+  return { counter, history };
 }
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
