@@ -109,9 +109,9 @@
               <%- include('partials/rewardFields', { idPrefix: 'new', values: {
                 title: '', cost: '', prompt: '', is_enabled: true, background_color: '',
                 is_user_input_required: false, should_redemptions_skip_request_queue: false,
-                max_per_stream_setting: { is_enabled: false, value: 1 },
-                max_per_user_per_stream_setting: { is_enabled: false, value: 1 },
-                global_cooldown_setting: { is_enabled: false, value: 60 },
+                max_per_stream_setting: { is_enabled: false, max_per_stream: 1 },
+                max_per_user_per_stream_setting: { is_enabled: false, max_per_user_per_stream: 1 },
+                global_cooldown_setting: { is_enabled: false, global_cooldown_seconds: 60 },
               } }) %>
               <div style="margin-top:0.75rem;">
                 <button type="submit" class="btn">Create Reward</button>
