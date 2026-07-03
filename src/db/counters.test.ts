@@ -37,6 +37,7 @@ const mockConnection = {
 import { getPool } from './pool';
 import {
   getAllCounters,
+  getCounterHistory,
   addCounter,
   updateCounter,
   removeCounter,
@@ -104,6 +105,55 @@ describe('getAllCounters', () => {
     expect(result[0].reset_yearly).toBe(true);
     expect(result[1].reset_yearly).toBe(false);
     expect(result[0].current_value).toBe(5);
+  });
+});
+
+// ─── getCounterHistory ─────────────────────────────────────────────────────────
+
+describe('getCounterHistory', () => {
+  it('returns null when the counter does not exist', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([]) as any);
+    expect(await getCounterHistory(99)).toBeNull();
+  });
+
+  it('returns the counter and archived years newest-first, filtering out nulls', async () => {
+    const row = {
+      id: 1,
+      trigger_command: '!hits',
+      check_command: '!checkhits',
+      message: 'msg',
+      increment_message: 'inc',
+      reset_yearly: 1,
+      current_value: 5,
+      value2023: 10,
+      value2024: 20,
+      value2025: null,
+    };
+    vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
+    const result = await getCounterHistory(1);
+    expect(result).not.toBeNull();
+    expect(result!.counter.id).toBe(1);
+    expect(result!.counter.reset_yearly).toBe(true);
+    expect(result!.history).toEqual([
+      { year: 2024, value: 20 },
+      { year: 2023, value: 10 },
+    ]);
+  });
+
+  it('returns an empty history array for a counter with no archived years', async () => {
+    const row = {
+      id: 2,
+      trigger_command: '!deaths',
+      check_command: '!checkdeaths',
+      message: 'msg',
+      increment_message: 'inc',
+      reset_yearly: 0,
+      current_value: 0,
+    };
+    vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
+    const result = await getCounterHistory(2);
+    expect(result).not.toBeNull();
+    expect(result!.history).toEqual([]);
   });
 });
 

@@ -103,8 +103,9 @@ export {
   CounterNotFoundError,
   getAllCounters, addCounter, updateCounter, removeCounter,
   resetCounterCurrentValue, incrementCounter, archiveAndResetYearlyCounters,
+  getCounterHistory,
 } from './db/counters';
-export type { DbCounter, CounterMatchType, DbMatchedCounter, UpdateCounterInput } from './db/counters';
+export type { DbCounter, CounterMatchType, DbMatchedCounter, UpdateCounterInput, CounterHistoryEntry } from './db/counters';
 export { invalidateCounterLookupCache, findCounterByCommand, isCounterCommandTaken } from './db/counterCache';
 
 // ─── Stream monitor ──────────────────────────────────────────────────────────

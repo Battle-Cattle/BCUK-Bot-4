@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Counter History</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body>
+  <%- include('partials/nav') %>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Counter History — <%= counter.trigger_command %></h2>
+
+      <div class="card card-spaced">
+        <div class="card-body">
+          <a href="/counters" class="btn btn-ghost btn-sm">&larr; Back to Counters</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="table-scroll">
+          <table class="table" aria-label="Counter History">
+            <thead>
+              <tr>
+                <th scope="col">Year</th>
+                <th scope="col" class="counter-value-cell">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% history.forEach(function(entry) { %>
+              <tr>
+                <td class="mono"><%= entry.year %></td>
+                <td class="counter-value-cell"><span class="counter-value-badge"><%= entry.value %></span></td>
+              </tr>
+              <% }) %>
+              <% if (history.length === 0) { %>
+              <tr>
+                <td colspan="2" class="empty-msg">No archived history for this counter yet.</td>
+              </tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <%- include('partials/pwa-register') %>
+  <%- include('partials/footer') %>
+</body>
+</html>
