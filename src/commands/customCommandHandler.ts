@@ -50,6 +50,22 @@ async function lookupCommand(
   return null;
 }
 
+/**
+ * Extracts args from `rawMessage` and runs `rawResponse` through {@link fillTemplate}
+ * with `{user}` (the invoking username), `{args}` (the raw text after the command
+ * token), and `{arg}` (the first whitespace-delimited word of `{args}`) substituted
+ * in. Shared by both the Discord and Twitch execute paths so the placeholder set
+ * stays in sync between them.
+ */
+function buildFilledResponse(rawResponse: string, rawMessage: string, username?: string | null): string {
+  const args = extractArgs(rawMessage);
+  return fillTemplate(rawResponse, {
+    user: username ?? '',
+    args,
+    arg: args.split(/\s+/)[0] ?? '',
+  });
+}
+
 // ─── Multi-twitch broadcast ───────────────────────────────────────────────────
 
 interface SessionCacheEntry {
@@ -201,12 +217,7 @@ export async function executeCustomCommandForDiscord(
   const result = await lookupCommand(command, (cmd) => getCustomCommandForDiscord(cmd, resolvedGuildId));
   if (!result) return;
 
-  const args = extractArgs(message.content);
-  const filledResponse = fillTemplate(result.response, {
-    user: username ?? '',
-    args,
-    arg: args.split(/\s+/)[0] ?? '',
-  });
+  const filledResponse = buildFilledResponse(result.response, message.content, username);
 
   recordCommandTestEntry({
     source: 'discord',
@@ -254,12 +265,7 @@ export async function executeCustomCommandForTwitch(
   const result = await lookupCommand(command, (cmd) => getCustomCommandForTwitchChannel(channel, cmd));
   if (!result) return;
 
-  const args = extractArgs(rawMessage);
-  const filledResponse = fillTemplate(result.response, {
-    user: username ?? '',
-    args,
-    arg: args.split(/\s+/)[0] ?? '',
-  });
+  const filledResponse = buildFilledResponse(result.response, rawMessage, username);
 
   recordCommandTestEntry({
     source: 'twitch',
