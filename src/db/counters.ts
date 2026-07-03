@@ -110,13 +110,33 @@ export async function getAllCounters(): Promise<DbCounter[]> {
  * @returns The counter and its history (years with a non-null archived value, newest
  *   first), or `null` if no counter exists with the given id.
  */
+/**
+ * Returns the `value<year>` archive columns that actually exist on the `counter`
+ * table right now. Per `DATABASE-SCHEMA.md`, these columns are added incrementally
+ * over time (one per year, as each year's archive becomes needed) — `ARCHIVE_YEAR_COLUMNS`
+ * is a fixed allowlist of *theoretically valid* years, not a guarantee that every
+ * column in it has been created yet, so callers must not assume the full range exists.
+ */
+async function getExistingArchiveColumns(): Promise<string[]> {
+  const [rows] = await getPool().query<mysql.RowDataPacket[]>(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'counter' AND COLUMN_NAME LIKE 'value2%'`,
+  );
+  const knownColumns = new Set(ARCHIVE_YEAR_COLUMNS.values());
+  return rows
+    .map((row) => row.COLUMN_NAME as string)
+    .filter((columnName) => knownColumns.has(columnName));
+}
+
 export async function getCounterHistory(
   id: number,
 ): Promise<{ counter: DbCounter; history: CounterHistoryEntry[] } | null> {
-  const archiveColumns = Array.from(ARCHIVE_YEAR_COLUMNS.values());
+  const existingColumns = await getExistingArchiveColumns();
+  const selectColumns = existingColumns.length > 0
+    ? `, ${existingColumns.map((col) => `\`${col}\``).join(', ')}`
+    : '';
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value,
-            ${archiveColumns.map((col) => `\`${col}\``).join(', ')}
+    `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value${selectColumns}
      FROM counter
      WHERE id = ?
      LIMIT 1`,
@@ -126,8 +146,9 @@ export async function getCounterHistory(
 
   const row = rows[0];
   const counter = mapCounter(row);
+  const existingColumnSet = new Set(existingColumns);
   const history: CounterHistoryEntry[] = Array.from(ARCHIVE_YEAR_COLUMNS.entries())
-    .filter(([, columnName]) => row[columnName] !== null && row[columnName] !== undefined)
+    .filter(([, columnName]) => existingColumnSet.has(columnName) && row[columnName] !== null && row[columnName] !== undefined)
     .map(([year, columnName]) => ({ year, value: row[columnName] as number }))
     .sort((a, b) => b.year - a.year);
 

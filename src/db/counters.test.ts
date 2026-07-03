@@ -60,6 +60,7 @@ function makePool(rows: unknown[] = [], meta: unknown = {}) {
   };
   return {
     execute: vi.fn().mockResolvedValue([[...rows], meta]),
+    query: vi.fn().mockResolvedValue([[], meta]),
     getConnection: vi.fn().mockResolvedValue(conn),
     _conn: conn,
   };
@@ -129,7 +130,12 @@ describe('getCounterHistory', () => {
       value2024: 20,
       value2025: null,
     };
-    vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
+    const pool = makePool([row]);
+    pool.query.mockResolvedValue([
+      [{ COLUMN_NAME: 'value2023' }, { COLUMN_NAME: 'value2024' }, { COLUMN_NAME: 'value2025' }],
+      {},
+    ]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getCounterHistory(1);
     expect(result).not.toBeNull();
     expect(result!.counter.id).toBe(1);
@@ -154,6 +160,45 @@ describe('getCounterHistory', () => {
     const result = await getCounterHistory(2);
     expect(result).not.toBeNull();
     expect(result!.history).toEqual([]);
+  });
+
+  it('only selects value<year> columns that actually exist on the table, ignoring the rest of the allowlist', async () => {
+    // Regression test: ARCHIVE_YEAR_COLUMNS spans 2020-2100 as an allowlist, but per
+    // DATABASE-SCHEMA.md the physical columns are added one year at a time — the schema
+    // may only have e.g. value2020..value2025. Querying the full allowlist blindly used
+    // to throw "Unknown column 'value2026' in 'field list'" in production.
+    const row = {
+      id: 3,
+      trigger_command: '!wins',
+      check_command: '!checkwins',
+      message: 'msg',
+      increment_message: 'inc',
+      reset_yearly: 1,
+      current_value: 1,
+      value2025: 7,
+    };
+    const pool = makePool([row]);
+    pool.query.mockResolvedValue([[{ COLUMN_NAME: 'value2025' }], {}]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    const result = await getCounterHistory(3);
+
+    expect(result!.history).toEqual([{ year: 2025, value: 7 }]);
+    const [sql] = pool.execute.mock.calls[0];
+    expect(sql).toContain('`value2025`');
+    expect(sql).not.toContain('value2026');
+    expect(sql).not.toContain('value2100');
+  });
+
+  it('queries information_schema scoped to the counter table for existing archive columns', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await getCounterHistory(1);
+
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).toContain('information_schema.COLUMNS');
+    expect(sql).toContain("TABLE_NAME = 'counter'");
   });
 });
 
