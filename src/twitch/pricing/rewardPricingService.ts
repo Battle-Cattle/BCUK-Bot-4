@@ -19,6 +19,20 @@ function queueKey(streamerId: number, twitchRewardId: string): string {
   return `${streamerId}:${twitchRewardId}`;
 }
 
+// Caps how often a single reward's cost is actually pushed to Twitch, even if demand keeps
+// changing faster than that (e.g. a redemption burst during a raid/hype train) — every
+// redemption still updates demand immediately, but the resulting price is coalesced onto
+// Twitch at most this often. Skipped pushes aren't lost: since last_pushed_cost is left
+// unchanged, the next redemption (once the window has passed) or the next decay tick
+// (every 30s, well above this interval) will push the fully caught-up price.
+const MIN_PUSH_INTERVAL_MS = 5_000;
+const lastPushedAt = new Map<string, number>();
+
+/** Test-only: clears the in-memory last-pushed-at cache so each test starts from a clean slate. */
+export function __resetPushRateLimiterForTests(): void {
+  lastPushedAt.clear();
+}
+
 /** Outcome of {@link pushRewardCostUpdate}. */
 interface PushCostResult {
   /** The cost to persist as `last_pushed_cost` — the new cost on success, otherwise unchanged. */
@@ -29,13 +43,16 @@ interface PushCostResult {
 
 /**
  * Resolves the streamer's broadcaster token and pushes a recomputed cost to Twitch for one
- * reward. A 403 (the reward was created outside this app and can never be managed by it) is
- * treated as permanent: the row is disabled via `markPricingUnsupported`. A 401 (invalid
- * token, or missing the channel:manage:redemptions scope) is logged with an actionable message
- * but otherwise treated like any other transient failure — the token is shared with other bot
- * features, so it's never cleared from here; reconnecting Twitch in User Settings (to grant
- * the scope, or replace a revoked token) is what actually resolves it. Any other failure is
- * also logged and swallowed. In every failure case, `previousLastPushedCost` is returned
+ * reward, unless `MIN_PUSH_INTERVAL_MS` hasn't yet elapsed since the last successful push for
+ * this reward (see `lastPushedAt`), in which case the push is skipped entirely (no DB/token
+ * lookups) and `previousLastPushedCost` is returned unchanged. A 403 (the reward was created
+ * outside this app and can never be managed by it) is treated as permanent: the row is
+ * disabled via `markPricingUnsupported`. A 401 (invalid token, or missing the
+ * channel:manage:redemptions scope) is logged with an actionable message but otherwise
+ * treated like any other transient failure — the token is shared with other bot features, so
+ * it's never cleared from here; reconnecting Twitch in User Settings (to grant the scope, or
+ * replace a revoked token) is what actually resolves it. Any other failure is also logged and
+ * swallowed. In every failure/rate-limited case, `previousLastPushedCost` is returned
  * unchanged so the price is simply retried on the next redemption/decay tick.
  *
  * @param streamerId - DB row ID of the owning streamer.
@@ -46,6 +63,11 @@ interface PushCostResult {
 async function pushRewardCostUpdate(
   streamerId: number, twitchRewardId: string, newCost: number, previousLastPushedCost: number | null,
 ): Promise<PushCostResult> {
+  const key = queueKey(streamerId, twitchRewardId);
+  const lastPush = lastPushedAt.get(key) ?? 0;
+  if (Date.now() - lastPush < MIN_PUSH_INTERVAL_MS) {
+    return { lastPushedCost: previousLastPushedCost, unsupported: false };
+  }
   try {
     const streamer = await getStreamerById(streamerId);
     const token = streamer ? await getValidToken(streamer) : null;
@@ -54,6 +76,7 @@ async function pushRewardCostUpdate(
       return { lastPushedCost: previousLastPushedCost, unsupported: false };
     }
     await updateRewardCost(streamer.twitch_user_id, twitchRewardId, newCost, token);
+    lastPushedAt.set(key, Date.now());
     return { lastPushedCost: newCost, unsupported: false };
   } catch (err) {
     if (err instanceof TwitchRewardUnsupportedError) {
