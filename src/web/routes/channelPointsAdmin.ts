@@ -8,21 +8,24 @@ import { getPricingConfigsForStreamer, getGlobalPricingSettings } from '../../db
 import type { RewardPricingRow } from '../../db';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 import { computePrice } from '../../twitch/pricing/rewardPricingMath';
 import { filterQueryParam, renderError, renderView } from './shared';
-import { router as pricingMutationsRouter } from './pricingAdminMutations';
+import { router as channelPointsMutationsRouter } from './channelPointsAdminMutations';
 
-const log = createLogger('PricingAdmin');
+const log = createLogger('ChannelPointsAdmin');
 const router = Router();
 
 const KNOWN_ERRORS = new Set([
-  'not_a_streamer', 'invalid_reward_id', 'invalid_config', 'save_failed', 'invalid_id',
-  'delete_failed', 'not_owner', 'invalid_settings',
+  'not_a_streamer', 'invalid_reward_id', 'invalid_config', 'save_failed',
+  'delete_failed', 'not_owner', 'invalid_settings', 'invalid_reward_fields', 'create_failed', 'update_failed',
 ]);
-const KNOWN_SUCCESSES = new Set(['pricing_saved', 'pricing_deleted', 'global_settings_saved']);
+const KNOWN_SUCCESSES = new Set([
+  'pricing_saved', 'pricing_deleted', 'global_settings_saved', 'reward_created', 'reward_updated', 'reward_deleted',
+]);
 
-/** One row on the pricing admin page: a live Twitch reward, an "unlinked" orphaned config, or both merged. */
-interface PricingRewardRow {
+/** One row on the Channel Points page: a live Twitch reward, an "unlinked" orphaned pricing config, or both merged. */
+interface ChannelPointRewardRow {
   rewardId: string;
   twitchReward: TwitchCustomReward | null;
   config: RewardPricingRow | null;
@@ -53,23 +56,29 @@ async function fetchTwitchRewards(streamer: DbStreamerEventSub): Promise<TwitchC
 }
 
 /**
- * GET /pricing — renders the dynamic pricing admin page: the streamer's live Twitch
- * rewards merged with any existing pricing config (including a live price preview),
- * and — only for the bot owner — the bot-wide decay/increment settings.
+ * GET /channel-points — renders the Channel Points management page: the streamer's live
+ * Twitch rewards (creatable/editable/deletable from here) merged with any existing dynamic
+ * pricing config (including a live price preview), and — only for the bot owner — the
+ * bot-wide pricing decay/increment settings. Shows a reconnect prompt instead of the reward
+ * list when the streamer isn't connected, or their connection has started failing with an
+ * auth error (mirrors the same check on `/user/settings`).
  * @param req - Express request; reads `req.session.user`, `error`, and `success` query params.
- * @param res - Express response; renders the `pricingAdmin` view, or a 500 error page on failure.
+ * @param res - Express response; renders the `channelPointsAdmin` view, or a 500 error page on failure.
  */
 router.get('/', requireAuth, csrfProtection, async (req, res) => {
   try {
     const streamer = await getStreamerByDiscordId(req.session.user!.discordId);
-    const [pricingConfigs, twitchRewards] = streamer
+    const isConnected = !!streamer?.eventsub_access_token;
+    const needsReconnect = isConnected && !!streamer?.twitch_name && hasAuthFailedSubs(streamer.twitch_name);
+
+    const [pricingConfigs, twitchRewards] = streamer && isConnected && !needsReconnect
       ? await Promise.all([getPricingConfigsForStreamer(streamer.id), fetchTwitchRewards(streamer)])
       : [[], []];
 
     const configByRewardId = new Map(pricingConfigs.map((c) => [c.twitch_reward_id, c]));
     const matchedRewardIds = new Set(twitchRewards.map((tr) => tr.id));
 
-    const rewards: PricingRewardRow[] = twitchRewards.map((tr) => {
+    const rewards: ChannelPointRewardRow[] = twitchRewards.map((tr) => {
       const config = configByRewardId.get(tr.id) ?? null;
       return { rewardId: tr.id, twitchReward: tr, config, previewPrice: config ? previewPriceFor(config) : null };
     });
@@ -85,10 +94,12 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     const isOwner = req.session.user?.isOwner ?? false;
     const globalSettings = isOwner ? await getGlobalPricingSettings() : null;
 
-    renderView(res, 'pricingAdmin', {
+    renderView(res, 'channelPointsAdmin', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
       streamer: streamer ?? null,
+      isConnected,
+      needsReconnect,
       rewards,
       isOwner,
       globalSettings,
@@ -96,11 +107,11 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),
     });
   } catch (err) {
-    log.error('Pricing settings page error:', err);
-    renderError(res, 500, 'Failed to load pricing settings.', req.session.user);
+    log.error('Channel Points page error:', err);
+    renderError(res, 500, 'Failed to load Channel Points settings.', req.session.user);
   }
 });
 
-router.use(pricingMutationsRouter);
+router.use(channelPointsMutationsRouter);
 
 export default router;

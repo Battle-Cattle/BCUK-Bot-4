@@ -4,7 +4,7 @@ import {
   getGlobalPricingSettings, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
-import { updateRewardCost, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
+import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
 import { computePrice, decayDemand, applyRedemption } from './rewardPricingMath';
 import { createLogger } from '../../shared/logger';
 
@@ -142,16 +142,18 @@ export async function applyDecayTick(streamerId: number, twitchRewardId: string)
  * reward, so a concurrent redemption or decay tick can never push a new price into the gap
  * between the reset and the delete (which would otherwise leave Twitch at a stale cost with
  * no config left to ever reconcile it). Skips the reset (but still deletes) when the reward
- * was marked unsupported, since Twitch would just reject the reset too.
+ * was marked unsupported, since Twitch would just reject the reset too. No-ops entirely if
+ * no pricing config exists for this reward. Use this to turn dynamic pricing off while
+ * keeping the reward itself on Twitch — see `deleteRewardAndPricing` to delete the reward too.
  *
- * @param id - Primary key of the `reward_pricing` row to delete.
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
  */
-export async function resetAndDeletePricing(id: number, streamerId: number, twitchRewardId: string): Promise<void> {
+export async function resetAndDeletePricing(streamerId: number, twitchRewardId: string): Promise<void> {
   await pricingQueue.run(queueKey(streamerId, twitchRewardId), async () => {
     const row = await getPricingForReward(streamerId, twitchRewardId);
-    if (row && !row.twitch_unsupported) {
+    if (!row) return;
+    if (!row.twitch_unsupported) {
       try {
         const streamer = await getStreamerById(streamerId);
         const token = streamer ? await getValidToken(streamer) : null;
@@ -162,6 +164,34 @@ export async function resetAndDeletePricing(id: number, streamerId: number, twit
         log.warn(`Failed to reset Twitch reward cost before deleting pricing config for reward ${twitchRewardId}:`, err);
       }
     }
-    await deletePricingConfig(id, streamerId);
+    await deletePricingConfig(row.id, streamerId);
+  });
+}
+
+/**
+ * Deletes a reward entirely from Twitch — only succeeds for rewards created by this app
+ * (Twitch returns a 403 otherwise, which propagates to the caller) — then removes any local
+ * pricing config for it. Runs inside the same queued operation as
+ * `applyRedemptionPricing`/`applyDecayTick`/`resetAndDeletePricing` for this reward, so a
+ * concurrent redemption or decay tick can't race a reward being deleted. Unlike
+ * `resetAndDeletePricing`, this does not attempt a cost reset first — the reward won't exist
+ * to have a cost once this completes.
+ *
+ * @param streamerId - DB row ID of the owning streamer.
+ * @param twitchRewardId - Twitch reward UUID to delete.
+ * @throws When the streamer has no valid broadcaster token, or Twitch rejects the delete
+ *   (e.g. `TwitchRewardUnsupportedError` for a reward this app didn't create).
+ */
+export async function deleteRewardAndPricing(streamerId: number, twitchRewardId: string): Promise<void> {
+  await pricingQueue.run(queueKey(streamerId, twitchRewardId), async () => {
+    const streamer = await getStreamerById(streamerId);
+    const token = streamer ? await getValidToken(streamer) : null;
+    if (!streamer?.twitch_user_id || !token) {
+      throw new Error(`No valid broadcaster token for streamer ${streamerId} — cannot delete reward ${twitchRewardId}`);
+    }
+    await deleteCustomReward(streamer.twitch_user_id, twitchRewardId, token);
+
+    const row = await getPricingForReward(streamerId, twitchRewardId);
+    if (row) await deletePricingConfig(row.id, streamerId);
   });
 }

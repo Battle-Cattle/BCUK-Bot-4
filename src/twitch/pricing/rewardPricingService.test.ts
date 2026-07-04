@@ -15,7 +15,9 @@ vi.mock('../eventsub/twitchApiEventSub', () => ({ getValidToken: vi.fn() }));
 vi.mock('../twitchApi', () => {
   class TwitchRewardUnsupportedError extends Error {}
   class TwitchRewardAuthError extends Error {}
-  return { updateRewardCost: vi.fn(), TwitchRewardUnsupportedError, TwitchRewardAuthError };
+  return {
+    updateRewardCost: vi.fn(), deleteCustomReward: vi.fn(), TwitchRewardUnsupportedError, TwitchRewardAuthError,
+  };
 });
 
 import {
@@ -23,8 +25,10 @@ import {
   getGlobalPricingSettings, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
-import { updateRewardCost, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
-import { applyRedemptionPricing, applyDecayTick, resetAndDeletePricing } from './rewardPricingService';
+import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
+import {
+  applyRedemptionPricing, applyDecayTick, resetAndDeletePricing, deleteRewardAndPricing,
+} from './rewardPricingService';
 
 const settings = { decay_half_life_periods: 3, redemption_increment: 0.1 };
 const streamer = { id: 1, twitch_user_id: 'bc1', eventsub_access_token: 'tok' } as any;
@@ -57,6 +61,7 @@ beforeEach(() => {
   // implementations, so reset this explicitly — otherwise a test that rejects
   // updateRewardCost without ...Once leaks that rejection into later tests.
   vi.mocked(updateRewardCost).mockResolvedValue(undefined);
+  vi.mocked(deleteCustomReward).mockResolvedValue(undefined);
 });
 
 describe('applyRedemptionPricing', () => {
@@ -177,8 +182,8 @@ describe('applyDecayTick', () => {
 
 describe('resetAndDeletePricing', () => {
   it('resets the Twitch cost to base_cost, then deletes the config', async () => {
-    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ base_cost: 200 }));
-    await resetAndDeletePricing(42, 1, 'rwd1');
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ id: 42, base_cost: 200 }));
+    await resetAndDeletePricing(1, 'rwd1');
     expect(updateRewardCost).toHaveBeenCalledWith('bc1', 'rwd1', 200, 'user-token');
     expect(deletePricingConfig).toHaveBeenCalledWith(42, 1);
     const [resetOrder] = vi.mocked(updateRewardCost).mock.invocationCallOrder;
@@ -187,23 +192,23 @@ describe('resetAndDeletePricing', () => {
   });
 
   it('skips the reset (but still deletes) when the reward is marked unsupported', async () => {
-    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ twitch_unsupported: true }));
-    await resetAndDeletePricing(42, 1, 'rwd1');
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ id: 42, twitch_unsupported: true }));
+    await resetAndDeletePricing(1, 'rwd1');
     expect(updateRewardCost).not.toHaveBeenCalled();
     expect(deletePricingConfig).toHaveBeenCalledWith(42, 1);
   });
 
-  it('skips the reset (but still deletes) when the row no longer exists', async () => {
+  it('no-ops entirely when no pricing config exists for the reward', async () => {
     vi.mocked(getPricingForReward).mockResolvedValue(null);
-    await resetAndDeletePricing(42, 1, 'rwd1');
+    await resetAndDeletePricing(1, 'rwd1');
     expect(updateRewardCost).not.toHaveBeenCalled();
-    expect(deletePricingConfig).toHaveBeenCalledWith(42, 1);
+    expect(deletePricingConfig).not.toHaveBeenCalled();
   });
 
   it('still deletes when the Twitch reset fails', async () => {
-    vi.mocked(getPricingForReward).mockResolvedValue(makeRow());
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ id: 42 }));
     vi.mocked(updateRewardCost).mockRejectedValueOnce(new Error('twitch down'));
-    await expect(resetAndDeletePricing(42, 1, 'rwd1')).resolves.toBeUndefined();
+    await expect(resetAndDeletePricing(1, 'rwd1')).resolves.toBeUndefined();
     expect(deletePricingConfig).toHaveBeenCalledWith(42, 1);
   });
 
@@ -227,7 +232,7 @@ describe('resetAndDeletePricing', () => {
     });
 
     const decayTick = applyDecayTick(1, 'rwd1');
-    const del = resetAndDeletePricing(42, 1, 'rwd1'); // same key — must wait for the decay tick to finish
+    const del = resetAndDeletePricing(1, 'rwd1'); // same key — must wait for the decay tick to finish
 
     await Promise.resolve();
     await Promise.resolve();
@@ -235,6 +240,69 @@ describe('resetAndDeletePricing', () => {
 
     resolveFirst();
     await Promise.all([decayTick, del]);
+    expect(order).toEqual(['read', 'write', 'read', 'delete']);
+  });
+});
+
+describe('deleteRewardAndPricing', () => {
+  it('deletes the reward on Twitch, then deletes the local pricing config', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ id: 42 }));
+    await deleteRewardAndPricing(1, 'rwd1');
+    expect(deleteCustomReward).toHaveBeenCalledWith('bc1', 'rwd1', 'user-token');
+    expect(deletePricingConfig).toHaveBeenCalledWith(42, 1);
+    const [deleteRewardOrder] = vi.mocked(deleteCustomReward).mock.invocationCallOrder;
+    const [deleteConfigOrder] = vi.mocked(deletePricingConfig).mock.invocationCallOrder;
+    expect(deleteRewardOrder).toBeLessThan(deleteConfigOrder);
+  });
+
+  it('deletes the reward on Twitch without touching the local config when none exists', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(null);
+    await deleteRewardAndPricing(1, 'rwd1');
+    expect(deleteCustomReward).toHaveBeenCalledWith('bc1', 'rwd1', 'user-token');
+    expect(deletePricingConfig).not.toHaveBeenCalled();
+  });
+
+  it('throws (and does not delete the local config) when no valid token is available', async () => {
+    vi.mocked(getValidToken).mockResolvedValue(null);
+    await expect(deleteRewardAndPricing(1, 'rwd1')).rejects.toThrow();
+    expect(deleteCustomReward).not.toHaveBeenCalled();
+    expect(deletePricingConfig).not.toHaveBeenCalled();
+  });
+
+  it('propagates a 403 from Twitch (reward not created by this app) without deleting the local config', async () => {
+    vi.mocked(deleteCustomReward).mockRejectedValueOnce(new TwitchRewardUnsupportedError('403'));
+    await expect(deleteRewardAndPricing(1, 'rwd1')).rejects.toBeInstanceOf(TwitchRewardUnsupportedError);
+    expect(deletePricingConfig).not.toHaveBeenCalled();
+  });
+
+  it('serializes with a concurrent applyRedemptionPricing on the same reward key', async () => {
+    const order: string[] = [];
+    let resolveFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { resolveFirst = resolve; });
+
+    vi.mocked(getPricingForReward).mockImplementation(async () => {
+      order.push('read');
+      if (order.filter((o) => o === 'read').length === 1) {
+        await firstGate; // the redemption's read blocks here until released
+      }
+      return makeRow({ id: 42, demand: 0, last_pushed_cost: null });
+    });
+    vi.mocked(recordPricingUpdate).mockImplementation(async () => {
+      order.push('write');
+    });
+    vi.mocked(deletePricingConfig).mockImplementation(async () => {
+      order.push('delete');
+    });
+
+    const redemption = applyRedemptionPricing(1, 'rwd1');
+    const del = deleteRewardAndPricing(1, 'rwd1'); // same key — must wait for the redemption to finish
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual(['read']); // the delete's read hasn't happened yet — it's queued behind the redemption
+
+    resolveFirst();
+    await Promise.all([redemption, del]);
     expect(order).toEqual(['read', 'write', 'read', 'delete']);
   });
 });

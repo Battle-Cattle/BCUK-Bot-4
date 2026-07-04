@@ -25,27 +25,35 @@ vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
   getValidToken: vi.fn(),
 }));
 
+vi.mock('../../twitch/eventsub/twitchEventSubSubscriptions', () => ({
+  hasAuthFailedSubs: vi.fn(),
+}));
+
 vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
-vi.mock('./pricingAdminMutations', async () => {
+vi.mock('./channelPointsAdminMutations', async () => {
   const { Router } = await import('express');
   return { router: Router() };
 });
 
 import express from 'express';
 import supertest from 'supertest';
-import router from './pricingAdmin';
+import router from './channelPointsAdmin';
 import { getStreamerByDiscordId, getPricingConfigsForStreamer, getGlobalPricingSettings } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3; isOwner: boolean };
 const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: 0, isOwner: false };
 const OWNER: SessionUser = { ...USER, discordId: '200000000000000002', isOwner: true };
 
-const MOCK_STREAMER = { id: 123, twitch_user_id: 'twitch123', twitch_name: 'teststreamer', discord_id: USER.discordId };
+const MOCK_STREAMER = {
+  id: 123, twitch_user_id: 'twitch123', twitch_name: 'teststreamer', discord_id: USER.discordId,
+  eventsub_access_token: 'encrypted-token',
+};
 
 function buildApp(sessionUser: SessionUser = USER) {
   const app = express();
@@ -65,6 +73,7 @@ beforeEach(() => {
   vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([]);
   vi.mocked(getCustomRewards).mockResolvedValue([]);
   vi.mocked(getValidToken).mockResolvedValue('token');
+  vi.mocked(hasAuthFailedSubs).mockReturnValue(false);
   vi.mocked(getGlobalPricingSettings).mockResolvedValue({ decay_half_life_periods: 3, redemption_increment: 0.1 });
 });
 
@@ -170,5 +179,38 @@ describe('GET /', () => {
     const res = await supertest(buildApp(OWNER)).get('/');
     expect(res.body.isOwner).toBe(true);
     expect(res.body.globalSettings).toEqual({ decay_half_life_periods: 3, redemption_increment: 0.1 });
+  });
+
+  describe('reconnect detection', () => {
+    it('does not fetch rewards and reports isConnected=false when the streamer has no Twitch token', async () => {
+      vi.mocked(getStreamerByDiscordId).mockResolvedValue({ ...MOCK_STREAMER, eventsub_access_token: null } as any);
+
+      const res = await supertest(buildApp()).get('/');
+      expect(res.body.isConnected).toBe(false);
+      expect(res.body.needsReconnect).toBe(false);
+      expect(res.body.rewards).toEqual([]);
+      expect(getCustomRewards).not.toHaveBeenCalled();
+    });
+
+    it('does not fetch rewards and reports needsReconnect=true when subscriptions have failed with an auth error', async () => {
+      vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+      vi.mocked(hasAuthFailedSubs).mockReturnValue(true);
+
+      const res = await supertest(buildApp()).get('/');
+      expect(res.body.isConnected).toBe(true);
+      expect(res.body.needsReconnect).toBe(true);
+      expect(res.body.rewards).toEqual([]);
+      expect(getCustomRewards).not.toHaveBeenCalled();
+    });
+
+    it('fetches rewards normally when connected with no auth failures', async () => {
+      vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+      vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true } as any]);
+
+      const res = await supertest(buildApp()).get('/');
+      expect(res.body.isConnected).toBe(true);
+      expect(res.body.needsReconnect).toBe(false);
+      expect(getCustomRewards).toHaveBeenCalled();
+    });
   });
 });

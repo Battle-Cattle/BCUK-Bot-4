@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Channel Points</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body data-csrf-token="<%= csrfToken %>">
+  <%- include('partials/nav') %>
+
+  <main class="container">
+
+    <% if (error) { %>
+    <div class="card card-alert-danger">
+      <% const errorMessages = {
+        not_a_streamer:        'You are not configured as a monitored streamer.',
+        invalid_reward_id:     'Invalid reward ID format.',
+        invalid_reward_fields: 'Please check the reward fields — title and cost are required, a prompt is required when viewer input is required, and any enabled limit needs a value.',
+        create_failed:         'Failed to create the reward — please try again, or reconnect Twitch if this keeps happening.',
+        update_failed:         'Failed to update the reward — Twitch only allows the app that created a reward to edit it.',
+        invalid_config:        'Base cost, cooldown, and curve must be positive numbers, and max multiplier must be zero or greater.',
+        save_failed:           'Failed to save — please try again.',
+        delete_failed:         'Delete failed — please try again.',
+        not_owner:             'Only the bot owner can change the global pricing settings.',
+        invalid_settings:      'Decay half-life must be positive, and the redemption increment must be between 0 and 1.',
+      }; %>
+      <%= errorMessages[error] ?? `An error occurred (${error}).` %>
+    </div>
+    <% } %>
+
+    <% if (success) { %>
+    <div class="card card-alert-success">
+      <% const successMessages = {
+        reward_created:         'Reward created.',
+        reward_updated:         'Reward updated.',
+        reward_deleted:         'Reward deleted.',
+        pricing_saved:          'Pricing config saved.',
+        pricing_deleted:        'Dynamic pricing disabled.',
+        global_settings_saved:  'Global pricing settings saved.',
+      }; %>
+      <%= successMessages[success] ?? 'Done.' %>
+    </div>
+    <% } %>
+
+    <% if (!streamer) { %>
+    <section class="section">
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">You are not configured as a monitored streamer. Contact a Manager or Admin.</p>
+        </div>
+      </div>
+    </section>
+    <% } else if (!isConnected || needsReconnect) { %>
+    <section class="section">
+      <div class="card card-alert-danger">
+        <% if (!isConnected) { %>
+        Connect your Twitch account to create and manage Channel Point rewards.
+        <% } else { %>
+        Your Twitch connection is missing required permissions. Reconnect to manage Channel Point rewards.
+        <% } %>
+        <a href="/user/settings/twitch-connect" class="btn btn-sm" style="margin-left:1rem;">Reconnect Twitch</a>
+      </div>
+    </section>
+    <% } else { %>
+
+    <% if (isOwner) { %>
+    <!-- ── Global Settings (bot owner only) ───────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Global Pricing Settings</h2>
+      <p class="hint" style="margin-bottom:0.75rem;">
+        Shared by every reward's demand calculation, across all streamers.
+      </p>
+      <div class="card">
+        <div class="card-body">
+          <form method="POST" action="/channel-points/settings/global">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="form-row-wrap" style="align-items:flex-end;">
+              <div>
+                <label class="hint hint-compact" for="decay-half-life">Decay half-life (cooldown periods)</label>
+                <input id="decay-half-life" class="input" type="number" step="0.1" min="0.1" name="decay_half_life_periods"
+                  value="<%= globalSettings.decay_half_life_periods %>" required>
+              </div>
+              <div>
+                <label class="hint hint-compact" for="redemption-increment">Redemption increment (0–1)</label>
+                <input id="redemption-increment" class="input" type="number" step="0.01" min="0" max="1" name="redemption_increment"
+                  value="<%= globalSettings.redemption_increment %>" required>
+              </div>
+              <div>
+                <button type="submit" class="btn">Save</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+    <% } %>
+
+    <!-- ── Create Reward ───────────────────────────────────────────── -->
+    <section class="section">
+      <details>
+        <summary class="section-title" style="cursor:pointer;display:inline-block;">+ Create new reward</summary>
+        <div class="card card-spaced">
+          <div class="card-body">
+            <form method="POST" action="/channel-points/rewards">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <%- include('partials/rewardFields', { idPrefix: 'new', values: {
+                title: '', cost: '', prompt: '', is_enabled: true, background_color: '',
+                is_user_input_required: false, should_redemptions_skip_request_queue: false,
+                max_per_stream_setting: { is_enabled: false, max_per_stream: 1 },
+                max_per_user_per_stream_setting: { is_enabled: false, max_per_user_per_stream: 1 },
+                global_cooldown_setting: { is_enabled: false, global_cooldown_seconds: 60 },
+              } }) %>
+              <div style="margin-top:0.75rem;">
+                <button type="submit" class="btn">Create Reward</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <!-- ── Rewards ──────────────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Channel Point Rewards</h2>
+      <p class="hint" style="margin-bottom:0.75rem;">
+        Turn on dynamic pricing per reward to have its channel point cost automatically rise with usage and decay when idle.
+      </p>
+
+      <% if (rewards.length === 0) { %>
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">No Twitch custom rewards found. Create one above.</p>
+        </div>
+      </div>
+      <% } else { %>
+      <% for (const r of rewards) { %>
+      <div class="card card-spaced">
+        <div class="card-body">
+          <div class="form-row-wrap" style="align-items:center;justify-content:space-between;">
+            <div>
+              <% if (r.twitchReward) { %>
+              <strong><%= r.twitchReward.title %></strong>
+              <p class="hint hint-compact">
+                Cost: <%= r.twitchReward.cost.toLocaleString() %> pts<%= r.twitchReward.is_enabled ? '' : ' · disabled' %><%= r.twitchReward.is_paused ? ' · paused' : '' %>
+              </p>
+              <% if (r.twitchReward.prompt) { %><p class="hint hint-compact"><%= r.twitchReward.prompt %></p><% } %>
+              <% } else { %>
+              <strong>Unlinked reward</strong>
+              <p class="hint hint-compact">No longer found on Twitch (deleted, or not visible with the current connection) — reward ID: <code class="mono"><%= r.rewardId %></code></p>
+              <% } %>
+              <% if (r.config && r.config.twitch_unsupported) { %>
+              <p class="hint hint-compact" style="color:var(--danger, #c0392b);">This reward can't be managed by the bot — it was created via the Twitch dashboard (or another app), and Twitch only allows the app that created a reward to change its cost. Dynamic pricing has been disabled.</p>
+              <% } else if (r.config) { %>
+              <p class="hint hint-compact">Demand: <%= (r.config.demand * 100).toFixed(1) %>% — computed price (redemptions sync within seconds; idle decay syncs at least every 30s): <%= r.previewPrice.toLocaleString() %> pts</p>
+              <% } %>
+            </div>
+            <% if (r.twitchReward) { %>
+            <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>/delete" style="margin:0;">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="btn btn-ghost btn-sm">Delete Reward</button>
+            </form>
+            <% } %>
+          </div>
+
+          <% if (r.twitchReward) { %>
+          <details style="margin-top:0.5rem;">
+            <summary class="hint hint-compact" style="cursor:pointer;">Edit reward</summary>
+            <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>" style="margin-top:0.5rem;">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <%- include('partials/rewardFields', { idPrefix: r.rewardId, values: r.twitchReward }) %>
+              <div style="margin-top:0.75rem;">
+                <button type="submit" class="btn">Save Changes</button>
+              </div>
+            </form>
+          </details>
+          <% } %>
+
+          <!-- Dynamic pricing sub-section -->
+          <div style="margin-top:0.75rem;border-top:1px solid var(--border);padding-top:0.75rem;">
+            <div class="form-row-wrap" style="align-items:center;justify-content:space-between;">
+              <strong class="hint hint-compact">Dynamic pricing</strong>
+              <% if (r.config) { %>
+              <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>/pricing/delete" style="margin:0;">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button type="submit" class="btn btn-ghost btn-sm">Disable Pricing</button>
+              </form>
+              <% } %>
+            </div>
+            <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>/pricing" style="margin-top:0.5rem;">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <div class="form-row-wrap" style="align-items:flex-end;">
+                <label style="display:flex;align-items:center;gap:0.4rem;">
+                  <input type="checkbox" name="enabled" <%= r.config && r.config.enabled ? 'checked' : '' %>>
+                  Enabled
+                </label>
+                <div>
+                  <label class="hint hint-compact" for="base-cost-<%= r.rewardId %>">Base cost</label>
+                  <input id="base-cost-<%= r.rewardId %>" class="input" type="number" min="1" step="1" name="base_cost" style="width:7rem;"
+                    value="<%= r.config ? r.config.base_cost : (r.twitchReward ? r.twitchReward.cost : '') %>" required>
+                </div>
+                <div>
+                  <label class="hint hint-compact" for="cooldown-<%= r.rewardId %>">Cooldown (s)</label>
+                  <input id="cooldown-<%= r.rewardId %>" class="input" type="number" min="1" step="1" name="cooldown_seconds" style="width:7rem;"
+                    value="<%= r.config ? r.config.cooldown_seconds : 60 %>" required>
+                </div>
+                <div>
+                  <label class="hint hint-compact" for="max-mult-<%= r.rewardId %>">Max multiplier</label>
+                  <input id="max-mult-<%= r.rewardId %>" class="input" type="number" step="0.1" min="0" name="max_multiplier" style="width:7rem;"
+                    value="<%= r.config ? r.config.max_multiplier : 1 %>" required>
+                </div>
+                <div>
+                  <label class="hint hint-compact" for="curve-<%= r.rewardId %>">Curve</label>
+                  <input id="curve-<%= r.rewardId %>" class="input" type="number" step="0.1" min="0.1" name="curve" style="width:7rem;"
+                    value="<%= r.config ? r.config.curve : 1 %>" required>
+                </div>
+                <div>
+                  <button type="submit" class="btn">Save</button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+      <% } %>
+      <% } %>
+    </section>
+
+    <% } %>
+
+  </main>
+
+  <%- include('partials/pwa-register') %>
+  <%- include('partials/footer') %>
+  <script src="/utils.js"></script>
+</body>
+</html>
