@@ -83,7 +83,7 @@ describe('GET /', () => {
 
   it('merges live Twitch rewards with existing pricing config and computes a preview price', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true }]);
+    vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true } as any]);
     vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([{
       id: 1, streamer_id: 123, twitch_reward_id: 'rwd1', enabled: true,
       base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5,
@@ -136,7 +136,7 @@ describe('GET /', () => {
 
   it('passes through twitch_unsupported so the view can show the disabled-by-Twitch message', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true }]);
+    vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true } as any]);
     vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([{
       id: 1, streamer_id: 123, twitch_reward_id: 'rwd1', enabled: false,
       base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5,
@@ -150,7 +150,7 @@ describe('GET /', () => {
 
   it('leaves config/previewPrice null for a reward with no pricing config yet', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true }]);
+    vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true } as any]);
 
     const res = await supertest(buildApp()).get('/');
     expect(res.body.rewards[0].config).toBeNull();
