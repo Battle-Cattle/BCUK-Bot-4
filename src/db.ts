@@ -157,6 +157,9 @@ export {
   initGlobalPricingSettings, getGlobalPricingSettings, saveGlobalPricingSettings,
 } from './db/rewardPricing';
 
+export type { RewardPricingHistoryPoint } from './db/rewardPricingHistory';
+export { recordPricingHistory, getPricingHistory } from './db/rewardPricingHistory';
+
 // ─── Streamdeck API keys ─────────────────────────────────────────────────────
 
 export type { StreamdeckKeyRow } from './db/streamdeckKeys';

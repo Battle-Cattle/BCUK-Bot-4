@@ -5,6 +5,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), er
 vi.mock('../../db', () => ({
   getPricingForReward: vi.fn(),
   recordPricingUpdate: vi.fn(),
+  recordPricingHistory: vi.fn(),
   markPricingUnsupported: vi.fn(),
   deletePricingConfig: vi.fn(),
   getGlobalPricingSettings: vi.fn(),
@@ -21,7 +22,7 @@ vi.mock('../twitchApi', () => {
 });
 
 import {
-  getPricingForReward, recordPricingUpdate, markPricingUnsupported, deletePricingConfig,
+  getPricingForReward, recordPricingUpdate, recordPricingHistory, markPricingUnsupported, deletePricingConfig,
   getGlobalPricingSettings, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
@@ -57,6 +58,7 @@ beforeEach(() => {
   vi.mocked(getGlobalPricingSettings).mockResolvedValue(settings);
   vi.mocked(getStreamerById).mockResolvedValue(streamer);
   vi.mocked(getValidToken).mockResolvedValue('user-token');
+  vi.mocked(recordPricingHistory).mockResolvedValue(undefined);
   vi.mocked(deletePricingConfig).mockResolvedValue(undefined);
   // clearAllMocks() resets call history but not mockResolvedValue/mockRejectedValue
   // implementations, so reset this explicitly — otherwise a test that rejects
@@ -91,12 +93,26 @@ describe('applyRedemptionPricing', () => {
     expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), expect.any(Number));
   });
 
-  it('marks the reward unsupported and disables it on a 403, without recording demand', async () => {
+  it('marks the reward unsupported and disables it on a 403, without recording demand or history', async () => {
     vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
     vi.mocked(updateRewardCost).mockRejectedValueOnce(new TwitchRewardUnsupportedError('403'));
     await applyRedemptionPricing(1, 'rwd1');
     expect(markPricingUnsupported).toHaveBeenCalledWith(1, 'rwd1');
     expect(recordPricingUpdate).not.toHaveBeenCalled();
+    expect(recordPricingHistory).not.toHaveBeenCalled();
+  });
+
+  it('records a price history point using the row id, computed cost, and demand', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ id: 42, demand: 0, last_pushed_cost: null }));
+    await applyRedemptionPricing(1, 'rwd1');
+    expect(recordPricingHistory).toHaveBeenCalledWith(42, expect.any(Number), expect.any(Number), expect.any(Number));
+  });
+
+  it('does not fail the sync when recording history throws', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
+    vi.mocked(recordPricingHistory).mockRejectedValueOnce(new Error('history db down'));
+    await expect(applyRedemptionPricing(1, 'rwd1')).resolves.toBeUndefined();
+    expect(recordPricingUpdate).toHaveBeenCalled();
   });
 
   it('on a 401, does not mark the reward unsupported but still persists the recalculated demand', async () => {

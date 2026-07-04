@@ -1,6 +1,6 @@
 import { createMutationQueue } from '../../shared/mutationQueue';
 import {
-  getPricingForReward, recordPricingUpdate, markPricingUnsupported, deletePricingConfig,
+  getPricingForReward, recordPricingUpdate, recordPricingHistory, markPricingUnsupported, deletePricingConfig,
   getGlobalPricingSettings, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
@@ -101,7 +101,9 @@ async function pushRewardCostUpdate(
  * persisted, even when the Twitch push fails, so the price is simply retried on the next
  * redemption/decay tick — except when the reward turns out to be permanently unsupported
  * (see {@link pushRewardCostUpdate}), in which case demand is intentionally not persisted
- * since the row won't be read again until re-enabled.
+ * since the row won't be read again until re-enabled. On every successful sync, also logs a
+ * price-history point (best-effort; a failure here is logged and swallowed rather than
+ * affecting the pricing update itself) for the /pricing history graph.
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
@@ -133,6 +135,12 @@ async function syncRewardPrice(streamerId: number, twitchRewardId: string, apply
   }
 
   await recordPricingUpdate(streamerId, twitchRewardId, newDemand, now, lastPushedCost);
+
+  try {
+    await recordPricingHistory(row.id, newCost, newDemand, now);
+  } catch (err) {
+    log.warn(`Failed to record price history for reward ${twitchRewardId}:`, err);
+  }
 }
 
 /**

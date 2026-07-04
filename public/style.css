@@ -347,3 +347,14 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
   .section-header { flex-wrap: wrap; gap: .5rem; }
   .search-input { width: 100%; }
 }
+
+/* ── Price history chart (pricing admin) ──────────────── */
+.price-history-tick, .price-history-end-label { font-size: 9px; fill: var(--muted); }
+.price-history-chart { display: block; cursor: crosshair; touch-action: none; }
+.price-history-tooltip {
+  position: absolute; z-index: 20; pointer-events: none;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
+  padding: .35rem .6rem; font-size: .78rem; color: var(--text); white-space: nowrap;
+}
+.price-history-tooltip strong { color: var(--primary); }
+.price-history-tooltip span { color: var(--muted); }
