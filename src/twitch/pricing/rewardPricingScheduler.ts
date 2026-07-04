@@ -4,7 +4,7 @@ import { applyDecayTick } from './rewardPricingService';
 
 const log = createLogger('RewardPricingScheduler');
 
-const DECAY_POLL_INTERVAL_MS = 5 * 60_000;
+const DECAY_POLL_INTERVAL_MS = 30_000;
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let tickRunning = false;

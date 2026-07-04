@@ -28,6 +28,7 @@ import { getValidToken } from '../eventsub/twitchApiEventSub';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
 import {
   applyRedemptionPricing, applyDecayTick, resetAndDeletePricing, deleteRewardAndPricing,
+  __resetPushRateLimiterForTests,
 } from './rewardPricingService';
 
 const settings = { decay_half_life_periods: 3, redemption_increment: 0.1 };
@@ -62,6 +63,10 @@ beforeEach(() => {
   // updateRewardCost without ...Once leaks that rejection into later tests.
   vi.mocked(updateRewardCost).mockResolvedValue(undefined);
   vi.mocked(deleteCustomReward).mockResolvedValue(undefined);
+  // The push rate limiter's last-pushed-at cache is module-level state that would
+  // otherwise leak between tests (e.g. a push in one test silently rate-limiting
+  // the next test's push, since both use the same default reward key).
+  __resetPushRateLimiterForTests();
 });
 
 describe('applyRedemptionPricing', () => {
@@ -304,5 +309,43 @@ describe('deleteRewardAndPricing', () => {
     resolveFirst();
     await Promise.all([redemption, del]);
     expect(order).toEqual(['read', 'write', 'read', 'delete']);
+  });
+});
+
+describe('redemption push rate limiting', () => {
+  it('does not push to Twitch again for the same reward within the rate-limit window, but still persists demand both times', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
+
+    await applyRedemptionPricing(1, 'rwd1');
+    await applyRedemptionPricing(1, 'rwd1'); // same reward, moments later — within the 5s window
+
+    expect(updateRewardCost).toHaveBeenCalledTimes(1);
+    expect(recordPricingUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not rate-limit a different reward for the same streamer', async () => {
+    vi.mocked(getPricingForReward).mockImplementation(async (_streamerId, twitchRewardId) =>
+      makeRow({ twitch_reward_id: twitchRewardId, demand: 0, last_pushed_cost: null }));
+
+    await applyRedemptionPricing(1, 'rwd1');
+    await applyRedemptionPricing(1, 'rwd2');
+
+    expect(updateRewardCost).toHaveBeenCalledTimes(2);
+  });
+
+  it('pushes again once the rate-limit window has elapsed', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
+
+      await applyRedemptionPricing(1, 'rwd1');
+      expect(updateRewardCost).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await applyRedemptionPricing(1, 'rwd1');
+      expect(updateRewardCost).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
