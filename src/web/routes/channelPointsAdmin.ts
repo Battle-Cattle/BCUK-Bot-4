@@ -115,16 +115,18 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     // Configs whose reward no longer appears on Twitch (deleted, or the streamer's token
     // lacks the scope to list it) still get processed by the decay scheduler — surface them
     // as "unlinked" rows so they aren't invisible/unmanageable from this page.
-    for (const config of pricingConfigs) {
-      if (matchedRewardIds.has(config.twitch_reward_id)) continue;
-      rewards.push({
-        rewardId: config.twitch_reward_id,
-        twitchReward: null,
-        config,
-        previewPrice: previewPriceFor(config),
-        historyChart: await buildHistoryChart(config),
-      });
-    }
+    const unlinkedRows = await Promise.all(
+      pricingConfigs
+        .filter((config) => !matchedRewardIds.has(config.twitch_reward_id))
+        .map(async (config) => ({
+          rewardId: config.twitch_reward_id,
+          twitchReward: null,
+          config,
+          previewPrice: previewPriceFor(config),
+          historyChart: await buildHistoryChart(config),
+        })),
+    );
+    rewards.push(...unlinkedRows);
 
     const isOwner = req.session.user?.isOwner ?? false;
     const globalSettings = isOwner ? await getGlobalPricingSettings() : null;

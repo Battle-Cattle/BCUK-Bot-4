@@ -28,8 +28,9 @@ export function renderPriceHistoryChart(points: PriceHistoryPoint[], rangeStartM
   const costs = sorted.map((p) => p.cost);
   const minCost = Math.min(...costs);
   const maxCost = Math.max(...costs);
+  const isFlat = maxCost === minCost;
   // Guard against a degenerate (flat) range so the line doesn't collapse to the chart's edge.
-  const costSpan = maxCost === minCost ? 1 : maxCost - minCost;
+  const costSpan = isFlat ? 1 : maxCost - minCost;
 
   const plotLeft = PADDING.left;
   const plotRight = WIDTH - PADDING.right;
@@ -38,7 +39,9 @@ export function renderPriceHistoryChart(points: PriceHistoryPoint[], rangeStartM
   const timeSpan = Math.max(1, rangeEndMs - rangeStartMs);
 
   const toX = (t: number) => plotLeft + ((t - rangeStartMs) / timeSpan) * (plotRight - plotLeft);
-  const toY = (cost: number) => plotBottom - ((cost - minCost) / costSpan) * (plotBottom - plotTop);
+  const toY = (cost: number) => isFlat
+    ? (plotTop + plotBottom) / 2
+    : plotBottom - ((cost - minCost) / costSpan) * (plotBottom - plotTop);
 
   const pixelPoints = sorted.map((p) => ({ x: toX(p.t), y: toY(p.cost), t: p.t, cost: p.cost }));
   const polyline = pixelPoints.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');

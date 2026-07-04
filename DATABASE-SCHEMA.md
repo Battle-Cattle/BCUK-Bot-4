@@ -225,7 +225,7 @@ Created by `migrations/reward_pricing.sql`.
 
 ## `reward_pricing_history`
 
-Time-series log of computed price/demand per reward, powering the price history graph on `/pricing`. Bounded to roughly the largest selectable time range (24h) — `recordPricingHistory()` prunes older rows for the same reward on every insert, so this table never grows unbounded.
+Time-series log of computed price/demand per reward, powering the price history graph on `/channel-points`. Bounded to roughly the largest selectable time range (24h) — `recordPricingHistory()` prunes older rows for the same reward on every insert, so this table never grows unbounded.
 
 | Column | Type | Notes |
 | --- | --- | --- |

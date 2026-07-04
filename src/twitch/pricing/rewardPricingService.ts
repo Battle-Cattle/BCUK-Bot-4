@@ -103,7 +103,7 @@ async function pushRewardCostUpdate(
  * (see {@link pushRewardCostUpdate}), in which case demand is intentionally not persisted
  * since the row won't be read again until re-enabled. On every successful sync, also logs a
  * price-history point (best-effort; a failure here is logged and swallowed rather than
- * affecting the pricing update itself) for the /pricing history graph.
+ * affecting the pricing update itself) for the Channel Points admin history graph.
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.

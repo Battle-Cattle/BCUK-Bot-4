@@ -1,4 +1,4 @@
--- Time-series log of computed price/demand for the /pricing admin page's history graph.
+-- Time-series log of computed price/demand for the /channel-points admin page's history graph.
 -- Bounded to roughly the largest selectable time range (24h) — recordPricingHistory()
 -- prunes older rows for the same reward on every insert, so this never grows unbounded.
 CREATE TABLE reward_pricing_history (

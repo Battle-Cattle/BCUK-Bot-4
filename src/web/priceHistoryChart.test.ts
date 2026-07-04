@@ -49,14 +49,15 @@ describe('renderPriceHistoryChart', () => {
     expect(svg).toContain('480 pts');
   });
 
-  it('does not collapse the line when all costs are equal (flat range)', () => {
+  it('centers the line vertically instead of collapsing to the bottom edge when all costs are equal (flat range)', () => {
     const points = [
       { t: 1_700_000_000_000, cost: 300 },
       { t: 1_700_010_000_000, cost: 300 },
     ];
-    // Should not throw or produce NaN coordinates.
     const svg = renderPriceHistoryChart(points, 1_700_000_000_000, 1_700_010_000_000);
     expect(svg).not.toContain('NaN');
+    // HEIGHT=120, PADDING.top=10, PADDING.bottom=20 -> plotTop=10, plotBottom=100, centered=55.0
+    expect(svg).toMatch(/points="[\d.]+,55\.0 [\d.]+,55\.0"/);
   });
 
   it('embeds the plotted time range as data attributes', () => {
