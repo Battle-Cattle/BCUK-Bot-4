@@ -47,20 +47,20 @@
     <input type="checkbox" name="is_max_per_stream_enabled" <%= values.max_per_stream_setting.is_enabled ? 'checked' : '' %>>
     Limit per stream
   </label>
-  <input class="input" type="number" min="1" step="1" name="max_per_stream" style="width:6rem;"
+  <input class="input" type="number" min="1" step="1" name="max_per_stream" aria-label="Max redemptions per stream" style="width:6rem;"
     value="<%= values.max_per_stream_setting.max_per_stream %>">
 
   <label style="display:flex;align-items:center;gap:0.4rem;">
     <input type="checkbox" name="is_max_per_user_per_stream_enabled" <%= values.max_per_user_per_stream_setting.is_enabled ? 'checked' : '' %>>
     Limit per user per stream
   </label>
-  <input class="input" type="number" min="1" step="1" name="max_per_user_per_stream" style="width:6rem;"
+  <input class="input" type="number" min="1" step="1" name="max_per_user_per_stream" aria-label="Max redemptions per user per stream" style="width:6rem;"
     value="<%= values.max_per_user_per_stream_setting.max_per_user_per_stream %>">
 
   <label style="display:flex;align-items:center;gap:0.4rem;">
     <input type="checkbox" name="is_global_cooldown_enabled" <%= values.global_cooldown_setting.is_enabled ? 'checked' : '' %>>
     Global cooldown (s)
   </label>
-  <input class="input" type="number" min="1" step="1" name="global_cooldown_seconds" style="width:6rem;"
+  <input class="input" type="number" min="1" step="1" name="global_cooldown_seconds" aria-label="Global cooldown in seconds" style="width:6rem;"
     value="<%= values.global_cooldown_setting.global_cooldown_seconds %>">
 </div>

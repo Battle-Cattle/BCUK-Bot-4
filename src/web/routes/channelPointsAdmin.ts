@@ -17,7 +17,7 @@ const log = createLogger('ChannelPointsAdmin');
 const router = Router();
 
 const KNOWN_ERRORS = new Set([
-  'not_a_streamer', 'invalid_reward_id', 'invalid_config', 'save_failed', 'invalid_id',
+  'not_a_streamer', 'invalid_reward_id', 'invalid_config', 'save_failed',
   'delete_failed', 'not_owner', 'invalid_settings', 'invalid_reward_fields', 'create_failed', 'update_failed',
 ]);
 const KNOWN_SUCCESSES = new Set([
