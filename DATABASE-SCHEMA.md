@@ -223,6 +223,20 @@ Single global row (`id` pinned to 1) — bot-wide decay/increment settings share
 
 Created by `migrations/reward_pricing.sql`.
 
+## `reward_pricing_history`
+
+Time-series log of computed price/demand per reward, powering the price history graph on `/channel-points`. Bounded to roughly the largest selectable time range (24h) — `recordPricingHistory()` prunes older rows for the same reward on every insert, so this table never grows unbounded.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK, auto-increment | |
+| `reward_pricing_id` | `INT` | FK to `reward_pricing.id` ON DELETE CASCADE |
+| `recorded_at` | `BIGINT` | Epoch ms this point was recorded at |
+| `cost` | `INT` | Computed price at `recorded_at` |
+| `demand` | `DECIMAL(9,6)` | Demand at `recorded_at`, in `[0,1]` |
+
+Created by `migrations/reward_pricing_history.sql`.
+
 ## `custom_command`
 
 Stores custom text commands managed through the admin panel. This is a **global catalog** shared across all guilds (no `guild_id`); per-guild deviations (disable / output override) live in `guild_command_override`. On Discord, every catalog command is enabled by default in every guild.

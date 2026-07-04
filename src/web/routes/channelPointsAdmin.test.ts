@@ -4,6 +4,7 @@ vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   getPricingConfigsForStreamer: vi.fn(),
   getGlobalPricingSettings: vi.fn(),
+  getPricingHistory: vi.fn(),
 }));
 
 vi.mock('../csrf', () => ({
@@ -41,7 +42,7 @@ vi.mock('./channelPointsAdminMutations', async () => {
 import express from 'express';
 import supertest from 'supertest';
 import router from './channelPointsAdmin';
-import { getStreamerByDiscordId, getPricingConfigsForStreamer, getGlobalPricingSettings } from '../../db';
+import { getStreamerByDiscordId, getPricingConfigsForStreamer, getGlobalPricingSettings, getPricingHistory } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
@@ -75,6 +76,7 @@ beforeEach(() => {
   vi.mocked(getValidToken).mockResolvedValue('token');
   vi.mocked(hasAuthFailedSubs).mockReturnValue(false);
   vi.mocked(getGlobalPricingSettings).mockResolvedValue({ decay_half_life_periods: 3, redemption_increment: 0.1 });
+  vi.mocked(getPricingHistory).mockResolvedValue([]);
 });
 
 describe('GET /', () => {
@@ -211,6 +213,73 @@ describe('GET /', () => {
       expect(res.body.isConnected).toBe(true);
       expect(res.body.needsReconnect).toBe(false);
       expect(getCustomRewards).toHaveBeenCalled();
+    });
+  });
+
+  it('exposes the selectable history hour options', async () => {
+    const res = await supertest(buildApp()).get('/');
+    expect(res.body.historyHourOptions).toEqual([1, 2, 3, 6, 9, 12, 24]);
+  });
+
+  describe('price history chart', () => {
+    const CONFIG = {
+      id: 1, streamer_id: 123, twitch_reward_id: 'rwd1', enabled: true,
+      base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5,
+      demand: 0.5, demand_updated_at: '1700000000000', last_pushed_cost: 300, twitch_unsupported: false,
+    };
+
+    beforeEach(() => {
+      vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+      vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true } as any]);
+      vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([CONFIG] as any);
+    });
+
+    it('defaults to a 3-hour range when hours is not specified', async () => {
+      const before = Date.now();
+      const res = await supertest(buildApp()).get('/');
+      const after = Date.now();
+
+      expect(res.body.historyHours).toBe(3);
+      expect(getPricingHistory).toHaveBeenCalledWith(1, expect.any(Number));
+      const sinceMs = vi.mocked(getPricingHistory).mock.calls[0][1];
+      expect(sinceMs).toBeGreaterThanOrEqual(before - 3 * 60 * 60 * 1000);
+      expect(sinceMs).toBeLessThanOrEqual(after - 3 * 60 * 60 * 1000);
+    });
+
+    it('respects a valid hours query param', async () => {
+      const res = await supertest(buildApp()).get('/?hours=6');
+      expect(res.body.historyHours).toBe(6);
+      const sinceMs = vi.mocked(getPricingHistory).mock.calls[0][1];
+      expect(Date.now() - sinceMs).toBeCloseTo(6 * 60 * 60 * 1000, -3);
+    });
+
+    it('falls back to the default for an invalid hours value', async () => {
+      const res = await supertest(buildApp()).get('/?hours=999');
+      expect(res.body.historyHours).toBe(3);
+    });
+
+    it('renders a chart string for a reward with a config (with points, and without), and null without a config', async () => {
+      vi.mocked(getPricingHistory).mockResolvedValue([{ recorded_at: '1700000000000', cost: 300, demand: 0.5 }]);
+      const res = await supertest(buildApp()).get('/');
+      expect(typeof res.body.rewards[0].historyChart).toBe('string');
+      expect(res.body.rewards[0].historyChart).toContain('<svg');
+
+      vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([]);
+      const res2 = await supertest(buildApp()).get('/');
+      expect(res2.body.rewards[0].historyChart).toBeNull();
+    });
+
+    it('renders the empty-history placeholder when there are no points yet', async () => {
+      const res = await supertest(buildApp()).get('/');
+      expect(res.body.rewards[0].historyChart).toContain('No price history yet');
+    });
+
+    it('renders a chart for an unlinked (orphaned) reward too', async () => {
+      vi.mocked(getCustomRewards).mockResolvedValue([]);
+      vi.mocked(getPricingHistory).mockResolvedValue([{ recorded_at: '1700000000000', cost: 300, demand: 0.5 }]);
+      const res = await supertest(buildApp()).get('/');
+      expect(res.body.rewards[0].twitchReward).toBeNull();
+      expect(res.body.rewards[0].historyChart).toContain('<svg');
     });
   });
 });
