@@ -350,7 +350,13 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 
 /* ── Price history chart (pricing admin) ──────────────── */
 .price-history-tick, .price-history-end-label { font-size: 9px; fill: var(--muted); }
-.price-history-chart { display: block; cursor: crosshair; touch-action: none; }
+/* height:auto + aspect-ratio (matching the 480x120 viewBox in priceHistoryChart.ts/.js) keeps the
+   chart's box proportional to the viewBox at any width — needed because the SVGs use
+   preserveAspectRatio="none" so hover math can assume a 1:1 coordinate stretch; without a matching
+   aspect ratio that stretch is non-uniform and visibly distorts the line. max-width caps how tall
+   that makes the chart on wide cards (uncapped, a ~1200px-wide card would need a ~300px-tall chart
+   to stay undistorted). */
+.price-history-chart { display: block; width: 100%; max-width: 640px; height: auto; aspect-ratio: 480 / 120; cursor: crosshair; touch-action: none; }
 .price-history-tooltip {
   position: absolute; z-index: 20; pointer-events: none;
   background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
