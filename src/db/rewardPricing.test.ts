@@ -13,9 +13,9 @@ import {
   recordPricingUpdate,
   deletePricingConfig,
   markPricingUnsupported,
-  initGlobalPricingSettings,
-  getGlobalPricingSettings,
-  saveGlobalPricingSettings,
+  updatePricingCooldownForReward,
+  getPricingSettingsForStreamer,
+  savePricingSettingsForStreamer,
 } from './rewardPricing';
 
 function makePool(rows: unknown[] = [], meta: unknown = {}) {
@@ -204,39 +204,46 @@ describe('deletePricingConfig', () => {
   });
 });
 
-describe('initGlobalPricingSettings', () => {
-  it('uses INSERT IGNORE with the default settings', async () => {
+describe('updatePricingCooldownForReward', () => {
+  it('updates cooldown_seconds, scoped by streamerId and twitchRewardId', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await initGlobalPricingSettings();
+    await updatePricingCooldownForReward(7, 'rwd-abc', 120);
     const sql: string = pool.execute.mock.calls[0][0];
-    expect(sql).toContain('INSERT IGNORE');
-    expect(pool.execute.mock.calls[0][1]).toEqual([3, 0.1]);
+    expect(sql).toContain('SET cooldown_seconds = ?');
+    expect(pool.execute.mock.calls[0][1]).toEqual([120, 7, 'rwd-abc']);
   });
 });
 
-describe('getGlobalPricingSettings', () => {
+describe('getPricingSettingsForStreamer', () => {
   it('returns defaults without throwing when the row is missing', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([]) as any);
-    const settings = await getGlobalPricingSettings();
-    expect(settings).toEqual({ decay_half_life_periods: 3, redemption_increment: 0.1 });
+    const settings = await getPricingSettingsForStreamer(7);
+    expect(settings).toEqual({ half_life_seconds: 1800, time_to_max_multiplier: 2 });
   });
 
   it('returns the stored row converted to numbers', async () => {
-    vi.mocked(getPool).mockReturnValue(makePool([{ decay_half_life_periods: '5.000', redemption_increment: '0.2000' }]) as any);
-    const settings = await getGlobalPricingSettings();
-    expect(settings).toEqual({ decay_half_life_periods: 5, redemption_increment: 0.2 });
+    vi.mocked(getPool).mockReturnValue(makePool([{ half_life_seconds: '900', time_to_max_multiplier: '3.000' }]) as any);
+    const settings = await getPricingSettingsForStreamer(7);
+    expect(settings).toEqual({ half_life_seconds: 900, time_to_max_multiplier: 3 });
+  });
+
+  it('queries scoped by streamerId', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getPricingSettingsForStreamer(7);
+    expect(pool.execute.mock.calls[0][1]).toEqual([7]);
   });
 });
 
-describe('saveGlobalPricingSettings', () => {
-  it('uses the row-alias upsert form and passes the new settings', async () => {
+describe('savePricingSettingsForStreamer', () => {
+  it('uses the row-alias upsert form and passes the streamerId and new settings', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await saveGlobalPricingSettings({ decay_half_life_periods: 4, redemption_increment: 0.15 });
+    await savePricingSettingsForStreamer(7, { half_life_seconds: 600, time_to_max_multiplier: 1.5 });
     const sql: string = pool.execute.mock.calls[0][0];
     expect(sql).toContain('AS new_row');
     expect(sql).toContain('ON DUPLICATE KEY UPDATE');
-    expect(pool.execute.mock.calls[0][1]).toEqual([4, 0.15]);
+    expect(pool.execute.mock.calls[0][1]).toEqual([7, 600, 1.5]);
   });
 });

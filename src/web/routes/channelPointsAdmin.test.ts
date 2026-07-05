@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   getPricingConfigsForStreamer: vi.fn(),
-  getGlobalPricingSettings: vi.fn(),
+  getPricingSettingsForStreamer: vi.fn(),
   getPricingHistory: vi.fn(),
 }));
 
@@ -42,14 +42,13 @@ vi.mock('./channelPointsAdminMutations', async () => {
 import express from 'express';
 import supertest from 'supertest';
 import router from './channelPointsAdmin';
-import { getStreamerByDiscordId, getPricingConfigsForStreamer, getGlobalPricingSettings, getPricingHistory } from '../../db';
+import { getStreamerByDiscordId, getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistory } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3; isOwner: boolean };
 const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: 0, isOwner: false };
-const OWNER: SessionUser = { ...USER, discordId: '200000000000000002', isOwner: true };
 
 const MOCK_STREAMER = {
   id: 123, twitch_user_id: 'twitch123', twitch_name: 'teststreamer', discord_id: USER.discordId,
@@ -75,7 +74,7 @@ beforeEach(() => {
   vi.mocked(getCustomRewards).mockResolvedValue([]);
   vi.mocked(getValidToken).mockResolvedValue('token');
   vi.mocked(hasAuthFailedSubs).mockReturnValue(false);
-  vi.mocked(getGlobalPricingSettings).mockResolvedValue({ decay_half_life_periods: 3, redemption_increment: 0.1 });
+  vi.mocked(getPricingSettingsForStreamer).mockResolvedValue({ half_life_seconds: 1800, time_to_max_multiplier: 2 });
   vi.mocked(getPricingHistory).mockResolvedValue([]);
 });
 
@@ -168,19 +167,17 @@ describe('GET /', () => {
     expect(res.body.rewards[0].previewPrice).toBeNull();
   });
 
-  it('does not include global settings for a non-owner', async () => {
+  it('includes the streamer\'s own pricing settings when connected', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const res = await supertest(buildApp(USER)).get('/');
-    expect(res.body.isOwner).toBe(false);
-    expect(res.body.globalSettings).toBeNull();
-    expect(getGlobalPricingSettings).not.toHaveBeenCalled();
+    expect(res.body.pricingSettings).toEqual({ half_life_seconds: 1800, time_to_max_multiplier: 2 });
+    expect(getPricingSettingsForStreamer).toHaveBeenCalledWith(MOCK_STREAMER.id);
   });
 
-  it('includes global settings for the bot owner', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp(OWNER)).get('/');
-    expect(res.body.isOwner).toBe(true);
-    expect(res.body.globalSettings).toEqual({ decay_half_life_periods: 3, redemption_increment: 0.1 });
+  it('does not fetch pricing settings when not a streamer', async () => {
+    const res = await supertest(buildApp(USER)).get('/');
+    expect(res.body.pricingSettings).toBeNull();
+    expect(getPricingSettingsForStreamer).not.toHaveBeenCalled();
   });
 
   describe('reconnect detection', () => {

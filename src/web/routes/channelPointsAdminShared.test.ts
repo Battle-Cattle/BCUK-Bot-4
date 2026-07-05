@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../db', () => ({ getStreamerByDiscordId: vi.fn() }));
+vi.mock('../../db', () => ({ getStreamerByDiscordId: vi.fn(), DEFAULT_PRICING_COOLDOWN_SECONDS: 60 }));
 
 import { getStreamerByDiscordId } from '../../db';
 import {
   requireStreamer, parsePositiveIntField, parseNonNegativeNumberField, parsePositiveNumberField,
-  parseCheckboxField, parseHexColorField, parseRewardIdParam, parseRewardFields,
+  parseCheckboxField, parseHexColorField, parseRewardIdParam, parseRewardFields, effectiveCooldownSeconds,
 } from './channelPointsAdminShared';
 
 const VALID_REWARD_ID = '12345678-1234-1234-8234-123456789abc';
@@ -175,6 +175,16 @@ describe('parseHexColorField', () => {
 
   it('returns null for a hex string missing the leading #', () => {
     expect(parseHexColorField('00E5CB')).toBeNull();
+  });
+});
+
+describe('effectiveCooldownSeconds', () => {
+  it('returns the reward global cooldown when enabled', () => {
+    expect(effectiveCooldownSeconds({ global_cooldown_setting: { is_enabled: true, global_cooldown_seconds: 120 } })).toBe(120);
+  });
+
+  it('falls back to the default when the reward has no global cooldown enabled', () => {
+    expect(effectiveCooldownSeconds({ global_cooldown_setting: { is_enabled: false, global_cooldown_seconds: 999 } })).toBe(60);
   });
 });
 

@@ -12,7 +12,6 @@ vi.mock('./db', () => ({
     }),
   })),
   closePool: vi.fn().mockResolvedValue(undefined),
-  initGlobalPricingSettings: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./discord/discordBot', () => ({
   startDiscordBot: vi.fn(),
@@ -159,33 +158,12 @@ describe('startup — guild registry preload', () => {
 // ─── Reward pricing scheduler startup/shutdown ────────────────────────────────
 
 describe('startup — reward pricing scheduler', () => {
-  it('starts the scheduler after initializing global pricing settings', async () => {
-    const db = await import('./db.js');
+  it('starts the scheduler', async () => {
     const { startRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
 
     await runMain();
 
-    expect(vi.mocked(db.initGlobalPricingSettings)).toHaveBeenCalledOnce();
     expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
-
-    const [initCallOrder] = vi.mocked(db.initGlobalPricingSettings).mock.invocationCallOrder;
-    const [schedulerCallOrder] = vi.mocked(startRewardPricingScheduler).mock.invocationCallOrder;
-    expect(initCallOrder).toBeLessThan(schedulerCallOrder);
-  });
-
-  it('still starts the scheduler and continues startup when initGlobalPricingSettings rejects', async () => {
-    const db = await import('./db.js');
-    const { startRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
-    const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
-    vi.mocked(db.initGlobalPricingSettings).mockRejectedValueOnce(new Error('db down'));
-
-    await runMain();
-
-    // A transient settings-bootstrap failure shouldn't disable decay for the process lifetime —
-    // the pricing read path falls back to defaults, so the scheduler starts regardless.
-    expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
-    expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
-    expect(exitSpy).not.toHaveBeenCalled();
   });
 });
 

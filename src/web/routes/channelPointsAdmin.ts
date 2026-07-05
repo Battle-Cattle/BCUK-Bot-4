@@ -4,7 +4,7 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
-import { getPricingConfigsForStreamer, getGlobalPricingSettings, getPricingHistory } from '../../db';
+import { getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistory } from '../../db';
 import type { RewardPricingRow } from '../../db';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
@@ -19,10 +19,10 @@ const router = Router();
 
 const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_reward_id', 'invalid_config', 'save_failed',
-  'delete_failed', 'not_owner', 'invalid_settings', 'invalid_reward_fields', 'create_failed', 'update_failed',
+  'delete_failed', 'invalid_settings', 'invalid_reward_fields', 'create_failed', 'update_failed',
 ]);
 const KNOWN_SUCCESSES = new Set([
-  'pricing_saved', 'pricing_deleted', 'global_settings_saved', 'reward_created', 'reward_updated', 'reward_deleted',
+  'pricing_saved', 'pricing_deleted', 'pricing_settings_saved', 'reward_created', 'reward_updated', 'reward_deleted',
 ]);
 
 /** Selectable "last N hours" ranges for the price history chart; streams here typically run ~3h. */
@@ -49,7 +49,6 @@ function parseHistoryHours(value: unknown): number {
 function previewPriceFor(config: RewardPricingRow): number {
   return computePrice(config.demand, {
     baseCost: config.base_cost,
-    cooldownSeconds: config.cooldown_seconds,
     maxMultiplier: config.max_multiplier,
     curve: config.curve,
   });
@@ -72,7 +71,7 @@ async function fetchTwitchRewards(streamer: DbStreamerEventSub): Promise<TwitchC
  * GET /channel-points — renders the Channel Points management page: the streamer's live
  * Twitch rewards (creatable/editable/deletable from here) merged with any existing dynamic
  * pricing config (including a live price preview and a price history chart over the selected
- * time range), and — only for the bot owner — the bot-wide pricing decay/increment settings.
+ * time range), and the streamer's own pricing decay-half-life/time-to-max settings.
  * Shows a reconnect prompt instead of the reward list when the streamer isn't connected, or
  * their connection has started failing with an auth error (mirrors the same check on
  * `/user/settings`).
@@ -128,8 +127,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     );
     rewards.push(...unlinkedRows);
 
-    const isOwner = req.session.user?.isOwner ?? false;
-    const globalSettings = isOwner ? await getGlobalPricingSettings() : null;
+    const pricingSettings = streamer && isConnected && !needsReconnect ? await getPricingSettingsForStreamer(streamer.id) : null;
 
     renderView(res, 'channelPointsAdmin', {
       user: req.session.user,
@@ -138,8 +136,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       isConnected,
       needsReconnect,
       rewards,
-      isOwner,
-      globalSettings,
+      pricingSettings,
       historyHours,
       historyHourOptions: HISTORY_HOUR_OPTIONS,
       error: filterQueryParam(req.query.error, KNOWN_ERRORS),

@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
-import { getStreamerByDiscordId } from '../../db';
+import { getStreamerByDiscordId, DEFAULT_PRICING_COOLDOWN_SECONDS } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
-import type { CustomRewardInput } from '../../twitch/twitchApi';
+import type { CustomRewardInput, TwitchCustomReward } from '../../twitch/twitchApi';
 import { trimField } from './shared';
 
 /**
@@ -52,7 +52,7 @@ export function parsePositiveIntField(value: string | string[] | undefined): num
 }
 
 /**
- * Parses a required non-negative decimal form field (e.g. max_multiplier, redemption_increment).
+ * Parses a required non-negative decimal form field (e.g. max_multiplier).
  * Rejects arrays (repeated fields), empty/whitespace input, non-numeric input, and negative values.
  */
 export function parseNonNegativeNumberField(value: string | string[] | undefined): number | null {
@@ -63,7 +63,7 @@ export function parseNonNegativeNumberField(value: string | string[] | undefined
 }
 
 /**
- * Parses a required strictly-positive decimal form field (e.g. curve, decay_half_life_periods).
+ * Parses a required strictly-positive decimal form field (e.g. curve, half_life_minutes).
  * Rejects arrays (repeated fields), empty/whitespace input, non-numeric input, and non-positive values.
  */
 export function parsePositiveNumberField(value: string | string[] | undefined): number | null {
@@ -71,6 +71,17 @@ export function parsePositiveNumberField(value: string | string[] | undefined): 
   if (typeof value !== 'string' || value.trim() === '') return null;
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * The cooldown (seconds) dynamic pricing should use for a reward: its own Twitch global
+ * cooldown when enabled, otherwise a fallback default — keeps pricing's `cooldown_seconds`
+ * mirroring the reward's real Twitch cooldown instead of a separately-edited value.
+ */
+export function effectiveCooldownSeconds(reward: Pick<TwitchCustomReward, 'global_cooldown_setting'>): number {
+  return reward.global_cooldown_setting.is_enabled
+    ? reward.global_cooldown_setting.global_cooldown_seconds
+    : DEFAULT_PRICING_COOLDOWN_SECONDS;
 }
 
 const REWARD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
