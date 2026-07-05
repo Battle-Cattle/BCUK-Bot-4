@@ -66,3 +66,12 @@ npm test      # Vitest
 ## New Command Handler Pattern
 
 Export `registerXRuntime(runtime)` from the handler file to store the platform client — avoids circular imports with `src/index.ts`. Call it from `index.ts` after the client is ready. Record matches via `commandMonitorStore`.
+
+---
+
+## PR Reviews (CodeRabbit)
+
+CodeRabbit auto-reviews pushes but is rate-limited per developer; a rate-limited push gets a "Review limit reached" comment with a wait time and no actual diff review. Once the cooldown has passed, trigger a fresh review with a PR comment:
+
+- **`@coderabbitai review`** — reviews only what changed since the last review. Default choice.
+- **`@coderabbitai full review`** — re-reviews the entire PR from scratch. Use this instead when the last review surfaced a lot of issues, or the intervening changes are large.
