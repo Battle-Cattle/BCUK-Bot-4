@@ -75,3 +75,7 @@ CodeRabbit auto-reviews pushes but is rate-limited per developer; a rate-limited
 
 - **`@coderabbitai review`** — reviews only what changed since the last review. Default choice.
 - **`@coderabbitai full review`** — re-reviews the entire PR from scratch. Use this instead when the last review surfaced a lot of issues, or the intervening changes are large.
+
+**Avoid re-triggering thrash:**
+- **Never push a new commit while a review is in progress** — the in-flight review fails outright ("head commit changed during the review") and wastes the attempt. Wait for the review to finish (or fail/rate-limit) before pushing again.
+- **Never re-trigger `@coderabbitai review` while already rate-limited or still in progress.** Each attempt costs a try and can reset/extend the cooldown countdown shown in the "Review limit reached" comment — retrying early makes the wait longer, not shorter. Wait out the full countdown from the *most recent* rate-limit comment, trigger exactly once, then leave it alone until it either posts real findings or rate-limits again.
