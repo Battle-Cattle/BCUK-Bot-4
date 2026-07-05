@@ -66,4 +66,13 @@ describe('renderPriceHistoryChart', () => {
     expect(svg).toContain('data-range-start="1700000000000"');
     expect(svg).toContain('data-range-end="1700010000000"');
   });
+
+  it('disables aspect-ratio preservation so the viewBox stretches to fill its actual rendered size', () => {
+    // Without this, the browser letterboxes the chart whenever its rendered box doesn't
+    // match the 480:120 viewBox ratio (the common case — the card is much wider), which
+    // throws off priceHistoryChart.js's pointer-to-chart-coordinate hover math.
+    const points = [{ t: 1_700_000_000_000, cost: 480 }];
+    const svg = renderPriceHistoryChart(points, 1_700_000_000_000, 1_700_010_000_000);
+    expect(svg).toContain('preserveAspectRatio="none"');
+  });
 });

@@ -149,7 +149,7 @@ function buildPriceHistoryChartMarkup(points, rangeStartMs, rangeEndMs) {
   const dataPoints = JSON.stringify(sorted).replace(/'/g, '&#39;');
 
   return `
-<svg class="price-history-chart" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" width="100%" height="${CHART_HEIGHT}"
+<svg class="price-history-chart" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" width="100%" height="${CHART_HEIGHT}" preserveAspectRatio="none"
      data-points='${dataPoints}'
      data-plot-left="${plotLeft}" data-plot-right="${plotRight}"
      data-range-start="${rangeStartMs}" data-range-end="${rangeEndMs}"
