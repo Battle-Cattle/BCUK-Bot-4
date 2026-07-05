@@ -1,8 +1,9 @@
 import type { Request, Response } from 'express';
+import type { Logger } from 'winston';
 import { getStreamerByDiscordId, DEFAULT_PRICING_COOLDOWN_SECONDS } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import type { CustomRewardInput, TwitchCustomReward } from '../../twitch/twitchApi';
-import { trimField } from './shared';
+import { trimField, logAndRedirectError } from './shared';
 
 /**
  * Loads the requesting user's streamer record, redirecting to
@@ -17,6 +18,34 @@ export async function requireStreamer(req: Request, res: Response): Promise<DbSt
     return null;
   }
   return streamer;
+}
+
+/**
+ * Shared body for reward-scoped "delete" routes (deleting a reward entirely, or just turning
+ * off its dynamic pricing): resolves the requester's streamer record and the `:twitchRewardId`
+ * route param, runs `action`, then redirects to `/channel-points` with `success=<successCode>`
+ * or (on a thrown error) `error=<errorCode>` via `logAndRedirectError`. Shared between
+ * `channelPointsAdminMutations.ts` and `channelPointsAdminPricingMutations.ts`.
+ */
+export async function handleRewardDeleteAction(
+  req: Request,
+  res: Response,
+  action: (streamer: DbStreamerEventSub, twitchRewardId: string) => Promise<void>,
+  opts: { log: Logger; successCode: string; errorLogLabel: string; errorCode: string },
+): Promise<void> {
+  try {
+    const streamer = await requireStreamer(req, res);
+    if (!streamer) return;
+
+    const twitchRewardId = parseRewardIdParam(req.params.twitchRewardId);
+    if (twitchRewardId === null) return res.redirect('/channel-points?error=invalid_reward_id');
+
+    await action(streamer, twitchRewardId);
+
+    res.redirect(`/channel-points?success=${opts.successCode}`);
+  } catch (err) {
+    logAndRedirectError({ res, log: opts.log, logLabel: opts.errorLogLabel, err, basePath: '/channel-points', errorCode: opts.errorCode });
+  }
 }
 
 /**
