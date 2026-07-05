@@ -100,7 +100,7 @@
     <!-- ── Create Reward ───────────────────────────────────────────── -->
     <section class="section">
       <details>
-        <summary class="section-title" style="cursor:pointer;display:inline-block;">+ Create new reward</summary>
+        <summary class="section-title disclosure-toggle">Create new reward</summary>
         <div class="card card-spaced">
           <div class="card-body">
             <form method="POST" action="/channel-points/rewards">
@@ -183,7 +183,7 @@
 
           <% if (r.twitchReward) { %>
           <details style="margin-top:0.5rem;">
-            <summary class="hint hint-compact" style="cursor:pointer;">Edit reward</summary>
+            <summary class="hint hint-compact disclosure-toggle">Edit reward</summary>
             <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>" style="margin-top:0.5rem;">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <%- include('partials/rewardFields', { idPrefix: r.rewardId, values: r.twitchReward }) %>

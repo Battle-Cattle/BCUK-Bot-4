@@ -358,3 +358,19 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 }
 .price-history-tooltip strong { color: var(--primary); }
 .price-history-tooltip span { color: var(--muted); }
+
+/* ── Disclosure toggles (<details><summary>) ─────────────
+   Native <summary> markers read as decorative, not "click me" — style these
+   as an explicit link-colored control with a chevron that rotates on open. */
+.disclosure-toggle {
+  display: inline-flex; align-items: center; gap: .35rem; cursor: pointer;
+  color: var(--primary); list-style: none;
+}
+.disclosure-toggle::-webkit-details-marker { display: none; }
+.disclosure-toggle:hover { text-decoration: underline; }
+.disclosure-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.disclosure-toggle::before {
+  content: '▸'; display: inline-block; font-size: .75em;
+  transition: transform .15s ease;
+}
+details[open] > .disclosure-toggle::before { transform: rotate(90deg); }
