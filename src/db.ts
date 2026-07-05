@@ -150,11 +150,12 @@ export {
 
 // ─── Channel point pricing ───────────────────────────────────────────────────
 
-export type { RewardPricingRow, RewardPricingInput, GlobalPricingSettings } from './db/rewardPricing';
+export type { RewardPricingRow, RewardPricingInput, StreamerPricingSettings } from './db/rewardPricing';
 export {
   getPricingForReward, getPricingConfigById, getPricingConfigsForStreamer, getAllEnabledPricingRows,
   upsertPricingConfig, recordPricingUpdate, deletePricingConfig, markPricingUnsupported,
-  initGlobalPricingSettings, getGlobalPricingSettings, saveGlobalPricingSettings,
+  updatePricingCooldownForReward, getPricingSettingsForStreamer, savePricingSettingsForStreamer,
+  DEFAULT_PRICING_COOLDOWN_SECONDS,
 } from './db/rewardPricing';
 
 export type { RewardPricingHistoryPoint } from './db/rewardPricingHistory';

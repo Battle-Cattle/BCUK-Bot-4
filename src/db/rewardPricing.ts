@@ -29,16 +29,21 @@ export interface RewardPricingInput {
   curve: number;
 }
 
-/** Bot-wide settings shared by every reward's demand calculations. */
-export interface GlobalPricingSettings {
-  decay_half_life_periods: number;
-  redemption_increment: number;
+/** Per-streamer settings shared by every one of their rewards' demand calculations. */
+export interface StreamerPricingSettings {
+  /** Fixed duration (seconds) of inactivity for demand to halve — the same for every reward, regardless of its own cooldown. */
+  half_life_seconds: number;
+  /** Redemptions at a reward's own cooldown frequency reach 100% demand after this many half-lives. */
+  time_to_max_multiplier: number;
 }
 
-const DEFAULT_GLOBAL_SETTINGS: GlobalPricingSettings = {
-  decay_half_life_periods: 3,
-  redemption_increment: 0.1,
+const DEFAULT_STREAMER_PRICING_SETTINGS: StreamerPricingSettings = {
+  half_life_seconds: 1800, // 30 minutes
+  time_to_max_multiplier: 2,
 };
+
+/** Fallback cooldown (seconds) used for a reward's pricing math when it has no Twitch-enforced cooldown. */
+export const DEFAULT_PRICING_COOLDOWN_SECONDS = 60;
 
 function mapRow(r: mysql.RowDataPacket): RewardPricingRow {
   return {
@@ -200,44 +205,53 @@ export async function deletePricingConfig(id: number, streamerId: number): Promi
 }
 
 /**
- * Insert the default global pricing settings row (id=1) if one does not already exist.
- * Safe to call multiple times; called once at bot startup.
+ * Updates an existing pricing config's `cooldown_seconds` to mirror the reward's current
+ * effective Twitch cooldown (its `global_cooldown_seconds` when enabled, otherwise the
+ * fallback default) — keeps the two in sync when the reward is edited after pricing was
+ * first configured. No-ops (0 rows affected) if no pricing config exists for this reward.
+ *
+ * @param streamerId - DB row ID of the owning streamer.
+ * @param twitchRewardId - Twitch reward UUID.
+ * @param cooldownSeconds - The reward's current effective cooldown, in seconds.
  */
-export async function initGlobalPricingSettings(): Promise<void> {
-  const s = DEFAULT_GLOBAL_SETTINGS;
+export async function updatePricingCooldownForReward(streamerId: number, twitchRewardId: string, cooldownSeconds: number): Promise<void> {
   await getPool().execute(
-    `INSERT IGNORE INTO pricing_global_settings (id, decay_half_life_periods, redemption_increment)
-     VALUES (1, ?, ?)`,
-    [s.decay_half_life_periods, s.redemption_increment],
+    `UPDATE reward_pricing SET cooldown_seconds = ? WHERE streamer_id = ? AND twitch_reward_id = ?`,
+    [cooldownSeconds, streamerId, twitchRewardId],
   );
 }
 
 /**
- * Read the global pricing settings. Falls back to hardcoded defaults (without throwing)
- * if the singleton row is missing, e.g. before initGlobalPricingSettings has run.
+ * Read a streamer's dynamic-pricing settings (decay half-life and time-to-max-demand
+ * multiplier). Falls back to hardcoded defaults (without throwing) if the streamer has no
+ * settings row yet, e.g. before they've ever saved this form.
+ *
+ * @param streamerId - DB row ID of the streamer.
  */
-export async function getGlobalPricingSettings(): Promise<GlobalPricingSettings> {
+export async function getPricingSettingsForStreamer(streamerId: number): Promise<StreamerPricingSettings> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT decay_half_life_periods, redemption_increment FROM pricing_global_settings WHERE id = 1`,
+    `SELECT half_life_seconds, time_to_max_multiplier FROM reward_pricing_settings WHERE streamer_id = ?`,
+    [streamerId],
   );
-  if (rows.length === 0) return { ...DEFAULT_GLOBAL_SETTINGS };
+  if (rows.length === 0) return { ...DEFAULT_STREAMER_PRICING_SETTINGS };
   return {
-    decay_half_life_periods: Number(rows[0].decay_half_life_periods),
-    redemption_increment: Number(rows[0].redemption_increment),
+    half_life_seconds: Number(rows[0].half_life_seconds),
+    time_to_max_multiplier: Number(rows[0].time_to_max_multiplier),
   };
 }
 
 /**
- * Upsert the global pricing settings row (id=1).
+ * Upsert a streamer's dynamic-pricing settings (decay half-life and time-to-max-demand multiplier).
  *
- * @param settings - The new global decay/increment settings.
+ * @param streamerId - DB row ID of the streamer.
+ * @param settings - The new half-life/time-to-max settings.
  */
-export async function saveGlobalPricingSettings(settings: GlobalPricingSettings): Promise<void> {
+export async function savePricingSettingsForStreamer(streamerId: number, settings: StreamerPricingSettings): Promise<void> {
   await getPool().execute(
-    `INSERT INTO pricing_global_settings (id, decay_half_life_periods, redemption_increment)
-     VALUES (1, ?, ?) AS new_row
+    `INSERT INTO reward_pricing_settings (streamer_id, half_life_seconds, time_to_max_multiplier)
+     VALUES (?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE
-       decay_half_life_periods=new_row.decay_half_life_periods, redemption_increment=new_row.redemption_increment`,
-    [settings.decay_half_life_periods, settings.redemption_increment],
+       half_life_seconds=new_row.half_life_seconds, time_to_max_multiplier=new_row.time_to_max_multiplier`,
+    [streamerId, settings.half_life_seconds, settings.time_to_max_multiplier],
   );
 }

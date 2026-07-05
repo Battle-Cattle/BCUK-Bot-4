@@ -66,3 +66,16 @@ npm test      # Vitest
 ## New Command Handler Pattern
 
 Export `registerXRuntime(runtime)` from the handler file to store the platform client — avoids circular imports with `src/index.ts`. Call it from `index.ts` after the client is ready. Record matches via `commandMonitorStore`.
+
+---
+
+## PR Reviews (CodeRabbit)
+
+CodeRabbit auto-reviews pushes but is rate-limited per developer; a rate-limited push gets a "Review limit reached" comment with a wait time and no actual diff review. **It never auto-retries** once the cooldown passes — a manual trigger is required every time, even if you just wait it out. After the wait time shown in the rate-limit comment has elapsed, post a PR comment:
+
+- **`@coderabbitai review`** — reviews only what changed since the last review. Default choice.
+- **`@coderabbitai full review`** — re-reviews the entire PR from scratch. Use this instead when the last review surfaced a lot of issues, or the intervening changes are large.
+
+**Avoid re-triggering thrash:**
+- **Never push a new commit while a review is in progress** — the in-flight review fails outright ("head commit changed during the review") and wastes the attempt. Wait for the review to finish (or fail/rate-limit) before pushing again.
+- **Never re-trigger `@coderabbitai review` while already rate-limited or still in progress.** Each rate-limit reply just reports the currently remaining cooldown (it doesn't reset or extend it) — retrying early is simply wasted, not counterproductive. Wait out the countdown, trigger exactly once, then leave it alone until it either posts real findings or rate-limits again.

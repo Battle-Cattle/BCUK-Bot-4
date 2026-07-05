@@ -1,8 +1,9 @@
 import type { Request, Response } from 'express';
-import { getStreamerByDiscordId } from '../../db';
+import type { Logger } from 'winston';
+import { getStreamerByDiscordId, DEFAULT_PRICING_COOLDOWN_SECONDS } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
-import type { CustomRewardInput } from '../../twitch/twitchApi';
-import { trimField } from './shared';
+import type { CustomRewardInput, TwitchCustomReward } from '../../twitch/twitchApi';
+import { trimField, logAndRedirectError } from './shared';
 
 /**
  * Loads the requesting user's streamer record, redirecting to
@@ -17,6 +18,34 @@ export async function requireStreamer(req: Request, res: Response): Promise<DbSt
     return null;
   }
   return streamer;
+}
+
+/**
+ * Shared body for reward-scoped "delete" routes (deleting a reward entirely, or just turning
+ * off its dynamic pricing): resolves the requester's streamer record and the `:twitchRewardId`
+ * route param, runs `action`, then redirects to `/channel-points` with `success=<successCode>`
+ * or (on a thrown error) `error=<errorCode>` via `logAndRedirectError`. Shared between
+ * `channelPointsAdminMutations.ts` and `channelPointsAdminPricingMutations.ts`.
+ */
+export async function handleRewardDeleteAction(
+  req: Request,
+  res: Response,
+  action: (streamer: DbStreamerEventSub, twitchRewardId: string) => Promise<void>,
+  opts: { log: Logger; successCode: string; errorLogLabel: string; errorCode: string },
+): Promise<void> {
+  try {
+    const streamer = await requireStreamer(req, res);
+    if (!streamer) return;
+
+    const twitchRewardId = parseRewardIdParam(req.params.twitchRewardId);
+    if (twitchRewardId === null) return res.redirect('/channel-points?error=invalid_reward_id');
+
+    await action(streamer, twitchRewardId);
+
+    res.redirect(`/channel-points?success=${opts.successCode}`);
+  } catch (err) {
+    logAndRedirectError({ res, log: opts.log, logLabel: opts.errorLogLabel, err, basePath: '/channel-points', errorCode: opts.errorCode });
+  }
 }
 
 /**
@@ -52,7 +81,7 @@ export function parsePositiveIntField(value: string | string[] | undefined): num
 }
 
 /**
- * Parses a required non-negative decimal form field (e.g. max_multiplier, redemption_increment).
+ * Parses a required non-negative decimal form field (e.g. max_multiplier).
  * Rejects arrays (repeated fields), empty/whitespace input, non-numeric input, and negative values.
  */
 export function parseNonNegativeNumberField(value: string | string[] | undefined): number | null {
@@ -63,7 +92,7 @@ export function parseNonNegativeNumberField(value: string | string[] | undefined
 }
 
 /**
- * Parses a required strictly-positive decimal form field (e.g. curve, decay_half_life_periods).
+ * Parses a required strictly-positive decimal form field (e.g. curve, half_life_minutes).
  * Rejects arrays (repeated fields), empty/whitespace input, non-numeric input, and non-positive values.
  */
 export function parsePositiveNumberField(value: string | string[] | undefined): number | null {
@@ -71,6 +100,17 @@ export function parsePositiveNumberField(value: string | string[] | undefined): 
   if (typeof value !== 'string' || value.trim() === '') return null;
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * The cooldown (seconds) dynamic pricing should use for a reward: its own Twitch global
+ * cooldown when enabled, otherwise a fallback default — keeps pricing's `cooldown_seconds`
+ * mirroring the reward's real Twitch cooldown instead of a separately-edited value.
+ */
+export function effectiveCooldownSeconds(reward: Pick<TwitchCustomReward, 'global_cooldown_setting'>): number {
+  return reward.global_cooldown_setting.is_enabled
+    ? reward.global_cooldown_setting.global_cooldown_seconds
+    : DEFAULT_PRICING_COOLDOWN_SECONDS;
 }
 
 const REWARD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

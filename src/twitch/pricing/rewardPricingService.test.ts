@@ -8,7 +8,7 @@ vi.mock('../../db', () => ({
   recordPricingHistory: vi.fn(),
   markPricingUnsupported: vi.fn(),
   deletePricingConfig: vi.fn(),
-  getGlobalPricingSettings: vi.fn(),
+  getPricingSettingsForStreamer: vi.fn(),
   getStreamerById: vi.fn(),
 }));
 
@@ -23,7 +23,7 @@ vi.mock('../twitchApi', () => {
 
 import {
   getPricingForReward, recordPricingUpdate, recordPricingHistory, markPricingUnsupported, deletePricingConfig,
-  getGlobalPricingSettings, getStreamerById,
+  getPricingSettingsForStreamer, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
@@ -32,7 +32,7 @@ import {
   __resetPushRateLimiterForTests,
 } from './rewardPricingService';
 
-const settings = { decay_half_life_periods: 3, redemption_increment: 0.1 };
+const settings = { half_life_seconds: 1800, time_to_max_multiplier: 2 };
 const streamer = { id: 1, twitch_user_id: 'bc1', eventsub_access_token: 'tok' } as any;
 
 function makeRow(overrides: Partial<Record<string, unknown>> = {}) {
@@ -55,7 +55,7 @@ function makeRow(overrides: Partial<Record<string, unknown>> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getGlobalPricingSettings).mockResolvedValue(settings);
+  vi.mocked(getPricingSettingsForStreamer).mockResolvedValue(settings);
   vi.mocked(getStreamerById).mockResolvedValue(streamer);
   vi.mocked(getValidToken).mockResolvedValue('user-token');
   vi.mocked(recordPricingHistory).mockResolvedValue(undefined);
@@ -191,13 +191,13 @@ describe('applyDecayTick', () => {
   it('applies decay without the redemption increment', async () => {
     vi.mocked(getPricingForReward).mockResolvedValue(makeRow({
       demand: 0.5,
-      demand_updated_at: String(Date.now() - 300_000), // 300s elapsed, cooldown=300s -> 1 period of decay
+      demand_updated_at: String(Date.now() - 300_000), // 300s elapsed
       last_pushed_cost: null,
     }));
     await applyDecayTick(1, 'rwd1');
     const [, , demandArg] = vi.mocked(recordPricingUpdate).mock.calls[0];
-    // decay(0.5, 300, 300, 3) = 0.5 * 2^(-1/3) ≈ 0.39700
-    expect(demandArg).toBeCloseTo(0.397, 2);
+    // decay(0.5, ~300s elapsed, half_life=1800s) = 0.5 * 2^(-300/1800)
+    expect(demandArg).toBeCloseTo(0.5 * Math.pow(2, -300 / 1800), 2);
   });
 });
 

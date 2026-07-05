@@ -295,16 +295,20 @@ CREATE TABLE IF NOT EXISTS reward_pricing (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
--- pricing_global_settings
--- Single global row (id pinned to 1) — bot-wide decay/increment settings
--- shared by every reward_pricing row.
+-- reward_pricing_settings
+-- One row per streamer — their own decay half-life and time-to-max-demand
+-- multiplier, shared by every one of their reward_pricing rows. The
+-- redemption increment is not stored here; it's derived per-reward from the
+-- reward's own cooldown plus these two settings (see rewardPricingMath.ts).
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS pricing_global_settings (
-  id                       TINYINT      NOT NULL DEFAULT 1,
-  decay_half_life_periods DECIMAL(8,3) NOT NULL DEFAULT 3.000,
-  redemption_increment     DECIMAL(6,4) NOT NULL DEFAULT 0.1000,
-  PRIMARY KEY (id),
-  CONSTRAINT chk_pricing_global_settings_singleton CHECK (id = 1)
+CREATE TABLE IF NOT EXISTS reward_pricing_settings (
+  streamer_id            INT          NOT NULL,
+  half_life_seconds      INT          NOT NULL DEFAULT 1800,
+  time_to_max_multiplier DECIMAL(6,3) NOT NULL DEFAULT 2.000,
+  PRIMARY KEY (streamer_id),
+  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE,
+  CONSTRAINT chk_reward_pricing_settings_half_life  CHECK (half_life_seconds > 0),
+  CONSTRAINT chk_reward_pricing_settings_multiplier CHECK (time_to_max_multiplier > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------

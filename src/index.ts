@@ -1,5 +1,5 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
-import { getPool, closePool, initGlobalPricingSettings } from './db';
+import { getPool, closePool } from './db';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startDiscordBot, stopDiscordBot } from './discord/discordBot';
@@ -89,12 +89,6 @@ async function main(): Promise<void> {
   await startTikTokBot();
   startWebPanel();
   startCounterScheduler();
-
-  try {
-    await initGlobalPricingSettings();
-  } catch (err) {
-    log.error('initGlobalPricingSettings startup error:', err);
-  }
   startRewardPricingScheduler();
 
   startTwitchMonitor().catch((err) => log.error('TwitchMonitor startup error:', err));

@@ -1,11 +1,11 @@
 import { createMutationQueue } from '../../shared/mutationQueue';
 import {
   getPricingForReward, recordPricingUpdate, recordPricingHistory, markPricingUnsupported, deletePricingConfig,
-  getGlobalPricingSettings, getStreamerById,
+  getPricingSettingsForStreamer, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
-import { computePrice, decayDemand, applyRedemption } from './rewardPricingMath';
+import { computePrice, decayDemand, applyRedemption, computeRedemptionIncrement } from './rewardPricingMath';
 import { createLogger } from '../../shared/logger';
 
 const log = createLogger('RewardPricing');
@@ -113,16 +113,18 @@ async function syncRewardPrice(streamerId: number, twitchRewardId: string, apply
   const row = await getPricingForReward(streamerId, twitchRewardId);
   if (!row || !row.enabled) return;
 
-  const settings = await getGlobalPricingSettings();
+  const settings = await getPricingSettingsForStreamer(streamerId);
   const now = Date.now();
   const elapsedSeconds = Math.max(0, (now - Number(row.demand_updated_at)) / 1000);
   const newDemand = applyIncrement
-    ? applyRedemption(row.demand, elapsedSeconds, row.cooldown_seconds, settings.decay_half_life_periods, settings.redemption_increment)
-    : decayDemand(row.demand, elapsedSeconds, row.cooldown_seconds, settings.decay_half_life_periods);
+    ? applyRedemption(
+        row.demand, elapsedSeconds, settings.half_life_seconds,
+        computeRedemptionIncrement(row.cooldown_seconds, settings.half_life_seconds, settings.time_to_max_multiplier),
+      )
+    : decayDemand(row.demand, elapsedSeconds, settings.half_life_seconds);
 
   const newCost = computePrice(newDemand, {
     baseCost: row.base_cost,
-    cooldownSeconds: row.cooldown_seconds,
     maxMultiplier: row.max_multiplier,
     curve: row.curve,
   });

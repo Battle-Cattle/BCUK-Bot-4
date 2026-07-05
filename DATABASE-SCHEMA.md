@@ -201,7 +201,7 @@ Dynamic Channel Point Pricing: per-reward config and demand state. Independent o
 | `twitch_reward_id` | `VARCHAR(255)` | Twitch reward UUID; unique per `(streamer_id, twitch_reward_id)` |
 | `enabled` | `TINYINT(1)` | Whether dynamic pricing is active for this reward |
 | `base_cost` | `INT` | Minimum price |
-| `cooldown_seconds` | `INT` | Used to normalize demand decay/increment across rewards |
+| `cooldown_seconds` | `INT` | Mirrors the reward's own Twitch global cooldown (or a fallback default when it has none) — kept in sync automatically, not directly editable |
 | `max_multiplier` | `DECIMAL(6,3)` | Max price = `base_cost * (1 + max_multiplier)` |
 | `curve` | `DECIMAL(5,3)` | Exponent controlling how aggressively price rises with demand |
 | `demand` | `DECIMAL(9,6)` | Current demand, in `[0,1]` |
@@ -211,17 +211,17 @@ Dynamic Channel Point Pricing: per-reward config and demand state. Independent o
 
 Created by `migrations/reward_pricing.sql`.
 
-## `pricing_global_settings`
+## `reward_pricing_settings`
 
-Single global row (`id` pinned to 1) — bot-wide decay/increment settings shared by every `reward_pricing` row.
+One row per streamer — their own decay half-life and time-to-max-demand multiplier, shared by every one of their `reward_pricing` rows. The redemption increment isn't stored here; it's derived per-reward from the reward's own `cooldown_seconds` plus these two settings.
 
 | Column | Type | Notes |
 | --- | --- | --- |
-| `id` | `TINYINT` PK | Always `1` (enforced by a CHECK constraint) |
-| `decay_half_life_periods` | `DECIMAL(8,3)` | Cooldown-periods of inactivity for demand to halve |
-| `redemption_increment` | `DECIMAL(6,4)` | Flat demand increase applied per redemption |
+| `streamer_id` | `INT` PK | FK to `streamer.id` ON DELETE CASCADE |
+| `half_life_seconds` | `INT` | Fixed seconds of inactivity for demand to halve — independent of any reward's cooldown |
+| `time_to_max_multiplier` | `DECIMAL(6,3)` | Redemptions at a reward's own cooldown frequency reach 100% demand after this many half-lives |
 
-Created by `migrations/reward_pricing.sql`.
+Created by `migrations/reward_pricing_settings.sql` (replaces the earlier `pricing_global_settings` singleton table from `migrations/reward_pricing.sql`).
 
 ## `reward_pricing_history`
 
