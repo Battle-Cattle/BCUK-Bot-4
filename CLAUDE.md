@@ -71,7 +71,7 @@ Export `registerXRuntime(runtime)` from the handler file to store the platform c
 
 ## PR Reviews (CodeRabbit)
 
-CodeRabbit auto-reviews pushes but is rate-limited per developer; a rate-limited push gets a "Review limit reached" comment with a wait time and no actual diff review. Once the cooldown has passed, trigger a fresh review with a PR comment:
+CodeRabbit auto-reviews pushes but is rate-limited per developer; a rate-limited push gets a "Review limit reached" comment with a wait time and no actual diff review. **It never auto-retries** once the cooldown passes — a manual trigger is required every time, even if you just wait it out. After the wait time shown in the rate-limit comment has elapsed, post a PR comment:
 
 - **`@coderabbitai review`** — reviews only what changed since the last review. Default choice.
 - **`@coderabbitai full review`** — re-reviews the entire PR from scratch. Use this instead when the last review surfaced a lot of issues, or the intervening changes are large.
