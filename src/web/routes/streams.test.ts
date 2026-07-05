@@ -31,8 +31,11 @@ vi.mock('../../twitch/monitor/twitchMonitor', () => ({
   getLiveStates: vi.fn().mockReturnValue([]),
 }));
 
+const { logMock } = vi.hoisted(() => ({
+  logMock: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+}));
 vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
+  createLogger: () => logMock,
 }));
 
 vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
@@ -40,7 +43,11 @@ vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, A
 import express from 'express';
 import supertest from 'supertest';
 import router from './streams';
-import { getAllStreamGroups, getAllStreamers, getAllUsers, findUser, addStreamer, addStreamGroup, updateStreamGroup } from '../../db';
+import {
+  getAllStreamGroups, getAllStreamers, getAllUsers, findUser, addStreamer, addStreamGroup, updateStreamGroup,
+  removeStreamGroup, removeStreamer, removeStreamersByGroup, getAllEventSubStreamers,
+} from '../../db';
+import { restartTwitchMonitor, getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db/users';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
@@ -67,7 +74,18 @@ beforeEach(() => {
   vi.mocked(addStreamer).mockResolvedValue(undefined);
   vi.mocked(addStreamGroup).mockResolvedValue(undefined);
   vi.mocked(updateStreamGroup).mockResolvedValue(undefined);
+  vi.mocked(removeStreamGroup).mockResolvedValue(undefined);
+  vi.mocked(removeStreamer).mockResolvedValue(undefined);
+  vi.mocked(removeStreamersByGroup).mockResolvedValue(undefined);
+  vi.mocked(getAllEventSubStreamers).mockResolvedValue([]);
+  vi.mocked(getLiveStates).mockReturnValue([]);
+  vi.mocked(restartTwitchMonitor).mockResolvedValue(undefined);
 });
+
+/** Waits for the fire-and-forget `triggerRestart()` promise chain to settle. */
+async function flushRestartChain() {
+  await new Promise((resolve) => setImmediate(resolve));
+}
 
 describe('GET /streams — query param filtering', () => {
   it('passes a known error to the template', async () => {
@@ -291,5 +309,205 @@ describe('POST /streams/groups/update — field length capping', () => {
         newGameMessage: longStr(2000),
       }),
     );
+  });
+
+  it('redirects with missing_fields when a required field is blank', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/groups/update')
+      .send('group_id=1&name=&discord_channel=chan&live_message=live&new_game_message=game');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=missing_fields');
+    expect(updateStreamGroup).not.toHaveBeenCalled();
+  });
+
+  it('redirects with invalid_id when group_id is not a valid positive integer', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/groups/update')
+      .send('group_id=abc&name=n&discord_channel=chan&live_message=live&new_game_message=game');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=invalid_id');
+    expect(updateStreamGroup).not.toHaveBeenCalled();
+  });
+
+  it('redirects with update_group_failed when the DB update rejects', async () => {
+    vi.mocked(updateStreamGroup).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp())
+      .post('/streams/groups/update')
+      .send('group_id=1&name=n&discord_channel=chan&live_message=live&new_game_message=game');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=update_group_failed');
+  });
+});
+
+describe('POST /streams/groups/add — failure paths', () => {
+  it('redirects with missing_fields when a required field is blank', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/groups/add')
+      .send('name=&discord_channel=chan&live_message=live&new_game_message=game');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=missing_fields');
+    expect(addStreamGroup).not.toHaveBeenCalled();
+  });
+
+  it('redirects with add_group_failed when the DB insert rejects', async () => {
+    vi.mocked(addStreamGroup).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp())
+      .post('/streams/groups/add')
+      .send('name=n&discord_channel=chan&live_message=live&new_game_message=game');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=add_group_failed');
+  });
+});
+
+describe('POST /streams/groups/remove', () => {
+  it('redirects without an error when group_id is absent', async () => {
+    const res = await supertest(buildApp()).post('/streams/groups/remove').send('');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).not.toContain('error');
+    expect(removeStreamGroup).not.toHaveBeenCalled();
+  });
+
+  it('redirects with invalid_id when group_id is not a valid positive integer', async () => {
+    const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=abc');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=invalid_id');
+    expect(removeStreamGroup).not.toHaveBeenCalled();
+  });
+
+  it('removes the group\'s streamers before the group itself, then restarts the monitor', async () => {
+    const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=5');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).not.toContain('error');
+    expect(removeStreamersByGroup).toHaveBeenCalledWith(5);
+    expect(removeStreamGroup).toHaveBeenCalledWith(5);
+    expect(vi.mocked(removeStreamersByGroup).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(removeStreamGroup).mock.invocationCallOrder[0]);
+    await flushRestartChain();
+    expect(restartTwitchMonitor).toHaveBeenCalled();
+  });
+
+  it('redirects with remove_group_failed when the DB delete rejects', async () => {
+    vi.mocked(removeStreamGroup).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=5');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=remove_group_failed');
+  });
+});
+
+describe('POST /streams/streamers/add — failure path', () => {
+  it('redirects with add_streamer_failed when the DB insert rejects', async () => {
+    vi.mocked(findUser).mockResolvedValue({ twitch_name: 'streamer', discord_id: '100000000000000001' } as any);
+    vi.mocked(addStreamer).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp())
+      .post('/streams/streamers/add')
+      .send('discord_id=100000000000000001&group_id=1');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=add_streamer_failed');
+  });
+});
+
+describe('POST /streams/streamers/remove', () => {
+  it('redirects without an error when streamer_id is absent', async () => {
+    const res = await supertest(buildApp()).post('/streams/streamers/remove').send('');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).not.toContain('error');
+    expect(removeStreamer).not.toHaveBeenCalled();
+  });
+
+  it('redirects with invalid_id when streamer_id is not a valid positive integer', async () => {
+    const res = await supertest(buildApp()).post('/streams/streamers/remove').send('streamer_id=abc');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=invalid_id');
+    expect(removeStreamer).not.toHaveBeenCalled();
+  });
+
+  it('removes the streamer and restarts the monitor', async () => {
+    const res = await supertest(buildApp()).post('/streams/streamers/remove').send('streamer_id=7');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).not.toContain('error');
+    expect(removeStreamer).toHaveBeenCalledWith(7);
+    await flushRestartChain();
+    expect(restartTwitchMonitor).toHaveBeenCalled();
+  });
+
+  it('redirects with remove_streamer_failed when the DB delete rejects', async () => {
+    vi.mocked(removeStreamer).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp()).post('/streams/streamers/remove').send('streamer_id=7');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=remove_streamer_failed');
+  });
+});
+
+describe('triggerRestart', () => {
+  it('logs an error when the monitor restart itself rejects, without affecting the response', async () => {
+    vi.mocked(restartTwitchMonitor).mockRejectedValueOnce(new Error('monitor boom'));
+    const res = await supertest(buildApp()).post('/streams/streamers/remove').send('streamer_id=8');
+    expect(res.status).toBe(302);
+
+    await flushRestartChain();
+
+    expect(logMock.error).toHaveBeenCalledWith('TwitchMonitor restart error:', expect.any(Error));
+  });
+});
+
+describe('GET /streams/live', () => {
+  it('returns the current live states as JSON', async () => {
+    vi.mocked(getLiveStates).mockReturnValue([{ login: 'streamera' } as any]);
+    const res = await supertest(buildApp()).get('/streams/live');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ streams: [{ login: 'streamera' }] });
+  });
+});
+
+describe('GET /streams — eligible users and admin EventSub status', () => {
+  it('includes users with a Twitch name who are not already streamers, excluding the rest', async () => {
+    vi.mocked(getAllStreamers).mockResolvedValue([{ discord_id: '1', twitch_name: 'existing' }] as any);
+    vi.mocked(getAllUsers).mockResolvedValue([
+      { discord_id: '1', twitch_name: 'existing' }, // already a streamer
+      { discord_id: '2', twitch_name: 'eligible' }, // eligible
+      { discord_id: '3', twitch_name: null }, // no Twitch name
+    ] as any);
+
+    const res = await supertest(buildApp()).get('/streams');
+
+    expect(res.status).toBe(200);
+    expect(res.body.eligibleUsers).toEqual([{ discord_id: '2', twitch_name: 'eligible' }]);
+  });
+
+  it('builds eventSubById keyed by streamer row id for admin users, and skips the lookup for non-admins', async () => {
+    vi.mocked(getAllEventSubStreamers).mockResolvedValue([{ id: 42, twitch_name: 'admineligible' }] as any);
+    const admin: SessionUser = { discordId: '300000000000000001', discordName: 'AdminUser', discordAvatar: null, accessLevel: AccessLevel.ADMIN };
+
+    const res = await supertest(buildApp(admin)).get('/streams');
+
+    expect(res.status).toBe(200);
+    expect(getAllEventSubStreamers).toHaveBeenCalled();
+    expect(res.body.eventSubById).toEqual({ 42: { id: 42, twitch_name: 'admineligible' } });
+  });
+
+  it('does not query EventSub streamers for a non-admin manager', async () => {
+    const res = await supertest(buildApp()).get('/streams');
+
+    expect(res.status).toBe(200);
+    expect(getAllEventSubStreamers).not.toHaveBeenCalled();
+    expect(res.body.eventSubById).toEqual({});
+  });
+});
+
+describe('getFriendlyError — unknown error code fallback', () => {
+  it('falls back to a generic message including the error code for unrecognised keys', async () => {
+    const app = express();
+    app.use(express.urlencoded({ extended: false }));
+    app.use((req: any, res: any, next: any) => {
+      req.session = { user: MANAGER };
+      res.render = (view: string, locals: any) => res.json({ view, friendlyError: locals.getFriendlyError('totally_made_up') });
+      next();
+    });
+    app.use(router);
+
+    const res = await supertest(app).get('/streams');
+
+    expect(res.status).toBe(200);
+    expect(res.body.friendlyError).toBe('An error occurred (totally_made_up).');
   });
 });

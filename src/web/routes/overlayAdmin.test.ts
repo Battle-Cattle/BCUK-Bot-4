@@ -29,8 +29,11 @@ vi.mock('../../shared/config', () => ({
   PUBLIC_URL: 'http://localhost:3000',
 }));
 
+const { logMock } = vi.hoisted(() => ({
+  logMock: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+}));
 vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
+  createLogger: () => logMock,
 }));
 
 vi.mock('./overlayAdminMutations', async () => {
@@ -41,7 +44,9 @@ vi.mock('./overlayAdminMutations', async () => {
 import express from 'express';
 import supertest from 'supertest';
 import router from './overlayAdmin';
-import { getStreamerByDiscordId } from '../../db';
+import { getStreamerByDiscordId, getVideosForStreamer, getRewardsForStreamer } from '../../db';
+import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getCustomRewards } from '../../twitch/twitchApi';
 import { AccessLevel } from '../../db/users';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
@@ -99,5 +104,64 @@ describe('GET /settings — query param filtering', () => {
     const res = await supertest(buildApp()).get('/settings');
     expect(res.status).toBe(200);
     expect(res.body.maxFileMb).toBe(100);
+  });
+});
+
+// fetchTwitchRewards isn't exported, so it's exercised indirectly through GET /settings —
+// twitchRewards in the rendered locals is its return value.
+describe('GET /settings — fetchTwitchRewards', () => {
+  function makeStreamer(overrides: Record<string, unknown> = {}) {
+    return { id: 1, discord_id: '100000000000000001', twitch_user_id: 'tuid-1', ...overrides };
+  }
+
+  beforeEach(() => {
+    vi.mocked(getVideosForStreamer).mockResolvedValue([]);
+    vi.mocked(getRewardsForStreamer).mockResolvedValue([]);
+  });
+
+  it('returns no rewards and skips token lookup when the streamer has no twitch_user_id', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer({ twitch_user_id: null }) as any);
+
+    const res = await supertest(buildApp()).get('/settings');
+
+    expect(res.status).toBe(200);
+    expect(res.body.twitchRewards).toEqual([]);
+    expect(getValidToken).not.toHaveBeenCalled();
+    expect(getCustomRewards).not.toHaveBeenCalled();
+  });
+
+  it('returns no rewards when getValidToken has no valid token', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer() as any);
+    vi.mocked(getValidToken).mockResolvedValue(null);
+
+    const res = await supertest(buildApp()).get('/settings');
+
+    expect(res.status).toBe(200);
+    expect(res.body.twitchRewards).toEqual([]);
+    expect(getCustomRewards).not.toHaveBeenCalled();
+  });
+
+  it('returns the streamer\'s Twitch custom rewards when a valid token is available', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer() as any);
+    vi.mocked(getValidToken).mockResolvedValue('valid-token');
+    vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'reward-1', title: 'Reward One' }] as any);
+
+    const res = await supertest(buildApp()).get('/settings');
+
+    expect(res.status).toBe(200);
+    expect(getCustomRewards).toHaveBeenCalledWith('tuid-1', 'valid-token');
+    expect(res.body.twitchRewards).toEqual([{ id: 'reward-1', title: 'Reward One' }]);
+  });
+
+  it('logs a warning and returns no rewards when getCustomRewards throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer() as any);
+    vi.mocked(getValidToken).mockResolvedValue('valid-token');
+    vi.mocked(getCustomRewards).mockRejectedValue(new Error('Twitch API down'));
+
+    const res = await supertest(buildApp()).get('/settings');
+
+    expect(res.status).toBe(200);
+    expect(res.body.twitchRewards).toEqual([]);
+    expect(logMock.warn).toHaveBeenCalledWith('Failed to fetch Twitch custom rewards:', expect.any(Error));
   });
 });
