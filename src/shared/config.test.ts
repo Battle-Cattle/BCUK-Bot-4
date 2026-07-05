@@ -177,6 +177,11 @@ describe('config — parsePositiveIntEnv-backed values', () => {
     const config = await loadConfig({ OVERLAY_MAX_SSE_PER_CHANNEL: undefined });
     expect(config.OVERLAY_MAX_SSE_PER_CHANNEL).toBe(10);
   });
+
+  it('defaults CHANNEL_POINTS_MAX_SSE_PER_STREAMER to 5 when unset', async () => {
+    const config = await loadConfig({ CHANNEL_POINTS_MAX_SSE_PER_STREAMER: undefined });
+    expect(config.CHANNEL_POINTS_MAX_SSE_PER_STREAMER).toBe(5);
+  });
 });
 
 describe('config — GLOBAL_COOLDOWN_MS', () => {

@@ -29,7 +29,7 @@ import { getValidToken } from '../eventsub/twitchApiEventSub';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
 import {
   applyRedemptionPricing, applyDecayTick, resetAndDeletePricing, deleteRewardAndPricing,
-  __resetPushRateLimiterForTests,
+  registerRewardPricingRuntime, __resetPushRateLimiterForTests,
 } from './rewardPricingService';
 
 const settings = { half_life_seconds: 1800, time_to_max_multiplier: 2 };
@@ -363,5 +363,50 @@ describe('redemption push rate limiting', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('live pricing update push', () => {
+  it('pushes the computed cost and demand to the registered runtime after a successful sync', async () => {
+    const pushPricingUpdate = vi.fn();
+    registerRewardPricingRuntime({ pushPricingUpdate });
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
+
+    await applyRedemptionPricing(1, 'rwd1');
+
+    expect(pushPricingUpdate).toHaveBeenCalledWith(1, {
+      rewardId: 'rwd1', cost: expect.any(Number), demand: expect.any(Number), recordedAt: expect.any(Number),
+    });
+  });
+
+  it('still pushes the live update when recording price history fails', async () => {
+    const pushPricingUpdate = vi.fn();
+    registerRewardPricingRuntime({ pushPricingUpdate });
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
+    vi.mocked(recordPricingHistory).mockRejectedValueOnce(new Error('history db down'));
+
+    await applyRedemptionPricing(1, 'rwd1');
+
+    expect(pushPricingUpdate).toHaveBeenCalled();
+  });
+
+  it('does not push when the reward has no pricing config', async () => {
+    const pushPricingUpdate = vi.fn();
+    registerRewardPricingRuntime({ pushPricingUpdate });
+    vi.mocked(getPricingForReward).mockResolvedValue(null);
+
+    await applyRedemptionPricing(1, 'rwd1');
+
+    expect(pushPricingUpdate).not.toHaveBeenCalled();
+  });
+
+  it('does not fail the sync when the runtime push throws', async () => {
+    registerRewardPricingRuntime({
+      pushPricingUpdate: () => { throw new Error('push failed'); },
+    });
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
+
+    await expect(applyRedemptionPricing(1, 'rwd1')).resolves.toBeUndefined();
+    expect(recordPricingUpdate).toHaveBeenCalled();
   });
 });

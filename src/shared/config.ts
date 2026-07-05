@@ -47,6 +47,7 @@ export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER ?? './overlay-videos';
 export const OVERLAY_MAX_FILE_MB = parsePositiveIntEnv(process.env.OVERLAY_MAX_FILE_MB, 100);
 export const COMPANION_MAX_SSE_PER_TOKEN = parsePositiveIntEnv(process.env.COMPANION_MAX_SSE_PER_TOKEN, 3);
 export const OVERLAY_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.OVERLAY_MAX_SSE_PER_CHANNEL, 10);
+export const CHANNEL_POINTS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.CHANNEL_POINTS_MAX_SSE_PER_STREAMER, 5);
 const _COOLDOWN = parseInt(process.env.GLOBAL_COOLDOWN_MS ?? '3000', 10);
 if (Number.isNaN(_COOLDOWN)) throw new Error('Invalid GLOBAL_COOLDOWN_MS: must be a number');
 export const GLOBAL_COOLDOWN_MS = _COOLDOWN;
