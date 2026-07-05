@@ -141,6 +141,17 @@ describe('POST /rewards/:twitchRewardId/pricing', () => {
     expect(upsertPricingConfig).toHaveBeenCalledWith(MOCK_STREAMER.id, VALID_REWARD_ID, expect.objectContaining({ cooldown_seconds: 60 }));
   });
 
+  it('falls back to the existing pricing config cooldown when the live Twitch lookup throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(getCustomRewards).mockRejectedValueOnce(new Error('Twitch down'));
+    vi.mocked(getPricingForReward).mockResolvedValue({ cooldown_seconds: 90 } as any);
+    await supertest(buildApp())
+      .post(`/rewards/${VALID_REWARD_ID}/pricing`)
+      .type('form')
+      .send({ base_cost: '200', max_multiplier: '4', curve: '1.5' });
+    expect(upsertPricingConfig).toHaveBeenCalledWith(MOCK_STREAMER.id, VALID_REWARD_ID, expect.objectContaining({ cooldown_seconds: 90 }));
+  });
+
   it('treats a missing enabled checkbox as false', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     await supertest(buildApp())
