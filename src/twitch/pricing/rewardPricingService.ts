@@ -156,7 +156,11 @@ async function syncRewardPrice(streamerId: number, twitchRewardId: string, apply
     log.warn(`Failed to record price history for reward ${twitchRewardId}:`, err);
   }
 
-  _runtime?.pushPricingUpdate(streamerId, { rewardId: twitchRewardId, cost: newCost, demand: newDemand, recordedAt: now });
+  try {
+    _runtime?.pushPricingUpdate(streamerId, { rewardId: twitchRewardId, cost: newCost, demand: newDemand, recordedAt: now });
+  } catch (err) {
+    log.warn(`Failed to push live price update for reward ${twitchRewardId}:`, err);
+  }
 }
 
 /**

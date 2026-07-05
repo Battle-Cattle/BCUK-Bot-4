@@ -198,17 +198,42 @@ function applyLivePricingUpdate(event) {
   if (priceEl) priceEl.textContent = event.cost.toLocaleString();
 }
 
-/** Opens the `/channel-points/events` SSE connection and applies each pushed update, when the page has at least one live chart. */
+const SSE_RECONNECT_BASE_MS = 3000;
+const SSE_RECONNECT_MAX_MS = 60000;
+
+/**
+ * Opens the `/channel-points/events` SSE connection and applies each pushed update, when the
+ * page has at least one live chart. Reconnects on error with an exponential backoff (capped at
+ * `SSE_RECONNECT_MAX_MS`) instead of relying on the browser's fixed ~3s retry — otherwise a
+ * persistent failure (e.g. the per-streamer connection cap being hit) would hammer the endpoint
+ * indefinitely for as long as the tab stays open.
+ * @returns {void}
+ */
 function initLivePricingUpdates() {
   if (document.querySelectorAll('.price-history-container').length === 0) return;
-  const source = new EventSource('/channel-points/events');
-  source.onmessage = (event) => {
-    try {
-      applyLivePricingUpdate(JSON.parse(event.data));
-    } catch {
-      // Malformed/comment-only SSE frames (e.g. keepalive pings) are expected — ignore.
-    }
-  };
+
+  let backoffMs = SSE_RECONNECT_BASE_MS;
+  let reconnectTimer = null;
+
+  function connect() {
+    const source = new EventSource('/channel-points/events');
+    source.onopen = () => { backoffMs = SSE_RECONNECT_BASE_MS; };
+    source.onmessage = (event) => {
+      try {
+        applyLivePricingUpdate(JSON.parse(event.data));
+      } catch {
+        // Malformed/comment-only SSE frames (e.g. keepalive pings) are expected — ignore.
+      }
+    };
+    source.onerror = () => {
+      source.close();
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(connect, backoffMs);
+      backoffMs = Math.min(backoffMs * 2, SSE_RECONNECT_MAX_MS);
+    };
+  }
+
+  connect();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

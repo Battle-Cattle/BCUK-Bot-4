@@ -8,6 +8,10 @@ vi.mock('../../shared/config', () => ({
   CHANNEL_POINTS_MAX_SSE_PER_STREAMER: 5,
 }));
 
+vi.mock('../../shared/logger', () => ({
+  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
+}));
+
 import express from 'express';
 import supertest from 'supertest';
 import router, { MAX_SSE_CONNECTIONS_PER_STREAMER, connections, pushPricingUpdate } from './channelPointsEvents';
@@ -70,6 +74,25 @@ describe('GET /events — auth', () => {
     const res = await supertest(buildApp()).get('/events');
     expect(res.status).toBe(403);
   });
+
+  it('returns 500 (and logs) instead of crashing when req.session.user is missing', async () => {
+    const app = express();
+    app.use((req: any, _res, next) => {
+      req.session = {}; // no `user` — requireAuth normally guarantees this, but the handler shouldn't crash if it didn't run
+      next();
+    });
+    app.use(router);
+
+    const res = await supertest(app).get('/events');
+    expect(res.status).toBe(500);
+    expect(getStreamerByDiscordId).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 (and logs) when getStreamerByDiscordId rejects', async () => {
+    vi.mocked(getStreamerByDiscordId).mockRejectedValue(new Error('db down'));
+    const res = await supertest(buildApp()).get('/events');
+    expect(res.status).toBe(500);
+  });
 });
 
 describe('GET /events — SSE connection limit', () => {
@@ -84,24 +107,26 @@ describe('GET /events — SSE connection limit', () => {
   });
 
   it('accepts a connection when the streamer is below the limit', async () => {
+    // Invokes the handler directly (as the lifecycle tests below do) rather than a real
+    // supertest round-trip: an open SSE response has no natural end, and destroying the
+    // underlying socket to clean up after a real connection raises an unhandled
+    // 'aborted'/ECONNRESET error from Node's http internals that a client-side listener
+    // can't fully suppress.
     const dummies = new Set(
       Array.from({ length: MAX_SSE_CONNECTIONS_PER_STREAMER - 1 }, () => ({}) as any),
     );
     connections.set(123, dummies);
 
-    const req = supertest(buildApp()).get('/events');
-    const p = new Promise<number>((resolve) => {
-      req
-        .buffer(false)
-        .parse((_res, _cb) => {
-          resolve(_res.statusCode ?? 0);
-          (_res as any).resume();
-        })
-        .end();
-    });
-    const status = await p;
-    expect(status).not.toBe(429);
-    expect(status).toBe(200);
+    const handler = getRouteHandler('/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('discord1');
+
+    await handler(req, res, vi.fn());
+
+    expect(res.status).not.toHaveBeenCalledWith(429);
+    expect(connections.get(123)?.has(res as any)).toBe(true);
+
+    triggerClose(); // clears the 25s keepalive interval so it doesn't leak into other tests
   });
 });
 

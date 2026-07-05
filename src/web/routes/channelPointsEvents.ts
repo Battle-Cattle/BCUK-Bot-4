@@ -1,7 +1,9 @@
+import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { getStreamerByDiscordId } from '../../db';
 import { CHANNEL_POINTS_MAX_SSE_PER_STREAMER } from '../../shared/config';
 
+const log = createLogger('ChannelPointsEvents');
 const router = Router();
 
 /** A live price/demand update for one reward, pushed to the Channel Points admin page. */
@@ -43,10 +45,18 @@ export function pushPricingUpdate(streamerId: number, event: PricingUpdateEvent)
  * @param req - Express request; reads `req.session.user`.
  * @param res - Express response; upgrades to a `text/event-stream` connection kept alive with
  *   periodic pings and torn down on client disconnect; replies 403 if the session user isn't a
- *   monitored streamer, or 429 if the streamer's connection limit is exceeded.
+ *   monitored streamer, 429 if the streamer's connection limit is exceeded, or 500 on an
+ *   unexpected lookup failure (also logged, unlike a plain unhandled rejection).
  */
 router.get('/events', async (req, res) => {
-  const streamer = await getStreamerByDiscordId(req.session.user!.discordId);
+  let streamer;
+  try {
+    streamer = await getStreamerByDiscordId(req.session.user!.discordId);
+  } catch (err) {
+    log.error('Failed to resolve streamer for SSE events:', err);
+    res.status(500).end();
+    return;
+  }
   if (!streamer) {
     res.status(403).end();
     return;

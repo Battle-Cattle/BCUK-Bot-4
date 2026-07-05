@@ -399,4 +399,14 @@ describe('live pricing update push', () => {
 
     expect(pushPricingUpdate).not.toHaveBeenCalled();
   });
+
+  it('does not fail the sync when the runtime push throws', async () => {
+    registerRewardPricingRuntime({
+      pushPricingUpdate: () => { throw new Error('push failed'); },
+    });
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
+
+    await expect(applyRedemptionPricing(1, 'rwd1')).resolves.toBeUndefined();
+    expect(recordPricingUpdate).toHaveBeenCalled();
+  });
 });
