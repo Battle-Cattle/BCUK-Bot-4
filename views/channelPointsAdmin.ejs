@@ -128,7 +128,7 @@
       <% if (rewards.some((r) => r.config)) { %>
       <form method="GET" action="/channel-points" class="form-row-wrap" style="align-items:center;margin-bottom:0.75rem;">
         <label class="hint hint-compact" for="history-hours" style="padding:0;">Price history range</label>
-        <select id="history-hours" class="input" name="hours" onchange="this.form.submit()" style="width:auto;">
+        <select id="history-hours" class="input" name="hours" style="width:auto;">
           <% for (const h of historyHourOptions) { %>
           <option value="<%= h %>" <%= h === historyHours ? 'selected' : '' %>><%= h %>h</option>
           <% } %>

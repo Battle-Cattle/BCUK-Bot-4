@@ -103,6 +103,19 @@ function initPriceHistoryCharts() {
   document.querySelectorAll('.price-history-chart').forEach(wireChartInteractivity);
 }
 
+/**
+ * Wires the "Price history range" `<select>` to auto-submit its enclosing form on change.
+ * This has to be done from an external script rather than an inline `onchange` attribute —
+ * the page's CSP sets `script-src-attr 'none'`, which silently blocks inline event-handler
+ * attributes (the select just sits there doing nothing on change, with no visible error).
+ */
+function initHistoryRangeSelect() {
+  const select = document.getElementById('history-hours');
+  if (select instanceof HTMLSelectElement && select.form) {
+    select.addEventListener('change', () => select.form.submit());
+  }
+}
+
 // ─── Live updates (Server-Sent Events) ─────────────────────────────────────
 
 const CHART_WIDTH = 480;
@@ -238,5 +251,6 @@ function initLivePricingUpdates() {
 
 document.addEventListener('DOMContentLoaded', () => {
   initPriceHistoryCharts();
+  initHistoryRangeSelect();
   initLivePricingUpdates();
 });
