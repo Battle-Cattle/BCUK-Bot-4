@@ -544,7 +544,7 @@ describe('error handling in subscription setup', () => {
     expect(count).toBeGreaterThan(0);
   });
 
-  it('logs and returns null when resolving a raid-only streamer\'s Twitch user ID fails', async () => {
+  it('logs and excludes the streamer when resolving a raid-only streamer\'s Twitch user ID fails', async () => {
     vi.mocked(getAllEventSubStreamers).mockResolvedValue([{
       id: 80,
       twitch_name: 'raidFailStreamer',

@@ -380,6 +380,8 @@ describe('POST /streams/groups/remove', () => {
     expect(res.headers.location).not.toContain('error');
     expect(removeStreamersByGroup).toHaveBeenCalledWith(5);
     expect(removeStreamGroup).toHaveBeenCalledWith(5);
+    expect(vi.mocked(removeStreamersByGroup).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(removeStreamGroup).mock.invocationCallOrder[0]);
     await flushRestartChain();
     expect(restartTwitchMonitor).toHaveBeenCalled();
   });
