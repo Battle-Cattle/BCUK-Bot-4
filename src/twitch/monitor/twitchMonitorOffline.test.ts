@@ -1,11 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('../../shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }) }));
+const { logMock } = vi.hoisted(() => ({
+  logMock: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
+}));
+vi.mock('../../shared/logger', () => ({ createLogger: () => logMock }));
 vi.mock('../twitchApi', () => ({ getStreams: vi.fn() }));
 vi.mock('./twitchMonitorAnnouncements', () => ({ deleteAnnouncement: vi.fn() }));
 vi.mock('../../shared/statusStore', () => ({ setTwitchChannelLive: vi.fn() }));
 
-import { cancelOfflineTimersForLogin, runOfflineCheck } from './twitchMonitorOffline';
+import { cancelOfflineTimersForLogin, runOfflineCheck, handleStreamOffline } from './twitchMonitorOffline';
 import { getStreams } from '../twitchApi';
 import { deleteAnnouncement } from './twitchMonitorAnnouncements';
 import { setTwitchChannelLive } from '../../shared/statusStore';
@@ -155,5 +158,80 @@ describe('runOfflineCheck', () => {
     await runOfflineCheck(liveStates, loginToUserId, 'k1', 'alice', 'alice');
 
     expect(deleteAnnouncement).toHaveBeenCalled();
+  });
+});
+
+// ─── handleStreamOffline ──────────────────────────────────────────────────────
+
+describe('handleStreamOffline', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does nothing when no live-state entries match the login', async () => {
+    const map = new Map<string, LiveState>();
+
+    await handleStreamOffline(map, new Map(), 'alice');
+
+    expect(logMock.info).not.toHaveBeenCalled();
+  });
+
+  it('starts a grace-period timer for every entry matching the login (case-insensitive)', async () => {
+    const s1 = makeState({ login: 'alice', groupId: 10 });
+    const s2 = makeState({ login: 'alice', groupId: 20 });
+    const other = makeState({ login: 'bob' });
+    const map = new Map([['k1', s1], ['k2', s2], ['k3', other]]);
+
+    await handleStreamOffline(map, new Map(), 'Alice');
+
+    expect(s1.offlineTimer).not.toBeNull();
+    expect(s2.offlineTimer).not.toBeNull();
+    expect(other.offlineTimer).toBeNull();
+    expect(logMock.info).toHaveBeenCalledWith('Alice went offline — grace period started');
+  });
+
+  it('clears a pre-existing offlineTimer before starting a new one', async () => {
+    const oldTimer = setTimeout(() => {}, 99999);
+    const state = makeState({ login: 'alice', offlineTimer: oldTimer });
+    const map = new Map([['k1', state]]);
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+
+    await handleStreamOffline(map, new Map(), 'alice');
+
+    expect(clearSpy).toHaveBeenCalledWith(oldTimer);
+    expect(state.offlineTimer).not.toBeNull();
+    expect(state.offlineTimer).not.toBe(oldTimer);
+  });
+
+  it('confirms the streamer offline and removes the announcement once the grace period elapses', async () => {
+    vi.mocked(getStreams).mockResolvedValue([]);
+    const state = makeState({ login: 'alice' });
+    const map = new Map([['k1', state]]);
+    const loginToUserId = new Map([['alice', 'uid123']]);
+
+    await handleStreamOffline(map, loginToUserId, 'alice');
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+
+    expect(getStreams).toHaveBeenCalledWith(['uid123']);
+    expect(deleteAnnouncement).toHaveBeenCalledWith(map, 'k1');
+    expect(state.offlineTimer).toBeNull();
+  });
+
+  it('logs and does not throw when the grace-period check itself fails', async () => {
+    vi.mocked(getStreams).mockRejectedValue(new Error('API down'));
+    const state = makeState({ login: 'alice' });
+    const map = new Map([['k1', state]]);
+    const loginToUserId = new Map([['alice', 'uid123']]);
+
+    await handleStreamOffline(map, loginToUserId, 'alice');
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+
+    expect(logMock.error).toHaveBeenCalledWith('Offline-check failed for alice (k1):', expect.any(Error));
+    expect(state.offlineTimer).toBeNull();
   });
 });

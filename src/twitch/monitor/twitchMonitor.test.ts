@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
+const { logMock } = vi.hoisted(() => ({
+  logMock: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock('../../shared/logger', () => ({ createLogger: () => logMock }));
 vi.mock('../../shared/statusStore', () => ({ setTwitchChannelLive: vi.fn() }));
 vi.mock('../../discord/discordBot', () => ({ getDiscordClient: vi.fn() }));
 vi.mock('../../db', () => ({
@@ -21,8 +24,11 @@ vi.mock('./twitchMonitorOffline', () => ({
 }));
 vi.mock('./twitchMonitorStartup', () => ({ performStartupLiveCheck: vi.fn().mockResolvedValue(undefined) }));
 
-import { startTwitchMonitor, stopTwitchMonitor, triggerImmediateLiveCheck, getLiveStates } from './twitchMonitor';
-import { getAllStreamersWithGroups } from '../../db';
+import {
+  startTwitchMonitor, stopTwitchMonitor, triggerImmediateLiveCheck, getLiveStates,
+  shutdownTwitchMonitor, restartTwitchMonitor, getMultiTwitchDataForChannel,
+} from './twitchMonitor';
+import { getAllStreamersWithGroups, clearStreamerLive } from '../../db';
 import { getUsers, getStreams } from '../twitchApi';
 import { cancelOfflineTimersForLogin, handleStreamOffline } from './twitchMonitorOffline';
 import { getDiscordClient } from '../../discord/discordBot';
@@ -226,5 +232,197 @@ describe('60s poll interval', () => {
     const states = getLiveStates();
     expect(states).toHaveLength(1);
     expect(states[0].login).toBe('teststreamer');
+  });
+
+  it('logs and recovers when getStreams rejects during a poll tick', async () => {
+    vi.mocked(getStreams).mockRejectedValueOnce(new Error('boom'));
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(logMock.error).toHaveBeenCalledWith('Poll error:', expect.any(Error));
+    expect(getLiveStates()).toHaveLength(0);
+
+    // A subsequent tick still works — pollRunning was reset in the `finally` block.
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream()] as any);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getLiveStates()).toHaveLength(1);
+  });
+});
+
+describe('startTwitchMonitor with no configured streamers', () => {
+  afterEach(async () => {
+    await stopTwitchMonitor();
+  });
+
+  it('logs a warning and does not fetch users when there are no streamers in the DB', async () => {
+    vi.clearAllMocks();
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([]);
+    vi.mocked(getUsers).mockResolvedValue([]);
+
+    await startTwitchMonitor();
+
+    expect(logMock.warn).toHaveBeenCalledWith('No streamers configured in DB — nothing to monitor');
+    expect(getUsers).toHaveBeenCalledWith([]);
+  });
+});
+
+// Exercises shutdownTwitchMonitor, restartTwitchMonitor, getMultiTwitchDataForChannel, and the
+// getLiveStates() sort comparator — none of these paths are covered by the EventSub-style
+// triggerImmediateLiveCheck tests above, which never restart or tear the monitor down.
+describe('shutdown, restart, multitwitch lookup, and live-state ordering', () => {
+  function makeGroup(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 1, name: 'Alpha', discord_channel: '111',
+      live_message: 'live', new_game_message: 'game',
+      multi_twitch: false, delete_old_posts: false,
+      ...overrides,
+    };
+  }
+
+  let channel: ReturnType<typeof makeTextChannel>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+  });
+
+  afterEach(async () => {
+    await stopTwitchMonitor();
+  });
+
+  it('shuts down cleanly, deleting every live announcement and clearing all state', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer({ id: 5, twitch_name: 'streamera', group: makeGroup({ id: 1, name: 'Alpha' }) }),
+      makeStreamer({ id: 6, twitch_name: 'streamerb', group: makeGroup({ id: 2, name: 'Beta' }) }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([
+      { login: 'streamera', id: 'uid-5' },
+      { login: 'streamerb', id: 'uid-6' },
+    ]);
+    await startTwitchMonitor();
+
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ user_id: 'uid-5', user_login: 'streamera' })] as any);
+    await triggerImmediateLiveCheck('streamera');
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ user_id: 'uid-6', user_login: 'streamerb' })] as any);
+    await triggerImmediateLiveCheck('streamerb');
+    expect(getLiveStates()).toHaveLength(2);
+
+    await shutdownTwitchMonitor();
+
+    expect(clearStreamerLive).toHaveBeenCalledTimes(2);
+    expect(getLiveStates()).toHaveLength(0);
+    expect(logMock.info).toHaveBeenCalledWith('Shutdown complete — all live messages deleted');
+  });
+
+  it('logs a warning with the failure count when some announcement deletes fail, but still clears all state', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer({ id: 5, twitch_name: 'streamera', group: makeGroup({ id: 1, name: 'Alpha' }) }),
+      makeStreamer({ id: 6, twitch_name: 'streamerb', group: makeGroup({ id: 2, name: 'Beta' }) }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([
+      { login: 'streamera', id: 'uid-5' },
+      { login: 'streamerb', id: 'uid-6' },
+    ]);
+    await startTwitchMonitor();
+
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ user_id: 'uid-5', user_login: 'streamera' })] as any);
+    await triggerImmediateLiveCheck('streamera');
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ user_id: 'uid-6', user_login: 'streamerb' })] as any);
+    await triggerImmediateLiveCheck('streamerb');
+
+    vi.mocked(clearStreamerLive).mockRejectedValueOnce(new Error('db down'));
+
+    await shutdownTwitchMonitor();
+
+    expect(getLiveStates()).toHaveLength(0);
+    expect(logMock.warn).toHaveBeenCalledWith('Shutdown complete with 1 failed delete(s) — some announcements may remain');
+  });
+
+  it('restarts by tearing down and re-running startup without deleting Discord messages', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await startTwitchMonitor();
+
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream()] as any);
+    await triggerImmediateLiveCheck('teststreamer');
+    vi.mocked(channel._message.delete).mockClear();
+
+    await restartTwitchMonitor();
+
+    expect(logMock.info).toHaveBeenCalledWith('Restarting...');
+    expect(getAllStreamersWithGroups).toHaveBeenCalledTimes(2);
+    expect(channel._message.delete).not.toHaveBeenCalled();
+    // Restart clears in-memory state; the startup live-check (mocked) doesn't repopulate it.
+    expect(getLiveStates()).toHaveLength(0);
+  });
+
+  it('getMultiTwitchDataForChannel returns null for a login with no live state', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await startTwitchMonitor();
+
+    expect(getMultiTwitchDataForChannel('unknownstreamer')).toBeNull();
+  });
+
+  it('getMultiTwitchDataForChannel returns null when fewer than two streamers in the group are live', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await startTwitchMonitor();
+
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream()] as any);
+    await triggerImmediateLiveCheck('teststreamer');
+
+    expect(getMultiTwitchDataForChannel('teststreamer')).toBeNull();
+  });
+
+  it('getMultiTwitchDataForChannel returns the multitwitch URL when two+ streamers in a multi-twitch group share a game', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer({ id: 5, twitch_name: 'zeta', group: makeGroup({ id: 9, name: 'Beta', multi_twitch: true }) }),
+      makeStreamer({ id: 6, twitch_name: 'alpha', group: makeGroup({ id: 9, name: 'Beta', multi_twitch: true }) }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([
+      { login: 'zeta', id: 'uid-5' },
+      { login: 'alpha', id: 'uid-6' },
+    ]);
+    await startTwitchMonitor();
+
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ user_id: 'uid-5', user_login: 'zeta', game_name: 'Just Chatting' })] as any);
+    await triggerImmediateLiveCheck('zeta');
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ user_id: 'uid-6', user_login: 'alpha', game_name: 'Just Chatting' })] as any);
+    await triggerImmediateLiveCheck('alpha');
+
+    const result = getMultiTwitchDataForChannel('zeta');
+    expect(result).not.toBeNull();
+    expect(result!.url).toBe('https://www.multitwitch.tv/alpha/zeta');
+    expect(result!.participants).toEqual(['alpha', 'zeta']);
+  });
+
+  it('getLiveStates sorts by group name, then by login within a group', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer({ id: 5, twitch_name: 'zeta', group: makeGroup({ id: 9, name: 'Beta' }) }),
+      makeStreamer({ id: 6, twitch_name: 'alpha', group: makeGroup({ id: 9, name: 'Beta' }) }),
+      makeStreamer({ id: 7, twitch_name: 'yankee', group: makeGroup({ id: 1, name: 'Alpha' }) }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([
+      { login: 'zeta', id: 'uid-5' },
+      { login: 'alpha', id: 'uid-6' },
+      { login: 'yankee', id: 'uid-7' },
+    ]);
+    await startTwitchMonitor();
+
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ user_id: 'uid-5', user_login: 'zeta' })] as any);
+    await triggerImmediateLiveCheck('zeta');
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ user_id: 'uid-6', user_login: 'alpha' })] as any);
+    await triggerImmediateLiveCheck('alpha');
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ user_id: 'uid-7', user_login: 'yankee' })] as any);
+    await triggerImmediateLiveCheck('yankee');
+
+    const states = getLiveStates();
+    expect(states.map((s) => [s.groupName, s.login])).toEqual([
+      ['Alpha', 'yankee'],
+      ['Beta', 'alpha'],
+      ['Beta', 'zeta'],
+    ]);
   });
 });

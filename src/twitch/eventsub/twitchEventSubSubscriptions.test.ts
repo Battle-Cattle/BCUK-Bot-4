@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
+const { logMock } = vi.hoisted(() => ({
+  logMock: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock('../../shared/logger', () => ({ createLogger: () => logMock }));
 vi.mock('../../db', () => ({
   getAllEventSubStreamers: vi.fn(),
   clearStreamerToken: vi.fn().mockResolvedValue(undefined),
@@ -16,12 +19,12 @@ vi.mock('./twitchApiEventSub', () => ({
   TwitchAuthError: class TwitchAuthError extends Error {},
 }));
 vi.mock('./twitchEventSubHandler', () => ({
-  handleFollow: vi.fn(),
-  handleSub: vi.fn(),
-  handleResub: vi.fn(),
-  handleGiftSub: vi.fn(),
-  handleRaid: vi.fn(),
-  handleRedemption: vi.fn(),
+  handleFollow: vi.fn().mockResolvedValue(undefined),
+  handleSub: vi.fn().mockResolvedValue(undefined),
+  handleResub: vi.fn().mockResolvedValue(undefined),
+  handleGiftSub: vi.fn().mockResolvedValue(undefined),
+  handleRaid: vi.fn().mockResolvedValue(undefined),
+  handleRedemption: vi.fn().mockResolvedValue(undefined),
   handleStreamOnline: vi.fn().mockResolvedValue(undefined),
   handleStreamOffline: vi.fn().mockResolvedValue(undefined),
   handleChannelUpdate: vi.fn().mockResolvedValue(undefined),
@@ -33,12 +36,17 @@ import {
   loadStreamersForEventSub,
   subscribeForStreamer,
   dispatchNotification,
+  removeStreamerFromMap,
+  handleRevocation,
 } from './twitchEventSubSubscriptions';
-import { getAllEventSubStreamers } from '../../db';
+import { getAllEventSubStreamers, clearStreamerToken } from '../../db';
 import { getValidToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
-import { handleStreamOnline, handleStreamOffline, handleChannelUpdate } from './twitchEventSubHandler';
+import {
+  handleStreamOnline, handleStreamOffline, handleChannelUpdate,
+  handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
+} from './twitchEventSubHandler';
 
 // ---------------------------------------------------------------------------
 // hasAuthFailedSubs / clearAuthFailedSubs
@@ -362,5 +370,268 @@ describe('dispatchNotification routes stream.online/offline', () => {
   it('calls handleChannelUpdate for a channel.update notification', () => {
     dispatchNotification('channel.update', {}, { broadcaster_user_id: 'uid-dispatch' });
     expect(handleChannelUpdate).toHaveBeenCalledWith('liveStreamer');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// subscribeForStreamer — sub_enabled subscription creation
+// ---------------------------------------------------------------------------
+describe('subscribeForStreamer with sub_enabled', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearAuthFailedSubs('subStreamer');
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['substreamer']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+  });
+
+  it('subscribes to channel.subscribe, subscription.message, and subscription.gift', async () => {
+    const count = await subscribeForStreamer('sess-sub', {
+      uid: 'uid-sub',
+      token: 'tok-sub',
+      name: 'subStreamer',
+      config: { follow_enabled: false, sub_enabled: true, raid_enabled: false } as any,
+      streamerId: 40,
+    });
+
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.subscribe', '1', { broadcaster_user_id: 'uid-sub' }, 'sess-sub', 'tok-sub',
+    );
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.subscription.message', '1', { broadcaster_user_id: 'uid-sub' }, 'sess-sub', 'tok-sub',
+    );
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.subscription.gift', '1', { broadcaster_user_id: 'uid-sub' }, 'sess-sub', 'tok-sub',
+    );
+    expect(count).toBeGreaterThanOrEqual(3);
+  });
+
+  it('does not subscribe to any sub events when sub_enabled is false', async () => {
+    await subscribeForStreamer('sess-nosub', {
+      uid: 'uid-nosub',
+      token: 'tok-nosub',
+      name: 'subStreamer',
+      config: { follow_enabled: false, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 41,
+    });
+
+    expect(createEventSubSubscription).not.toHaveBeenCalledWith(
+      'channel.subscribe', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dispatchNotification — remaining notification types
+// ---------------------------------------------------------------------------
+describe('dispatchNotification routes chat-alert and redemption events', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    clearAuthFailedSubs('alertStreamer');
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['alertstreamer']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+    await subscribeForStreamer('sess-alert', {
+      uid: 'uid-alert',
+      token: 'tok-alert',
+      name: 'alertStreamer',
+      config: { follow_enabled: true, sub_enabled: true, raid_enabled: true } as any,
+      streamerId: 50,
+    });
+  });
+
+  it('routes channel.follow to handleFollow', () => {
+    dispatchNotification('channel.follow', { user_name: 'follower' }, { broadcaster_user_id: 'uid-alert' });
+    expect(handleFollow).toHaveBeenCalledWith('alertStreamer', { user_name: 'follower' }, expect.anything());
+  });
+
+  it('routes channel.subscribe to handleSub', () => {
+    dispatchNotification('channel.subscribe', { tier: '1000' }, { broadcaster_user_id: 'uid-alert' });
+    expect(handleSub).toHaveBeenCalledWith('alertStreamer', { tier: '1000' }, expect.anything());
+  });
+
+  it('routes channel.subscription.message to handleResub', () => {
+    dispatchNotification('channel.subscription.message', { cumulative_months: 5 }, { broadcaster_user_id: 'uid-alert' });
+    expect(handleResub).toHaveBeenCalledWith('alertStreamer', { cumulative_months: 5 }, expect.anything());
+  });
+
+  it('routes channel.subscription.gift to handleGiftSub', () => {
+    dispatchNotification('channel.subscription.gift', { total: 3 }, { broadcaster_user_id: 'uid-alert' });
+    expect(handleGiftSub).toHaveBeenCalledWith('alertStreamer', { total: 3 }, expect.anything());
+  });
+
+  it('routes channel.raid to handleRaid using to_broadcaster_user_id', () => {
+    dispatchNotification('channel.raid', { from_broadcaster_user_name: 'raider' }, { to_broadcaster_user_id: 'uid-alert' });
+    expect(handleRaid).toHaveBeenCalledWith('alertStreamer', { from_broadcaster_user_name: 'raider' }, expect.anything());
+  });
+
+  it('routes a channel-points redemption to handleRedemption with the streamerId', () => {
+    dispatchNotification(
+      'channel.channel_points_custom_reward_redemption.add',
+      { reward: { id: 'r1' } },
+      { broadcaster_user_id: 'uid-alert' },
+    );
+    expect(handleRedemption).toHaveBeenCalledWith('alertStreamer', { reward: { id: 'r1' } }, expect.anything(), 50);
+  });
+
+  it('logs a warning and does nothing for an unsupported notification type', () => {
+    dispatchNotification('channel.cheer', {}, { broadcaster_user_id: 'uid-alert' });
+    expect(logMock.warn).toHaveBeenCalledWith('Unsupported EventSub notification type: channel.cheer');
+    expect(handleFollow).not.toHaveBeenCalled();
+  });
+
+  it('logs an error when the routed handler rejects', async () => {
+    vi.mocked(handleFollow).mockRejectedValueOnce(new Error('handler exploded'));
+
+    dispatchNotification('channel.follow', {}, { broadcaster_user_id: 'uid-alert' });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(logMock.error).toHaveBeenCalledWith('channel.follow handler error:', expect.any(Error));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// removeStreamerFromMap
+// ---------------------------------------------------------------------------
+describe('removeStreamerFromMap', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    clearAuthFailedSubs('removable');
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['removable']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+    await subscribeForStreamer('sess-rm', {
+      uid: 'uid-rm',
+      token: 'tok-rm',
+      name: 'removable',
+      config: { follow_enabled: false, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 60,
+    });
+  });
+
+  it('removes the streamer so dispatchNotification no longer routes to it', () => {
+    removeStreamerFromMap('uid-rm');
+
+    dispatchNotification('stream.online', {}, { broadcaster_user_id: 'uid-rm' });
+
+    expect(handleStreamOnline).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Error paths: deleteStaleSubscriptions, resolveBroadcasterId, subscribe()
+// ---------------------------------------------------------------------------
+describe('error handling in subscription setup', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearAuthFailedSubs('errStreamer');
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['errstreamer']));
+  });
+
+  it('logs and continues when listing existing subscriptions fails during cleanup', async () => {
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
+    vi.mocked(listEventSubSubscriptions).mockRejectedValueOnce(new Error('list failed'));
+
+    const count = await subscribeForStreamer('sess-err', {
+      uid: 'uid-err',
+      token: 'tok-err',
+      name: 'errStreamer',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 70,
+    });
+
+    expect(logMock.error).toHaveBeenCalledWith('Subscription cleanup failed for uid uid-err:', expect.any(Error));
+    expect(count).toBeGreaterThan(0);
+  });
+
+  it('logs and returns null when resolving a raid-only streamer\'s Twitch user ID fails', async () => {
+    vi.mocked(getAllEventSubStreamers).mockResolvedValue([{
+      id: 80,
+      twitch_name: 'raidFailStreamer',
+      twitch_user_id: null,
+      config: { raid_enabled: true },
+    }] as any);
+    vi.mocked(getValidToken).mockResolvedValue('tok-raidfail');
+    vi.mocked(getUsers).mockRejectedValueOnce(new Error('Helix down'));
+
+    const result = await loadStreamersForEventSub();
+
+    expect(logMock.error).toHaveBeenCalledWith('Failed to resolve Twitch user ID for raidFailStreamer:', expect.any(Error));
+    expect(result).toHaveLength(0);
+  });
+
+  it('logs a generic subscribe failure (not a TwitchAuthError) without recording it as an auth failure', async () => {
+    vi.mocked(createEventSubSubscription).mockRejectedValueOnce(new Error('500 Internal Server Error'));
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+
+    await subscribeForStreamer('sess-generic', {
+      uid: 'uid-generic',
+      token: 'tok-generic',
+      name: 'errStreamer',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 90,
+    });
+
+    expect(logMock.error).toHaveBeenCalledWith(
+      'Failed to subscribe to channel.follow for errStreamer:', expect.any(Error),
+    );
+    expect(hasAuthFailedSubs('errStreamer')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleRevocation
+// ---------------------------------------------------------------------------
+describe('handleRevocation', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    clearAuthFailedSubs('revokedStreamer');
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['revokedstreamer']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+    vi.mocked(clearStreamerToken).mockResolvedValue(undefined);
+    await subscribeForStreamer('sess-revoke', {
+      uid: 'uid-revoke',
+      token: 'tok-revoke',
+      name: 'revokedStreamer',
+      config: { follow_enabled: false, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 100,
+    });
+  });
+
+  it('logs the revocation but does not clear a token for an unknown broadcaster', () => {
+    handleRevocation({ type: 'channel.follow', status: 'authorization_revoked', condition: { broadcaster_user_id: 'unknown-uid' } });
+
+    expect(logMock.warn).toHaveBeenCalledWith('Subscription revoked: type=channel.follow status=authorization_revoked');
+    expect(clearStreamerToken).not.toHaveBeenCalled();
+  });
+
+  it('clears the token when status is authorization_revoked for a known broadcaster', () => {
+    handleRevocation({ type: 'channel.follow', status: 'authorization_revoked', condition: { broadcaster_user_id: 'uid-revoke' } });
+
+    expect(clearStreamerToken).toHaveBeenCalledWith(100);
+    expect(logMock.warn).toHaveBeenCalledWith('Cleared token for revokedStreamer (authorization_revoked)');
+  });
+
+  it('clears the token when status is user_removed, using to_broadcaster_user_id', () => {
+    handleRevocation({ type: 'channel.raid', status: 'user_removed', condition: { to_broadcaster_user_id: 'uid-revoke' } });
+
+    expect(clearStreamerToken).toHaveBeenCalledWith(100);
+    expect(logMock.warn).toHaveBeenCalledWith('Cleared token for revokedStreamer (user_removed)');
+  });
+
+  it('does not clear the token for other revocation statuses', () => {
+    handleRevocation({ type: 'channel.follow', status: 'moderator_removed', condition: { broadcaster_user_id: 'uid-revoke' } });
+
+    expect(clearStreamerToken).not.toHaveBeenCalled();
+  });
+
+  it('logs an error if clearing the token itself fails', async () => {
+    vi.mocked(clearStreamerToken).mockRejectedValueOnce(new Error('db down'));
+
+    handleRevocation({ type: 'channel.follow', status: 'authorization_revoked', condition: { broadcaster_user_id: 'uid-revoke' } });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(logMock.error).toHaveBeenCalledWith('Clear token error:', expect.any(Error));
   });
 });
