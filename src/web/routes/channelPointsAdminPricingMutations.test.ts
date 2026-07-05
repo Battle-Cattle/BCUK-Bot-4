@@ -217,6 +217,16 @@ describe('POST /settings/pricing', () => {
     expect(res.headers.location).toBe('/channel-points?error=invalid_settings');
   });
 
+  it('rejects a half_life_minutes so small it would round down to 0 seconds', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const res = await supertest(buildApp())
+      .post('/settings/pricing')
+      .type('form')
+      .send({ half_life_minutes: '0.001', time_to_max_multiplier: '2' });
+    expect(res.headers.location).toBe('/channel-points?error=invalid_settings');
+    expect(savePricingSettingsForStreamer).not.toHaveBeenCalled();
+  });
+
   it('rejects an invalid time_to_max_multiplier', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const res = await supertest(buildApp())

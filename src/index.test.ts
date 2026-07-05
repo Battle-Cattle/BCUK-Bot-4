@@ -158,12 +158,15 @@ describe('startup — guild registry preload', () => {
 // ─── Reward pricing scheduler startup/shutdown ────────────────────────────────
 
 describe('startup — reward pricing scheduler', () => {
-  it('starts the scheduler', async () => {
+  it('starts the scheduler and continues startup through to startEventSub on a clean run', async () => {
     const { startRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
+    const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
 
     await runMain();
 
     expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
+    expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 });
 

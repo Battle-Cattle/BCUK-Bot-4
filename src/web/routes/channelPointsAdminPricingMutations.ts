@@ -127,8 +127,15 @@ router.post('/settings/pricing', requireAuth, csrfProtection, async (req, res) =
       return res.redirect('/channel-points?error=invalid_settings');
     }
 
+    // A sub-30-second value rounds to 0, which the DB rejects (half_life_seconds > 0) — catch
+    // that here so it reports as invalid_settings instead of an opaque save_failed.
+    const halfLifeSeconds = Math.round(halfLifeMinutes * 60);
+    if (halfLifeSeconds < 1) {
+      return res.redirect('/channel-points?error=invalid_settings');
+    }
+
     await savePricingSettingsForStreamer(streamer.id, {
-      half_life_seconds: Math.round(halfLifeMinutes * 60),
+      half_life_seconds: halfLifeSeconds,
       time_to_max_multiplier: timeToMaxMultiplier,
     });
 
