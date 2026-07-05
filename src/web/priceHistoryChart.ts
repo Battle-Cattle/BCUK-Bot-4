@@ -13,6 +13,11 @@ const PADDING = { top: 10, right: 12, bottom: 20, left: 44 };
  * A single series needs no legend (the card title above it already names what's plotted).
  * Embeds the plotted points as a `data-points` JSON attribute so `priceHistoryChart.js`
  * can add a hover crosshair/tooltip without re-deriving the scale server-side.
+ * Uses `preserveAspectRatio="none"` so the rendered box always stretches the 480x120
+ * viewBox to fill its actual on-screen size — without it, the browser's default
+ * "meet" scaling letterboxes the chart (renders it at native size, centered) whenever
+ * the box's aspect ratio doesn't match 480:120, which silently breaks the hover math in
+ * `priceHistoryChart.js` (it maps pointer position to the chart assuming a 1:1 stretch).
  *
  * @param points - Price history points, any order (sorted internally by time).
  * @param rangeStartMs - Left edge of the x-axis (epoch ms).
@@ -50,7 +55,7 @@ export function renderPriceHistoryChart(points: PriceHistoryPoint[], rangeStartM
   const dataPoints = JSON.stringify(sorted.map((p) => [p.t, p.cost]));
 
   return `
-<svg class="price-history-chart" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="100%" height="${HEIGHT}"
+<svg class="price-history-chart" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="100%" height="${HEIGHT}" preserveAspectRatio="none"
      data-points='${dataPoints.replace(/'/g, '&#39;')}'
      data-plot-left="${plotLeft}" data-plot-right="${plotRight}"
      data-range-start="${rangeStartMs}" data-range-end="${rangeEndMs}"
