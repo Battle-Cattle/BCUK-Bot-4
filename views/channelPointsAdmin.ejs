@@ -161,7 +161,7 @@
               <% if (r.config && r.config.twitch_unsupported) { %>
               <p class="hint hint-compact" style="color:var(--danger, #c0392b);">This reward can't be managed by the bot — it was created via the Twitch dashboard (or another app), and Twitch only allows the app that created a reward to change its cost. Dynamic pricing has been disabled.</p>
               <% } else if (r.config) { %>
-              <p class="hint hint-compact">Demand: <%= (r.config.demand * 100).toFixed(1) %>% — computed price (redemptions sync within seconds; idle decay syncs at least every 30s): <%= r.previewPrice.toLocaleString() %> pts</p>
+              <p class="hint hint-compact">Demand: <span id="demand-<%= r.rewardId %>"><%= (r.config.demand * 100).toFixed(1) %>%</span> — computed price (updates live as demand changes): <span id="price-<%= r.rewardId %>"><%= r.previewPrice.toLocaleString() %></span> pts</p>
               <% } %>
             </div>
             <% if (r.twitchReward) { %>
@@ -172,8 +172,8 @@
             <% } %>
           </div>
 
-          <% if (r.historyChart) { %>
-          <div style="margin-top:0.5rem;">
+          <% if (r.config) { %>
+          <div class="price-history-container" data-reward-id="<%= r.rewardId %>" data-range-ms="<%= historyHours * 60 * 60 * 1000 %>" style="margin-top:0.5rem;">
             <%- r.historyChart %>
           </div>
           <% } %>

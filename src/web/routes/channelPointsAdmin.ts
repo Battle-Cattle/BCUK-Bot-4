@@ -13,6 +13,7 @@ import { computePrice } from '../../twitch/pricing/rewardPricingMath';
 import { renderPriceHistoryChart } from '../priceHistoryChart';
 import { filterQueryParam, renderError, renderView } from './shared';
 import { router as channelPointsMutationsRouter } from './channelPointsAdminMutations';
+import channelPointsEventsRouter from './channelPointsEvents';
 
 const log = createLogger('ChannelPointsAdmin');
 const router = Router();
@@ -148,6 +149,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
   }
 });
 
+router.use(channelPointsEventsRouter);
 router.use(channelPointsMutationsRouter);
 
 export default router;

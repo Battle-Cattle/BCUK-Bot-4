@@ -17,8 +17,10 @@ import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
 import { registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime } from './twitch/eventsub/twitchEventSubHandler';
 import { pushOverlayEvent } from './web/routes/overlaySource';
 import { pushCompanionEvent } from './web/routes/companionEvents';
+import { pushPricingUpdate } from './web/routes/channelPointsEvents';
 import { startCounterScheduler, stopCounterScheduler } from './commands/counterScheduler';
 import { startRewardPricingScheduler, stopRewardPricingScheduler } from './twitch/pricing/rewardPricingScheduler';
+import { registerRewardPricingRuntime } from './twitch/pricing/rewardPricingService';
 import { createLogger } from './shared/logger';
 
 const log = createLogger('Bot');
@@ -73,6 +75,7 @@ async function main(): Promise<void> {
   registerEventSubOverlayRuntime({ pushOverlayEvent });
   registerEventSubCompanionRuntime({ pushCompanionEvent });
   registerEventSubTwitchRuntime({ send: sayInChannel });
+  registerRewardPricingRuntime({ pushPricingUpdate });
 
   // Load the guild registry before the Discord client connects so the
   // messageCreate gate recognises registered guilds from the first message.

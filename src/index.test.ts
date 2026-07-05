@@ -57,6 +57,7 @@ vi.mock('./twitch/eventsub/twitchEventSubHandler', () => ({
 }));
 vi.mock('./web/routes/overlaySource', () => ({ pushOverlayEvent: vi.fn() }));
 vi.mock('./web/routes/companionEvents', () => ({ pushCompanionEvent: vi.fn() }));
+vi.mock('./web/routes/channelPointsEvents', () => ({ pushPricingUpdate: vi.fn() }));
 vi.mock('./commands/counterScheduler', () => ({
   startCounterScheduler: vi.fn(),
   stopCounterScheduler: vi.fn(),
@@ -64,6 +65,9 @@ vi.mock('./commands/counterScheduler', () => ({
 vi.mock('./twitch/pricing/rewardPricingScheduler', () => ({
   startRewardPricingScheduler: vi.fn(),
   stopRewardPricingScheduler: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('./twitch/pricing/rewardPricingService', () => ({
+  registerRewardPricingRuntime: vi.fn(),
 }));
 vi.mock('./shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
@@ -128,6 +132,15 @@ describe('startup — guild registry preload', () => {
     await runMain();
 
     expect(vi.mocked(registerEventSubCompanionRuntime)).toHaveBeenCalledWith({ pushCompanionEvent });
+  });
+
+  it('registers the reward pricing runtime with pushPricingUpdate on a clean startup', async () => {
+    const { registerRewardPricingRuntime } = await import('./twitch/pricing/rewardPricingService.js');
+    const { pushPricingUpdate } = await import('./web/routes/channelPointsEvents.js');
+
+    await runMain();
+
+    expect(vi.mocked(registerRewardPricingRuntime)).toHaveBeenCalledWith({ pushPricingUpdate });
   });
 
   it('calls process.exit(1) and does not start the bot when reloadGuildRegistry rejects', async () => {

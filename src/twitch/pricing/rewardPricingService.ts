@@ -10,6 +10,17 @@ import { createLogger } from '../../shared/logger';
 
 const log = createLogger('RewardPricing');
 
+/** Runtime hooks injected from index.ts, mirroring the `registerEventSub*Runtime` pattern — avoids a circular import back into `web/routes/channelPointsEvents`. */
+interface RewardPricingRuntime {
+  pushPricingUpdate: (streamerId: number, event: import('../../web/routes/channelPointsEvents').PricingUpdateEvent) => void;
+}
+let _runtime: RewardPricingRuntime | null = null;
+
+/** Registers the live-pricing-update push hook. Call once from index.ts after startup. */
+export function registerRewardPricingRuntime(runtime: RewardPricingRuntime): void {
+  _runtime = runtime;
+}
+
 // Serializes read-modify-write cycles per reward, so a redemption and a concurrent
 // decay-scheduler tick on the same reward never race each other. Different rewards
 // (different keys) run fully concurrently.
@@ -103,7 +114,8 @@ async function pushRewardCostUpdate(
  * (see {@link pushRewardCostUpdate}), in which case demand is intentionally not persisted
  * since the row won't be read again until re-enabled. On every successful sync, also logs a
  * price-history point (best-effort; a failure here is logged and swallowed rather than
- * affecting the pricing update itself) for the Channel Points admin history graph.
+ * affecting the pricing update itself) and pushes a live update to any open Channel Points
+ * admin pages for this streamer, so the price history graph updates without a page refresh.
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
@@ -143,6 +155,8 @@ async function syncRewardPrice(streamerId: number, twitchRewardId: string, apply
   } catch (err) {
     log.warn(`Failed to record price history for reward ${twitchRewardId}:`, err);
   }
+
+  _runtime?.pushPricingUpdate(streamerId, { rewardId: twitchRewardId, cost: newCost, demand: newDemand, recordedAt: now });
 }
 
 /**
