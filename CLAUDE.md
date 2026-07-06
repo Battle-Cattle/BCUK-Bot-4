@@ -76,6 +76,12 @@ CodeRabbit auto-reviews pushes but is rate-limited per developer; a rate-limited
 - **`@coderabbitai review`** — reviews only what changed since the last review. Default choice.
 - **`@coderabbitai full review`** — re-reviews the entire PR from scratch. Use this instead when the last review surfaced a lot of issues, or the intervening changes are large.
 
+**The manual comment is ONLY for the rate-limit case above.** Do not post it reactively for other "review skipped" reasons:
+- **"Review skipped: Draft detected"** — expected while the PR is a draft. Marking the PR ready for review (`draft: false`) auto-triggers a review on its own; no comment needed. Only manually trigger if, after going ready, no review shows up within a few minutes.
+- **"No new commits to review since the last review"** — CodeRabbit is up to date; nothing to do.
+
+If unsure which case a "skipped"/"no review" comment falls into, check whether it names a wait time (rate-limit → wait then trigger) or a different reason (draft/no-new-commits → no action).
+
 **Avoid re-triggering thrash:**
 - **Never push a new commit while a review is in progress** — the in-flight review fails outright ("head commit changed during the review") and wastes the attempt. Wait for the review to finish (or fail/rate-limit) before pushing again.
 - **Never re-trigger `@coderabbitai review` while already rate-limited or still in progress.** Each rate-limit reply just reports the currently remaining cooldown (it doesn't reset or extend it) — retrying early is simply wasted, not counterproductive. Wait out the countdown, trigger exactly once, then leave it alone until it either posts real findings or rate-limits again.
