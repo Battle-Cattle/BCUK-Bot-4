@@ -113,7 +113,7 @@ const RESERVED_RENDER_DATA_KEYS = new Set([
   'views',
   'root',
   'client',
-  'escapeFunction',
+  'escape',
   'compileDebug',
   'debug',
   'delimiter',
@@ -125,6 +125,10 @@ const RESERVED_RENDER_DATA_KEYS = new Set([
   'rmWhitespace',
   'outputFunctionName',
   'async',
+  'destructuredLocals',
+  'context',
+  'beautify',
+  'includer',
 ]);
 
 /**

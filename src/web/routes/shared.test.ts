@@ -216,6 +216,11 @@ describe('renderView', () => {
     expect(() => renderView(res, 'error', { outputFunctionName: 'x' })).toThrow(/reserved key/);
   });
 
+  it('throws when data contains the EJS "escape" option key', () => {
+    const { res } = mockRes();
+    expect(() => renderView(res, 'error', { escape: (x: unknown) => String(x) })).toThrow(/reserved key/);
+  });
+
   it('throws when data contains a prototype-pollution key', () => {
     const { res } = mockRes();
     const data = JSON.parse('{"__proto__": {"polluted": true}}') as Record<string, unknown>;
