@@ -89,6 +89,12 @@ describe('renderPriceHistoryChart', () => {
     expect(svg).not.toContain('Price history from');
   });
 
+  it('escapes double quotes and ampersands in a custom aria-label', () => {
+    const points = [{ t: 0, cost: 480 }];
+    const svg = renderPriceHistoryChart(points, 0, 1000, { ariaLabel: 'Peak "demand" & price' });
+    expect(svg).toContain('aria-label="Peak &quot;demand&quot; &amp; price"');
+  });
+
   it('marks the chart as an elapsed-time axis when requested', () => {
     const points = [{ t: 0, cost: 480 }];
     const svg = renderPriceHistoryChart(points, 0, 1000, { elapsedTimeAxis: true });

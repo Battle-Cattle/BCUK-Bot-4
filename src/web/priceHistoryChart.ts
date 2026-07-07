@@ -66,6 +66,7 @@ export function renderPriceHistoryChart(
   const dataPoints = JSON.stringify(sorted.map((p) => [p.t, p.cost]));
   const ariaLabel = options?.ariaLabel
     ?? `Price history from ${new Date(rangeStartMs).toLocaleString()} to ${new Date(rangeEndMs).toLocaleString()}, ranging from ${minCost} to ${maxCost} points`;
+  const escapedAriaLabel = ariaLabel.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
   return `
 <svg class="price-history-chart" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="100%" height="${HEIGHT}" preserveAspectRatio="none"
@@ -73,7 +74,7 @@ export function renderPriceHistoryChart(
      data-plot-left="${plotLeft}" data-plot-right="${plotRight}"
      data-range-start="${rangeStartMs}" data-range-end="${rangeEndMs}"
      ${options?.elapsedTimeAxis ? 'data-elapsed="true"' : ''}
-     role="img" aria-label="${ariaLabel}">
+     role="img" aria-label="${escapedAriaLabel}">
   <line x1="${plotLeft}" y1="${toY(maxCost).toFixed(1)}" x2="${plotRight}" y2="${toY(maxCost).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
   <line x1="${plotLeft}" y1="${toY(minCost).toFixed(1)}" x2="${plotRight}" y2="${toY(minCost).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
   <text x="${plotLeft - 6}" y="${toY(maxCost).toFixed(1)}" dy="0.32em" text-anchor="end" class="price-history-tick">${maxCost.toLocaleString()}</text>

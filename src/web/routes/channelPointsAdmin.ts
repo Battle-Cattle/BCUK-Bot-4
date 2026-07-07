@@ -70,19 +70,13 @@ function buildSimulationChart(config: RewardPricingRow, settings: StreamerPricin
     timeToMaxMultiplier: settings.time_to_max_multiplier,
   });
 
-  const peakCost = computePrice(result.peakDemand, {
-    baseCost: config.base_cost,
-    maxMultiplier: config.max_multiplier,
-    curve: config.curve,
-  });
-
   const chart = renderPriceHistoryChart(result.points, 0, result.totalDurationMs, {
     elapsedTimeAxis: true,
-    ariaLabel: `Simulated constant-use cycle peaking at ${(result.peakDemand * 100).toFixed(0)}% demand, ${peakCost} points, then cooling down`,
+    ariaLabel: `Simulated constant-use cycle peaking at ${(result.peakDemand * 100).toFixed(0)}% demand, ${result.peakCost} points, then cooling down`,
   });
 
   const summary = `Simulated: constant redemptions peak at ${(result.peakDemand * 100).toFixed(1)}% demand `
-    + `(${peakCost.toLocaleString()} pts) after ~${formatDurationShort(result.peakAtMs)} of continuous use, `
+    + `(${result.peakCost.toLocaleString()} pts) after ~${formatDurationShort(result.peakAtMs)} of continuous use, `
     + `then cool back down over ~${formatDurationShort(result.totalDurationMs - result.peakAtMs)}.`;
 
   return { chart, summary };
@@ -146,9 +140,10 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       return renderPriceHistoryChart(points.map((p) => ({ t: Number(p.recorded_at), cost: p.cost })), rangeStartMs, rangeEndMs);
     }
 
-    function buildSimulation(config: RewardPricingRow): { simulationChart: string | null; simulationSummary: string | null } {
-      if (!pricingSettings) return { simulationChart: null, simulationSummary: null };
-      const { chart, summary } = buildSimulationChart(config, pricingSettings);
+    // Only ever called for a config drawn from `pricingConfigs`, which is populated in the same
+    // branch as `pricingSettings` above — so `pricingSettings` is guaranteed non-null here.
+    function buildSimulation(config: RewardPricingRow): { simulationChart: string; simulationSummary: string } {
+      const { chart, summary } = buildSimulationChart(config, pricingSettings!);
       return { simulationChart: chart, simulationSummary: summary };
     }
 

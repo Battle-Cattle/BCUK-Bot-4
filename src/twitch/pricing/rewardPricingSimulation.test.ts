@@ -51,7 +51,7 @@ describe('simulateConstantUsageCycle', () => {
     const result = simulateConstantUsageCycle(config);
     expect(result.points[0].cost).toBe(config.baseCost);
     const last = result.points[result.points.length - 1];
-    expect(last.cost).toBeLessThan(config.baseCost * 1.05);
+    expect(last.cost).toBeLessThan(config.baseCost * 1.01);
   });
 
   it("every point's cost matches computePrice for its implied demand", () => {
@@ -59,6 +59,11 @@ describe('simulateConstantUsageCycle', () => {
     // every case), so instead spot-check the peak point directly.
     const result = simulateConstantUsageCycle(config);
     expect(result.points.find((p) => p.t === result.peakAtMs)?.cost).toBe(computePrice(result.peakDemand, config));
+  });
+
+  it('reports peakCost as computePrice(peakDemand, config)', () => {
+    const result = simulateConstantUsageCycle(config);
+    expect(result.peakCost).toBe(computePrice(result.peakDemand, config));
   });
 
   it('does not loop unreasonably long for an extreme config (near-zero half-life)', () => {

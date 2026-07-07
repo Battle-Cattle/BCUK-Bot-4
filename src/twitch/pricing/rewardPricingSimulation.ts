@@ -14,6 +14,8 @@ export interface SimulationResult {
   points: PriceHistoryPoint[];
   /** The demand reached at the ramp/cooldown transition — may be below 1 (see module docs). */
   peakDemand: number;
+  /** The price at `peakDemand` — `computePrice(peakDemand, config)`. */
+  peakCost: number;
   /** Elapsed ms when the ramp phase ends and the cooldown phase begins. */
   peakAtMs: number;
   /** Elapsed ms of the last point (end of the cooldown phase). */
@@ -71,6 +73,7 @@ export function simulateConstantUsageCycle(config: SimulationConfig): Simulation
 
   const peakAtMs = rampDurationSeconds * 1000;
   const peakDemand = rampDemandAt(rampDurationSeconds);
+  const peakCost = computePrice(peakDemand, config);
 
   if (peakDemand > CONVERGENCE_RATIO) {
     const cooldownDurationSeconds = halfLifeSeconds * Math.log2(1 / CONVERGENCE_RATIO);
@@ -83,6 +86,7 @@ export function simulateConstantUsageCycle(config: SimulationConfig): Simulation
   return {
     points,
     peakDemand,
+    peakCost,
     peakAtMs,
     totalDurationMs: points[points.length - 1].t,
   };

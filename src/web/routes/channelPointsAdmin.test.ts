@@ -312,13 +312,6 @@ describe('GET /', () => {
       expect(res.body.rewards[0].simulationSummary).toBeNull();
     });
 
-    it('leaves simulationChart/simulationSummary null when pricing settings are unavailable (not a streamer)', async () => {
-      vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
-      vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([]);
-      const res = await supertest(buildApp()).get('/');
-      expect(res.body.rewards).toEqual([]);
-    });
-
     it('renders a simulation chart for an unlinked (orphaned) reward too', async () => {
       vi.mocked(getCustomRewards).mockResolvedValue([]);
       const res = await supertest(buildApp()).get('/');
