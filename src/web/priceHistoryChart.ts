@@ -22,9 +22,20 @@ const PADDING = { top: 10, right: 12, bottom: 20, left: 44 };
  * @param points - Price history points, any order (sorted internally by time).
  * @param rangeStartMs - Left edge of the x-axis (epoch ms).
  * @param rangeEndMs - Right edge of the x-axis (epoch ms).
+ * @param options.ariaLabel - Overrides the default "Price history from ... to ..." aria-label —
+ *   needed when `rangeStartMs`/`rangeEndMs` aren't real epoch times (e.g. a simulated timeline
+ *   starting at 0), where the default wording would render a nonsensical 1970 date.
+ * @param options.elapsedTimeAxis - Marks the chart's x-axis as elapsed time rather than wall-clock
+ *   time (via a `data-elapsed` attribute), so `priceHistoryChart.js`'s hover tooltip formats it as
+ *   a duration instead of a clock time.
  * @returns Self-contained `<svg>` markup, or a "no data yet" placeholder if `points` is empty.
  */
-export function renderPriceHistoryChart(points: PriceHistoryPoint[], rangeStartMs: number, rangeEndMs: number): string {
+export function renderPriceHistoryChart(
+  points: PriceHistoryPoint[],
+  rangeStartMs: number,
+  rangeEndMs: number,
+  options?: { ariaLabel?: string; elapsedTimeAxis?: boolean },
+): string {
   if (points.length === 0) {
     return `<div class="hint price-history-empty" style="height:${HEIGHT}px;display:flex;align-items:center;justify-content:center;">No price history yet for this range.</div>`;
   }
@@ -53,13 +64,17 @@ export function renderPriceHistoryChart(points: PriceHistoryPoint[], rangeStartM
   const last = pixelPoints[pixelPoints.length - 1];
 
   const dataPoints = JSON.stringify(sorted.map((p) => [p.t, p.cost]));
+  const ariaLabel = options?.ariaLabel
+    ?? `Price history from ${new Date(rangeStartMs).toLocaleString()} to ${new Date(rangeEndMs).toLocaleString()}, ranging from ${minCost} to ${maxCost} points`;
+  const escapedAriaLabel = ariaLabel.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
   return `
 <svg class="price-history-chart" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="100%" height="${HEIGHT}" preserveAspectRatio="none"
      data-points='${dataPoints.replace(/'/g, '&#39;')}'
      data-plot-left="${plotLeft}" data-plot-right="${plotRight}"
      data-range-start="${rangeStartMs}" data-range-end="${rangeEndMs}"
-     role="img" aria-label="Price history from ${new Date(rangeStartMs).toLocaleString()} to ${new Date(rangeEndMs).toLocaleString()}, ranging from ${minCost} to ${maxCost} points">
+     ${options?.elapsedTimeAxis ? 'data-elapsed="true"' : ''}
+     role="img" aria-label="${escapedAriaLabel}">
   <line x1="${plotLeft}" y1="${toY(maxCost).toFixed(1)}" x2="${plotRight}" y2="${toY(maxCost).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
   <line x1="${plotLeft}" y1="${toY(minCost).toFixed(1)}" x2="${plotRight}" y2="${toY(minCost).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
   <text x="${plotLeft - 6}" y="${toY(maxCost).toFixed(1)}" dy="0.32em" text-anchor="end" class="price-history-tick">${maxCost.toLocaleString()}</text>

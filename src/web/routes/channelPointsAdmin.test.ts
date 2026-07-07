@@ -284,4 +284,39 @@ describe('GET /', () => {
       expect(res.body.rewards[0].historyChart).toContain('<svg');
     });
   });
+
+  describe('simulated ramp/cooldown chart', () => {
+    const CONFIG = {
+      id: 1, streamer_id: 123, twitch_reward_id: 'rwd1', enabled: true,
+      base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5,
+      demand: 0.5, demand_updated_at: '1700000000000', last_pushed_cost: 300, twitch_unsupported: false,
+    };
+
+    beforeEach(() => {
+      vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+      vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true } as any]);
+      vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([CONFIG] as any);
+    });
+
+    it('renders a simulation chart and summary for a reward with a config', async () => {
+      const res = await supertest(buildApp()).get('/');
+      expect(res.body.rewards[0].simulationChart).toContain('<svg');
+      expect(typeof res.body.rewards[0].simulationSummary).toBe('string');
+      expect(res.body.rewards[0].simulationSummary).toMatch(/% demand/);
+    });
+
+    it('leaves simulationChart/simulationSummary null for a reward with no pricing config', async () => {
+      vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([]);
+      const res = await supertest(buildApp()).get('/');
+      expect(res.body.rewards[0].simulationChart).toBeNull();
+      expect(res.body.rewards[0].simulationSummary).toBeNull();
+    });
+
+    it('renders a simulation chart for an unlinked (orphaned) reward too', async () => {
+      vi.mocked(getCustomRewards).mockResolvedValue([]);
+      const res = await supertest(buildApp()).get('/');
+      expect(res.body.rewards[0].twitchReward).toBeNull();
+      expect(res.body.rewards[0].simulationChart).toContain('<svg');
+    });
+  });
 });
