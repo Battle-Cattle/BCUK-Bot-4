@@ -75,4 +75,29 @@ describe('renderPriceHistoryChart', () => {
     const svg = renderPriceHistoryChart(points, 1_700_000_000_000, 1_700_010_000_000);
     expect(svg).toContain('preserveAspectRatio="none"');
   });
+
+  it('uses the default date-based aria-label when no override is given', () => {
+    const points = [{ t: 1_700_000_000_000, cost: 480 }];
+    const svg = renderPriceHistoryChart(points, 1_700_000_000_000, 1_700_010_000_000);
+    expect(svg).toContain('aria-label="Price history from');
+  });
+
+  it('uses a custom aria-label when one is provided via options', () => {
+    const points = [{ t: 0, cost: 480 }];
+    const svg = renderPriceHistoryChart(points, 0, 1000, { ariaLabel: 'Simulated demand cycle' });
+    expect(svg).toContain('aria-label="Simulated demand cycle"');
+    expect(svg).not.toContain('Price history from');
+  });
+
+  it('marks the chart as an elapsed-time axis when requested', () => {
+    const points = [{ t: 0, cost: 480 }];
+    const svg = renderPriceHistoryChart(points, 0, 1000, { elapsedTimeAxis: true });
+    expect(svg).toContain('data-elapsed="true"');
+  });
+
+  it('omits the data-elapsed attribute by default', () => {
+    const points = [{ t: 1_700_000_000_000, cost: 480 }];
+    const svg = renderPriceHistoryChart(points, 1_700_000_000_000, 1_700_010_000_000);
+    expect(svg).not.toContain('data-elapsed');
+  });
 });

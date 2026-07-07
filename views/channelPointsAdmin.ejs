@@ -178,6 +178,14 @@
           </div>
           <% } %>
 
+          <% if (r.config && r.simulationChart) { %>
+          <div style="margin-top:0.75rem;">
+            <p class="hint hint-compact">Simulated: constant use &rarr; cooldown</p>
+            <%- r.simulationChart %>
+            <p class="hint hint-compact"><%= r.simulationSummary %></p>
+          </div>
+          <% } %>
+
           <% if (r.twitchReward) { %>
           <details style="margin-top:0.5rem;">
             <summary class="hint hint-compact disclosure-toggle">Edit reward</summary>

@@ -27,6 +27,19 @@ function formatTooltipTime(t) {
 }
 
 /**
+ * Formats a duration in ms (elapsed time since a simulation's start) as e.g. "1h 24m" or "12m"
+ * for charts whose x-axis is elapsed time rather than a wall-clock time.
+ * @param {number} ms - Elapsed milliseconds.
+ * @returns {string} Formatted duration.
+ */
+function formatTooltipElapsed(ms) {
+  const totalMinutes = Math.round(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+/**
  * Updates a chart's crosshair line/dot and tooltip to the nearest point at a given
  * client X position, or hides them when `clientX` is null.
  * @param {SVGSVGElement} svg - The chart's root SVG element.
@@ -51,6 +64,7 @@ function updateCrosshair(svg, tooltip, clientX) {
   const plotRight = Number(svg.dataset.plotRight);
   const rangeStart = Number(svg.dataset.rangeStart);
   const rangeEnd = Number(svg.dataset.rangeEnd);
+  const isElapsed = svg.dataset.elapsed === 'true';
 
   const svgX = ((clientX - rect.left) / rect.width) * viewBoxWidth;
   const clampedX = Math.min(plotRight, Math.max(plotLeft, svgX));
@@ -71,7 +85,7 @@ function updateCrosshair(svg, tooltip, clientX) {
   const valueEl = document.createElement('strong');
   valueEl.textContent = `${cost.toLocaleString()} pts`;
   const timeEl = document.createElement('span');
-  timeEl.textContent = ` — ${formatTooltipTime(t)}`;
+  timeEl.textContent = ` — ${isElapsed ? formatTooltipElapsed(t) : formatTooltipTime(t)}`;
   tooltip.appendChild(valueEl);
   tooltip.appendChild(timeEl);
   tooltip.style.display = '';

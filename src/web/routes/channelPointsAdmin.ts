@@ -5,11 +5,12 @@ import { requireAuth } from '../middleware';
 import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import { getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistory } from '../../db';
-import type { RewardPricingRow } from '../../db';
+import type { RewardPricingRow, StreamerPricingSettings } from '../../db';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 import { computePrice } from '../../twitch/pricing/rewardPricingMath';
+import { simulateConstantUsageCycle } from '../../twitch/pricing/rewardPricingSimulation';
 import { renderPriceHistoryChart } from '../priceHistoryChart';
 import { filterQueryParam, renderError, renderView } from './shared';
 import { router as channelPointsMutationsRouter } from './channelPointsAdminMutations';
@@ -38,6 +39,53 @@ interface ChannelPointRewardRow {
   previewPrice: number | null;
   /** Rendered SVG history chart, or null when there's no config to chart yet. */
   historyChart: string | null;
+  /** Rendered SVG chart simulating a constant-use ramp-to-peak-demand-then-cooldown cycle, or null when there's no config to simulate yet. */
+  simulationChart: string | null;
+  /** One-line human-readable summary of the simulation's peak demand/price and phase durations, or null alongside a null `simulationChart`. */
+  simulationSummary: string | null;
+}
+
+/** Formats a duration in ms as e.g. "1h 24m" or "12m", for the simulation summary sentence. */
+function formatDurationShort(ms: number): string {
+  const totalMinutes = Math.round(ms / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
+/**
+ * Simulates a reward's demand/price over one constant-use ramp + cooldown cycle and renders it
+ * as an SVG chart alongside a one-line summary of the peak reached and how long each phase takes —
+ * this is illustrative (not real usage data), so admins can see how their base cost/multiplier/
+ * curve/cooldown and the streamer's half-life/time-to-max settings shape the pricing curve.
+ */
+function buildSimulationChart(config: RewardPricingRow, settings: StreamerPricingSettings): { chart: string; summary: string } {
+  const result = simulateConstantUsageCycle({
+    baseCost: config.base_cost,
+    maxMultiplier: config.max_multiplier,
+    curve: config.curve,
+    cooldownSeconds: config.cooldown_seconds,
+    halfLifeSeconds: settings.half_life_seconds,
+    timeToMaxMultiplier: settings.time_to_max_multiplier,
+  });
+
+  const peakCost = computePrice(result.peakDemand, {
+    baseCost: config.base_cost,
+    maxMultiplier: config.max_multiplier,
+    curve: config.curve,
+  });
+
+  const chart = renderPriceHistoryChart(result.points, 0, result.totalDurationMs, {
+    elapsedTimeAxis: true,
+    ariaLabel: `Simulated constant-use cycle peaking at ${(result.peakDemand * 100).toFixed(0)}% demand, ${peakCost} points, then cooling down`,
+  });
+
+  const summary = `Simulated: constant redemptions peak at ${(result.peakDemand * 100).toFixed(1)}% demand `
+    + `(${peakCost.toLocaleString()} pts) after ~${formatDurationShort(result.peakAtMs)} of continuous use, `
+    + `then cool back down over ~${formatDurationShort(result.totalDurationMs - result.peakAtMs)}.`;
+
+  return { chart, summary };
 }
 
 /** Parses the `hours` query param against the allowed range options, defaulting when missing/invalid. */
@@ -85,9 +133,9 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     const isConnected = !!streamer?.eventsub_access_token;
     const needsReconnect = isConnected && !!streamer?.twitch_name && hasAuthFailedSubs(streamer.twitch_name);
 
-    const [pricingConfigs, twitchRewards] = streamer && isConnected && !needsReconnect
-      ? await Promise.all([getPricingConfigsForStreamer(streamer.id), fetchTwitchRewards(streamer)])
-      : [[], []];
+    const [pricingConfigs, twitchRewards, pricingSettings] = streamer && isConnected && !needsReconnect
+      ? await Promise.all([getPricingConfigsForStreamer(streamer.id), fetchTwitchRewards(streamer), getPricingSettingsForStreamer(streamer.id)])
+      : [[], [], null];
 
     const historyHours = parseHistoryHours(req.query.hours);
     const rangeEndMs = Date.now();
@@ -96,6 +144,12 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     async function buildHistoryChart(config: RewardPricingRow): Promise<string> {
       const points = await getPricingHistory(config.id, rangeStartMs);
       return renderPriceHistoryChart(points.map((p) => ({ t: Number(p.recorded_at), cost: p.cost })), rangeStartMs, rangeEndMs);
+    }
+
+    function buildSimulation(config: RewardPricingRow): { simulationChart: string | null; simulationSummary: string | null } {
+      if (!pricingSettings) return { simulationChart: null, simulationSummary: null };
+      const { chart, summary } = buildSimulationChart(config, pricingSettings);
+      return { simulationChart: chart, simulationSummary: summary };
     }
 
     const configByRewardId = new Map(pricingConfigs.map((c) => [c.twitch_reward_id, c]));
@@ -109,6 +163,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
         config,
         previewPrice: config ? previewPriceFor(config) : null,
         historyChart: config ? await buildHistoryChart(config) : null,
+        ...(config ? buildSimulation(config) : { simulationChart: null, simulationSummary: null }),
       };
     }));
 
@@ -124,11 +179,10 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
           config,
           previewPrice: previewPriceFor(config),
           historyChart: await buildHistoryChart(config),
+          ...buildSimulation(config),
         })),
     );
     rewards.push(...unlinkedRows);
-
-    const pricingSettings = streamer && isConnected && !needsReconnect ? await getPricingSettingsForStreamer(streamer.id) : null;
 
     renderView(res, 'channelPointsAdmin', {
       user: req.session.user,
