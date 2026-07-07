@@ -221,6 +221,18 @@ describe('renderView', () => {
     expect(() => renderView(res, 'error', { escape: (x: unknown) => String(x) })).toThrow(/reserved key/);
   });
 
+  it('throws when data contains the deprecated EJS "scope" alias for "context"', () => {
+    const { res } = mockRes();
+    expect(() => renderView(res, 'error', { scope: {} })).toThrow(/reserved key/);
+  });
+
+  it('throws when data contains a "settings" key (EJS renderFile\'s Express compat bypass)', () => {
+    const { res } = mockRes();
+    expect(() => renderView(res, 'error', { settings: { 'view options': { outputFunctionName: 'x' } } })).toThrow(
+      /reserved key/,
+    );
+  });
+
   it('throws when data contains a prototype-pollution key', () => {
     const { res } = mockRes();
     const data = JSON.parse('{"__proto__": {"polluted": true}}') as Record<string, unknown>;

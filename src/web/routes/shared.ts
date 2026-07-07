@@ -127,8 +127,15 @@ const RESERVED_RENDER_DATA_KEYS = new Set([
   'async',
   'destructuredLocals',
   'context',
+  'scope',
   'beautify',
   'includer',
+  // EJS's `renderFile` special-cases a `settings` key on the data object (for Express 2/3
+  // compat): `settings.views`/`settings['view cache']` set compile options directly, and
+  // `settings['view options']` is shallow-copied into the real options *without* being
+  // filtered by any key list at all. Blocking `settings` outright closes that whole nested
+  // bypass rather than trying to enumerate every option it could smuggle through.
+  'settings',
 ]);
 
 /**
