@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { renderPriceHistoryChart } from './priceHistoryChart';
 
 describe('renderPriceHistoryChart', () => {
@@ -105,5 +105,30 @@ describe('renderPriceHistoryChart', () => {
     const points = [{ t: 1_700_000_000_000, cost: 480 }];
     const svg = renderPriceHistoryChart(points, 1_700_000_000_000, 1_700_010_000_000);
     expect(svg).not.toContain('data-elapsed');
+  });
+
+  describe('escaping locale-formatted values embedded in the SVG', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('escapes HTML/XML special characters from Date#toLocaleString before embedding them in aria-label', () => {
+      vi.spyOn(Date.prototype, 'toLocaleString').mockReturnValue('"><script>alert(1)</script>');
+      const points = [{ t: 1_700_000_000_000, cost: 480 }];
+      const svg = renderPriceHistoryChart(points, 1_700_000_000_000, 1_700_010_000_000);
+      expect(svg).not.toContain('<script>');
+      expect(svg).toContain('&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;');
+    });
+
+    it('escapes HTML/XML special characters from Number#toLocaleString before embedding them as tick/end-label text', () => {
+      vi.spyOn(Number.prototype, 'toLocaleString').mockReturnValue('</text><script>alert(1)</script>');
+      const points = [
+        { t: 1_700_000_000_000, cost: 200 },
+        { t: 1_700_010_000_000, cost: 800 },
+      ];
+      const svg = renderPriceHistoryChart(points, 1_700_000_000_000, 1_700_010_000_000);
+      expect(svg).not.toContain('<script>');
+      expect(svg).toContain('&lt;/text&gt;&lt;script&gt;alert(1)&lt;/script&gt;');
+    });
   });
 });

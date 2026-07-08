@@ -8,6 +8,16 @@ const WIDTH = 480;
 const HEIGHT = 120;
 const PADDING = { top: 10, right: 12, bottom: 20, left: 44 };
 
+/** Escapes HTML/XML special characters so a value is safe to embed as SVG text or an attribute value. */
+function escapeHtml(value: string | number): string {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
  * Renders an inline SVG line chart of a reward's price over `[rangeStartMs, rangeEndMs]`.
  * A single series needs no legend (the card title above it already names what's plotted).
@@ -64,24 +74,25 @@ export function renderPriceHistoryChart(
   const last = pixelPoints[pixelPoints.length - 1];
 
   const dataPoints = JSON.stringify(sorted.map((p) => [p.t, p.cost]));
-  const ariaLabel = options?.ariaLabel
-    ?? `Price history from ${new Date(rangeStartMs).toLocaleString()} to ${new Date(rangeEndMs).toLocaleString()}, ranging from ${minCost} to ${maxCost} points`;
-  const escapedAriaLabel = ariaLabel.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const ariaLabel = escapeHtml(
+    options?.ariaLabel
+      ?? `Price history from ${new Date(rangeStartMs).toLocaleString()} to ${new Date(rangeEndMs).toLocaleString()}, ranging from ${minCost} to ${maxCost} points`
+  );
 
   return `
 <svg class="price-history-chart" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="100%" height="${HEIGHT}" preserveAspectRatio="none"
-     data-points='${dataPoints.replace(/'/g, '&#39;')}'
+     data-points='${escapeHtml(dataPoints)}'
      data-plot-left="${plotLeft}" data-plot-right="${plotRight}"
      data-range-start="${rangeStartMs}" data-range-end="${rangeEndMs}"
      ${options?.elapsedTimeAxis ? 'data-elapsed="true"' : ''}
-     role="img" aria-label="${escapedAriaLabel}">
+     role="img" aria-label="${ariaLabel}">
   <line x1="${plotLeft}" y1="${toY(maxCost).toFixed(1)}" x2="${plotRight}" y2="${toY(maxCost).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
   <line x1="${plotLeft}" y1="${toY(minCost).toFixed(1)}" x2="${plotRight}" y2="${toY(minCost).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
-  <text x="${plotLeft - 6}" y="${toY(maxCost).toFixed(1)}" dy="0.32em" text-anchor="end" class="price-history-tick">${maxCost.toLocaleString()}</text>
-  <text x="${plotLeft - 6}" y="${toY(minCost).toFixed(1)}" dy="0.32em" text-anchor="end" class="price-history-tick">${minCost.toLocaleString()}</text>
+  <text x="${plotLeft - 6}" y="${toY(maxCost).toFixed(1)}" dy="0.32em" text-anchor="end" class="price-history-tick">${escapeHtml(maxCost.toLocaleString())}</text>
+  <text x="${plotLeft - 6}" y="${toY(minCost).toFixed(1)}" dy="0.32em" text-anchor="end" class="price-history-tick">${escapeHtml(minCost.toLocaleString())}</text>
   <polyline points="${polyline}" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
   <circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="4" fill="var(--primary)" stroke="var(--bg-card)" stroke-width="2"/>
-  <text x="${last.x.toFixed(1)}" y="${(last.y - 8).toFixed(1)}" text-anchor="end" class="price-history-end-label">${last.cost.toLocaleString()} pts</text>
+  <text x="${last.x.toFixed(1)}" y="${(last.y - 8).toFixed(1)}" text-anchor="end" class="price-history-end-label">${escapeHtml(last.cost.toLocaleString())} pts</text>
   <g class="price-history-crosshair" style="display:none;">
     <line class="price-history-crosshair-line" y1="${plotTop}" y2="${plotBottom}" stroke="var(--muted)" stroke-width="1"/>
     <circle class="price-history-crosshair-dot" r="4" fill="var(--primary)" stroke="var(--bg-card)" stroke-width="2"/>
