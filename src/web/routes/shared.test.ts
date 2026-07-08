@@ -210,6 +210,52 @@ describe('renderView', () => {
     expect(() => renderView(res, '../../etc/passwd')).toThrow();
     expect(render).not.toHaveBeenCalled();
   });
+
+  it('throws when data contains an EJS-reserved option key', () => {
+    const { res } = mockRes();
+    expect(() => renderView(res, 'error', { outputFunctionName: 'x' })).toThrow(/reserved key/);
+  });
+
+  it('throws when data contains the EJS "escape" option key', () => {
+    const { res } = mockRes();
+    expect(() => renderView(res, 'error', { escape: (x: unknown) => String(x) })).toThrow(/reserved key/);
+  });
+
+  it('throws when data contains the deprecated EJS "scope" alias for "context"', () => {
+    const { res } = mockRes();
+    expect(() => renderView(res, 'error', { scope: {} })).toThrow(/reserved key/);
+  });
+
+  it('throws when data contains a "settings" key (EJS renderFile\'s Express compat bypass)', () => {
+    const { res } = mockRes();
+    expect(() => renderView(res, 'error', { settings: { 'view options': { outputFunctionName: 'x' } } })).toThrow(
+      /reserved key/,
+    );
+  });
+
+  it('throws when data contains a prototype-pollution key', () => {
+    const { res } = mockRes();
+    const data = JSON.parse('{"__proto__": {"polluted": true}}') as Record<string, unknown>;
+    expect(() => renderView(res, 'error', data)).toThrow(/reserved key/);
+  });
+
+  it('throws when data contains a "constructor" key', () => {
+    const { res } = mockRes();
+    expect(() => renderView(res, 'error', { constructor: {} })).toThrow(/reserved key/);
+  });
+
+  it('does not call res.render when data has a reserved key', () => {
+    const { res, render } = mockRes();
+    expect(() => renderView(res, 'error', { cache: true })).toThrow();
+    expect(render).not.toHaveBeenCalled();
+  });
+
+  it('throws when data is not a plain object', () => {
+    const { res } = mockRes();
+    expect(() => renderView(res, 'error', [1, 2, 3] as unknown as Record<string, unknown>)).toThrow(
+      /plain object/,
+    );
+  });
 });
 
 describe('renderError', () => {

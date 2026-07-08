@@ -98,16 +98,70 @@ export function normalizeDiscordId(value: string | undefined): string | null {
 }
 
 /**
+ * Keys that must never appear in `renderView`'s `data` argument. Express's EJS integration
+ * uses the same object as both template locals and `ejs.compile` options, so an
+ * attacker-controlled key here (e.g. `outputFunctionName`) could alter template compilation —
+ * a known EJS option-injection class of SSTI. `__proto__`/`constructor`/`prototype` are
+ * blocked for the same reason (prototype pollution of the render options object).
+ */
+const RESERVED_RENDER_DATA_KEYS = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+  'cache',
+  'filename',
+  'views',
+  'root',
+  'client',
+  'escape',
+  'compileDebug',
+  'debug',
+  'delimiter',
+  'openDelimiter',
+  'closeDelimiter',
+  'strict',
+  '_with',
+  'localsName',
+  'rmWhitespace',
+  'outputFunctionName',
+  'async',
+  'destructuredLocals',
+  'context',
+  'scope',
+  'beautify',
+  'includer',
+  // EJS's `renderFile` special-cases a `settings` key on the data object (for Express 2/3
+  // compat): `settings.views`/`settings['view cache']` set compile options directly, and
+  // `settings['view options']` is shallow-copied into the real options *without* being
+  // filtered by any key list at all. Blocking `settings` outright closes that whole nested
+  // bypass rather than trying to enumerate every option it could smuggle through.
+  'settings',
+]);
+
+/**
  * Renders an EJS view after checking `view` against the actual `.ejs` files present
  * under `views/`. Throws if `view` isn't a real template, so a template name can never
- * be attacker-controlled or silently mistyped.
+ * be attacker-controlled or silently mistyped. Also validates `data`: it must be a plain
+ * object and must not contain any key in {@link RESERVED_RENDER_DATA_KEYS}, preventing a
+ * caller from ever smuggling EJS compile-option or prototype-pollution keys into the
+ * render call.
  * @param res - Express response object.
  * @param view - Name of the view to render (without the `.ejs` extension).
- * @param data - Template data, forwarded to `res.render` unchanged.
+ * @param data - Template data, forwarded to `res.render` unchanged once validated.
  */
 export function renderView(res: Response, view: string, data?: Record<string, unknown>): void {
   if (!getKnownViews().has(view)) {
     throw new Error(`renderView: unknown view "${view}"`);
+  }
+  if (data !== undefined) {
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      throw new Error('renderView: data must be a plain object');
+    }
+    for (const key of Object.keys(data)) {
+      if (RESERVED_RENDER_DATA_KEYS.has(key)) {
+        throw new Error(`renderView: data contains reserved key "${key}"`);
+      }
+    }
   }
   res.render(view, data);
 }
