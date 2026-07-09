@@ -42,7 +42,17 @@ describe('simulateConstantUsageCycle', () => {
   it("ramp phase's redemption jumps (tooth peaks) rise monotonically toward the overall peak", () => {
     const result = simulateConstantUsageCycle(config);
     const ramp = result.points.filter((p) => p.t <= result.peakAtMs);
-    const jumps = ramp.filter((p, i) => i === 0 || p.cost >= ramp[i - 1].cost);
+    // Identify tooth peaks structurally (the final peak, or a point immediately followed by its
+    // own decay-to-next-redemption point) rather than by comparing costs — a cost-comparison
+    // filter would silently exclude a regressed (decreasing) jump instead of catching it.
+    const cooldownMs = config.cooldownSeconds * 1000;
+    const jumps = ramp.filter((p, i) => {
+      const next = ramp[i + 1];
+      const isFinalPeak = p.t === result.peakAtMs;
+      const isJumpFollowedByDecay = next !== undefined && next.t === p.t + cooldownMs && next.cost <= p.cost;
+      return p.cost > config.baseCost && (isFinalPeak || isJumpFollowedByDecay);
+    });
+    expect(jumps.length).toBeGreaterThan(1);
     for (let i = 1; i < jumps.length; i++) {
       expect(jumps[i].cost).toBeGreaterThanOrEqual(jumps[i - 1].cost);
     }
