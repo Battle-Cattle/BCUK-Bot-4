@@ -31,6 +31,35 @@ describe('computePrice', () => {
   it('clamps demand below 0 before computing', () => {
     expect(computePrice(-5, config)).toBe(computePrice(0, config));
   });
+
+  it('rounds to the nearest multiple of roundToNearest when set', () => {
+    // usage=0.5, curve=1.5 -> raw = 200 * 2.414214 = 482.8427 -> nearest 10 = 480
+    expect(computePrice(0.5, { ...config, roundToNearest: 10 })).toBe(480);
+    // nearest 5 = 485
+    expect(computePrice(0.5, { ...config, roundToNearest: 5 })).toBe(485);
+  });
+
+  it('is unaffected by roundToNearest when it is 0', () => {
+    expect(computePrice(0.5, { ...config, roundToNearest: 0 })).toBe(computePrice(0.5, config));
+  });
+
+  it('is unaffected by roundToNearest when it is negative', () => {
+    expect(computePrice(0.5, { ...config, roundToNearest: -5 })).toBe(computePrice(0.5, config));
+  });
+
+  it('clamps a rounded price back up to baseCost when rounding would push it below the minimum', () => {
+    // baseCost=1, raw=1 -> round(1/5)*5 = round(0.2)*5 = 0, which is below baseCost and clamped back up.
+    expect(computePrice(0, { baseCost: 1, maxMultiplier: 1, curve: 1, roundToNearest: 5 })).toBe(1);
+  });
+
+  it('clamps a rounded price back down to the max when rounding would push it above the max', () => {
+    // baseCost=100, maxMultiplier=0.53 -> max=153, raw=153 -> round(153/5)*5 = round(30.6)*5 = 155, clamped to 153.
+    expect(computePrice(1, { baseCost: 100, maxMultiplier: 0.53, curve: 1, roundToNearest: 5 })).toBe(153);
+  });
+
+  it('is unaffected by a missing roundToNearest', () => {
+    expect(computePrice(0.5, config)).toBe(483);
+  });
 });
 
 describe('decayDemand', () => {

@@ -94,6 +94,16 @@ describe('simulateConstantUsageCycle', () => {
     expect(result.peakCost).toBe(computePrice(result.peakDemand, config));
   });
 
+  it('rounds every plotted point and peakCost to roundToNearest when configured', () => {
+    const roundedConfig = { ...config, roundToNearest: 10 };
+    const result = simulateConstantUsageCycle(roundedConfig);
+    for (const point of result.points) {
+      expect(point.cost % 10).toBe(0);
+    }
+    expect(result.peakCost % 10).toBe(0);
+    expect(result.peakCost).toBe(computePrice(result.peakDemand, roundedConfig));
+  });
+
   it('does not loop unreasonably long for an extreme config (near-zero half-life)', () => {
     const start = Date.now();
     const result = simulateConstantUsageCycle({ ...config, halfLifeSeconds: 1, cooldownSeconds: 1 });

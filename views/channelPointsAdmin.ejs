@@ -20,7 +20,7 @@
         invalid_reward_fields: 'Please check the reward fields — title and cost are required, a prompt is required when viewer input is required, and any enabled limit needs a value.',
         create_failed:         'Failed to create the reward — please try again, or reconnect Twitch if this keeps happening.',
         update_failed:         'Failed to update the reward — Twitch only allows the app that created a reward to edit it.',
-        invalid_config:        'Base cost and curve must be positive numbers, and max multiplier must be zero or greater.',
+        invalid_config:        'Base cost and curve must be positive numbers, max multiplier must be zero or greater, and round to nearest must be Off, 5, or 10.',
         save_failed:           'Failed to save — please try again.',
         delete_failed:         'Delete failed — please try again.',
         invalid_settings:      'Half-life and time-to-max-demand multiplier must both be positive numbers.',
@@ -238,6 +238,15 @@
                   <label class="hint hint-compact" for="curve-<%= r.rewardId %>">Curve</label>
                   <input id="curve-<%= r.rewardId %>" class="input" type="number" step="0.1" min="0.1" name="curve" style="width:7rem;"
                     value="<%= r.config ? r.config.curve : 1 %>" required>
+                </div>
+                <div>
+                  <label class="hint hint-compact" for="round-to-nearest-<%= r.rewardId %>">Round to nearest</label>
+                  <% const roundToNearest = r.config ? r.config.round_to_nearest : 0; %>
+                  <select id="round-to-nearest-<%= r.rewardId %>" class="input" name="round_to_nearest" style="width:7rem;">
+                    <option value="0" <%= roundToNearest === 0 ? 'selected' : '' %>>Off</option>
+                    <option value="5" <%= roundToNearest === 5 ? 'selected' : '' %>>5</option>
+                    <option value="10" <%= roundToNearest === 10 ? 'selected' : '' %>>10</option>
+                  </select>
                 </div>
                 <div>
                   <button type="submit" class="btn">Save</button>

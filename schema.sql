@@ -278,6 +278,9 @@ CREATE TABLE IF NOT EXISTS reward_pricing (
   cooldown_seconds  INT          NOT NULL DEFAULT 60,
   max_multiplier    DECIMAL(6,3) NOT NULL DEFAULT 1.000,
   curve             DECIMAL(5,3) NOT NULL DEFAULT 1.000,
+  -- Rounds the computed price to the nearest multiple of this many points (e.g. 5 or 10).
+  -- 0 (the default) disables rounding.
+  round_to_nearest  INT          NOT NULL DEFAULT 0,
   demand            DECIMAL(9,6) NOT NULL DEFAULT 0.000000,
   demand_updated_at BIGINT       NOT NULL,
   last_pushed_cost  INT          NULL,
@@ -291,7 +294,8 @@ CREATE TABLE IF NOT EXISTS reward_pricing (
   CONSTRAINT chk_reward_pricing_base_cost        CHECK (base_cost > 0),
   CONSTRAINT chk_reward_pricing_cooldown_seconds CHECK (cooldown_seconds > 0),
   CONSTRAINT chk_reward_pricing_max_multiplier   CHECK (max_multiplier >= 0),
-  CONSTRAINT chk_reward_pricing_curve            CHECK (curve > 0)
+  CONSTRAINT chk_reward_pricing_curve            CHECK (curve > 0),
+  CONSTRAINT chk_reward_pricing_round_to_nearest CHECK (round_to_nearest IN (0, 5, 10))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------

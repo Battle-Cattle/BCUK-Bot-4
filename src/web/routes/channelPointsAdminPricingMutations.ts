@@ -11,7 +11,7 @@ import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { logAndRedirectError } from './shared';
 import {
   requireStreamer, parsePositiveIntField, parseNonNegativeNumberField, parsePositiveNumberField,
-  parseCheckboxField, parseRewardIdParam, effectiveCooldownSeconds, handleRewardDeleteAction,
+  parseCheckboxField, parseRoundToNearestField, parseRewardIdParam, effectiveCooldownSeconds, handleRewardDeleteAction,
 } from './channelPointsAdminShared';
 import { applyDecayTick, resetAndDeletePricing } from '../../twitch/pricing/rewardPricingService';
 
@@ -47,7 +47,7 @@ async function resolveCooldownSecondsForPricing(streamer: DbStreamerEventSub, tw
  * reward's live Twitch global cooldown (see {@link resolveCooldownSecondsForPricing}), so it
  * can never drift from the reward's actual Twitch-enforced cooldown.
  * @param req - Express request; reads the `twitchRewardId` route param and `enabled`,
- *   `base_cost`, `max_multiplier`, `curve` from `req.body`.
+ *   `base_cost`, `max_multiplier`, `curve`, `round_to_nearest` from `req.body`.
  * @param res - Express response; redirects to `/channel-points?success=pricing_saved` on success,
  *   or to `/channel-points?error=<code>` if the requester isn't a streamer (`not_a_streamer`),
  *   the reward ID isn't a valid UUID (`invalid_reward_id`), any config field is invalid
@@ -65,7 +65,8 @@ router.post('/rewards/:twitchRewardId/pricing', requireAuth, csrfProtection, asy
     const baseCost = parsePositiveIntField(body.base_cost);
     const maxMultiplier = parseNonNegativeNumberField(body.max_multiplier);
     const curve = parsePositiveNumberField(body.curve);
-    if (baseCost === null || maxMultiplier === null || curve === null) {
+    const roundToNearest = parseRoundToNearestField(body.round_to_nearest);
+    if (baseCost === null || maxMultiplier === null || curve === null || roundToNearest === null) {
       return res.redirect('/channel-points?error=invalid_config');
     }
 
@@ -74,6 +75,7 @@ router.post('/rewards/:twitchRewardId/pricing', requireAuth, csrfProtection, asy
 
     await upsertPricingConfig(streamer.id, twitchRewardId, {
       enabled, base_cost: baseCost, cooldown_seconds: cooldownSeconds, max_multiplier: maxMultiplier, curve,
+      round_to_nearest: roundToNearest,
     });
 
     // Best-effort immediate resync so the reward's Twitch-side cost reflects the new

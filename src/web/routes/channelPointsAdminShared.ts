@@ -102,6 +102,20 @@ export function parsePositiveNumberField(value: string | string[] | undefined): 
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+const VALID_ROUND_TO_NEAREST = new Set([0, 5, 10]);
+
+/**
+ * Parses the optional "round to nearest" pricing field (0/5/10 points). Missing or blank
+ * input defaults to `0` (rounding off) rather than being rejected, since the setting is
+ * optional. An array (repeated field) or any value outside `{0, 5, 10}` is a validation error.
+ */
+export function parseRoundToNearestField(value: string | string[] | undefined): number | null {
+  if (Array.isArray(value)) return null;
+  if (typeof value !== 'string' || value.trim() === '') return 0;
+  const n = Number(value);
+  return VALID_ROUND_TO_NEAREST.has(n) ? n : null;
+}
+
 /**
  * The cooldown (seconds) dynamic pricing should use for a reward: its own Twitch global
  * cooldown when enabled, otherwise a fallback default — keeps pricing's `cooldown_seconds`

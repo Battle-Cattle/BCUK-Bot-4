@@ -37,6 +37,7 @@ const sampleRow = {
   cooldown_seconds: 300,
   max_multiplier: '4.000',
   curve: '1.500',
+  round_to_nearest: 0,
   demand: '0.500000',
   demand_updated_at: '1700000000000',
   last_pushed_cost: 400,
@@ -61,6 +62,7 @@ describe('getPricingForReward', () => {
       cooldown_seconds: 300,
       max_multiplier: 4,
       curve: 1.5,
+      round_to_nearest: 0,
       demand: 0.5,
       demand_updated_at: '1700000000000',
       last_pushed_cost: 400,
@@ -125,7 +127,7 @@ describe('upsertPricingConfig', () => {
   it('uses the row-alias ON DUPLICATE KEY UPDATE form', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await upsertPricingConfig(7, 'rwd-abc', { enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5 });
+    await upsertPricingConfig(7, 'rwd-abc', { enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5, round_to_nearest: 0 });
     const sql: string = pool.execute.mock.calls[0][0];
     expect(sql).toContain('AS new_row');
     expect(sql).toContain('ON DUPLICATE KEY UPDATE');
@@ -134,7 +136,7 @@ describe('upsertPricingConfig', () => {
   it('does not touch demand, demand_updated_at, or last_pushed_cost in the SET list', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await upsertPricingConfig(7, 'rwd-abc', { enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5 });
+    await upsertPricingConfig(7, 'rwd-abc', { enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5, round_to_nearest: 0 });
     const sql: string = pool.execute.mock.calls[0][0];
     const setClause = sql.split('ON DUPLICATE KEY UPDATE')[1];
     expect(setClause).not.toContain('demand=');
@@ -145,16 +147,26 @@ describe('upsertPricingConfig', () => {
   it('clears twitch_unsupported in the SET list, so an explicit save gives the reward another attempt', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await upsertPricingConfig(7, 'rwd-abc', { enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5 });
+    await upsertPricingConfig(7, 'rwd-abc', { enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5, round_to_nearest: 0 });
     const sql: string = pool.execute.mock.calls[0][0];
     const setClause = sql.split('ON DUPLICATE KEY UPDATE')[1];
     expect(setClause).toContain('twitch_unsupported=0');
   });
 
+  it('includes round_to_nearest in both the column list and the SET list', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await upsertPricingConfig(7, 'rwd-abc', { enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5, round_to_nearest: 5 });
+    const sql: string = pool.execute.mock.calls[0][0];
+    expect(sql).toContain('round_to_nearest');
+    const setClause = sql.split('ON DUPLICATE KEY UPDATE')[1];
+    expect(setClause).toContain('round_to_nearest=new_row.round_to_nearest');
+  });
+
   it('passes converted enabled boolean and config fields', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await upsertPricingConfig(7, 'rwd-abc', { enabled: false, base_cost: 100, cooldown_seconds: 60, max_multiplier: 2, curve: 1 });
+    await upsertPricingConfig(7, 'rwd-abc', { enabled: false, base_cost: 100, cooldown_seconds: 60, max_multiplier: 2, curve: 1, round_to_nearest: 10 });
     const params: unknown[] = pool.execute.mock.calls[0][1];
     expect(params[0]).toBe(7);
     expect(params[1]).toBe('rwd-abc');
@@ -163,6 +175,7 @@ describe('upsertPricingConfig', () => {
     expect(params[4]).toBe(60);
     expect(params[5]).toBe(2);
     expect(params[6]).toBe(1);
+    expect(params[7]).toBe(10);
   });
 });
 
