@@ -31,7 +31,18 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        shell: bash
+        run: |
+          for attempt in 1 2 3 4; do
+            npm ci && break
+            if [ "$attempt" -eq 4 ]; then
+              echo "npm ci failed after 4 attempts" >&2
+              exit 1
+            fi
+            delay=$((2 ** attempt))
+            echo "npm ci failed (attempt $attempt/4). Retrying in ${delay}s..."
+            sleep "$delay"
+          done
 
       - name: Build (TypeScript)
         run: npm run build

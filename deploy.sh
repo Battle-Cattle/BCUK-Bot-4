@@ -19,6 +19,25 @@ rollback() {
     exit 1
 }
 
+# Retries a command up to 4 times with exponential backoff (2s, 4s, 8s, 16s),
+# to ride out transient failures like registry/CDN timeouts (e.g. ffmpeg-static's
+# postinstall download from GitHub releases).
+retry() {
+    local attempt=1
+    local max_attempts=4
+    local delay=2
+    until "$@"; do
+        if [ "$attempt" -ge "$max_attempts" ]; then
+            echo "ERROR: '$*' failed after $max_attempts attempts."
+            return 1
+        fi
+        echo "WARNING: '$*' failed (attempt $attempt/$max_attempts). Retrying in ${delay}s..."
+        sleep "$delay"
+        attempt=$((attempt + 1))
+        delay=$((delay * 2))
+    done
+}
+
 echo "==> Pulling latest code..."
 git update-index -q --refresh
 if ! git diff-index --quiet HEAD --; then
@@ -31,7 +50,7 @@ git pull origin main
 trap rollback ERR
 
 echo "==> Installing dependencies..."
-npm ci
+retry npm ci
 
 echo "==> Checking for vulnerabilities..."
 npm audit --audit-level=high
@@ -47,6 +66,8 @@ npm prune --omit=dev
 
 trap - ERR  # Rollback no longer needed — code is good.
 
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 echo "==> Restarting bot in screen session '$SCREEN_SESSION'..."
 if screen -list | grep -Eq "[0-9]+\.${SCREEN_SESSION}[[:space:]]"; then
     screen -S "$SCREEN_SESSION" -X stuff $'\003'
@@ -61,12 +82,12 @@ if screen -list | grep -Eq "[0-9]+\.${SCREEN_SESSION}[[:space:]]"; then
         echo "WARNING: Node process did not stop within 15s. Attempting restart anyway..."
     fi
 
-    REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
     screen -S "$SCREEN_SESSION" -X stuff "cd ${REPO_DIR} && npm start\n"
     echo "==> Bot restarted."
 else
-    echo "WARNING: Screen session '$SCREEN_SESSION' not found."
-    echo "         Start it manually: screen -S $SCREEN_SESSION npm start"
+    echo "WARNING: Screen session '$SCREEN_SESSION' not found. Starting a new one..."
+    screen -dmS "$SCREEN_SESSION" bash -c "cd '${REPO_DIR}' && npm start"
+    echo "==> Bot started in new screen session '$SCREEN_SESSION'."
 fi
 
 echo "==> Deploy complete."
