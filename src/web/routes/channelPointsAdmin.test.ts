@@ -112,6 +112,20 @@ describe('GET /', () => {
     expect(res.body.rewards[0].previewPrice).toBe(1000);
   });
 
+  it('rounds the preview price to round_to_nearest when configured on the pricing config', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1', title: 'Cool Reward', cost: 200, is_enabled: true } as any]);
+    vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([{
+      id: 1, streamer_id: 123, twitch_reward_id: 'rwd1', enabled: true,
+      base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5, round_to_nearest: 10,
+      demand: 0.5, demand_updated_at: '1700000000000', last_pushed_cost: 480, twitch_unsupported: false,
+    }] as any);
+
+    const res = await supertest(buildApp()).get('/');
+    // raw price at demand=0.5 with these params is 482.84, rounded to nearest 10 -> 480.
+    expect(res.body.rewards[0].previewPrice).toBe(480);
+  });
+
   it('renders with an empty reward list when getCustomRewards throws', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(getCustomRewards).mockRejectedValue(new Error('Twitch down'));

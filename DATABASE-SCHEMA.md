@@ -204,12 +204,13 @@ Dynamic Channel Point Pricing: per-reward config and demand state. Independent o
 | `cooldown_seconds` | `INT` | Mirrors the reward's own Twitch global cooldown (or a fallback default when it has none) — kept in sync automatically, not directly editable |
 | `max_multiplier` | `DECIMAL(6,3)` | Max price = `base_cost * (1 + max_multiplier)` |
 | `curve` | `DECIMAL(5,3)` | Exponent controlling how aggressively price rises with demand |
+| `round_to_nearest` | `INT` | Rounds the computed price to the nearest multiple of this many points (`0`, `5`, or `10`); `0` disables rounding |
 | `demand` | `DECIMAL(9,6)` | Current demand, in `[0,1]` |
 | `demand_updated_at` | `BIGINT` | Epoch ms the `demand` value was last computed as of |
 | `last_pushed_cost` | `INT` NULL | Last cost actually pushed to Twitch; used to skip redundant Helix calls |
 | `twitch_unsupported` | `TINYINT(1)` | Set (and `enabled` forced to 0) when Twitch returns 403 — the reward was created outside this app and can never be managed by it |
 
-Created by `migrations/reward_pricing.sql`.
+Created by `migrations/reward_pricing.sql`. `round_to_nearest` added by `migrations/reward_pricing_round_to_nearest.sql`.
 
 ## `reward_pricing_settings`
 

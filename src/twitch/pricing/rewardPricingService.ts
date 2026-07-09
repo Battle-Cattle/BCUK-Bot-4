@@ -106,7 +106,10 @@ async function pushRewardCostUpdate(
 
 /**
  * Recomputes demand and price for one reward and persists the result, pushing the new
- * cost to Twitch only when it differs from the last pushed cost. No-ops entirely (no DB
+ * cost to Twitch only when it differs from the last pushed cost — since `newCost` is
+ * already rounded to `row.round_to_nearest` (see `computePrice`), this comparison (and
+ * therefore the Twitch push) naturally only fires when the *rounded* price changes, not
+ * on every sub-step fluctuation in demand. No-ops entirely (no DB
  * write, no Twitch call) when the reward has no pricing config or dynamic pricing is
  * disabled for it — this is where "optional per reward" is enforced. Demand is always
  * persisted, even when the Twitch push fails, so the price is simply retried on the next
@@ -139,6 +142,7 @@ async function syncRewardPrice(streamerId: number, twitchRewardId: string, apply
     baseCost: row.base_cost,
     maxMultiplier: row.max_multiplier,
     curve: row.curve,
+    roundToNearest: row.round_to_nearest,
   });
 
   let lastPushedCost = row.last_pushed_cost;

@@ -5,8 +5,8 @@ vi.mock('../../db', () => ({ getStreamerByDiscordId: vi.fn(), DEFAULT_PRICING_CO
 import { getStreamerByDiscordId } from '../../db';
 import {
   requireStreamer, parsePositiveIntField, parseNonNegativeNumberField, parsePositiveNumberField,
-  parseCheckboxField, parseHexColorField, parseRewardIdParam, parseRewardFields, effectiveCooldownSeconds,
-  handleRewardDeleteAction,
+  parseCheckboxField, parseHexColorField, parseRoundToNearestField, parseRewardIdParam, parseRewardFields,
+  effectiveCooldownSeconds, handleRewardDeleteAction,
 } from './channelPointsAdminShared';
 
 const VALID_REWARD_ID = '12345678-1234-1234-8234-123456789abc';
@@ -222,6 +222,40 @@ describe('parseHexColorField', () => {
 
   it('returns null for a hex string missing the leading #', () => {
     expect(parseHexColorField('00E5CB')).toBeNull();
+  });
+});
+
+describe('parseRoundToNearestField', () => {
+  it('accepts 0 (off)', () => {
+    expect(parseRoundToNearestField('0')).toBe(0);
+  });
+
+  it('accepts 5', () => {
+    expect(parseRoundToNearestField('5')).toBe(5);
+  });
+
+  it('accepts 10', () => {
+    expect(parseRoundToNearestField('10')).toBe(10);
+  });
+
+  it('defaults to 0 (off) when undefined, since the setting is optional', () => {
+    expect(parseRoundToNearestField(undefined)).toBe(0);
+  });
+
+  it('defaults to 0 (off) for a blank string', () => {
+    expect(parseRoundToNearestField('')).toBe(0);
+  });
+
+  it('rejects a value outside {0, 5, 10}', () => {
+    expect(parseRoundToNearestField('7')).toBeNull();
+  });
+
+  it('rejects non-numeric input', () => {
+    expect(parseRoundToNearestField('abc')).toBeNull();
+  });
+
+  it('rejects an array (repeated field)', () => {
+    expect(parseRoundToNearestField(['5', '10'])).toBeNull();
   });
 });
 

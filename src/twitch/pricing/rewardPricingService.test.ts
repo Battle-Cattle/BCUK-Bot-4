@@ -45,6 +45,7 @@ function makeRow(overrides: Partial<Record<string, unknown>> = {}) {
     cooldown_seconds: 300,
     max_multiplier: 4,
     curve: 1.5,
+    round_to_nearest: 0,
     demand: 0,
     demand_updated_at: String(Date.now()),
     last_pushed_cost: null,
@@ -198,6 +199,31 @@ describe('applyDecayTick', () => {
     const [, , demandArg] = vi.mocked(recordPricingUpdate).mock.calls[0];
     // decay(0.5, ~300s elapsed, half_life=1800s) = 0.5 * 2^(-300/1800)
     expect(demandArg).toBeCloseTo(0.5 * Math.pow(2, -300 / 1800), 2);
+  });
+});
+
+describe('round_to_nearest', () => {
+  it('pushes the price rounded to the configured step, not the raw computed price', async () => {
+    // decay-only tick (no redemption increment) with elapsed~0 keeps demand pinned at exactly 0.5.
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({
+      demand: 0.5, demand_updated_at: String(Date.now()), last_pushed_cost: null, round_to_nearest: 10,
+    }));
+    await applyDecayTick(1, 'rwd1');
+    // raw price at demand=0.5 (base_cost=200, max_multiplier=4, curve=1.5) is 482.84,
+    // which rounds to 480 at round_to_nearest=10 (see rewardPricingMath.test.ts).
+    expect(updateRewardCost).toHaveBeenCalledWith('bc1', 'rwd1', 480, 'user-token');
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), 480);
+  });
+
+  it('skips the Twitch push (but still persists demand) when the rounded price matches last_pushed_cost, even though the underlying demand has changed', async () => {
+    // demand=0.5 (raw 482.84) and demand=0.55 (raw 526.32) both round to 500 at
+    // round_to_nearest=100 — the update should only fire once the *rounded* price moves.
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({
+      demand: 0.55, demand_updated_at: String(Date.now()), last_pushed_cost: 500, round_to_nearest: 100,
+    }));
+    await applyDecayTick(1, 'rwd1');
+    expect(updateRewardCost).not.toHaveBeenCalled();
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), 500);
   });
 });
 

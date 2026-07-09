@@ -31,6 +31,25 @@ describe('computePrice', () => {
   it('clamps demand below 0 before computing', () => {
     expect(computePrice(-5, config)).toBe(computePrice(0, config));
   });
+
+  it('rounds to the nearest multiple of roundToNearest when set', () => {
+    // usage=0.5, curve=1.5 -> raw = 200 * 2.414214 = 482.8427 -> nearest 10 = 480
+    expect(computePrice(0.5, { ...config, roundToNearest: 10 })).toBe(480);
+    // nearest 5 = 485
+    expect(computePrice(0.5, { ...config, roundToNearest: 5 })).toBe(485);
+  });
+
+  it('is unaffected by roundToNearest when it is 0', () => {
+    expect(computePrice(0.5, { ...config, roundToNearest: 0 })).toBe(computePrice(0.5, config));
+  });
+
+  it('is unaffected by roundToNearest when it is negative', () => {
+    expect(computePrice(0.5, { ...config, roundToNearest: -5 })).toBe(computePrice(0.5, config));
+  });
+
+  it('is unaffected by a missing roundToNearest', () => {
+    expect(computePrice(0.5, config)).toBe(483);
+  });
 });
 
 describe('decayDemand', () => {

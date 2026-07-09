@@ -65,6 +65,7 @@ function buildSimulationChart(config: RewardPricingRow, settings: StreamerPricin
     baseCost: config.base_cost,
     maxMultiplier: config.max_multiplier,
     curve: config.curve,
+    roundToNearest: config.round_to_nearest,
     cooldownSeconds: config.cooldown_seconds,
     halfLifeSeconds: settings.half_life_seconds,
     timeToMaxMultiplier: settings.time_to_max_multiplier,
@@ -94,6 +95,7 @@ function previewPriceFor(config: RewardPricingRow): number {
     baseCost: config.base_cost,
     maxMultiplier: config.max_multiplier,
     curve: config.curve,
+    roundToNearest: config.round_to_nearest,
   });
 }
 

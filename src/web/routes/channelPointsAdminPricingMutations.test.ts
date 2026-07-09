@@ -114,9 +114,37 @@ describe('POST /rewards/:twitchRewardId/pricing', () => {
       .send({ enabled: 'on', base_cost: '200', max_multiplier: '4', curve: '1.5' });
     expect(res.headers.location).toBe('/channel-points?success=pricing_saved');
     expect(upsertPricingConfig).toHaveBeenCalledWith(MOCK_STREAMER.id, VALID_REWARD_ID, {
-      enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5,
+      enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5, round_to_nearest: 0,
     });
     expect(applyDecayTick).toHaveBeenCalledWith(MOCK_STREAMER.id, VALID_REWARD_ID);
+  });
+
+  it('defaults round_to_nearest to 0 (off) when not sent', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    await supertest(buildApp())
+      .post(`/rewards/${VALID_REWARD_ID}/pricing`)
+      .type('form')
+      .send({ base_cost: '200', max_multiplier: '4', curve: '1.5' });
+    expect(upsertPricingConfig).toHaveBeenCalledWith(MOCK_STREAMER.id, VALID_REWARD_ID, expect.objectContaining({ round_to_nearest: 0 }));
+  });
+
+  it('saves a configured round_to_nearest value', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    await supertest(buildApp())
+      .post(`/rewards/${VALID_REWARD_ID}/pricing`)
+      .type('form')
+      .send({ base_cost: '200', max_multiplier: '4', curve: '1.5', round_to_nearest: '10' });
+    expect(upsertPricingConfig).toHaveBeenCalledWith(MOCK_STREAMER.id, VALID_REWARD_ID, expect.objectContaining({ round_to_nearest: 10 }));
+  });
+
+  it('redirects with invalid_config when round_to_nearest is outside {0, 5, 10}', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const res = await supertest(buildApp())
+      .post(`/rewards/${VALID_REWARD_ID}/pricing`)
+      .type('form')
+      .send({ base_cost: '200', max_multiplier: '4', curve: '1.5', round_to_nearest: '7' });
+    expect(res.headers.location).toBe('/channel-points?error=invalid_config');
+    expect(upsertPricingConfig).not.toHaveBeenCalled();
   });
 
   it('falls back to the existing pricing config cooldown when the reward is no longer found on Twitch', async () => {

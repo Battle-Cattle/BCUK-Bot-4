@@ -12,6 +12,8 @@ export interface RewardPricingRow {
   cooldown_seconds: number;
   max_multiplier: number;
   curve: number;
+  /** Rounds the computed price to the nearest multiple of this many points (e.g. 5 or 10). 0 disables rounding. */
+  round_to_nearest: number;
   demand: number;
   /** Epoch ms as a string — BIGINT column; never coerce with Number() at this layer. */
   demand_updated_at: string;
@@ -27,6 +29,8 @@ export interface RewardPricingInput {
   cooldown_seconds: number;
   max_multiplier: number;
   curve: number;
+  /** Rounds the computed price to the nearest multiple of this many points (e.g. 5 or 10). 0 disables rounding. */
+  round_to_nearest: number;
 }
 
 /** Per-streamer settings shared by every one of their rewards' demand calculations. */
@@ -55,6 +59,7 @@ function mapRow(r: mysql.RowDataPacket): RewardPricingRow {
     cooldown_seconds: r.cooldown_seconds,
     max_multiplier: Number(r.max_multiplier),
     curve: Number(r.curve),
+    round_to_nearest: r.round_to_nearest,
     demand: Number(r.demand),
     demand_updated_at: String(r.demand_updated_at),
     last_pushed_cost: r.last_pushed_cost == null ? null : Number(r.last_pushed_cost),
@@ -64,7 +69,7 @@ function mapRow(r: mysql.RowDataPacket): RewardPricingRow {
 
 const REWARD_PRICING_SELECT = `
   id, streamer_id, twitch_reward_id, enabled, base_cost, cooldown_seconds,
-  max_multiplier, curve, demand, demand_updated_at, last_pushed_cost, twitch_unsupported`;
+  max_multiplier, curve, round_to_nearest, demand, demand_updated_at, last_pushed_cost, twitch_unsupported`;
 
 /**
  * Look up a single reward's pricing config/demand row, or null if not configured.
@@ -121,9 +126,9 @@ export async function getAllEnabledPricingRows(): Promise<RewardPricingRow[]> {
 
 /**
  * Create or update a reward's pricing config. Only touches the config columns
- * (enabled/base_cost/cooldown_seconds/max_multiplier/curve) — demand, demand_updated_at,
- * and last_pushed_cost are left untouched on an update so editing config never resets
- * in-flight demand state. New rows start at demand=0 with demand_updated_at=now.
+ * (enabled/base_cost/cooldown_seconds/max_multiplier/curve/round_to_nearest) — demand,
+ * demand_updated_at, and last_pushed_cost are left untouched on an update so editing config
+ * never resets in-flight demand state. New rows start at demand=0 with demand_updated_at=now.
  * Always clears `twitch_unsupported`, since an explicit save is the streamer opting back
  * in and deserves another attempt (e.g. after recreating the reward via the bot).
  *
@@ -138,15 +143,16 @@ export async function upsertPricingConfig(
 ): Promise<void> {
   await getPool().execute(
     `INSERT INTO reward_pricing
-       (streamer_id, twitch_reward_id, enabled, base_cost, cooldown_seconds, max_multiplier, curve, demand_updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?) AS new_row
+       (streamer_id, twitch_reward_id, enabled, base_cost, cooldown_seconds, max_multiplier, curve, round_to_nearest, demand_updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE
        enabled=new_row.enabled, base_cost=new_row.base_cost, cooldown_seconds=new_row.cooldown_seconds,
-       max_multiplier=new_row.max_multiplier, curve=new_row.curve, twitch_unsupported=0`,
+       max_multiplier=new_row.max_multiplier, curve=new_row.curve, round_to_nearest=new_row.round_to_nearest,
+       twitch_unsupported=0`,
     [
       streamerId, twitchRewardId,
       input.enabled ? 1 : 0, input.base_cost, input.cooldown_seconds, input.max_multiplier, input.curve,
-      Date.now(),
+      input.round_to_nearest, Date.now(),
     ],
   );
 }
