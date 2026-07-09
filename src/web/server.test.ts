@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Router } from 'express';
 import request from 'supertest';
 import { EventEmitter } from 'events';
@@ -178,6 +178,30 @@ describe('CSP header', () => {
     const csp = res.headers['content-security-policy'];
     expect(csp).toContain("font-src 'self'");
     expect(csp).not.toMatch(/font-src[^;]*https:/);
+  });
+});
+
+describe('HSTS header', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+  });
+
+  it('sends Strict-Transport-Security when NODE_ENV=production', async () => {
+    vi.resetModules();
+    process.env.NODE_ENV = 'production';
+    const { app: prodApp } = await import('./server.js');
+    const res = await request(prodApp).get('/__marker_dashboard');
+    expect(res.headers['strict-transport-security']).toBe('max-age=31536000; includeSubDomains');
+  });
+
+  it('omits Strict-Transport-Security outside production', async () => {
+    vi.resetModules();
+    process.env.NODE_ENV = 'test';
+    const { app: devApp } = await import('./server.js');
+    const res = await request(devApp).get('/__marker_dashboard');
+    expect(res.headers['strict-transport-security']).toBeUndefined();
   });
 });
 

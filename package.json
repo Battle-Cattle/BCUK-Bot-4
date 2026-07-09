@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/index.js",
+    "start": "NODE_ENV=production node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
