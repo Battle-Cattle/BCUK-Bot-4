@@ -19,6 +19,25 @@ rollback() {
     exit 1
 }
 
+# Retries a command up to 4 times with exponential backoff (2s, 4s, 8s, 16s),
+# to ride out transient failures like registry/CDN timeouts (e.g. ffmpeg-static's
+# postinstall download from GitHub releases).
+retry() {
+    local attempt=1
+    local max_attempts=4
+    local delay=2
+    until "$@"; do
+        if [ "$attempt" -ge "$max_attempts" ]; then
+            echo "ERROR: '$*' failed after $max_attempts attempts."
+            return 1
+        fi
+        echo "WARNING: '$*' failed (attempt $attempt/$max_attempts). Retrying in ${delay}s..."
+        sleep "$delay"
+        attempt=$((attempt + 1))
+        delay=$((delay * 2))
+    done
+}
+
 echo "==> Pulling latest code..."
 git update-index -q --refresh
 if ! git diff-index --quiet HEAD --; then
@@ -31,7 +50,7 @@ git pull origin main
 trap rollback ERR
 
 echo "==> Installing dependencies..."
-npm ci
+retry npm ci
 
 echo "==> Checking for vulnerabilities..."
 npm audit --audit-level=high
