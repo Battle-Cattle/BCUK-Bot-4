@@ -47,6 +47,16 @@ describe('computePrice', () => {
     expect(computePrice(0.5, { ...config, roundToNearest: -5 })).toBe(computePrice(0.5, config));
   });
 
+  it('clamps a rounded price back up to baseCost when rounding would push it below the minimum', () => {
+    // baseCost=1, raw=1 -> round(1/5)*5 = round(0.2)*5 = 0, which is below baseCost and clamped back up.
+    expect(computePrice(0, { baseCost: 1, maxMultiplier: 1, curve: 1, roundToNearest: 5 })).toBe(1);
+  });
+
+  it('clamps a rounded price back down to the max when rounding would push it above the max', () => {
+    // baseCost=100, maxMultiplier=0.53 -> max=153, raw=153 -> round(153/5)*5 = round(30.6)*5 = 155, clamped to 153.
+    expect(computePrice(1, { baseCost: 100, maxMultiplier: 0.53, curve: 1, roundToNearest: 5 })).toBe(153);
+  });
+
   it('is unaffected by a missing roundToNearest', () => {
     expect(computePrice(0.5, config)).toBe(483);
   });

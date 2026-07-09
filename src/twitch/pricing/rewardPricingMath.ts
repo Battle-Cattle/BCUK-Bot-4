@@ -10,19 +10,22 @@ export interface RewardPricingConfig {
 /**
  * Computes the current redemption price from demand and a reward's pricing config.
  * price = round(baseCost * (1 + clamp(demand,0,1)^curve * maxMultiplier)), then, if
- * `config.roundToNearest` is set, rounded again to the nearest multiple of it.
+ * `config.roundToNearest` is set, rounded again to the nearest multiple of it and clamped
+ * back into range — rounding to a coarse step can otherwise push the price below `baseCost`
+ * (even to a Twitch-invalid 0) or above the max.
  *
  * @param demand - Current demand value; clamped to [0,1] before use.
  * @param config - The reward's pricing configuration.
- * @returns The rounded price, bounded to [baseCost, baseCost*(1+maxMultiplier)] before any
- *   `roundToNearest` step is applied.
+ * @returns The price, always bounded to [baseCost, baseCost*(1+maxMultiplier)].
  */
 export function computePrice(demand: number, config: RewardPricingConfig): number {
   const usage = Math.min(1, Math.max(0, demand));
   const curved = Math.pow(usage, config.curve);
   const raw = config.baseCost * (1 + curved * config.maxMultiplier);
   if (config.roundToNearest && config.roundToNearest > 0) {
-    return Math.round(raw / config.roundToNearest) * config.roundToNearest;
+    const max = config.baseCost * (1 + config.maxMultiplier);
+    const rounded = Math.round(raw / config.roundToNearest) * config.roundToNearest;
+    return Math.max(config.baseCost, Math.min(max, rounded));
   }
   return Math.round(raw);
 }
