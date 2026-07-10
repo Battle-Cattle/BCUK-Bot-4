@@ -9,8 +9,25 @@ import type {
 import { TIKTOK_CHANNELS, TIKTOK_SIGN_API_KEY } from '../shared/config';
 import { handleCommand } from '../commands/commandRouter';
 import { setTikTokChannel } from '../shared/statusStore';
+import { findOwnerUser } from '../db';
+import { getDiscordClient } from '../discord/discordBot';
+import { getActiveGuildForUser } from '../discord/voicePresence';
 
 const log = createLogger('TikTok');
+
+/**
+ * Resolves which guild a TikTok chat command should target. TikTok channels
+ * have no per-streamer Discord-identity mapping today (unlike Twitch's
+ * `twitch_name`), so commands are routed to wherever the bot owner is
+ * currently in a voice channel.
+ */
+async function resolveGuildIdForTikTokCommand(): Promise<string | null> {
+  const owner = await findOwnerUser();
+  if (!owner) return null;
+  const discordClient = getDiscordClient();
+  if (!discordClient) return null;
+  return getActiveGuildForUser(discordClient, owner.discord_id);
+}
 
 // TypedEventEmitter<ClientEventMap> is the base of TikTokLiveConnection but TypeScript
 // can't resolve it through the library's declaration chain; cast explicitly.
@@ -76,9 +93,9 @@ function connectToChannel(username: string, modules: TikTokModules): void {
   });
 
   connection.on(WebcastEvent.CHAT, (data) => {
-    handleCommand(data.content, 'tiktok').catch((err) =>
-      log.error(`Command handler error (${username}):`, err),
-    );
+    resolveGuildIdForTikTokCommand()
+      .then((guildId) => handleCommand(data.content, 'tiktok', guildId))
+      .catch((err) => log.error(`Command handler error (${username}):`, err));
   });
 
   connection.on(WebcastEvent.STREAM_END, () => {

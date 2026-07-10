@@ -62,11 +62,26 @@ vi.mock('../shared/statusStore', () => ({
   setTikTokChannel: vi.fn(),
 }));
 
+vi.mock('../db', () => ({
+  findOwnerUser: vi.fn(),
+}));
+
+vi.mock('../discord/discordBot', () => ({
+  getDiscordClient: vi.fn(),
+}));
+
+vi.mock('../discord/voicePresence', () => ({
+  getActiveGuildForUser: vi.fn(),
+}));
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 type TikTokBotModule = typeof import('./tiktokBot');
 type CommandRouterModule = typeof import('../commands/commandRouter');
 type StatusStoreModule = typeof import('../shared/statusStore');
+type DbModule = typeof import('../db');
+type DiscordBotModule = typeof import('../discord/discordBot');
+type VoicePresenceModule = typeof import('../discord/voicePresence');
 
 const RECONNECT_DELAY_MS = 30_000;
 
@@ -78,6 +93,9 @@ async function setup(
   bot: TikTokBotModule;
   handleCommand: CommandRouterModule['handleCommand'];
   setTikTokChannel: StatusStoreModule['setTikTokChannel'];
+  findOwnerUser: DbModule['findOwnerUser'];
+  getDiscordClient: DiscordBotModule['getDiscordClient'];
+  getActiveGuildForUser: VoicePresenceModule['getActiveGuildForUser'];
 }> {
   vi.resetModules();
   vi.doMock('../shared/config', () => ({
@@ -86,8 +104,21 @@ async function setup(
   }));
   const commandRouter = await import('../commands/commandRouter.js') as CommandRouterModule;
   const statusStore = await import('../shared/statusStore.js') as StatusStoreModule;
+  const db = await import('../db.js') as DbModule;
+  const discordBot = await import('../discord/discordBot.js') as DiscordBotModule;
+  const voicePresence = await import('../discord/voicePresence.js') as VoicePresenceModule;
   const bot = await import('./tiktokBot.js') as TikTokBotModule;
-  return { bot, handleCommand: commandRouter.handleCommand, setTikTokChannel: statusStore.setTikTokChannel };
+  vi.mocked(db.findOwnerUser).mockResolvedValue({ discord_id: 'owner-discord-id' } as any);
+  vi.mocked(discordBot.getDiscordClient).mockReturnValue({} as any);
+  vi.mocked(voicePresence.getActiveGuildForUser).mockReturnValue('guild-A');
+  return {
+    bot,
+    handleCommand: commandRouter.handleCommand,
+    setTikTokChannel: statusStore.setTikTokChannel,
+    findOwnerUser: db.findOwnerUser,
+    getDiscordClient: discordBot.getDiscordClient,
+    getActiveGuildForUser: voicePresence.getActiveGuildForUser,
+  };
 }
 
 let activeBot: TikTokBotModule | undefined;
@@ -186,14 +217,29 @@ describe('startTikTokBot', () => {
 // ─── chat handler ─────────────────────────────────────────────────────────────
 
 describe('chat handling', () => {
-  it('forwards chat messages to handleCommand with the tiktok source', async () => {
-    const { bot, handleCommand } = await setup(['alice']);
+  it('forwards chat messages to handleCommand with the tiktok source, resolved via the bot owner\'s active voice guild', async () => {
+    const { bot, handleCommand, findOwnerUser, getActiveGuildForUser } = await setup(['alice']);
     activeBot = bot;
 
     await bot.startTikTokBot();
     getConnection('alice').emit('chat', { content: '!clap' });
 
-    expect(handleCommand).toHaveBeenCalledWith('!clap', 'tiktok');
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
+    expect(handleCommand).toHaveBeenCalledWith('!clap', 'tiktok', 'guild-A');
+    expect(findOwnerUser).toHaveBeenCalled();
+    expect(getActiveGuildForUser).toHaveBeenCalledWith(expect.anything(), 'owner-discord-id');
+  });
+
+  it('passes a null guildId when no bot owner is found', async () => {
+    const { bot, handleCommand, findOwnerUser } = await setup(['alice']);
+    activeBot = bot;
+    vi.mocked(findOwnerUser).mockResolvedValue(null);
+
+    await bot.startTikTokBot();
+    getConnection('alice').emit('chat', { content: '!clap' });
+
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
+    expect(handleCommand).toHaveBeenCalledWith('!clap', 'tiktok', null);
   });
 
   it('does not throw when the command handler rejects', async () => {

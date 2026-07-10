@@ -125,7 +125,9 @@ export function requireMod(req: Request, res: Response, next: NextFunction): voi
 
 /**
  * Authenticates a Streamdeck API request via a `Bearer` token, hashing it and looking it
- * up against approved keys. On success, attaches the key owner's Discord ID to the request.
+ * up against keys approved for at least one guild. On success, attaches the key owner's
+ * Discord ID to the request — the same key may be approved for more than one guild, so
+ * each route must resolve its own target guild and check {@link isKeyApprovedForGuild}.
  * @param req - Express request; reads the `Authorization` header.
  * @param res - Express response; used to respond 401/500 on failure.
  * @param next - Called once `req.apiKeyOwner` has been set.
@@ -145,8 +147,7 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
       res.status(401).json({ ok: false, error: 'Unauthorized' });
       return;
     }
-    req.apiKeyOwner = row.discord_id;
-    req.apiKeyGuildId = row.guild_id;
+    req.apiKeyOwner = row.discordId;
     next();
   } catch {
     res.status(500).json({ ok: false, error: 'Internal server error' });

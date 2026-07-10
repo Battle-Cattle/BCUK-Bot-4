@@ -30,12 +30,9 @@ import {
 // by guild ID. The reconnect state machine (attempt IDs, timers, backoff) runs
 // independently per guild so a drop in one guild never disturbs another.
 //
-// The @discordjs/voice AudioPlayer below is intentionally a single shared
-// instance (Pitfall #7 in the plan): only one guild can play audio at a time,
-// and a resource sent to the player is heard on every connection currently
-// subscribed. That is acceptable for the single-guild deployment (one
-// connection) and is documented as an MVP limitation; true concurrency needs a
-// per-guild player.
+// Each guild also gets its own @discordjs/voice AudioPlayer, subscribed only to
+// that guild's connection, so two guilds can play independent audio
+// concurrently — playing a sound in one guild is never heard in another.
 
 interface GuildVoiceState {
   guildId: string;
@@ -49,6 +46,8 @@ interface GuildVoiceState {
   currentAttemptId: number;
   // Builds this guild's raw-gateway voice adapters and tracks their cleanup.
   adapterFactory: VoiceAdapterFactory;
+  player: DjsAudioPlayer | null;
+  playing: boolean;
 }
 
 const states = new Map<string, GuildVoiceState>();
@@ -68,6 +67,8 @@ function getState(guildId: string): GuildVoiceState {
       shouldAutoReconnect: false,
       currentAttemptId: 0,
       adapterFactory: createVoiceAdapterFactory(),
+      player: null,
+      playing: false,
     };
     states.set(guildId, state);
   }
@@ -81,10 +82,6 @@ function anyConnected(): boolean {
   }
   return false;
 }
-
-// Single shared audio player (see note above).
-let player: DjsAudioPlayer;
-let playing = false;
 
 // ─── Reconnect ────────────────────────────────────────────────────────────────
 
@@ -119,38 +116,41 @@ function scheduleReconnect(state: GuildVoiceState, reason: string): void {
   }, delay);
 }
 
-/** Returns the shared audio player, lazily creating it with idle and error handlers on first use. */
-function getPlayer(): DjsAudioPlayer {
-  if (!player) {
-    player = createAudioPlayer({
+/** Returns this guild's audio player, lazily creating it with idle and error handlers on first use. */
+function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
+  if (!state.player) {
+    const guildPlayer = createAudioPlayer({
       behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
     });
-    player.on(AudioPlayerStatus.Idle, () => {
-      playing = false;
+    guildPlayer.on(AudioPlayerStatus.Idle, () => {
+      state.playing = false;
       setVoiceIdle();
     });
-    player.on('error', (err) => {
+    guildPlayer.on('error', (err) => {
       log.error(`Error: ${err.message}`, err);
-      playing = false;
+      state.playing = false;
     });
+    state.player = guildPlayer;
   }
-  return player;
+  return state.player;
 }
 
 /**
- * Releases a guild's playback footprint after its connection is gone. Only stops
- * the shared player / clears the global playing status once no guild remains
- * connected, so tearing down one guild never silences another.
+ * Releases a guild's playback footprint after its connection is gone. Always
+ * stops this guild's own player so playback in one guild never bleeds into
+ * another; the shared/global voice-status dashboard is only cleared once no
+ * guild remains connected, so tearing down one guild's connection doesn't
+ * report the whole bot as disconnected while another guild is still live.
  */
 function tearDownGuild(state: GuildVoiceState): void {
   state.currentChannelId = null;
+  try {
+    state.player?.stop(true);
+  } catch {
+    // Ignore audio stop errors during disconnect cleanup.
+  }
+  state.playing = false;
   if (!anyConnected()) {
-    try {
-      getPlayer().stop(true);
-    } catch {
-      // Ignore audio stop errors during disconnect cleanup.
-    }
-    playing = false;
     setVoiceDisconnected();
   }
 }
@@ -238,7 +238,7 @@ export async function connect(client: Client, guildId: string, channelId: string
     log.info(`Voice connection ready for guild ${guildId}.`);
     state.reconnectAttempts = 0;
 
-    joinedConnection.subscribe(getPlayer());
+    joinedConnection.subscribe(getPlayer(state));
     setVoiceConnected(channel.name);
     log.info(`Joined voice channel: ${channel.name}`);
   } catch (err) {
@@ -270,13 +270,13 @@ function disconnectGuild(state: GuildVoiceState): void {
   if (existingConnection) {
     existingConnection.destroy();
     state.connection = null;
+    try {
+      state.player?.stop(true);
+    } catch {
+      // Ignore audio stop errors during disconnect cleanup.
+    }
+    state.playing = false;
     if (!anyConnected()) {
-      try {
-        getPlayer().stop(true);
-      } catch {
-        // Ignore audio stop errors during disconnect cleanup.
-      }
-      playing = false;
       setVoiceDisconnected();
     }
     log.info(`Disconnected from voice channel for guild ${state.guildId}.`);
@@ -298,9 +298,13 @@ export function disconnect(guildId?: string): void {
   if (state) disconnectGuild(state);
 }
 
-/** Returns true if a sound is currently being played (shared across guilds). */
-export function isPlaying(): boolean {
-  return playing;
+/**
+ * Returns true if a sound is currently being played in the given guild.
+ *
+ * @param guildId - Guild to check.
+ */
+export function isPlaying(guildId: string): boolean {
+  return states.get(guildId)?.playing ?? false;
 }
 
 /**
@@ -323,11 +327,14 @@ export function getCurrentChannelId(guildId: string): string | null {
 }
 
 /**
- * Marks playback as active and sends the resource to the shared audio player.
+ * Marks playback as active for the given guild and sends the resource to that
+ * guild's own audio player.
  *
  * @param resource - The audio resource to play.
+ * @param guildId - Guild to play the resource in.
  */
-export function startPlayback(resource: AudioResource): void {
-  playing = true;
-  getPlayer().play(resource);
+export function startPlayback(resource: AudioResource, guildId: string): void {
+  const state = getState(guildId);
+  state.playing = true;
+  getPlayer(state).play(resource);
 }

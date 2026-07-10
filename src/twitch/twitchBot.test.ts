@@ -37,6 +37,15 @@ vi.mock('../shared/config', () => ({
 
 vi.mock('../db', () => ({
   getTwitchEnabledChannels: vi.fn(),
+  findUserByTwitchName: vi.fn(),
+}));
+
+vi.mock('../discord/discordBot', () => ({
+  getDiscordClient: vi.fn(),
+}));
+
+vi.mock('../discord/voicePresence', () => ({
+  getActiveGuildForUser: vi.fn(),
 }));
 
 vi.mock('./twitchApi', () => ({
@@ -77,6 +86,7 @@ import {
   startTwitchBot,
   stopTwitchBot,
   sayInChannel,
+  __resetTwitchChannelDiscordIdCacheForTests,
 } from './twitchBot';
 import {
   joinTwitchChannel,
@@ -85,7 +95,9 @@ import {
   getActiveChannelUserIds,
   setChannelJoinedHook,
 } from './twitchChannelMembership';
-import { getTwitchEnabledChannels } from '../db';
+import { getTwitchEnabledChannels, findUserByTwitchName } from '../db';
+import { getDiscordClient } from '../discord/discordBot';
+import { getActiveGuildForUser } from '../discord/voicePresence';
 import { getUsers } from './twitchApi';
 import { setTwitchChannel } from '../shared/statusStore';
 import { executeCustomCommandForTwitch } from '../commands/customCommandHandler';
@@ -151,6 +163,10 @@ describe('handleTwitchMessage', () => {
     // Reset call history so only message-dispatch calls are visible to assertions.
     vi.clearAllMocks();
     resetMockClient();
+    vi.mocked(findUserByTwitchName).mockResolvedValue({ discord_id: 'streamer-discord-id' } as any);
+    vi.mocked(getDiscordClient).mockReturnValue({} as any);
+    vi.mocked(getActiveGuildForUser).mockReturnValue('guild-A');
+    __resetTwitchChannelDiscordIdCacheForTests();
   });
 
   function sendMessage(
@@ -188,7 +204,7 @@ describe('handleTwitchMessage', () => {
     expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', 'hello', null);
   });
 
-  it('dispatches all six executors for a normal message', () => {
+  it('dispatches all six executors for a normal message', async () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeCounterCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeMultiCommandForTwitch).mockResolvedValue(undefined);
@@ -202,8 +218,32 @@ describe('handleTwitchMessage', () => {
     expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce();
     expect(executeMultiCommandForTwitch).toHaveBeenCalledOnce();
     expect(executeShoutoutForTwitch).toHaveBeenCalledOnce();
-    expect(handleCommand).toHaveBeenCalledOnce();
+    // Guild resolution (Twitch-channel → discord_id → active voice guild) runs
+    // asynchronously before handleCommand is invoked.
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
+    expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', 'guild-A');
     expect(executeCountdownForTwitch).toHaveBeenCalledOnce();
+  });
+
+  it('resolves the target guild via the linked streamer\'s active voice presence', async () => {
+    vi.mocked(handleCommand).mockResolvedValue(undefined);
+
+    sendMessage('#streamer', makeTags(), '!cmd');
+
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
+    expect(findUserByTwitchName).toHaveBeenCalledWith('streamer');
+    expect(getActiveGuildForUser).toHaveBeenCalledWith(expect.anything(), 'streamer-discord-id');
+  });
+
+  it('passes a null guildId to handleCommand when the channel has no linked Discord user', async () => {
+    vi.mocked(findUserByTwitchName).mockResolvedValue(null);
+    vi.mocked(handleCommand).mockResolvedValue(undefined);
+
+    sendMessage('#streamer', makeTags(), '!cmd');
+
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
+    expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', null);
+    expect(getActiveGuildForUser).not.toHaveBeenCalled();
   });
 
   it('passes the normalized channel and message to executors', () => {

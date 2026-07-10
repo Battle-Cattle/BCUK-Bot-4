@@ -53,44 +53,69 @@ beforeEach(() => {
 
 const TRIGGER: SfxTrigger = { id: 42n, trigger_command: '!ding', category_id: null, hidden: false, description: null };
 const FILES: SfxFile[] = [{ id: 1, trigger_id: 42n, file: 'ding.mp3', trigger_command: null, weight: 1, hidden: false, category_id: null }];
+const GUILD_A = 'guild-A';
+const GUILD_B = 'guild-B';
 
 describe('handleCommand', () => {
   it('does nothing for an unrecognised command', async () => {
     vi.mocked(isPlaying).mockReturnValue(false);
     vi.mocked(findTrigger).mockResolvedValue(null);
 
-    await handleCommand('!unknown', 'twitch');
+    await handleCommand('!unknown', 'twitch', GUILD_A);
 
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
 
-  it('ignores the command while audio is already playing', async () => {
-    vi.mocked(isPlaying).mockReturnValue(true);
-
-    await handleCommand('!ding', 'twitch');
+  it('skips with a warning and does not look anything up when no guild is resolved', async () => {
+    await handleCommand('!ding', 'twitch', null);
 
     expect(vi.mocked(findTrigger)).not.toHaveBeenCalled();
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
 
-  it('ignores the command while the global cooldown is active', async () => {
-    // First call plays successfully and sets lastPlayedAt = mockNow
+  it('ignores the command while audio is already playing in that guild', async () => {
+    vi.mocked(isPlaying).mockReturnValue(true);
+
+    await handleCommand('!ding', 'twitch', GUILD_A);
+
+    expect(vi.mocked(findTrigger)).not.toHaveBeenCalled();
+    expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(isPlaying)).toHaveBeenCalledWith(GUILD_A);
+  });
+
+  it('ignores the command while the per-guild cooldown is active', async () => {
+    // First call plays successfully and sets this guild's lastPlayedAt = mockNow
     vi.mocked(isPlaying).mockReturnValue(false);
     vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
     vi.mocked(findSoundFiles).mockResolvedValue(FILES);
     vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
 
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', GUILD_A);
     expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
 
     // Second call at the same timestamp — cooldown has not elapsed
     vi.clearAllMocks();
     vi.spyOn(Date, 'now').mockReturnValue(mockNow);
 
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', GUILD_A);
 
     expect(vi.mocked(findTrigger)).not.toHaveBeenCalled();
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+  });
+
+  it('does not apply one guild\'s cooldown to another guild', async () => {
+    vi.mocked(isPlaying).mockReturnValue(false);
+    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
+    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
+
+    await handleCommand('!ding', 'twitch', GUILD_A);
+    expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
+
+    // Same timestamp, but a different guild — its own cooldown has not started yet.
+    await handleCommand('!ding', 'twitch', GUILD_B);
+
+    expect(vi.mocked(playFile)).toHaveBeenCalledTimes(2);
   });
 
   it('plays the correct file and updates status for a known command', async () => {
@@ -99,10 +124,10 @@ describe('handleCommand', () => {
     vi.mocked(findSoundFiles).mockResolvedValue(FILES);
     vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
 
-    await handleCommand('!ding discord', 'discord');
+    await handleCommand('!ding discord', 'discord', GUILD_A);
 
     expect(vi.mocked(findTrigger)).toHaveBeenCalledWith('!ding');
-    expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'ding.mp3'));
+    expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'ding.mp3'), GUILD_A);
     expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('ding.mp3', '!ding', 'discord');
   });
 
@@ -116,10 +141,10 @@ describe('handleCommand', () => {
     const firstTriggerPromise = new Promise<typeof TRIGGER>((resolve) => { resolveFirst = resolve; });
     vi.mocked(findTrigger).mockReturnValueOnce(firstTriggerPromise as ReturnType<typeof findTrigger>);
 
-    const first = handleCommand('!ding', 'twitch');
+    const first = handleCommand('!ding', 'twitch', GUILD_A);
 
     // Second call arrives while first is suspended inside findTrigger
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', GUILD_A);
     expect(vi.mocked(findTrigger)).toHaveBeenCalledTimes(1); // second was blocked
 
     // Let the first call complete
@@ -136,7 +161,7 @@ describe('handleCommand', () => {
     vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
     vi.mocked(findSoundFiles).mockResolvedValue([]);
 
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', GUILD_A);
 
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
@@ -150,7 +175,7 @@ describe('handleCommand', () => {
 
     const errorSpy = vi.spyOn(console, 'error');
 
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', GUILD_A);
 
     // setVoicePlaying must NOT be called when playback fails
     expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
@@ -167,7 +192,7 @@ describe('handleCommand', () => {
 
     const errorSpy = vi.spyOn(console, 'error');
 
-    await handleCommand('!ding', 'twitch');
+    await handleCommand('!ding', 'twitch', GUILD_A);
 
     expect(errorSpy).not.toHaveBeenCalled();
     expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
@@ -180,7 +205,7 @@ describe('handleCommand', () => {
       vi.mocked(findSoundFiles).mockResolvedValue(FILES);
       vi.mocked(pickWeightedRandom).mockReturnValue('../../../etc/passwd');
 
-      await handleCommand('!exploit', 'twitch');
+      await handleCommand('!exploit', 'twitch', GUILD_A);
 
       expect(vi.mocked(playFile)).not.toHaveBeenCalled();
       expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
@@ -192,7 +217,7 @@ describe('handleCommand', () => {
       vi.mocked(findSoundFiles).mockResolvedValue(FILES);
       vi.mocked(pickWeightedRandom).mockReturnValue('..%2F..%2Fetc%2Fpasswd');
 
-      await handleCommand('!exploit', 'twitch');
+      await handleCommand('!exploit', 'twitch', GUILD_A);
 
       expect(vi.mocked(playFile)).not.toHaveBeenCalled();
       expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
@@ -204,7 +229,7 @@ describe('handleCommand', () => {
       vi.mocked(findSoundFiles).mockResolvedValue(FILES);
       vi.mocked(pickWeightedRandom).mockReturnValue('/etc/passwd');
 
-      await handleCommand('!exploit', 'twitch');
+      await handleCommand('!exploit', 'twitch', GUILD_A);
 
       expect(vi.mocked(playFile)).not.toHaveBeenCalled();
       expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
@@ -217,9 +242,9 @@ describe('handleCommand', () => {
       vi.mocked(pickWeightedRandom).mockReturnValue('valid-sound.mp3');
       vi.mocked(playFile).mockImplementation(() => {}); // Reset to no-op
 
-      await handleCommand('!safe', 'twitch');
+      await handleCommand('!safe', 'twitch', GUILD_A);
 
-      expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'valid-sound.mp3'));
+      expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'valid-sound.mp3'), GUILD_A);
       expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('valid-sound.mp3', '!safe', 'twitch');
     });
 
@@ -230,9 +255,9 @@ describe('handleCommand', () => {
       vi.mocked(pickWeightedRandom).mockReturnValue('category/sound.mp3');
       vi.mocked(playFile).mockImplementation(() => {}); // Reset to no-op
 
-      await handleCommand('!safe', 'twitch');
+      await handleCommand('!safe', 'twitch', GUILD_A);
 
-      expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'category', 'sound.mp3'));
+      expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'category', 'sound.mp3'), GUILD_A);
       expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('category/sound.mp3', '!safe', 'twitch');
     });
   });

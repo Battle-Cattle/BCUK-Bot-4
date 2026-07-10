@@ -1,8 +1,11 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import {
-  requestApiKey,
-  getApiKeyStatus,
+  hasApiKey,
+  createApiKeyAndRequestGuildAccess,
+  requestGuildAccessForExistingKey,
+  rotateApiKey,
+  getGuildStatusForKey,
   revokeApiKey,
   approveApiKey,
   denyApiKey,
@@ -21,10 +24,10 @@ const router = Router();
 
 const USER_KNOWN_ERRORS = new Set(['request_failed', 'revoke_failed']);
 
-/** Renders the current user's Streamdeck API key status page. */
+/** Renders the current user's Streamdeck API key status page for their current guild. */
 router.get('/streamdeck-key', csrfProtection, async (req, res) => {
   try {
-    const keyRow = await getApiKeyStatus(req.session.user!.discordId);
+    const keyRow = await getGuildStatusForKey(req.session.user!.discordId, req.session.user!.currentGuildId!);
     renderView(res, 'streamdeck-keys', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
@@ -39,15 +42,32 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
   }
 });
 
-/** Requests a new Streamdeck API key for the current user and renders the plaintext key once. */
+/**
+ * Requests Streamdeck access for the current guild and renders the result.
+ * A brand-new user gets a freshly minted key (plaintext shown once). A user
+ * who already has a key from another guild reuses it — no plaintext to show,
+ * since only the key's hash is ever stored. Re-requesting when this guild
+ * already has a request on file rotates the key's secret instead (the
+ * "lost my key" flow), which also stops the old key working everywhere.
+ */
 router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
+  const discordId = req.session.user!.discordId;
+  const accessLevel = req.session.user!.accessLevel;
+  const guildId = req.session.user!.currentGuildId!;
   try {
-    const { plain } = await requestApiKey(
-      req.session.user!.discordId,
-      req.session.user!.accessLevel,
-      req.session.user!.currentGuildId!,
-    );
-    const keyRow = await getApiKeyStatus(req.session.user!.discordId);
+    const existingGuildStatus = await getGuildStatusForKey(discordId, guildId);
+    let plain: string | null = null;
+    if (existingGuildStatus) {
+      if (existingGuildStatus.status === 'denied') {
+        throw new Error('API key request rejected: previous request was denied');
+      }
+      ({ plain } = await rotateApiKey(discordId));
+    } else if (await hasApiKey(discordId)) {
+      await requestGuildAccessForExistingKey(discordId, accessLevel, guildId);
+    } else {
+      ({ plain } = await createApiKeyAndRequestGuildAccess(discordId, accessLevel, guildId));
+    }
+    const keyRow = await getGuildStatusForKey(discordId, guildId);
     renderView(res, 'streamdeck-keys', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
@@ -61,10 +81,10 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
   }
 });
 
-/** Revokes the current user's own Streamdeck API key. */
+/** Revokes the current user's own Streamdeck access for their current guild only — other guilds' approvals are unaffected. */
 router.post('/streamdeck-key/revoke', csrfProtection, async (req, res) => {
   try {
-    await revokeApiKey(req.session.user!.discordId);
+    await revokeApiKey(req.session.user!.discordId, req.session.user!.currentGuildId!);
     res.redirect('/streamdeck-key');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key revoke error:', err, basePath: '/streamdeck-key', errorCode: 'revoke_failed' });

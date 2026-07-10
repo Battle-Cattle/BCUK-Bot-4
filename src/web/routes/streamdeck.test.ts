@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SfxTrigger, SfxFile } from '../../db';
 
-let mockApiKeyGuildId: string | null = 'guild-123';
+const API_KEY_OWNER = 'user-1';
+
 vi.mock('../middleware', () => ({
   requireApiKey: (req: any, _res: any, next: any) => {
-    req.apiKeyGuildId = mockApiKeyGuildId;
+    req.apiKeyOwner = API_KEY_OWNER;
     next();
   },
 }));
@@ -13,6 +14,8 @@ vi.mock('../../db', () => ({
   findTrigger: vi.fn(),
   findSoundFiles: vi.fn(),
   getAllSfxTriggers: vi.fn(),
+  isKeyApprovedForGuild: vi.fn(),
+  getApprovedGuildIdsForKey: vi.fn(),
 }));
 
 vi.mock('../../commands/soundSelector', () => ({
@@ -43,6 +46,10 @@ vi.mock('../../discord/discordBot', () => ({
   getDiscordClient: vi.fn(),
 }));
 
+vi.mock('../../discord/voicePresence', () => ({
+  getActiveGuildForUser: vi.fn(),
+}));
+
 vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
@@ -50,13 +57,14 @@ vi.mock('../../shared/logger', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router from './streamdeck';
-import { findTrigger, findSoundFiles, getAllSfxTriggers } from '../../db';
+import { findTrigger, findSoundFiles, getAllSfxTriggers, isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
 import { getDiscordClient } from '../../discord/discordBot';
+import { getActiveGuildForUser } from '../../discord/voicePresence';
 
 const TRIGGER: SfxTrigger = {
   id: BigInt(1),
@@ -70,6 +78,17 @@ const FILES: SfxFile[] = [
   { id: 1, trigger_id: BigInt(1), file: 'ding.mp3', trigger_command: null, weight: 1, hidden: false, category_id: null },
 ];
 
+/** Fake Discord client whose channels.fetch resolves any channel to the given guildId. */
+function makeClient(channelGuildId: string | null = 'guild-123') {
+  return {
+    channels: {
+      fetch: vi.fn(async (channelId: string) =>
+        channelGuildId ? { id: channelId, guildId: channelGuildId } : null,
+      ),
+    },
+  } as any;
+}
+
 function buildApp() {
   const app = express();
   app.use(express.json());
@@ -79,18 +98,20 @@ function buildApp() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockApiKeyGuildId = 'guild-123';
   vi.mocked(getAllSfxTriggers).mockResolvedValue([]);
   vi.mocked(findTrigger).mockResolvedValue(null);
   vi.mocked(findSoundFiles).mockResolvedValue([]);
   vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
-  vi.mocked(getDiscordClient).mockReturnValue({} as any);
+  vi.mocked(getDiscordClient).mockReturnValue(makeClient());
   vi.mocked(connect).mockResolvedValue(undefined);
   vi.mocked(getAvailableVoiceChannels).mockResolvedValue([]);
+  vi.mocked(getActiveGuildForUser).mockReturnValue('guild-123');
+  vi.mocked(isKeyApprovedForGuild).mockResolvedValue(true);
+  vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue(['guild-123']);
 });
 
 describe('POST /sfx', () => {
-  it('calls playFile with the bare filename — not prefixed with SFX_FOLDER', async () => {
+  it('calls playFile with the bare filename and the presence-resolved guild', async () => {
     vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
     vi.mocked(findSoundFiles).mockResolvedValue(FILES);
     vi.mocked(pickWeightedRandom).mockReturnValue('only1_v2.mp3');
@@ -100,8 +121,8 @@ describe('POST /sfx', () => {
       .send({ command: '!ding' })
       .expect(200);
 
-    expect(vi.mocked(playFile)).toHaveBeenCalledWith('only1_v2.mp3');
-    expect(vi.mocked(playFile)).not.toHaveBeenCalledWith(expect.stringContaining('/'));
+    expect(vi.mocked(playFile)).toHaveBeenCalledWith('only1_v2.mp3', 'guild-123');
+    expect(vi.mocked(playFile)).not.toHaveBeenCalledWith(expect.stringContaining('/'), expect.anything());
   });
 
   it('returns 200 and the filename on success', async () => {
@@ -140,6 +161,32 @@ describe('POST /sfx', () => {
     const res = await supertest(buildApp()).post('/sfx').send({ command: '   ' }).expect(400);
     expect(res.body).toMatchObject({ ok: false });
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 when the key owner is not connected to voice in any guild', async () => {
+    vi.mocked(getActiveGuildForUser).mockReturnValue(null);
+
+    const res = await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(503);
+
+    expect(res.body).toMatchObject({ ok: false });
+    expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when the key is not approved for the resolved guild', async () => {
+    vi.mocked(isKeyApprovedForGuild).mockResolvedValue(false);
+
+    const res = await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(403);
+
+    expect(res.body).toMatchObject({ ok: false });
+    expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 when Discord client is not ready', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue(null);
+
+    const res = await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(503);
+
+    expect(res.body).toMatchObject({ ok: false });
   });
 
   it('returns 404 when trigger is not found', async () => {
@@ -236,27 +283,29 @@ describe('GET /sfx', () => {
 });
 
 describe('GET /voice/channels', () => {
-  it('returns available voice channels', async () => {
-    const channels = [{ id: 'ch1', name: 'General' }];
-    vi.mocked(getAvailableVoiceChannels).mockResolvedValue(channels as any);
+  it('returns voice channels grouped by every guild the key is approved for', async () => {
+    vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue(['guild-123', 'guild-456']);
+    const channelsA = [{ id: 'ch1', name: 'General' }];
+    const channelsB = [{ id: 'ch2', name: 'Hangout' }];
+    vi.mocked(getAvailableVoiceChannels).mockImplementation(async (guildId: string) =>
+      (guildId === 'guild-123' ? channelsA : channelsB) as any,
+    );
 
     const res = await supertest(buildApp()).get('/voice/channels').expect(200);
 
-    expect(res.body).toEqual({ ok: true, channels });
+    expect(res.body).toEqual({
+      ok: true,
+      guilds: [
+        { guildId: 'guild-123', channels: channelsA },
+        { guildId: 'guild-456', channels: channelsB },
+      ],
+    });
   });
 
   it('returns 500 on error', async () => {
-    vi.mocked(getAvailableVoiceChannels).mockRejectedValue(new Error('Discord down'));
+    vi.mocked(getApprovedGuildIdsForKey).mockRejectedValue(new Error('DB down'));
 
     const res = await supertest(buildApp()).get('/voice/channels').expect(500);
-
-    expect(res.body).toMatchObject({ ok: false });
-  });
-
-  it('returns 503 when the API key has no guild binding', async () => {
-    mockApiKeyGuildId = null;
-
-    const res = await supertest(buildApp()).get('/voice/channels').expect(503);
 
     expect(res.body).toMatchObject({ ok: false });
   });
@@ -284,7 +333,10 @@ describe('POST /voice/join', () => {
     expect(res.body).toMatchObject({ ok: false });
   });
 
-  it('disconnects and then joins the specified channel', async () => {
+  it('disconnects and then joins the channel, resolving the guild from the channel ID', async () => {
+    const client = makeClient('guild-123');
+    vi.mocked(getDiscordClient).mockReturnValue(client);
+
     const res = await supertest(buildApp())
       .post('/voice/join')
       .send({ channelId: '123456789012345678' })
@@ -292,7 +344,32 @@ describe('POST /voice/join', () => {
 
     expect(res.body).toEqual({ ok: true });
     expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
-    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, 'guild-123', '123456789012345678');
+    expect(vi.mocked(connect)).toHaveBeenCalledWith(client, 'guild-123', '123456789012345678');
+    expect(vi.mocked(isKeyApprovedForGuild)).toHaveBeenCalledWith(API_KEY_OWNER, 'guild-123');
+  });
+
+  it('returns 400 when the channel does not resolve to any guild', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue(makeClient(null));
+
+    const res = await supertest(buildApp())
+      .post('/voice/join')
+      .send({ channelId: '123456789012345678' })
+      .expect(400);
+
+    expect(res.body).toMatchObject({ ok: false });
+    expect(vi.mocked(connect)).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when the key is not approved for the channel\'s guild', async () => {
+    vi.mocked(isKeyApprovedForGuild).mockResolvedValue(false);
+
+    const res = await supertest(buildApp())
+      .post('/voice/join')
+      .send({ channelId: '123456789012345678' })
+      .expect(403);
+
+    expect(res.body).toMatchObject({ ok: false });
+    expect(vi.mocked(connect)).not.toHaveBeenCalled();
   });
 
   it('returns 500 when connect throws', async () => {
@@ -305,32 +382,46 @@ describe('POST /voice/join', () => {
 
     expect(res.body).toMatchObject({ ok: false });
   });
-
-  it('returns 503 when the API key has no guild binding', async () => {
-    mockApiKeyGuildId = null;
-
-    const res = await supertest(buildApp())
-      .post('/voice/join')
-      .send({ channelId: '123456789012345678' })
-      .expect(503);
-
-    expect(res.body).toMatchObject({ ok: false });
-  });
 });
 
 describe('POST /voice/leave', () => {
-  it('disconnects and returns ok', async () => {
-    const res = await supertest(buildApp()).post('/voice/leave').expect(200);
+  it('returns 400 when channelId is missing', async () => {
+    const res = await supertest(buildApp()).post('/voice/leave').send({}).expect(400);
+    expect(res.body).toMatchObject({ ok: false });
+  });
+
+  it('resolves the guild from channelId and disconnects', async () => {
+    const client = makeClient('guild-123');
+    vi.mocked(getDiscordClient).mockReturnValue(client);
+
+    const res = await supertest(buildApp())
+      .post('/voice/leave')
+      .send({ channelId: '123456789012345678' })
+      .expect(200);
 
     expect(res.body).toEqual({ ok: true });
-    // Leaving must be scoped to the configured guild, not an unscoped disconnect.
     expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
   });
 
-  it('returns 503 when the API key has no guild binding', async () => {
-    mockApiKeyGuildId = null;
+  it('returns 403 when the key is not approved for the channel\'s guild', async () => {
+    vi.mocked(isKeyApprovedForGuild).mockResolvedValue(false);
 
-    const res = await supertest(buildApp()).post('/voice/leave').expect(503);
+    const res = await supertest(buildApp())
+      .post('/voice/leave')
+      .send({ channelId: '123456789012345678' })
+      .expect(403);
+
+    expect(res.body).toMatchObject({ ok: false });
+    expect(vi.mocked(disconnect)).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 when Discord client is not ready', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue(null);
+
+    const res = await supertest(buildApp())
+      .post('/voice/leave')
+      .send({ channelId: '123456789012345678' })
+      .expect(503);
 
     expect(res.body).toMatchObject({ ok: false });
   });

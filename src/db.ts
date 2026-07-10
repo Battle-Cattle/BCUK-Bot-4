@@ -23,7 +23,7 @@ export type { DbGuildCommandOverride } from './db/guildCommandOverrides';
 
 export {
   AccessLevel, ACCESS_LEVEL_LABELS,
-  findUser, findUserByTwitchName, getAllUsers, getGuildMemberUsers,
+  findUser, findUserByTwitchName, findOwnerUser, getAllUsers, getGuildMemberUsers,
   updateDiscordName, getTwitchEnabledChannels, updateAccessLevel,
 } from './db/users';
 export type { AccessLevelValue, DbUser } from './db/users';
@@ -163,11 +163,16 @@ export { recordPricingHistory, getPricingHistory } from './db/rewardPricingHisto
 
 // ─── Streamdeck API keys ─────────────────────────────────────────────────────
 
-export type { StreamdeckKeyRow } from './db/streamdeckKeys';
+export type { StreamdeckKeyGuildStatusRow } from './db/streamdeckKeys';
 export {
-  requestApiKey,
+  hasApiKey,
+  createApiKeyAndRequestGuildAccess,
+  requestGuildAccessForExistingKey,
+  rotateApiKey,
   findApprovedKeyByHash,
-  getApiKeyStatus,
+  isKeyApprovedForGuild,
+  getApprovedGuildIdsForKey,
+  getGuildStatusForKey,
   approveApiKey,
   denyApiKey,
   revokeApiKey,

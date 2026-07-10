@@ -1,6 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Request, type Response } from 'express';
-import { findTrigger, findSoundFiles, getAllSfxTriggers } from '../../db';
+import { Client } from 'discord.js';
+import { findTrigger, findSoundFiles, getAllSfxTriggers, isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
@@ -8,19 +9,60 @@ import { requireApiKey } from '../middleware';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
 import { getDiscordClient } from '../../discord/discordBot';
+import { getActiveGuildForUser } from '../../discord/voicePresence';
 import { normalizeDiscordId } from './shared';
 
 const log = createLogger('Streamdeck');
 const router = Router();
 
 /**
- * Returns the guild ID the API key is bound to. Sends 503 and returns null
- * if the key is not bound to a guild.
+ * Resolves which guild a voice-channel ID belongs to, or null if the channel
+ * doesn't exist / isn't a guild channel.
  */
-function getApiKeyGuildId(req: Request, res: Response): string | null {
-  const guildId = req.apiKeyGuildId ?? null;
+async function resolveGuildIdFromChannelId(client: Client, channelId: string): Promise<string | null> {
+  try {
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || !('guildId' in channel)) return null;
+    return channel.guildId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves the guild a channel-scoped Streamdeck action (join/leave) should
+ * target from the request's own `channelId`, and confirms the key is approved
+ * for that guild. Sends the appropriate error response and returns null on
+ * any failure.
+ */
+async function resolveChannelGuildOrRespond(req: Request, res: Response, client: Client, channelId: string): Promise<string | null> {
+  const guildId = await resolveGuildIdFromChannelId(client, channelId);
   if (!guildId) {
-    res.status(503).json({ ok: false, error: 'API key has no guild binding' });
+    res.status(400).json({ ok: false, error: 'Unknown voice channel' });
+    return null;
+  }
+  if (!(await isKeyApprovedForGuild(req.apiKeyOwner!, guildId))) {
+    res.status(403).json({ ok: false, error: 'Key not approved for this guild' });
+    return null;
+  }
+  return guildId;
+}
+
+/**
+ * Resolves the guild a presence-scoped Streamdeck action (e.g. play SFX)
+ * should target: wherever the key owner currently has a live voice-channel
+ * connection, since a Discord account can only be in one voice channel across
+ * every server at a time. Sends the appropriate error response and returns
+ * null on any failure.
+ */
+async function resolvePresenceGuildOrRespond(req: Request, res: Response, client: Client): Promise<string | null> {
+  const guildId = getActiveGuildForUser(client, req.apiKeyOwner!);
+  if (!guildId) {
+    res.status(503).json({ ok: false, error: 'Not currently connected to a voice channel in any server' });
+    return null;
+  }
+  if (!(await isKeyApprovedForGuild(req.apiKeyOwner!, guildId))) {
+    res.status(403).json({ ok: false, error: 'Key not approved for this guild' });
     return null;
   }
   return guildId;
@@ -37,13 +79,24 @@ router.get('/sfx', requireApiKey, async (_req, res) => {
   }
 });
 
-/** Plays a random weighted sound file for the SFX trigger named in the request body. */
+/**
+ * Plays a random weighted sound file for the SFX trigger named in the request
+ * body, in whichever guild the key owner is currently connected to voice in.
+ */
 router.post('/sfx', requireApiKey, async (req, res) => {
   const { command } = req.body as { command?: unknown };
   if (typeof command !== 'string' || !command.trim()) {
     res.status(400).json({ ok: false, error: 'Missing or invalid "command" field' });
     return;
   }
+
+  const discordClient = getDiscordClient();
+  if (!discordClient) {
+    res.status(503).json({ ok: false, error: 'Discord client not ready' });
+    return;
+  }
+  const guildId = await resolvePresenceGuildOrRespond(req, res, discordClient);
+  if (!guildId) return;
 
   const normalizedCommand = command.trim().toLowerCase();
 
@@ -76,9 +129,9 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   const filename = pickWeightedRandom(files);
 
   try {
-    playFile(filename);
+    playFile(filename, guildId);
     setVoicePlaying(filename, normalizedCommand, 'streamdeck');
-    log.info(`Playing '${filename.replace(/[\r\n]/g, '')}' for trigger '${normalizedCommand.replace(/[\r\n]/g, '')}'`);
+    log.info(`Playing '${filename.replace(/[\r\n]/g, '')}' for trigger '${normalizedCommand.replace(/[\r\n]/g, '')}' in guild ${guildId}`);
     res.json({ ok: true, file: filename });
   } catch (err: unknown) {
     if (err instanceof VoiceNotConnectedError) {
@@ -90,13 +143,14 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   }
 });
 
-/** Lists voice channels the bot can join, scoped to the API key's bound guild. */
+/** Lists voice channels across every guild the key is currently approved for. */
 router.get('/voice/channels', requireApiKey, async (req, res) => {
-  const guildId = getApiKeyGuildId(req, res);
-  if (!guildId) return;
   try {
-    const channels = await getAvailableVoiceChannels(guildId);
-    res.json({ ok: true, channels });
+    const guildIds = await getApprovedGuildIdsForKey(req.apiKeyOwner!);
+    const guilds = await Promise.all(
+      guildIds.map(async (guildId) => ({ guildId, channels: await getAvailableVoiceChannels(guildId) })),
+    );
+    res.json({ ok: true, guilds });
   } catch (err) {
     log.error('Failed to list voice channels:', err);
     res.status(500).json({ ok: false, error: 'Failed to fetch voice channels' });
@@ -105,9 +159,6 @@ router.get('/voice/channels', requireApiKey, async (req, res) => {
 
 /** Disconnects any existing voice connection and joins the voice channel named in the request body. */
 router.post('/voice/join', requireApiKey, async (req, res) => {
-  const guildId = getApiKeyGuildId(req, res);
-  if (!guildId) return;
-
   const { channelId } = req.body as { channelId?: unknown };
   if (typeof channelId !== 'string') {
     res.status(400).json({ ok: false, error: 'Missing or invalid "channelId" field' });
@@ -125,6 +176,9 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
     return;
   }
 
+  const guildId = await resolveChannelGuildOrRespond(req, res, discordClient, normalizedChannelId);
+  if (!guildId) return;
+
   try {
     disconnect(guildId);
     await connect(discordClient, guildId, normalizedChannelId);
@@ -135,10 +189,28 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
   }
 });
 
-/** Disconnects the bot from its current voice channel in the API key's bound guild. */
-router.post('/voice/leave', requireApiKey, (req, res) => {
-  const guildId = getApiKeyGuildId(req, res);
+/** Disconnects the bot from its voice channel in the guild implied by the request body's `channelId`. */
+router.post('/voice/leave', requireApiKey, async (req, res) => {
+  const { channelId } = req.body as { channelId?: unknown };
+  if (typeof channelId !== 'string') {
+    res.status(400).json({ ok: false, error: 'Missing or invalid "channelId" field' });
+    return;
+  }
+  const normalizedChannelId = normalizeDiscordId(channelId);
+  if (!normalizedChannelId) {
+    res.status(400).json({ ok: false, error: 'Missing or invalid "channelId" field' });
+    return;
+  }
+
+  const discordClient = getDiscordClient();
+  if (!discordClient) {
+    res.status(503).json({ ok: false, error: 'Discord client not ready' });
+    return;
+  }
+
+  const guildId = await resolveChannelGuildOrRespond(req, res, discordClient, normalizedChannelId);
   if (!guildId) return;
+
   disconnect(guildId);
   res.json({ ok: true });
 });

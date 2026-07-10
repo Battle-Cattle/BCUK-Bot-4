@@ -340,7 +340,7 @@ describe('reconnect', () => {
   });
 });
 
-describe('shared audio player', () => {
+describe('per-guild audio player', () => {
   it('Idle handler clears the playing flag and reports idle status', async () => {
     const { client } = makeClient();
     const voice = await import('@discordjs/voice');
@@ -349,13 +349,13 @@ describe('shared audio player', () => {
     vi.mocked(voice.createAudioPlayer).mockReturnValue(fakePlayer as never);
 
     await mod.connect(client as never, 'guild-A', 'chan-1');
-    mod.startPlayback({} as never);
-    expect(mod.isPlaying()).toBe(true);
+    mod.startPlayback({} as never, 'guild-A');
+    expect(mod.isPlaying('guild-A')).toBe(true);
 
     const idleHandler = fakePlayer.on.mock.calls.find(([e]) => e === 'idle')?.[1] as () => void;
     idleHandler();
 
-    expect(mod.isPlaying()).toBe(false);
+    expect(mod.isPlaying('guild-A')).toBe(false);
     expect(vi.mocked(status.setVoiceIdle)).toHaveBeenCalled();
   });
 
@@ -366,12 +366,30 @@ describe('shared audio player', () => {
     vi.mocked(voice.createAudioPlayer).mockReturnValue(fakePlayer as never);
 
     await mod.connect(client as never, 'guild-A', 'chan-1');
-    mod.startPlayback({} as never);
-    expect(mod.isPlaying()).toBe(true);
+    mod.startPlayback({} as never, 'guild-A');
+    expect(mod.isPlaying('guild-A')).toBe(true);
 
     const errorHandler = fakePlayer.on.mock.calls.find(([e]) => e === 'error')?.[1] as (err: Error) => void;
     errorHandler(new Error('decode failed'));
 
-    expect(mod.isPlaying()).toBe(false);
+    expect(mod.isPlaying('guild-A')).toBe(false);
+  });
+
+  it('playing one guild does not affect another guild\'s playing flag or player instance', async () => {
+    const a = makeClient();
+    const b = makeClient();
+    const voice = await import('@discordjs/voice');
+    const players = [{ on: vi.fn(), stop: vi.fn(), play: vi.fn() }, { on: vi.fn(), stop: vi.fn(), play: vi.fn() }];
+    let call = 0;
+    vi.mocked(voice.createAudioPlayer).mockImplementation(() => players[call++] as never);
+
+    await mod.connect(a.client as never, 'guild-A', 'chan-A');
+    await mod.connect(b.client as never, 'guild-B', 'chan-B');
+
+    mod.startPlayback({} as never, 'guild-A');
+    expect(mod.isPlaying('guild-A')).toBe(true);
+    expect(mod.isPlaying('guild-B')).toBe(false);
+    expect(players[0].play).toHaveBeenCalledTimes(1);
+    expect(players[1].play).not.toHaveBeenCalled();
   });
 });
