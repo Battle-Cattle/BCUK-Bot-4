@@ -72,7 +72,11 @@ function streamGroupParams(input: AddStreamGroupInput): Array<string | number> {
   ];
 }
 
-/** Return one guild's stream groups ordered by name. */
+/**
+ * Return one guild's stream groups ordered by name.
+ * @param guildId - Guild whose stream groups to fetch.
+ * @returns The guild's stream groups.
+ */
 export async function getStreamGroupsForGuild(guildId: string): Promise<DbStreamGroup[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT id, guild_id, name, discord_channel, live_message, new_game_message, multi_twitch, delete_old_posts
@@ -120,7 +124,12 @@ export async function removeStreamGroup(id: number, guildId: string): Promise<vo
   await getPool().execute('DELETE FROM stream_group WHERE id = ? AND guild_id = ?', [id, guildId]);
 }
 
-/** Return one guild's streamers with their group name, ordered by group then Twitch name (flat view for the admin panel). */
+/**
+ * Return one guild's streamers with their group name, ordered by group then
+ * Twitch name (flat view for the admin panel).
+ * @param guildId - Guild whose streamers to fetch.
+ * @returns The guild's streamers.
+ */
 export async function getStreamersForGuild(guildId: string): Promise<DbStreamer[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT s.id, s.discord_id, s.group_id,

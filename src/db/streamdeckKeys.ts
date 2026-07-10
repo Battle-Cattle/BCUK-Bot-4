@@ -74,16 +74,29 @@ export async function createApiKeyAndRequestGuildAccess(
   const status = initialStatus(accessLevel);
   const now = new Date();
 
-  await getPool().execute(
-    'INSERT INTO streamdeck_api_keys (discord_id, key_hash, created_at) VALUES (?, ?, ?)',
-    [discordId, hash, now],
-  );
-  await getPool().execute(
-    `INSERT INTO streamdeck_key_guild_status
-       (discord_id, guild_id, status, requested_at, approved_at, approved_by)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [discordId, guildId, status, now, status === 'approved' ? now : null, status === 'approved' ? discordId : null],
-  );
+  // Both inserts must commit together — a partial failure would strand a key
+  // identity with no guild-status row, and the plaintext (only ever returned
+  // here) would be unrecoverable.
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute(
+      'INSERT INTO streamdeck_api_keys (discord_id, key_hash, created_at) VALUES (?, ?, ?)',
+      [discordId, hash, now],
+    );
+    await conn.execute(
+      `INSERT INTO streamdeck_key_guild_status
+         (discord_id, guild_id, status, requested_at, approved_at, approved_by)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [discordId, guildId, status, now, status === 'approved' ? now : null, status === 'approved' ? discordId : null],
+    );
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback().catch(() => {});
+    throw err;
+  } finally {
+    conn.release();
+  }
 
   return { plain, status };
 }

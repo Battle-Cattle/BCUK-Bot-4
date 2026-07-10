@@ -29,6 +29,22 @@ function makePool(rows: unknown[] = []) {
   return { execute: vi.fn().mockResolvedValue([[...rows], []]) };
 }
 
+/** Pool mock whose getConnection() returns a fake transactional connection, matching the overlayVideos.ts test convention. */
+function makeTransactionalPool() {
+  const conn = {
+    execute: vi.fn().mockResolvedValue([[], []]),
+    beginTransaction: vi.fn().mockResolvedValue(undefined),
+    commit: vi.fn().mockResolvedValue(undefined),
+    rollback: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn(),
+  };
+  return {
+    execute: vi.fn().mockResolvedValue([[], []]),
+    getConnection: vi.fn().mockResolvedValue(conn),
+    _conn: conn,
+  };
+}
+
 function sha256hex(s: string) {
   return createHash('sha256').update(s).digest('hex');
 }
@@ -54,32 +70,50 @@ describe('hasApiKey', () => {
 // ─── createApiKeyAndRequestGuildAccess ─────────────────────────────────────────
 
 describe('createApiKeyAndRequestGuildAccess', () => {
-  it('inserts an identity row and a guild-status row, returning a 64-char hex plain key', async () => {
-    const pool = makePool();
+  it('inserts an identity row and a guild-status row within one transaction, returning a 64-char hex plain key', async () => {
+    const pool = makeTransactionalPool();
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     const result = await createApiKeyAndRequestGuildAccess('1', AccessLevel.USER, 'g1');
 
     expect(result.plain).toMatch(/^[0-9a-f]{64}$/);
     expect(result.status).toBe('pending');
-    expect(pool.execute).toHaveBeenCalledTimes(2);
-    const [identitySql, identityParams] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(pool._conn.beginTransaction).toHaveBeenCalledOnce();
+    expect(pool._conn.execute).toHaveBeenCalledTimes(2);
+    const [identitySql, identityParams] = pool._conn.execute.mock.calls[0] as [string, unknown[]];
     expect(identitySql).toContain('INSERT INTO streamdeck_api_keys');
     expect(identityParams[0]).toBe('1');
-    const [statusSql, statusParams] = pool.execute.mock.calls[1] as [string, unknown[]];
+    const [statusSql, statusParams] = pool._conn.execute.mock.calls[1] as [string, unknown[]];
     expect(statusSql).toContain('INSERT INTO streamdeck_key_guild_status');
     expect(statusParams).toEqual(['1', 'g1', 'pending', expect.any(Date), null, null]);
+    expect(pool._conn.commit).toHaveBeenCalledOnce();
+    expect(pool._conn.rollback).not.toHaveBeenCalled();
+    expect(pool._conn.release).toHaveBeenCalledOnce();
   });
 
   it('auto-approves for MANAGER access level and above', async () => {
-    const pool = makePool();
+    const pool = makeTransactionalPool();
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     const result = await createApiKeyAndRequestGuildAccess('1', AccessLevel.MANAGER, 'g1');
 
     expect(result.status).toBe('approved');
-    const [, statusParams] = pool.execute.mock.calls[1] as [string, unknown[]];
+    const [, statusParams] = pool._conn.execute.mock.calls[1] as [string, unknown[]];
     expect(statusParams).toEqual(['1', 'g1', 'approved', expect.any(Date), expect.any(Date), '1']);
+  });
+
+  it('rolls back and releases the connection, without returning a result, when the second insert fails', async () => {
+    const pool = makeTransactionalPool();
+    pool._conn.execute
+      .mockResolvedValueOnce([[], []]) // identity insert succeeds
+      .mockRejectedValueOnce(new Error('duplicate guild-status row')); // guild-status insert fails
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(createApiKeyAndRequestGuildAccess('1', AccessLevel.USER, 'g1')).rejects.toThrow('duplicate guild-status row');
+
+    expect(pool._conn.commit).not.toHaveBeenCalled();
+    expect(pool._conn.rollback).toHaveBeenCalledOnce();
+    expect(pool._conn.release).toHaveBeenCalledOnce();
   });
 });
 

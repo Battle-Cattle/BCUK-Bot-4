@@ -375,6 +375,69 @@ describe('per-guild audio player', () => {
     expect(mod.isPlaying('guild-A')).toBe(false);
   });
 
+  it('does not clear the shared/global voice status when another guild is still playing (Idle)', async () => {
+    const a = makeClient();
+    const b = makeClient();
+    const voice = await import('@discordjs/voice');
+    const status = await import('../shared/statusStore.js');
+    const players = [{ on: vi.fn(), stop: vi.fn(), play: vi.fn() }, { on: vi.fn(), stop: vi.fn(), play: vi.fn() }];
+    let call = 0;
+    vi.mocked(voice.createAudioPlayer).mockImplementation(() => players[call++] as never);
+
+    await mod.connect(a.client as never, 'guild-A', 'chan-A');
+    await mod.connect(b.client as never, 'guild-B', 'chan-B');
+    mod.startPlayback({} as never, 'guild-A');
+    mod.startPlayback({} as never, 'guild-B');
+    vi.mocked(status.setVoiceIdle).mockClear();
+
+    const idleHandlerA = players[0].on.mock.calls.find(([e]) => e === 'idle')?.[1] as () => void;
+    idleHandlerA();
+
+    expect(mod.isPlaying('guild-A')).toBe(false);
+    expect(mod.isPlaying('guild-B')).toBe(true);
+    expect(vi.mocked(status.setVoiceIdle)).not.toHaveBeenCalled();
+  });
+
+  it('clears the shared/global voice status once the last playing guild goes idle', async () => {
+    const { client } = makeClient();
+    const voice = await import('@discordjs/voice');
+    const status = await import('../shared/statusStore.js');
+    const fakePlayer = { on: vi.fn(), stop: vi.fn(), play: vi.fn() };
+    vi.mocked(voice.createAudioPlayer).mockReturnValue(fakePlayer as never);
+
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    mod.startPlayback({} as never, 'guild-A');
+    vi.mocked(status.setVoiceIdle).mockClear();
+
+    const idleHandler = fakePlayer.on.mock.calls.find(([e]) => e === 'idle')?.[1] as () => void;
+    idleHandler();
+
+    expect(vi.mocked(status.setVoiceIdle)).toHaveBeenCalled();
+  });
+
+  it('does not clear the shared/global voice status on error when another guild is still playing', async () => {
+    const a = makeClient();
+    const b = makeClient();
+    const voice = await import('@discordjs/voice');
+    const status = await import('../shared/statusStore.js');
+    const players = [{ on: vi.fn(), stop: vi.fn(), play: vi.fn() }, { on: vi.fn(), stop: vi.fn(), play: vi.fn() }];
+    let call = 0;
+    vi.mocked(voice.createAudioPlayer).mockImplementation(() => players[call++] as never);
+
+    await mod.connect(a.client as never, 'guild-A', 'chan-A');
+    await mod.connect(b.client as never, 'guild-B', 'chan-B');
+    mod.startPlayback({} as never, 'guild-A');
+    mod.startPlayback({} as never, 'guild-B');
+    vi.mocked(status.setVoiceIdle).mockClear();
+
+    const errorHandlerA = players[0].on.mock.calls.find(([e]) => e === 'error')?.[1] as (err: Error) => void;
+    errorHandlerA(new Error('decode failed'));
+
+    expect(mod.isPlaying('guild-A')).toBe(false);
+    expect(mod.isPlaying('guild-B')).toBe(true);
+    expect(vi.mocked(status.setVoiceIdle)).not.toHaveBeenCalled();
+  });
+
   it('playing one guild does not affect another guild\'s playing flag or player instance', async () => {
     const a = makeClient();
     const b = makeClient();

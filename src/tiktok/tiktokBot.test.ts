@@ -251,6 +251,20 @@ describe('chat handling', () => {
     getConnection('alice').emit('chat', { content: '!clap' });
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalled());
   });
+
+  it('caches a successfully-resolved owner, avoiding a DB lookup on subsequent chat messages', async () => {
+    const { bot, handleCommand, findOwnerUser } = await setup(['alice']);
+    activeBot = bot;
+
+    await bot.startTikTokBot();
+    getConnection('alice').emit('chat', { content: '!clap' });
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(1));
+
+    getConnection('alice').emit('chat', { content: '!again' });
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(2));
+
+    expect(findOwnerUser).toHaveBeenCalledOnce();
+  });
 });
 
 // ─── reconnect behaviour ──────────────────────────────────────────────────────

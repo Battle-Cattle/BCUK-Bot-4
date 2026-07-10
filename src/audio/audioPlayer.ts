@@ -83,6 +83,14 @@ function anyConnected(): boolean {
   return false;
 }
 
+/** True if any guild's audio player is currently playing. */
+function anyPlaying(): boolean {
+  for (const state of states.values()) {
+    if (state.playing) return true;
+  }
+  return false;
+}
+
 // ─── Reconnect ────────────────────────────────────────────────────────────────
 
 const RECONNECT_BASE_DELAY_MS = 5_000;
@@ -124,11 +132,19 @@ function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
     });
     guildPlayer.on(AudioPlayerStatus.Idle, () => {
       state.playing = false;
-      setVoiceIdle();
+      // Another guild may still be playing — only clear the shared/global
+      // status once no guild remains playing, mirroring the disconnected-status
+      // guard in tearDownGuild/disconnectGuild below.
+      if (!anyPlaying()) {
+        setVoiceIdle();
+      }
     });
     guildPlayer.on('error', (err) => {
       log.error(`Error: ${err.message}`, err);
       state.playing = false;
+      if (!anyPlaying()) {
+        setVoiceIdle();
+      }
     });
     state.player = guildPlayer;
   }

@@ -40,9 +40,12 @@ PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 
 -- Carry each existing (discord_id, guild_id) binding + approval state over
 -- as its own row — a straightforward 1-to-1 split of the old data model.
+-- INSERT IGNORE makes this resumable: a run that fails after this step but
+-- before the DROP COLUMN step below leaves guild_id in place, so a re-run
+-- would otherwise re-insert already-backfilled rows and hit the primary key.
 SET @sql = IF(@sd_exists = 0 OR @already_split = 0,
   'SELECT ''nothing to backfill''',
-  'INSERT INTO streamdeck_key_guild_status
+  'INSERT IGNORE INTO streamdeck_key_guild_status
      (discord_id, guild_id, status, requested_at, approved_at, approved_by)
    SELECT discord_id, guild_id, status, requested_at, approved_at, approved_by
    FROM streamdeck_api_keys');
