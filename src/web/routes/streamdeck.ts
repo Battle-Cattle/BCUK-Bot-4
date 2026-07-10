@@ -30,6 +30,19 @@ async function resolveGuildIdFromChannelId(client: Client, channelId: string): P
 }
 
 /**
+ * Confirms the request's API key is approved for `guildId`, sending a generic
+ * 403 and returning false if not. Shared by every route below so approval
+ * denial always produces the same response.
+ */
+async function ensureGuildApproved(req: Request, res: Response, guildId: string): Promise<boolean> {
+  if (!(await isKeyApprovedForGuild(req.apiKeyOwner!, guildId))) {
+    res.status(403).json({ ok: false, error: 'Key not approved for this guild' });
+    return false;
+  }
+  return true;
+}
+
+/**
  * Resolves the guild a channel-scoped Streamdeck action (join/leave) should
  * target from the request's own `channelId`, and confirms the key is approved
  * for that guild. Sends the appropriate error response and returns null on
@@ -41,11 +54,7 @@ async function resolveChannelGuildOrRespond(req: Request, res: Response, client:
     res.status(400).json({ ok: false, error: 'Unknown voice channel' });
     return null;
   }
-  if (!(await isKeyApprovedForGuild(req.apiKeyOwner!, guildId))) {
-    res.status(403).json({ ok: false, error: 'Key not approved for this guild' });
-    return null;
-  }
-  return guildId;
+  return (await ensureGuildApproved(req, res, guildId)) ? guildId : null;
 }
 
 /**
@@ -61,11 +70,7 @@ async function resolvePresenceGuildOrRespond(req: Request, res: Response, client
     res.status(503).json({ ok: false, error: 'Not currently connected to a voice channel in any server' });
     return null;
   }
-  if (!(await isKeyApprovedForGuild(req.apiKeyOwner!, guildId))) {
-    res.status(403).json({ ok: false, error: 'Key not approved for this guild' });
-    return null;
-  }
-  return guildId;
+  return (await ensureGuildApproved(req, res, guildId)) ? guildId : null;
 }
 
 /** Lists all SFX triggers available to play via Streamdeck. */
@@ -219,10 +224,7 @@ router.post('/voice/leave', requireApiKey, async (req, res) => {
     }
   }
 
-  if (!(await isKeyApprovedForGuild(req.apiKeyOwner!, guildId))) {
-    res.status(403).json({ ok: false, error: 'Key not approved for this guild' });
-    return;
-  }
+  if (!(await ensureGuildApproved(req, res, guildId))) return;
 
   disconnect(guildId);
   res.json({ ok: true });
