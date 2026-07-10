@@ -93,7 +93,7 @@ if pgrep -f "node dist/index.js" > /dev/null 2>&1; then
     fi
 fi
 
-screen -S "$SCREEN_SESSION" -X stuff "cd ${REPO_DIR} && npm start\n"
+screen -S "$SCREEN_SESSION" -X stuff "cd '${REPO_DIR}' && npm start\n"
 echo "==> Bot restarted."
 
 echo "==> Deploy complete."
