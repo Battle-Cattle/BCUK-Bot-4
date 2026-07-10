@@ -284,7 +284,7 @@ describe('GET /sfx', () => {
 
 describe('GET /voice/channels', () => {
   it('returns voice channels grouped by every guild the key is approved for', async () => {
-    vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue(['guild-123', 'guild-456']);
+    vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue(['guild-123', '900000000000000002']);
     const channelsA = [{ id: 'ch1', name: 'General' }];
     const channelsB = [{ id: 'ch2', name: 'Hangout' }];
     vi.mocked(getAvailableVoiceChannels).mockImplementation(async (guildId: string) =>
@@ -297,7 +297,7 @@ describe('GET /voice/channels', () => {
       ok: true,
       guilds: [
         { guildId: 'guild-123', channels: channelsA },
-        { guildId: 'guild-456', channels: channelsB },
+        { guildId: '900000000000000002', channels: channelsB },
       ],
     });
   });
@@ -385,7 +385,7 @@ describe('POST /voice/join', () => {
 });
 
 describe('POST /voice/leave', () => {
-  it('returns 400 when channelId is missing', async () => {
+  it('returns 400 when both channelId and guildId are missing', async () => {
     const res = await supertest(buildApp()).post('/voice/leave').send({}).expect(400);
     expect(res.body).toMatchObject({ ok: false });
   });
@@ -403,6 +403,41 @@ describe('POST /voice/leave', () => {
     expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
   });
 
+  it('uses an explicit guildId directly, bypassing channel resolution entirely', async () => {
+    const res = await supertest(buildApp())
+      .post('/voice/leave')
+      .send({ guildId: '900000000000000002' })
+      .expect(200);
+
+    expect(res.body).toEqual({ ok: true });
+    expect(vi.mocked(disconnect)).toHaveBeenCalledWith('900000000000000002');
+    expect(vi.mocked(isKeyApprovedForGuild)).toHaveBeenCalledWith(API_KEY_OWNER, '900000000000000002');
+  });
+
+  it('falls back to an explicit guildId when the channel no longer exists (e.g. deleted while connected)', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue(makeClient(null));
+
+    const res = await supertest(buildApp())
+      .post('/voice/leave')
+      .send({ channelId: '123456789012345678', guildId: '900000000000000002' })
+      .expect(200);
+
+    expect(res.body).toEqual({ ok: true });
+    expect(vi.mocked(disconnect)).toHaveBeenCalledWith('900000000000000002');
+  });
+
+  it('returns 400 when only channelId is given and the channel no longer exists', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue(makeClient(null));
+
+    const res = await supertest(buildApp())
+      .post('/voice/leave')
+      .send({ channelId: '123456789012345678' })
+      .expect(400);
+
+    expect(res.body).toMatchObject({ ok: false });
+    expect(vi.mocked(disconnect)).not.toHaveBeenCalled();
+  });
+
   it('returns 403 when the key is not approved for the channel\'s guild', async () => {
     vi.mocked(isKeyApprovedForGuild).mockResolvedValue(false);
 
@@ -415,7 +450,7 @@ describe('POST /voice/leave', () => {
     expect(vi.mocked(disconnect)).not.toHaveBeenCalled();
   });
 
-  it('returns 503 when Discord client is not ready', async () => {
+  it('returns 503 when Discord client is not ready and only channelId is given', async () => {
     vi.mocked(getDiscordClient).mockReturnValue(null);
 
     const res = await supertest(buildApp())
@@ -424,5 +459,17 @@ describe('POST /voice/leave', () => {
       .expect(503);
 
     expect(res.body).toMatchObject({ ok: false });
+  });
+
+  it('does not require the Discord client when guildId is given explicitly', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue(null);
+
+    const res = await supertest(buildApp())
+      .post('/voice/leave')
+      .send({ guildId: '900000000000000002' })
+      .expect(200);
+
+    expect(res.body).toEqual({ ok: true });
+    expect(vi.mocked(disconnect)).toHaveBeenCalledWith('900000000000000002');
   });
 });

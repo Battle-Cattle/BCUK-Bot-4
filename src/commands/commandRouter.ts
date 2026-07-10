@@ -28,6 +28,16 @@ function getGuildCommandState(guildId: string): GuildCommandState {
   return state;
 }
 
+/**
+ * Looks up a trigger command's sound files, picks one, and plays it into the
+ * given guild, recording the play time on that guild's cooldown state and a
+ * command-monitor entry on success.
+ *
+ * @param command - Lowercased trigger command to look up.
+ * @param source - Where the command came from, used for logging/status.
+ * @param guildId - Guild to play the sound into.
+ * @param state - The guild's cooldown/in-flight state; `lastPlayedAt` is updated on success.
+ */
 async function lookupAndPlay(
   command: string,
   source: 'twitch' | 'discord' | 'tiktok',

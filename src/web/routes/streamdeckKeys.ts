@@ -16,6 +16,7 @@ import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
 import { WEB_PORT } from '../../shared/config';
 import { logAndRedirectError, normalizeDiscordId, renderError, filterQueryParam, renderView } from './shared';
+import { userMutationQueue } from './adminUserMutationQueue';
 
 const log = createLogger('Web');
 const router = Router();
@@ -49,25 +50,31 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
  * since only the key's hash is ever stored. Re-requesting when this guild
  * already has a request on file rotates the key's secret instead (the
  * "lost my key" flow), which also stops the old key working everywhere.
+ *
+ * The check-then-act sequence below is serialized per `discordId` through
+ * `userMutationQueue` — without it, two concurrent requests from a brand-new
+ * user could both see "no existing key" and race on the identity insert.
  */
 router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
   const discordId = req.session.user!.discordId;
   const accessLevel = req.session.user!.accessLevel;
   const guildId = req.session.user!.currentGuildId!;
   try {
-    const existingGuildStatus = await getGuildStatusForKey(discordId, guildId);
-    let plain: string | null = null;
-    if (existingGuildStatus) {
-      if (existingGuildStatus.status === 'denied') {
-        throw new Error('API key request rejected: previous request was denied');
+    const { plain, keyRow } = await userMutationQueue.run(discordId, async () => {
+      const existingGuildStatus = await getGuildStatusForKey(discordId, guildId);
+      let resolvedPlain: string | null = null;
+      if (existingGuildStatus) {
+        if (existingGuildStatus.status === 'denied') {
+          throw new Error('API key request rejected: previous request was denied');
+        }
+        ({ plain: resolvedPlain } = await rotateApiKey(discordId));
+      } else if (await hasApiKey(discordId)) {
+        await requestGuildAccessForExistingKey(discordId, accessLevel, guildId);
+      } else {
+        ({ plain: resolvedPlain } = await createApiKeyAndRequestGuildAccess(discordId, accessLevel, guildId));
       }
-      ({ plain } = await rotateApiKey(discordId));
-    } else if (await hasApiKey(discordId)) {
-      await requestGuildAccessForExistingKey(discordId, accessLevel, guildId);
-    } else {
-      ({ plain } = await createApiKeyAndRequestGuildAccess(discordId, accessLevel, guildId));
-    }
-    const keyRow = await getGuildStatusForKey(discordId, guildId);
+      return { plain: resolvedPlain, keyRow: await getGuildStatusForKey(discordId, guildId) };
+    });
     renderView(res, 'streamdeck-keys', {
       user: req.session.user,
       csrfToken: req.csrfToken(),

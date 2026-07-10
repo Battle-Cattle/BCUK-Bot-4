@@ -30,15 +30,17 @@ const TWITCH_CHAT_MESSAGE_PATTERN = /^\[#[^\]]+\] <[^>]+>: /;
 // Caches only successful Twitch-channel → discord_id resolutions (never a
 // miss) so a not-yet-linked channel keeps retrying instead of being stuck
 // unresolved until a restart, while a linked channel avoids a DB round trip
-// on every chat message.
-const twitchChannelDiscordIdCache = new Map<string, string>();
+// on every chat message. Bounded by a TTL so a relinked twitch_name is picked
+// up within a few minutes rather than staying stale until the process restarts.
+const CHANNEL_DISCORD_ID_CACHE_TTL_MS = 5 * 60 * 1000;
+const twitchChannelDiscordIdCache = new Map<string, { discordId: string; cachedAt: number }>();
 
 /** Resolves the Discord ID linked to a Twitch channel's `twitch_name`, or null if unlinked. */
 async function resolveDiscordIdForTwitchChannel(normalizedChannel: string): Promise<string | null> {
   const cached = twitchChannelDiscordIdCache.get(normalizedChannel);
-  if (cached) return cached;
+  if (cached && Date.now() - cached.cachedAt < CHANNEL_DISCORD_ID_CACHE_TTL_MS) return cached.discordId;
   const user = await findUserByTwitchName(normalizedChannel);
-  if (user) twitchChannelDiscordIdCache.set(normalizedChannel, user.discord_id);
+  if (user) twitchChannelDiscordIdCache.set(normalizedChannel, { discordId: user.discord_id, cachedAt: Date.now() });
   return user?.discord_id ?? null;
 }
 

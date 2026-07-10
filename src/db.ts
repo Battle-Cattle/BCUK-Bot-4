@@ -169,7 +169,7 @@ export {
   createApiKeyAndRequestGuildAccess,
   requestGuildAccessForExistingKey,
   rotateApiKey,
-  findApprovedKeyByHash,
+  findKeyByHash,
   isKeyApprovedForGuild,
   getApprovedGuildIdsForKey,
   getGuildStatusForKey,

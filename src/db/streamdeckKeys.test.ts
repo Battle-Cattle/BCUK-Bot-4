@@ -13,7 +13,7 @@ import {
   createApiKeyAndRequestGuildAccess,
   requestGuildAccessForExistingKey,
   rotateApiKey,
-  findApprovedKeyByHash,
+  findKeyByHash,
   isKeyApprovedForGuild,
   getApprovedGuildIdsForKey,
   getGuildStatusForKey,
@@ -180,12 +180,12 @@ describe('rotateApiKey', () => {
   });
 });
 
-// ─── findApprovedKeyByHash ────────────────────────────────────────────────────
+// ─── findKeyByHash ────────────────────────────────────────────────────
 
-describe('findApprovedKeyByHash', () => {
+describe('findKeyByHash', () => {
   it('returns null when no rows found', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([]) as any);
-    const result = await findApprovedKeyByHash('a'.repeat(64));
+    const result = await findKeyByHash('a'.repeat(64));
     expect(result).toBeNull();
   });
 
@@ -194,19 +194,20 @@ describe('findApprovedKeyByHash', () => {
     const stored = 'bb'.repeat(32);   // different 64 hex chars
     const row = { discord_id: '1', key_hash: stored };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
-    const result = await findApprovedKeyByHash(incoming);
+    const result = await findKeyByHash(incoming);
     expect(result).toBeNull();
   });
 
-  it('returns the owning discordId when hash matches', async () => {
+  it('returns the owning discordId when hash matches, as a pure identity lookup (no approval filter)', async () => {
     const hash = sha256hex('mysecretkey');
     const row = { discord_id: '42', key_hash: hash };
     const pool = makePool([row]);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await findApprovedKeyByHash(hash);
+    const result = await findKeyByHash(hash);
     expect(result).toEqual({ discordId: '42' });
-    const [sql] = pool.execute.mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain("status = 'approved'");
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).not.toContain('approved');
+    expect(params).toEqual([hash]);
   });
 
   it('returns null when stored and incoming hash have different lengths', async () => {
@@ -214,7 +215,7 @@ describe('findApprovedKeyByHash', () => {
     const stored = 'ab'.repeat(16);   // 32 chars — different length
     const row = { discord_id: '1', key_hash: stored };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
-    const result = await findApprovedKeyByHash(incoming);
+    const result = await findKeyByHash(incoming);
     expect(result).toBeNull();
   });
 });

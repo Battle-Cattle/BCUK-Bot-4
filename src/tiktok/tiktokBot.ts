@@ -18,14 +18,16 @@ const log = createLogger('TikTok');
 // Caches only a successfully-resolved owner discord_id (never a miss) so a
 // bot with no owner flagged yet keeps retrying instead of being stuck
 // unresolved until a restart, while normal operation avoids a DB round trip
-// on every chat message.
-let cachedOwnerDiscordId: string | null = null;
+// on every chat message. Bounded by a TTL so a reassigned is_owner is picked
+// up within a few minutes rather than staying stale until the process restarts.
+const OWNER_DISCORD_ID_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedOwner: { discordId: string; cachedAt: number } | null = null;
 
 /** Resolves the bot owner's Discord ID, caching a successful lookup. */
 async function resolveOwnerDiscordId(): Promise<string | null> {
-  if (cachedOwnerDiscordId) return cachedOwnerDiscordId;
+  if (cachedOwner && Date.now() - cachedOwner.cachedAt < OWNER_DISCORD_ID_CACHE_TTL_MS) return cachedOwner.discordId;
   const owner = await findOwnerUser();
-  if (owner) cachedOwnerDiscordId = owner.discord_id;
+  if (owner) cachedOwner = { discordId: owner.discord_id, cachedAt: Date.now() };
   return owner?.discord_id ?? null;
 }
 
@@ -45,7 +47,7 @@ async function resolveGuildIdForTikTokCommand(): Promise<string | null> {
 
 /** Test-only: clears the cached owner discord_id so each test starts from a clean slate. */
 export function __resetOwnerDiscordIdCacheForTests(): void {
-  cachedOwnerDiscordId = null;
+  cachedOwner = null;
 }
 
 // TypedEventEmitter<ClientEventMap> is the base of TikTokLiveConnection but TypeScript

@@ -206,7 +206,8 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
     const guildId = req.session.user!.currentGuildId!;
     // Delete streamers in the group first (avoids FK constraint errors)
     await removeStreamersByGroup(parsedGroupId, guildId);
-    await removeStreamGroup(parsedGroupId, guildId);
+    const removed = await removeStreamGroup(parsedGroupId, guildId);
+    if (!removed) return res.redirect('/admin/streams?error=remove_group_failed');
     triggerRestart();
   } catch (err) {
     return logAndRedirectError({ res, log, logLabel: 'Remove stream group error:', err, basePath: '/admin/streams', errorCode: 'remove_group_failed' });
@@ -261,7 +262,8 @@ router.post('/streams/streamers/remove', requireManager, csrfProtection, async (
   if (parsedStreamerId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
-    await removeStreamer(parsedStreamerId, req.session.user!.currentGuildId!);
+    const removed = await removeStreamer(parsedStreamerId, req.session.user!.currentGuildId!);
+    if (!removed) return res.redirect('/admin/streams?error=remove_streamer_failed');
     triggerRestart();
   } catch (err) {
     return logAndRedirectError({ res, log, logLabel: 'Remove streamer error:', err, basePath: '/admin/streams', errorCode: 'remove_streamer_failed' });

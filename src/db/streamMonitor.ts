@@ -119,9 +119,13 @@ export async function updateStreamGroup(input: UpdateStreamGroupInput): Promise<
  *
  * @param id - Primary key of the stream group to remove.
  * @param guildId - Guild the caller is acting in; the group must belong to it.
+ * @returns True if a group was actually deleted; false if `id` didn't belong to `guildId`.
  */
-export async function removeStreamGroup(id: number, guildId: string): Promise<void> {
-  await getPool().execute('DELETE FROM stream_group WHERE id = ? AND guild_id = ?', [id, guildId]);
+export async function removeStreamGroup(id: number, guildId: string): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    'DELETE FROM stream_group WHERE id = ? AND guild_id = ?', [id, guildId],
+  );
+  return result.affectedRows > 0;
 }
 
 /**
@@ -219,12 +223,14 @@ export async function addStreamer(discordId: string, groupId: number, guildId: s
  *
  * @param id - Primary key of the streamer row to delete.
  * @param guildId - Guild the caller is acting in.
+ * @returns True if a streamer was actually deleted; false if `id`'s group didn't belong to `guildId`.
  */
-export async function removeStreamer(id: number, guildId: string): Promise<void> {
-  await getPool().execute(
+export async function removeStreamer(id: number, guildId: string): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `DELETE s FROM streamer s JOIN stream_group g ON s.group_id = g.id WHERE s.id = ? AND g.guild_id = ?`,
     [id, guildId],
   );
+  return result.affectedRows > 0;
 }
 
 /**
@@ -233,12 +239,14 @@ export async function removeStreamer(id: number, guildId: string): Promise<void>
  *
  * @param groupId - ID of the stream group whose streamers should be deleted.
  * @param guildId - Guild the caller is acting in.
+ * @returns The number of streamer rows deleted.
  */
-export async function removeStreamersByGroup(groupId: number, guildId: string): Promise<void> {
-  await getPool().execute(
+export async function removeStreamersByGroup(groupId: number, guildId: string): Promise<number> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `DELETE s FROM streamer s JOIN stream_group g ON s.group_id = g.id WHERE s.group_id = ? AND g.guild_id = ?`,
     [groupId, guildId],
   );
+  return result.affectedRows;
 }
 
 /**

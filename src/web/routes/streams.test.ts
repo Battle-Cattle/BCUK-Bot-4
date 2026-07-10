@@ -75,9 +75,9 @@ beforeEach(() => {
   vi.mocked(addStreamer).mockResolvedValue(undefined);
   vi.mocked(addStreamGroup).mockResolvedValue(undefined);
   vi.mocked(updateStreamGroup).mockResolvedValue(undefined);
-  vi.mocked(removeStreamGroup).mockResolvedValue(undefined);
-  vi.mocked(removeStreamer).mockResolvedValue(undefined);
-  vi.mocked(removeStreamersByGroup).mockResolvedValue(undefined);
+  vi.mocked(removeStreamGroup).mockResolvedValue(true);
+  vi.mocked(removeStreamer).mockResolvedValue(true);
+  vi.mocked(removeStreamersByGroup).mockResolvedValue(0);
   vi.mocked(getAllEventSubStreamers).mockResolvedValue([]);
   vi.mocked(getLiveStates).mockReturnValue([]);
   vi.mocked(restartTwitchMonitor).mockResolvedValue(undefined);
@@ -393,6 +393,14 @@ describe('POST /streams/groups/remove', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('error=remove_group_failed');
   });
+
+  it('redirects with remove_group_failed (not a false success) when the group belongs to a different guild', async () => {
+    vi.mocked(removeStreamGroup).mockResolvedValueOnce(false);
+    const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=5');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=remove_group_failed');
+    expect(restartTwitchMonitor).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /streams/streamers/add — failure path', () => {
@@ -436,6 +444,14 @@ describe('POST /streams/streamers/remove', () => {
     const res = await supertest(buildApp()).post('/streams/streamers/remove').send('streamer_id=7');
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('error=remove_streamer_failed');
+  });
+
+  it('redirects with remove_streamer_failed (not a false success) when the streamer belongs to a different guild', async () => {
+    vi.mocked(removeStreamer).mockResolvedValueOnce(false);
+    const res = await supertest(buildApp()).post('/streams/streamers/remove').send('streamer_id=7');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=remove_streamer_failed');
+    expect(restartTwitchMonitor).not.toHaveBeenCalled();
   });
 });
 

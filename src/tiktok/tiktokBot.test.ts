@@ -265,6 +265,25 @@ describe('chat handling', () => {
 
     expect(findOwnerUser).toHaveBeenCalledOnce();
   });
+
+  it('re-resolves the owner after the cache TTL expires, picking up an ownership change', async () => {
+    const { bot, handleCommand, findOwnerUser, getActiveGuildForUser } = await setup(['alice']);
+    activeBot = bot;
+
+    await bot.startTikTokBot();
+    getConnection('alice').emit('chat', { content: '!clap' });
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(1));
+    expect(findOwnerUser).toHaveBeenCalledOnce();
+
+    vi.mocked(findOwnerUser).mockResolvedValue({ discord_id: 'new-owner-discord-id' } as any);
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1);
+
+    getConnection('alice').emit('chat', { content: '!again' });
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(2));
+
+    expect(findOwnerUser).toHaveBeenCalledTimes(2);
+    expect(getActiveGuildForUser).toHaveBeenLastCalledWith(expect.anything(), 'new-owner-discord-id');
+  });
 });
 
 // ─── reconnect behaviour ──────────────────────────────────────────────────────

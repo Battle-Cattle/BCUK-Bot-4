@@ -160,6 +160,49 @@ describe('POST /streamdeck-key/request', () => {
     const res = await supertest(buildApp()).post('/streamdeck-key/request');
     expect(res.headers.location).toBe('/streamdeck-key?error=request_failed');
   });
+
+  it('serializes two concurrent requests from the same brand-new user, avoiding a duplicate-key race', async () => {
+    const callOrder: string[] = [];
+    let resolveFirstHasApiKey!: () => void;
+    const firstHasApiKeyGate = new Promise<void>((resolve) => { resolveFirstHasApiKey = resolve; });
+    let hasApiKeyCalls = 0;
+
+    vi.mocked(getGuildStatusForKey).mockResolvedValue(null);
+    vi.mocked(hasApiKey).mockImplementation(async () => {
+      hasApiKeyCalls += 1;
+      callOrder.push('hasApiKey-start');
+      if (hasApiKeyCalls === 1) {
+        await firstHasApiKeyGate;
+      }
+      callOrder.push('hasApiKey-end');
+      return false;
+    });
+    vi.mocked(createApiKeyAndRequestGuildAccess).mockImplementation(async () => {
+      callOrder.push('create');
+      return { plain: 'a'.repeat(64), status: 'pending' };
+    });
+
+    const app = buildApp();
+    // supertest/superagent requests are thenable but lazy — chaining .then()
+    // immediately (rather than just holding the unawaited value) is what
+    // actually dispatches the request.
+    const firstReq = supertest(app).post('/streamdeck-key/request').then((r) => r);
+    await vi.waitFor(() => expect(callOrder).toContain('hasApiKey-start'));
+    const secondReq = supertest(app).post('/streamdeck-key/request').then((r) => r);
+
+    // Give the second request every chance to (incorrectly) start its own
+    // hasApiKey check before asserting it didn't — it should be stuck behind
+    // the mutation queue holding the first request's in-flight operation.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(callOrder).toEqual(['hasApiKey-start']);
+
+    resolveFirstHasApiKey();
+    await firstReq;
+    await secondReq;
+
+    expect(callOrder).toEqual(['hasApiKey-start', 'hasApiKey-end', 'create', 'hasApiKey-start', 'hasApiKey-end', 'create']);
+    expect(createApiKeyAndRequestGuildAccess).toHaveBeenCalledTimes(2);
+  });
 });
 
 // ─── POST /streamdeck-key/revoke ──────────────────────────────────────────────

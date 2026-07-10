@@ -161,23 +161,18 @@ export async function rotateApiKey(discordId: string): Promise<{ plain: string }
 }
 
 /**
- * Finds the Discord ID owning an approved Streamdeck API key by its SHA-256
- * hash. "Approved" means the key has at least one guild with `approved`
- * status — the caller must separately check {@link isKeyApprovedForGuild} for
- * the specific guild a request targets.
+ * Finds the Discord ID owning a Streamdeck API key by its SHA-256 hash. This
+ * is purely an identity lookup — it does not authorize any guild by itself;
+ * every caller must separately check {@link isKeyApprovedForGuild} for the
+ * specific guild a request targets, so there is exactly one source of truth
+ * for per-guild approval instead of two checks that could drift apart.
  *
  * @param hash SHA-256 hash of the submitted plaintext key.
- * @returns The owning Discord ID, or null when not found/not approved anywhere.
+ * @returns The owning Discord ID, or null when no key matches this hash.
  */
-export async function findApprovedKeyByHash(hash: string): Promise<{ discordId: string } | null> {
+export async function findKeyByHash(hash: string): Promise<{ discordId: string } | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT k.discord_id, k.key_hash
-     FROM streamdeck_api_keys k
-     WHERE k.key_hash = ?
-       AND EXISTS (
-         SELECT 1 FROM streamdeck_key_guild_status s
-         WHERE s.discord_id = k.discord_id AND s.status = 'approved'
-       )`,
+    'SELECT discord_id, key_hash FROM streamdeck_api_keys WHERE key_hash = ?',
     [hash],
   );
   if (rows.length === 0) return null;

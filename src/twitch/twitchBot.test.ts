@@ -246,6 +246,23 @@ describe('handleTwitchMessage', () => {
     expect(getActiveGuildForUser).not.toHaveBeenCalled();
   });
 
+  it('re-resolves the linked discord_id after the cache TTL expires, picking up a relink', async () => {
+    vi.mocked(handleCommand).mockResolvedValue(undefined);
+
+    sendMessage('#streamer', makeTags(), '!cmd');
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(1));
+    expect(findUserByTwitchName).toHaveBeenCalledOnce();
+
+    vi.mocked(findUserByTwitchName).mockResolvedValue({ discord_id: 'new-streamer-discord-id' } as any);
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1);
+
+    sendMessage('#streamer', makeTags(), '!again');
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(2));
+
+    expect(findUserByTwitchName).toHaveBeenCalledTimes(2);
+    expect(getActiveGuildForUser).toHaveBeenLastCalledWith(expect.anything(), 'new-streamer-discord-id');
+  });
+
   it('passes the normalized channel and message to executors', () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     sendMessage('#STREAMER', makeTags({ 'display-name': 'Alice' }), '!clap');

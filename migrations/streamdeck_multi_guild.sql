@@ -63,13 +63,27 @@ SET @sql = IF(@sd_exists = 0 OR @already_split = 0,
   'UPDATE streamdeck_api_keys SET created_at = requested_at');
 PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 
+-- The old approved_by FK (`FOREIGN KEY (approved_by) REFERENCES user(discord_id)
+-- ON DELETE SET NULL`) was never given an explicit name in schema.sql, so MySQL
+-- auto-generated one (e.g. streamdeck_api_keys_ibfk_2). DROP COLUMN approved_by
+-- fails with error 1553 unless that constraint is dropped first — look its name
+-- up rather than guessing it.
+SET @approved_by_fk = (
+  SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'streamdeck_api_keys'
+    AND COLUMN_NAME = 'approved_by' AND REFERENCED_TABLE_NAME IS NOT NULL
+  LIMIT 1
+);
+
 SET @sql = IF(@sd_exists = 0 OR @already_split = 0,
   'SELECT ''nothing to drop''',
-  'ALTER TABLE streamdeck_api_keys
-     DROP FOREIGN KEY fk_streamdeck_guild,
-     DROP COLUMN guild_id,
-     DROP COLUMN status,
-     DROP COLUMN requested_at,
-     DROP COLUMN approved_at,
-     DROP COLUMN approved_by');
+  CONCAT(
+    'ALTER TABLE streamdeck_api_keys ',
+    'DROP FOREIGN KEY fk_streamdeck_guild, ',
+    IF(@approved_by_fk IS NOT NULL, CONCAT('DROP FOREIGN KEY `', @approved_by_fk, '`, '), ''),
+    'DROP COLUMN guild_id, ',
+    'DROP COLUMN status, ',
+    'DROP COLUMN requested_at, ',
+    'DROP COLUMN approved_at, ',
+    'DROP COLUMN approved_by'));
 PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;

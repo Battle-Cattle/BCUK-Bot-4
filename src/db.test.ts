@@ -109,7 +109,7 @@ vi.mock('./db/streamdeckKeys', () => ({
   createApiKeyAndRequestGuildAccess: vi.fn(),
   requestGuildAccessForExistingKey: vi.fn(),
   rotateApiKey: vi.fn(),
-  findApprovedKeyByHash: vi.fn(),
+  findKeyByHash: vi.fn(),
   isKeyApprovedForGuild: vi.fn(),
   getApprovedGuildIdsForKey: vi.fn(),
   getGuildStatusForKey: vi.fn(),
