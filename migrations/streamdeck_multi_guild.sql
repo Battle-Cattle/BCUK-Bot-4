@@ -52,8 +52,17 @@ SET @sql = IF(@sd_exists = 0 OR @already_split = 0,
 PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 
 -- ─── streamdeck_api_keys: drop the old per-guild columns ───────────────────
-SET @sql = IF(@sd_exists = 0 OR @already_split = 0,
-  'SELECT ''nothing to drop''',
+-- Guarded the same way as the approved_by FK lookup below: a run that fails
+-- after adding created_at but before the DROP COLUMN step leaves guild_id in
+-- place (so @already_split is still 1), and a re-run would otherwise hit
+-- "Duplicate column name 'created_at'".
+SET @created_at_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+  WHERE table_schema = DATABASE() AND table_name = 'streamdeck_api_keys' AND column_name = 'created_at'
+);
+
+SET @sql = IF(@sd_exists = 0 OR @already_split = 0 OR @created_at_exists = 1,
+  'SELECT ''nothing to add''',
   'ALTER TABLE streamdeck_api_keys
      ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
 PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
