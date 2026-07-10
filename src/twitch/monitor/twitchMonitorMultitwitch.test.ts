@@ -18,7 +18,7 @@ function makeState(overrides: Partial<LiveState> = {}): LiveState {
     messageId: 'msg1',
     channelId: 'chan1',
     offlineTimer: null,
-    group: { id: 10, name: 'G', discord_channel: 'c', live_message: 'l', new_game_message: 'g', multi_twitch: true, delete_old_posts: false },
+    group: { id: 10, guild_id: 'guild-1', name: 'G', discord_channel: 'c', live_message: 'l', new_game_message: 'g', multi_twitch: true, delete_old_posts: false },
     ...overrides,
   };
 }

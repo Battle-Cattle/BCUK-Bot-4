@@ -6,6 +6,7 @@ import { makeLiveState } from './twitchMonitorTypes';
 function makeGroup(overrides: Partial<DbStreamGroup> = {}): DbStreamGroup {
   return {
     id: 1,
+    guild_id: 'guild-1',
     name: 'TestGroup',
     discord_channel: '111',
     live_message: 'Live: {user}',

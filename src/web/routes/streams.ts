@@ -1,11 +1,11 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import {
-  getAllStreamGroups,
+  getStreamGroupsForGuild,
   addStreamGroup,
   updateStreamGroup,
   removeStreamGroup,
-  getAllStreamers,
+  getStreamersForGuild,
   addStreamer,
   removeStreamer,
   removeStreamersByGroup,
@@ -62,9 +62,10 @@ function getFriendlyError(key: string): string {
 router.get('/streams', requireManager, csrfProtection, async (req, res) => {
   try {
     const isAdmin = (req.session.user?.accessLevel ?? 0) >= AccessLevel.ADMIN;
+    const guildId = req.session.user!.currentGuildId!;
     const [groups, streamers, eventSubStreamers, allUsers] = await Promise.all([
-      getAllStreamGroups(),
-      getAllStreamers(),
+      getStreamGroupsForGuild(guildId),
+      getStreamersForGuild(guildId),
       isAdmin ? getAllEventSubStreamers() : Promise.resolve([]),
       getAllUsers(),
     ]);
@@ -132,6 +133,7 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
 
   try {
     await addStreamGroup({
+      guildId: req.session.user!.currentGuildId!,
       name: name!.trim().slice(0, 100),
       discordChannel: discord_channel!.trim().slice(0, 20),
       liveMessage: live_message!.trim().slice(0, 2000),
@@ -171,6 +173,7 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
   try {
     await updateStreamGroup({
       id: parsedGroupId,
+      guildId: req.session.user!.currentGuildId!,
       name: name!.trim().slice(0, 100),
       discordChannel: discord_channel!.trim().slice(0, 20),
       liveMessage: live_message!.trim().slice(0, 2000),
@@ -200,9 +203,10 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
   if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
+    const guildId = req.session.user!.currentGuildId!;
     // Delete streamers in the group first (avoids FK constraint errors)
-    await removeStreamersByGroup(parsedGroupId);
-    await removeStreamGroup(parsedGroupId);
+    await removeStreamersByGroup(parsedGroupId, guildId);
+    await removeStreamGroup(parsedGroupId, guildId);
     triggerRestart();
   } catch (err) {
     return logAndRedirectError({ res, log, logLabel: 'Remove stream group error:', err, basePath: '/admin/streams', errorCode: 'remove_group_failed' });
@@ -234,7 +238,7 @@ router.post('/streams/streamers/add', requireManager, csrfProtection, async (req
   try {
     const user = await findUser(discordId);
     if (!user?.twitch_name) return res.redirect('/admin/streams?error=missing_fields');
-    await addStreamer(discordId, parsedGroupId);
+    await addStreamer(discordId, parsedGroupId, req.session.user!.currentGuildId!);
     triggerRestart();
   } catch (err) {
     return logAndRedirectError({ res, log, logLabel: 'Add streamer error:', err, basePath: '/admin/streams', errorCode: 'add_streamer_failed' });
@@ -257,7 +261,7 @@ router.post('/streams/streamers/remove', requireManager, csrfProtection, async (
   if (parsedStreamerId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
-    await removeStreamer(parsedStreamerId);
+    await removeStreamer(parsedStreamerId, req.session.user!.currentGuildId!);
     triggerRestart();
   } catch (err) {
     return logAndRedirectError({ res, log, logLabel: 'Remove streamer error:', err, basePath: '/admin/streams', errorCode: 'remove_streamer_failed' });

@@ -62,11 +62,11 @@ vi.mock('./db/counterCache', () => ({
 }));
 
 vi.mock('./db/streamMonitor', () => ({
-  getAllStreamGroups: vi.fn(),
+  getStreamGroupsForGuild: vi.fn(),
   addStreamGroup: vi.fn(),
   updateStreamGroup: vi.fn(),
   removeStreamGroup: vi.fn(),
-  getAllStreamers: vi.fn(),
+  getStreamersForGuild: vi.fn(),
   getAllStreamersWithGroups: vi.fn(),
   addStreamer: vi.fn(),
   removeStreamer: vi.fn(),
@@ -105,9 +105,14 @@ vi.mock('./db/overlayVideos', () => ({
 }));
 
 vi.mock('./db/streamdeckKeys', () => ({
-  requestApiKey: vi.fn(),
+  hasApiKey: vi.fn(),
+  createApiKeyAndRequestGuildAccess: vi.fn(),
+  requestGuildAccessForExistingKey: vi.fn(),
+  rotateApiKey: vi.fn(),
   findApprovedKeyByHash: vi.fn(),
-  getApiKeyStatus: vi.fn(),
+  isKeyApprovedForGuild: vi.fn(),
+  getApprovedGuildIdsForKey: vi.fn(),
+  getGuildStatusForKey: vi.fn(),
   approveApiKey: vi.fn(),
   denyApiKey: vi.fn(),
   revokeApiKey: vi.fn(),

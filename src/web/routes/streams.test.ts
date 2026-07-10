@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../db', () => ({
-  getAllStreamGroups: vi.fn(),
+  getStreamGroupsForGuild: vi.fn(),
   addStreamGroup: vi.fn(),
   updateStreamGroup: vi.fn(),
   removeStreamGroup: vi.fn(),
-  getAllStreamers: vi.fn(),
+  getStreamersForGuild: vi.fn(),
   addStreamer: vi.fn(),
   removeStreamer: vi.fn(),
   removeStreamersByGroup: vi.fn(),
@@ -44,14 +44,15 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './streams';
 import {
-  getAllStreamGroups, getAllStreamers, getAllUsers, findUser, addStreamer, addStreamGroup, updateStreamGroup,
+  getStreamGroupsForGuild, getStreamersForGuild, getAllUsers, findUser, addStreamer, addStreamGroup, updateStreamGroup,
   removeStreamGroup, removeStreamer, removeStreamersByGroup, getAllEventSubStreamers,
 } from '../../db';
 import { restartTwitchMonitor, getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db/users';
 
-type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
-const MANAGER: SessionUser = { discordId: '200000000000000001', discordName: 'ManagerUser', discordAvatar: null, accessLevel: AccessLevel.MANAGER };
+const GUILD_ID = '900000000000000001';
+type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3; currentGuildId: string };
+const MANAGER: SessionUser = { discordId: '200000000000000001', discordName: 'ManagerUser', discordAvatar: null, accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID };
 
 function buildApp(sessionUser: SessionUser = MANAGER) {
   const app = express();
@@ -67,8 +68,8 @@ function buildApp(sessionUser: SessionUser = MANAGER) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getAllStreamGroups).mockResolvedValue([]);
-  vi.mocked(getAllStreamers).mockResolvedValue([]);
+  vi.mocked(getStreamGroupsForGuild).mockResolvedValue([]);
+  vi.mocked(getStreamersForGuild).mockResolvedValue([]);
   vi.mocked(getAllUsers).mockResolvedValue([]);
   vi.mocked(findUser).mockResolvedValue(null);
   vi.mocked(addStreamer).mockResolvedValue(undefined);
@@ -106,8 +107,8 @@ describe('GET /streams — query param filtering', () => {
     expect(res.body.success).toBeNull();
   });
 
-  it('returns 500 when getAllStreamGroups throws', async () => {
-    vi.mocked(getAllStreamGroups).mockRejectedValue(new Error('DB down'));
+  it('returns 500 when getStreamGroupsForGuild throws', async () => {
+    vi.mocked(getStreamGroupsForGuild).mockRejectedValue(new Error('DB down'));
     const res = await supertest(buildApp()).get('/streams');
     expect(res.status).toBe(500);
   });
@@ -129,7 +130,7 @@ describe('POST /streams/streamers/add — array and missing input handling', () 
       .send('discord_id=100000000000000001&group_id=1&group_id=2');
     expect(res.status).toBe(302);
     expect(res.headers.location).not.toContain('error');
-    expect(vi.mocked(addStreamer)).toHaveBeenCalledWith('100000000000000001', 1);
+    expect(vi.mocked(addStreamer)).toHaveBeenCalledWith('100000000000000001', 1, GUILD_ID);
   });
 
   it('redirects with missing_fields when discord_id is absent', async () => {
@@ -378,8 +379,8 @@ describe('POST /streams/groups/remove', () => {
     const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=5');
     expect(res.status).toBe(302);
     expect(res.headers.location).not.toContain('error');
-    expect(removeStreamersByGroup).toHaveBeenCalledWith(5);
-    expect(removeStreamGroup).toHaveBeenCalledWith(5);
+    expect(removeStreamersByGroup).toHaveBeenCalledWith(5, GUILD_ID);
+    expect(removeStreamGroup).toHaveBeenCalledWith(5, GUILD_ID);
     expect(vi.mocked(removeStreamersByGroup).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(removeStreamGroup).mock.invocationCallOrder[0]);
     await flushRestartChain();
@@ -425,7 +426,7 @@ describe('POST /streams/streamers/remove', () => {
     const res = await supertest(buildApp()).post('/streams/streamers/remove').send('streamer_id=7');
     expect(res.status).toBe(302);
     expect(res.headers.location).not.toContain('error');
-    expect(removeStreamer).toHaveBeenCalledWith(7);
+    expect(removeStreamer).toHaveBeenCalledWith(7, GUILD_ID);
     await flushRestartChain();
     expect(restartTwitchMonitor).toHaveBeenCalled();
   });
@@ -461,7 +462,7 @@ describe('GET /streams/live', () => {
 
 describe('GET /streams — eligible users and admin EventSub status', () => {
   it('includes users with a Twitch name who are not already streamers, excluding the rest', async () => {
-    vi.mocked(getAllStreamers).mockResolvedValue([{ discord_id: '1', twitch_name: 'existing' }] as any);
+    vi.mocked(getStreamersForGuild).mockResolvedValue([{ discord_id: '1', twitch_name: 'existing' }] as any);
     vi.mocked(getAllUsers).mockResolvedValue([
       { discord_id: '1', twitch_name: 'existing' }, // already a streamer
       { discord_id: '2', twitch_name: 'eligible' }, // eligible
@@ -476,7 +477,7 @@ describe('GET /streams — eligible users and admin EventSub status', () => {
 
   it('builds eventSubById keyed by streamer row id for admin users, and skips the lookup for non-admins', async () => {
     vi.mocked(getAllEventSubStreamers).mockResolvedValue([{ id: 42, twitch_name: 'admineligible' }] as any);
-    const admin: SessionUser = { discordId: '300000000000000001', discordName: 'AdminUser', discordAvatar: null, accessLevel: AccessLevel.ADMIN };
+    const admin: SessionUser = { discordId: '300000000000000001', discordName: 'AdminUser', discordAvatar: null, accessLevel: AccessLevel.ADMIN, currentGuildId: GUILD_ID };
 
     const res = await supertest(buildApp(admin)).get('/streams');
 
