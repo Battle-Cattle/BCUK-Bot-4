@@ -37,11 +37,18 @@ interface ChannelPointRewardRow {
   twitchReward: TwitchCustomReward | null;
   config: RewardPricingRow | null;
   previewPrice: number | null;
-  /** Rendered SVG history chart, or null when there's no config to chart yet. */
-  historyChart: string | null;
-  /** Rendered SVG chart simulating a constant-use ramp-to-peak-demand-then-cooldown cycle, or null when there's no config to simulate yet. */
-  simulationChart: string | null;
-  /** One-line human-readable summary of the simulation's peak demand/price and phase durations, or null alongside a null `simulationChart`. */
+  /**
+   * Rendered SVG history chart, already HTML-escaped by `renderPriceHistoryChart` and safe to
+   * output raw (`<%- %>`) in the view — or null when there's no config to chart yet.
+   */
+  historyChartSafeHtml: string | null;
+  /**
+   * Rendered SVG chart simulating a constant-use ramp-to-peak-demand-then-cooldown cycle, already
+   * HTML-escaped by `renderPriceHistoryChart` and safe to output raw (`<%- %>`) in the view — or
+   * null when there's no config to simulate yet.
+   */
+  simulationChartSafeHtml: string | null;
+  /** One-line human-readable summary of the simulation's peak demand/price and phase durations, or null alongside a null `simulationChartSafeHtml`. */
   simulationSummary: string | null;
 }
 
@@ -144,9 +151,9 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
 
     // Only ever called for a config drawn from `pricingConfigs`, which is populated in the same
     // branch as `pricingSettings` above — so `pricingSettings` is guaranteed non-null here.
-    function buildSimulation(config: RewardPricingRow): { simulationChart: string; simulationSummary: string } {
+    function buildSimulation(config: RewardPricingRow): { simulationChartSafeHtml: string; simulationSummary: string } {
       const { chart, summary } = buildSimulationChart(config, pricingSettings!);
-      return { simulationChart: chart, simulationSummary: summary };
+      return { simulationChartSafeHtml: chart, simulationSummary: summary };
     }
 
     const configByRewardId = new Map(pricingConfigs.map((c) => [c.twitch_reward_id, c]));
@@ -159,8 +166,8 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
         twitchReward: tr,
         config,
         previewPrice: config ? previewPriceFor(config) : null,
-        historyChart: config ? await buildHistoryChart(config) : null,
-        ...(config ? buildSimulation(config) : { simulationChart: null, simulationSummary: null }),
+        historyChartSafeHtml: config ? await buildHistoryChart(config) : null,
+        ...(config ? buildSimulation(config) : { simulationChartSafeHtml: null, simulationSummary: null }),
       };
     }));
 
@@ -175,7 +182,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
           twitchReward: null,
           config,
           previewPrice: previewPriceFor(config),
-          historyChart: await buildHistoryChart(config),
+          historyChartSafeHtml: await buildHistoryChart(config),
           ...buildSimulation(config),
         })),
     );
