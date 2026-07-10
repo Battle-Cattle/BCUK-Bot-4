@@ -75,10 +75,11 @@ router.post('/streamdeck-key/revoke', csrfProtection, async (req, res) => {
 
 const ADMIN_KNOWN_ERRORS = new Set(['approve_failed', 'deny_failed', 'revoke_failed', 'invalid_discord_id']);
 
-/** Renders the admin Streamdeck key management page, listing pending and all key requests. */
+/** Renders the admin Streamdeck key management page, listing pending and all key requests for the admin's current guild. */
 router.get('/admin/streamdeck-keys', requireAdmin, csrfProtection, async (req, res) => {
   try {
-    const [pending, all] = await Promise.all([getPendingRequests(), getAllApiKeys()]);
+    const guildId = req.session.user!.currentGuildId!;
+    const [pending, all] = await Promise.all([getPendingRequests(guildId), getAllApiKeys(guildId)]);
     renderView(res, 'streamdeck-keys-admin', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
@@ -92,36 +93,36 @@ router.get('/admin/streamdeck-keys', requireAdmin, csrfProtection, async (req, r
   }
 });
 
-/** Approves a pending Streamdeck API key request for the Discord ID in the request body. */
+/** Approves a pending Streamdeck API key request for the Discord ID in the request body, scoped to the admin's current guild. */
 router.post('/admin/streamdeck-keys/approve', requireAdmin, csrfProtection, async (req, res) => {
   const validId = normalizeDiscordId((req.body as { discord_id?: string }).discord_id);
   if (!validId) return res.redirect('/admin/streamdeck-keys?error=invalid_discord_id');
   try {
-    await approveApiKey(validId, req.session.user!.discordId);
+    await approveApiKey(validId, req.session.user!.discordId, req.session.user!.currentGuildId!);
     res.redirect('/admin/streamdeck-keys');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key approve error:', err, basePath: '/admin/streamdeck-keys', errorCode: 'approve_failed' });
   }
 });
 
-/** Denies a pending Streamdeck API key request for the Discord ID in the request body. */
+/** Denies a pending Streamdeck API key request for the Discord ID in the request body, scoped to the admin's current guild. */
 router.post('/admin/streamdeck-keys/deny', requireAdmin, csrfProtection, async (req, res) => {
   const validId = normalizeDiscordId((req.body as { discord_id?: string }).discord_id);
   if (!validId) return res.redirect('/admin/streamdeck-keys?error=invalid_discord_id');
   try {
-    await denyApiKey(validId);
+    await denyApiKey(validId, req.session.user!.currentGuildId!);
     res.redirect('/admin/streamdeck-keys');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key deny error:', err, basePath: '/admin/streamdeck-keys', errorCode: 'deny_failed' });
   }
 });
 
-/** Revokes the Streamdeck API key for the Discord ID in the request body. */
+/** Revokes the Streamdeck API key for the Discord ID in the request body, scoped to the admin's current guild. */
 router.post('/admin/streamdeck-keys/revoke', requireAdmin, csrfProtection, async (req, res) => {
   const validId = normalizeDiscordId((req.body as { discord_id?: string }).discord_id);
   if (!validId) return res.redirect('/admin/streamdeck-keys?error=invalid_discord_id');
   try {
-    await revokeApiKey(validId);
+    await revokeApiKey(validId, req.session.user!.currentGuildId!);
     res.redirect('/admin/streamdeck-keys');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key admin revoke error:', err, basePath: '/admin/streamdeck-keys', errorCode: 'revoke_failed' });

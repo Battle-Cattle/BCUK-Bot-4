@@ -147,40 +147,52 @@ describe('getApiKeyStatus', () => {
 // ─── approveApiKey ────────────────────────────────────────────────────────────
 
 describe('approveApiKey', () => {
-  it('executes UPDATE with approvedBy and discordId', async () => {
+  it('executes UPDATE with approvedBy, discordId, and guildId', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await approveApiKey('user1', 'admin1');
+    await approveApiKey('user1', 'admin1', 'g1');
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain("status = 'approved'");
-    expect(params).toContain('admin1');
-    expect(params).toContain('user1');
+    expect(sql).toContain('guild_id = ?');
+    expect(params).toEqual(['admin1', 'user1', 'g1']);
   });
 });
 
 // ─── denyApiKey ───────────────────────────────────────────────────────────────
 
 describe('denyApiKey', () => {
-  it('executes UPDATE setting status to denied', async () => {
+  it('executes UPDATE setting status to denied, scoped to guildId', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await denyApiKey('user1');
+    await denyApiKey('user1', 'g1');
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain("status = 'denied'");
-    expect(params).toContain('user1');
+    expect(sql).toContain('guild_id = ?');
+    expect(params).toEqual(['user1', 'g1']);
   });
 });
 
 // ─── revokeApiKey ─────────────────────────────────────────────────────────────
 
 describe('revokeApiKey', () => {
-  it('executes UPDATE setting status to revoked', async () => {
+  it('executes UPDATE setting status to revoked, with no guild scoping when guildId is omitted (self-service)', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await revokeApiKey('user1');
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain("status = 'revoked'");
-    expect(params).toContain('user1');
+    expect(sql).not.toContain('guild_id');
+    expect(params).toEqual(['user1']);
+  });
+
+  it('scopes the UPDATE to guildId when provided (admin-initiated revoke)', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await revokeApiKey('user1', 'g1');
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("status = 'revoked'");
+    expect(sql).toContain('guild_id = ?');
+    expect(params).toEqual(['user1', 'g1']);
   });
 });
 
@@ -189,21 +201,22 @@ describe('revokeApiKey', () => {
 describe('getPendingRequests', () => {
   it('returns empty array when no rows', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([]) as any);
-    const result = await getPendingRequests();
+    const result = await getPendingRequests('g1');
     expect(result).toEqual([]);
   });
 
-  it('maps pending rows', async () => {
+  it('maps pending rows and scopes the query to guildId', async () => {
     const row = { discord_id: '1', guild_id: 'g1', status: 'pending', requested_at: new Date(), approved_at: null, approved_by: null, user_name: 'Alice', approver_name: null };
     const pool = makePool([row]);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await getPendingRequests();
+    const result = await getPendingRequests('g1');
     expect(result).toHaveLength(1);
     expect(result[0].guild_id).toBe('g1');
     expect(result[0].status).toBe('pending');
     expect(result[0].user_name).toBe('Alice');
-    const [sql] = pool.execute.mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain('guild_id');
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('k.guild_id = ?');
+    expect(params).toEqual(['g1']);
   });
 });
 
@@ -212,25 +225,26 @@ describe('getPendingRequests', () => {
 describe('getAllApiKeys', () => {
   it('returns empty array when no rows', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([]) as any);
-    const result = await getAllApiKeys();
+    const result = await getAllApiKeys('g1');
     expect(result).toEqual([]);
   });
 
-  it('maps multiple rows with different statuses', async () => {
+  it('maps multiple rows and scopes the query to guildId', async () => {
     const rows = [
       { discord_id: '1', guild_id: 'g1', status: 'approved', requested_at: new Date(), approved_at: new Date(), approved_by: '2', user_name: 'Alice', approver_name: 'Admin' },
-      { discord_id: '3', guild_id: 'g2', status: 'revoked', requested_at: new Date(), approved_at: null, approved_by: null, user_name: 'Bob', approver_name: null },
+      { discord_id: '3', guild_id: 'g1', status: 'revoked', requested_at: new Date(), approved_at: null, approved_by: null, user_name: 'Bob', approver_name: null },
     ];
     const pool = makePool(rows);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await getAllApiKeys();
+    const result = await getAllApiKeys('g1');
     expect(result).toHaveLength(2);
     expect(result[0].guild_id).toBe('g1');
     expect(result[0].status).toBe('approved');
-    expect(result[1].guild_id).toBe('g2');
+    expect(result[1].guild_id).toBe('g1');
     expect(result[1].status).toBe('revoked');
-    const [sql] = pool.execute.mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain('guild_id');
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('k.guild_id = ?');
+    expect(params).toEqual(['g1']);
   });
 });
 
