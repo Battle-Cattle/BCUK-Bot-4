@@ -69,7 +69,17 @@ trap - ERR  # Rollback no longer needed — code is good.
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "==> Restarting bot in screen session '$SCREEN_SESSION'..."
-if screen -list | grep -Eq "[0-9]+\.${SCREEN_SESSION}[[:space:]]"; then
+
+# The screen window always runs a plain, persistent `bash` — never `bash -c "... && npm start"`
+# directly. If npm start were the window's own command, Ctrl-C-ing it to stop the bot would
+# make that command (and so the shell, and so the single-window session) exit immediately,
+# leaving nothing for the restart command below to `stuff` into.
+if ! screen -list | grep -Eq "[0-9]+\.${SCREEN_SESSION}[[:space:]]"; then
+    echo "==> Screen session '$SCREEN_SESSION' not found. Creating it..."
+    screen -dmS "$SCREEN_SESSION" bash
+fi
+
+if pgrep -f "node dist/index.js" > /dev/null 2>&1; then
     screen -S "$SCREEN_SESSION" -X stuff $'\003'
 
     # Wait up to 15s for the node process to fully exit before restarting.
@@ -81,13 +91,9 @@ if screen -list | grep -Eq "[0-9]+\.${SCREEN_SESSION}[[:space:]]"; then
     if pgrep -f "node dist/index.js" > /dev/null 2>&1; then
         echo "WARNING: Node process did not stop within 15s. Attempting restart anyway..."
     fi
-
-    screen -S "$SCREEN_SESSION" -X stuff "cd ${REPO_DIR} && npm start\n"
-    echo "==> Bot restarted."
-else
-    echo "WARNING: Screen session '$SCREEN_SESSION' not found. Starting a new one..."
-    screen -dmS "$SCREEN_SESSION" bash -c "cd '${REPO_DIR}' && npm start"
-    echo "==> Bot started in new screen session '$SCREEN_SESSION'."
 fi
+
+screen -S "$SCREEN_SESSION" -X stuff "cd '${REPO_DIR}' && npm start\n"
+echo "==> Bot restarted."
 
 echo "==> Deploy complete."
