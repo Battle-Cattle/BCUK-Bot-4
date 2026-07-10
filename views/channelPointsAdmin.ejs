@@ -174,14 +174,16 @@
 
           <% if (r.config) { %>
           <div class="price-history-container" data-reward-id="<%= r.rewardId %>" data-range-ms="<%= historyHours * 60 * 60 * 1000 %>" style="margin-top:0.5rem;">
-            <%- r.historyChart %>
+            <%# historyChartSafeHtml is pre-escaped SVG from renderPriceHistoryChart(); the "SafeHtml" suffix is the contract that <%- %> here is safe. %>
+            <%- r.historyChartSafeHtml %>
           </div>
           <% } %>
 
-          <% if (r.config && r.simulationChart) { %>
+          <% if (r.config && r.simulationChartSafeHtml) { %>
           <div style="margin-top:0.75rem;">
             <p class="hint hint-compact">Simulated: constant use &rarr; cooldown</p>
-            <%- r.simulationChart %>
+            <%# simulationChartSafeHtml is pre-escaped SVG from renderPriceHistoryChart(); the "SafeHtml" suffix is the contract that <%- %> here is safe. %>
+            <%- r.simulationChartSafeHtml %>
             <p class="hint hint-compact"><%= r.simulationSummary %></p>
           </div>
           <% } %>

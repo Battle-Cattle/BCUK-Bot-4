@@ -277,17 +277,17 @@ describe('GET /', () => {
     it('renders a chart string for a reward with a config (with points, and without), and null without a config', async () => {
       vi.mocked(getPricingHistory).mockResolvedValue([{ recorded_at: '1700000000000', cost: 300, demand: 0.5 }]);
       const res = await supertest(buildApp()).get('/');
-      expect(typeof res.body.rewards[0].historyChart).toBe('string');
-      expect(res.body.rewards[0].historyChart).toContain('<svg');
+      expect(typeof res.body.rewards[0].historyChartSafeHtml).toBe('string');
+      expect(res.body.rewards[0].historyChartSafeHtml).toContain('<svg');
 
       vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([]);
       const res2 = await supertest(buildApp()).get('/');
-      expect(res2.body.rewards[0].historyChart).toBeNull();
+      expect(res2.body.rewards[0].historyChartSafeHtml).toBeNull();
     });
 
     it('renders the empty-history placeholder when there are no points yet', async () => {
       const res = await supertest(buildApp()).get('/');
-      expect(res.body.rewards[0].historyChart).toContain('No price history yet');
+      expect(res.body.rewards[0].historyChartSafeHtml).toContain('No price history yet');
     });
 
     it('renders a chart for an unlinked (orphaned) reward too', async () => {
@@ -295,7 +295,7 @@ describe('GET /', () => {
       vi.mocked(getPricingHistory).mockResolvedValue([{ recorded_at: '1700000000000', cost: 300, demand: 0.5 }]);
       const res = await supertest(buildApp()).get('/');
       expect(res.body.rewards[0].twitchReward).toBeNull();
-      expect(res.body.rewards[0].historyChart).toContain('<svg');
+      expect(res.body.rewards[0].historyChartSafeHtml).toContain('<svg');
     });
   });
 
@@ -314,15 +314,15 @@ describe('GET /', () => {
 
     it('renders a simulation chart and summary for a reward with a config', async () => {
       const res = await supertest(buildApp()).get('/');
-      expect(res.body.rewards[0].simulationChart).toContain('<svg');
+      expect(res.body.rewards[0].simulationChartSafeHtml).toContain('<svg');
       expect(typeof res.body.rewards[0].simulationSummary).toBe('string');
       expect(res.body.rewards[0].simulationSummary).toMatch(/% demand/);
     });
 
-    it('leaves simulationChart/simulationSummary null for a reward with no pricing config', async () => {
+    it('leaves simulationChartSafeHtml/simulationSummary null for a reward with no pricing config', async () => {
       vi.mocked(getPricingConfigsForStreamer).mockResolvedValue([]);
       const res = await supertest(buildApp()).get('/');
-      expect(res.body.rewards[0].simulationChart).toBeNull();
+      expect(res.body.rewards[0].simulationChartSafeHtml).toBeNull();
       expect(res.body.rewards[0].simulationSummary).toBeNull();
     });
 
@@ -330,7 +330,7 @@ describe('GET /', () => {
       vi.mocked(getCustomRewards).mockResolvedValue([]);
       const res = await supertest(buildApp()).get('/');
       expect(res.body.rewards[0].twitchReward).toBeNull();
-      expect(res.body.rewards[0].simulationChart).toContain('<svg');
+      expect(res.body.rewards[0].simulationChartSafeHtml).toContain('<svg');
     });
   });
 });
