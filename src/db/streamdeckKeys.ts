@@ -119,18 +119,19 @@ export async function getApiKeyStatus(discordId: string): Promise<StreamdeckKeyR
 }
 
 /**
- * Approves a pending Streamdeck API key request.
+ * Approves a pending Streamdeck API key request, scoped to the admin's guild.
  *
  * @param discordId Requester's Discord snowflake.
  * @param approvedBy Approver's Discord snowflake.
- * @returns A promise that resolves once the update completes; a no-op if the request isn't pending.
+ * @param guildId Guild the approving admin is acting in; the request must be bound to this guild.
+ * @returns A promise that resolves once the update completes; a no-op if the request isn't pending or isn't bound to `guildId`.
  */
-export async function approveApiKey(discordId: string, approvedBy: string): Promise<void> {
+export async function approveApiKey(discordId: string, approvedBy: string, guildId: string): Promise<void> {
   await getPool().execute(
     `UPDATE streamdeck_api_keys
      SET status = 'approved', approved_at = NOW(), approved_by = ?
-     WHERE discord_id = ? AND status = 'pending'`,
-    [approvedBy, discordId],
+     WHERE discord_id = ? AND status = 'pending' AND guild_id = ?`,
+    [approvedBy, discordId, guildId],
   );
 }
 
@@ -138,12 +139,13 @@ export async function approveApiKey(discordId: string, approvedBy: string): Prom
  * Denies a pending Streamdeck API key request, permanently blocking future requests from this user.
  *
  * @param discordId Requester's Discord snowflake.
- * @returns A promise that resolves once the update completes; a no-op if the request isn't pending.
+ * @param guildId Guild the denying admin is acting in; the request must be bound to this guild.
+ * @returns A promise that resolves once the update completes; a no-op if the request isn't pending or isn't bound to `guildId`.
  */
-export async function denyApiKey(discordId: string): Promise<void> {
+export async function denyApiKey(discordId: string, guildId: string): Promise<void> {
   await getPool().execute(
-    `UPDATE streamdeck_api_keys SET status = 'denied' WHERE discord_id = ? AND status = 'pending'`,
-    [discordId],
+    `UPDATE streamdeck_api_keys SET status = 'denied' WHERE discord_id = ? AND status = 'pending' AND guild_id = ?`,
+    [discordId, guildId],
   );
 }
 
@@ -151,45 +153,58 @@ export async function denyApiKey(discordId: string): Promise<void> {
  * Revokes a Discord user's Streamdeck API key, regardless of its current status.
  *
  * @param discordId User's Discord snowflake.
+ * @param guildId When provided (admin-initiated revoke), the key must be bound to this guild or the update is a no-op. Omitted for self-service revokes, which always act on the caller's own key.
  * @returns A promise that resolves once the update completes.
  */
-export async function revokeApiKey(discordId: string): Promise<void> {
-  await getPool().execute(
-    `UPDATE streamdeck_api_keys SET status = 'revoked' WHERE discord_id = ?`,
-    [discordId],
-  );
+export async function revokeApiKey(discordId: string, guildId?: string): Promise<void> {
+  if (guildId) {
+    await getPool().execute(
+      `UPDATE streamdeck_api_keys SET status = 'revoked' WHERE discord_id = ? AND guild_id = ?`,
+      [discordId, guildId],
+    );
+  } else {
+    await getPool().execute(
+      `UPDATE streamdeck_api_keys SET status = 'revoked' WHERE discord_id = ?`,
+      [discordId],
+    );
+  }
 }
 
 /**
- * Lists pending Streamdeck API key requests.
+ * Lists pending Streamdeck API key requests for one guild.
  *
- * @returns Pending key rows, including requester names and guild bindings, oldest first.
+ * @param guildId Guild to list pending requests for.
+ * @returns Pending key rows for `guildId`, including requester names, oldest first.
  */
-export async function getPendingRequests(): Promise<StreamdeckKeyRow[]> {
+export async function getPendingRequests(guildId: string): Promise<StreamdeckKeyRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT k.discord_id, k.guild_id, k.status, k.requested_at, k.approved_at, k.approved_by,
             u.discord_name AS user_name, NULL AS approver_name
      FROM streamdeck_api_keys k
      LEFT JOIN \`user\` u ON u.discord_id = k.discord_id
-     WHERE k.status = 'pending'
+     WHERE k.status = 'pending' AND k.guild_id = ?
      ORDER BY k.requested_at ASC`,
+    [guildId],
   );
   return rows.map(mapRow);
 }
 
 /**
- * Lists all Streamdeck API keys.
+ * Lists all Streamdeck API keys for one guild.
  *
- * @returns Key rows, including requester/approver names and guild bindings, ordered by status then request time.
+ * @param guildId Guild to list keys for.
+ * @returns Key rows for `guildId`, including requester/approver names, ordered by status then request time.
  */
-export async function getAllApiKeys(): Promise<StreamdeckKeyRow[]> {
+export async function getAllApiKeys(guildId: string): Promise<StreamdeckKeyRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT k.discord_id, k.guild_id, k.status, k.requested_at, k.approved_at, k.approved_by,
             u.discord_name AS user_name, a.discord_name AS approver_name
      FROM streamdeck_api_keys k
      LEFT JOIN \`user\` u ON u.discord_id = k.discord_id
      LEFT JOIN \`user\` a ON a.discord_id = k.approved_by
+     WHERE k.guild_id = ?
      ORDER BY k.status ASC, k.requested_at ASC`,
+    [guildId],
   );
   return rows.map(mapRow);
 }

@@ -168,7 +168,7 @@ describe('POST /admin/streamdeck-keys/approve', () => {
   it('approves key and redirects to /admin/streamdeck-keys', async () => {
     const res = await supertest(buildApp()).post('/admin/streamdeck-keys/approve').send(`discord_id=${VALID_DISCORD_ID}`);
     expect(res.headers.location).toBe('/admin/streamdeck-keys');
-    expect(approveApiKey).toHaveBeenCalledWith(VALID_DISCORD_ID, SESSION_USER.discordId);
+    expect(approveApiKey).toHaveBeenCalledWith(VALID_DISCORD_ID, SESSION_USER.discordId, GUILD_ID);
   });
 
   it('redirects to ?error=invalid_discord_id for invalid ID', async () => {
@@ -189,7 +189,7 @@ describe('POST /admin/streamdeck-keys/deny', () => {
   it('denies key and redirects', async () => {
     const res = await supertest(buildApp()).post('/admin/streamdeck-keys/deny').send(`discord_id=${VALID_DISCORD_ID}`);
     expect(res.headers.location).toBe('/admin/streamdeck-keys');
-    expect(denyApiKey).toHaveBeenCalledWith(VALID_DISCORD_ID);
+    expect(denyApiKey).toHaveBeenCalledWith(VALID_DISCORD_ID, GUILD_ID);
   });
 
   it('redirects to ?error=invalid_discord_id for invalid ID', async () => {
@@ -210,7 +210,7 @@ describe('POST /admin/streamdeck-keys/revoke', () => {
   it('revokes key and redirects', async () => {
     const res = await supertest(buildApp()).post('/admin/streamdeck-keys/revoke').send(`discord_id=${VALID_DISCORD_ID}`);
     expect(res.headers.location).toBe('/admin/streamdeck-keys');
-    expect(revokeApiKey).toHaveBeenCalledWith(VALID_DISCORD_ID);
+    expect(revokeApiKey).toHaveBeenCalledWith(VALID_DISCORD_ID, GUILD_ID);
   });
 
   it('redirects to ?error=invalid_discord_id for invalid ID', async () => {
