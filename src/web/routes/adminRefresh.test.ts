@@ -24,7 +24,7 @@ import express from 'express';
 import supertest from 'supertest';
 
 // Import module last so mocks are in place before module-level code runs
-import router, { refreshStates, getRefreshState } from './adminRefresh';
+import router, { refreshStates, getRefreshState, forgetGuildRefreshState } from './adminRefresh';
 
 const GUILD_ID = '900000000000000001';
 const OTHER_GUILD_ID = '900000000000000002';
@@ -66,6 +66,28 @@ describe('getRefreshState', () => {
       startedAt: null,
       finishedAt: null,
     });
+  });
+});
+
+// ─── forgetGuildRefreshState ────────────────────────────────────────────────
+
+describe('forgetGuildRefreshState', () => {
+  it('removes a guild\'s recorded refresh state, resetting it to idle on next read', () => {
+    refreshStates.set(GUILD_ID, { outcome: 'success', updatedCount: 3, failureCount: 0, startedAt: 1, finishedAt: 2 });
+
+    forgetGuildRefreshState(GUILD_ID);
+
+    expect(getRefreshState(GUILD_ID)).toEqual({
+      outcome: 'idle',
+      updatedCount: 0,
+      failureCount: 0,
+      startedAt: null,
+      finishedAt: null,
+    });
+  });
+
+  it('is a no-op for a guild with no recorded state', () => {
+    expect(() => forgetGuildRefreshState('never-seen')).not.toThrow();
   });
 });
 

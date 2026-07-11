@@ -5,6 +5,7 @@ import { executeCustomCommandForDiscord } from '../commands/customCommandHandler
 import { executeCounterCommandForDiscord } from '../commands/counterHandler';
 import { setDiscordReady, clearVoiceStatus } from '../shared/statusStore';
 import { forgetGuild as forgetGuildVoiceState } from '../audio/audioPlayer';
+import { forgetGuildRefreshState } from '../web/routes/adminRefresh';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
 import { upsertGuild, getAllGuilds, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
 import { createLogger } from '../shared/logger';
@@ -159,15 +160,16 @@ export function startDiscordBot(): void {
   });
 
   // The bot's per-guild in-memory state (voice connections, command cooldowns,
-  // dashboard voice status) is populated lazily and never expires on its own.
-  // Without this, a guild the bot is kicked from — or that deletes itself —
-  // leaves its entry behind forever in a long-running process. None of this
-  // touches the `guild` DB row, which (like guildCreate) is intentionally
-  // never deleted on leave.
+  // dashboard voice status, admin name-refresh progress) is populated lazily
+  // and never expires on its own. Without this, a guild the bot is kicked
+  // from — or that deletes itself — leaves its entry behind forever in a
+  // long-running process. None of this touches the `guild` DB row, which
+  // (like guildCreate) is intentionally never deleted on leave.
   localClient.on('guildDelete', (guild) => {
     forgetGuildVoiceState(guild.id);
     forgetGuildCommandState(guild.id);
     clearVoiceStatus(guild.id);
+    forgetGuildRefreshState(guild.id);
     log.info(`Forgot in-memory state for guild '${guild.name}' (${guild.id}) — bot removed.`);
   });
 
