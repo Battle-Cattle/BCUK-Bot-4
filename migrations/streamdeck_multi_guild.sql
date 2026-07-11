@@ -40,15 +40,22 @@ PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 
 -- Carry each existing (discord_id, guild_id) binding + approval state over
 -- as its own row — a straightforward 1-to-1 split of the old data model.
--- INSERT IGNORE makes this resumable: a run that fails after this step but
--- before the DROP COLUMN step below leaves guild_id in place, so a re-run
--- would otherwise re-insert already-backfilled rows and hit the primary key.
+-- Upsert (rather than INSERT IGNORE) makes this both resumable and safe to
+-- re-run: a run that fails after this step but before the DROP COLUMN step
+-- below leaves guild_id in place, so a re-run refreshes the already-backfilled
+-- rows' status/approval fields from streamdeck_api_keys instead of silently
+-- skipping them (which would leave stale data if it changed between runs).
 SET @sql = IF(@sd_exists = 0 OR @already_split = 0,
   'SELECT ''nothing to backfill''',
-  'INSERT IGNORE INTO streamdeck_key_guild_status
+  'INSERT INTO streamdeck_key_guild_status
      (discord_id, guild_id, status, requested_at, approved_at, approved_by)
    SELECT discord_id, guild_id, status, requested_at, approved_at, approved_by
-   FROM streamdeck_api_keys');
+   FROM streamdeck_api_keys AS src
+   ON DUPLICATE KEY UPDATE
+     status = src.status,
+     requested_at = src.requested_at,
+     approved_at = src.approved_at,
+     approved_by = src.approved_by');
 PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 
 -- ─── streamdeck_api_keys: drop the old per-guild columns ───────────────────

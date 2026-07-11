@@ -149,6 +149,8 @@ describe('POST /voice/join', () => {
     expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
     expect(vi.mocked(connect)).toHaveBeenCalledWith(client, 'guild-123', '123456789012345678');
     expect(vi.mocked(isKeyApprovedForGuild)).toHaveBeenCalledWith(API_KEY_OWNER, 'guild-123');
+    expect(vi.mocked(disconnect).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(connect).mock.invocationCallOrder[0]);
   });
 
   it('returns 400 when the channel does not resolve to any guild', async () => {
@@ -227,6 +229,7 @@ describe('POST /voice/leave', () => {
 
     expect(res.body).toEqual({ ok: true });
     expect(vi.mocked(disconnect)).toHaveBeenCalledWith('900000000000000002');
+    expect(vi.mocked(isKeyApprovedForGuild)).toHaveBeenCalledWith(API_KEY_OWNER, '900000000000000002');
   });
 
   it('returns 400 when only channelId is given and the channel no longer exists', async () => {

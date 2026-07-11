@@ -125,10 +125,10 @@ describe('POST /streams/streamers/add — failure path', () => {
 });
 
 describe('POST /streams/streamers/remove', () => {
-  it('redirects without an error when streamer_id is absent', async () => {
+  it('redirects with missing_fields when streamer_id is absent', async () => {
     const res = await supertest(buildApp()).post('/streams/streamers/remove').send('');
     expect(res.status).toBe(302);
-    expect(res.headers.location).not.toContain('error');
+    expect(res.headers.location).toContain('error=missing_fields');
     expect(removeStreamer).not.toHaveBeenCalled();
   });
 

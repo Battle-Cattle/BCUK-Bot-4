@@ -59,7 +59,7 @@ function makeStreamer(overrides: Record<string, unknown> = {}) {
     group: {
       id: 1, name: 'Main', discord_channel: '111',
       live_message: 'live', new_game_message: 'game',
-      multi_twitch: false, delete_old_posts: false,
+      multi_twitch: false, delete_old_posts: false, guild_id: 'guild-1',
     },
     ...overrides,
   };
@@ -102,7 +102,7 @@ describe('triggerImmediateLiveCheck', () => {
     await triggerImmediateLiveCheck('teststreamer');
 
     expect(getStreams).toHaveBeenCalledWith(['uid-5']);
-    const states = getLiveStates();
+    const states = getLiveStates('guild-1');
     expect(states).toHaveLength(1);
     expect(states[0].login).toBe('teststreamer');
     expect(states[0].currentGame).toBe('Just Chatting');
@@ -113,7 +113,7 @@ describe('triggerImmediateLiveCheck', () => {
 
     await triggerImmediateLiveCheck('TestStreamer');
 
-    expect(getLiveStates()).toHaveLength(1);
+    expect(getLiveStates('guild-1')).toHaveLength(1);
   });
 
   it('starts the offline grace period when an already-live streamer is found offline', async () => {
@@ -149,7 +149,7 @@ describe('triggerImmediateLiveCheck', () => {
     expect(editAnnouncementSpy).toHaveBeenCalledWith(
       expect.anything(), expect.anything(), expect.objectContaining({ title: 'New title' }), 'live_message',
     );
-    expect(getLiveStates()[0].title).toBe('New title');
+    expect(getLiveStates('guild-1')[0].title).toBe('New title');
   });
 
   it('edits the announcement with the new_game_message template on a game change', async () => {
@@ -169,7 +169,7 @@ describe('triggerImmediateLiveCheck', () => {
 
     await expect(triggerImmediateLiveCheck('teststreamer')).resolves.toBeUndefined();
 
-    expect(getLiveStates()).toHaveLength(0);
+    expect(getLiveStates('guild-1')).toHaveLength(0);
   });
 });
 
@@ -181,8 +181,8 @@ describe('triggerImmediateLiveCheck with multiple streamer rows for one login', 
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
-      makeStreamer({ id: 5, group: { id: 1, name: 'GroupA', discord_channel: '111', live_message: 'live', new_game_message: 'game', multi_twitch: false, delete_old_posts: false } }),
-      makeStreamer({ id: 6, group: { id: 2, name: 'GroupB', discord_channel: '222', live_message: 'live', new_game_message: 'game', multi_twitch: false, delete_old_posts: false } }),
+      makeStreamer({ id: 5, group: { id: 1, name: 'GroupA', discord_channel: '111', live_message: 'live', new_game_message: 'game', multi_twitch: false, delete_old_posts: false, guild_id: 'guild-1' } }),
+      makeStreamer({ id: 6, group: { id: 2, name: 'GroupB', discord_channel: '222', live_message: 'live', new_game_message: 'game', multi_twitch: false, delete_old_posts: false, guild_id: 'guild-1' } }),
     ] as any);
     vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
     vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient() as any);
@@ -200,7 +200,7 @@ describe('triggerImmediateLiveCheck with multiple streamer rows for one login', 
     await triggerImmediateLiveCheck('teststreamer');
 
     expect(postAnnouncementSpy).toHaveBeenCalledTimes(2);
-    const states = getLiveStates();
+    const states = getLiveStates('guild-1');
     expect(states.map((s) => s.streamerId)).toContain(6);
   });
 });
@@ -229,7 +229,7 @@ describe('60s poll interval', () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(getStreams).toHaveBeenCalledWith(['uid-5']);
-    const states = getLiveStates();
+    const states = getLiveStates('guild-1');
     expect(states).toHaveLength(1);
     expect(states[0].login).toBe('teststreamer');
   });
@@ -240,12 +240,12 @@ describe('60s poll interval', () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(logMock.error).toHaveBeenCalledWith('Poll error:', expect.any(Error));
-    expect(getLiveStates()).toHaveLength(0);
+    expect(getLiveStates('guild-1')).toHaveLength(0);
 
     // A subsequent tick still works — pollRunning was reset in the `finally` block.
     vi.mocked(getStreams).mockResolvedValueOnce([makeStream()] as any);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(getLiveStates()).toHaveLength(1);
+    expect(getLiveStates('guild-1')).toHaveLength(1);
   });
 });
 
@@ -274,7 +274,7 @@ describe('shutdown, restart, multitwitch lookup, and live-state ordering', () =>
     return {
       id: 1, name: 'Alpha', discord_channel: '111',
       live_message: 'live', new_game_message: 'game',
-      multi_twitch: false, delete_old_posts: false,
+      multi_twitch: false, delete_old_posts: false, guild_id: 'guild-1',
       ...overrides,
     };
   }
@@ -306,12 +306,12 @@ describe('shutdown, restart, multitwitch lookup, and live-state ordering', () =>
     await triggerImmediateLiveCheck('streamera');
     vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ user_id: 'uid-6', user_login: 'streamerb' })] as any);
     await triggerImmediateLiveCheck('streamerb');
-    expect(getLiveStates()).toHaveLength(2);
+    expect(getLiveStates('guild-1')).toHaveLength(2);
 
     await shutdownTwitchMonitor();
 
     expect(clearStreamerLive).toHaveBeenCalledTimes(2);
-    expect(getLiveStates()).toHaveLength(0);
+    expect(getLiveStates('guild-1')).toHaveLength(0);
     expect(logMock.info).toHaveBeenCalledWith('Shutdown complete — all live messages deleted');
   });
 
@@ -335,7 +335,7 @@ describe('shutdown, restart, multitwitch lookup, and live-state ordering', () =>
 
     await shutdownTwitchMonitor();
 
-    expect(getLiveStates()).toHaveLength(0);
+    expect(getLiveStates('guild-1')).toHaveLength(0);
     expect(logMock.warn).toHaveBeenCalledWith('Shutdown complete with 1 failed delete(s) — some announcements may remain');
   });
 
@@ -354,7 +354,7 @@ describe('shutdown, restart, multitwitch lookup, and live-state ordering', () =>
     expect(getAllStreamersWithGroups).toHaveBeenCalledTimes(2);
     expect(channel._message.delete).not.toHaveBeenCalled();
     // Restart clears in-memory state; the startup live-check (mocked) doesn't repopulate it.
-    expect(getLiveStates()).toHaveLength(0);
+    expect(getLiveStates('guild-1')).toHaveLength(0);
   });
 
   it('getMultiTwitchDataForChannel returns null for a login with no live state', async () => {
@@ -418,7 +418,7 @@ describe('shutdown, restart, multitwitch lookup, and live-state ordering', () =>
     vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ user_id: 'uid-7', user_login: 'yankee' })] as any);
     await triggerImmediateLiveCheck('yankee');
 
-    const states = getLiveStates();
+    const states = getLiveStates('guild-1');
     expect(states.map((s) => [s.groupName, s.login])).toEqual([
       ['Alpha', 'yankee'],
       ['Beta', 'alpha'],

@@ -106,6 +106,7 @@ describe('GET /streams/live', () => {
     const res = await supertest(buildApp()).get('/streams/live');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ streams: [{ login: 'streamera' }] });
+    expect(getLiveStates).toHaveBeenCalledWith(GUILD_ID);
   });
 });
 

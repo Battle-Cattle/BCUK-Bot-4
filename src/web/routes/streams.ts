@@ -38,10 +38,10 @@ function getFriendlyError(key: string): string {
 // ─── View ─────────────────────────────────────────────────────────────────────
 
 /**
- * GET /streams — renders the streams page with stream groups, streamers, and
- * (admin only) EventSub status per streamer.
- * @param req - Express request; reads `req.session.user`, `error`, and `success`
- *   query params.
+ * GET /streams — renders the streams page with the session's current guild's
+ * stream groups, streamers, and (admin only) EventSub status per streamer.
+ * @param req - Express request; reads `req.session.user` (including
+ *   `currentGuildId`), `error`, and `success` query params.
  * @param res - Express response; renders the `streams` view, or a 500 error page
  *   if loading streams data fails.
  */
@@ -87,13 +87,13 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
 // ─── Live state snapshot ──────────────────────────────────────────────────────
 
 /**
- * GET /streams/live — JSON snapshot of current live states, polled by the
- * streams page frontend.
- * @param _req - Express request (unused).
- * @param res - Express response; returns `{ streams }` from `getLiveStates()`.
+ * GET /streams/live — JSON snapshot of current live states for the session's
+ * current guild, polled by the streams page frontend.
+ * @param req - Express request; reads `req.session.user.currentGuildId`.
+ * @param res - Express response; returns `{ streams }` from `getLiveStates(guildId)`.
  */
-router.get('/streams/live', requireManager, (_req, res) => {
-  res.json({ streams: getLiveStates() });
+router.get('/streams/live', requireManager, (req, res) => {
+  res.json({ streams: getLiveStates(req.session.user!.currentGuildId!) });
 });
 
 router.use(groupsRouter);

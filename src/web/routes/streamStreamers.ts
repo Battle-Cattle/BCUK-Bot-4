@@ -49,7 +49,7 @@ router.post('/streams/streamers/add', requireManager, csrfProtection, async (req
  */
 router.post('/streams/streamers/remove', requireManager, csrfProtection, async (req, res) => {
   const { streamer_id } = req.body as { streamer_id?: string };
-  if (!streamer_id) return res.redirect('/admin/streams');
+  if (!streamer_id) return res.redirect('/admin/streams?error=missing_fields');
   const parsedStreamerId = parsePositiveIntId(streamer_id);
   if (parsedStreamerId === null) return res.redirect('/admin/streams?error=invalid_id');
 

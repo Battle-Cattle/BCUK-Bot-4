@@ -48,6 +48,7 @@ export interface DbStreamerFull {
   group: DbStreamGroup;
 }
 
+/** Maps a `stream_group` row to a `DbStreamGroup`, converting BIGINT/bit columns to string/boolean. */
 function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
   return {
     id: r.id,
@@ -61,6 +62,7 @@ function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
   };
 }
 
+/** Extracts the shared column values (everything but `guildId`/`id`) from an add/update input, in SQL parameter order. */
 function streamGroupParams(input: AddStreamGroupInput): Array<string | number> {
   return [
     input.name,
@@ -90,6 +92,7 @@ export async function getStreamGroupsForGuild(guildId: string): Promise<DbStream
  * Insert a new stream group.
  *
  * @param input - Stream group fields to store, including the owning guild.
+ * @returns Resolves once the row is inserted.
  */
 export async function addStreamGroup(input: AddStreamGroupInput): Promise<void> {
   await getPool().execute(
@@ -149,6 +152,8 @@ export async function getStreamersForGuild(guildId: string): Promise<DbStreamer[
  * which polls and posts live announcements for all guilds at once — the live
  * announcement itself is already guild-scoped via each group's Discord
  * channel ID, so this read intentionally isn't filtered by guild.
+ *
+ * @returns Every streamer row across all guilds, with its full group configuration attached.
  */
 export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -191,6 +196,7 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
  * @param discordId - Discord snowflake of the user to register as a streamer.
  * @param groupId - ID of the stream group to add the streamer to.
  * @param guildId - Guild the caller is acting in; `groupId` must belong to it.
+ * @returns Resolves once the row is inserted; throws if `groupId` isn't in `guildId`.
  */
 export async function addStreamer(discordId: string, groupId: number, guildId: string): Promise<void> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
@@ -244,6 +250,7 @@ export async function removeStreamGroupAndStreamers(groupId: number, guildId: st
     await conn.commit();
     return result.affectedRows > 0;
   } catch (err) {
+    // Swallow rollback failures (e.g. connection already dropped) so the original error propagates.
     await conn.rollback().catch(() => {});
     throw err;
   } finally {

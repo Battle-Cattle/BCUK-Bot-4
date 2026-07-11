@@ -221,8 +221,16 @@ export interface LiveStateSnapshot {
   gameChangePreview: DiscordMessagePreview;
 }
 
-export function getLiveStates(): LiveStateSnapshot[] {
-  const states = Array.from(liveStates.values());
+/**
+ * Returns a snapshot of currently-live streamers scoped to one guild, for the
+ * admin web panel. Filtering happens before the multi-twitch context is built
+ * so a streamer's "who else is live" grouping never includes another guild's
+ * streamers.
+ * @param guildId - Guild to return live states for.
+ * @returns Live state snapshots for `guildId`'s streamers, sorted by group then login.
+ */
+export function getLiveStates(guildId: string): LiveStateSnapshot[] {
+  const states = Array.from(liveStates.values()).filter((state) => state.group.guild_id === guildId);
   const multiTwitchContext = buildMultiTwitchContext(states);
 
   return states

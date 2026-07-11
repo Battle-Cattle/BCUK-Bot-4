@@ -167,7 +167,7 @@ describe('findOwnerUser', () => {
       discord_name: 'Owner',
       is_twitch_bot_enabled: 0,
       twitch_name: null,
-      access_level: 3,
+      access_level: AccessLevel.ADMIN,
       is_owner: Buffer.from([1]),
     };
     vi.mocked(getPool).mockReturnValue(makePool([[row]]) as any);

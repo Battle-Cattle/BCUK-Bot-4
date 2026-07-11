@@ -265,10 +265,10 @@ describe('POST /streams/groups/add — failure paths', () => {
 });
 
 describe('POST /streams/groups/remove', () => {
-  it('redirects without an error when group_id is absent', async () => {
+  it('redirects with missing_fields when group_id is absent', async () => {
     const res = await supertest(buildApp()).post('/streams/groups/remove').send('');
     expect(res.status).toBe(302);
-    expect(res.headers.location).not.toContain('error');
+    expect(res.headers.location).toContain('error=missing_fields');
     expect(removeStreamGroupAndStreamers).not.toHaveBeenCalled();
   });
 

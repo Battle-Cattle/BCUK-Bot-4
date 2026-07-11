@@ -101,7 +101,7 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
  */
 router.post('/streams/groups/remove', requireManager, csrfProtection, async (req, res) => {
   const { group_id } = req.body as { group_id?: string };
-  if (!group_id) return res.redirect('/admin/streams');
+  if (!group_id) return res.redirect('/admin/streams?error=missing_fields');
   const parsedGroupId = parsePositiveIntId(group_id);
   if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
 
