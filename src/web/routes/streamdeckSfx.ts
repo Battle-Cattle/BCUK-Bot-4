@@ -37,7 +37,7 @@ router.get('/sfx', requireApiKey, async (req, res) => {
  * body, in whichever guild the key owner is currently connected to voice in.
  */
 router.post('/sfx', requireApiKey, async (req, res) => {
-  const { command } = req.body as { command?: unknown };
+  const { command } = (req.body ?? {}) as { command?: unknown };
   if (typeof command !== 'string' || !command.trim()) {
     res.status(400).json({ ok: false, error: 'Missing or invalid "command" field' });
     return;

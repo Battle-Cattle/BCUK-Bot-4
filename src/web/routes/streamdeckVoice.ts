@@ -7,8 +7,8 @@ import { connect, disconnect } from '../../audio/audioPlayer';
 import { getDiscordClient } from '../../discord/discordBot';
 import { normalizeDiscordId } from './shared';
 import {
-  resolveGuildIdFromChannelId,
   resolveChannelGuildOrRespond,
+  resolvePresenceGuildOrRespond,
   ensureGuildApproved,
 } from './streamdeckGuildResolution';
 
@@ -41,7 +41,7 @@ router.get('/voice/channels', requireApiKey, async (req, res) => {
 
 /** Disconnects any existing voice connection and joins the voice channel named in the request body. */
 router.post('/voice/join', requireApiKey, async (req, res) => {
-  const { channelId } = req.body as { channelId?: unknown };
+  const { channelId } = (req.body ?? {}) as { channelId?: unknown };
   if (typeof channelId !== 'string') {
     res.status(400).json({ ok: false, error: 'Missing or invalid "channelId" field' });
     return;
@@ -73,19 +73,18 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
 
 /**
  * Disconnects the bot from its voice channel in the target guild. Accepts an
- * explicit `guildId`, or falls back to resolving it from `channelId` — the
- * explicit form matters because the channel may no longer exist (e.g. deleted
- * while the bot was connected to it), in which case resolving via channelId
- * alone would leave the bot stuck connected with no way to force a leave.
+ * explicit `guildId`, or a `channelId` to resolve one from — the explicit form
+ * matters because the channel may no longer exist (e.g. deleted while the bot
+ * was connected to it), in which case resolving via channelId alone would
+ * leave the bot stuck connected with no way to force a leave. If neither is
+ * given (the pre-multi-guild Streamdeck config sends no body at all), falls
+ * back to wherever the key owner currently has a live voice connection, the
+ * same presence-based resolution `/sfx` uses.
  */
 router.post('/voice/leave', requireApiKey, async (req, res) => {
-  const { channelId, guildId: rawGuildId } = req.body as { channelId?: unknown; guildId?: unknown };
+  const { channelId, guildId: rawGuildId } = (req.body ?? {}) as { channelId?: unknown; guildId?: unknown };
   const normalizedChannelId = typeof channelId === 'string' ? normalizeDiscordId(channelId) : null;
   const explicitGuildId = typeof rawGuildId === 'string' ? normalizeDiscordId(rawGuildId) : null;
-  if (!normalizedChannelId && !explicitGuildId) {
-    res.status(400).json({ ok: false, error: 'Missing or invalid "channelId" or "guildId" field' });
-    return;
-  }
 
   let guildId = explicitGuildId;
   if (!guildId) {
@@ -94,14 +93,13 @@ router.post('/voice/leave', requireApiKey, async (req, res) => {
       res.status(503).json({ ok: false, error: 'Discord client not ready' });
       return;
     }
-    guildId = await resolveGuildIdFromChannelId(discordClient, normalizedChannelId!);
-    if (!guildId) {
-      res.status(400).json({ ok: false, error: 'Unknown voice channel' });
-      return;
-    }
+    guildId = normalizedChannelId
+      ? await resolveChannelGuildOrRespond(req, res, discordClient, normalizedChannelId)
+      : await resolvePresenceGuildOrRespond(req, res, discordClient);
+    if (!guildId) return;
+  } else if (!(await ensureGuildApproved(req, res, guildId))) {
+    return;
   }
-
-  if (!(await ensureGuildApproved(req, res, guildId))) return;
 
   disconnect(guildId);
   res.json({ ok: true });

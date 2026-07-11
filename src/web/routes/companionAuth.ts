@@ -43,7 +43,7 @@ router.get('/companion/login', authLimiter, (req, res) => {
  *   429 comes from `authLimiter` and short-circuits before this handler runs.
  */
 router.post('/api/companion/oauth/token', authLimiter, async (req, res) => {
-  const { code } = req.body as { code?: string };
+  const { code } = (req.body ?? {}) as { code?: string };
   if (!code || typeof code !== 'string') {
     res.status(400).json({ ok: false, error: 'Missing code' });
     return;
