@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import {
   hasApiKey,
   createApiKeyAndRequestGuildAccess,
@@ -11,6 +11,7 @@ import {
   denyApiKey,
   getAllApiKeys,
   getPendingRequests,
+  type StreamdeckKeyGuildStatusRow,
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
@@ -20,6 +21,31 @@ import { userMutationQueue } from './adminUserMutationQueue';
 
 const log = createLogger('Web');
 const router = Router();
+
+/**
+ * Renders the current user's Streamdeck key status page, shared by
+ * GET /streamdeck-key and the success paths of the request/rotate POST
+ * handlers below (they only differ in what `keyRow`/`newKey` they pass in).
+ * @param req - Express request; reads `req.session.user` and `req.csrfToken()`.
+ * @param res - Express response.
+ * @param keyRow - The current (possibly just-created/rotated) guild-status row, or null.
+ * @param newKey - Freshly generated plaintext key to display once, or null if none.
+ */
+function renderKeyStatus(
+  req: Request,
+  res: Response,
+  keyRow: StreamdeckKeyGuildStatusRow | null,
+  newKey: string | null,
+): void {
+  renderView(res, 'streamdeck-keys', {
+    user: req.session.user,
+    csrfToken: req.csrfToken(),
+    keyRow,
+    newKey,
+    error: null,
+    webPort: WEB_PORT,
+  });
+}
 
 // ─── User routes (any authenticated user) ────────────────────────────────────
 
@@ -85,9 +111,11 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
         }
         if (existingGuildStatus.status === 'revoked') {
           await requestGuildAccessForExistingKey(discordId, accessLevel, guildId);
+        } else {
+          // pending/approved: idempotent no-op — nothing changed, so the
+          // status already fetched above is still current; skip re-querying it.
+          return { plain: resolvedPlain, keyRow: existingGuildStatus };
         }
-        // pending/approved: idempotent no-op — the caller just gets the current
-        // status back, with no key mutation.
       } else if (await hasApiKey(discordId)) {
         await requestGuildAccessForExistingKey(discordId, accessLevel, guildId);
       } else {
@@ -95,18 +123,34 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
       }
       return { plain: resolvedPlain, keyRow: await getGuildStatusForKey(discordId, guildId) };
     });
-    renderView(res, 'streamdeck-keys', {
-      user: req.session.user,
-      csrfToken: req.csrfToken(),
-      keyRow,
-      newKey: plain,
-      error: null,
-      webPort: WEB_PORT,
-    });
+    renderKeyStatus(req, res, keyRow, plain);
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key request error:', err, basePath: '/streamdeck-key', errorCode: 'request_failed' });
   }
 });
+
+interface RecentRotation {
+  plain: string;
+  keyRow: StreamdeckKeyGuildStatusRow | null;
+  rotatedAt: number;
+}
+
+// Tracks a just-completed rotation per discordId for a short window so a
+// rapid duplicate POST /streamdeck-key/rotate (a network-level retry of a
+// timed-out request, or the same "Lost your key?" confirm landing twice from
+// two tabs) reuses the response already rendered instead of rotating again
+// and silently invalidating the key the user was just shown — the same class
+// of accidental-duplicate bug this file's /request handler guards against.
+// Entries are checked lazily by age (like the rest of this codebase's TTL
+// caches) rather than actively evicted; bounded by the small, admin-managed
+// user table this app already assumes elsewhere (see CLAUDE.md's user model).
+const ROTATE_DEDUPE_WINDOW_MS = 10_000;
+const recentRotations = new Map<string, RecentRotation>();
+
+/** Test-only: clears the rotate dedupe cache so each test starts from a clean slate. */
+export function __resetRecentRotationsForTests(): void {
+  recentRotations.clear();
+}
 
 /**
  * Rotates the current user's existing Streamdeck API key secret — the
@@ -118,7 +162,9 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
  *
  * Serialized per `discordId` through `userMutationQueue` for the same reason
  * as `/streamdeck-key/request` — to keep the has-a-key check and the
- * rotation itself atomic with respect to concurrent requests.
+ * rotation itself atomic with respect to concurrent requests. A rotation
+ * within `ROTATE_DEDUPE_WINDOW_MS` of the last one for this user reuses that
+ * result instead of rotating again (see {@link recentRotations}).
  *
  * @param req - Express request; reads `req.session.user` (discordId, currentGuildId).
  * @param res - Express response; renders the `streamdeck-keys` view with the freshly
@@ -131,20 +177,23 @@ router.post('/streamdeck-key/rotate', csrfProtection, async (req, res) => {
   const guildId = req.session.user!.currentGuildId!;
   try {
     const { plain, keyRow } = await userMutationQueue.run(discordId, async () => {
+      const recent = recentRotations.get(discordId);
+      if (recent && Date.now() - recent.rotatedAt < ROTATE_DEDUPE_WINDOW_MS) return recent;
+
       if (!(await hasApiKey(discordId))) {
         throw new Error('Cannot rotate: no existing Streamdeck API key');
       }
-      const { plain: rotatedPlain } = await rotateApiKey(discordId);
-      return { plain: rotatedPlain, keyRow: await getGuildStatusForKey(discordId, guildId) };
+      // Independent reads/writes on unrelated tables (key hash vs. guild
+      // approval status) — safe to run concurrently.
+      const [{ plain: rotatedPlain }, rotatedKeyRow] = await Promise.all([
+        rotateApiKey(discordId),
+        getGuildStatusForKey(discordId, guildId),
+      ]);
+      const result: RecentRotation = { plain: rotatedPlain, keyRow: rotatedKeyRow, rotatedAt: Date.now() };
+      recentRotations.set(discordId, result);
+      return result;
     });
-    renderView(res, 'streamdeck-keys', {
-      user: req.session.user,
-      csrfToken: req.csrfToken(),
-      keyRow,
-      newKey: plain,
-      error: null,
-      webPort: WEB_PORT,
-    });
+    renderKeyStatus(req, res, keyRow, plain);
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key rotate error:', err, basePath: '/streamdeck-key', errorCode: 'rotate_failed' });
   }
