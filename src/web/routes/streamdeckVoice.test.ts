@@ -27,6 +27,10 @@ vi.mock('../../discord/discordBot', () => ({
   getDiscordClient: vi.fn(),
 }));
 
+vi.mock('../../discord/voicePresence', () => ({
+  getActiveGuildForUser: vi.fn(),
+}));
+
 vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
@@ -38,6 +42,7 @@ import { isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
 import { getDiscordClient } from '../../discord/discordBot';
+import { getActiveGuildForUser } from '../../discord/voicePresence';
 
 /** Fake Discord client whose channels.fetch resolves any channel to the given guildId. */
 function makeClient(channelGuildId: string | null = 'guild-123') {
@@ -64,6 +69,7 @@ beforeEach(() => {
   vi.mocked(getAvailableVoiceChannels).mockResolvedValue([]);
   vi.mocked(isKeyApprovedForGuild).mockResolvedValue(true);
   vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue(['guild-123']);
+  vi.mocked(getActiveGuildForUser).mockReturnValue(null);
 });
 
 describe('GET /voice/channels', () => {
@@ -117,6 +123,11 @@ describe('GET /voice/channels', () => {
 describe('POST /voice/join', () => {
   it('returns 400 when channelId is missing', async () => {
     const res = await supertest(buildApp()).post('/voice/join').send({}).expect(400);
+    expect(res.body).toMatchObject({ ok: false });
+  });
+
+  it('does not crash when the request has no body at all', async () => {
+    const res = await supertest(buildApp()).post('/voice/join').expect(400);
     expect(res.body).toMatchObject({ ok: false });
   });
 
@@ -190,9 +201,32 @@ describe('POST /voice/join', () => {
 });
 
 describe('POST /voice/leave', () => {
-  it('returns 400 when both channelId and guildId are missing', async () => {
-    const res = await supertest(buildApp()).post('/voice/leave').send({}).expect(400);
+  it('falls back to the key owner\'s live voice presence when channelId and guildId are both missing', async () => {
+    vi.mocked(getActiveGuildForUser).mockReturnValue('guild-123');
+
+    const res = await supertest(buildApp()).post('/voice/leave').send({}).expect(200);
+
+    expect(res.body).toEqual({ ok: true });
+    expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
+    expect(vi.mocked(getActiveGuildForUser)).toHaveBeenCalledWith(expect.anything(), API_KEY_OWNER);
+  });
+
+  it('returns 503 when neither channelId nor guildId is given and the key owner has no live voice presence', async () => {
+    const res = await supertest(buildApp()).post('/voice/leave').send({}).expect(503);
+
     expect(res.body).toMatchObject({ ok: false });
+    expect(vi.mocked(disconnect)).not.toHaveBeenCalled();
+  });
+
+  it('does not crash when the request has no body at all (e.g. a client that sends no Content-Type)', async () => {
+    vi.mocked(getActiveGuildForUser).mockReturnValue('guild-123');
+
+    const res = await supertest(buildApp())
+      .post('/voice/leave')
+      .expect(200);
+
+    expect(res.body).toEqual({ ok: true });
+    expect(vi.mocked(disconnect)).toHaveBeenCalledWith('guild-123');
   });
 
   it('resolves the guild from channelId and disconnects', async () => {
