@@ -32,6 +32,8 @@ export interface DbUser {
   is_owner: boolean;
 }
 
+const USER_SELECT = 'discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner';
+
 function mapUser(r: mysql.RowDataPacket): DbUser {
   return {
     discord_id: String(r.discord_id),
@@ -50,7 +52,7 @@ function mapUser(r: mysql.RowDataPacket): DbUser {
  */
 export async function findUser(discordId: string): Promise<DbUser | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner FROM `user` WHERE discord_id = ?',
+    `SELECT ${USER_SELECT} FROM \`user\` WHERE discord_id = ?`,
     [discordId],
   );
   return rows.length === 0 ? null : mapUser(rows[0]);
@@ -70,12 +72,12 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
   }
 
   const sql = excludeDiscordId
-    ? `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner
+    ? `SELECT ${USER_SELECT}
        FROM \`user\`
        WHERE twitch_name = ?
          AND discord_id <> ?
        LIMIT 1`
-    : `SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner
+    : `SELECT ${USER_SELECT}
        FROM \`user\`
        WHERE twitch_name = ?
        LIMIT 1`;
@@ -92,7 +94,7 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
  */
 export async function findOwnerUser(): Promise<DbUser | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner FROM `user` WHERE is_owner = 1 LIMIT 1',
+    `SELECT ${USER_SELECT} FROM \`user\` WHERE is_owner = 1 LIMIT 1`,
   );
   return rows.length === 0 ? null : mapUser(rows[0]);
 }
@@ -100,7 +102,7 @@ export async function findOwnerUser(): Promise<DbUser | null> {
 /** Returns every user row, ordered by access level (highest first) then name. */
 export async function getAllUsers(): Promise<DbUser[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner FROM `user` ORDER BY access_level DESC, discord_name ASC',
+    `SELECT ${USER_SELECT} FROM \`user\` ORDER BY access_level DESC, discord_name ASC`,
   );
   return rows.map(mapUser);
 }

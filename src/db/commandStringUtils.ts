@@ -15,7 +15,8 @@ export function requireTrimmedString(value: string, fieldName: string, maxLength
   return normalizedValue;
 }
 
-function normalizeCommand(command: string): string | null {
+/** Trims and lowercases a single command string; returns null when the result is blank. */
+export function normalizeCommand(command: string): string | null {
   const normalized = command.trim().toLowerCase();
   return normalized.length > 0 ? normalized : null;
 }

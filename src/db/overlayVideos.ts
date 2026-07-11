@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import { getPool } from './pool';
+import { getPool, withTransaction } from './pool';
 
 export interface OverlayVideo {
   id: number;
@@ -63,33 +63,35 @@ export async function getVideoById(videoId: number, streamerId: number): Promise
   return rows.length === 0 ? null : mapVideo(rows[0]);
 }
 
+/**
+ * Delete an overlay video row, scoped to the owning streamer.
+ * @param videoId Primary key of the `overlay_video` row.
+ * @param streamerId DB row ID of the owning streamer.
+ * @returns The deleted row's filename (for filesystem cleanup), or null if no matching row existed.
+ */
 export async function deleteVideo(videoId: number, streamerId: number): Promise<string | null> {
-  const conn = await getPool().getConnection();
+  class VideoNotFound extends Error {}
   try {
-    await conn.beginTransaction();
-    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT filename FROM overlay_video WHERE id = ? AND streamer_id = ?`,
-      [videoId, streamerId],
-    );
-    if (rows.length === 0) {
-      await conn.rollback();
-      return null;
-    }
-    const filename: string = rows[0].filename;
-    const [del] = await conn.execute<mysql.ResultSetHeader>(
-      `DELETE FROM overlay_video WHERE id = ? AND streamer_id = ?`, [videoId, streamerId],
-    );
-    if (del.affectedRows === 0) {
-      await conn.rollback();
-      return null;
-    }
-    await conn.commit();
-    return filename;
+    return await withTransaction(async (conn) => {
+      const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+        `SELECT filename FROM overlay_video WHERE id = ? AND streamer_id = ?`,
+        [videoId, streamerId],
+      );
+      if (rows.length === 0) {
+        throw new VideoNotFound();
+      }
+      const filename: string = rows[0].filename;
+      const [del] = await conn.execute<mysql.ResultSetHeader>(
+        `DELETE FROM overlay_video WHERE id = ? AND streamer_id = ?`, [videoId, streamerId],
+      );
+      if (del.affectedRows === 0) {
+        throw new VideoNotFound();
+      }
+      return filename;
+    });
   } catch (err) {
-    await conn.rollback().catch(() => {});
+    if (err instanceof VideoNotFound) return null;
     throw err;
-  } finally {
-    conn.release();
   }
 }
 
@@ -136,42 +138,47 @@ export async function upsertReward(streamerId: number, twitchRewardId: string): 
   return result.insertId;
 }
 
+/**
+ * Replaces the set of videos assigned to a reward with `videos`, scoped to the owning streamer.
+ * A no-op if `rewardId` doesn't belong to `streamerId`. Throws if any video in `videos` doesn't
+ * belong to `streamerId`, rolling back the whole replacement.
+ * @param rewardId Primary key of the `overlay_reward` row.
+ * @param streamerId DB row ID of the owning streamer.
+ * @param videos The videos (and their weights) to assign to the reward.
+ */
 export async function setRewardVideos(
   rewardId: number,
   streamerId: number,
   videos: Array<{ videoId: number; weight: number }>,
 ): Promise<void> {
-  const conn = await getPool().getConnection();
+  class RewardNotFound extends Error {}
   try {
-    await conn.beginTransaction();
-    // Verify reward belongs to this streamer
-    const [check] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT id FROM overlay_reward WHERE id = ? AND streamer_id = ?`,
-      [rewardId, streamerId],
-    );
-    if (check.length === 0) {
-      await conn.rollback();
-      return;
-    }
-    await conn.execute(`DELETE FROM overlay_reward_video WHERE reward_id = ?`, [rewardId]);
-    for (const v of videos) {
-      const [insert] = await conn.execute<mysql.ResultSetHeader>(
-        `INSERT INTO overlay_reward_video (reward_id, video_id, weight)
-         SELECT ?, ov.id, ?
-         FROM overlay_video ov
-         WHERE ov.id = ? AND ov.streamer_id = ?`,
-        [rewardId, Math.max(1, v.weight), v.videoId, streamerId],
+    await withTransaction(async (conn) => {
+      // Verify reward belongs to this streamer
+      const [check] = await conn.execute<mysql.RowDataPacket[]>(
+        `SELECT id FROM overlay_reward WHERE id = ? AND streamer_id = ?`,
+        [rewardId, streamerId],
       );
-      if (insert.affectedRows !== 1) {
-        throw new Error(`Video ${v.videoId} does not belong to streamer ${streamerId}`);
+      if (check.length === 0) {
+        throw new RewardNotFound();
       }
-    }
-    await conn.commit();
+      await conn.execute(`DELETE FROM overlay_reward_video WHERE reward_id = ?`, [rewardId]);
+      for (const v of videos) {
+        const [insert] = await conn.execute<mysql.ResultSetHeader>(
+          `INSERT INTO overlay_reward_video (reward_id, video_id, weight)
+           SELECT ?, ov.id, ?
+           FROM overlay_video ov
+           WHERE ov.id = ? AND ov.streamer_id = ?`,
+          [rewardId, Math.max(1, v.weight), v.videoId, streamerId],
+        );
+        if (insert.affectedRows !== 1) {
+          throw new Error(`Video ${v.videoId} does not belong to streamer ${streamerId}`);
+        }
+      }
+    });
   } catch (err) {
-    await conn.rollback().catch(() => {});
+    if (err instanceof RewardNotFound) return;
     throw err;
-  } finally {
-    conn.release();
   }
 }
 

@@ -21,6 +21,10 @@ vi.mock('./commandStringUtils', () => ({
       this.commands = cmds;
     }
   },
+  normalizeCommand: vi.fn((command: string) => {
+    const normalized = command.trim().toLowerCase();
+    return normalized.length > 0 ? normalized : null;
+  }),
 }));
 
 import {

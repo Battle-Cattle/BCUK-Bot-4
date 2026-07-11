@@ -1,6 +1,7 @@
 import { createLogger } from '../shared/logger';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
+import { normalizeCommand } from './commandStringUtils';
 import { getTwitchEnabledChannels } from './users';
 // customCommands imports invalidateCustomCommandLookupCache from this module;
 // this module imports getAllCustomCommandsWithAssignments from customCommands.
@@ -67,7 +68,7 @@ function buildOverridesByGuild(
 
 function getTwitchCommandCacheKey(channelName: string, triggerString: string): string | null {
   const normalizedChannelName = normalizeTwitchChannelName(channelName);
-  const normalizedTriggerString = triggerString.trim().toLowerCase();
+  const normalizedTriggerString = normalizeCommand(triggerString);
 
   if (!normalizedChannelName || !normalizedTriggerString) {
     return null;
@@ -221,7 +222,7 @@ function buildCustomCommandLookupCache(
   };
 
   for (const command of sortedCommands) {
-    const normalizedTriggerString = command.trigger_string.trim().toLowerCase();
+    const normalizedTriggerString = normalizeCommand(command.trigger_string);
     if (!normalizedTriggerString) {
       continue;
     }
@@ -318,7 +319,7 @@ export async function getCustomCommandForDiscord(
   triggerString: string,
   guildId: string,
 ): Promise<DbCustomCommand | null> {
-  const normalizedTriggerString = triggerString.trim().toLowerCase();
+  const normalizedTriggerString = normalizeCommand(triggerString);
   if (!normalizedTriggerString) {
     return null;
   }

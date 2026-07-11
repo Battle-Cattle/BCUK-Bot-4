@@ -3,7 +3,7 @@ import mysql from 'mysql2/promise';
 
 const log = createLogger('DB');
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
-import { type SqlExecutor, CommandConflictError } from './commandStringUtils';
+import { type SqlExecutor, CommandConflictError, normalizeCommand } from './commandStringUtils';
 import {
   acquireNamedLock,
   releaseNamedLock,
@@ -11,6 +11,7 @@ import {
   isDeadlockError,
   MAX_DEADLOCK_RETRIES,
 } from './commandLocks';
+import { fromBit } from './utils';
 
 // ─── Conflict assertions ──────────────────────────────────────────────────────
 
@@ -123,6 +124,13 @@ export async function assertNoSingleTwitchAssignmentOverlap(
   }
 }
 
+/**
+ * Looks up a custom command's trigger string by its id, normalized (trimmed, lowercased).
+ * @param executor Pool or transaction connection to query with.
+ * @param commandId Primary key of the `custom_command` row.
+ * @returns The normalized trigger string.
+ * @throws If no command exists with the given id.
+ */
 export async function getCommandTriggerStringById(executor: SqlExecutor, commandId: number): Promise<string> {
   const [commandRows] = await executor.execute<mysql.RowDataPacket[]>(
     'SELECT trigger_string FROM custom_command WHERE command_id = ? LIMIT 1',
@@ -132,7 +140,7 @@ export async function getCommandTriggerStringById(executor: SqlExecutor, command
     throw new Error(`Custom command not found: ${commandId}`);
   }
 
-  return String(commandRows[0].trigger_string).trim().toLowerCase();
+  return normalizeCommand(String(commandRows[0].trigger_string)) ?? '';
 }
 
 interface UserTwitchEligibility {
@@ -140,6 +148,14 @@ interface UserTwitchEligibility {
   isTwitchBotEnabled: boolean;
 }
 
+/**
+ * Looks up a user's normalized Twitch channel name and Twitch-bot-enabled flag, used to
+ * decide whether a Twitch-channel trigger conflict check applies to them.
+ * @param executor Pool or transaction connection to query with.
+ * @param discordId Discord snowflake of the user to look up.
+ * @returns The user's normalized Twitch channel name (or null if unset/invalid) and Twitch-bot-enabled flag.
+ * @throws If no user exists with the given `discordId`.
+ */
 export async function getUserTwitchEligibility(executor: SqlExecutor, discordId: string): Promise<UserTwitchEligibility> {
   const [userRows] = await executor.execute<mysql.RowDataPacket[]>(
     'SELECT twitch_name, is_twitch_bot_enabled FROM `user` WHERE discord_id = ? LIMIT 1',
@@ -152,11 +168,7 @@ export async function getUserTwitchEligibility(executor: SqlExecutor, discordId:
   const twitchName = userRows[0].twitch_name ? String(userRows[0].twitch_name) : null;
   return {
     normalizedTwitchName: twitchName ? normalizeTwitchChannelName(twitchName) : null,
-    // MySQL BIT(1) columns arrive as a single-byte Buffer on some driver configurations
-    // and as a numeric 0/1 on others; check byte 0 in the Buffer path, loose-equality for numeric.
-    isTwitchBotEnabled: Buffer.isBuffer(userRows[0].is_twitch_bot_enabled)
-      ? userRows[0].is_twitch_bot_enabled[0] === 1
-      : userRows[0].is_twitch_bot_enabled == 1,
+    isTwitchBotEnabled: fromBit(userRows[0].is_twitch_bot_enabled),
   };
 }
 

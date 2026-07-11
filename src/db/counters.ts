@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
-import { getPool } from './pool';
-import { requireTrimmedString, type SqlExecutor } from './commandStringUtils';
+import { getPool, withTransaction } from './pool';
+import { requireTrimmedString, normalizeCommand, type SqlExecutor } from './commandStringUtils';
 import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
 import { fromBit } from './utils';
@@ -278,8 +278,8 @@ export async function updateCounter(input: UpdateCounterInput): Promise<void> {
   // Lock old commands too so concurrent adds/updates can't sneak in during the
   // transition window while the old trigger/check names are being released.
   const commandsToLock = [
-    current.trigger_command.trim().toLowerCase(),
-    current.check_command.trim().toLowerCase(),
+    normalizeCommand(current.trigger_command) ?? '',
+    normalizeCommand(current.check_command) ?? '',
     fields.triggerCommand,
     fields.checkCommand,
   ];
@@ -342,10 +342,14 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
   invalidateCounterLookupCache();
 }
 
+/**
+ * Atomically increments a counter's `current_value` and returns the new value.
+ * @param id The counter's numeric id.
+ * @returns The counter's `current_value` after the increment.
+ * @throws {CounterNotFoundError} If no counter exists with the given id.
+ */
 export async function incrementCounter(id: number): Promise<number> {
-  const conn = await getPool().getConnection();
-  try {
-    await conn.beginTransaction();
+  const newValue = await withTransaction(async (conn) => {
     const [result] = await conn.execute<mysql.ResultSetHeader>(
       'UPDATE counter SET current_value = current_value + 1 WHERE id = ?',
       [id],
@@ -355,16 +359,10 @@ export async function incrementCounter(id: number): Promise<number> {
       'SELECT current_value FROM counter WHERE id = ?',
       [id],
     );
-    const newValue = (rows[0] as mysql.RowDataPacket).current_value as number;
-    await conn.commit();
-    invalidateCounterLookupCache();
-    return newValue;
-  } catch (err) {
-    await conn.rollback().catch(() => {});
-    throw err;
-  } finally {
-    conn.release();
-  }
+    return (rows[0] as mysql.RowDataPacket).current_value as number;
+  });
+  invalidateCounterLookupCache();
+  return newValue;
 }
 
 export async function archiveAndResetYearlyCounters(year: number): Promise<number> {

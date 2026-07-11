@@ -161,6 +161,15 @@ export async function clearStreamerToken(streamerId: number): Promise<void> {
   );
 }
 
+/** Extracts the 9 event-config column values (everything but `streamer_id`) from a config, in SQL parameter order, coercing booleans to 0/1 for BIT(1) columns. */
+function eventConfigParams(config: EventSubConfig): Array<string | number> {
+  return [
+    config.follow_enabled ? 1 : 0, config.follow_message,
+    config.sub_enabled ? 1 : 0, config.sub_message, config.resub_message, config.giftsub_message,
+    config.raid_enabled ? 1 : 0, config.raid_message, config.raid_shoutout_enabled ? 1 : 0,
+  ];
+}
+
 const DEFAULT_EVENT_CONFIG: EventSubConfig = {
   follow_enabled: false,
   follow_message: 'Thanks {display_name} for the follow!',
@@ -180,19 +189,13 @@ const DEFAULT_EVENT_CONFIG: EventSubConfig = {
  * @param streamerId - DB row ID of the streamer to initialise config for.
  */
 export async function initEventConfig(streamerId: number): Promise<void> {
-  const c = DEFAULT_EVENT_CONFIG;
   await getPool().execute(
     `INSERT IGNORE INTO streamer_event_config
        (streamer_id, follow_enabled, follow_message,
         sub_enabled, sub_message, resub_message, giftsub_message,
         raid_enabled, raid_message, raid_shoutout_enabled)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      streamerId,
-      c.follow_enabled ? 1 : 0, c.follow_message,
-      c.sub_enabled ? 1 : 0, c.sub_message, c.resub_message, c.giftsub_message,
-      c.raid_enabled ? 1 : 0, c.raid_message, c.raid_shoutout_enabled ? 1 : 0,
-    ],
+    [streamerId, ...eventConfigParams(DEFAULT_EVENT_CONFIG)],
   );
 }
 
@@ -216,11 +219,6 @@ export async function saveEventConfig(streamerId: number, config: EventSubConfig
        resub_message=new_row.resub_message, giftsub_message=new_row.giftsub_message,
        raid_enabled=new_row.raid_enabled, raid_message=new_row.raid_message,
        raid_shoutout_enabled=new_row.raid_shoutout_enabled`,
-    [
-      streamerId,
-      config.follow_enabled ? 1 : 0, config.follow_message,
-      config.sub_enabled ? 1 : 0, config.sub_message, config.resub_message, config.giftsub_message,
-      config.raid_enabled ? 1 : 0, config.raid_message, config.raid_shoutout_enabled ? 1 : 0,
-    ],
+    [streamerId, ...eventConfigParams(config)],
   );
 }
