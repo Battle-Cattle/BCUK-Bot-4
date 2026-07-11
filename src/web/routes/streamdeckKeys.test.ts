@@ -278,35 +278,32 @@ describe('POST /streamdeck-key/rotate', () => {
     expect(res.headers.location).toBe('/streamdeck-key?error=rotate_failed');
   });
 
-  it('fetches the rotated key hash and the guild status concurrently, not sequentially', async () => {
+  it('reads the guild status before rotating the key, not concurrently', async () => {
     vi.mocked(hasApiKey).mockResolvedValue(true);
     const callOrder: string[] = [];
-    let resolveRotate!: () => void;
-    const rotateGate = new Promise<void>((resolve) => { resolveRotate = resolve; });
-    let resolveStatus!: () => void;
-    const statusGate = new Promise<void>((resolve) => { resolveStatus = resolve; });
 
-    vi.mocked(rotateApiKey).mockImplementation(async () => {
-      callOrder.push('rotate-start');
-      await rotateGate;
-      callOrder.push('rotate-end');
-      return { plain: 'b'.repeat(64) };
-    });
     vi.mocked(getGuildStatusForKey).mockImplementation(async () => {
-      callOrder.push('status-start');
-      await statusGate;
-      callOrder.push('status-end');
+      callOrder.push('status');
       return { discord_id: '1', guild_id: GUILD_ID, status: 'approved' } as any;
     });
+    vi.mocked(rotateApiKey).mockImplementation(async () => {
+      callOrder.push('rotate');
+      return { plain: 'b'.repeat(64) };
+    });
 
-    const reqPromise = supertest(buildApp()).post('/streamdeck-key/rotate').then((r) => r);
-    // Both calls should have started before either resolves — proving they
-    // run concurrently rather than one awaiting the other's completion.
-    await vi.waitFor(() => expect(callOrder).toEqual(['rotate-start', 'status-start']));
+    await supertest(buildApp()).post('/streamdeck-key/rotate');
 
-    resolveRotate();
-    resolveStatus();
-    await reqPromise;
+    expect(callOrder).toEqual(['status', 'rotate']);
+  });
+
+  it('never rotates the key if reading the guild status fails first, so no plaintext is generated and lost', async () => {
+    vi.mocked(hasApiKey).mockResolvedValue(true);
+    vi.mocked(getGuildStatusForKey).mockRejectedValueOnce(new Error('DB down'));
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/rotate');
+
+    expect(res.headers.location).toBe('/streamdeck-key?error=rotate_failed');
+    expect(rotateApiKey).not.toHaveBeenCalled();
   });
 
   it('a rapid duplicate rotate within the dedupe window reuses the first rotation instead of rotating again', async () => {
@@ -326,7 +323,7 @@ describe('POST /streamdeck-key/rotate', () => {
     expect(rotateApiKey).toHaveBeenCalledOnce();
   });
 
-  it('does not reuse another guild\'s cached approval status for the same user within the dedupe window', async () => {
+  it('reuses the same rotated key across a guild switch within the dedupe window, but always reports the current guild\'s fresh status', async () => {
     const OTHER_GUILD_ID = '900000000000000002';
     const sessionInGuildA = SESSION_USER;
     const sessionInGuildB = { ...SESSION_USER, currentGuildId: OTHER_GUILD_ID };
@@ -341,14 +338,19 @@ describe('POST /streamdeck-key/rotate', () => {
 
     const appA = buildApp(sessionInGuildA);
     const firstInA = await supertest(appA).post('/streamdeck-key/rotate');
+    expect((firstInA.body as any).locals.newKey).toBe('shared-plain-key');
     expect((firstInA.body as any).locals.keyRow).toMatchObject({ guild_id: GUILD_ID, status: 'approved' });
 
-    // Same discordId, different guild, within the dedupe window — must not
-    // be served guild A's cached keyRow.
+    // Same discordId, different guild, within the dedupe window — the
+    // global key secret is reused (not rotated again, which would silently
+    // invalidate the one just shown for guild A), but the guild's approval
+    // status is still read fresh and correctly reflects guild B, not a
+    // stale cached value from guild A.
     const appB = buildApp(sessionInGuildB);
     const firstInB = await supertest(appB).post('/streamdeck-key/rotate');
+    expect((firstInB.body as any).locals.newKey).toBe('shared-plain-key');
     expect((firstInB.body as any).locals.keyRow).toMatchObject({ guild_id: OTHER_GUILD_ID, status: 'pending' });
-    expect(rotateApiKey).toHaveBeenCalledTimes(2);
+    expect(rotateApiKey).toHaveBeenCalledOnce();
   });
 
   it('rotates again once the dedupe window has passed', async () => {
@@ -374,6 +376,34 @@ describe('POST /streamdeck-key/rotate', () => {
       expect(rotateApiKey).toHaveBeenCalledTimes(2);
     } finally {
       dateNowSpy.mockRestore();
+    }
+  });
+
+  it('actively evicts the cached plaintext once the dedupe window elapses, not just on next access', async () => {
+    // Captures the scheduled eviction callback instead of letting a real
+    // timer fire, then invokes it directly — proving eviction happens via
+    // that callback (not merely via the lazy age check on next read) by
+    // triggering a second rotation while Date.now() is still unchanged
+    // (i.e. still "within window" by age alone).
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    try {
+      vi.mocked(hasApiKey).mockResolvedValue(true);
+      vi.mocked(rotateApiKey).mockResolvedValueOnce({ plain: 'first-plain-key' } as any);
+
+      const app = buildApp();
+      await supertest(app).post('/streamdeck-key/rotate');
+
+      const [callback, delay] = setTimeoutSpy.mock.calls.at(-1)!;
+      expect(delay).toBe(10_000);
+      (callback as () => void)();
+
+      vi.mocked(rotateApiKey).mockResolvedValueOnce({ plain: 'second-plain-key' } as any);
+      const second = await supertest(app).post('/streamdeck-key/rotate');
+
+      expect((second.body as any).locals.newKey).toBe('second-plain-key');
+      expect(rotateApiKey).toHaveBeenCalledTimes(2);
+    } finally {
+      setTimeoutSpy.mockRestore();
     }
   });
 });
