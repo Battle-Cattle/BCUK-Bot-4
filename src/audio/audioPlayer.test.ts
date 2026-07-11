@@ -99,7 +99,7 @@ describe('connect', () => {
     );
     expect(mod.isConnected('guild-A')).toBe(true);
     expect(mod.getCurrentChannelId('guild-A')).toBe('chan-1');
-    expect(vi.mocked(status.setVoiceConnected)).toHaveBeenCalledWith('vc-chan-1');
+    expect(vi.mocked(status.setVoiceConnected)).toHaveBeenCalledWith('guild-A', 'vc-chan-1');
   });
 
   it('rejects when no channelId is given', async () => {
@@ -153,7 +153,7 @@ describe('per-guild isolation', () => {
     expect(mod.getCurrentChannelId('guild-B')).toBe('chan-B');
   });
 
-  it('disconnecting one guild leaves the other connected and does not clear global voice status', async () => {
+  it('disconnecting one guild leaves the other connected and only clears that guild\'s voice status', async () => {
     const a = makeClient();
     const b = makeClient();
     const status = await import('../shared/statusStore.js');
@@ -165,8 +165,9 @@ describe('per-guild isolation', () => {
 
     expect(mod.isConnected('guild-A')).toBe(false);
     expect(mod.isConnected('guild-B')).toBe(true);
-    // Another guild is still connected, so the shared/global voice status must not be cleared.
-    expect(vi.mocked(status.setVoiceDisconnected)).not.toHaveBeenCalled();
+    // Voice status is scoped per guild, so only guild-A's status is cleared.
+    expect(vi.mocked(status.setVoiceDisconnected)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(status.setVoiceDisconnected)).toHaveBeenCalledWith('guild-A');
   });
 
   it('a scheduled reconnect in one guild does not affect the other guild', async () => {
@@ -214,7 +215,8 @@ describe('per-guild isolation', () => {
     expect(mod.isConnected('guild-A')).toBe(false);
     expect(mod.isConnected('guild-B')).toBe(false);
     expect(mod.isConnected()).toBe(false);
-    expect(vi.mocked(status.setVoiceDisconnected)).toHaveBeenCalled();
+    expect(vi.mocked(status.setVoiceDisconnected)).toHaveBeenCalledWith('guild-A');
+    expect(vi.mocked(status.setVoiceDisconnected)).toHaveBeenCalledWith('guild-B');
   });
 });
 
@@ -333,7 +335,7 @@ describe('reconnect', () => {
 
       expect(mod.isConnected('guild-A')).toBe(false);
       expect(conn.destroy).toHaveBeenCalled();
-      expect(vi.mocked(status.setVoiceDisconnected)).toHaveBeenCalled();
+      expect(vi.mocked(status.setVoiceDisconnected)).toHaveBeenCalledWith('guild-A');
     } finally {
       vi.useRealTimers();
     }
@@ -356,7 +358,7 @@ describe('per-guild audio player', () => {
     idleHandler();
 
     expect(mod.isPlaying('guild-A')).toBe(false);
-    expect(vi.mocked(status.setVoiceIdle)).toHaveBeenCalled();
+    expect(vi.mocked(status.setVoiceIdle)).toHaveBeenCalledWith('guild-A');
   });
 
   it('error handler resets the playing flag', async () => {
@@ -375,7 +377,7 @@ describe('per-guild audio player', () => {
     expect(mod.isPlaying('guild-A')).toBe(false);
   });
 
-  it('does not clear the shared/global voice status when another guild is still playing (Idle)', async () => {
+  it('going idle in one guild only clears that guild\'s voice status (Idle)', async () => {
     const a = makeClient();
     const b = makeClient();
     const voice = await import('@discordjs/voice');
@@ -395,10 +397,11 @@ describe('per-guild audio player', () => {
 
     expect(mod.isPlaying('guild-A')).toBe(false);
     expect(mod.isPlaying('guild-B')).toBe(true);
-    expect(vi.mocked(status.setVoiceIdle)).not.toHaveBeenCalled();
+    expect(vi.mocked(status.setVoiceIdle)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(status.setVoiceIdle)).toHaveBeenCalledWith('guild-A');
   });
 
-  it('clears the shared/global voice status once the last playing guild goes idle', async () => {
+  it('clears the guild\'s voice status once it goes idle', async () => {
     const { client } = makeClient();
     const voice = await import('@discordjs/voice');
     const status = await import('../shared/statusStore.js');
@@ -412,10 +415,10 @@ describe('per-guild audio player', () => {
     const idleHandler = fakePlayer.on.mock.calls.find(([e]) => e === 'idle')?.[1] as () => void;
     idleHandler();
 
-    expect(vi.mocked(status.setVoiceIdle)).toHaveBeenCalled();
+    expect(vi.mocked(status.setVoiceIdle)).toHaveBeenCalledWith('guild-A');
   });
 
-  it('does not clear the shared/global voice status on error when another guild is still playing', async () => {
+  it('an error in one guild only clears that guild\'s voice status', async () => {
     const a = makeClient();
     const b = makeClient();
     const voice = await import('@discordjs/voice');
@@ -435,7 +438,8 @@ describe('per-guild audio player', () => {
 
     expect(mod.isPlaying('guild-A')).toBe(false);
     expect(mod.isPlaying('guild-B')).toBe(true);
-    expect(vi.mocked(status.setVoiceIdle)).not.toHaveBeenCalled();
+    expect(vi.mocked(status.setVoiceIdle)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(status.setVoiceIdle)).toHaveBeenCalledWith('guild-A');
   });
 
   it('playing one guild does not affect another guild\'s playing flag or player instance', async () => {

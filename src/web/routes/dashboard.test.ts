@@ -61,6 +61,12 @@ describe('GET /', () => {
     expect(res.body.status).toEqual(STATUS);
     expect(res.body.needsReconnect).toBe(false);
     expect(getStreamerByDiscordId).not.toHaveBeenCalled();
+    expect(getStatus).toHaveBeenCalledWith(null);
+  });
+
+  it('scopes status to the session\'s current guild', async () => {
+    await supertest(buildApp({ discordId: '100', currentGuildId: 'guild-A' })).get('/');
+    expect(getStatus).toHaveBeenCalledWith('guild-A');
   });
 
   it('sets needsReconnect true when the streamer has auth-failed subs', async () => {

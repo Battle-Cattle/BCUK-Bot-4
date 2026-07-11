@@ -83,14 +83,6 @@ function anyConnected(): boolean {
   return false;
 }
 
-/** True if any guild's audio player is currently playing. */
-function anyPlaying(): boolean {
-  for (const state of states.values()) {
-    if (state.playing) return true;
-  }
-  return false;
-}
-
 // ─── Reconnect ────────────────────────────────────────────────────────────────
 
 const RECONNECT_BASE_DELAY_MS = 5_000;
@@ -132,19 +124,12 @@ function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
     });
     guildPlayer.on(AudioPlayerStatus.Idle, () => {
       state.playing = false;
-      // Another guild may still be playing — only clear the shared/global
-      // status once no guild remains playing, mirroring the disconnected-status
-      // guard in tearDownGuild/disconnectGuild below.
-      if (!anyPlaying()) {
-        setVoiceIdle();
-      }
+      setVoiceIdle(state.guildId);
     });
     guildPlayer.on('error', (err) => {
       log.error(`Error: ${err.message}`, err);
       state.playing = false;
-      if (!anyPlaying()) {
-        setVoiceIdle();
-      }
+      setVoiceIdle(state.guildId);
     });
     state.player = guildPlayer;
   }
@@ -163,17 +148,14 @@ function stopGuildPlayer(state: GuildVoiceState): void {
 
 /**
  * Releases a guild's playback footprint after its connection is gone. Always
- * stops this guild's own player so playback in one guild never bleeds into
- * another; the shared/global voice-status dashboard is only cleared once no
- * guild remains connected, so tearing down one guild's connection doesn't
- * report the whole bot as disconnected while another guild is still live.
+ * stops this guild's own player and clears this guild's own voice status —
+ * status is scoped per guild, so tearing down one guild's connection never
+ * affects another guild's reported state.
  */
 function tearDownGuild(state: GuildVoiceState): void {
   state.currentChannelId = null;
   stopGuildPlayer(state);
-  if (!anyConnected()) {
-    setVoiceDisconnected();
-  }
+  setVoiceDisconnected(state.guildId);
 }
 
 /** Builds the ConnectionHandlerDeps callbacks bound to a specific guild's mutable voice state. */
@@ -260,7 +242,7 @@ export async function connect(client: Client, guildId: string, channelId: string
     state.reconnectAttempts = 0;
 
     joinedConnection.subscribe(getPlayer(state));
-    setVoiceConnected(channel.name);
+    setVoiceConnected(guildId, channel.name);
     log.info(`Joined voice channel: ${channel.name}`);
   } catch (err) {
     if (attemptId === state.currentAttemptId) {
@@ -292,9 +274,7 @@ function disconnectGuild(state: GuildVoiceState): void {
     existingConnection.destroy();
     state.connection = null;
     stopGuildPlayer(state);
-    if (!anyConnected()) {
-      setVoiceDisconnected();
-    }
+    setVoiceDisconnected(state.guildId);
     log.info(`Disconnected from voice channel for guild ${state.guildId}.`);
   }
 }

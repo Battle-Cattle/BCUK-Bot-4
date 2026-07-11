@@ -65,7 +65,7 @@ async function lookupAndPlay(
   try {
     playFile(fullPath, guildId);
     state.lastPlayedAt = Date.now();
-    setVoicePlaying(filename, command, source);
+    setVoicePlaying(guildId, filename, command, source);
     recordCommandTestEntry({ source, command, response: filename, channel: null, user: null });
   } catch (err) {
     if (err instanceof VoiceNotConnectedError) {

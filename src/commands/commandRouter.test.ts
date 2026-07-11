@@ -128,7 +128,7 @@ describe('handleCommand', () => {
 
     expect(vi.mocked(findTrigger)).toHaveBeenCalledWith('!ding');
     expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'ding.mp3'), GUILD_A);
-    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('ding.mp3', '!ding', 'discord');
+    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'ding.mp3', '!ding', 'discord');
   });
 
   it('blocks a second concurrent call via the inFlight flag', async () => {
@@ -245,7 +245,7 @@ describe('handleCommand', () => {
       await handleCommand('!safe', 'twitch', GUILD_A);
 
       expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'valid-sound.mp3'), GUILD_A);
-      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('valid-sound.mp3', '!safe', 'twitch');
+      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'valid-sound.mp3', '!safe', 'twitch');
     });
 
     it('allows valid filenames in subdirectories within the SFX folder', async () => {
@@ -258,7 +258,7 @@ describe('handleCommand', () => {
       await handleCommand('!safe', 'twitch', GUILD_A);
 
       expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'category', 'sound.mp3'), GUILD_A);
-      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('category/sound.mp3', '!safe', 'twitch');
+      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'category/sound.mp3', '!safe', 'twitch');
     });
   });
 });

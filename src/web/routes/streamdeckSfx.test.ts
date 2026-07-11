@@ -117,7 +117,7 @@ describe('POST /sfx', () => {
       .expect(200);
 
     expect(res.body).toEqual({ ok: true, file: 'ding.mp3' });
-    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('ding.mp3', '!ding', 'streamdeck');
+    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('guild-123', 'ding.mp3', '!ding', 'streamdeck');
   });
 
   it('normalises the command to lowercase before lookup', async () => {

@@ -14,9 +14,9 @@ const router = Router();
 
 /**
  * Resolves the guild the request acts in from the session, replying 400 when no
- * guild is selected. Voice routes are guild-scoped — the bot can hold a separate
- * connection per guild — and the guild is taken from the session (never the
- * request body) so a Mod cannot drive another guild's voice connection.
+ * guild is selected. Voice and status routes are guild-scoped — the bot can hold
+ * a separate connection per guild — and the guild is taken from the session
+ * (never the request body) so a Mod cannot drive or view another guild's state.
  *
  * @returns The current guild ID, or null when the response has already been sent.
  */
@@ -31,12 +31,16 @@ function getSessionGuildId(req: Request, res: Response): string | null {
 
 /**
  * GET /status — live bot status JSON, polled by the dashboard frontend every
- * few seconds.
- * @param _req - Express request (unused).
- * @param res - Express response; returns `getStatus()`.
+ * few seconds. Voice status is scoped to the viewer's current guild so a
+ * Manager on guild B's dashboard never sees guild A's now-playing info.
+ * @param req - Express request; guild is taken from the session.
+ * @param res - Express response; returns `getStatus(guildId)`, or 400 if no
+ *   guild is selected.
  */
-router.get('/status', requireAuth, (_req, res) => {
-  res.json(getStatus());
+router.get('/status', requireAuth, (req, res) => {
+  const guildId = getSessionGuildId(req, res);
+  if (!guildId) return;
+  res.json(getStatus(guildId));
 });
 
 /**
