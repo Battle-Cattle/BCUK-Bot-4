@@ -336,6 +336,14 @@ describe('revokeApiKey', () => {
     expect(sql).toContain('guild_id = ?');
     expect(params).toEqual(['user1', 'g1']);
   });
+
+  it('excludes denied rows from the UPDATE, so a denial can never be self-revoked away', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await revokeApiKey('user1', 'g1');
+    const [sql] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("status != 'denied'");
+  });
 });
 
 // ─── getPendingRequests ───────────────────────────────────────────────────────

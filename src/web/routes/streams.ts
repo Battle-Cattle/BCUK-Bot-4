@@ -4,11 +4,10 @@ import {
   getStreamGroupsForGuild,
   addStreamGroup,
   updateStreamGroup,
-  removeStreamGroup,
   getStreamersForGuild,
   addStreamer,
   removeStreamer,
-  removeStreamersByGroup,
+  removeStreamGroupAndStreamers,
   getAllEventSubStreamers,
   getAllUsers,
   findUser,
@@ -171,7 +170,7 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
   if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
 
   try {
-    await updateStreamGroup({
+    const updated = await updateStreamGroup({
       id: parsedGroupId,
       guildId: req.session.user!.currentGuildId!,
       name: name!.trim().slice(0, 100),
@@ -181,6 +180,7 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
       multiTwitch: multi_twitch,
       deleteOldPosts: delete_old_posts,
     });
+    if (!updated) return res.redirect('/admin/streams?error=update_group_failed');
     triggerRestart();
   } catch (err) {
     return logAndRedirectError({ res, log, logLabel: 'Update stream group error:', err, basePath: '/admin/streams', errorCode: 'update_group_failed' });
@@ -189,8 +189,8 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
 });
 
 /**
- * POST /streams/groups/remove — deletes a stream group, first removing its
- * streamers to avoid FK constraint errors, then restarts the Twitch monitor.
+ * POST /streams/groups/remove — deletes a stream group and its streamers
+ * atomically, then restarts the Twitch monitor.
  * @param req - Express request; reads `group_id` from `req.body`.
  * @param res - Express response; redirects to `/admin/streams` on success, or to
  *   `/admin/streams?error=<code>` if `group_id` is malformed (`invalid_id`) or the
@@ -204,9 +204,7 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
 
   try {
     const guildId = req.session.user!.currentGuildId!;
-    // Delete streamers in the group first (avoids FK constraint errors)
-    await removeStreamersByGroup(parsedGroupId, guildId);
-    const removed = await removeStreamGroup(parsedGroupId, guildId);
+    const removed = await removeStreamGroupAndStreamers(parsedGroupId, guildId);
     if (!removed) return res.redirect('/admin/streams?error=remove_group_failed');
     triggerRestart();
   } catch (err) {

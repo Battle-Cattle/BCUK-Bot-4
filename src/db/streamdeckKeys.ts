@@ -262,10 +262,12 @@ export async function denyApiKey(discordId: string, guildId: string): Promise<vo
 }
 
 /**
- * Revokes a Discord user's Streamdeck access for one guild, regardless of its
- * current status. Used for both self-service and admin-initiated revokes —
- * revoking always affects only the named guild, leaving the same key's
- * approval state in every other guild untouched.
+ * Revokes a Discord user's Streamdeck access for one guild. Used for both
+ * self-service and admin-initiated revokes — revoking always affects only the
+ * named guild, leaving the same key's approval state in every other guild
+ * untouched. A `denied` row is left as-is: denial is meant to permanently
+ * block re-requesting, and revoking it would let a denied user recreate
+ * access simply by calling this instead of getting approved again.
  *
  * @param discordId User's Discord snowflake.
  * @param guildId Guild to revoke access for.
@@ -273,7 +275,7 @@ export async function denyApiKey(discordId: string, guildId: string): Promise<vo
  */
 export async function revokeApiKey(discordId: string, guildId: string): Promise<void> {
   await getPool().execute(
-    `UPDATE streamdeck_key_guild_status SET status = 'revoked' WHERE discord_id = ? AND guild_id = ?`,
+    `UPDATE streamdeck_key_guild_status SET status = 'revoked' WHERE discord_id = ? AND guild_id = ? AND status != 'denied'`,
     [discordId, guildId],
   );
 }

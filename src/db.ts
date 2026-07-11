@@ -111,9 +111,9 @@ export { invalidateCounterLookupCache, findCounterByCommand, isCounterCommandTak
 // ─── Stream monitor ──────────────────────────────────────────────────────────
 
 export {
-  getStreamGroupsForGuild, addStreamGroup, updateStreamGroup, removeStreamGroup,
+  getStreamGroupsForGuild, addStreamGroup, updateStreamGroup,
   getStreamersForGuild, getAllStreamersWithGroups,
-  addStreamer, removeStreamer, removeStreamersByGroup,
+  addStreamer, removeStreamer, removeStreamGroupAndStreamers,
   setStreamerLive, clearStreamerLive,
 } from './db/streamMonitor';
 export type {

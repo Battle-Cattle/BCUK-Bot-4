@@ -146,6 +146,20 @@ describe('POST /streamdeck-key/request', () => {
     expect(requestGuildAccessForExistingKey).not.toHaveBeenCalled();
   });
 
+  it('re-requests guild access instead of just rotating when this guild was previously revoked', async () => {
+    vi.mocked(getGuildStatusForKey)
+      .mockResolvedValueOnce({ discord_id: '1', guild_id: GUILD_ID, status: 'revoked' } as any)
+      .mockResolvedValueOnce({ discord_id: '1', guild_id: GUILD_ID, status: 'pending' } as any);
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/request');
+
+    expect(res.status).toBe(200);
+    expect((res.body as any).locals.newKey).toBeNull();
+    expect(requestGuildAccessForExistingKey).toHaveBeenCalledWith(SESSION_USER.discordId, SESSION_USER.accessLevel, GUILD_ID);
+    expect(rotateApiKey).not.toHaveBeenCalled();
+    expect(createApiKeyAndRequestGuildAccess).not.toHaveBeenCalled();
+  });
+
   it('redirects to ?error=request_failed when this guild was previously denied', async () => {
     vi.mocked(getGuildStatusForKey).mockResolvedValue({ discord_id: '1', guild_id: GUILD_ID, status: 'denied' } as any);
 
@@ -166,8 +180,12 @@ describe('POST /streamdeck-key/request', () => {
     let resolveFirstHasApiKey!: () => void;
     const firstHasApiKeyGate = new Promise<void>((resolve) => { resolveFirstHasApiKey = resolve; });
     let hasApiKeyCalls = 0;
+    // Models the DB state createApiKeyAndRequestGuildAccess would actually
+    // persist — without this, both requests would see "no existing key" and
+    // the test would just be asserting the duplicate-insert race it claims to prevent.
+    let persistedGuildStatus: { status: string } | null = null;
 
-    vi.mocked(getGuildStatusForKey).mockResolvedValue(null);
+    vi.mocked(getGuildStatusForKey).mockImplementation(async () => persistedGuildStatus as any);
     vi.mocked(hasApiKey).mockImplementation(async () => {
       hasApiKeyCalls += 1;
       callOrder.push('hasApiKey-start');
@@ -175,11 +193,16 @@ describe('POST /streamdeck-key/request', () => {
         await firstHasApiKeyGate;
       }
       callOrder.push('hasApiKey-end');
-      return false;
+      return persistedGuildStatus !== null;
     });
     vi.mocked(createApiKeyAndRequestGuildAccess).mockImplementation(async () => {
       callOrder.push('create');
+      persistedGuildStatus = { status: 'pending' };
       return { plain: 'a'.repeat(64), status: 'pending' };
+    });
+    vi.mocked(rotateApiKey).mockImplementation(async () => {
+      callOrder.push('rotate');
+      return { plain: 'b'.repeat(64) };
     });
 
     const app = buildApp();
@@ -200,8 +223,11 @@ describe('POST /streamdeck-key/request', () => {
     await firstReq;
     await secondReq;
 
-    expect(callOrder).toEqual(['hasApiKey-start', 'hasApiKey-end', 'create', 'hasApiKey-start', 'hasApiKey-end', 'create']);
-    expect(createApiKeyAndRequestGuildAccess).toHaveBeenCalledTimes(2);
+    // The second request only starts once the first has fully committed its
+    // guild-status row, so it sees existingGuildStatus set and takes the
+    // rotate path instead of racing into a second identity insert.
+    expect(callOrder).toEqual(['hasApiKey-start', 'hasApiKey-end', 'create', 'rotate']);
+    expect(createApiKeyAndRequestGuildAccess).toHaveBeenCalledTimes(1);
   });
 });
 

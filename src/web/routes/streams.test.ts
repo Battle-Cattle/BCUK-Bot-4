@@ -4,11 +4,10 @@ vi.mock('../../db', () => ({
   getStreamGroupsForGuild: vi.fn(),
   addStreamGroup: vi.fn(),
   updateStreamGroup: vi.fn(),
-  removeStreamGroup: vi.fn(),
   getStreamersForGuild: vi.fn(),
   addStreamer: vi.fn(),
   removeStreamer: vi.fn(),
-  removeStreamersByGroup: vi.fn(),
+  removeStreamGroupAndStreamers: vi.fn(),
   getAllEventSubStreamers: vi.fn(),
   getAllUsers: vi.fn(),
   findUser: vi.fn(),
@@ -45,7 +44,7 @@ import supertest from 'supertest';
 import router from './streams';
 import {
   getStreamGroupsForGuild, getStreamersForGuild, getAllUsers, findUser, addStreamer, addStreamGroup, updateStreamGroup,
-  removeStreamGroup, removeStreamer, removeStreamersByGroup, getAllEventSubStreamers,
+  removeStreamGroupAndStreamers, removeStreamer, getAllEventSubStreamers,
 } from '../../db';
 import { restartTwitchMonitor, getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db/users';
@@ -74,10 +73,9 @@ beforeEach(() => {
   vi.mocked(findUser).mockResolvedValue(null);
   vi.mocked(addStreamer).mockResolvedValue(undefined);
   vi.mocked(addStreamGroup).mockResolvedValue(undefined);
-  vi.mocked(updateStreamGroup).mockResolvedValue(undefined);
-  vi.mocked(removeStreamGroup).mockResolvedValue(true);
+  vi.mocked(updateStreamGroup).mockResolvedValue(true);
+  vi.mocked(removeStreamGroupAndStreamers).mockResolvedValue(true);
   vi.mocked(removeStreamer).mockResolvedValue(true);
-  vi.mocked(removeStreamersByGroup).mockResolvedValue(0);
   vi.mocked(getAllEventSubStreamers).mockResolvedValue([]);
   vi.mocked(getLiveStates).mockReturnValue([]);
   vi.mocked(restartTwitchMonitor).mockResolvedValue(undefined);
@@ -338,6 +336,16 @@ describe('POST /streams/groups/update — field length capping', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('error=update_group_failed');
   });
+
+  it('redirects with update_group_failed (not a false success) when the group belongs to a different guild', async () => {
+    vi.mocked(updateStreamGroup).mockResolvedValueOnce(false);
+    const res = await supertest(buildApp())
+      .post('/streams/groups/update')
+      .send('group_id=1&name=n&discord_channel=chan&live_message=live&new_game_message=game');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=update_group_failed');
+    expect(restartTwitchMonitor).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /streams/groups/add — failure paths', () => {
@@ -365,37 +373,34 @@ describe('POST /streams/groups/remove', () => {
     const res = await supertest(buildApp()).post('/streams/groups/remove').send('');
     expect(res.status).toBe(302);
     expect(res.headers.location).not.toContain('error');
-    expect(removeStreamGroup).not.toHaveBeenCalled();
+    expect(removeStreamGroupAndStreamers).not.toHaveBeenCalled();
   });
 
   it('redirects with invalid_id when group_id is not a valid positive integer', async () => {
     const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=abc');
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('error=invalid_id');
-    expect(removeStreamGroup).not.toHaveBeenCalled();
+    expect(removeStreamGroupAndStreamers).not.toHaveBeenCalled();
   });
 
-  it('removes the group\'s streamers before the group itself, then restarts the monitor', async () => {
+  it('removes the group and its streamers atomically, then restarts the monitor', async () => {
     const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=5');
     expect(res.status).toBe(302);
     expect(res.headers.location).not.toContain('error');
-    expect(removeStreamersByGroup).toHaveBeenCalledWith(5, GUILD_ID);
-    expect(removeStreamGroup).toHaveBeenCalledWith(5, GUILD_ID);
-    expect(vi.mocked(removeStreamersByGroup).mock.invocationCallOrder[0])
-      .toBeLessThan(vi.mocked(removeStreamGroup).mock.invocationCallOrder[0]);
+    expect(removeStreamGroupAndStreamers).toHaveBeenCalledWith(5, GUILD_ID);
     await flushRestartChain();
     expect(restartTwitchMonitor).toHaveBeenCalled();
   });
 
   it('redirects with remove_group_failed when the DB delete rejects', async () => {
-    vi.mocked(removeStreamGroup).mockRejectedValueOnce(new Error('DB down'));
+    vi.mocked(removeStreamGroupAndStreamers).mockRejectedValueOnce(new Error('DB down'));
     const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=5');
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('error=remove_group_failed');
   });
 
   it('redirects with remove_group_failed (not a false success) when the group belongs to a different guild', async () => {
-    vi.mocked(removeStreamGroup).mockResolvedValueOnce(false);
+    vi.mocked(removeStreamGroupAndStreamers).mockResolvedValueOnce(false);
     const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=5');
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('error=remove_group_failed');

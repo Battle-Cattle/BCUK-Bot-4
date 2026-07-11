@@ -104,26 +104,13 @@ export async function addStreamGroup(input: AddStreamGroupInput): Promise<void> 
  * belong to `guildId`, preventing one guild from editing another's group.
  *
  * @param input - Updated stream group fields; `id` identifies the row to update.
+ * @returns True if a group was actually updated; false if `id` didn't belong to `guildId`.
  */
-export async function updateStreamGroup(input: UpdateStreamGroupInput): Promise<void> {
-  await getPool().execute(
+export async function updateStreamGroup(input: UpdateStreamGroupInput): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `UPDATE stream_group SET name=?, discord_channel=?, live_message=?, new_game_message=?, multi_twitch=?, delete_old_posts=?
      WHERE id=? AND guild_id=?`,
     [...streamGroupParams(input), input.id, input.guildId],
-  );
-}
-
-/**
- * Delete a stream group by ID. A no-op if `id` doesn't belong to `guildId`,
- * preventing one guild from deleting another's group.
- *
- * @param id - Primary key of the stream group to remove.
- * @param guildId - Guild the caller is acting in; the group must belong to it.
- * @returns True if a group was actually deleted; false if `id` didn't belong to `guildId`.
- */
-export async function removeStreamGroup(id: number, guildId: string): Promise<boolean> {
-  const [result] = await getPool().execute<mysql.ResultSetHeader>(
-    'DELETE FROM stream_group WHERE id = ? AND guild_id = ?', [id, guildId],
   );
   return result.affectedRows > 0;
 }
@@ -234,19 +221,36 @@ export async function removeStreamer(id: number, guildId: string): Promise<boole
 }
 
 /**
- * Remove all streamers belonging to a given stream group. A no-op if the
- * group doesn't belong to `guildId`.
+ * Deletes a stream group together with all of its streamers, as a single
+ * transaction — if the group delete fails after the streamers are already
+ * gone (or vice versa), the whole operation rolls back instead of leaving the
+ * group orphaned from its streamers while the caller reports failure. A
+ * no-op (returns false, nothing deleted) if `groupId` doesn't belong to
+ * `guildId`.
  *
- * @param groupId - ID of the stream group whose streamers should be deleted.
- * @param guildId - Guild the caller is acting in.
- * @returns The number of streamer rows deleted.
+ * @param groupId - ID of the stream group to remove, along with its streamers.
+ * @param guildId - Guild the caller is acting in; the group must belong to it.
+ * @returns True if the group was actually deleted; false if it didn't belong to `guildId`.
  */
-export async function removeStreamersByGroup(groupId: number, guildId: string): Promise<number> {
-  const [result] = await getPool().execute<mysql.ResultSetHeader>(
-    `DELETE s FROM streamer s JOIN stream_group g ON s.group_id = g.id WHERE s.group_id = ? AND g.guild_id = ?`,
-    [groupId, guildId],
-  );
-  return result.affectedRows;
+export async function removeStreamGroupAndStreamers(groupId: number, guildId: string): Promise<boolean> {
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute(
+      `DELETE s FROM streamer s JOIN stream_group g ON s.group_id = g.id WHERE s.group_id = ? AND g.guild_id = ?`,
+      [groupId, guildId],
+    );
+    const [result] = await conn.execute<mysql.ResultSetHeader>(
+      'DELETE FROM stream_group WHERE id = ? AND guild_id = ?', [groupId, guildId],
+    );
+    await conn.commit();
+    return result.affectedRows > 0;
+  } catch (err) {
+    await conn.rollback().catch(() => {});
+    throw err;
+  } finally {
+    conn.release();
+  }
 }
 
 /**

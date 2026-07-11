@@ -65,12 +65,11 @@ vi.mock('./db/streamMonitor', () => ({
   getStreamGroupsForGuild: vi.fn(),
   addStreamGroup: vi.fn(),
   updateStreamGroup: vi.fn(),
-  removeStreamGroup: vi.fn(),
   getStreamersForGuild: vi.fn(),
   getAllStreamersWithGroups: vi.fn(),
   addStreamer: vi.fn(),
   removeStreamer: vi.fn(),
-  removeStreamersByGroup: vi.fn(),
+  removeStreamGroupAndStreamers: vi.fn(),
   setStreamerLive: vi.fn(),
   clearStreamerLive: vi.fn(),
 }));

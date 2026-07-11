@@ -8,12 +8,11 @@ import {
   getStreamGroupsForGuild,
   addStreamGroup,
   updateStreamGroup,
-  removeStreamGroup,
   getStreamersForGuild,
   getAllStreamersWithGroups,
   addStreamer,
   removeStreamer,
-  removeStreamersByGroup,
+  removeStreamGroupAndStreamers,
   setStreamerLive,
   clearStreamerLive,
 } from './streamMonitor';
@@ -111,7 +110,7 @@ describe('addStreamGroup', () => {
 
 describe('updateStreamGroup', () => {
   it('includes the id and guildId as the last WHERE params', async () => {
-    const pool = makePool();
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
     await updateStreamGroup({ id: 42, guildId: GUILD_ID, name: 'G', discordChannel: 'c', liveMessage: 'l', newGameMessage: 'g', multiTwitch: false, deleteOldPosts: false });
     const params: unknown[] = pool.execute.mock.calls[0][1];
@@ -120,33 +119,92 @@ describe('updateStreamGroup', () => {
   });
 
   it('uses UPDATE and scopes the WHERE to guild_id', async () => {
-    const pool = makePool();
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
     await updateStreamGroup({ id: 1, guildId: GUILD_ID, name: 'G', discordChannel: 'c', liveMessage: 'l', newGameMessage: 'g', multiTwitch: false, deleteOldPosts: false });
     const sql = (pool.execute.mock.calls[0][0] as string).toLowerCase();
     expect(sql).toContain('update');
     expect(sql).toContain('guild_id=?');
   });
-});
 
-// ─── removeStreamGroup ────────────────────────────────────────────────────────
-
-describe('removeStreamGroup', () => {
-  it('executes DELETE scoped to the group id and guildId, returning true when a row was deleted', async () => {
+  it('returns true when a row was updated', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await removeStreamGroup(7, GUILD_ID);
-    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
-    expect(params).toEqual([7, GUILD_ID]);
-    expect(sql.toLowerCase()).toContain('delete');
-    expect(sql.toLowerCase()).toContain('guild_id');
+    const result = await updateStreamGroup({ id: 1, guildId: GUILD_ID, name: 'G', discordChannel: 'c', liveMessage: 'l', newGameMessage: 'g', multiTwitch: false, deleteOldPosts: false });
     expect(result).toBe(true);
   });
 
-  it('returns false when the group did not belong to guildId (no row deleted)', async () => {
+  it('returns false when the group did not belong to guildId (no row updated)', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    expect(await removeStreamGroup(7, GUILD_ID)).toBe(false);
+    const result = await updateStreamGroup({ id: 1, guildId: GUILD_ID, name: 'G', discordChannel: 'c', liveMessage: 'l', newGameMessage: 'g', multiTwitch: false, deleteOldPosts: false });
+    expect(result).toBe(false);
+  });
+});
+
+// ─── removeStreamGroupAndStreamers ────────────────────────────────────────────
+
+/** Pool mock whose getConnection() returns a fake transactional connection. */
+function makeTransactionalPool(streamerAffectedRows: number, groupAffectedRows: number) {
+  const conn = {
+    execute: vi.fn()
+      .mockResolvedValueOnce([{ affectedRows: streamerAffectedRows }, []])
+      .mockResolvedValueOnce([{ affectedRows: groupAffectedRows }, []]),
+    beginTransaction: vi.fn().mockResolvedValue(undefined),
+    commit: vi.fn().mockResolvedValue(undefined),
+    rollback: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn(),
+  };
+  return {
+    getConnection: vi.fn().mockResolvedValue(conn),
+    _conn: conn,
+  };
+}
+
+describe('removeStreamGroupAndStreamers', () => {
+  it('deletes streamers then the group within a single transaction, returning true when the group was deleted', async () => {
+    const pool = makeTransactionalPool(3, 1);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    const result = await removeStreamGroupAndStreamers(7, GUILD_ID);
+
+    expect(pool._conn.beginTransaction).toHaveBeenCalledOnce();
+    expect(pool._conn.execute).toHaveBeenCalledTimes(2);
+    const [streamerSql, streamerParams] = pool._conn.execute.mock.calls[0] as [string, unknown[]];
+    expect(streamerSql.toLowerCase()).toContain('delete');
+    expect(streamerParams).toEqual([7, GUILD_ID]);
+    const [groupSql, groupParams] = pool._conn.execute.mock.calls[1] as [string, unknown[]];
+    expect(groupSql.toLowerCase()).toContain('delete');
+    expect(groupParams).toEqual([7, GUILD_ID]);
+    expect(pool._conn.commit).toHaveBeenCalledOnce();
+    expect(pool._conn.release).toHaveBeenCalledOnce();
+    expect(result).toBe(true);
+  });
+
+  it('returns false and still commits when the group did not belong to guildId (no row deleted)', async () => {
+    const pool = makeTransactionalPool(0, 0);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    const result = await removeStreamGroupAndStreamers(7, GUILD_ID);
+
+    expect(pool._conn.commit).toHaveBeenCalledOnce();
+    expect(result).toBe(false);
+  });
+
+  it('rolls back and releases the connection when a delete throws', async () => {
+    const conn = {
+      execute: vi.fn().mockRejectedValue(new Error('DB down')),
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    await expect(removeStreamGroupAndStreamers(7, GUILD_ID)).rejects.toThrow('DB down');
+    expect(conn.rollback).toHaveBeenCalledOnce();
+    expect(conn.commit).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalledOnce();
   });
 });
 
@@ -244,7 +302,7 @@ describe('getAllStreamersWithGroups', () => {
   });
 });
 
-// ─── addStreamer / removeStreamer / removeStreamersByGroup ────────────────────
+// ─── addStreamer / removeStreamer ─────────────────────────────────────────────
 
 describe('addStreamer', () => {
   it('inserts with discordId and groupId after confirming the group belongs to guildId', async () => {
@@ -276,18 +334,6 @@ describe('removeStreamer', () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await removeStreamer(5, GUILD_ID)).toBe(false);
-  });
-});
-
-describe('removeStreamersByGroup', () => {
-  it('deletes by group_id, scoped to guildId, returning the affected row count', async () => {
-    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 3 }, []]) };
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await removeStreamersByGroup(10, GUILD_ID);
-    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
-    expect(params).toEqual([10, GUILD_ID]);
-    expect(sql).toContain('g.guild_id = ?');
-    expect(result).toBe(3);
   });
 });
 
