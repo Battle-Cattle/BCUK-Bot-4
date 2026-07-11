@@ -126,6 +126,11 @@ describe('POST /voice/join', () => {
     expect(res.body).toMatchObject({ ok: false });
   });
 
+  it('does not crash when the request has no body at all', async () => {
+    const res = await supertest(buildApp()).post('/voice/join').expect(400);
+    expect(res.body).toMatchObject({ ok: false });
+  });
+
   it('returns 400 when channelId is not a valid Discord snowflake', async () => {
     const res = await supertest(buildApp()).post('/voice/join').send({ channelId: 'not-a-snowflake' }).expect(400);
     expect(res.body).toMatchObject({ ok: false });
