@@ -3,7 +3,8 @@ import { Router } from 'express';
 import { addStreamer, removeStreamer, findUser } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
-import { logAndRedirectError, parsePositiveIntId, normalizeDiscordId } from './shared';
+import { parsePositiveIntId, normalizeDiscordId } from './shared';
+import { redirectStreamsInvalid, redirectStreamsFailure } from './streamsErrors';
 import { triggerRestart } from './streamRestart';
 
 const log = createLogger('Web');
@@ -24,17 +25,17 @@ router.post('/streams/streamers/add', requireManager, csrfProtection, async (req
   const discordId = normalizeDiscordId(typeof discord_id === 'string' ? discord_id : undefined);
   const rawGroupId = Array.isArray(group_id) ? group_id[0] : group_id;
   const groupId = typeof rawGroupId === 'string' ? rawGroupId.trim() : null;
-  if (!discordId || !groupId) return res.redirect('/admin/streams?error=missing_fields');
+  if (!discordId || !groupId) return redirectStreamsInvalid(res, 'missing_fields');
   const parsedGroupId = parsePositiveIntId(groupId);
-  if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
+  if (parsedGroupId === null) return redirectStreamsInvalid(res, 'invalid_id');
 
   try {
     const user = await findUser(discordId);
-    if (!user?.twitch_name) return res.redirect('/admin/streams?error=missing_fields');
+    if (!user?.twitch_name) return redirectStreamsInvalid(res, 'missing_fields');
     await addStreamer(discordId, parsedGroupId, req.session.user!.currentGuildId!);
     triggerRestart();
   } catch (err) {
-    return logAndRedirectError({ res, log, logLabel: 'Add streamer error:', err, basePath: '/admin/streams', errorCode: 'add_streamer_failed' });
+    return redirectStreamsFailure(res, log, 'Add streamer error:', err, 'add_streamer_failed');
   }
   res.redirect('/admin/streams');
 });
@@ -49,16 +50,16 @@ router.post('/streams/streamers/add', requireManager, csrfProtection, async (req
  */
 router.post('/streams/streamers/remove', requireManager, csrfProtection, async (req, res) => {
   const { streamer_id } = req.body as { streamer_id?: string };
-  if (!streamer_id) return res.redirect('/admin/streams?error=missing_fields');
+  if (!streamer_id) return redirectStreamsInvalid(res, 'missing_fields');
   const parsedStreamerId = parsePositiveIntId(streamer_id);
-  if (parsedStreamerId === null) return res.redirect('/admin/streams?error=invalid_id');
+  if (parsedStreamerId === null) return redirectStreamsInvalid(res, 'invalid_id');
 
   try {
     const removed = await removeStreamer(parsedStreamerId, req.session.user!.currentGuildId!);
-    if (!removed) return res.redirect('/admin/streams?error=remove_streamer_failed');
+    if (!removed) return redirectStreamsInvalid(res, 'remove_streamer_failed');
     triggerRestart();
   } catch (err) {
-    return logAndRedirectError({ res, log, logLabel: 'Remove streamer error:', err, basePath: '/admin/streams', errorCode: 'remove_streamer_failed' });
+    return redirectStreamsFailure(res, log, 'Remove streamer error:', err, 'remove_streamer_failed');
   }
   res.redirect('/admin/streams');
 });

@@ -6,33 +6,20 @@ import { requireManager } from '../middleware';
 import { getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db';
 import { filterQueryParam, renderView, renderError } from './shared';
+import { STREAMS_ERROR_CODES, STREAMS_ERROR_MESSAGES, type StreamsErrorCode } from './streamsErrors';
 import groupsRouter from './streamGroups';
 import streamersRouter from './streamStreamers';
 
 const log = createLogger('Web');
 const router = Router();
 
-const KNOWN_ERRORS = new Set([
-  'missing_fields', 'invalid_id',
-  'add_group_failed', 'update_group_failed', 'remove_group_failed',
-  'add_streamer_failed', 'remove_streamer_failed',
-  'eventsub_disconnect_failed',
-]);
+const KNOWN_ERRORS: ReadonlySet<StreamsErrorCode> = new Set(STREAMS_ERROR_CODES);
 const KNOWN_SUCCESSES = new Set<string>([]);
 
-export const ERROR_MESSAGES: Record<string, string> = {
-  missing_fields:             'All required fields must be filled in.',
-  invalid_id:                 'Invalid ID — please try again.',
-  add_group_failed:           'Failed to add stream group. Please try again.',
-  update_group_failed:        'Failed to update stream group. Please try again.',
-  remove_group_failed:        'Failed to remove stream group. Please try again.',
-  add_streamer_failed:        'Failed to add streamer. Please try again.',
-  remove_streamer_failed:     'Failed to remove streamer. Please try again.',
-  eventsub_disconnect_failed: 'Failed to disconnect Twitch account. Please try again.',
-};
+export const ERROR_MESSAGES = STREAMS_ERROR_MESSAGES;
 
 function getFriendlyError(key: string): string {
-  return ERROR_MESSAGES[key] ?? `An error occurred (${key}).`;
+  return (ERROR_MESSAGES as Record<string, string>)[key] ?? `An error occurred (${key}).`;
 }
 
 // ─── View ─────────────────────────────────────────────────────────────────────
