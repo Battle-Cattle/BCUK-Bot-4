@@ -135,17 +135,26 @@ interface RecentRotation {
   rotatedAt: number;
 }
 
-// Tracks a just-completed rotation per discordId for a short window so a
-// rapid duplicate POST /streamdeck-key/rotate (a network-level retry of a
-// timed-out request, or the same "Lost your key?" confirm landing twice from
-// two tabs) reuses the response already rendered instead of rotating again
-// and silently invalidating the key the user was just shown — the same class
-// of accidental-duplicate bug this file's /request handler guards against.
-// Entries are checked lazily by age (like the rest of this codebase's TTL
-// caches) rather than actively evicted; bounded by the small, admin-managed
-// user table this app already assumes elsewhere (see CLAUDE.md's user model).
+// Tracks a just-completed rotation per (discordId, guildId) for a short
+// window so a rapid duplicate POST /streamdeck-key/rotate (a network-level
+// retry of a timed-out request, or the same "Lost your key?" confirm landing
+// twice from two tabs) reuses the response already rendered instead of
+// rotating again and silently invalidating the key the user was just shown —
+// the same class of accidental-duplicate bug this file's /request handler
+// guards against. Guild-scoped (not just discordId) because the cached
+// keyRow is guild-specific (from getGuildStatusForKey) — a user rotating
+// while switching between two guilds they belong to must not have the wrong
+// guild's approval status served back to them. Entries are checked lazily by
+// age (like the rest of this codebase's TTL caches) rather than actively
+// evicted; bounded by the small, admin-managed user table this app already
+// assumes elsewhere (see CLAUDE.md's user model).
 const ROTATE_DEDUPE_WINDOW_MS = 10_000;
 const recentRotations = new Map<string, RecentRotation>();
+
+/** Builds the `recentRotations` cache key for a (discordId, guildId) pair. */
+function recentRotationKey(discordId: string, guildId: string): string {
+  return `${discordId}:${guildId}`;
+}
 
 /** Test-only: clears the rotate dedupe cache so each test starts from a clean slate. */
 export function __resetRecentRotationsForTests(): void {
@@ -163,8 +172,9 @@ export function __resetRecentRotationsForTests(): void {
  * Serialized per `discordId` through `userMutationQueue` for the same reason
  * as `/streamdeck-key/request` — to keep the has-a-key check and the
  * rotation itself atomic with respect to concurrent requests. A rotation
- * within `ROTATE_DEDUPE_WINDOW_MS` of the last one for this user reuses that
- * result instead of rotating again (see {@link recentRotations}).
+ * within `ROTATE_DEDUPE_WINDOW_MS` of the last one for this (discordId,
+ * guildId) pair reuses that result instead of rotating again (see
+ * {@link recentRotations}).
  *
  * @param req - Express request; reads `req.session.user` (discordId, currentGuildId).
  * @param res - Express response; renders the `streamdeck-keys` view with the freshly
@@ -177,7 +187,8 @@ router.post('/streamdeck-key/rotate', csrfProtection, async (req, res) => {
   const guildId = req.session.user!.currentGuildId!;
   try {
     const { plain, keyRow } = await userMutationQueue.run(discordId, async () => {
-      const recent = recentRotations.get(discordId);
+      const dedupeKey = recentRotationKey(discordId, guildId);
+      const recent = recentRotations.get(dedupeKey);
       if (recent && Date.now() - recent.rotatedAt < ROTATE_DEDUPE_WINDOW_MS) return recent;
 
       if (!(await hasApiKey(discordId))) {
@@ -190,7 +201,7 @@ router.post('/streamdeck-key/rotate', csrfProtection, async (req, res) => {
         getGuildStatusForKey(discordId, guildId),
       ]);
       const result: RecentRotation = { plain: rotatedPlain, keyRow: rotatedKeyRow, rotatedAt: Date.now() };
-      recentRotations.set(discordId, result);
+      recentRotations.set(dedupeKey, result);
       return result;
     });
     renderKeyStatus(req, res, keyRow, plain);

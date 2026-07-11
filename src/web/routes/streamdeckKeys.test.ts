@@ -326,6 +326,31 @@ describe('POST /streamdeck-key/rotate', () => {
     expect(rotateApiKey).toHaveBeenCalledOnce();
   });
 
+  it('does not reuse another guild\'s cached approval status for the same user within the dedupe window', async () => {
+    const OTHER_GUILD_ID = '900000000000000002';
+    const sessionInGuildA = SESSION_USER;
+    const sessionInGuildB = { ...SESSION_USER, currentGuildId: OTHER_GUILD_ID };
+
+    vi.mocked(hasApiKey).mockResolvedValue(true);
+    vi.mocked(rotateApiKey).mockResolvedValue({ plain: 'shared-plain-key' } as any);
+    vi.mocked(getGuildStatusForKey).mockImplementation(async (_discordId, guildId) => ({
+      discord_id: SESSION_USER.discordId,
+      guild_id: guildId,
+      status: guildId === GUILD_ID ? 'approved' : 'pending',
+    } as any));
+
+    const appA = buildApp(sessionInGuildA);
+    const firstInA = await supertest(appA).post('/streamdeck-key/rotate');
+    expect((firstInA.body as any).locals.keyRow).toMatchObject({ guild_id: GUILD_ID, status: 'approved' });
+
+    // Same discordId, different guild, within the dedupe window — must not
+    // be served guild A's cached keyRow.
+    const appB = buildApp(sessionInGuildB);
+    const firstInB = await supertest(appB).post('/streamdeck-key/rotate');
+    expect((firstInB.body as any).locals.keyRow).toMatchObject({ guild_id: OTHER_GUILD_ID, status: 'pending' });
+    expect(rotateApiKey).toHaveBeenCalledTimes(2);
+  });
+
   it('rotates again once the dedupe window has passed', async () => {
     // Uses a Date.now() spy (not fake timers) so supertest's real HTTP round
     // trip isn't disrupted — the dedupe check reads Date.now() lazily, so
