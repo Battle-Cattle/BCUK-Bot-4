@@ -44,10 +44,10 @@ import {
   addStreamGroup, addStreamer, findUser,
 } from '../../db';
 import { getLiveStates } from '../../twitch/monitor/twitchMonitor';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel, AccessLevelValue } from '../../db/users';
 
 const GUILD_ID = '900000000000000001';
-type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3; currentGuildId: string };
+type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: AccessLevelValue; currentGuildId: string };
 const MANAGER: SessionUser = { discordId: '200000000000000001', discordName: 'ManagerUser', discordAvatar: null, accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID };
 
 function buildApp(sessionUser: SessionUser = MANAGER) {
