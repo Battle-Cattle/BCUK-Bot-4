@@ -15,13 +15,23 @@ import {
 const log = createLogger('Streamdeck');
 const router = Router();
 
-/** Lists voice channels across every guild the key is currently approved for. */
+/**
+ * Lists voice channels across every guild the key is currently approved for.
+ * One guild failing to resolve (e.g. the bot was removed from it but its
+ * approval row wasn't cleaned up) doesn't block the channel list for every
+ * other approved guild — that guild is just reported with an empty list.
+ */
 router.get('/voice/channels', requireApiKey, async (req, res) => {
   try {
     const guildIds = await getApprovedGuildIdsForKey(req.apiKeyOwner!);
-    const guilds = await Promise.all(
+    const results = await Promise.allSettled(
       guildIds.map(async (guildId) => ({ guildId, channels: await getAvailableVoiceChannels(guildId) })),
     );
+    const guilds = results.map((result, i) => {
+      if (result.status === 'fulfilled') return result.value;
+      log.error(`Failed to list voice channels for guild ${guildIds[i]}:`, result.reason);
+      return { guildId: guildIds[i], channels: [] };
+    });
     res.json({ ok: true, guilds });
   } catch (err) {
     log.error('Failed to list voice channels:', err);

@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { findTrigger, findSoundFiles, getAllSfxTriggers } from '../../db';
+import { findTrigger, findSoundFiles, getAllSfxTriggers, getApprovedGuildIdsForKey } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
@@ -11,9 +11,19 @@ import { resolvePresenceGuildOrRespond } from './streamdeckGuildResolution';
 const log = createLogger('Streamdeck');
 const router = Router();
 
-/** Lists all SFX triggers available to play via Streamdeck. */
-router.get('/sfx', requireApiKey, async (_req, res) => {
+/**
+ * Lists all SFX triggers available to play via Streamdeck. The SFX catalog
+ * itself is global (not guild-scoped), so this only requires the key be
+ * approved for at least one guild — matching the old `requireApiKey`
+ * semantics before per-guild approval moved out of the identity lookup.
+ */
+router.get('/sfx', requireApiKey, async (req, res) => {
   try {
+    const approvedGuildIds = await getApprovedGuildIdsForKey(req.apiKeyOwner!);
+    if (approvedGuildIds.length === 0) {
+      res.status(403).json({ ok: false, error: 'Key not approved for any guild' });
+      return;
+    }
     const triggers = await getAllSfxTriggers();
     res.json({ ok: true, triggers });
   } catch (err) {

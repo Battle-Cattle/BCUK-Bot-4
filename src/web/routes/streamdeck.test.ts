@@ -73,6 +73,7 @@ beforeEach(() => {
 
 describe('streamdeck router composition', () => {
   it('mounts the SFX sub-router', async () => {
+    vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue(['guild-123']);
     const res = await supertest(buildApp()).get('/sfx').expect(200);
     expect(res.body).toEqual({ ok: true, triggers: [] });
   });

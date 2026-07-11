@@ -15,6 +15,7 @@ vi.mock('../../db', () => ({
   findSoundFiles: vi.fn(),
   getAllSfxTriggers: vi.fn(),
   isKeyApprovedForGuild: vi.fn(),
+  getApprovedGuildIdsForKey: vi.fn(),
 }));
 
 vi.mock('../../commands/soundSelector', () => ({
@@ -47,7 +48,7 @@ vi.mock('../../shared/logger', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router from './streamdeckSfx';
-import { findTrigger, findSoundFiles, getAllSfxTriggers, isKeyApprovedForGuild } from '../../db';
+import { findTrigger, findSoundFiles, getAllSfxTriggers, isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
@@ -87,6 +88,7 @@ beforeEach(() => {
   vi.mocked(getDiscordClient).mockReturnValue(makeClient());
   vi.mocked(getActiveGuildForUser).mockReturnValue('guild-123');
   vi.mocked(isKeyApprovedForGuild).mockResolvedValue(true);
+  vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue(['guild-123']);
 });
 
 describe('POST /sfx', () => {
@@ -258,5 +260,14 @@ describe('GET /sfx', () => {
     const res = await supertest(buildApp()).get('/sfx').expect(500);
 
     expect(res.body).toMatchObject({ ok: false });
+  });
+
+  it('returns 403 when the key is not approved for any guild', async () => {
+    vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue([]);
+
+    const res = await supertest(buildApp()).get('/sfx').expect(403);
+
+    expect(res.body).toMatchObject({ ok: false });
+    expect(getAllSfxTriggers).not.toHaveBeenCalled();
   });
 });

@@ -93,6 +93,25 @@ describe('GET /voice/channels', () => {
 
     expect(res.body).toMatchObject({ ok: false });
   });
+
+  it('reports an empty channel list for a guild whose fetch fails, without failing the other guilds', async () => {
+    vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue(['guild-123', '900000000000000002']);
+    const channelsB = [{ id: 'ch2', name: 'Hangout' }];
+    vi.mocked(getAvailableVoiceChannels).mockImplementation(async (guildId: string) => {
+      if (guildId === 'guild-123') throw new Error('Unknown Guild');
+      return channelsB as any;
+    });
+
+    const res = await supertest(buildApp()).get('/voice/channels').expect(200);
+
+    expect(res.body).toEqual({
+      ok: true,
+      guilds: [
+        { guildId: 'guild-123', channels: [] },
+        { guildId: '900000000000000002', channels: channelsB },
+      ],
+    });
+  });
 });
 
 describe('POST /voice/join', () => {

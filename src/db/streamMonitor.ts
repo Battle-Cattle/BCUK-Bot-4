@@ -185,23 +185,21 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
 /**
  * Add a streamer to a stream group. Throws if `groupId` doesn't belong to
  * `guildId`, preventing one guild from adding a streamer to another's group.
+ * The ownership check and insert are done as a single `INSERT ... SELECT`
+ * so the two can't race with a concurrent deletion of the group.
  *
  * @param discordId - Discord snowflake of the user to register as a streamer.
  * @param groupId - ID of the stream group to add the streamer to.
  * @param guildId - Guild the caller is acting in; `groupId` must belong to it.
  */
 export async function addStreamer(discordId: string, groupId: number, guildId: string): Promise<void> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT 1 FROM stream_group WHERE id = ? AND guild_id = ?',
-    [groupId, guildId],
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    'INSERT INTO streamer (discord_id, group_id) SELECT ?, ? FROM stream_group WHERE id = ? AND guild_id = ?',
+    [discordId, groupId, groupId, guildId],
   );
-  if (rows.length === 0) {
+  if (result.affectedRows === 0) {
     throw new Error(`Stream group ${groupId} does not belong to guild ${guildId}`);
   }
-  await getPool().execute(
-    'INSERT INTO streamer (discord_id, group_id) VALUES (?, ?)',
-    [discordId, groupId],
-  );
 }
 
 /**

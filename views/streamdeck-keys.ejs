@@ -84,6 +84,9 @@
             <button type="submit" class="btn btn-sm btn-ghost">Revoke Key</button>
           </form>
         </div>
+        <% if (user.guilds && user.guilds.length > 1) { %>
+        <p class="muted" style="margin-top:.5rem;">Revoking only removes access for this server — the key stays active in any other server it's approved for. Use <strong>Generate New Key</strong> to invalidate it everywhere.</p>
+        <% } %>
 
         <% } else if (keyRow.status === 'revoked') { %>
         <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;">

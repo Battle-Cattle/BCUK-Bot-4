@@ -151,6 +151,16 @@ function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
   return state.player;
 }
 
+/** Stops this guild's audio player (if any) and marks it not-playing, ignoring stop errors. */
+function stopGuildPlayer(state: GuildVoiceState): void {
+  try {
+    state.player?.stop(true);
+  } catch {
+    // Ignore audio stop errors during disconnect cleanup.
+  }
+  state.playing = false;
+}
+
 /**
  * Releases a guild's playback footprint after its connection is gone. Always
  * stops this guild's own player so playback in one guild never bleeds into
@@ -160,12 +170,7 @@ function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
  */
 function tearDownGuild(state: GuildVoiceState): void {
   state.currentChannelId = null;
-  try {
-    state.player?.stop(true);
-  } catch {
-    // Ignore audio stop errors during disconnect cleanup.
-  }
-  state.playing = false;
+  stopGuildPlayer(state);
   if (!anyConnected()) {
     setVoiceDisconnected();
   }
@@ -286,12 +291,7 @@ function disconnectGuild(state: GuildVoiceState): void {
   if (existingConnection) {
     existingConnection.destroy();
     state.connection = null;
-    try {
-      state.player?.stop(true);
-    } catch {
-      // Ignore audio stop errors during disconnect cleanup.
-    }
-    state.playing = false;
+    stopGuildPlayer(state);
     if (!anyConnected()) {
       setVoiceDisconnected();
     }

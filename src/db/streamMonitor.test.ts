@@ -305,16 +305,19 @@ describe('getAllStreamersWithGroups', () => {
 // ─── addStreamer / removeStreamer ─────────────────────────────────────────────
 
 describe('addStreamer', () => {
-  it('inserts with discordId and groupId after confirming the group belongs to guildId', async () => {
-    const conn = makePool([{ 1: 1 }]);
-    vi.mocked(getPool).mockReturnValue(conn as any);
+  it('inserts atomically via INSERT...SELECT scoped to groupId and guildId', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
     await addStreamer('user1', 3, GUILD_ID);
-    expect(conn.execute).toHaveBeenNthCalledWith(1, expect.stringContaining('SELECT'), [3, GUILD_ID]);
-    expect(conn.execute).toHaveBeenNthCalledWith(2, expect.stringContaining('INSERT'), ['user1', 3]);
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('INSERT INTO streamer');
+    expect(sql).toContain('SELECT');
+    expect(params).toEqual(['user1', 3, 3, GUILD_ID]);
   });
 
-  it('throws and does not insert when the group does not belong to guildId', async () => {
-    vi.mocked(getPool).mockReturnValue(makePool([]) as any);
+  it('throws when the group does not belong to guildId (no row inserted)', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(addStreamer('user1', 3, GUILD_ID)).rejects.toThrow('does not belong to guild');
   });
 });
