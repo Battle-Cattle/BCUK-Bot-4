@@ -30,6 +30,16 @@ function defaultVoiceStatus(): VoiceStatus {
   };
 }
 
+/** Returns the value for `key` in `map`, creating and inserting `makeDefault()` if absent. */
+function getOrCreate<K, V>(map: Map<K, V>, key: K, makeDefault: () => V): V {
+  let value = map.get(key);
+  if (!value) {
+    value = makeDefault();
+    map.set(key, value);
+  }
+  return value;
+}
+
 const state = {
   discord: {
     ready: false,
@@ -43,12 +53,7 @@ const state = {
 
 /** Returns a guild's voice status, creating a default (disconnected/idle) record on first use. */
 function getVoiceState(guildId: string): VoiceStatus {
-  let voice = state.voice.get(guildId);
-  if (!voice) {
-    voice = defaultVoiceStatus();
-    state.voice.set(guildId, voice);
-  }
-  return voice;
+  return getOrCreate(state.voice, guildId, defaultVoiceStatus);
 }
 
 /**
@@ -115,17 +120,16 @@ export function setVoiceIdle(guildId: string): void {
   voice.currentFile = null;
 }
 
+/** Returns a fresh, disconnected channel status record with no connection history yet. */
+function defaultChannelStatus(): ChannelStatus {
+  return { connected: false, lastConnectedAt: null, lastDisconnectedAt: null, isLive: false };
+}
+
 function updateChannel(map: Map<string, ChannelStatus>, key: string, connected: boolean): void {
-  const existing: ChannelStatus = map.get(key) ?? {
-    connected: false,
-    lastConnectedAt: null,
-    lastDisconnectedAt: null,
-    isLive: false,
-  };
+  const existing = getOrCreate(map, key, defaultChannelStatus);
   if (connected && !existing.connected) existing.lastConnectedAt = new Date();
   if (!connected && existing.connected) existing.lastDisconnectedAt = new Date();
   existing.connected = connected;
-  map.set(key, existing);
 }
 
 /** Updates the connected state for a Twitch channel. */

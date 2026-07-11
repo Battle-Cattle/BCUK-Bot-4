@@ -1,5 +1,9 @@
 export type { RefreshingLookupCache, ManagedLookupCacheOptions, ManagedLookupCache } from './db/lookupCache';
-export { createManagedLookupCache } from './db/lookupCache';
+export {
+  createManagedLookupCache,
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
+} from './db/lookupCache';
 export { getPool, closePool } from './db/pool';
 
 // ─── Guilds ──────────────────────────────────────────────────────────────────

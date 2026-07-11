@@ -9,7 +9,13 @@ import type {
 import { TIKTOK_CHANNELS, TIKTOK_SIGN_API_KEY } from '../shared/config';
 import { handleCommand } from '../commands/commandRouter';
 import { setTikTokChannel } from '../shared/statusStore';
-import { createManagedLookupCache, findOwnerUser, type RefreshingLookupCache } from '../db';
+import {
+  createManagedLookupCache,
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  findOwnerUser,
+  type RefreshingLookupCache,
+} from '../db';
 import { getDiscordClient } from '../discord/discordBot';
 import { getActiveGuildForUser } from '../discord/voicePresence';
 
@@ -21,8 +27,6 @@ const log = createLogger('TikTok');
 // on every chat message. Bounded by a TTL so a reassigned is_owner is picked
 // up within a few minutes rather than staying stale until the process restarts.
 const OWNER_DISCORD_ID_CACHE_TTL_MS = 5 * 60 * 1000;
-const OWNER_DISCORD_ID_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
-const OWNER_DISCORD_ID_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
 
 interface OwnerDiscordIdCache extends RefreshingLookupCache {
   discordId: string | null;
@@ -36,8 +40,8 @@ function createEmptyOwnerDiscordIdCache(): OwnerDiscordIdCache {
 const ownerDiscordIdLookupCache = createManagedLookupCache<OwnerDiscordIdCache>({
   cacheName: 'tiktok owner discord id cache',
   ttlMs: OWNER_DISCORD_ID_CACHE_TTL_MS,
-  refreshFailureBackoffMs: OWNER_DISCORD_ID_CACHE_REFRESH_FAILURE_BACKOFF_MS,
-  refreshFailureMaxBackoffMs: OWNER_DISCORD_ID_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  refreshFailureBackoffMs: DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  refreshFailureMaxBackoffMs: DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
   createEmptyCache: createEmptyOwnerDiscordIdCache,
   loadCache: async () => {
     const owner = await findOwnerUser();

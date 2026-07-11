@@ -1,6 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createManagedLookupCache } from './lookupCache';
+import {
+  createManagedLookupCache,
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
+} from './lookupCache';
 import type { RefreshingLookupCache } from './lookupCache';
+
+describe('default backoff constants', () => {
+  it('exposes a shared backoff pair so callers do not each hardcode their own', () => {
+    expect(DEFAULT_REFRESH_FAILURE_BACKOFF_MS).toBe(5_000);
+    expect(DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS).toBe(60_000);
+    expect(DEFAULT_REFRESH_FAILURE_BACKOFF_MS).toBeLessThan(DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS);
+  });
+});
 
 interface TC extends RefreshingLookupCache {
   data: string;

@@ -65,10 +65,13 @@ vi.mock('../shared/statusStore', () => ({
 // Uses the real createManagedLookupCache (not a fake) so tests below can
 // exercise its actual TTL / stale-while-revalidate behaviour.
 vi.mock('../db', async () => {
-  const { createManagedLookupCache } = await vi.importActual<typeof import('../db/lookupCache')>('../db/lookupCache');
+  const { createManagedLookupCache, DEFAULT_REFRESH_FAILURE_BACKOFF_MS, DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS } =
+    await vi.importActual<typeof import('../db/lookupCache')>('../db/lookupCache');
   return {
     findOwnerUser: vi.fn(),
     createManagedLookupCache,
+    DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+    DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
   };
 });
 

@@ -2,6 +2,12 @@ import { createLogger } from '../shared/logger';
 
 const log = createLogger('DB');
 
+/** Default backoff (ms) before retrying after a failed background refresh. */
+export const DEFAULT_REFRESH_FAILURE_BACKOFF_MS = 5_000;
+
+/** Default ceiling (ms) exponential backoff climbs to after repeated refresh failures. */
+export const DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
+
 export interface RefreshingLookupCache {
   loadedAt: number;
 }
