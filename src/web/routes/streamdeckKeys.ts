@@ -23,7 +23,7 @@ const router = Router();
 
 // ─── User routes (any authenticated user) ────────────────────────────────────
 
-const USER_KNOWN_ERRORS = new Set(['request_failed', 'revoke_failed']);
+const USER_KNOWN_ERRORS = new Set(['request_failed', 'rotate_failed', 'revoke_failed']);
 
 /**
  * Renders the current user's Streamdeck API key status page for their current guild.
@@ -53,12 +53,14 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
  * A brand-new user gets a freshly minted key (plaintext shown once). A user
  * who already has a key from another guild reuses it — no plaintext to show,
  * since only the key's hash is ever stored. A previously revoked request for
- * this guild is re-requested (routed back through the normal approval flow)
- * rather than just rotating the secret, since rotating alone would leave the
- * guild's status stuck on `revoked` while showing the user a "new" key that
- * still isn't authorized here. Re-requesting when this guild already has a
- * pending/approved request on file rotates the key's secret instead (the
- * "lost my key" flow), which also stops the old key working everywhere.
+ * this guild is re-requested (routed back through the normal approval flow).
+ *
+ * Idempotent when this guild already has a pending/approved request on file —
+ * it just re-renders the current status without touching the key, so an
+ * accidental duplicate submission (double-click, browser retry, two requests
+ * racing through `userMutationQueue`) never silently invalidates a plaintext
+ * key the user was just shown. Genuine key rotation (the "lost my key" flow)
+ * is a separate explicit action — see `POST /streamdeck-key/rotate` below.
  *
  * The check-then-act sequence below is serialized per `discordId` through
  * `userMutationQueue` — without it, two concurrent requests from a brand-new
@@ -83,9 +85,9 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
         }
         if (existingGuildStatus.status === 'revoked') {
           await requestGuildAccessForExistingKey(discordId, accessLevel, guildId);
-        } else {
-          ({ plain: resolvedPlain } = await rotateApiKey(discordId));
         }
+        // pending/approved: idempotent no-op — the caller just gets the current
+        // status back, with no key mutation.
       } else if (await hasApiKey(discordId)) {
         await requestGuildAccessForExistingKey(discordId, accessLevel, guildId);
       } else {
@@ -103,6 +105,48 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
     });
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key request error:', err, basePath: '/streamdeck-key', errorCode: 'request_failed' });
+  }
+});
+
+/**
+ * Rotates the current user's existing Streamdeck API key secret — the
+ * explicit "lost my key" action. Every guild's approval state is left
+ * untouched; only the key's identity (hash) changes, so the old key
+ * immediately stops working everywhere. Distinct from
+ * `POST /streamdeck-key/request`, which never rotates a key that's already
+ * pending or approved.
+ *
+ * Serialized per `discordId` through `userMutationQueue` for the same reason
+ * as `/streamdeck-key/request` — to keep the has-a-key check and the
+ * rotation itself atomic with respect to concurrent requests.
+ *
+ * @param req - Express request; reads `req.session.user` (discordId, currentGuildId).
+ * @param res - Express response; renders the `streamdeck-keys` view with the freshly
+ *   rotated plaintext key on success, or redirects to
+ *   `/streamdeck-key?error=rotate_failed` if the user has no key yet or rotation fails.
+ * @returns A promise that resolves once the view has been rendered or the error redirect issued.
+ */
+router.post('/streamdeck-key/rotate', csrfProtection, async (req, res) => {
+  const discordId = req.session.user!.discordId;
+  const guildId = req.session.user!.currentGuildId!;
+  try {
+    const { plain, keyRow } = await userMutationQueue.run(discordId, async () => {
+      if (!(await hasApiKey(discordId))) {
+        throw new Error('Cannot rotate: no existing Streamdeck API key');
+      }
+      const { plain: rotatedPlain } = await rotateApiKey(discordId);
+      return { plain: rotatedPlain, keyRow: await getGuildStatusForKey(discordId, guildId) };
+    });
+    renderView(res, 'streamdeck-keys', {
+      user: req.session.user,
+      csrfToken: req.csrfToken(),
+      keyRow,
+      newKey: plain,
+      error: null,
+      webPort: WEB_PORT,
+    });
+  } catch (err) {
+    logAndRedirectError({ res, log, logLabel: 'Streamdeck key rotate error:', err, basePath: '/streamdeck-key', errorCode: 'rotate_failed' });
   }
 });
 

@@ -134,14 +134,28 @@ describe('POST /streamdeck-key/request', () => {
     expect(createApiKeyAndRequestGuildAccess).not.toHaveBeenCalled();
   });
 
-  it('rotates the key when a guild status already exists for this guild (lost-key flow)', async () => {
+  it('is idempotent — a duplicate request while approved neither creates nor rotates a key', async () => {
     vi.mocked(getGuildStatusForKey).mockResolvedValue({ discord_id: '1', guild_id: GUILD_ID, status: 'approved' } as any);
 
     const res = await supertest(buildApp()).post('/streamdeck-key/request');
 
     expect(res.status).toBe(200);
-    expect((res.body as any).locals.newKey).toBeTruthy();
-    expect(rotateApiKey).toHaveBeenCalledWith(SESSION_USER.discordId);
+    expect((res.body as any).locals.newKey).toBeNull();
+    expect((res.body as any).locals.keyRow).toMatchObject({ status: 'approved' });
+    expect(rotateApiKey).not.toHaveBeenCalled();
+    expect(createApiKeyAndRequestGuildAccess).not.toHaveBeenCalled();
+    expect(requestGuildAccessForExistingKey).not.toHaveBeenCalled();
+  });
+
+  it('is idempotent — a duplicate request while pending neither creates nor rotates a key', async () => {
+    vi.mocked(getGuildStatusForKey).mockResolvedValue({ discord_id: '1', guild_id: GUILD_ID, status: 'pending' } as any);
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/request');
+
+    expect(res.status).toBe(200);
+    expect((res.body as any).locals.newKey).toBeNull();
+    expect((res.body as any).locals.keyRow).toMatchObject({ status: 'pending' });
+    expect(rotateApiKey).not.toHaveBeenCalled();
     expect(createApiKeyAndRequestGuildAccess).not.toHaveBeenCalled();
     expect(requestGuildAccessForExistingKey).not.toHaveBeenCalled();
   });
@@ -200,11 +214,6 @@ describe('POST /streamdeck-key/request', () => {
       persistedGuildStatus = { status: 'pending' };
       return { plain: 'a'.repeat(64), status: 'pending' };
     });
-    vi.mocked(rotateApiKey).mockImplementation(async () => {
-      callOrder.push('rotate');
-      return { plain: 'b'.repeat(64) };
-    });
-
     const app = buildApp();
     // supertest/superagent requests are thenable but lazy — chaining .then()
     // immediately (rather than just holding the unawaited value) is what
@@ -224,10 +233,46 @@ describe('POST /streamdeck-key/request', () => {
     await secondReq;
 
     // The second request only starts once the first has fully committed its
-    // guild-status row, so it sees existingGuildStatus set and takes the
-    // rotate path instead of racing into a second identity insert.
-    expect(callOrder).toEqual(['hasApiKey-start', 'hasApiKey-end', 'create', 'rotate']);
+    // guild-status row, so it sees existingGuildStatus already set (pending)
+    // and takes the idempotent no-op branch — it never even reaches the
+    // hasApiKey check, let alone races into a second identity insert.
+    expect(callOrder).toEqual(['hasApiKey-start', 'hasApiKey-end', 'create']);
     expect(createApiKeyAndRequestGuildAccess).toHaveBeenCalledTimes(1);
+    expect(rotateApiKey).not.toHaveBeenCalled();
+  });
+});
+
+// ─── POST /streamdeck-key/rotate ─────────────────────────────────────────────
+
+describe('POST /streamdeck-key/rotate', () => {
+  it('rotates the key when the user already has one, regardless of this guild\'s status', async () => {
+    vi.mocked(hasApiKey).mockResolvedValue(true);
+    vi.mocked(getGuildStatusForKey).mockResolvedValue({ discord_id: '1', guild_id: GUILD_ID, status: 'approved' } as any);
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/rotate');
+
+    expect(res.status).toBe(200);
+    expect((res.body as any).locals.newKey).toBeTruthy();
+    expect((res.body as any).locals.keyRow).toMatchObject({ status: 'approved' });
+    expect(rotateApiKey).toHaveBeenCalledWith(SESSION_USER.discordId);
+  });
+
+  it('redirects to ?error=rotate_failed when the user has no existing key', async () => {
+    vi.mocked(hasApiKey).mockResolvedValue(false);
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/rotate');
+
+    expect(res.headers.location).toBe('/streamdeck-key?error=rotate_failed');
+    expect(rotateApiKey).not.toHaveBeenCalled();
+  });
+
+  it('redirects to ?error=rotate_failed on a DB error', async () => {
+    vi.mocked(hasApiKey).mockResolvedValue(true);
+    vi.mocked(rotateApiKey).mockRejectedValueOnce(new Error('DB error'));
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/rotate');
+
+    expect(res.headers.location).toBe('/streamdeck-key?error=rotate_failed');
   });
 });
 
