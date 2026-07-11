@@ -11,7 +11,10 @@ import { normalizeTwitchChannelName } from './twitchChannelName';
 import { createLogger } from '../shared/logger';
 import {
   createManagedLookupCache,
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
   getAllTwitchLinkedUsers,
+  findUserByTwitchName,
   type RefreshingLookupCache,
 } from '../db';
 import { getDiscordClient } from '../discord/discordBot';
@@ -37,8 +40,6 @@ const TWITCH_CHAT_MESSAGE_PATTERN = /^\[#[^\]]+\] <[^>]+>: /;
 // so a relinked twitch_name is picked up within a few minutes rather than
 // staying stale until the process restarts.
 const CHANNEL_DISCORD_ID_CACHE_TTL_MS = 5 * 60 * 1000;
-const CHANNEL_DISCORD_ID_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
-const CHANNEL_DISCORD_ID_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
 
 interface TwitchChannelDiscordIdCache extends RefreshingLookupCache {
   discordIdByChannel: Map<string, string>;
@@ -52,8 +53,8 @@ function createEmptyTwitchChannelDiscordIdCache(): TwitchChannelDiscordIdCache {
 const twitchChannelDiscordIdLookupCache = createManagedLookupCache<TwitchChannelDiscordIdCache>({
   cacheName: 'twitch channel discord id cache',
   ttlMs: CHANNEL_DISCORD_ID_CACHE_TTL_MS,
-  refreshFailureBackoffMs: CHANNEL_DISCORD_ID_CACHE_REFRESH_FAILURE_BACKOFF_MS,
-  refreshFailureMaxBackoffMs: CHANNEL_DISCORD_ID_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  refreshFailureBackoffMs: DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  refreshFailureMaxBackoffMs: DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
   createEmptyCache: createEmptyTwitchChannelDiscordIdCache,
   loadCache: async () => {
     const linkedUsers = await getAllTwitchLinkedUsers();
@@ -62,10 +63,18 @@ const twitchChannelDiscordIdLookupCache = createManagedLookupCache<TwitchChannel
   },
 });
 
-/** Resolves the Discord ID linked to a Twitch channel's `twitch_name`, or null if unlinked. */
+/**
+ * Resolves the Discord ID linked to a Twitch channel's `twitch_name`, or null if unlinked.
+ * A channel absent from the bulk cache falls back to a live lookup — the cache has no
+ * per-key invalidation, so a channel linked since the last bulk refresh would otherwise
+ * stay unresolved for up to the cache's TTL instead of working on the very next message.
+ */
 async function resolveDiscordIdForTwitchChannel(normalizedChannel: string): Promise<string | null> {
   const cache = await twitchChannelDiscordIdLookupCache.getCache();
-  return cache.discordIdByChannel.get(normalizedChannel) ?? null;
+  const cachedDiscordId = cache.discordIdByChannel.get(normalizedChannel);
+  if (cachedDiscordId) return cachedDiscordId;
+  const user = await findUserByTwitchName(normalizedChannel);
+  return user?.discord_id ?? null;
 }
 
 /** Test-only: clears the Twitch-channel → discord_id cache so each test starts from a clean slate. */
