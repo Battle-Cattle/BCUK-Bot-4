@@ -234,6 +234,45 @@ describe('isConnected / getCurrentChannelId for unknown guilds', () => {
   });
 });
 
+describe('forgetGuild', () => {
+  it('is a no-op for a guild with no state', () => {
+    expect(() => mod.forgetGuild('never-seen')).not.toThrow();
+  });
+
+  it('disconnects a still-connected guild and clears its voice status before forgetting it', async () => {
+    const { client } = makeClient();
+    const status = await import('../shared/statusStore.js');
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    vi.mocked(status.setVoiceDisconnected).mockClear();
+
+    mod.forgetGuild('guild-A');
+
+    expect(mod.isConnected('guild-A')).toBe(false);
+    expect(vi.mocked(status.setVoiceDisconnected)).toHaveBeenCalledWith('guild-A');
+  });
+
+  it('drops the guild\'s current-channel state entirely', async () => {
+    const { client } = makeClient();
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+
+    mod.forgetGuild('guild-A');
+
+    expect(mod.getCurrentChannelId('guild-A')).toBeNull();
+  });
+
+  it('does not affect another guild\'s state', async () => {
+    const a = makeClient();
+    const b = makeClient();
+    await mod.connect(a.client as never, 'guild-A', 'chan-A');
+    await mod.connect(b.client as never, 'guild-B', 'chan-B');
+
+    mod.forgetGuild('guild-A');
+
+    expect(mod.isConnected('guild-B')).toBe(true);
+    expect(mod.getCurrentChannelId('guild-B')).toBe('chan-B');
+  });
+});
+
 describe('reconnect', () => {
   it('schedules a reconnect after a failed connect and retries when the timer fires', async () => {
     vi.useFakeTimers();

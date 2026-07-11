@@ -29,6 +29,18 @@ function getGuildCommandState(guildId: string): GuildCommandState {
 }
 
 /**
+ * Forgets a guild's cooldown/in-flight state so it stops occupying memory
+ * once the bot is no longer in that guild. Safe to call for a guild with no
+ * state (no-op). Called from the `guildDelete` handler; a guild the bot
+ * rejoins later starts fresh via {@link getGuildCommandState}'s lazy creation.
+ *
+ * @param guildId - Guild to forget.
+ */
+export function forgetGuildCommandState(guildId: string): void {
+  guildStates.delete(guildId);
+}
+
+/**
  * Looks up a trigger command's sound files, picks one, and plays it into the
  * given guild, recording the play time on that guild's cooldown state and a
  * command-monitor entry on success.

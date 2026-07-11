@@ -323,6 +323,23 @@ export function getCurrentChannelId(guildId: string): string | null {
 }
 
 /**
+ * Fully forgets a guild's voice state — disconnecting first if still
+ * connected — so it stops occupying memory once the bot is no longer in
+ * that guild. Safe to call for a guild with no state (no-op). Called from
+ * the `guildDelete` handler; a guild the bot rejoins later starts fresh via
+ * {@link getState}'s lazy creation.
+ *
+ * @param guildId - Guild to forget.
+ */
+export function forgetGuild(guildId: string): void {
+  const state = states.get(guildId);
+  if (state) {
+    disconnectGuild(state);
+  }
+  states.delete(guildId);
+}
+
+/**
  * Marks playback as active for the given guild and sends the resource to that
  * guild's own audio player.
  *

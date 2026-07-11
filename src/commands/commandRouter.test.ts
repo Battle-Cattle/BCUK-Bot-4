@@ -33,7 +33,7 @@ vi.mock('../shared/statusStore', () => ({
   setVoicePlaying: vi.fn(),
 }));
 
-import { handleCommand } from './commandRouter';
+import { handleCommand, forgetGuildCommandState } from './commandRouter';
 import { findTrigger, findSoundFiles } from '../db';
 import { isPlaying } from '../audio/audioPlayer';
 import { playFile, VoiceNotConnectedError } from '../audio/sfxPlayer';
@@ -116,6 +116,26 @@ describe('handleCommand', () => {
     await handleCommand('!ding', 'twitch', GUILD_B);
 
     expect(vi.mocked(playFile)).toHaveBeenCalledTimes(2);
+  });
+
+  it('forgetGuildCommandState resets a guild\'s cooldown so a subsequent command fires immediately', async () => {
+    vi.mocked(isPlaying).mockReturnValue(false);
+    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
+    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
+
+    await handleCommand('!ding', 'twitch', GUILD_A);
+    expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
+
+    forgetGuildCommandState(GUILD_A);
+
+    // Same timestamp — without forgetting, this would be blocked by the cooldown.
+    await handleCommand('!ding', 'twitch', GUILD_A);
+    expect(vi.mocked(playFile)).toHaveBeenCalledTimes(2);
+  });
+
+  it('forgetGuildCommandState is a no-op for a guild with no state', () => {
+    expect(() => forgetGuildCommandState('never-seen')).not.toThrow();
   });
 
   it('plays the correct file and updates status for a known command', async () => {
