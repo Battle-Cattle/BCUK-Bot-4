@@ -7,10 +7,15 @@ vi.mock('../shared/config', () => ({
   GLOBAL_COOLDOWN_MS: 0,
   EVENTSUB_TOKEN_SECRET: undefined,
 }));
-vi.mock('../commands/commandRouter', () => ({ handleCommand: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../commands/commandRouter', () => ({
+  handleCommand: vi.fn().mockResolvedValue(undefined),
+  forgetGuildCommandState: vi.fn(),
+}));
 vi.mock('../commands/customCommandHandler', () => ({ executeCustomCommandForDiscord: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../commands/counterHandler', () => ({ executeCounterCommandForDiscord: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('../shared/statusStore', () => ({ setDiscordReady: vi.fn() }));
+vi.mock('../shared/statusStore', () => ({ setDiscordReady: vi.fn(), clearVoiceStatus: vi.fn() }));
+vi.mock('../audio/audioPlayer', () => ({ forgetGuild: vi.fn() }));
+vi.mock('../web/routes/adminRefresh', () => ({ forgetGuildRefreshState: vi.fn() }));
 vi.mock('./guildRegistry', () => ({
   // Only the legacy configured guild is registered in these tests.
   isRegisteredGuild: vi.fn((id: string) => id === 'guild-id'),
@@ -265,6 +270,38 @@ describe('startDiscordBot — guildCreate handler', () => {
 
     expect(vi.mocked(guilds.setMemberAccessLevel)).not.toHaveBeenCalled();
     expect(vi.mocked(registry.reloadGuildRegistry)).not.toHaveBeenCalled();
+  });
+});
+
+// ─── startDiscordBot — guildDelete handler ────────────────────────────────────
+
+describe('startDiscordBot — guildDelete handler', () => {
+  function getGuildDeleteCb() {
+    mod.startDiscordBot();
+    return mockInstance.on.mock.calls.find(([event]: string[]) => event === 'guildDelete')?.[1] as Function;
+  }
+
+  it('forgets the departed guild\'s in-memory voice, command, status, and refresh state', async () => {
+    const audioPlayer = await import('../audio/audioPlayer.js');
+    const status = await import('../shared/statusStore.js');
+    const adminRefresh = await import('../web/routes/adminRefresh.js');
+    const cb = getGuildDeleteCb();
+
+    cb({ id: 'departed-guild', name: 'Departed Server' });
+
+    expect(vi.mocked(audioPlayer.forgetGuild)).toHaveBeenCalledWith('departed-guild');
+    expect(vi.mocked(commands.forgetGuildCommandState)).toHaveBeenCalledWith('departed-guild');
+    expect(vi.mocked(status.clearVoiceStatus)).toHaveBeenCalledWith('departed-guild');
+    expect(vi.mocked(adminRefresh.forgetGuildRefreshState)).toHaveBeenCalledWith('departed-guild');
+  });
+
+  it('does not touch the guild DB row', async () => {
+    const guilds = await import('../db.js');
+    const cb = getGuildDeleteCb();
+
+    cb({ id: 'departed-guild', name: 'Departed Server' });
+
+    expect(vi.mocked(guilds.upsertGuild)).not.toHaveBeenCalled();
   });
 });
 

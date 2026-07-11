@@ -83,7 +83,7 @@ router.post('/sfx', requireApiKey, async (req, res) => {
 
   try {
     playFile(filename, guildId);
-    setVoicePlaying(filename, normalizedCommand, 'streamdeck');
+    setVoicePlaying(guildId, filename, normalizedCommand, 'streamdeck');
     log.info(`Playing '${filename.replace(/[\r\n]/g, '')}' for trigger '${normalizedCommand.replace(/[\r\n]/g, '')}' in guild ${guildId}`);
     res.json({ ok: true, file: filename });
   } catch (err: unknown) {

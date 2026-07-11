@@ -62,9 +62,18 @@ vi.mock('../shared/statusStore', () => ({
   setTikTokChannel: vi.fn(),
 }));
 
-vi.mock('../db', () => ({
-  findOwnerUser: vi.fn(),
-}));
+// Uses the real createManagedLookupCache (not a fake) so tests below can
+// exercise its actual TTL / stale-while-revalidate behaviour.
+vi.mock('../db', async () => {
+  const { createManagedLookupCache, DEFAULT_REFRESH_FAILURE_BACKOFF_MS, DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS } =
+    await vi.importActual<typeof import('../db/lookupCache')>('../db/lookupCache');
+  return {
+    findOwnerUser: vi.fn(),
+    createManagedLookupCache,
+    DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+    DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  };
+});
 
 vi.mock('../discord/discordBot', () => ({
   getDiscordClient: vi.fn(),
@@ -278,10 +287,16 @@ describe('chat handling', () => {
     vi.mocked(findOwnerUser).mockResolvedValue({ discord_id: 'new-owner-discord-id' } as any);
     await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1);
 
+    // The cache is now stale — this lookup kicks a background refresh but
+    // (per the shared lookupCache's stale-while-revalidate strategy) still
+    // serves the last-good owner for this call.
     getConnection('alice').emit('chat', { content: '!again' });
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(findOwnerUser).toHaveBeenCalledTimes(2));
 
-    expect(findOwnerUser).toHaveBeenCalledTimes(2);
+    // A subsequent lookup picks up the refreshed owner.
+    getConnection('alice').emit('chat', { content: '!third' });
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(3));
     expect(getActiveGuildForUser).toHaveBeenLastCalledWith(expect.anything(), 'new-owner-discord-id');
   });
 });

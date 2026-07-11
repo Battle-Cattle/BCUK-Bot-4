@@ -14,6 +14,7 @@ vi.mock('./db/users', () => ({
   getAllUsers: vi.fn(),
   updateDiscordName: vi.fn(),
   getTwitchEnabledChannels: vi.fn(),
+  getAllTwitchLinkedUsers: vi.fn(),
   updateAccessLevel: vi.fn(),
 }));
 
@@ -121,6 +122,8 @@ vi.mock('./db/streamdeckKeys', () => ({
 
 vi.mock('./db/lookupCache', () => ({
   createManagedLookupCache: vi.fn(),
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS: 5_000,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60_000,
 }));
 
 import { upsertUserRecord, setTwitchBotEnabledRecord, removeUserRecord } from './db/users';

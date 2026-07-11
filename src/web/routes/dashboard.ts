@@ -19,7 +19,7 @@ const router = Router();
  */
 router.get('/', csrfProtection, async (req, res) => {
   try {
-    const status = getStatus();
+    const status = getStatus(req.session.user?.currentGuildId ?? null);
     let needsReconnect = false;
     if (req.session.user) {
       const streamer = await getStreamerByDiscordId(req.session.user.discordId);

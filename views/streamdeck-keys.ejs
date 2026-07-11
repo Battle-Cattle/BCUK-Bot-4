@@ -17,6 +17,7 @@
       <% if (error) { %>
       <% const errorMessages = {
         request_failed: 'Failed to generate API key. Please try again.',
+        rotate_failed:  'Failed to generate a new key. Please try again.',
         revoke_failed:  'Failed to revoke API key. Please try again.',
       }; %>
       <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
@@ -61,10 +62,10 @@
           <span class="muted" style="font-size:.85rem;">Requested <%= keyRow.requested_at.toLocaleDateString() %></span>
         </div>
         <p>Your key is awaiting Admin approval. No further action is needed — the key you already copied will become active automatically once an Admin approves your request. Refresh this page to check the current status.</p>
-        <p class="muted" style="margin-top:.5rem;">Want to cancel and start over? Requesting a new key will replace the pending one<%= user.guilds && user.guilds.length > 1 ? ' — and immediately stop your existing key from working in every server it was approved for, not just this one' : '' %>.</p>
-        <form method="POST" action="/streamdeck-key/request" style="margin-top:1rem;">
+        <p class="muted" style="margin-top:.5rem;">Lost the key you copied? Generating a new one won't affect your approval status, but the old key will immediately stop working<%= user.guilds && user.guilds.length > 1 ? ' — in every server it was approved for, not just this one' : '' %>.</p>
+        <form method="POST" action="/streamdeck-key/rotate" class="js-confirm-rotate-key" style="margin-top:1rem;">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-          <button type="submit" class="btn btn-sm">Generate New Key (replaces pending)</button>
+          <button type="submit" class="btn btn-sm btn-ghost">Lost your key?</button>
         </form>
 
         <% } else if (keyRow.status === 'approved') { %>
@@ -75,9 +76,9 @@
         <p>Your API key is active. See the <strong>How to Use</strong> section below for setup instructions.</p>
         <p class="muted">If you have lost your key, you can generate a new one. The old key will immediately stop working<%= user.guilds && user.guilds.length > 1 ? ' — in every server it was approved for, not just this one' : '' %>.</p>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:1rem;">
-          <form method="POST" action="/streamdeck-key/request">
+          <form method="POST" action="/streamdeck-key/rotate" class="js-confirm-rotate-key">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-            <button type="submit" class="btn btn-sm">Generate New Key</button>
+            <button type="submit" class="btn btn-sm btn-ghost">Lost your key?</button>
           </form>
           <form method="POST" action="/streamdeck-key/revoke" class="js-confirm-revoke-key">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -85,7 +86,7 @@
           </form>
         </div>
         <% if (user.guilds && user.guilds.length > 1) { %>
-        <p class="muted" style="margin-top:.5rem;">Revoking only removes access for this server — the key stays active in any other server it's approved for. Use <strong>Generate New Key</strong> to invalidate it everywhere.</p>
+        <p class="muted" style="margin-top:.5rem;">Revoking only removes access for this server — the key stays active in any other server it's approved for. Use <strong>Lost your key?</strong> to invalidate it everywhere.</p>
         <% } %>
 
         <% } else if (keyRow.status === 'revoked') { %>

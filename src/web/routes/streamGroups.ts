@@ -3,7 +3,8 @@ import { Router } from 'express';
 import { addStreamGroup, updateStreamGroup, removeStreamGroupAndStreamers } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
-import { logAndRedirectError, parsePositiveIntId } from './shared';
+import { parsePositiveIntId } from './shared';
+import { redirectStreamsInvalid, redirectStreamsFailure } from './streamsErrors';
 import { triggerRestart } from './streamRestart';
 
 const log = createLogger('Web');
@@ -30,7 +31,7 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
   const delete_old_posts = req.body.delete_old_posts === 'on';
 
   if (hasMissingValues(name, discord_channel, live_message, new_game_message)) {
-    return res.redirect('/admin/streams?error=missing_fields');
+    return redirectStreamsInvalid(res, 'missing_fields');
   }
 
   try {
@@ -45,7 +46,7 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
     });
     triggerRestart();
   } catch (err) {
-    return logAndRedirectError({ res, log, logLabel: 'Add stream group error:', err, basePath: '/admin/streams', errorCode: 'add_group_failed' });
+    return redirectStreamsFailure(res, log, 'Add stream group error:', err, 'add_group_failed');
   }
   res.redirect('/admin/streams');
 });
@@ -66,11 +67,11 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
   const delete_old_posts = req.body.delete_old_posts === 'on';
 
   if (hasMissingValues(group_id, name, discord_channel, live_message, new_game_message)) {
-    return res.redirect('/admin/streams?error=missing_fields');
+    return redirectStreamsInvalid(res, 'missing_fields');
   }
 
   const parsedGroupId = parsePositiveIntId(group_id);
-  if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
+  if (parsedGroupId === null) return redirectStreamsInvalid(res, 'invalid_id');
 
   try {
     const updated = await updateStreamGroup({
@@ -83,10 +84,10 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
       multiTwitch: multi_twitch,
       deleteOldPosts: delete_old_posts,
     });
-    if (!updated) return res.redirect('/admin/streams?error=update_group_failed');
+    if (!updated) return redirectStreamsInvalid(res, 'update_group_failed');
     triggerRestart();
   } catch (err) {
-    return logAndRedirectError({ res, log, logLabel: 'Update stream group error:', err, basePath: '/admin/streams', errorCode: 'update_group_failed' });
+    return redirectStreamsFailure(res, log, 'Update stream group error:', err, 'update_group_failed');
   }
   res.redirect('/admin/streams');
 });
@@ -101,17 +102,17 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
  */
 router.post('/streams/groups/remove', requireManager, csrfProtection, async (req, res) => {
   const { group_id } = req.body as { group_id?: string };
-  if (!group_id) return res.redirect('/admin/streams?error=missing_fields');
+  if (!group_id) return redirectStreamsInvalid(res, 'missing_fields');
   const parsedGroupId = parsePositiveIntId(group_id);
-  if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
+  if (parsedGroupId === null) return redirectStreamsInvalid(res, 'invalid_id');
 
   try {
     const guildId = req.session.user!.currentGuildId!;
     const removed = await removeStreamGroupAndStreamers(parsedGroupId, guildId);
-    if (!removed) return res.redirect('/admin/streams?error=remove_group_failed');
+    if (!removed) return redirectStreamsInvalid(res, 'remove_group_failed');
     triggerRestart();
   } catch (err) {
-    return logAndRedirectError({ res, log, logLabel: 'Remove stream group error:', err, basePath: '/admin/streams', errorCode: 'remove_group_failed' });
+    return redirectStreamsFailure(res, log, 'Remove stream group error:', err, 'remove_group_failed');
   }
   res.redirect('/admin/streams');
 });

@@ -32,6 +32,18 @@ export function getRefreshState(guildId: string): RefreshState {
   return refreshStates.get(guildId) ?? idleRefreshState();
 }
 
+/**
+ * Forgets a guild's Discord-name-refresh progress state so it stops occupying
+ * memory once the bot is no longer in that guild. Safe to call for a guild
+ * with no state (no-op). Called from the `guildDelete` handler; a guild the
+ * bot rejoins later starts fresh via {@link getRefreshState}'s idle default.
+ *
+ * @param guildId - Guild to forget.
+ */
+export function forgetGuildRefreshState(guildId: string): void {
+  refreshStates.delete(guildId);
+}
+
 const log = createLogger('Web');
 
 async function runDiscordNameRefresh(guildId: string): Promise<void> {

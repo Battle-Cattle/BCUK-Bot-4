@@ -73,9 +73,16 @@ beforeEach(() => {
 });
 
 describe('GET /status', () => {
-  it('returns the status snapshot', async () => {
+  it('returns the status snapshot for the session guild', async () => {
     const res = await supertest(buildApp()).get('/status').expect(200);
     expect(res.body).toEqual({ discord: {}, voice: {}, twitch: {}, tiktok: {} });
+    expect(vi.mocked(getStatus)).toHaveBeenCalledWith(GUILD_ID);
+  });
+
+  it('returns 400 when no guild is selected', async () => {
+    const res = await supertest(buildApp(null)).get('/status').expect(400);
+    expect(res.body).toEqual({ ok: false, error: 'No guild selected' });
+    expect(vi.mocked(getStatus)).not.toHaveBeenCalled();
   });
 });
 

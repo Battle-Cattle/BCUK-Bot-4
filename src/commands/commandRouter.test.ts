@@ -33,7 +33,7 @@ vi.mock('../shared/statusStore', () => ({
   setVoicePlaying: vi.fn(),
 }));
 
-import { handleCommand } from './commandRouter';
+import { handleCommand, forgetGuildCommandState } from './commandRouter';
 import { findTrigger, findSoundFiles } from '../db';
 import { isPlaying } from '../audio/audioPlayer';
 import { playFile, VoiceNotConnectedError } from '../audio/sfxPlayer';
@@ -118,6 +118,26 @@ describe('handleCommand', () => {
     expect(vi.mocked(playFile)).toHaveBeenCalledTimes(2);
   });
 
+  it('forgetGuildCommandState resets a guild\'s cooldown so a subsequent command fires immediately', async () => {
+    vi.mocked(isPlaying).mockReturnValue(false);
+    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
+    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
+
+    await handleCommand('!ding', 'twitch', GUILD_A);
+    expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
+
+    forgetGuildCommandState(GUILD_A);
+
+    // Same timestamp — without forgetting, this would be blocked by the cooldown.
+    await handleCommand('!ding', 'twitch', GUILD_A);
+    expect(vi.mocked(playFile)).toHaveBeenCalledTimes(2);
+  });
+
+  it('forgetGuildCommandState is a no-op for a guild with no state', () => {
+    expect(() => forgetGuildCommandState('never-seen')).not.toThrow();
+  });
+
   it('plays the correct file and updates status for a known command', async () => {
     vi.mocked(isPlaying).mockReturnValue(false);
     vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
@@ -128,7 +148,7 @@ describe('handleCommand', () => {
 
     expect(vi.mocked(findTrigger)).toHaveBeenCalledWith('!ding');
     expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'ding.mp3'), GUILD_A);
-    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('ding.mp3', '!ding', 'discord');
+    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'ding.mp3', '!ding', 'discord');
   });
 
   it('blocks a second concurrent call via the inFlight flag', async () => {
@@ -245,7 +265,7 @@ describe('handleCommand', () => {
       await handleCommand('!safe', 'twitch', GUILD_A);
 
       expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'valid-sound.mp3'), GUILD_A);
-      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('valid-sound.mp3', '!safe', 'twitch');
+      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'valid-sound.mp3', '!safe', 'twitch');
     });
 
     it('allows valid filenames in subdirectories within the SFX folder', async () => {
@@ -258,7 +278,7 @@ describe('handleCommand', () => {
       await handleCommand('!safe', 'twitch', GUILD_A);
 
       expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'category', 'sound.mp3'), GUILD_A);
-      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('category/sound.mp3', '!safe', 'twitch');
+      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'category/sound.mp3', '!safe', 'twitch');
     });
   });
 });

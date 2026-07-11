@@ -9,7 +9,14 @@ import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { setTwitchChannel } from '../shared/statusStore';
 import { normalizeTwitchChannelName } from './twitchChannelName';
 import { createLogger } from '../shared/logger';
-import { findUserByTwitchName } from '../db';
+import {
+  createManagedLookupCache,
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  getAllTwitchLinkedUsers,
+  findUserByTwitchName,
+  type RefreshingLookupCache,
+} from '../db';
 import { getDiscordClient } from '../discord/discordBot';
 import { getActiveGuildForUser } from '../discord/voicePresence';
 import {
@@ -27,26 +34,52 @@ let client: tmi.Client | null = null;
 let connected = false;
 const TWITCH_CHAT_MESSAGE_PATTERN = /^\[#[^\]]+\] <[^>]+>: /;
 
-// Caches only successful Twitch-channel → discord_id resolutions (never a
-// miss) so a not-yet-linked channel keeps retrying instead of being stuck
-// unresolved until a restart, while a linked channel avoids a DB round trip
-// on every chat message. Bounded by a TTL so a relinked twitch_name is picked
-// up within a few minutes rather than staying stale until the process restarts.
+// Bulk-loads every twitch_name → discord_id mapping in one query (like
+// getTwitchEnabledChannels()) instead of a lazy per-channel lookup, so a
+// chat message never blocks on an individual DB round trip. Bounded by a TTL
+// so a relinked twitch_name is picked up within a few minutes rather than
+// staying stale until the process restarts.
 const CHANNEL_DISCORD_ID_CACHE_TTL_MS = 5 * 60 * 1000;
-const twitchChannelDiscordIdCache = new Map<string, { discordId: string; cachedAt: number }>();
 
-/** Resolves the Discord ID linked to a Twitch channel's `twitch_name`, or null if unlinked. */
+interface TwitchChannelDiscordIdCache extends RefreshingLookupCache {
+  discordIdByChannel: Map<string, string>;
+}
+
+/** Returns a fresh, empty Twitch-channel → discord_id cache. */
+function createEmptyTwitchChannelDiscordIdCache(): TwitchChannelDiscordIdCache {
+  return { loadedAt: 0, discordIdByChannel: new Map() };
+}
+
+const twitchChannelDiscordIdLookupCache = createManagedLookupCache<TwitchChannelDiscordIdCache>({
+  cacheName: 'twitch channel discord id cache',
+  ttlMs: CHANNEL_DISCORD_ID_CACHE_TTL_MS,
+  refreshFailureBackoffMs: DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  refreshFailureMaxBackoffMs: DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  createEmptyCache: createEmptyTwitchChannelDiscordIdCache,
+  loadCache: async () => {
+    const linkedUsers = await getAllTwitchLinkedUsers();
+    const discordIdByChannel = new Map(linkedUsers.map((u) => [u.twitchName, u.discordId]));
+    return { loadedAt: Date.now(), discordIdByChannel };
+  },
+});
+
+/**
+ * Resolves the Discord ID linked to a Twitch channel's `twitch_name`, or null if unlinked.
+ * A channel absent from the bulk cache falls back to a live lookup — the cache has no
+ * per-key invalidation, so a channel linked since the last bulk refresh would otherwise
+ * stay unresolved for up to the cache's TTL instead of working on the very next message.
+ */
 async function resolveDiscordIdForTwitchChannel(normalizedChannel: string): Promise<string | null> {
-  const cached = twitchChannelDiscordIdCache.get(normalizedChannel);
-  if (cached && Date.now() - cached.cachedAt < CHANNEL_DISCORD_ID_CACHE_TTL_MS) return cached.discordId;
+  const cache = await twitchChannelDiscordIdLookupCache.getCache();
+  const cachedDiscordId = cache.discordIdByChannel.get(normalizedChannel);
+  if (cachedDiscordId) return cachedDiscordId;
   const user = await findUserByTwitchName(normalizedChannel);
-  if (user) twitchChannelDiscordIdCache.set(normalizedChannel, { discordId: user.discord_id, cachedAt: Date.now() });
   return user?.discord_id ?? null;
 }
 
 /** Test-only: clears the Twitch-channel → discord_id cache so each test starts from a clean slate. */
 export function __resetTwitchChannelDiscordIdCacheForTests(): void {
-  twitchChannelDiscordIdCache.clear();
+  twitchChannelDiscordIdLookupCache.invalidate();
 }
 
 /** Resolves which guild a Twitch chat command should target: the linked streamer's active voice guild. */
