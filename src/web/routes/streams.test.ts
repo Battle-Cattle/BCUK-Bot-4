@@ -2,14 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../db', () => ({
   getStreamGroupsForGuild: vi.fn(),
-  addStreamGroup: vi.fn(),
-  updateStreamGroup: vi.fn(),
   getStreamersForGuild: vi.fn(),
-  addStreamer: vi.fn(),
-  removeStreamer: vi.fn(),
-  removeStreamGroupAndStreamers: vi.fn(),
   getAllEventSubStreamers: vi.fn(),
   getAllUsers: vi.fn(),
+  addStreamGroup: vi.fn(),
+  updateStreamGroup: vi.fn(),
+  removeStreamGroupAndStreamers: vi.fn(),
+  addStreamer: vi.fn(),
+  removeStreamer: vi.fn(),
   findUser: vi.fn(),
   AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
@@ -30,11 +30,8 @@ vi.mock('../../twitch/monitor/twitchMonitor', () => ({
   getLiveStates: vi.fn().mockReturnValue([]),
 }));
 
-const { logMock } = vi.hoisted(() => ({
-  logMock: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
-}));
 vi.mock('../../shared/logger', () => ({
-  createLogger: () => logMock,
+  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
 vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
@@ -43,10 +40,10 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './streams';
 import {
-  getStreamGroupsForGuild, getStreamersForGuild, getAllUsers, findUser, addStreamer, addStreamGroup, updateStreamGroup,
-  removeStreamGroupAndStreamers, removeStreamer, getAllEventSubStreamers,
+  getStreamGroupsForGuild, getStreamersForGuild, getAllUsers, getAllEventSubStreamers,
+  addStreamGroup, addStreamer, findUser,
 } from '../../db';
-import { restartTwitchMonitor, getLiveStates } from '../../twitch/monitor/twitchMonitor';
+import { getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db/users';
 
 const GUILD_ID = '900000000000000001';
@@ -70,21 +67,12 @@ beforeEach(() => {
   vi.mocked(getStreamGroupsForGuild).mockResolvedValue([]);
   vi.mocked(getStreamersForGuild).mockResolvedValue([]);
   vi.mocked(getAllUsers).mockResolvedValue([]);
-  vi.mocked(findUser).mockResolvedValue(null);
-  vi.mocked(addStreamer).mockResolvedValue(undefined);
-  vi.mocked(addStreamGroup).mockResolvedValue(undefined);
-  vi.mocked(updateStreamGroup).mockResolvedValue(true);
-  vi.mocked(removeStreamGroupAndStreamers).mockResolvedValue(true);
-  vi.mocked(removeStreamer).mockResolvedValue(true);
   vi.mocked(getAllEventSubStreamers).mockResolvedValue([]);
   vi.mocked(getLiveStates).mockReturnValue([]);
-  vi.mocked(restartTwitchMonitor).mockResolvedValue(undefined);
+  vi.mocked(addStreamGroup).mockResolvedValue(undefined);
+  vi.mocked(addStreamer).mockResolvedValue(undefined);
+  vi.mocked(findUser).mockResolvedValue(null);
 });
-
-/** Waits for the fire-and-forget `triggerRestart()` promise chain to settle. */
-async function flushRestartChain() {
-  await new Promise((resolve) => setImmediate(resolve));
-}
 
 describe('GET /streams — query param filtering', () => {
   it('passes a known error to the template', async () => {
@@ -109,366 +97,6 @@ describe('GET /streams — query param filtering', () => {
     vi.mocked(getStreamGroupsForGuild).mockRejectedValue(new Error('DB down'));
     const res = await supertest(buildApp()).get('/streams');
     expect(res.status).toBe(500);
-  });
-});
-
-describe('POST /streams/streamers/add — array and missing input handling', () => {
-  it('redirects with missing_fields when discord_id is an array', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/streamers/add')
-      .send('discord_id=100000000000000001&discord_id=200000000000000002&group_id=1');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=missing_fields');
-  });
-
-  it('uses the first element when group_id is an array', async () => {
-    vi.mocked(findUser).mockResolvedValue({ twitch_name: 'streamer', discord_id: '100000000000000001' } as any);
-    const res = await supertest(buildApp())
-      .post('/streams/streamers/add')
-      .send('discord_id=100000000000000001&group_id=1&group_id=2');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).not.toContain('error');
-    expect(vi.mocked(addStreamer)).toHaveBeenCalledWith('100000000000000001', 1, GUILD_ID);
-  });
-
-  it('redirects with missing_fields when discord_id is absent', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/streamers/add')
-      .send('group_id=1');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=missing_fields');
-  });
-
-  it('redirects with missing_fields when group_id is absent', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/streamers/add')
-      .send('discord_id=100000000000000001');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=missing_fields');
-  });
-
-  it('redirects with missing_fields when discord_id is not a valid snowflake', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/streamers/add')
-      .send('discord_id=not-a-snowflake&group_id=1');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=missing_fields');
-  });
-
-  it('redirects with missing_fields when discord_id is too short', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/streamers/add')
-      .send('discord_id=1234&group_id=1');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=missing_fields');
-  });
-});
-
-describe('POST /streams/groups/add — field length capping', () => {
-  const longStr = (n: number) => 'x'.repeat(n);
-
-  it('truncates name to 100 chars, discordChannel to 20, messages to 2000', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/groups/add')
-      .send(
-        `name=${longStr(200)}&discord_channel=${longStr(30)}&live_message=${longStr(3000)}&new_game_message=${longStr(3000)}`,
-      );
-    expect(res.status).toBe(302);
-    expect(vi.mocked(addStreamGroup)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: longStr(100),
-        discordChannel: longStr(20),
-        liveMessage: longStr(2000),
-        newGameMessage: longStr(2000),
-      }),
-    );
-  });
-
-  it('preserves fields exactly at the limits without over-truncation', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/groups/add')
-      .send(
-        `name=${longStr(100)}&discord_channel=${longStr(20)}&live_message=${longStr(2000)}&new_game_message=${longStr(2000)}`,
-      );
-    expect(res.status).toBe(302);
-    expect(vi.mocked(addStreamGroup)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: longStr(100),
-        discordChannel: longStr(20),
-        liveMessage: longStr(2000),
-        newGameMessage: longStr(2000),
-      }),
-    );
-  });
-
-  it('preserves fields under the limits unchanged', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/groups/add')
-      .send(
-        `name=${longStr(50)}&discord_channel=${longStr(10)}&live_message=${longStr(1000)}&new_game_message=${longStr(1000)}`,
-      );
-    expect(res.status).toBe(302);
-    expect(vi.mocked(addStreamGroup)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: longStr(50),
-        discordChannel: longStr(10),
-        liveMessage: longStr(1000),
-        newGameMessage: longStr(1000),
-      }),
-    );
-  });
-
-  it('trims leading/trailing whitespace before applying the length cap', async () => {
-    // Wrap each value in two spaces (%20 encoding); values are over-limit after trimming
-    const padded = (n: number) => `%20%20${longStr(n)}%20%20`;
-    const res = await supertest(buildApp())
-      .post('/streams/groups/add')
-      .send(
-        `name=${padded(105)}&discord_channel=${padded(25)}&live_message=${padded(2005)}&new_game_message=${padded(2005)}`,
-      );
-    expect(res.status).toBe(302);
-    expect(vi.mocked(addStreamGroup)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: longStr(100),
-        discordChannel: longStr(20),
-        liveMessage: longStr(2000),
-        newGameMessage: longStr(2000),
-      }),
-    );
-  });
-});
-
-describe('POST /streams/groups/update — field length capping', () => {
-  const longStr = (n: number) => 'x'.repeat(n);
-
-  it('truncates name to 100 chars, discordChannel to 20, messages to 2000', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/groups/update')
-      .send(
-        `group_id=1&name=${longStr(200)}&discord_channel=${longStr(30)}&live_message=${longStr(3000)}&new_game_message=${longStr(3000)}`,
-      );
-    expect(res.status).toBe(302);
-    expect(vi.mocked(updateStreamGroup)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: longStr(100),
-        discordChannel: longStr(20),
-        liveMessage: longStr(2000),
-        newGameMessage: longStr(2000),
-      }),
-    );
-  });
-
-  it('preserves fields exactly at the limits without over-truncation', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/groups/update')
-      .send(
-        `group_id=1&name=${longStr(100)}&discord_channel=${longStr(20)}&live_message=${longStr(2000)}&new_game_message=${longStr(2000)}`,
-      );
-    expect(res.status).toBe(302);
-    expect(vi.mocked(updateStreamGroup)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: longStr(100),
-        discordChannel: longStr(20),
-        liveMessage: longStr(2000),
-        newGameMessage: longStr(2000),
-      }),
-    );
-  });
-
-  it('preserves fields under the limits unchanged', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/groups/update')
-      .send(
-        `group_id=1&name=${longStr(50)}&discord_channel=${longStr(10)}&live_message=${longStr(1000)}&new_game_message=${longStr(1000)}`,
-      );
-    expect(res.status).toBe(302);
-    expect(vi.mocked(updateStreamGroup)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: longStr(50),
-        discordChannel: longStr(10),
-        liveMessage: longStr(1000),
-        newGameMessage: longStr(1000),
-      }),
-    );
-  });
-
-  it('trims leading/trailing whitespace before applying the length cap', async () => {
-    const padded = (n: number) => `%20%20${longStr(n)}%20%20`;
-    const res = await supertest(buildApp())
-      .post('/streams/groups/update')
-      .send(
-        `group_id=1&name=${padded(105)}&discord_channel=${padded(25)}&live_message=${padded(2005)}&new_game_message=${padded(2005)}`,
-      );
-    expect(res.status).toBe(302);
-    expect(vi.mocked(updateStreamGroup)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: longStr(100),
-        discordChannel: longStr(20),
-        liveMessage: longStr(2000),
-        newGameMessage: longStr(2000),
-      }),
-    );
-  });
-
-  it('redirects with missing_fields when a required field is blank', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/groups/update')
-      .send('group_id=1&name=&discord_channel=chan&live_message=live&new_game_message=game');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=missing_fields');
-    expect(updateStreamGroup).not.toHaveBeenCalled();
-  });
-
-  it('redirects with invalid_id when group_id is not a valid positive integer', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/groups/update')
-      .send('group_id=abc&name=n&discord_channel=chan&live_message=live&new_game_message=game');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=invalid_id');
-    expect(updateStreamGroup).not.toHaveBeenCalled();
-  });
-
-  it('redirects with update_group_failed when the DB update rejects', async () => {
-    vi.mocked(updateStreamGroup).mockRejectedValueOnce(new Error('DB down'));
-    const res = await supertest(buildApp())
-      .post('/streams/groups/update')
-      .send('group_id=1&name=n&discord_channel=chan&live_message=live&new_game_message=game');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=update_group_failed');
-  });
-
-  it('redirects with update_group_failed (not a false success) when the group belongs to a different guild', async () => {
-    vi.mocked(updateStreamGroup).mockResolvedValueOnce(false);
-    const res = await supertest(buildApp())
-      .post('/streams/groups/update')
-      .send('group_id=1&name=n&discord_channel=chan&live_message=live&new_game_message=game');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=update_group_failed');
-    expect(restartTwitchMonitor).not.toHaveBeenCalled();
-  });
-});
-
-describe('POST /streams/groups/add — failure paths', () => {
-  it('redirects with missing_fields when a required field is blank', async () => {
-    const res = await supertest(buildApp())
-      .post('/streams/groups/add')
-      .send('name=&discord_channel=chan&live_message=live&new_game_message=game');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=missing_fields');
-    expect(addStreamGroup).not.toHaveBeenCalled();
-  });
-
-  it('redirects with add_group_failed when the DB insert rejects', async () => {
-    vi.mocked(addStreamGroup).mockRejectedValueOnce(new Error('DB down'));
-    const res = await supertest(buildApp())
-      .post('/streams/groups/add')
-      .send('name=n&discord_channel=chan&live_message=live&new_game_message=game');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=add_group_failed');
-  });
-});
-
-describe('POST /streams/groups/remove', () => {
-  it('redirects without an error when group_id is absent', async () => {
-    const res = await supertest(buildApp()).post('/streams/groups/remove').send('');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).not.toContain('error');
-    expect(removeStreamGroupAndStreamers).not.toHaveBeenCalled();
-  });
-
-  it('redirects with invalid_id when group_id is not a valid positive integer', async () => {
-    const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=abc');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=invalid_id');
-    expect(removeStreamGroupAndStreamers).not.toHaveBeenCalled();
-  });
-
-  it('removes the group and its streamers atomically, then restarts the monitor', async () => {
-    const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=5');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).not.toContain('error');
-    expect(removeStreamGroupAndStreamers).toHaveBeenCalledWith(5, GUILD_ID);
-    await flushRestartChain();
-    expect(restartTwitchMonitor).toHaveBeenCalled();
-  });
-
-  it('redirects with remove_group_failed when the DB delete rejects', async () => {
-    vi.mocked(removeStreamGroupAndStreamers).mockRejectedValueOnce(new Error('DB down'));
-    const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=5');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=remove_group_failed');
-  });
-
-  it('redirects with remove_group_failed (not a false success) when the group belongs to a different guild', async () => {
-    vi.mocked(removeStreamGroupAndStreamers).mockResolvedValueOnce(false);
-    const res = await supertest(buildApp()).post('/streams/groups/remove').send('group_id=5');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=remove_group_failed');
-    expect(restartTwitchMonitor).not.toHaveBeenCalled();
-  });
-});
-
-describe('POST /streams/streamers/add — failure path', () => {
-  it('redirects with add_streamer_failed when the DB insert rejects', async () => {
-    vi.mocked(findUser).mockResolvedValue({ twitch_name: 'streamer', discord_id: '100000000000000001' } as any);
-    vi.mocked(addStreamer).mockRejectedValueOnce(new Error('DB down'));
-    const res = await supertest(buildApp())
-      .post('/streams/streamers/add')
-      .send('discord_id=100000000000000001&group_id=1');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=add_streamer_failed');
-  });
-});
-
-describe('POST /streams/streamers/remove', () => {
-  it('redirects without an error when streamer_id is absent', async () => {
-    const res = await supertest(buildApp()).post('/streams/streamers/remove').send('');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).not.toContain('error');
-    expect(removeStreamer).not.toHaveBeenCalled();
-  });
-
-  it('redirects with invalid_id when streamer_id is not a valid positive integer', async () => {
-    const res = await supertest(buildApp()).post('/streams/streamers/remove').send('streamer_id=abc');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=invalid_id');
-    expect(removeStreamer).not.toHaveBeenCalled();
-  });
-
-  it('removes the streamer and restarts the monitor', async () => {
-    const res = await supertest(buildApp()).post('/streams/streamers/remove').send('streamer_id=7');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).not.toContain('error');
-    expect(removeStreamer).toHaveBeenCalledWith(7, GUILD_ID);
-    await flushRestartChain();
-    expect(restartTwitchMonitor).toHaveBeenCalled();
-  });
-
-  it('redirects with remove_streamer_failed when the DB delete rejects', async () => {
-    vi.mocked(removeStreamer).mockRejectedValueOnce(new Error('DB down'));
-    const res = await supertest(buildApp()).post('/streams/streamers/remove').send('streamer_id=7');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=remove_streamer_failed');
-  });
-
-  it('redirects with remove_streamer_failed (not a false success) when the streamer belongs to a different guild', async () => {
-    vi.mocked(removeStreamer).mockResolvedValueOnce(false);
-    const res = await supertest(buildApp()).post('/streams/streamers/remove').send('streamer_id=7');
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=remove_streamer_failed');
-    expect(restartTwitchMonitor).not.toHaveBeenCalled();
-  });
-});
-
-describe('triggerRestart', () => {
-  it('logs an error when the monitor restart itself rejects, without affecting the response', async () => {
-    vi.mocked(restartTwitchMonitor).mockRejectedValueOnce(new Error('monitor boom'));
-    const res = await supertest(buildApp()).post('/streams/streamers/remove').send('streamer_id=8');
-    expect(res.status).toBe(302);
-
-    await flushRestartChain();
-
-    expect(logMock.error).toHaveBeenCalledWith('TwitchMonitor restart error:', expect.any(Error));
   });
 });
 
@@ -531,5 +159,24 @@ describe('getFriendlyError — unknown error code fallback', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.friendlyError).toBe('An error occurred (totally_made_up).');
+  });
+});
+
+describe('streams router composition', () => {
+  it('mounts the groups sub-router', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/groups/add')
+      .send('name=n&discord_channel=chan&live_message=live&new_game_message=game');
+    expect(res.status).toBe(302);
+    expect(addStreamGroup).toHaveBeenCalled();
+  });
+
+  it('mounts the streamers sub-router', async () => {
+    vi.mocked(findUser).mockResolvedValue({ twitch_name: 'streamer', discord_id: '100000000000000001' } as any);
+    const res = await supertest(buildApp())
+      .post('/streams/streamers/add')
+      .send('discord_id=100000000000000001&group_id=1');
+    expect(res.status).toBe(302);
+    expect(addStreamer).toHaveBeenCalled();
   });
 });

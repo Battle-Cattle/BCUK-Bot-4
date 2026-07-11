@@ -1,0 +1,66 @@
+import { createLogger } from '../../shared/logger';
+import { Router } from 'express';
+import { addStreamer, removeStreamer, findUser } from '../../db';
+import { csrfProtection } from '../csrf';
+import { requireManager } from '../middleware';
+import { logAndRedirectError, parsePositiveIntId, normalizeDiscordId } from './shared';
+import { triggerRestart } from './streamRestart';
+
+const log = createLogger('Web');
+const router = Router();
+
+/**
+ * POST /streams/streamers/add — adds a user (who must already have a Twitch
+ * name) as a streamer in a stream group, then restarts the Twitch monitor.
+ * @param req - Express request; reads `discord_id` and `group_id` from
+ *   `req.body`.
+ * @param res - Express response; redirects to `/admin/streams` on success, or to
+ *   `/admin/streams?error=<code>` for missing/invalid fields or no Twitch name
+ *   (`missing_fields`), a malformed `group_id` (`invalid_id`), or a DB failure
+ *   (`add_streamer_failed`).
+ */
+router.post('/streams/streamers/add', requireManager, csrfProtection, async (req, res) => {
+  const { discord_id, group_id } = req.body as { discord_id?: string | string[]; group_id?: string | string[] };
+  const discordId = normalizeDiscordId(typeof discord_id === 'string' ? discord_id : undefined);
+  const rawGroupId = Array.isArray(group_id) ? group_id[0] : group_id;
+  const groupId = typeof rawGroupId === 'string' ? rawGroupId.trim() : null;
+  if (!discordId || !groupId) return res.redirect('/admin/streams?error=missing_fields');
+  const parsedGroupId = parsePositiveIntId(groupId);
+  if (parsedGroupId === null) return res.redirect('/admin/streams?error=invalid_id');
+
+  try {
+    const user = await findUser(discordId);
+    if (!user?.twitch_name) return res.redirect('/admin/streams?error=missing_fields');
+    await addStreamer(discordId, parsedGroupId, req.session.user!.currentGuildId!);
+    triggerRestart();
+  } catch (err) {
+    return logAndRedirectError({ res, log, logLabel: 'Add streamer error:', err, basePath: '/admin/streams', errorCode: 'add_streamer_failed' });
+  }
+  res.redirect('/admin/streams');
+});
+
+/**
+ * POST /streams/streamers/remove — removes a streamer, then restarts the
+ * Twitch monitor.
+ * @param req - Express request; reads `streamer_id` from `req.body`.
+ * @param res - Express response; redirects to `/admin/streams` on success, or to
+ *   `/admin/streams?error=<code>` if `streamer_id` is malformed (`invalid_id`) or
+ *   the delete fails (`remove_streamer_failed`).
+ */
+router.post('/streams/streamers/remove', requireManager, csrfProtection, async (req, res) => {
+  const { streamer_id } = req.body as { streamer_id?: string };
+  if (!streamer_id) return res.redirect('/admin/streams');
+  const parsedStreamerId = parsePositiveIntId(streamer_id);
+  if (parsedStreamerId === null) return res.redirect('/admin/streams?error=invalid_id');
+
+  try {
+    const removed = await removeStreamer(parsedStreamerId, req.session.user!.currentGuildId!);
+    if (!removed) return res.redirect('/admin/streams?error=remove_streamer_failed');
+    triggerRestart();
+  } catch (err) {
+    return logAndRedirectError({ res, log, logLabel: 'Remove streamer error:', err, basePath: '/admin/streams', errorCode: 'remove_streamer_failed' });
+  }
+  res.redirect('/admin/streams');
+});
+
+export default router;
