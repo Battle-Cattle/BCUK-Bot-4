@@ -35,10 +35,16 @@ vi.mock('../shared/config', () => ({
   TWITCH_OAUTH_TOKEN: 'oauth:test',
 }));
 
-vi.mock('../db', () => ({
-  getTwitchEnabledChannels: vi.fn(),
-  findUserByTwitchName: vi.fn(),
-}));
+// Uses the real createManagedLookupCache (not a fake) so tests below can
+// exercise its actual TTL / stale-while-revalidate behaviour.
+vi.mock('../db', async () => {
+  const { createManagedLookupCache } = await vi.importActual<typeof import('../db/lookupCache')>('../db/lookupCache');
+  return {
+    getTwitchEnabledChannels: vi.fn(),
+    getAllTwitchLinkedUsers: vi.fn(),
+    createManagedLookupCache,
+  };
+});
 
 vi.mock('../discord/discordBot', () => ({
   getDiscordClient: vi.fn(),
@@ -95,7 +101,7 @@ import {
   getActiveChannelUserIds,
   setChannelJoinedHook,
 } from './twitchChannelMembership';
-import { getTwitchEnabledChannels, findUserByTwitchName } from '../db';
+import { getTwitchEnabledChannels, getAllTwitchLinkedUsers } from '../db';
 import { getDiscordClient } from '../discord/discordBot';
 import { getActiveGuildForUser } from '../discord/voicePresence';
 import { getUsers } from './twitchApi';
@@ -163,7 +169,7 @@ describe('handleTwitchMessage', () => {
     // Reset call history so only message-dispatch calls are visible to assertions.
     vi.clearAllMocks();
     resetMockClient();
-    vi.mocked(findUserByTwitchName).mockResolvedValue({ discord_id: 'streamer-discord-id' } as any);
+    vi.mocked(getAllTwitchLinkedUsers).mockResolvedValue([{ twitchName: 'streamer', discordId: 'streamer-discord-id' }]);
     vi.mocked(getDiscordClient).mockReturnValue({} as any);
     vi.mocked(getActiveGuildForUser).mockReturnValue('guild-A');
     __resetTwitchChannelDiscordIdCacheForTests();
@@ -231,12 +237,12 @@ describe('handleTwitchMessage', () => {
     sendMessage('#streamer', makeTags(), '!cmd');
 
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
-    expect(findUserByTwitchName).toHaveBeenCalledWith('streamer');
+    expect(getAllTwitchLinkedUsers).toHaveBeenCalled();
     expect(getActiveGuildForUser).toHaveBeenCalledWith(expect.anything(), 'streamer-discord-id');
   });
 
   it('passes a null guildId to handleCommand when the channel has no linked Discord user', async () => {
-    vi.mocked(findUserByTwitchName).mockResolvedValue(null);
+    vi.mocked(getAllTwitchLinkedUsers).mockResolvedValue([]);
     vi.mocked(handleCommand).mockResolvedValue(undefined);
 
     sendMessage('#streamer', makeTags(), '!cmd');
@@ -251,15 +257,21 @@ describe('handleTwitchMessage', () => {
 
     sendMessage('#streamer', makeTags(), '!cmd');
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(1));
-    expect(findUserByTwitchName).toHaveBeenCalledOnce();
+    expect(getAllTwitchLinkedUsers).toHaveBeenCalledOnce();
 
-    vi.mocked(findUserByTwitchName).mockResolvedValue({ discord_id: 'new-streamer-discord-id' } as any);
+    vi.mocked(getAllTwitchLinkedUsers).mockResolvedValue([{ twitchName: 'streamer', discordId: 'new-streamer-discord-id' }]);
     await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1);
 
+    // The cache is now stale — this lookup kicks a background refresh but
+    // (per the shared lookupCache's stale-while-revalidate strategy) still
+    // serves the last-good mapping for this call.
     sendMessage('#streamer', makeTags(), '!again');
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(getAllTwitchLinkedUsers).toHaveBeenCalledTimes(2));
 
-    expect(findUserByTwitchName).toHaveBeenCalledTimes(2);
+    // A subsequent lookup picks up the refreshed mapping.
+    sendMessage('#streamer', makeTags(), '!third');
+    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(3));
     expect(getActiveGuildForUser).toHaveBeenLastCalledWith(expect.anything(), 'new-streamer-discord-id');
   });
 

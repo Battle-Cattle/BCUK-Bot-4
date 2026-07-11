@@ -9,7 +9,7 @@ import type {
 import { TIKTOK_CHANNELS, TIKTOK_SIGN_API_KEY } from '../shared/config';
 import { handleCommand } from '../commands/commandRouter';
 import { setTikTokChannel } from '../shared/statusStore';
-import { findOwnerUser } from '../db';
+import { createManagedLookupCache, findOwnerUser, type RefreshingLookupCache } from '../db';
 import { getDiscordClient } from '../discord/discordBot';
 import { getActiveGuildForUser } from '../discord/voicePresence';
 
@@ -21,14 +21,37 @@ const log = createLogger('TikTok');
 // on every chat message. Bounded by a TTL so a reassigned is_owner is picked
 // up within a few minutes rather than staying stale until the process restarts.
 const OWNER_DISCORD_ID_CACHE_TTL_MS = 5 * 60 * 1000;
-let cachedOwner: { discordId: string; cachedAt: number } | null = null;
+const OWNER_DISCORD_ID_CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
+const OWNER_DISCORD_ID_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
+
+interface OwnerDiscordIdCache extends RefreshingLookupCache {
+  discordId: string | null;
+}
+
+/** Returns a fresh, immediately-stale "no owner resolved yet" cache entry. */
+function createEmptyOwnerDiscordIdCache(): OwnerDiscordIdCache {
+  return { loadedAt: 0, discordId: null };
+}
+
+const ownerDiscordIdLookupCache = createManagedLookupCache<OwnerDiscordIdCache>({
+  cacheName: 'tiktok owner discord id cache',
+  ttlMs: OWNER_DISCORD_ID_CACHE_TTL_MS,
+  refreshFailureBackoffMs: OWNER_DISCORD_ID_CACHE_REFRESH_FAILURE_BACKOFF_MS,
+  refreshFailureMaxBackoffMs: OWNER_DISCORD_ID_CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  createEmptyCache: createEmptyOwnerDiscordIdCache,
+  loadCache: async () => {
+    const owner = await findOwnerUser();
+    // Only a successful resolution is cached for the full TTL; a miss stays
+    // immediately stale (loadedAt: 0) so the next lookup retries instead of
+    // being stuck unresolved until the TTL expires.
+    return owner ? { loadedAt: Date.now(), discordId: owner.discord_id } : createEmptyOwnerDiscordIdCache();
+  },
+});
 
 /** Resolves the bot owner's Discord ID, caching a successful lookup. */
 async function resolveOwnerDiscordId(): Promise<string | null> {
-  if (cachedOwner && Date.now() - cachedOwner.cachedAt < OWNER_DISCORD_ID_CACHE_TTL_MS) return cachedOwner.discordId;
-  const owner = await findOwnerUser();
-  if (owner) cachedOwner = { discordId: owner.discord_id, cachedAt: Date.now() };
-  return owner?.discord_id ?? null;
+  const cache = await ownerDiscordIdLookupCache.getCache();
+  return cache.discordId;
 }
 
 /**
@@ -47,7 +70,7 @@ async function resolveGuildIdForTikTokCommand(): Promise<string | null> {
 
 /** Test-only: clears the cached owner discord_id so each test starts from a clean slate. */
 export function __resetOwnerDiscordIdCacheForTests(): void {
-  cachedOwner = null;
+  ownerDiscordIdLookupCache.invalidate();
 }
 
 // TypedEventEmitter<ClientEventMap> is the base of TikTokLiveConnection but TypeScript

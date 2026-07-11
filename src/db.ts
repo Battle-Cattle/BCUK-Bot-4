@@ -1,4 +1,5 @@
 export type { RefreshingLookupCache, ManagedLookupCacheOptions, ManagedLookupCache } from './db/lookupCache';
+export { createManagedLookupCache } from './db/lookupCache';
 export { getPool, closePool } from './db/pool';
 
 // ─── Guilds ──────────────────────────────────────────────────────────────────
@@ -24,9 +25,9 @@ export type { DbGuildCommandOverride } from './db/guildCommandOverrides';
 export {
   AccessLevel, ACCESS_LEVEL_LABELS,
   findUser, findUserByTwitchName, findOwnerUser, getAllUsers, getGuildMemberUsers,
-  updateDiscordName, getTwitchEnabledChannels, updateAccessLevel,
+  updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers, updateAccessLevel,
 } from './db/users';
-export type { AccessLevelValue, DbUser } from './db/users';
+export type { AccessLevelValue, DbUser, TwitchLinkedUser } from './db/users';
 
 import { upsertUserRecord, setTwitchBotEnabledRecord, removeUserRecord } from './db/users';
 

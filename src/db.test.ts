@@ -14,6 +14,7 @@ vi.mock('./db/users', () => ({
   getAllUsers: vi.fn(),
   updateDiscordName: vi.fn(),
   getTwitchEnabledChannels: vi.fn(),
+  getAllTwitchLinkedUsers: vi.fn(),
   updateAccessLevel: vi.fn(),
 }));
 

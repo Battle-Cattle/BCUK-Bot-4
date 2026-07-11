@@ -215,6 +215,35 @@ export async function getTwitchEnabledChannels(): Promise<string[]> {
     .filter((v): v is string => v !== null);
 }
 
+/** A user's normalized Twitch channel name paired with their Discord ID. */
+export interface TwitchLinkedUser {
+  twitchName: string;
+  discordId: string;
+}
+
+/**
+ * Returns every user with a linked Twitch channel name, for bulk-loading a
+ * Twitch-channel → Discord-ID lookup cache. Unlike `getTwitchEnabledChannels`,
+ * this is not filtered by `is_twitch_bot_enabled` — it matches the same
+ * `twitch_name`-only lookup that `findUserByTwitchName` performs.
+ * @returns Normalized channel names paired with their owner's Discord ID;
+ *   invalid/unparseable names are silently dropped.
+ */
+export async function getAllTwitchLinkedUsers(): Promise<TwitchLinkedUser[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT discord_id, twitch_name
+     FROM \`user\`
+     WHERE twitch_name IS NOT NULL
+       AND twitch_name <> ''`,
+  );
+  return rows
+    .map((r) => {
+      const twitchName = normalizeTwitchChannelName(String(r.twitch_name));
+      return twitchName ? { twitchName, discordId: String(r.discord_id) } : null;
+    })
+    .filter((v): v is TwitchLinkedUser => v !== null);
+}
+
 /**
  * Sets whether a user's Twitch bot integration is enabled.
  * @param discordId - Discord snowflake as a string.

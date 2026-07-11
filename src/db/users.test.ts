@@ -17,6 +17,7 @@ import {
   upsertUserRecord,
   updateDiscordName,
   getTwitchEnabledChannels,
+  getAllTwitchLinkedUsers,
   setTwitchBotEnabledRecord,
   updateAccessLevel,
   removeUserRecord,
@@ -329,6 +330,41 @@ describe('getTwitchEnabledChannels', () => {
     vi.mocked(getPool).mockReturnValue(makePool([rows]) as any);
     const result = await getTwitchEnabledChannels();
     expect(result).toEqual(['alice']);
+  });
+});
+
+// ─── getAllTwitchLinkedUsers ───────────────────────────────────────────────────
+
+describe('getAllTwitchLinkedUsers', () => {
+  it('returns empty array when no rows', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([[]]) as any);
+    const result = await getAllTwitchLinkedUsers();
+    expect(result).toEqual([]);
+  });
+
+  it('maps discord_id and twitch_name through normalizeTwitchChannelName', async () => {
+    vi.mocked(normalizeTwitchChannelName).mockImplementation((s) => `normalized_${s}`);
+    const rows = [
+      { discord_id: '1', twitch_name: 'Alice' },
+      { discord_id: '2', twitch_name: 'Bob' },
+    ];
+    vi.mocked(getPool).mockReturnValue(makePool([rows]) as any);
+    const result = await getAllTwitchLinkedUsers();
+    expect(result).toEqual([
+      { twitchName: 'normalized_Alice', discordId: '1' },
+      { twitchName: 'normalized_Bob', discordId: '2' },
+    ]);
+  });
+
+  it('filters out entries where normalizeTwitchChannelName returns null', async () => {
+    vi.mocked(normalizeTwitchChannelName).mockReturnValueOnce('alice').mockReturnValueOnce(null);
+    const rows = [
+      { discord_id: '1', twitch_name: 'alice' },
+      { discord_id: '2', twitch_name: 'bad!' },
+    ];
+    vi.mocked(getPool).mockReturnValue(makePool([rows]) as any);
+    const result = await getAllTwitchLinkedUsers();
+    expect(result).toEqual([{ twitchName: 'alice', discordId: '1' }]);
   });
 });
 
