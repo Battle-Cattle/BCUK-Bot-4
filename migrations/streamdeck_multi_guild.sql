@@ -10,6 +10,13 @@
 -- in the pre-split shape (guild_id/status/requested_at/approved_at/approved_by
 -- columns present). Guarded behind an existence check since the table may be
 -- absent on some deployments.
+--
+-- streamdeck_key_guild_status.discord_id is declared VARCHAR(64) (matching
+-- utf8mb4_0900_ai_ci) rather than the BIGINT schema.sql documents for `user`
+-- and `guild` — some deployments' streamdeck_api_keys.discord_id predates the
+-- BIGINT convention and is still VARCHAR(64); MySQL's FK type/collation check
+-- (error 3780) requires an exact match to whatever streamdeck_api_keys
+-- actually has. Run `SHOW CREATE TABLE streamdeck_api_keys` first if unsure.
 
 SET @sd_exists = (
   SELECT COUNT(*) FROM information_schema.tables
@@ -25,7 +32,7 @@ SET @already_split = (
 SET @sql = IF(@sd_exists = 0,
   'SELECT ''streamdeck_api_keys absent — skipping streamdeck multi-guild migration''',
   'CREATE TABLE IF NOT EXISTS streamdeck_key_guild_status (
-     discord_id   BIGINT                                       NOT NULL,
+     discord_id   VARCHAR(64) COLLATE utf8mb4_0900_ai_ci       NOT NULL,
      guild_id     BIGINT                                       NOT NULL,
      status       ENUM(''pending'',''approved'',''revoked'',''denied'') NOT NULL DEFAULT ''pending'',
      requested_at DATETIME                                     NOT NULL,
@@ -79,11 +86,12 @@ SET @sql = IF(@sd_exists = 0 OR @already_split = 0,
   'UPDATE streamdeck_api_keys SET created_at = requested_at');
 PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 
--- The old approved_by FK (`FOREIGN KEY (approved_by) REFERENCES user(discord_id)
--- ON DELETE SET NULL`) was never given an explicit name in schema.sql, so MySQL
--- auto-generated one (e.g. streamdeck_api_keys_ibfk_2). DROP COLUMN approved_by
--- fails with error 1553 unless that constraint is dropped first — look its name
--- up rather than guessing it.
+-- Some deployments' streamdeck_api_keys has an approved_by FK (`FOREIGN KEY
+-- (approved_by) REFERENCES user(discord_id) ON DELETE SET NULL`); others have
+-- none at all. Where it exists it was never given an explicit name in
+-- schema.sql, so MySQL auto-generated one (e.g. streamdeck_api_keys_ibfk_2).
+-- DROP COLUMN approved_by fails with error 1553 unless that constraint is
+-- dropped first — look its name up rather than guessing (or assuming) it.
 SET @approved_by_fk = (
   SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'streamdeck_api_keys'
