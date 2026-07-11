@@ -53,15 +53,25 @@ export interface VoiceChannelInfo {
   name: string;
 }
 
+/**
+ * Lists a guild's voice channels from the gateway-populated channel cache —
+ * channels are already kept current via CHANNEL_CREATE/UPDATE/DELETE events,
+ * so this avoids an unconditional bulk REST fetch (`channels.fetch()` with no
+ * ID always hits the API, never the cache, unlike fetching a single channel).
+ * `guilds.fetch(guildId)` itself still checks cache first, so this stays
+ * REST-free in the common case.
+ *
+ * @param guildId - Guild whose voice channels to list.
+ * @returns The guild's voice channels, sorted by name; empty if the client isn't ready.
+ */
 export async function getAvailableVoiceChannels(guildId: string): Promise<VoiceChannelInfo[]> {
   const discordClient = getDiscordClient();
   if (!discordClient) return [];
 
   try {
     const guild = await discordClient.guilds.fetch(guildId);
-    const channels = await guild.channels.fetch();
-    return channels
-      .filter((ch): ch is Exclude<typeof ch, null> => ch !== null && ch.type === ChannelType.GuildVoice)
+    return [...guild.channels.cache.values()]
+      .filter((ch) => ch.type === ChannelType.GuildVoice)
       .map((ch) => ({ id: ch.id, name: ch.name }))
       .sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {

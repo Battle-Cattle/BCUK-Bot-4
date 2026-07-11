@@ -1,8 +1,11 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import {
-  requestApiKey,
-  getApiKeyStatus,
+  hasApiKey,
+  createApiKeyAndRequestGuildAccess,
+  requestGuildAccessForExistingKey,
+  rotateApiKey,
+  getGuildStatusForKey,
   revokeApiKey,
   approveApiKey,
   denyApiKey,
@@ -13,6 +16,7 @@ import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
 import { WEB_PORT } from '../../shared/config';
 import { logAndRedirectError, normalizeDiscordId, renderError, filterQueryParam, renderView } from './shared';
+import { userMutationQueue } from './adminUserMutationQueue';
 
 const log = createLogger('Web');
 const router = Router();
@@ -21,10 +25,15 @@ const router = Router();
 
 const USER_KNOWN_ERRORS = new Set(['request_failed', 'revoke_failed']);
 
-/** Renders the current user's Streamdeck API key status page. */
+/**
+ * Renders the current user's Streamdeck API key status page for their current guild.
+ * @param req - Express request; reads `req.session.user` and `req.query.error`.
+ * @param res - Express response; renders the `streamdeck-keys` view, or a 500 error page on failure.
+ * @returns A promise that resolves once the view (or error page) has been rendered.
+ */
 router.get('/streamdeck-key', csrfProtection, async (req, res) => {
   try {
-    const keyRow = await getApiKeyStatus(req.session.user!.discordId);
+    const keyRow = await getGuildStatusForKey(req.session.user!.discordId, req.session.user!.currentGuildId!);
     renderView(res, 'streamdeck-keys', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
@@ -39,15 +48,51 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
   }
 });
 
-/** Requests a new Streamdeck API key for the current user and renders the plaintext key once. */
+/**
+ * Requests Streamdeck access for the current guild and renders the result.
+ * A brand-new user gets a freshly minted key (plaintext shown once). A user
+ * who already has a key from another guild reuses it — no plaintext to show,
+ * since only the key's hash is ever stored. A previously revoked request for
+ * this guild is re-requested (routed back through the normal approval flow)
+ * rather than just rotating the secret, since rotating alone would leave the
+ * guild's status stuck on `revoked` while showing the user a "new" key that
+ * still isn't authorized here. Re-requesting when this guild already has a
+ * pending/approved request on file rotates the key's secret instead (the
+ * "lost my key" flow), which also stops the old key working everywhere.
+ *
+ * The check-then-act sequence below is serialized per `discordId` through
+ * `userMutationQueue` — without it, two concurrent requests from a brand-new
+ * user could both see "no existing key" and race on the identity insert.
+ *
+ * @param req - Express request; reads `req.session.user` (discordId, accessLevel, currentGuildId).
+ * @param res - Express response; renders the `streamdeck-keys` view with the new/existing key
+ *   status on success, or redirects to `/streamdeck-key?error=request_failed` on failure.
+ * @returns A promise that resolves once the view has been rendered or the error redirect issued.
+ */
 router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
+  const discordId = req.session.user!.discordId;
+  const accessLevel = req.session.user!.accessLevel;
+  const guildId = req.session.user!.currentGuildId!;
   try {
-    const { plain } = await requestApiKey(
-      req.session.user!.discordId,
-      req.session.user!.accessLevel,
-      req.session.user!.currentGuildId!,
-    );
-    const keyRow = await getApiKeyStatus(req.session.user!.discordId);
+    const { plain, keyRow } = await userMutationQueue.run(discordId, async () => {
+      const existingGuildStatus = await getGuildStatusForKey(discordId, guildId);
+      let resolvedPlain: string | null = null;
+      if (existingGuildStatus) {
+        if (existingGuildStatus.status === 'denied') {
+          throw new Error('API key request rejected: previous request was denied');
+        }
+        if (existingGuildStatus.status === 'revoked') {
+          await requestGuildAccessForExistingKey(discordId, accessLevel, guildId);
+        } else {
+          ({ plain: resolvedPlain } = await rotateApiKey(discordId));
+        }
+      } else if (await hasApiKey(discordId)) {
+        await requestGuildAccessForExistingKey(discordId, accessLevel, guildId);
+      } else {
+        ({ plain: resolvedPlain } = await createApiKeyAndRequestGuildAccess(discordId, accessLevel, guildId));
+      }
+      return { plain: resolvedPlain, keyRow: await getGuildStatusForKey(discordId, guildId) };
+    });
     renderView(res, 'streamdeck-keys', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
@@ -61,10 +106,16 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
   }
 });
 
-/** Revokes the current user's own Streamdeck API key. */
+/**
+ * Revokes the current user's own Streamdeck access for their current guild only — other guilds' approvals are unaffected.
+ * @param req - Express request; reads `req.session.user` (discordId, currentGuildId).
+ * @param res - Express response; redirects to `/streamdeck-key` on success, or
+ *   `/streamdeck-key?error=revoke_failed` on failure.
+ * @returns A promise that resolves once the redirect has been issued.
+ */
 router.post('/streamdeck-key/revoke', csrfProtection, async (req, res) => {
   try {
-    await revokeApiKey(req.session.user!.discordId);
+    await revokeApiKey(req.session.user!.discordId, req.session.user!.currentGuildId!);
     res.redirect('/streamdeck-key');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key revoke error:', err, basePath: '/streamdeck-key', errorCode: 'revoke_failed' });

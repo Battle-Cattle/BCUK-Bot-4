@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../db', () => ({
-  findApprovedKeyByHash: vi.fn(),
+  findKeyByHash: vi.fn(),
   findDiscordIdByTokenHash: vi.fn(),
   getEffectiveAccessLevel: vi.fn(),
   findUser: vi.fn(),
@@ -15,7 +15,7 @@ vi.mock('./csrf', () => ({
 
 import { createHash } from 'crypto';
 import { requireAuth, requireManager, requireMod, requireAdmin, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
-import { findApprovedKeyByHash, findDiscordIdByTokenHash, getEffectiveAccessLevel, findUser, getAllGuilds, getGuildsForMember, AccessLevel } from '../db';
+import { findKeyByHash, findDiscordIdByTokenHash, getEffectiveAccessLevel, findUser, getAllGuilds, getGuildsForMember, AccessLevel } from '../db';
 
 function makeReq(overrides: object = {}): any {
   return {
@@ -194,8 +194,8 @@ describe('requireApiKey', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('returns 401 when findApprovedKeyByHash returns null', async () => {
-    vi.mocked(findApprovedKeyByHash).mockResolvedValue(null);
+  it('returns 401 when findKeyByHash returns null', async () => {
+    vi.mocked(findKeyByHash).mockResolvedValue(null);
     const req = makeReq({ headers: { authorization: 'Bearer mytoken' } });
     const res = makeRes();
     await requireApiKey(req, res, next);
@@ -203,29 +203,28 @@ describe('requireApiKey', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('sets req.apiKeyOwner, req.apiKeyGuildId, and calls next() when key is valid', async () => {
-    vi.mocked(findApprovedKeyByHash).mockResolvedValue({ discord_id: 'user42', guild_id: 'guild99' } as any);
+  it('sets req.apiKeyOwner and calls next() when key is valid', async () => {
+    vi.mocked(findKeyByHash).mockResolvedValue({ discordId: 'user42' } as any);
     const req = makeReq({ headers: { authorization: 'Bearer validtoken' } });
     const res = makeRes();
     await requireApiKey(req, res, next);
     expect(req.apiKeyOwner).toBe('user42');
-    expect(req.apiKeyGuildId).toBe('guild99');
     expect(next).toHaveBeenCalled();
     expect(res.status).not.toHaveBeenCalled();
   });
 
   it('hashes the token before looking it up', async () => {
-    vi.mocked(findApprovedKeyByHash).mockResolvedValue({ discord_id: 'u1' } as any);
+    vi.mocked(findKeyByHash).mockResolvedValue({ discordId: 'u1' } as any);
     const req = makeReq({ headers: { authorization: 'Bearer mytoken' } });
     await requireApiKey(req, makeRes(), next);
-    const passedHash: string = vi.mocked(findApprovedKeyByHash).mock.calls[0][0];
+    const passedHash: string = vi.mocked(findKeyByHash).mock.calls[0][0];
     // SHA256 of 'mytoken' is a 64-char hex string
     expect(passedHash).toMatch(/^[0-9a-f]{64}$/);
     expect(passedHash).not.toBe('mytoken');
   });
 
-  it('returns 500 when findApprovedKeyByHash throws', async () => {
-    vi.mocked(findApprovedKeyByHash).mockRejectedValue(new Error('DB error'));
+  it('returns 500 when findKeyByHash throws', async () => {
+    vi.mocked(findKeyByHash).mockRejectedValue(new Error('DB error'));
     const req = makeReq({ headers: { authorization: 'Bearer tok' } });
     const res = makeRes();
     await requireApiKey(req, res, next);

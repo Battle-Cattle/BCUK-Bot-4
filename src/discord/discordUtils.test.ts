@@ -181,20 +181,20 @@ describe('getAvailableVoiceChannels', () => {
     await expect(getAvailableVoiceChannels('guild1')).resolves.toEqual([]);
   });
 
-  it('returns voice channels sorted alphabetically, filtering out non-voice/null entries', async () => {
-    // discord.js Collection#fetch() resolves to a Collection, which (like the array used
-    // here) exposes filter/map/sort — the code under test only relies on those methods.
+  it('returns voice channels sorted alphabetically, filtering out non-voice entries, reading from the cache (no REST fetch)', async () => {
     const channels = [
       { id: '1', name: 'Zeta', type: 2 },
       { id: '2', name: 'General Text', type: 0 },
       { id: '3', name: 'Alpha', type: 2 },
-      null,
     ];
-    const guildsFetch = vi.fn().mockResolvedValue({ channels: { fetch: vi.fn().mockResolvedValue(channels) } });
+    const channelsFetch = vi.fn();
+    const cache = new Map(channels.map((ch) => [ch.id, ch]));
+    const guildsFetch = vi.fn().mockResolvedValue({ channels: { cache, fetch: channelsFetch } });
     vi.mocked(getDiscordClient).mockReturnValue({ guilds: { fetch: guildsFetch } } as any);
 
     const result = await getAvailableVoiceChannels('guild1');
     expect(guildsFetch).toHaveBeenCalledWith('guild1');
+    expect(channelsFetch).not.toHaveBeenCalled();
     expect(result).toEqual([
       { id: '3', name: 'Alpha' },
       { id: '1', name: 'Zeta' },

@@ -20,7 +20,7 @@ import type { TwitchStream } from '../twitchApi';
 import type { LiveState } from './twitchMonitorTypes';
 
 function makeGroup(overrides: Partial<DbStreamGroup> = {}): DbStreamGroup {
-  return { id: 1, name: 'Main', discord_channel: 'ch1', live_message: 'live', new_game_message: 'game', multi_twitch: false, delete_old_posts: false, ...overrides };
+  return { id: 1, guild_id: 'guild-1', name: 'Main', discord_channel: 'ch1', live_message: 'live', new_game_message: 'game', multi_twitch: false, delete_old_posts: false, ...overrides };
 }
 
 function makeStreamer(overrides: Partial<DbStreamerFull> = {}): DbStreamerFull {

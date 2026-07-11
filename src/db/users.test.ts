@@ -11,6 +11,7 @@ import { getPool } from './pool';
 import {
   findUser,
   findUserByTwitchName,
+  findOwnerUser,
   getAllUsers,
   getGuildMemberUsers,
   upsertUserRecord,
@@ -148,6 +149,39 @@ describe('findUserByTwitchName', () => {
     await findUserByTwitchName('alice');
     const sql: string = vi.mocked(pool.execute).mock.calls[0][0] as string;
     expect(sql).not.toContain('discord_id <> ?');
+  });
+});
+
+// ─── findOwnerUser ────────────────────────────────────────────────────────────
+
+describe('findOwnerUser', () => {
+  it('returns null when no owner row exists', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([[]]) as any);
+    const result = await findOwnerUser();
+    expect(result).toBeNull();
+  });
+
+  it('maps the owner row when found', async () => {
+    const row = {
+      discord_id: '1',
+      discord_name: 'Owner',
+      is_twitch_bot_enabled: 0,
+      twitch_name: null,
+      access_level: AccessLevel.ADMIN,
+      is_owner: Buffer.from([1]),
+    };
+    vi.mocked(getPool).mockReturnValue(makePool([[row]]) as any);
+    const result = await findOwnerUser();
+    expect(result!.discord_id).toBe('1');
+    expect(result!.is_owner).toBe(true);
+  });
+
+  it('queries WHERE is_owner = 1', async () => {
+    const pool = makePool([[]]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await findOwnerUser();
+    const sql: string = vi.mocked(pool.execute).mock.calls[0][0] as string;
+    expect(sql).toContain('is_owner = 1');
   });
 });
 

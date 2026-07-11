@@ -61,7 +61,7 @@
           <span class="muted" style="font-size:.85rem;">Requested <%= keyRow.requested_at.toLocaleDateString() %></span>
         </div>
         <p>Your key is awaiting Admin approval. No further action is needed — the key you already copied will become active automatically once an Admin approves your request. Refresh this page to check the current status.</p>
-        <p class="muted" style="margin-top:.5rem;">Want to cancel and start over? Requesting a new key will replace the pending one.</p>
+        <p class="muted" style="margin-top:.5rem;">Want to cancel and start over? Requesting a new key will replace the pending one<%= user.guilds && user.guilds.length > 1 ? ' — and immediately stop your existing key from working in every server it was approved for, not just this one' : '' %>.</p>
         <form method="POST" action="/streamdeck-key/request" style="margin-top:1rem;">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
           <button type="submit" class="btn btn-sm">Generate New Key (replaces pending)</button>
@@ -73,7 +73,7 @@
           <span class="muted" style="font-size:.85rem;">Approved <%= keyRow.approved_at ? keyRow.approved_at.toLocaleDateString() : '' %></span>
         </div>
         <p>Your API key is active. See the <strong>How to Use</strong> section below for setup instructions.</p>
-        <p class="muted">If you have lost your key, you can generate a new one. The old key will immediately stop working.</p>
+        <p class="muted">If you have lost your key, you can generate a new one. The old key will immediately stop working<%= user.guilds && user.guilds.length > 1 ? ' — in every server it was approved for, not just this one' : '' %>.</p>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:1rem;">
           <form method="POST" action="/streamdeck-key/request">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -84,6 +84,9 @@
             <button type="submit" class="btn btn-sm btn-ghost">Revoke Key</button>
           </form>
         </div>
+        <% if (user.guilds && user.guilds.length > 1) { %>
+        <p class="muted" style="margin-top:.5rem;">Revoking only removes access for this server — the key stays active in any other server it's approved for. Use <strong>Generate New Key</strong> to invalidate it everywhere.</p>
+        <% } %>
 
         <% } else if (keyRow.status === 'revoked') { %>
         <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;">

@@ -9,6 +9,9 @@ import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { setTwitchChannel } from '../shared/statusStore';
 import { normalizeTwitchChannelName } from './twitchChannelName';
 import { createLogger } from '../shared/logger';
+import { findUserByTwitchName } from '../db';
+import { getDiscordClient } from '../discord/discordBot';
+import { getActiveGuildForUser } from '../discord/voicePresence';
 import {
   setTmiClient,
   setConnected,
@@ -23,6 +26,37 @@ const log = createLogger('Twitch');
 let client: tmi.Client | null = null;
 let connected = false;
 const TWITCH_CHAT_MESSAGE_PATTERN = /^\[#[^\]]+\] <[^>]+>: /;
+
+// Caches only successful Twitch-channel → discord_id resolutions (never a
+// miss) so a not-yet-linked channel keeps retrying instead of being stuck
+// unresolved until a restart, while a linked channel avoids a DB round trip
+// on every chat message. Bounded by a TTL so a relinked twitch_name is picked
+// up within a few minutes rather than staying stale until the process restarts.
+const CHANNEL_DISCORD_ID_CACHE_TTL_MS = 5 * 60 * 1000;
+const twitchChannelDiscordIdCache = new Map<string, { discordId: string; cachedAt: number }>();
+
+/** Resolves the Discord ID linked to a Twitch channel's `twitch_name`, or null if unlinked. */
+async function resolveDiscordIdForTwitchChannel(normalizedChannel: string): Promise<string | null> {
+  const cached = twitchChannelDiscordIdCache.get(normalizedChannel);
+  if (cached && Date.now() - cached.cachedAt < CHANNEL_DISCORD_ID_CACHE_TTL_MS) return cached.discordId;
+  const user = await findUserByTwitchName(normalizedChannel);
+  if (user) twitchChannelDiscordIdCache.set(normalizedChannel, { discordId: user.discord_id, cachedAt: Date.now() });
+  return user?.discord_id ?? null;
+}
+
+/** Test-only: clears the Twitch-channel → discord_id cache so each test starts from a clean slate. */
+export function __resetTwitchChannelDiscordIdCacheForTests(): void {
+  twitchChannelDiscordIdCache.clear();
+}
+
+/** Resolves which guild a Twitch chat command should target: the linked streamer's active voice guild. */
+async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promise<string | null> {
+  const discordId = await resolveDiscordIdForTwitchChannel(normalizedChannel);
+  if (!discordId) return null;
+  const discordClient = getDiscordClient();
+  if (!discordClient) return null;
+  return getActiveGuildForUser(discordClient, discordId);
+}
 
 function fireAndForget(promise: Promise<void>, context: string): void {
   promise.catch((err) => log.error(`${context}:`, err));
@@ -53,7 +87,10 @@ function handleTwitchMessage(
     fireAndForget(executeCounterCommandForTwitch(normalizedChannel, message, displayName), 'Counter command error');
     fireAndForget(executeMultiCommandForTwitch(normalizedChannel, message, displayName), 'Multi command error');
     fireAndForget(executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod), 'Shoutout error');
-    fireAndForget(handleCommand(message, 'twitch'), 'Command handler error');
+    fireAndForget(
+      resolveGuildIdForTwitchCommand(normalizedChannel).then((guildId) => handleCommand(message, 'twitch', guildId)),
+      'Command handler error',
+    );
     fireAndForget(executeCountdownForTwitch(normalizedChannel, message), 'Countdown error');
   } catch (err) {
     log.error('Unexpected error in message handler:', err);

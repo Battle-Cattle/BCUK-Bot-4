@@ -86,6 +86,17 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
   return rows.length === 0 ? null : mapUser(rows[0]);
 }
 
+/**
+ * Look up the bot owner's user row (the single global super-admin, `is_owner = 1`).
+ * @returns The owner's user row, or null if no user is flagged as owner.
+ */
+export async function findOwnerUser(): Promise<DbUser | null> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    'SELECT discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner FROM `user` WHERE is_owner = 1 LIMIT 1',
+  );
+  return rows.length === 0 ? null : mapUser(rows[0]);
+}
+
 /** Returns every user row, ordered by access level (highest first) then name. */
 export async function getAllUsers(): Promise<DbUser[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(

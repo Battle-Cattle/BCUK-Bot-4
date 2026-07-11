@@ -9,8 +9,46 @@ import type {
 import { TIKTOK_CHANNELS, TIKTOK_SIGN_API_KEY } from '../shared/config';
 import { handleCommand } from '../commands/commandRouter';
 import { setTikTokChannel } from '../shared/statusStore';
+import { findOwnerUser } from '../db';
+import { getDiscordClient } from '../discord/discordBot';
+import { getActiveGuildForUser } from '../discord/voicePresence';
 
 const log = createLogger('TikTok');
+
+// Caches only a successfully-resolved owner discord_id (never a miss) so a
+// bot with no owner flagged yet keeps retrying instead of being stuck
+// unresolved until a restart, while normal operation avoids a DB round trip
+// on every chat message. Bounded by a TTL so a reassigned is_owner is picked
+// up within a few minutes rather than staying stale until the process restarts.
+const OWNER_DISCORD_ID_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedOwner: { discordId: string; cachedAt: number } | null = null;
+
+/** Resolves the bot owner's Discord ID, caching a successful lookup. */
+async function resolveOwnerDiscordId(): Promise<string | null> {
+  if (cachedOwner && Date.now() - cachedOwner.cachedAt < OWNER_DISCORD_ID_CACHE_TTL_MS) return cachedOwner.discordId;
+  const owner = await findOwnerUser();
+  if (owner) cachedOwner = { discordId: owner.discord_id, cachedAt: Date.now() };
+  return owner?.discord_id ?? null;
+}
+
+/**
+ * Resolves which guild a TikTok chat command should target. TikTok channels
+ * have no per-streamer Discord-identity mapping today (unlike Twitch's
+ * `twitch_name`), so commands are routed to wherever the bot owner is
+ * currently in a voice channel.
+ */
+async function resolveGuildIdForTikTokCommand(): Promise<string | null> {
+  const ownerDiscordId = await resolveOwnerDiscordId();
+  if (!ownerDiscordId) return null;
+  const discordClient = getDiscordClient();
+  if (!discordClient) return null;
+  return getActiveGuildForUser(discordClient, ownerDiscordId);
+}
+
+/** Test-only: clears the cached owner discord_id so each test starts from a clean slate. */
+export function __resetOwnerDiscordIdCacheForTests(): void {
+  cachedOwner = null;
+}
 
 // TypedEventEmitter<ClientEventMap> is the base of TikTokLiveConnection but TypeScript
 // can't resolve it through the library's declaration chain; cast explicitly.
@@ -76,9 +114,9 @@ function connectToChannel(username: string, modules: TikTokModules): void {
   });
 
   connection.on(WebcastEvent.CHAT, (data) => {
-    handleCommand(data.content, 'tiktok').catch((err) =>
-      log.error(`Command handler error (${username}):`, err),
-    );
+    resolveGuildIdForTikTokCommand()
+      .then((guildId) => handleCommand(data.content, 'tiktok', guildId))
+      .catch((err) => log.error(`Command handler error (${username}):`, err));
   });
 
   connection.on(WebcastEvent.STREAM_END, () => {

@@ -40,9 +40,8 @@ declare module 'express-session' {
 declare module 'express-serve-static-core' {
   interface Request {
     csrfToken(): string;
+    /** Discord ID owning the Streamdeck API key, set by requireApiKey. Not bound to a single guild — each route resolves its own target guild. */
     apiKeyOwner?: string;
-    /** The guild the Streamdeck API key is bound to, set by requireApiKey. */
-    apiKeyGuildId?: string | null;
     /** Discord ID owning the companion app token, set by requireCompanionKey. */
     companionDiscordId?: string;
   }

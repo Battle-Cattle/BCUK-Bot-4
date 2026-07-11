@@ -130,7 +130,7 @@ export function startDiscordBot(): void {
       log.error('Counter command error:', err),
     );
 
-    handleCommand(message.content, 'discord').catch((err) =>
+    handleCommand(message.content, 'discord', guildId).catch((err) =>
       log.error('Command handler error:', err),
     );
   });

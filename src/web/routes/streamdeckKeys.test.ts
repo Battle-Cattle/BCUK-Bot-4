@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../db', () => ({
-  requestApiKey: vi.fn().mockResolvedValue({ plain: 'a'.repeat(64), status: 'pending' }),
-  getApiKeyStatus: vi.fn().mockResolvedValue(null),
+  hasApiKey: vi.fn().mockResolvedValue(false),
+  createApiKeyAndRequestGuildAccess: vi.fn().mockResolvedValue({ plain: 'a'.repeat(64), status: 'pending' }),
+  requestGuildAccessForExistingKey: vi.fn().mockResolvedValue({ status: 'pending' }),
+  rotateApiKey: vi.fn().mockResolvedValue({ plain: 'b'.repeat(64) }),
+  getGuildStatusForKey: vi.fn().mockResolvedValue(null),
   revokeApiKey: vi.fn().mockResolvedValue(undefined),
   approveApiKey: vi.fn().mockResolvedValue(undefined),
   denyApiKey: vi.fn().mockResolvedValue(undefined),
@@ -25,7 +28,8 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './streamdeckKeys';
 import {
-  requestApiKey, getApiKeyStatus, revokeApiKey,
+  hasApiKey, createApiKeyAndRequestGuildAccess, requestGuildAccessForExistingKey, rotateApiKey,
+  getGuildStatusForKey, revokeApiKey,
   approveApiKey, denyApiKey, getAllApiKeys, getPendingRequests,
 } from '../../db';
 import { AccessLevel } from '../../db/users';
@@ -58,8 +62,11 @@ function buildApp(sessionUser = SESSION_USER) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requestApiKey).mockResolvedValue({ plain: 'a'.repeat(64), status: 'pending' } as any);
-  vi.mocked(getApiKeyStatus).mockResolvedValue(null);
+  vi.mocked(hasApiKey).mockResolvedValue(false);
+  vi.mocked(createApiKeyAndRequestGuildAccess).mockResolvedValue({ plain: 'a'.repeat(64), status: 'pending' } as any);
+  vi.mocked(requestGuildAccessForExistingKey).mockResolvedValue({ status: 'pending' } as any);
+  vi.mocked(rotateApiKey).mockResolvedValue({ plain: 'b'.repeat(64) } as any);
+  vi.mocked(getGuildStatusForKey).mockResolvedValue(null);
   vi.mocked(getAllApiKeys).mockResolvedValue([]);
   vi.mocked(getPendingRequests).mockResolvedValue([]);
 });
@@ -68,8 +75,8 @@ beforeEach(() => {
 
 describe('GET /streamdeck-key', () => {
   it('renders streamdeck-keys with keyRow and webPort', async () => {
-    const keyRow = { discord_id: '1', status: 'pending', requested_at: new Date(), approved_at: null, approved_by: null };
-    vi.mocked(getApiKeyStatus).mockResolvedValue(keyRow as any);
+    const keyRow = { discord_id: '1', guild_id: GUILD_ID, status: 'pending', requested_at: new Date(), approved_at: null, approved_by: null };
+    vi.mocked(getGuildStatusForKey).mockResolvedValue(keyRow as any);
     const res = await supertest(buildApp()).get('/streamdeck-key');
     expect(res.status).toBe(200);
     const body = res.body as any;
@@ -77,10 +84,11 @@ describe('GET /streamdeck-key', () => {
     expect(body.locals.keyRow).toMatchObject({ discord_id: '1', status: 'pending' });
     expect(body.locals.webPort).toBe(3000);
     expect(body.locals.newKey).toBeNull();
+    expect(getGuildStatusForKey).toHaveBeenCalledWith(SESSION_USER.discordId, GUILD_ID);
   });
 
   it('returns 500 on DB error', async () => {
-    vi.mocked(getApiKeyStatus).mockRejectedValueOnce(new Error('DB down'));
+    vi.mocked(getGuildStatusForKey).mockRejectedValueOnce(new Error('DB down'));
     const app = express();
     app.use((req: any, _res: any, next: any) => { req.session = { user: SESSION_USER }; next(); });
     app.use((req: any, res: any, next: any) => {
@@ -97,33 +105,139 @@ describe('GET /streamdeck-key', () => {
 // ─── POST /streamdeck-key/request ────────────────────────────────────────────
 
 describe('POST /streamdeck-key/request', () => {
-  it('renders streamdeck-keys with the plain key on success', async () => {
-    vi.mocked(requestApiKey).mockResolvedValue({ plain: 'abc123'.repeat(10).slice(0, 64), status: 'pending' } as any);
-    vi.mocked(getApiKeyStatus).mockResolvedValue({ discord_id: '1', status: 'pending' } as any);
+  it('mints a brand-new key when the user has no existing guild status and no key', async () => {
+    vi.mocked(getGuildStatusForKey)
+      .mockResolvedValueOnce(null) // pre-check
+      .mockResolvedValueOnce({ discord_id: '1', guild_id: GUILD_ID, status: 'pending' } as any); // post-request
+    vi.mocked(hasApiKey).mockResolvedValue(false);
+
     const res = await supertest(buildApp()).post('/streamdeck-key/request');
+
     expect(res.status).toBe(200);
     expect((res.body as any).locals.newKey).toBeTruthy();
-    expect(vi.mocked(requestApiKey)).toHaveBeenCalledWith(
-      SESSION_USER.discordId,
-      SESSION_USER.accessLevel,
-      GUILD_ID,
-    );
+    expect(createApiKeyAndRequestGuildAccess).toHaveBeenCalledWith(SESSION_USER.discordId, SESSION_USER.accessLevel, GUILD_ID);
+    expect(requestGuildAccessForExistingKey).not.toHaveBeenCalled();
+    expect(rotateApiKey).not.toHaveBeenCalled();
+  });
+
+  it('reuses the existing key with no new plaintext when the user already has a key from another guild', async () => {
+    vi.mocked(getGuildStatusForKey)
+      .mockResolvedValueOnce(null) // no status for this guild yet
+      .mockResolvedValueOnce({ discord_id: '1', guild_id: GUILD_ID, status: 'pending' } as any);
+    vi.mocked(hasApiKey).mockResolvedValue(true);
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/request');
+
+    expect(res.status).toBe(200);
+    expect((res.body as any).locals.newKey).toBeNull();
+    expect(requestGuildAccessForExistingKey).toHaveBeenCalledWith(SESSION_USER.discordId, SESSION_USER.accessLevel, GUILD_ID);
+    expect(createApiKeyAndRequestGuildAccess).not.toHaveBeenCalled();
+  });
+
+  it('rotates the key when a guild status already exists for this guild (lost-key flow)', async () => {
+    vi.mocked(getGuildStatusForKey).mockResolvedValue({ discord_id: '1', guild_id: GUILD_ID, status: 'approved' } as any);
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/request');
+
+    expect(res.status).toBe(200);
+    expect((res.body as any).locals.newKey).toBeTruthy();
+    expect(rotateApiKey).toHaveBeenCalledWith(SESSION_USER.discordId);
+    expect(createApiKeyAndRequestGuildAccess).not.toHaveBeenCalled();
+    expect(requestGuildAccessForExistingKey).not.toHaveBeenCalled();
+  });
+
+  it('re-requests guild access instead of just rotating when this guild was previously revoked', async () => {
+    vi.mocked(getGuildStatusForKey)
+      .mockResolvedValueOnce({ discord_id: '1', guild_id: GUILD_ID, status: 'revoked' } as any)
+      .mockResolvedValueOnce({ discord_id: '1', guild_id: GUILD_ID, status: 'pending' } as any);
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/request');
+
+    expect(res.status).toBe(200);
+    expect((res.body as any).locals.newKey).toBeNull();
+    expect(requestGuildAccessForExistingKey).toHaveBeenCalledWith(SESSION_USER.discordId, SESSION_USER.accessLevel, GUILD_ID);
+    expect(rotateApiKey).not.toHaveBeenCalled();
+    expect(createApiKeyAndRequestGuildAccess).not.toHaveBeenCalled();
+  });
+
+  it('redirects to ?error=request_failed when this guild was previously denied', async () => {
+    vi.mocked(getGuildStatusForKey).mockResolvedValue({ discord_id: '1', guild_id: GUILD_ID, status: 'denied' } as any);
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/request');
+
+    expect(res.headers.location).toBe('/streamdeck-key?error=request_failed');
+    expect(rotateApiKey).not.toHaveBeenCalled();
   });
 
   it('redirects to ?error=request_failed on error', async () => {
-    vi.mocked(requestApiKey).mockRejectedValueOnce(new Error('denied'));
+    vi.mocked(createApiKeyAndRequestGuildAccess).mockRejectedValueOnce(new Error('DB error'));
     const res = await supertest(buildApp()).post('/streamdeck-key/request');
     expect(res.headers.location).toBe('/streamdeck-key?error=request_failed');
+  });
+
+  it('serializes two concurrent requests from the same brand-new user, avoiding a duplicate-key race', async () => {
+    const callOrder: string[] = [];
+    let resolveFirstHasApiKey!: () => void;
+    const firstHasApiKeyGate = new Promise<void>((resolve) => { resolveFirstHasApiKey = resolve; });
+    let hasApiKeyCalls = 0;
+    // Models the DB state createApiKeyAndRequestGuildAccess would actually
+    // persist — without this, both requests would see "no existing key" and
+    // the test would just be asserting the duplicate-insert race it claims to prevent.
+    let persistedGuildStatus: { status: string } | null = null;
+
+    vi.mocked(getGuildStatusForKey).mockImplementation(async () => persistedGuildStatus as any);
+    vi.mocked(hasApiKey).mockImplementation(async () => {
+      hasApiKeyCalls += 1;
+      callOrder.push('hasApiKey-start');
+      if (hasApiKeyCalls === 1) {
+        await firstHasApiKeyGate;
+      }
+      callOrder.push('hasApiKey-end');
+      return persistedGuildStatus !== null;
+    });
+    vi.mocked(createApiKeyAndRequestGuildAccess).mockImplementation(async () => {
+      callOrder.push('create');
+      persistedGuildStatus = { status: 'pending' };
+      return { plain: 'a'.repeat(64), status: 'pending' };
+    });
+    vi.mocked(rotateApiKey).mockImplementation(async () => {
+      callOrder.push('rotate');
+      return { plain: 'b'.repeat(64) };
+    });
+
+    const app = buildApp();
+    // supertest/superagent requests are thenable but lazy — chaining .then()
+    // immediately (rather than just holding the unawaited value) is what
+    // actually dispatches the request.
+    const firstReq = supertest(app).post('/streamdeck-key/request').then((r) => r);
+    await vi.waitFor(() => expect(callOrder).toContain('hasApiKey-start'));
+    const secondReq = supertest(app).post('/streamdeck-key/request').then((r) => r);
+
+    // Give the second request every chance to (incorrectly) start its own
+    // hasApiKey check before asserting it didn't — it should be stuck behind
+    // the mutation queue holding the first request's in-flight operation.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(callOrder).toEqual(['hasApiKey-start']);
+
+    resolveFirstHasApiKey();
+    await firstReq;
+    await secondReq;
+
+    // The second request only starts once the first has fully committed its
+    // guild-status row, so it sees existingGuildStatus set and takes the
+    // rotate path instead of racing into a second identity insert.
+    expect(callOrder).toEqual(['hasApiKey-start', 'hasApiKey-end', 'create', 'rotate']);
+    expect(createApiKeyAndRequestGuildAccess).toHaveBeenCalledTimes(1);
   });
 });
 
 // ─── POST /streamdeck-key/revoke ──────────────────────────────────────────────
 
 describe('POST /streamdeck-key/revoke', () => {
-  it('redirects to /streamdeck-key on success', async () => {
+  it('redirects to /streamdeck-key on success, scoped to the current guild', async () => {
     const res = await supertest(buildApp()).post('/streamdeck-key/revoke');
     expect(res.headers.location).toBe('/streamdeck-key');
-    expect(revokeApiKey).toHaveBeenCalledWith(SESSION_USER.discordId);
+    expect(revokeApiKey).toHaveBeenCalledWith(SESSION_USER.discordId, GUILD_ID);
   });
 
   it('redirects to ?error=revoke_failed on error', async () => {
