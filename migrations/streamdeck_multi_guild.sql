@@ -81,10 +81,17 @@ SET @sql = IF(@sd_exists = 0 OR @already_split = 0 OR @created_at_exists = 1,
      ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
 PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 
+-- This UPDATE intentionally has no WHERE clause — every row needs its
+-- created_at backfilled — which trips SQL_SAFE_UPDATES if a client (e.g.
+-- MySQL Workbench) has it enabled by default. Disable it for this statement
+-- only and restore it immediately after.
+SET @prior_safe_updates = @@SESSION.sql_safe_updates;
+SET SQL_SAFE_UPDATES = 0;
 SET @sql = IF(@sd_exists = 0 OR @already_split = 0,
   'SELECT ''nothing to backfill for created_at''',
   'UPDATE streamdeck_api_keys SET created_at = requested_at');
 PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+SET SQL_SAFE_UPDATES = @prior_safe_updates;
 
 -- Some deployments' streamdeck_api_keys has an approved_by FK (`FOREIGN KEY
 -- (approved_by) REFERENCES user(discord_id) ON DELETE SET NULL`); others have
