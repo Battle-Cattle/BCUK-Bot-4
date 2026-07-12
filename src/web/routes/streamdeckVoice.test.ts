@@ -34,7 +34,6 @@ vi.mock('../../discord/voicePresence', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './streamdeckVoice';
 import { isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
@@ -42,6 +41,7 @@ import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
 import { getDiscordClient } from '../../discord/discordBot';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Fake Discord client whose channels.fetch resolves any channel to the given guildId. */
 function makeClient(channelGuildId: string | null = 'guild-123') {
@@ -54,11 +54,9 @@ function makeClient(channelGuildId: string | null = 'guild-123') {
   } as any;
 }
 
+/** Builds a supertest-ready app: the streamdeck-voice router with a JSON body parser and no session stub (routes are key-authenticated). */
 function buildApp() {
-  const app = express();
-  app.use(express.json());
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'json' });
 }
 
 beforeEach(() => {

@@ -41,27 +41,21 @@ vi.mock('./overlayAdminMutations', async () => {
   return { router: Router(), MAX_UPLOAD_MB: 100 };
 });
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './overlayAdmin';
 import { getStreamerByDiscordId, getVideosForStreamer, getRewardsForStreamer } from '../../db';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { AccessLevel } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
+import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 
-type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
-const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: AccessLevel.MOD };
+type SessionUser = SessionUserFixture;
+const USER: SessionUser = makeSessionUser({ accessLevel: AccessLevel.MOD });
 
+/** Builds a supertest-ready app: the overlay admin router with a stubbed session and a render mock that flattens locals into the JSON body. */
 function buildApp(sessionUser: SessionUser = USER) {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, res: any, next: any) => {
-    req.session = { user: sessionUser };
-    res.render = (view: string, locals?: any) => res.json({ view, ...locals });
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser, mockRender: 'spread' });
 }
 
 beforeEach(() => {

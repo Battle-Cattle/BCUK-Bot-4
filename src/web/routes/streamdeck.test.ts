@@ -52,16 +52,14 @@ vi.mock('../../discord/voicePresence', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './streamdeck';
 import { getAllSfxTriggers, getApprovedGuildIdsForKey } from '../../db';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
+/** Builds a supertest-ready app: the streamdeck router with a JSON body parser and no session stub (routes are key-authenticated). */
 function buildApp() {
-  const app = express();
-  app.use(express.json());
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'json' });
 }
 
 beforeEach(() => {

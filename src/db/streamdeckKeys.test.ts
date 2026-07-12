@@ -48,27 +48,19 @@ import {
   getAllApiKeys,
 } from './streamdeckKeys';
 import { createHash } from 'crypto';
+import { makeMockPool } from '../test-utils/mockMysqlPool';
 
+/** Builds a fake mysql pool whose `execute`/`query` resolve to the given rows. */
 function makePool(rows: unknown[] = []) {
-  return { execute: vi.fn().mockResolvedValue([[...rows], []]) };
+  return makeMockPool({ rows });
 }
 
 /** Pool mock whose getConnection() returns a fake transactional connection, matching the overlayVideos.ts test convention. */
 function makeTransactionalPool() {
-  const conn = {
-    execute: vi.fn().mockResolvedValue([[], []]),
-    beginTransaction: vi.fn().mockResolvedValue(undefined),
-    commit: vi.fn().mockResolvedValue(undefined),
-    rollback: vi.fn().mockResolvedValue(undefined),
-    release: vi.fn(),
-  };
-  return {
-    execute: vi.fn().mockResolvedValue([[], []]),
-    getConnection: vi.fn().mockResolvedValue(conn),
-    _conn: conn,
-  };
+  return makeMockPool();
 }
 
+/** Hashes a string with SHA-256 and returns it as a hex digest, matching the stored-key hashing scheme. */
 function sha256hex(s: string) {
   return createHash('sha256').update(s).digest('hex');
 }

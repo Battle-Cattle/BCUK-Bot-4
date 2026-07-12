@@ -6,24 +6,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
  * but a real (unmocked) import would otherwise try to build a live connection pool.
  */
 vi.mock('../../db', () => ({}));
-
-import express from 'express';
 import supertest from 'supertest';
 import privacyRouter from './privacy';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a minimal Express app wired with the privacy router, a fake session, and a `res.render` stub that echoes its arguments as JSON instead of rendering EJS. */
 function buildApp(sessionUser: unknown = null) {
-  const app = express();
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: sessionUser };
-    next();
-  });
-  app.use((req: any, res: any, next: any) => {
-    res.render = (view: string, locals: unknown) => res.json({ view, locals });
-    next();
-  });
-  app.use(privacyRouter);
-  return app;
+  return buildTestApp({ router: privacyRouter, sessionUser, mockRender: 'nested' });
 }
 
 describe('GET /privacy', () => {

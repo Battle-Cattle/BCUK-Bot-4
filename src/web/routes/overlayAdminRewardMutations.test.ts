@@ -30,11 +30,11 @@ vi.mock('../../config', () => ({
 
 vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 
-import express from 'express';
 import supertest from 'supertest';
 import { router } from './overlayAdminRewardMutations';
 import { getStreamerByDiscordId, upsertReward, setRewardVideos, deleteReward } from '../../db';
 import { AccessLevel } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
 const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: AccessLevel.USER };
@@ -46,15 +46,9 @@ const MOCK_STREAMER = {
   discord_id: USER.discordId,
 };
 
+/** Builds a supertest-ready app: the overlay admin reward mutations router with a stubbed session (no render stub — these routes redirect). */
 function buildApp(sessionUser: SessionUser = USER) {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, res: any, next: any) => {
-    req.session = { user: sessionUser };
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
 }
 
 beforeEach(() => {

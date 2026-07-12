@@ -27,25 +27,20 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 /** Mocks `db/users` so `AccessLevel` resolves to the shared hoisted mock instead of hitting the real module. */
 vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './counterHistory';
 import { getCounterHistory } from '../../db';
 import { AccessLevel } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
+/** Builds a supertest-ready app: the counter history router with a stubbed session and a render mock that sends `rendered:<view>` (locals ignored). */
 function buildApp() {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((_req: any, res: any, next: any) => {
-    res.render = (view: string) => res.send(`rendered:${view}`);
-    next();
+  return buildTestApp({
+    router,
+    bodyParser: 'urlencoded',
+    sessionUser: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.USER },
+    mockRender: 'text',
   });
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.USER } };
-    next();
-  });
-  app.use(router);
-  return app;
 }
 
 beforeEach(() => {

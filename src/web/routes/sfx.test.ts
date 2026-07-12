@@ -24,11 +24,11 @@ vi.mock('../../db/users', () => ({
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './sfx';
 import { getAllSfxTriggers, getAllCategories } from '../../db';
 import { AccessLevel } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /**
  * Build a supertest GET request against the SFX view router with a stubbed session
@@ -37,17 +37,8 @@ import { AccessLevel } from '../../db/users';
  * @param query Optional query string appended to `/sfx` (e.g. `?error=invalid_id`).
  * @returns A supertest request for `GET /sfx`.
  */
-function buildApp(sessionUser: any = { discordId: '1', accessLevel: AccessLevel.USER }, query = '') {
-  const app = express();
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: sessionUser };
-    next();
-  });
-  app.use((_req: any, res: any, next: any) => {
-    res.render = (view: string, locals: unknown) => res.json({ view, locals });
-    next();
-  });
-  app.use(router);
+function buildApp(sessionUser: unknown = { discordId: '1', accessLevel: AccessLevel.USER }, query = '') {
+  const app = buildTestApp({ router, sessionUser, mockRender: 'nested' });
   return supertest(app).get('/sfx' + query);
 }
 

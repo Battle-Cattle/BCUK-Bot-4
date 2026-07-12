@@ -15,6 +15,7 @@ import express from 'express';
 import supertest from 'supertest';
 import router, { MAX_SSE_CONNECTIONS_PER_STREAMER, connections, pushPricingUpdate } from './channelPointsEvents';
 import { getStreamerByDiscordId } from '../../db';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely — needed to control fake timers and the request's 'close' event deterministically. */
 function getRouteHandler(routePath: string): (req: any, res: any, next: any) => void {
@@ -22,6 +23,7 @@ function getRouteHandler(routePath: string): (req: any, res: any, next: any) => 
   return layer.route.stack[0].handle;
 }
 
+/** Builds a fake Express `res` covering the SSE-specific methods (`setHeader`, `flushHeaders`, `write`, `end`) used by the events route handler. */
 function makeSseRes() {
   return {
     setHeader: vi.fn(),
@@ -32,6 +34,7 @@ function makeSseRes() {
   };
 }
 
+/** Builds a fake Express `req` with a session for `discordId` and a `close`-event hook, plus a `triggerClose()` helper to simulate the client disconnecting. */
 function makeSseReq(discordId: string) {
   let closeCb: (() => void) | undefined;
   return {
@@ -45,14 +48,9 @@ function makeSseReq(discordId: string) {
   };
 }
 
+/** Builds a supertest-ready app: the channel-points-events router with a stubbed session user. */
 function buildApp() {
-  const app = express();
-  app.use((req: any, _res, next) => {
-    req.session = { user: { discordId: 'discord1' } };
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, sessionUser: { discordId: 'discord1' } });
 }
 
 beforeEach(() => {

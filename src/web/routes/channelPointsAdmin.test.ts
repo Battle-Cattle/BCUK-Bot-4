@@ -19,6 +19,11 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 
+// `makeSessionUser` (from `test-utils/fixtures`) imports `AccessLevel` from `../../db/users` at
+// runtime, which transitively pulls in `../../db/pool` and its required env vars. Mock it out,
+// matching the convention used elsewhere (e.g. `streamGroups.test.ts`).
+vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+
 vi.mock('../../twitch/twitchApi', () => ({
   getCustomRewards: vi.fn(),
 }));
@@ -43,32 +48,26 @@ vi.mock('./channelPointsEvents', async () => {
   return { default: Router() };
 });
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './channelPointsAdmin';
 import { getStreamerByDiscordId, getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistory } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
+import { buildTestApp } from '../../test-utils/expressTestApp';
+import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 
-type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3; isOwner: boolean };
-const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: 0, isOwner: false };
+type SessionUser = SessionUserFixture;
+const USER: SessionUser = makeSessionUser({ isOwner: false });
 
 const MOCK_STREAMER = {
   id: 123, twitch_user_id: 'twitch123', twitch_name: 'teststreamer', discord_id: USER.discordId,
   eventsub_access_token: 'encrypted-token',
 };
 
+/** Builds a supertest-ready app: the channel points admin router with a stubbed session and a render mock that flattens locals into the JSON body. */
 function buildApp(sessionUser: SessionUser = USER) {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, res: any, next: any) => {
-    req.session = { user: sessionUser };
-    res.render = (view: string, locals?: any) => res.json({ view, ...locals });
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser, mockRender: 'spread' });
 }
 
 beforeEach(() => {

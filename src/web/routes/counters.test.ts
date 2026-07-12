@@ -38,7 +38,6 @@ vi.mock('../../logger', () => ({
 
 vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './counters';
 import {
@@ -54,20 +53,16 @@ import {
   ReservedCommandError,
 } from '../../db';
 import { AccessLevel } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
+/** Builds a supertest-ready app: the counters router with a stubbed session and a render mock that sends `rendered:<view>` (locals ignored). */
 function buildApp() {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((_req: any, res: any, next: any) => {
-    res.render = (view: string) => res.send(`rendered:${view}`);
-    next();
+  return buildTestApp({
+    router,
+    bodyParser: 'urlencoded',
+    sessionUser: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER },
+    mockRender: 'text',
   });
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER } };
-    next();
-  });
-  app.use(router);
-  return app;
 }
 
 const VALID_ADD = {

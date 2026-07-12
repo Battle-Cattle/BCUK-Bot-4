@@ -47,7 +47,6 @@ vi.mock('fs', () => ({
   },
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './sfxMutations';
 import {
@@ -65,6 +64,7 @@ import {
 import { requireMod } from '../middleware';
 import { csrfProtection } from '../csrf';
 import fs from 'fs';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 // Minimal buffers with correct magic bytes for each accepted format
 const MP3_ID3 = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
@@ -77,14 +77,7 @@ const WAV_BUF = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x5
  * @returns The configured Express app.
  */
 function buildApp() {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: { discordId: '1', accessLevel: 1 } };
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser: { discordId: '1', accessLevel: 1 } });
 }
 
 beforeEach(() => {

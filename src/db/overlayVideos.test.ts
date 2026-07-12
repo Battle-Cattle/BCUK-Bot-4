@@ -38,20 +38,11 @@ import {
   deleteReward,
   getVideosForReward,
 } from './overlayVideos';
+import { makeMockPool } from '../test-utils/mockMysqlPool';
 
+/** Builds a fake mysql pool whose `execute`/`query` resolve to the given rows/meta. */
 function makePool(rows: unknown[] = [], meta: unknown = {}) {
-  const conn = {
-    execute: vi.fn(),
-    beginTransaction: vi.fn().mockResolvedValue(undefined),
-    commit: vi.fn().mockResolvedValue(undefined),
-    rollback: vi.fn().mockResolvedValue(undefined),
-    release: vi.fn(),
-  };
-  return {
-    execute: vi.fn().mockResolvedValue([[...rows], meta]),
-    getConnection: vi.fn().mockResolvedValue(conn),
-    _conn: conn,
-  };
+  return makeMockPool({ rows, meta });
 }
 
 beforeEach(() => {

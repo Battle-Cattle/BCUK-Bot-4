@@ -35,13 +35,13 @@ vi.mock('../../twitch/pricing/rewardPricingService', () => ({
   resetAndDeletePricing: vi.fn().mockResolvedValue(undefined),
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import { router } from './channelPointsAdminPricingMutations';
 import { getStreamerByDiscordId, upsertPricingConfig, getPricingForReward, savePricingSettingsForStreamer } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { applyDecayTick, resetAndDeletePricing } from '../../twitch/pricing/rewardPricingService';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3; isOwner: boolean };
 const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: 0, isOwner: false };
@@ -51,15 +51,9 @@ const MOCK_STREAMER = { id: 123, twitch_user_id: 'twitch123', twitch_name: 'test
 const VALID_REWARD_ID = '12345678-1234-1234-8234-123456789abc';
 const VALID_REWARD_TWITCH_DATA = { id: VALID_REWARD_ID, global_cooldown_setting: { is_enabled: true, global_cooldown_seconds: 300 } };
 
+/** Builds a supertest-ready app: the channel points pricing mutations router with a stubbed session (no render stub — these routes redirect). */
 function buildApp(sessionUser: SessionUser = USER) {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: sessionUser };
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
 }
 
 beforeEach(() => {

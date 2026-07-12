@@ -39,11 +39,13 @@ import {
   setStreamerLive,
   clearStreamerLive,
 } from './streamMonitor';
+import { makeMockConnection, makeMockPool } from '../test-utils/mockMysqlPool';
 
 const GUILD_ID = 'guild-1';
 
+/** Builds a fake mysql pool whose `execute`/`query` resolve to the given rows. */
 function makePool(rows: unknown[] = []) {
-  return { execute: vi.fn().mockResolvedValue([[...rows], []]) };
+  return makeMockPool({ rows });
 }
 
 beforeEach(() => {
@@ -169,19 +171,12 @@ describe('updateStreamGroup', () => {
 
 /** Pool mock whose getConnection() returns a fake transactional connection. */
 function makeTransactionalPool(streamerAffectedRows: number, groupAffectedRows: number) {
-  const conn = {
+  const connection = makeMockConnection({
     execute: vi.fn()
       .mockResolvedValueOnce([{ affectedRows: streamerAffectedRows }, []])
       .mockResolvedValueOnce([{ affectedRows: groupAffectedRows }, []]),
-    beginTransaction: vi.fn().mockResolvedValue(undefined),
-    commit: vi.fn().mockResolvedValue(undefined),
-    rollback: vi.fn().mockResolvedValue(undefined),
-    release: vi.fn(),
-  };
-  return {
-    getConnection: vi.fn().mockResolvedValue(conn),
-    _conn: conn,
-  };
+  });
+  return makeMockPool({ connection });
 }
 
 describe('removeStreamGroupAndStreamers', () => {
@@ -215,13 +210,7 @@ describe('removeStreamGroupAndStreamers', () => {
   });
 
   it('rolls back and releases the connection when a delete throws', async () => {
-    const conn = {
-      execute: vi.fn().mockRejectedValue(new Error('DB down')),
-      beginTransaction: vi.fn().mockResolvedValue(undefined),
-      commit: vi.fn().mockResolvedValue(undefined),
-      rollback: vi.fn().mockResolvedValue(undefined),
-      release: vi.fn(),
-    };
+    const conn = makeMockConnection({ execute: vi.fn().mockRejectedValue(new Error('DB down')) });
     vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
 
     await expect(removeStreamGroupAndStreamers(7, GUILD_ID)).rejects.toThrow('DB down');

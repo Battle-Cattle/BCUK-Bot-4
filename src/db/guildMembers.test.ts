@@ -17,16 +17,13 @@ import {
   removeGuildMember,
   getEffectiveAccessLevel,
 } from './guildMembers';
+import { makeMockPool, type MockPool } from '../test-utils/mockMysqlPool';
 
-function makePool() {
-  return { execute: vi.fn().mockResolvedValue([[], []]) };
-}
-
-let pool: ReturnType<typeof makePool>;
+let pool: MockPool;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  pool = makePool();
+  pool = makeMockPool();
   vi.mocked(getPool).mockReturnValue(pool as never);
 });
 

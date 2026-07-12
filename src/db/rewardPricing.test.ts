@@ -17,11 +17,11 @@ import {
   getPricingSettingsForStreamer,
   savePricingSettingsForStreamer,
 } from './rewardPricing';
+import { makeMockPool } from '../test-utils/mockMysqlPool';
 
+/** Builds a fake mysql pool whose `execute`/`query` resolve to the given rows/meta. */
 function makePool(rows: unknown[] = [], meta: unknown = {}) {
-  return {
-    execute: vi.fn().mockResolvedValue([[...rows], meta]),
-  };
+  return makeMockPool({ rows, meta });
 }
 
 beforeEach(() => {

@@ -40,7 +40,6 @@ vi.mock('fs', () => ({
   },
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import multer from 'multer';
 import { router, detectVideoType, handleUploadError } from './overlayAdminMutations';
@@ -48,6 +47,7 @@ import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
 import { AccessLevel } from '../../db/users';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 // Minimal buffers with correct magic bytes for each format
 const WEBM_BUF = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00, 0x00, 0x00, 0x00]);
@@ -63,15 +63,9 @@ const MOCK_STREAMER = {
   discord_id: USER.discordId,
 };
 
+/** Builds a supertest-ready app: the overlay admin mutations router with a stubbed session (no render stub — these routes redirect). */
 function buildApp(sessionUser: SessionUser = USER) {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, res: any, next: any) => {
-    req.session = { user: sessionUser };
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
 }
 
 beforeEach(() => {

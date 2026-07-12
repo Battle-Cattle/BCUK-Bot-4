@@ -8,20 +8,14 @@ vi.mock('../../db', () => ({
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './companionAuth';
 import { authLimiter } from '../rateLimits';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
+/** Builds a supertest-ready app: the companion auth router with a JSON body parser and an empty (no-user) session. */
 function buildApp() {
-  const app = express();
-  app.use(express.json());
-  app.use((req: any, _res: any, next: any) => {
-    req.session = {};
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'json', session: {} });
 }
 
 // authLimiter is a process-wide singleton (shared with /auth's routes), so reset its

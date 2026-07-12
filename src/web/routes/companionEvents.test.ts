@@ -22,14 +22,13 @@ vi.mock('../middleware', () => ({
   },
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router, { pushCompanionEvent, MAX_SSE_CONNECTIONS_PER_TOKEN, connections, type CompanionEvent } from './companionEvents';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
+/** Builds a supertest-ready app: the companion events router with no body parser or session stub (auth is driven via a test header, see requireCompanionKey mock above). */
 function buildApp() {
-  const app = express();
-  app.use(router);
-  return app;
+  return buildTestApp({ router });
 }
 
 const sampleEvent: CompanionEvent = {

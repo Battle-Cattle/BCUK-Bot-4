@@ -38,7 +38,6 @@ vi.mock('./shared', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './api';
 import { getStatus } from '../../shared/statusStore';
@@ -46,19 +45,13 @@ import { connect, disconnect, getCurrentChannelId } from '../../audio/audioPlaye
 import { getDiscordClient } from '../../discord/discordBot';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { getGuildById } from '../../db';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';
 
-// Injects a session with the current guild so the guild-scoped voice routes resolve.
+/** Builds a supertest-ready app: the API router with a session injecting the current guild so the guild-scoped voice routes resolve. */
 function buildApp(currentGuildId: string | null = GUILD_ID) {
-  const app = express();
-  app.use(express.json());
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: { discordId: 'u1', currentGuildId } };
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'json', sessionUser: { discordId: 'u1', currentGuildId } });
 }
 
 beforeEach(() => {

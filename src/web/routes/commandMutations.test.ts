@@ -25,7 +25,6 @@ vi.mock('../csrf', () => ({ csrfProtection: (_req: any, _res: any, next: any) =>
 vi.mock('../middleware', () => ({ requireMod: (_req: any, _res: any, next: any) => next() }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './commandMutations';
 import {
@@ -35,12 +34,11 @@ import {
   isMysqlDuplicateEntryError,
 } from '../../db';
 import { AccessLevel } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
+/** Builds a supertest-ready app: the command mutations router with a urlencoded body parser (no session or render stub needed). */
 function buildApp() {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded' });
 }
 
 const VALID_DISCORD_ID = '123456789012345678';

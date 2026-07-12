@@ -5,11 +5,11 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
 import { recordPricingHistory, getPricingHistory } from './rewardPricingHistory';
+import { makeMockPool } from '../test-utils/mockMysqlPool';
 
+/** Builds a fake mysql pool whose `execute`/`query` resolve to the given rows/meta. */
 function makePool(rows: unknown[] = [], meta: unknown = {}) {
-  return {
-    execute: vi.fn().mockResolvedValue([[...rows], meta]),
-  };
+  return makeMockPool({ rows, meta });
 }
 
 beforeEach(() => {

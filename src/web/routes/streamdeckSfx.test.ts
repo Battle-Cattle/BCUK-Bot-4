@@ -44,7 +44,6 @@ vi.mock('../../discord/voicePresence', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './streamdeckSfx';
 import { findTrigger, findSoundFiles, getAllSfxTriggers, isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
@@ -53,6 +52,7 @@ import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
 import { getDiscordClient } from '../../discord/discordBot';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const TRIGGER: SfxTrigger = {
   id: BigInt(1),
@@ -71,11 +71,9 @@ function makeClient() {
   return { channels: { fetch: vi.fn() } } as any;
 }
 
+/** Builds a supertest-ready app: the streamdeck-SFX router with a JSON body parser and no session stub (routes are key-authenticated). */
 function buildApp() {
-  const app = express();
-  app.use(express.json());
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'json' });
 }
 
 beforeEach(() => {
