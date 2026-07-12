@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
+import { buildInClausePlaceholders } from './commandStringUtils';
 
 /** One recorded price/demand point for a reward, at a point in time. */
 export interface RewardPricingHistoryPoint {
@@ -61,4 +62,39 @@ export async function getPricingHistory(rewardPricingId: number, sinceMs: number
     cost: r.cost,
     demand: Number(r.demand),
   }));
+}
+
+/**
+ * Returns recorded price/demand points for multiple rewards at or after `sinceMs` in a
+ * single query, grouped by `reward_pricing_id` (oldest first within each group). Used by
+ * the Channel Points admin page to chart every reward's history without one query per
+ * reward.
+ *
+ * @param rewardPricingIds - Primary keys of the `reward_pricing` rows to fetch history for.
+ * @param sinceMs - Epoch ms lower bound (inclusive) for returned points.
+ * @returns A map from `reward_pricing_id` to its points; ids with no points are absent.
+ */
+export async function getPricingHistoryForRewards(
+  rewardPricingIds: number[],
+  sinceMs: number,
+): Promise<Map<number, RewardPricingHistoryPoint[]>> {
+  const byRewardId = new Map<number, RewardPricingHistoryPoint[]>();
+  if (rewardPricingIds.length === 0) return byRewardId;
+
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT reward_pricing_id, recorded_at, cost, demand FROM reward_pricing_history
+     WHERE reward_pricing_id IN (${buildInClausePlaceholders(rewardPricingIds.length)}) AND recorded_at >= ?
+     ORDER BY reward_pricing_id, recorded_at ASC`,
+    [...rewardPricingIds, sinceMs],
+  );
+
+  for (const r of rows) {
+    const rewardPricingId = r.reward_pricing_id as number;
+    const point: RewardPricingHistoryPoint = { recorded_at: String(r.recorded_at), cost: r.cost, demand: Number(r.demand) };
+    const existing = byRewardId.get(rewardPricingId);
+    if (existing) existing.push(point);
+    else byRewardId.set(rewardPricingId, [point]);
+  }
+
+  return byRewardId;
 }

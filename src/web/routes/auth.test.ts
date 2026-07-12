@@ -12,7 +12,7 @@ vi.mock('../../db', () => ({
   updateDiscordName: vi.fn().mockResolvedValue(undefined),
   getAllGuilds: vi.fn().mockResolvedValue([]),
   getGuildsForMember: vi.fn().mockResolvedValue([]),
-  getEffectiveAccessLevel: vi.fn().mockResolvedValue(0),
+  getEffectiveAccessLevelForUser: vi.fn().mockResolvedValue(0),
   createCode: vi.fn().mockResolvedValue('plain-auth-code'),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
@@ -35,7 +35,7 @@ import {
   updateDiscordName,
   getAllGuilds,
   getGuildsForMember,
-  getEffectiveAccessLevel,
+  getEffectiveAccessLevelForUser,
   createCode,
   AccessLevel,
 } from '../../db';
@@ -81,7 +81,7 @@ beforeEach(() => {
   vi.mocked(fetchMemberDisplayName).mockResolvedValue(null);
   vi.mocked(getAllGuilds).mockResolvedValue([]);
   vi.mocked(getGuildsForMember).mockResolvedValue([]);
-  vi.mocked(getEffectiveAccessLevel).mockResolvedValue(0);
+  vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(0);
   vi.mocked(createCode).mockResolvedValue('plain-auth-code');
 });
 
@@ -211,7 +211,7 @@ describe('GET /discord/callback', () => {
     ]);
     vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER, is_owner: false } as any);
     vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: '555', name: 'Guild', voice_channel_id: null }] as any);
-    vi.mocked(getEffectiveAccessLevel).mockResolvedValue(AccessLevel.MOD);
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.MOD);
 
     let capturedSession: any;
     const app = buildApp(

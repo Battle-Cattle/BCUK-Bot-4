@@ -201,6 +201,28 @@ describe('applyDecayTick', () => {
     // decay(0.5, ~300s elapsed, half_life=1800s) = 0.5 * 2^(-300/1800)
     expect(demandArg).toBeCloseTo(0.5 * Math.pow(2, -300 / 1800), 2);
   });
+
+  it('fetches settings itself when no settingsHint is passed', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0.5, last_pushed_cost: null }));
+    await applyDecayTick(1, 'rwd1');
+    expect(getPricingSettingsForStreamer).toHaveBeenCalledWith(1);
+  });
+
+  it('uses the provided settingsHint instead of fetching settings', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({
+      demand: 0.5,
+      demand_updated_at: String(Date.now() - 300_000),
+      last_pushed_cost: null,
+    }));
+    const hintSettings = { half_life_seconds: 60, time_to_max_multiplier: 2 };
+
+    await applyDecayTick(1, 'rwd1', hintSettings);
+
+    expect(getPricingSettingsForStreamer).not.toHaveBeenCalled();
+    const [, , demandArg] = vi.mocked(recordPricingUpdate).mock.calls[0];
+    // decay(0.5, ~300s elapsed, half_life=60s from the hint, not the default 1800s) ≈ 0
+    expect(demandArg).toBeCloseTo(0.5 * Math.pow(2, -300 / 60), 4);
+  });
 });
 
 describe('round_to_nearest', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { SfxTrigger, SfxFile } from '../../db';
+import type { SfxTrigger, SfxFile, SfxLookupResult } from '../../db';
 import { mockLogger } from '../../test-utils/loggerMock';
 
 const API_KEY_OWNER = 'user-1';
@@ -12,8 +12,7 @@ vi.mock('../middleware', () => ({
 }));
 
 vi.mock('../../db', () => ({
-  findTrigger: vi.fn(),
-  findSoundFiles: vi.fn(),
+  findCachedSfxTrigger: vi.fn(),
   getAllSfxTriggers: vi.fn(),
   isKeyApprovedForGuild: vi.fn(),
   getApprovedGuildIdsForKey: vi.fn(),
@@ -46,7 +45,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import supertest from 'supertest';
 import router from './streamdeckSfx';
-import { findTrigger, findSoundFiles, getAllSfxTriggers, isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
+import { findCachedSfxTrigger, getAllSfxTriggers, isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
@@ -66,6 +65,8 @@ const FILES: SfxFile[] = [
   { id: 1, trigger_id: BigInt(1), file: 'ding.mp3', trigger_command: null, weight: 1, hidden: false, category_id: null },
 ];
 
+const LOOKUP: SfxLookupResult = { trigger: TRIGGER, files: FILES };
+
 /** Fake Discord client; channel lookups aren't exercised by SFX routes. */
 function makeClient() {
   return { channels: { fetch: vi.fn() } } as any;
@@ -79,8 +80,7 @@ function buildApp() {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getAllSfxTriggers).mockResolvedValue([]);
-  vi.mocked(findTrigger).mockResolvedValue(null);
-  vi.mocked(findSoundFiles).mockResolvedValue([]);
+  vi.mocked(findCachedSfxTrigger).mockResolvedValue(null);
   vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
   vi.mocked(getDiscordClient).mockReturnValue(makeClient());
   vi.mocked(getActiveGuildForUser).mockReturnValue('guild-123');
@@ -90,8 +90,7 @@ beforeEach(() => {
 
 describe('POST /sfx', () => {
   it('calls playFile with the bare filename and the presence-resolved guild', async () => {
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
     vi.mocked(pickWeightedRandom).mockReturnValue('only1_v2.mp3');
 
     await supertest(buildApp())
@@ -104,8 +103,7 @@ describe('POST /sfx', () => {
   });
 
   it('returns 200 and the filename on success', async () => {
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
     vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
 
     const res = await supertest(buildApp())
@@ -118,15 +116,14 @@ describe('POST /sfx', () => {
   });
 
   it('normalises the command to lowercase before lookup', async () => {
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
 
     await supertest(buildApp())
       .post('/sfx')
       .send({ command: '!DING' })
       .expect(200);
 
-    expect(vi.mocked(findTrigger)).toHaveBeenCalledWith('!ding');
+    expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledWith('!ding');
   });
 
   it('returns 400 when command field is missing', async () => {
@@ -168,7 +165,7 @@ describe('POST /sfx', () => {
   });
 
   it('returns 404 when trigger is not found', async () => {
-    vi.mocked(findTrigger).mockResolvedValue(null);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(null);
 
     const res = await supertest(buildApp())
       .post('/sfx')
@@ -179,8 +176,7 @@ describe('POST /sfx', () => {
   });
 
   it('returns 404 when trigger has no sound files', async () => {
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue([]);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue({ trigger: TRIGGER, files: [] });
 
     const res = await supertest(buildApp())
       .post('/sfx')
@@ -192,8 +188,7 @@ describe('POST /sfx', () => {
   });
 
   it('returns 503 when bot is not connected to a voice channel', async () => {
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
     vi.mocked(playFile).mockImplementation(() => { throw new VoiceNotConnectedError(); });
 
     const res = await supertest(buildApp())
@@ -205,8 +200,7 @@ describe('POST /sfx', () => {
   });
 
   it('returns 500 when playFile throws an unexpected error', async () => {
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
     vi.mocked(playFile).mockImplementation(() => { throw new Error('FFMPEG crashed'); });
 
     const res = await supertest(buildApp())
@@ -217,20 +211,8 @@ describe('POST /sfx', () => {
     expect(res.body).toMatchObject({ ok: false });
   });
 
-  it('returns 500 on DB error looking up trigger', async () => {
-    vi.mocked(findTrigger).mockRejectedValue(new Error('DB gone'));
-
-    const res = await supertest(buildApp())
-      .post('/sfx')
-      .send({ command: '!ding' })
-      .expect(500);
-
-    expect(res.body).toMatchObject({ ok: false });
-  });
-
-  it('returns 500 on DB error fetching sound files', async () => {
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockRejectedValue(new Error('DB gone'));
+  it('returns 500 on DB error looking up the cached trigger', async () => {
+    vi.mocked(findCachedSfxTrigger).mockRejectedValue(new Error('DB gone'));
 
     const res = await supertest(buildApp())
       .post('/sfx')

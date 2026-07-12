@@ -3,7 +3,7 @@ import { mockLogger } from '../../test-utils/loggerMock';
 import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
-  getEffectiveAccessLevel: vi.fn().mockResolvedValue(0),
+  getEffectiveAccessLevelForUser: vi.fn().mockResolvedValue(0),
   getAllGuilds: vi.fn(),
   getGuildsForMember: vi.fn(),
   findUser: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 import express from 'express';
 import supertest from 'supertest';
 import router from './guild';
-import { findUser, getAllGuilds, getEffectiveAccessLevel, getGuildsForMember } from '../../db';
+import { findUser, getAllGuilds, getEffectiveAccessLevelForUser, getGuildsForMember } from '../../db';
 import { AccessLevel } from '../../db/users';
 
 const TWO_GUILDS = [
@@ -53,7 +53,7 @@ function buildApp(sessionUser: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getEffectiveAccessLevel).mockResolvedValue(AccessLevel.USER);
+  vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.USER);
   vi.mocked(getGuildsForMember).mockResolvedValue(TWO_DB_GUILDS as any);
   vi.mocked(getAllGuilds).mockResolvedValue(TWO_DB_GUILDS as any);
   vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
@@ -78,7 +78,7 @@ describe('GET /guild/select', () => {
 
 describe('POST /guild/select', () => {
   it('selects a guild the user belongs to and recomputes the access level', async () => {
-    vi.mocked(getEffectiveAccessLevel).mockResolvedValue(AccessLevel.MANAGER);
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.MANAGER);
     const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
     const app = express();
     app.use(express.urlencoded({ extended: false }));
@@ -98,7 +98,7 @@ describe('POST /guild/select', () => {
     expect(res.headers.location).toBe('/');
     expect(user.currentGuildId).toBe('100000000000000002');
     expect(user.accessLevel).toBe(AccessLevel.MANAGER);
-    expect(vi.mocked(getEffectiveAccessLevel)).toHaveBeenCalledWith('100000000000000002', 'u1');
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).toHaveBeenCalledWith('100000000000000002', { discord_id: 'u1', is_owner: false });
   });
 
   it('rejects a guild the user does not belong to (cross-guild IDOR guard)', async () => {
@@ -120,7 +120,7 @@ describe('POST /guild/select', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/guild/select');
     expect(user.currentGuildId).toBeNull();
-    expect(vi.mocked(getEffectiveAccessLevel)).not.toHaveBeenCalled();
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
 
   it('rejects a guild present in the stale session list but no longer returned by getGuildsForMember', async () => {
@@ -145,7 +145,7 @@ describe('POST /guild/select', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/guild/select');
     expect(user.currentGuildId).toBeNull();
-    expect(vi.mocked(getEffectiveAccessLevel)).not.toHaveBeenCalled();
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
 
   it('uses getAllGuilds (not getGuildsForMember) when the user is the bot owner', async () => {
@@ -240,7 +240,7 @@ describe('POST /guild/select', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/auth/login');
     expect(user.currentGuildId).toBeNull();
-    expect(vi.mocked(getEffectiveAccessLevel)).not.toHaveBeenCalled();
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
 
   it('redirects to login when the session user no longer exists in the database', async () => {
@@ -262,7 +262,7 @@ describe('POST /guild/select', () => {
 
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/auth/login');
-    expect(vi.mocked(getEffectiveAccessLevel)).not.toHaveBeenCalled();
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
 
   it('rejects a malformed guild ID', async () => {
@@ -283,11 +283,11 @@ describe('POST /guild/select', () => {
 
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/guild/select');
-    expect(vi.mocked(getEffectiveAccessLevel)).not.toHaveBeenCalled();
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
 
   it('redirects to the picker and does not mutate the session when an unexpected error occurs', async () => {
-    vi.mocked(getEffectiveAccessLevel).mockRejectedValue(new Error('DB unavailable'));
+    vi.mocked(getEffectiveAccessLevelForUser).mockRejectedValue(new Error('DB unavailable'));
     const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
     const app = buildApp(user);
 

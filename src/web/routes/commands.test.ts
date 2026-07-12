@@ -19,6 +19,7 @@ vi.mock('../../db', () => {
     assignUserToCommand: vi.fn().mockResolvedValue(undefined),
     unassignUserFromCommand: vi.fn().mockResolvedValue(undefined),
     findUser: vi.fn().mockResolvedValue(null),
+    findUsersByIds: vi.fn().mockResolvedValue(new Map()),
     upsertOverride: vi.fn().mockResolvedValue(undefined),
     removeOverride: vi.fn().mockResolvedValue(undefined),
     CommandConflictError,
@@ -59,6 +60,7 @@ import {
   assignUserToCommand,
   unassignUserFromCommand,
   findUser,
+  findUsersByIds,
   getAllCustomCommandsWithAssignments,
   getAllUsers,
   getOverridesForGuild,
@@ -91,6 +93,7 @@ beforeEach(() => {
   vi.mocked(assignUserToCommand).mockResolvedValue(undefined);
   vi.mocked(unassignUserFromCommand).mockResolvedValue(undefined);
   vi.mocked(findUser).mockResolvedValue(null);
+  vi.mocked(findUsersByIds).mockResolvedValue(new Map());
   vi.mocked(isMysqlDuplicateEntryError).mockReturnValue(false);
 });
 
@@ -154,7 +157,9 @@ describe('POST /commands/add', () => {
   });
 
   it('7. skips assignment and redirects /commands when user has no twitch_name', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '123456789012345678', twitch_name: null } as any);
+    vi.mocked(findUsersByIds).mockResolvedValue(new Map([
+      ['123456789012345678', { discord_id: '123456789012345678', twitch_name: null } as any],
+    ]));
     const res = await supertest(buildApp())
       .post('/commands/add')
       .type('form')
@@ -165,7 +170,9 @@ describe('POST /commands/add', () => {
   });
 
   it('8. calls assignUserToCommand and redirects /commands when user has twitch_name', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '123456789012345678', twitch_name: 'streamer' } as any);
+    vi.mocked(findUsersByIds).mockResolvedValue(new Map([
+      ['123456789012345678', { discord_id: '123456789012345678', twitch_name: 'streamer' } as any],
+    ]));
     const res = await supertest(buildApp())
       .post('/commands/add')
       .type('form')
@@ -396,7 +403,9 @@ describe('POST /commands/add — additional coverage', () => {
   });
 
   it('28. redirects ?error=command_taken when assignUserToCommand throws CommandConflictError during add', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '123456789012345678', twitch_name: 'streamer' } as any);
+    vi.mocked(findUsersByIds).mockResolvedValue(new Map([
+      ['123456789012345678', { discord_id: '123456789012345678', twitch_name: 'streamer' } as any],
+    ]));
     vi.mocked(assignUserToCommand).mockRejectedValue(new CommandConflictError(['conflict']));
     const res = await supertest(buildApp())
       .post('/commands/add')
@@ -407,7 +416,9 @@ describe('POST /commands/add — additional coverage', () => {
   });
 
   it('29. redirects ?error=assign_failed when assignUserToCommand throws generic error during add', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '123456789012345678', twitch_name: 'streamer' } as any);
+    vi.mocked(findUsersByIds).mockResolvedValue(new Map([
+      ['123456789012345678', { discord_id: '123456789012345678', twitch_name: 'streamer' } as any],
+    ]));
     vi.mocked(assignUserToCommand).mockRejectedValue(new Error('db error'));
     const res = await supertest(buildApp())
       .post('/commands/add')
@@ -605,9 +616,10 @@ describe('GET /commands', () => {
 
 describe('POST /commands/add — array discord_ids', () => {
   it('38. handles multiple discord_ids sent as an array and assigns each valid user', async () => {
-    vi.mocked(findUser)
-      .mockResolvedValueOnce({ discord_id: '111111111111111111', twitch_name: 'user1' } as any)
-      .mockResolvedValueOnce({ discord_id: '222222222222222222', twitch_name: 'user2' } as any);
+    vi.mocked(findUsersByIds).mockResolvedValue(new Map([
+      ['111111111111111111', { discord_id: '111111111111111111', twitch_name: 'user1' } as any],
+      ['222222222222222222', { discord_id: '222222222222222222', twitch_name: 'user2' } as any],
+    ]));
     const res = await supertest(buildApp())
       .post('/commands/add')
       .type('form')

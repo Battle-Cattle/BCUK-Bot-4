@@ -7,7 +7,7 @@ import {
   findDiscordIdByTokenHash,
   findUser,
   getAllGuilds,
-  getEffectiveAccessLevel,
+  getEffectiveAccessLevelForUser,
   getGuildsForMember,
 } from '../db';
 import { renderView } from './routes/shared';
@@ -78,7 +78,7 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
     }
   }
 
-  user.accessLevel = (await getEffectiveAccessLevel(user.currentGuildId, user.discordId)) as (typeof AccessLevel)[keyof typeof AccessLevel];
+  user.accessLevel = (await getEffectiveAccessLevelForUser(user.currentGuildId, dbUser)) as (typeof AccessLevel)[keyof typeof AccessLevel];
 
   next();
 }

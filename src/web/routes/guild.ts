@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { AccessLevel, findUser, getAllGuilds, getEffectiveAccessLevel, getGuildsForMember } from '../../db';
+import { AccessLevel, findUser, getAllGuilds, getEffectiveAccessLevelForUser, getGuildsForMember } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { normalizeDiscordId, renderView } from './shared';
@@ -64,7 +64,7 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
     if (!liveGuilds.some((g) => g.guild_id === requestedGuildId)) {
       return res.redirect('/guild/select');
     }
-    const accessLevel = (await getEffectiveAccessLevel(requestedGuildId, user.discordId)) as (typeof AccessLevel)[keyof typeof AccessLevel];
+    const accessLevel = (await getEffectiveAccessLevelForUser(requestedGuildId, dbUser)) as (typeof AccessLevel)[keyof typeof AccessLevel];
     user.currentGuildId = requestedGuildId;
     user.accessLevel = accessLevel;
   } catch (err) {

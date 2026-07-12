@@ -6,7 +6,7 @@ import {
   CommandConflictError,
   CommandNotFoundError,
   isMysqlDuplicateEntryError,
-  findUser,
+  findUsersByIds,
   removeCustomCommand,
   updateCustomCommand,
 } from '../../db';
@@ -31,21 +31,22 @@ const COMMAND_WRITE_ERROR_OPTIONS = { basePath: '/commands', conflictErrorCode: 
  *  to avoid leaving it in a partially-assigned state.  Returns an error code, or
  *  null on success. */
 async function assignUsersToNewCommand(commandId: number, discordIds: string[]): Promise<string | null> {
-  for (const discordId of discordIds) {
-    try {
-      const user = await findUser(discordId);
+  try {
+    const users = await findUsersByIds(discordIds);
+    for (const discordId of discordIds) {
+      const user = users.get(discordId);
       if (!user || !user.twitch_name) continue;
       await assignUserToCommand(commandId, discordId);
-    } catch (err) {
-      try {
-        await removeCustomCommand(commandId);
-      } catch (cleanupErr) {
-        log.error('Cleanup after failed assign error:', cleanupErr);
-      }
-      if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) return 'command_taken';
-      log.error('Assign user during command creation error:', err);
-      return 'assign_failed';
     }
+  } catch (err) {
+    try {
+      await removeCustomCommand(commandId);
+    } catch (cleanupErr) {
+      log.error('Cleanup after failed assign error:', cleanupErr);
+    }
+    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) return 'command_taken';
+    log.error('Assign user during command creation error:', err);
+    return 'assign_failed';
   }
   return null;
 }

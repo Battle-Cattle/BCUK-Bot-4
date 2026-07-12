@@ -4,7 +4,7 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
-import { getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistory } from '../../db';
+import { getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards } from '../../db';
 import type { RewardPricingRow, StreamerPricingSettings } from '../../db';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
@@ -144,8 +144,11 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     const rangeEndMs = Date.now();
     const rangeStartMs = rangeEndMs - historyHours * 60 * 60 * 1000;
 
-    async function buildHistoryChart(config: RewardPricingRow): Promise<string> {
-      const points = await getPricingHistory(config.id, rangeStartMs);
+    // One query for every config's history instead of one query per config.
+    const historyByRewardId = await getPricingHistoryForRewards(pricingConfigs.map((c) => c.id), rangeStartMs);
+
+    function buildHistoryChart(config: RewardPricingRow): string {
+      const points = historyByRewardId.get(config.id) ?? [];
       return renderPriceHistoryChart(points.map((p) => ({ t: Number(p.recorded_at), cost: p.cost })), rangeStartMs, rangeEndMs);
     }
 
@@ -159,33 +162,31 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     const configByRewardId = new Map(pricingConfigs.map((c) => [c.twitch_reward_id, c]));
     const matchedRewardIds = new Set(twitchRewards.map((tr) => tr.id));
 
-    const rewards: ChannelPointRewardRow[] = await Promise.all(twitchRewards.map(async (tr) => {
+    const rewards: ChannelPointRewardRow[] = twitchRewards.map((tr) => {
       const config = configByRewardId.get(tr.id) ?? null;
       return {
         rewardId: tr.id,
         twitchReward: tr,
         config,
         previewPrice: config ? previewPriceFor(config) : null,
-        historyChartSafeHtml: config ? await buildHistoryChart(config) : null,
+        historyChartSafeHtml: config ? buildHistoryChart(config) : null,
         ...(config ? buildSimulation(config) : { simulationChartSafeHtml: null, simulationSummary: null }),
       };
-    }));
+    });
 
     // Configs whose reward no longer appears on Twitch (deleted, or the streamer's token
     // lacks the scope to list it) still get processed by the decay scheduler — surface them
     // as "unlinked" rows so they aren't invisible/unmanageable from this page.
-    const unlinkedRows = await Promise.all(
-      pricingConfigs
-        .filter((config) => !matchedRewardIds.has(config.twitch_reward_id))
-        .map(async (config) => ({
-          rewardId: config.twitch_reward_id,
-          twitchReward: null,
-          config,
-          previewPrice: previewPriceFor(config),
-          historyChartSafeHtml: await buildHistoryChart(config),
-          ...buildSimulation(config),
-        })),
-    );
+    const unlinkedRows = pricingConfigs
+      .filter((config) => !matchedRewardIds.has(config.twitch_reward_id))
+      .map((config) => ({
+        rewardId: config.twitch_reward_id,
+        twitchReward: null,
+        config,
+        previewPrice: previewPriceFor(config),
+        historyChartSafeHtml: buildHistoryChart(config),
+        ...buildSimulation(config),
+      }));
     rewards.push(...unlinkedRows);
 
     renderView(res, 'channelPointsAdmin', {

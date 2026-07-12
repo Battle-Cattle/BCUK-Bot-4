@@ -88,8 +88,7 @@ async function main(): Promise<void> {
 
   setChannelJoinedHook(() => reloadEventSubSubscriptions());
   startDiscordBot();
-  await startTwitchBot();
-  await startTikTokBot();
+  await Promise.all([startTwitchBot(), startTikTokBot()]);
   startWebPanel();
   startCounterScheduler();
   startRewardPricingScheduler();

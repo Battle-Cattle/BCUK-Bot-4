@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
-import { AccessLevel, findUser } from './users';
+import { AccessLevel, findUser, type DbUser } from './users';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -93,13 +93,31 @@ export async function removeGuildMember(guildId: string, discordId: string): Pro
 // ─── Effective access-level resolution ─────────────────────────────────────────
 
 /**
- * Resolves a user's effective access level within a guild.
+ * Resolves an already-fetched user's effective access level within a guild.
  *
- * Resolution order (PR 3): a non-whitelisted user is User (0); a bot owner
- * (`user.is_owner`) is Admin everywhere regardless of membership; otherwise the
- * level comes from the user's `guild_member` row for that guild, defaulting to
- * User (0) when they have no membership there. The web panel writes `guild_member`
- * for the current guild, so this is the single source of truth for authorization.
+ * Resolution order (PR 3): a bot owner (`user.is_owner`) is Admin everywhere
+ * regardless of membership; otherwise the level comes from the user's
+ * `guild_member` row for that guild, defaulting to User (0) when they have no
+ * membership there. The web panel writes `guild_member` for the current guild,
+ * so this is the single source of truth for authorization.
+ *
+ * Use this instead of {@link getEffectiveAccessLevel} when the caller already has
+ * a fresh `DbUser` in hand (e.g. from its own `findUser` call moments earlier),
+ * to avoid re-querying the same row.
+ *
+ * @param guildId Guild snowflake as a string.
+ * @param user The user to resolve an access level for.
+ * @returns The user's access level (0–3) for the guild.
+ */
+export async function getEffectiveAccessLevelForUser(guildId: string, user: DbUser): Promise<number> {
+  if (user.is_owner) return AccessLevel.ADMIN;
+  return (await getMemberAccessLevel(guildId, user.discord_id)) ?? AccessLevel.USER;
+}
+
+/**
+ * Resolves a user's effective access level within a guild. A non-whitelisted user
+ * (no `user` row) is User (0) — see {@link getEffectiveAccessLevelForUser} for the
+ * resolution rules once a user row exists.
  *
  * @param guildId Guild snowflake as a string.
  * @param discordId User snowflake as a string.
@@ -108,6 +126,5 @@ export async function removeGuildMember(guildId: string, discordId: string): Pro
 export async function getEffectiveAccessLevel(guildId: string, discordId: string): Promise<number> {
   const user = await findUser(discordId);
   if (!user) return AccessLevel.USER;
-  if (user.is_owner) return AccessLevel.ADMIN;
-  return (await getMemberAccessLevel(guildId, discordId)) ?? AccessLevel.USER;
+  return getEffectiveAccessLevelForUser(guildId, user);
 }
