@@ -15,7 +15,7 @@ export type { DbGuild } from './db/guilds';
 
 export {
   getGuildMembers, getMemberAccessLevel, setMemberAccessLevel,
-  removeGuildMember, getEffectiveAccessLevel,
+  removeGuildMember, getEffectiveAccessLevel, getEffectiveAccessLevelForUser,
 } from './db/guildMembers';
 export type { DbGuildMember } from './db/guildMembers';
 
@@ -61,7 +61,7 @@ export async function removeOverride(guildId: string, commandId: number): Promis
 
 export {
   AccessLevel, ACCESS_LEVEL_LABELS,
-  findUser, findUserByTwitchName, findOwnerUser, getAllUsers, getGuildMemberUsers,
+  findUser, findUsersByIds, findUserByTwitchName, findOwnerUser, getAllUsers, getGuildMemberUsers,
   updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers, updateAccessLevel,
 } from './db/users';
 export type { AccessLevelValue, DbUser, TwitchLinkedUser } from './db/users';
@@ -176,6 +176,8 @@ export {
   createSfxTrigger, updateSfxTrigger, deleteSfxTrigger,
   addSfxFile, updateSfxFile, deleteSfxFile,
 } from './db/sfx';
+export type { SfxLookupResult } from './db/sfxCache';
+export { findCachedSfxTrigger, invalidateSfxLookupCache } from './db/sfxCache';
 
 // ─── Overlay videos ─────────────────────────────────────────────────────────
 
@@ -197,7 +199,7 @@ export {
 } from './db/rewardPricing';
 
 export type { RewardPricingHistoryPoint } from './db/rewardPricingHistory';
-export { recordPricingHistory, getPricingHistory } from './db/rewardPricingHistory';
+export { recordPricingHistory, getPricingHistory, getPricingHistoryForRewards } from './db/rewardPricingHistory';
 
 // ─── Streamdeck API keys ─────────────────────────────────────────────────────
 

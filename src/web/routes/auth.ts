@@ -7,7 +7,7 @@ import {
   updateDiscordName,
   getAllGuilds,
   getGuildsForMember,
-  getEffectiveAccessLevel,
+  getEffectiveAccessLevelForUser,
   createCode,
   AccessLevel,
   type DbGuild,
@@ -163,7 +163,7 @@ router.get('/discord/callback', async (req, res) => {
     // by leaving currentGuildId null (accessLevel stays 0 until a guild is chosen).
     const currentGuildId = accessibleGuilds.length === 1 ? accessibleGuilds[0].guild_id : null;
     const accessLevel = currentGuildId
-      ? ((await getEffectiveAccessLevel(currentGuildId, profile.id)) as (typeof AccessLevel)[keyof typeof AccessLevel])
+      ? ((await getEffectiveAccessLevelForUser(currentGuildId, dbUser)) as (typeof AccessLevel)[keyof typeof AccessLevel])
       : AccessLevel.USER;
 
     // 5. Save to session — regenerate the session ID first to prevent session fixation.

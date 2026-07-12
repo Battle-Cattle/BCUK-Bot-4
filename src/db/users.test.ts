@@ -11,6 +11,7 @@ vi.mock('../twitch/twitchChannelName', () => ({
 import { getPool } from './pool';
 import {
   findUser,
+  findUsersByIds,
   findUserByTwitchName,
   findOwnerUser,
   getAllUsers,
@@ -92,6 +93,47 @@ describe('findUser', () => {
     const plainRow = { discord_id: '2', discord_name: 'User', is_twitch_bot_enabled: 0, twitch_name: null, access_level: 0, is_owner: 0 };
     vi.mocked(getPool).mockReturnValue(makePool([[plainRow]]) as any);
     expect((await findUser('2'))!.is_owner).toBe(false);
+  });
+});
+
+// ─── findUsersByIds ───────────────────────────────────────────────────────────
+
+describe('findUsersByIds', () => {
+  it('returns an empty map without querying when given an empty array', async () => {
+    const pool = makePool([[]]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await findUsersByIds([]);
+    expect(result.size).toBe(0);
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+
+  it('returns a map keyed by discord_id for all matching rows', async () => {
+    const rows = [
+      { discord_id: '1', discord_name: 'Alice', is_twitch_bot_enabled: 1, twitch_name: 'alice', access_level: 0 },
+      { discord_id: '2', discord_name: 'Bob', is_twitch_bot_enabled: 0, twitch_name: null, access_level: 1 },
+    ];
+    vi.mocked(getPool).mockReturnValue(makePool([rows]) as any);
+    const result = await findUsersByIds(['1', '2']);
+    expect(result.size).toBe(2);
+    expect(result.get('1')!.discord_name).toBe('Alice');
+    expect(result.get('2')!.is_twitch_bot_enabled).toBe(false);
+  });
+
+  it('omits ids with no matching row rather than including a null entry', async () => {
+    const rows = [{ discord_id: '1', discord_name: 'Alice', is_twitch_bot_enabled: 0, twitch_name: null, access_level: 0 }];
+    vi.mocked(getPool).mockReturnValue(makePool([rows]) as any);
+    const result = await findUsersByIds(['1', '999']);
+    expect(result.size).toBe(1);
+    expect(result.has('999')).toBe(false);
+  });
+
+  it('builds an IN clause with one placeholder per id', async () => {
+    const pool = makePool([[]]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await findUsersByIds(['1', '2', '3']);
+    const [sql, params] = vi.mocked(pool.execute).mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('discord_id IN (?, ?, ?)');
+    expect(params).toEqual(['1', '2', '3']);
   });
 });
 

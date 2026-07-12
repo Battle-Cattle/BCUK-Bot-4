@@ -3,6 +3,7 @@ import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import { getPool } from './pool';
 import { createLogger } from '../shared/logger';
 import { fromBit } from './utils';
+import { buildInClausePlaceholders } from './commandStringUtils';
 
 const log = createLogger('DB');
 
@@ -57,6 +58,24 @@ export async function findUser(discordId: string): Promise<DbUser | null> {
     [discordId],
   );
   return rows.length === 0 ? null : mapUser(rows[0]);
+}
+
+/**
+ * Look up multiple users by Discord ID in a single query. Discord IDs with no
+ * matching row are simply absent from the returned map.
+ * @param discordIds - Discord snowflakes to look up.
+ * @returns A map from Discord ID to user row, containing only the IDs that matched.
+ */
+export async function findUsersByIds(discordIds: string[]): Promise<Map<string, DbUser>> {
+  if (discordIds.length === 0) return new Map();
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT ${USER_SELECT} FROM \`user\` WHERE discord_id IN (${buildInClausePlaceholders(discordIds.length)})`,
+    discordIds,
+  );
+  return new Map(rows.map((r) => {
+    const user = mapUser(r);
+    return [user.discord_id, user] as const;
+  }));
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import path from 'path';
-import type { SfxTrigger, SfxFile } from '../db';
+import type { SfxTrigger, SfxFile, SfxLookupResult } from '../db';
 
 const SFX_ROOT = '/sfx';
 
@@ -10,8 +10,7 @@ vi.mock('../shared/config', () => ({
 }));
 
 vi.mock('../db', () => ({
-  findTrigger: vi.fn(),
-  findSoundFiles: vi.fn(),
+  findCachedSfxTrigger: vi.fn(),
 }));
 
 vi.mock('../audio/audioPlayer', () => ({
@@ -34,7 +33,7 @@ vi.mock('../shared/statusStore', () => ({
 }));
 
 import { handleCommand, forgetGuildCommandState } from './commandRouter';
-import { findTrigger, findSoundFiles } from '../db';
+import { findCachedSfxTrigger } from '../db';
 import { isPlaying } from '../audio/audioPlayer';
 import { playFile, VoiceNotConnectedError } from '../audio/sfxPlayer';
 import { pickWeightedRandom } from './soundSelector';
@@ -53,13 +52,14 @@ beforeEach(() => {
 
 const TRIGGER: SfxTrigger = { id: 42n, trigger_command: '!ding', category_id: null, hidden: false, description: null };
 const FILES: SfxFile[] = [{ id: 1, trigger_id: 42n, file: 'ding.mp3', trigger_command: null, weight: 1, hidden: false, category_id: null }];
+const LOOKUP: SfxLookupResult = { trigger: TRIGGER, files: FILES };
 const GUILD_A = 'guild-A';
 const GUILD_B = 'guild-B';
 
 describe('handleCommand', () => {
   it('does nothing for an unrecognised command', async () => {
     vi.mocked(isPlaying).mockReturnValue(false);
-    vi.mocked(findTrigger).mockResolvedValue(null);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(null);
 
     await handleCommand('!unknown', 'twitch', GUILD_A);
 
@@ -69,7 +69,7 @@ describe('handleCommand', () => {
   it('skips with a warning and does not look anything up when no guild is resolved', async () => {
     await handleCommand('!ding', 'twitch', null);
 
-    expect(vi.mocked(findTrigger)).not.toHaveBeenCalled();
+    expect(vi.mocked(findCachedSfxTrigger)).not.toHaveBeenCalled();
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
 
@@ -78,7 +78,7 @@ describe('handleCommand', () => {
 
     await handleCommand('!ding', 'twitch', GUILD_A);
 
-    expect(vi.mocked(findTrigger)).not.toHaveBeenCalled();
+    expect(vi.mocked(findCachedSfxTrigger)).not.toHaveBeenCalled();
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
     expect(vi.mocked(isPlaying)).toHaveBeenCalledWith(GUILD_A);
   });
@@ -86,8 +86,7 @@ describe('handleCommand', () => {
   it('ignores the command while the per-guild cooldown is active', async () => {
     // First call plays successfully and sets this guild's lastPlayedAt = mockNow
     vi.mocked(isPlaying).mockReturnValue(false);
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
     vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
 
     await handleCommand('!ding', 'twitch', GUILD_A);
@@ -99,14 +98,13 @@ describe('handleCommand', () => {
 
     await handleCommand('!ding', 'twitch', GUILD_A);
 
-    expect(vi.mocked(findTrigger)).not.toHaveBeenCalled();
+    expect(vi.mocked(findCachedSfxTrigger)).not.toHaveBeenCalled();
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
 
   it('does not apply one guild\'s cooldown to another guild', async () => {
     vi.mocked(isPlaying).mockReturnValue(false);
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
     vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
 
     await handleCommand('!ding', 'twitch', GUILD_A);
@@ -120,8 +118,7 @@ describe('handleCommand', () => {
 
   it('forgetGuildCommandState resets a guild\'s cooldown so a subsequent command fires immediately', async () => {
     vi.mocked(isPlaying).mockReturnValue(false);
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
     vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
 
     await handleCommand('!ding', 'twitch', GUILD_A);
@@ -140,13 +137,12 @@ describe('handleCommand', () => {
 
   it('plays the correct file and updates status for a known command', async () => {
     vi.mocked(isPlaying).mockReturnValue(false);
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
     vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
 
     await handleCommand('!ding discord', 'discord', GUILD_A);
 
-    expect(vi.mocked(findTrigger)).toHaveBeenCalledWith('!ding');
+    expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledWith('!ding');
     expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'ding.mp3'), GUILD_A);
     expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'ding.mp3', '!ding', 'discord');
   });
@@ -154,23 +150,22 @@ describe('handleCommand', () => {
   it('blocks a second concurrent call via the inFlight flag', async () => {
     vi.mocked(isPlaying).mockReturnValue(false);
 
-    // findTrigger resolves immediately for the first call, but the second call
+    // findCachedSfxTrigger resolves immediately for the first call, but the second call
     // arrives while the first is still awaiting — simulate by running both
     // handleCommand calls concurrently without awaiting the first.
-    let resolveFirst!: (value: typeof TRIGGER) => void;
-    const firstTriggerPromise = new Promise<typeof TRIGGER>((resolve) => { resolveFirst = resolve; });
-    vi.mocked(findTrigger).mockReturnValueOnce(firstTriggerPromise as ReturnType<typeof findTrigger>);
+    let resolveFirst!: (value: SfxLookupResult) => void;
+    const firstLookupPromise = new Promise<SfxLookupResult>((resolve) => { resolveFirst = resolve; });
+    vi.mocked(findCachedSfxTrigger).mockReturnValueOnce(firstLookupPromise as ReturnType<typeof findCachedSfxTrigger>);
 
     const first = handleCommand('!ding', 'twitch', GUILD_A);
 
-    // Second call arrives while first is suspended inside findTrigger
+    // Second call arrives while first is suspended inside findCachedSfxTrigger
     await handleCommand('!ding', 'twitch', GUILD_A);
-    expect(vi.mocked(findTrigger)).toHaveBeenCalledTimes(1); // second was blocked
+    expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledTimes(1); // second was blocked
 
     // Let the first call complete
-    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
     vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
-    resolveFirst(TRIGGER);
+    resolveFirst(LOOKUP);
     await first;
 
     expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
@@ -178,8 +173,7 @@ describe('handleCommand', () => {
 
   it('logs a warning and returns when a trigger has no associated sound files', async () => {
     vi.mocked(isPlaying).mockReturnValue(false);
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue([]);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue({ trigger: TRIGGER, files: [] });
 
     await handleCommand('!ding', 'twitch', GUILD_A);
 
@@ -188,8 +182,7 @@ describe('handleCommand', () => {
 
   it('logs an error for non-VoiceNotConnectedError playback failures', async () => {
     vi.mocked(isPlaying).mockReturnValue(false);
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
     vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
     vi.mocked(playFile).mockImplementation(() => { throw new Error('FFMPEG crashed'); });
 
@@ -205,8 +198,7 @@ describe('handleCommand', () => {
 
   it('does not log an error when not connected to a voice channel', async () => {
     vi.mocked(isPlaying).mockReturnValue(false);
-    vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-    vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
     vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
     vi.mocked(playFile).mockImplementation(() => { throw new VoiceNotConnectedError(); });
 
@@ -221,8 +213,7 @@ describe('handleCommand', () => {
   describe('path traversal security', () => {
     it('rejects path traversal with ../ sequences', async () => {
       vi.mocked(isPlaying).mockReturnValue(false);
-      vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-      vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+      vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
       vi.mocked(pickWeightedRandom).mockReturnValue('../../../etc/passwd');
 
       await handleCommand('!exploit', 'twitch', GUILD_A);
@@ -233,8 +224,7 @@ describe('handleCommand', () => {
 
     it('rejects path traversal with encoded ../ sequences', async () => {
       vi.mocked(isPlaying).mockReturnValue(false);
-      vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-      vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+      vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
       vi.mocked(pickWeightedRandom).mockReturnValue('..%2F..%2Fetc%2Fpasswd');
 
       await handleCommand('!exploit', 'twitch', GUILD_A);
@@ -245,8 +235,7 @@ describe('handleCommand', () => {
 
     it('rejects absolute paths', async () => {
       vi.mocked(isPlaying).mockReturnValue(false);
-      vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-      vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+      vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
       vi.mocked(pickWeightedRandom).mockReturnValue('/etc/passwd');
 
       await handleCommand('!exploit', 'twitch', GUILD_A);
@@ -257,10 +246,9 @@ describe('handleCommand', () => {
 
     it('allows valid filenames within the SFX folder', async () => {
       vi.mocked(isPlaying).mockReturnValue(false);
-      vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-      vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+      vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
       vi.mocked(pickWeightedRandom).mockReturnValue('valid-sound.mp3');
-      vi.mocked(playFile).mockImplementation(() => {}); // Reset to no-op
+      vi.mocked(playFile).mockResolvedValue(undefined); // Reset to no-op
 
       await handleCommand('!safe', 'twitch', GUILD_A);
 
@@ -270,10 +258,9 @@ describe('handleCommand', () => {
 
     it('allows valid filenames in subdirectories within the SFX folder', async () => {
       vi.mocked(isPlaying).mockReturnValue(false);
-      vi.mocked(findTrigger).mockResolvedValue(TRIGGER);
-      vi.mocked(findSoundFiles).mockResolvedValue(FILES);
+      vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
       vi.mocked(pickWeightedRandom).mockReturnValue('category/sound.mp3');
-      vi.mocked(playFile).mockImplementation(() => {}); // Reset to no-op
+      vi.mocked(playFile).mockResolvedValue(undefined); // Reset to no-op
 
       await handleCommand('!safe', 'twitch', GUILD_A);
 

@@ -1,6 +1,10 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 import { fromBit, affectedOrExists } from './utils';
+// sfxCache imports getAllSfxTriggers from this module; this module imports
+// invalidateSfxLookupCache from sfxCache. Both calls happen inside function
+// bodies, so CommonJS resolves the cycle correctly.
+import { invalidateSfxLookupCache } from './sfxCache';
 
 export interface SfxTrigger {
   id: bigint;
@@ -175,6 +179,7 @@ export async function createSfxTrigger(
      VALUES (?, ?, ?, ?)`,
     [command, categoryId, description, hidden ? 1 : 0],
   );
+  invalidateSfxLookupCache();
   return BigInt(result.insertId);
 }
 
@@ -204,13 +209,15 @@ export async function updateSfxTrigger(
      WHERE id = ?`,
     [command, categoryId, description, hidden ? 1 : 0, id.toString()],
   );
-  return affectedOrExists(result.affectedRows, async () => {
+  const updated = await affectedOrExists(result.affectedRows, async () => {
     const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
       `SELECT id FROM sfxtrigger WHERE id = ?`,
       [id.toString()],
     );
     return rows.length > 0;
   });
+  if (updated) invalidateSfxLookupCache();
+  return updated;
 }
 
 /**
@@ -230,7 +237,7 @@ export async function updateSfxTrigger(
 export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } | null> {
   class TriggerNotFound extends Error {}
   try {
-    return await withTransaction(async (conn) => {
+    const result = await withTransaction(async (conn) => {
       const [triggerRows] = await conn.execute<mysql.RowDataPacket[]>(
         `SELECT id FROM sfxtrigger WHERE id = ? FOR UPDATE`,
         [id.toString()],
@@ -247,6 +254,8 @@ export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } 
       await conn.execute(`DELETE FROM sfxtrigger WHERE id = ?`, [id.toString()]);
       return { files };
     });
+    invalidateSfxLookupCache();
+    return result;
   } catch (err) {
     if (err instanceof TriggerNotFound) return null;
     throw err;
@@ -270,6 +279,7 @@ export async function addSfxFile(
     `INSERT INTO sfx (trigger_id, file, weight, hidden) VALUES (?, ?, ?, ?)`,
     [triggerId.toString(), file, weight, hidden ? 1 : 0],
   );
+  invalidateSfxLookupCache();
   return result.insertId;
 }
 
@@ -289,10 +299,12 @@ export async function updateSfxFile(id: number, weight: number, hidden: boolean)
     `UPDATE sfx SET weight = ?, hidden = ? WHERE id = ?`,
     [weight, hidden ? 1 : 0, id],
   );
-  return affectedOrExists(result.affectedRows, async () => {
+  const updated = await affectedOrExists(result.affectedRows, async () => {
     const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT id FROM sfx WHERE id = ?`, [id]);
     return rows.length > 0;
   });
+  if (updated) invalidateSfxLookupCache();
+  return updated;
 }
 
 /**
@@ -308,7 +320,7 @@ export async function updateSfxFile(id: number, weight: number, hidden: boolean)
 export async function deleteSfxFile(id: number): Promise<string | null> {
   class FileNotFound extends Error {}
   try {
-    return await withTransaction(async (conn) => {
+    const file = await withTransaction(async (conn) => {
       const [rows] = await conn.execute<mysql.RowDataPacket[]>(
         `SELECT file FROM sfx WHERE id = ? FOR UPDATE`,
         [id],
@@ -323,6 +335,8 @@ export async function deleteSfxFile(id: number): Promise<string | null> {
       }
       return file;
     });
+    invalidateSfxLookupCache();
+    return file;
   } catch (err) {
     if (err instanceof FileNotFound) return null;
     throw err;

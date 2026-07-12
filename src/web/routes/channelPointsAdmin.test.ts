@@ -5,7 +5,7 @@ vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   getPricingConfigsForStreamer: vi.fn(),
   getPricingSettingsForStreamer: vi.fn(),
-  getPricingHistory: vi.fn(),
+  getPricingHistoryForRewards: vi.fn(),
 }));
 
 vi.mock('../csrf', () => ({
@@ -50,7 +50,7 @@ vi.mock('./channelPointsEvents', async () => {
 
 import supertest from 'supertest';
 import router from './channelPointsAdmin';
-import { getStreamerByDiscordId, getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistory } from '../../db';
+import { getStreamerByDiscordId, getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
@@ -78,7 +78,7 @@ beforeEach(() => {
   vi.mocked(getValidToken).mockResolvedValue('token');
   vi.mocked(hasAuthFailedSubs).mockReturnValue(false);
   vi.mocked(getPricingSettingsForStreamer).mockResolvedValue({ half_life_seconds: 1800, time_to_max_multiplier: 2 });
-  vi.mocked(getPricingHistory).mockResolvedValue([]);
+  vi.mocked(getPricingHistoryForRewards).mockResolvedValue(new Map());
 });
 
 describe('GET /', () => {
@@ -254,8 +254,8 @@ describe('GET /', () => {
       const after = Date.now();
 
       expect(res.body.historyHours).toBe(3);
-      expect(getPricingHistory).toHaveBeenCalledWith(1, expect.any(Number));
-      const sinceMs = vi.mocked(getPricingHistory).mock.calls[0][1];
+      expect(getPricingHistoryForRewards).toHaveBeenCalledWith([1], expect.any(Number));
+      const sinceMs = vi.mocked(getPricingHistoryForRewards).mock.calls[0][1];
       expect(sinceMs).toBeGreaterThanOrEqual(before - 3 * 60 * 60 * 1000);
       expect(sinceMs).toBeLessThanOrEqual(after - 3 * 60 * 60 * 1000);
     });
@@ -263,7 +263,7 @@ describe('GET /', () => {
     it('respects a valid hours query param', async () => {
       const res = await supertest(buildApp()).get('/?hours=6');
       expect(res.body.historyHours).toBe(6);
-      const sinceMs = vi.mocked(getPricingHistory).mock.calls[0][1];
+      const sinceMs = vi.mocked(getPricingHistoryForRewards).mock.calls[0][1];
       expect(Date.now() - sinceMs).toBeCloseTo(6 * 60 * 60 * 1000, -3);
     });
 
@@ -273,7 +273,7 @@ describe('GET /', () => {
     });
 
     it('renders a chart string for a reward with a config (with points, and without), and null without a config', async () => {
-      vi.mocked(getPricingHistory).mockResolvedValue([{ recorded_at: '1700000000000', cost: 300, demand: 0.5 }]);
+      vi.mocked(getPricingHistoryForRewards).mockResolvedValue(new Map([[1, [{ recorded_at: '1700000000000', cost: 300, demand: 0.5 }]]]));
       const res = await supertest(buildApp()).get('/');
       expect(typeof res.body.rewards[0].historyChartSafeHtml).toBe('string');
       expect(res.body.rewards[0].historyChartSafeHtml).toContain('<svg');
@@ -290,7 +290,7 @@ describe('GET /', () => {
 
     it('renders a chart for an unlinked (orphaned) reward too', async () => {
       vi.mocked(getCustomRewards).mockResolvedValue([]);
-      vi.mocked(getPricingHistory).mockResolvedValue([{ recorded_at: '1700000000000', cost: 300, demand: 0.5 }]);
+      vi.mocked(getPricingHistoryForRewards).mockResolvedValue(new Map([[1, [{ recorded_at: '1700000000000', cost: 300, demand: 0.5 }]]]));
       const res = await supertest(buildApp()).get('/');
       expect(res.body.rewards[0].twitchReward).toBeNull();
       expect(res.body.rewards[0].historyChartSafeHtml).toContain('<svg');

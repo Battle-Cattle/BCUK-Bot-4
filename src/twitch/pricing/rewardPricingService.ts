@@ -1,7 +1,7 @@
 import { createMutationQueue } from '../../shared/mutationQueue';
 import {
   getPricingForReward, recordPricingUpdate, recordPricingHistory, markPricingUnsupported, deletePricingConfig,
-  getPricingSettingsForStreamer, getStreamerById,
+  getPricingSettingsForStreamer, getStreamerById, type StreamerPricingSettings,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
@@ -123,12 +123,17 @@ async function pushRewardCostUpdate(
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
  * @param applyIncrement - True for a redemption (decay + increment); false for a decay-only tick.
+ * @param settingsHint - Optional pre-fetched settings, passed by the decay scheduler when it has
+ *   already loaded a streamer's settings once for this tick — avoids re-querying the same row for
+ *   every one of that streamer's enabled rewards. Fetched fresh when omitted.
  */
-async function syncRewardPrice(streamerId: number, twitchRewardId: string, applyIncrement: boolean): Promise<void> {
+async function syncRewardPrice(
+  streamerId: number, twitchRewardId: string, applyIncrement: boolean, settingsHint?: StreamerPricingSettings,
+): Promise<void> {
   const row = await getPricingForReward(streamerId, twitchRewardId);
   if (!row || !row.enabled) return;
 
-  const settings = await getPricingSettingsForStreamer(streamerId);
+  const settings = settingsHint ?? await getPricingSettingsForStreamer(streamerId);
   const now = Date.now();
   const elapsedSeconds = Math.max(0, (now - Number(row.demand_updated_at)) / 1000);
   const newDemand = applyIncrement
@@ -186,9 +191,10 @@ export async function applyRedemptionPricing(streamerId: number, twitchRewardId:
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
+ * @param settingsHint - Optional pre-fetched settings for this streamer; see {@link syncRewardPrice}.
  */
-export async function applyDecayTick(streamerId: number, twitchRewardId: string): Promise<void> {
-  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, false));
+export async function applyDecayTick(streamerId: number, twitchRewardId: string, settingsHint?: StreamerPricingSettings): Promise<void> {
+  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, false, settingsHint));
 }
 
 /**

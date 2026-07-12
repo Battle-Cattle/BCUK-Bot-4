@@ -40,7 +40,7 @@ function getRealSfxRoot(): string {
  * @param filePath - Sound file path, relative to the SFX folder.
  * @param guildId - Guild whose voice connection to play the file into.
  */
-export function playFile(filePath: string, guildId: string): void {
+export async function playFile(filePath: string, guildId: string): Promise<void> {
   if (!isConnected(guildId)) {
     throw new VoiceNotConnectedError();
   }
@@ -50,18 +50,22 @@ export function playFile(filePath: string, guildId: string): void {
     throw new Error(`Path traversal blocked: ${filePath} resolves outside SFX folder`);
   }
 
-  if (!fs.existsSync(candidatePath)) {
-    throw new Error(`Sound file not found: ${candidatePath}`);
+  let resolved: string;
+  try {
+    resolved = await fs.promises.realpath(candidatePath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`Sound file not found: ${candidatePath}`);
+    }
+    throw err;
   }
-
-  const resolved = fs.realpathSync(candidatePath);
 
   // Resolve symlinks and verify the final real path is still inside the SFX root.
   if (!safeResolve(getRealSfxRoot(), resolved)) {
     throw new Error(`Path traversal blocked: ${filePath} resolves outside SFX folder`);
   }
 
-  const fileStats = fs.statSync(resolved);
+  const fileStats = await fs.promises.stat(resolved);
   if (!fileStats.isFile()) {
     throw new Error(`Sound path is not a file: ${resolved}`);
   }

@@ -1,6 +1,6 @@
 import path from 'path';
 import { createLogger } from '../shared/logger';
-import { findTrigger, findSoundFiles } from '../db';
+import { findCachedSfxTrigger } from '../db';
 import { pickWeightedRandom } from './soundSelector';
 import { isPlaying } from '../audio/audioPlayer';
 import { playFile, VoiceNotConnectedError } from '../audio/sfxPlayer';
@@ -52,10 +52,9 @@ async function lookupAndPlay(
   guildId: string,
   state: GuildCommandState,
 ): Promise<void> {
-  const trigger = await findTrigger(command);
-  if (!trigger) return;
-
-  const files = await findSoundFiles(trigger.id);
+  const lookup = await findCachedSfxTrigger(command);
+  if (!lookup) return;
+  const { files } = lookup;
   if (files.length === 0) {
     log.warn(`[${source}] Trigger '${command}' has no sound files in DB`);
     return;
@@ -71,7 +70,7 @@ async function lookupAndPlay(
   log.info(`[${source}] Playing '${filename}' for trigger '${command}' in guild ${guildId}`);
 
   try {
-    playFile(fullPath, guildId);
+    await playFile(fullPath, guildId);
     state.lastPlayedAt = Date.now();
     setVoicePlaying(guildId, filename, command, source);
     recordCommandTestEntry({ source, command, response: filename, channel: null, user: null });

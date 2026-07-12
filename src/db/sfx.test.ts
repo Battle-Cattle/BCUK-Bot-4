@@ -25,6 +25,9 @@ vi.mock('./pool', () => {
   };
 });
 vi.mock('mysql2/promise', () => ({ default: {} }));
+vi.mock('./sfxCache', () => ({
+  invalidateSfxLookupCache: vi.fn(),
+}));
 
 import { getPool } from './pool';
 import {
@@ -33,6 +36,7 @@ import {
   createSfxTrigger, updateSfxTrigger, deleteSfxTrigger,
   addSfxFile, updateSfxFile, deleteSfxFile,
 } from './sfx';
+import { invalidateSfxLookupCache } from './sfxCache';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 /** Pool whose top-level execute returns row data (for SELECT queries). */
@@ -306,6 +310,13 @@ describe('createSfxTrigger', () => {
     await createSfxTrigger('!bang', null, null, false);
     expect(pool.execute.mock.calls[0][1]).toEqual(['!bang', null, null, 0]);
   });
+
+  it('calls invalidateSfxLookupCache on success', async () => {
+    const pool = makeResultPool({ insertId: 1 });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await createSfxTrigger('!bang', null, null, false);
+    expect(invalidateSfxLookupCache).toHaveBeenCalledOnce();
+  });
 });
 
 describe('updateSfxTrigger', () => {
@@ -324,6 +335,7 @@ describe('updateSfxTrigger', () => {
       .mockResolvedValueOnce([[], []]); // fallback SELECT — id not found
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await updateSfxTrigger(999n, '!clap', null, null, false)).toBe(false);
+    expect(invalidateSfxLookupCache).not.toHaveBeenCalled();
   });
 
   it('returns true on a no-op update (all fields unchanged) when the row exists', async () => {
@@ -333,6 +345,13 @@ describe('updateSfxTrigger', () => {
       .mockResolvedValueOnce([[{ id: '5' }], []]); // fallback SELECT — id exists
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await updateSfxTrigger(5n, '!clap', 2, 'desc', false)).toBe(true);
+  });
+
+  it('calls invalidateSfxLookupCache when a row matched', async () => {
+    const pool = makeResultPool({ affectedRows: 1 });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await updateSfxTrigger(5n, '!clap', 2, 'desc', false);
+    expect(invalidateSfxLookupCache).toHaveBeenCalledOnce();
   });
 });
 
@@ -354,6 +373,7 @@ describe('deleteSfxTrigger', () => {
     expect(pool._conn.execute.mock.calls[1][0]).toContain('FOR UPDATE');
     expect(pool._conn.commit).toHaveBeenCalled();
     expect(pool._conn.release).toHaveBeenCalled();
+    expect(invalidateSfxLookupCache).toHaveBeenCalledOnce();
   });
 
   it('rolls back and returns null when the trigger row does not exist', async () => {
@@ -368,6 +388,7 @@ describe('deleteSfxTrigger', () => {
     expect(pool._conn.release).toHaveBeenCalled();
     // No child queries should run once the lock finds no trigger.
     expect(pool._conn.execute).toHaveBeenCalledTimes(1);
+    expect(invalidateSfxLookupCache).not.toHaveBeenCalled();
   });
 
   it('rolls back and rethrows on error', async () => {
@@ -378,6 +399,7 @@ describe('deleteSfxTrigger', () => {
     await expect(deleteSfxTrigger(7n)).rejects.toThrow('boom');
     expect(pool._conn.rollback).toHaveBeenCalled();
     expect(pool._conn.release).toHaveBeenCalled();
+    expect(invalidateSfxLookupCache).not.toHaveBeenCalled();
   });
 });
 
@@ -390,6 +412,13 @@ describe('addSfxFile', () => {
     const id = await addSfxFile(7n, 'clap.mp3', 2, false);
     expect(id).toBe(100);
     expect(pool.execute.mock.calls[0][1]).toEqual(['7', 'clap.mp3', 2, 0]);
+  });
+
+  it('calls invalidateSfxLookupCache on success', async () => {
+    const pool = makeResultPool({ insertId: 100 });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await addSfxFile(7n, 'clap.mp3', 2, false);
+    expect(invalidateSfxLookupCache).toHaveBeenCalledOnce();
   });
 });
 
@@ -409,6 +438,7 @@ describe('updateSfxFile', () => {
       .mockResolvedValueOnce([[], []]); // fallback SELECT — id not found
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await updateSfxFile(999, 3, true)).toBe(false);
+    expect(invalidateSfxLookupCache).not.toHaveBeenCalled();
   });
 
   it('returns true on a no-op update (weight/hidden unchanged) when the row exists', async () => {
@@ -418,6 +448,13 @@ describe('updateSfxFile', () => {
       .mockResolvedValueOnce([[{ id: 11 }], []]); // fallback SELECT — id exists
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await updateSfxFile(11, 3, true)).toBe(true);
+  });
+
+  it('calls invalidateSfxLookupCache when a row matched', async () => {
+    const pool = makeResultPool({ affectedRows: 1 });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await updateSfxFile(11, 3, true);
+    expect(invalidateSfxLookupCache).toHaveBeenCalledOnce();
   });
 });
 
@@ -432,6 +469,7 @@ describe('deleteSfxFile', () => {
     const file = await deleteSfxFile(11);
     expect(file).toBe('clap.mp3');
     expect(pool._conn.commit).toHaveBeenCalled();
+    expect(invalidateSfxLookupCache).toHaveBeenCalledOnce();
   });
 
   it('returns null and rolls back when no row exists', async () => {
@@ -443,6 +481,7 @@ describe('deleteSfxFile', () => {
     expect(file).toBeNull();
     expect(pool._conn.rollback).toHaveBeenCalled();
     expect(pool._conn.commit).not.toHaveBeenCalled();
+    expect(invalidateSfxLookupCache).not.toHaveBeenCalled();
   });
 
   it('returns null and rolls back when the row is deleted concurrently between the locked SELECT and DELETE', async () => {
@@ -456,6 +495,7 @@ describe('deleteSfxFile', () => {
     expect(file).toBeNull();
     expect(pool._conn.rollback).toHaveBeenCalled();
     expect(pool._conn.commit).not.toHaveBeenCalled();
+    expect(invalidateSfxLookupCache).not.toHaveBeenCalled();
   });
 
   it('rolls back, releases and rethrows on error', async () => {
@@ -466,5 +506,6 @@ describe('deleteSfxFile', () => {
     await expect(deleteSfxFile(11)).rejects.toThrow('boom');
     expect(pool._conn.rollback).toHaveBeenCalled();
     expect(pool._conn.release).toHaveBeenCalled();
+    expect(invalidateSfxLookupCache).not.toHaveBeenCalled();
   });
 });
