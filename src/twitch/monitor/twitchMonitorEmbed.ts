@@ -1,6 +1,7 @@
 import { EmbedBuilder } from 'discord.js';
 import { TwitchStream } from '../twitchApi';
 import { LiveState } from './twitchMonitorTypes';
+import { fillTemplate } from '../../shared/textTemplate';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -18,10 +19,6 @@ export interface DiscordMessagePreview {
 }
 
 // ─── Template helpers ─────────────────────────────────────────────────────────
-
-export function fillTemplate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
-}
 
 export function getStreamUrl(login: string): string {
   return `https://www.twitch.tv/${login}`;
@@ -73,6 +70,20 @@ export function templateVars(login: string, stream: TwitchStream): Record<string
 
 // ─── Message preview ──────────────────────────────────────────────────────────
 
+/**
+ * Builds the admin-panel preview (message content + embed) for a streamer's
+ * live/new-game announcement template. Uses the `'keep'` {@link fillTemplate}
+ * fallback so a placeholder with a typo (no matching key in `templateVars`)
+ * stays visible in the preview as `{like_this}` instead of silently vanishing —
+ * a useful signal for whoever is editing the template. This mirrors the
+ * behaviour used when the same templates are actually posted/edited on
+ * Discord (see `twitchMonitorAnnouncements.ts` and `twitchMonitorStartup.ts`).
+ *
+ * @param state - Live state supplying the current stream and message templates.
+ * @param templateKey - Which of the group's templates to render.
+ * @param multiTwitch - Multi-twitch URL context; a non-null `url` adds a MultiTwitch field.
+ * @returns The rendered message content and embed preview.
+ */
 export function buildMessagePreview(
   state: LiveState,
   templateKey: 'live_message' | 'new_game_message',
@@ -85,7 +96,7 @@ export function buildMessagePreview(
   const vars = templateVars(state.login, stream);
 
   return {
-    content: fillTemplate(template, vars),
+    content: fillTemplate(template, vars, 'keep'),
     embed: buildEmbedPreview(stream, multiTwitch.url ?? undefined),
   };
 }

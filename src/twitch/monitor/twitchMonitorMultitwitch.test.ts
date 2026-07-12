@@ -1,10 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }) }));
 vi.mock('../../discord/discordBot', () => ({ getDiscordClient: vi.fn().mockReturnValue(null) }));
-vi.mock('./twitchMonitorEmbed', () => ({ buildEmbed: vi.fn() }));
+vi.mock('../../discord/discordUtils', () => ({ tryEditDiscordMessage: vi.fn() }));
+vi.mock('./twitchMonitorEmbed', () => ({ buildEmbed: vi.fn().mockReturnValue({ title: 'embed' }) }));
 
-import { groupGameKey, buildMultiTwitchContext, getMultitwitchPreview } from './twitchMonitorMultitwitch';
+import { groupGameKey, buildMultiTwitchContext, getMultitwitchPreview, updateMultitwitch } from './twitchMonitorMultitwitch';
+import { getDiscordClient } from '../../discord/discordBot';
+import { tryEditDiscordMessage } from '../../discord/discordUtils';
 import type { LiveState } from './twitchMonitorTypes';
 
 function makeState(overrides: Partial<LiveState> = {}): LiveState {
@@ -170,5 +173,85 @@ describe('getMultitwitchPreview', () => {
     const state = makeState({ login: 'alice', groupId: 1, currentGame: 'Minecraft', group: { ...makeState().group, multi_twitch: false } });
     const result = getMultitwitchPreview(state, ctxWith([]));
     expect(result.enabled).toBe(false);
+  });
+});
+
+// ─── updateMultitwitch ────────────────────────────────────────────────────────
+
+describe('updateMultitwitch', () => {
+  const fakeClient = { id: 'fake-client' };
+
+  beforeEach(() => {
+    vi.mocked(getDiscordClient).mockReturnValue(fakeClient as any);
+    vi.mocked(tryEditDiscordMessage).mockReset();
+    vi.mocked(tryEditDiscordMessage).mockResolvedValue(true);
+  });
+
+  it('does nothing when there is no discord client', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue(null);
+    const liveStates = new Map<string, LiveState>([['k', makeState()]]);
+
+    await updateMultitwitch(10, liveStates);
+
+    expect(tryEditDiscordMessage).not.toHaveBeenCalled();
+  });
+
+  it('skips states with no messageId or channelId', async () => {
+    const liveStates = new Map<string, LiveState>([
+      ['k', makeState({ messageId: null, channelId: null })],
+    ]);
+
+    await updateMultitwitch(10, liveStates);
+
+    expect(tryEditDiscordMessage).not.toHaveBeenCalled();
+  });
+
+  it('edits the announcement message for each live state in the group', async () => {
+    const liveStates = new Map<string, LiveState>([
+      ['k', makeState({ groupId: 10, channelId: 'chan1', messageId: 'msg1' })],
+    ]);
+
+    await updateMultitwitch(10, liveStates);
+
+    expect(tryEditDiscordMessage).toHaveBeenCalledWith(fakeClient, 'chan1', 'msg1', { embeds: [{ title: 'embed' }] });
+  });
+
+  it('only updates states belonging to the requested group', async () => {
+    const liveStates = new Map<string, LiveState>([
+      ['a', makeState({ groupId: 10, login: 'alice', channelId: 'chan-a', messageId: 'msg-a' })],
+      ['b', makeState({ groupId: 99, login: 'bob', channelId: 'chan-b', messageId: 'msg-b' })],
+    ]);
+
+    await updateMultitwitch(10, liveStates);
+
+    expect(tryEditDiscordMessage).toHaveBeenCalledTimes(1);
+    expect(tryEditDiscordMessage).toHaveBeenCalledWith(fakeClient, 'chan-a', 'msg-a', expect.anything());
+  });
+
+  it('silently skips a state whose message was not found (returns false), without logging or throwing', async () => {
+    vi.mocked(tryEditDiscordMessage).mockResolvedValueOnce(false);
+    const liveStates = new Map<string, LiveState>([
+      ['a', makeState({ groupId: 10, login: 'alice', channelId: 'chan-a', messageId: 'msg-a' })],
+      ['b', makeState({ groupId: 10, login: 'bob', channelId: 'chan-b', messageId: 'msg-b' })],
+    ]);
+
+    await expect(updateMultitwitch(10, liveStates)).resolves.toBeUndefined();
+
+    // Both states are still attempted — the not-found result for 'a' doesn't abort the loop.
+    expect(tryEditDiscordMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs the error and continues updating the remaining states when a real error is thrown', async () => {
+    vi.mocked(tryEditDiscordMessage)
+      .mockRejectedValueOnce(new Error('network blip'))
+      .mockResolvedValueOnce(true);
+    const liveStates = new Map<string, LiveState>([
+      ['a', makeState({ groupId: 10, login: 'alice', channelId: 'chan-a', messageId: 'msg-a' })],
+      ['b', makeState({ groupId: 10, login: 'bob', channelId: 'chan-b', messageId: 'msg-b' })],
+    ]);
+
+    await expect(updateMultitwitch(10, liveStates)).resolves.toBeUndefined();
+
+    expect(tryEditDiscordMessage).toHaveBeenCalledTimes(2);
   });
 });

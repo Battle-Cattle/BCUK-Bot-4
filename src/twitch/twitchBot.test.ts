@@ -50,12 +50,8 @@ vi.mock('../db', async () => {
   };
 });
 
-vi.mock('../discord/discordBot', () => ({
-  getDiscordClient: vi.fn(),
-}));
-
 vi.mock('../discord/voicePresence', () => ({
-  getActiveGuildForUser: vi.fn(),
+  resolveGuildIdForDiscordId: vi.fn(),
 }));
 
 vi.mock('./twitchApi', () => ({
@@ -106,8 +102,7 @@ import {
   setChannelJoinedHook,
 } from './twitchChannelMembership';
 import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName } from '../db';
-import { getDiscordClient } from '../discord/discordBot';
-import { getActiveGuildForUser } from '../discord/voicePresence';
+import { resolveGuildIdForDiscordId } from '../discord/voicePresence';
 import { getUsers } from './twitchApi';
 import { setTwitchChannel } from '../shared/statusStore';
 import { executeCustomCommandForTwitch } from '../commands/customCommandHandler';
@@ -175,8 +170,7 @@ describe('handleTwitchMessage', () => {
     resetMockClient();
     vi.mocked(getAllTwitchLinkedUsers).mockResolvedValue([{ twitchName: 'streamer', discordId: 'streamer-discord-id' }]);
     vi.mocked(findUserByTwitchName).mockResolvedValue(null);
-    vi.mocked(getDiscordClient).mockReturnValue({} as any);
-    vi.mocked(getActiveGuildForUser).mockReturnValue('guild-A');
+    vi.mocked(resolveGuildIdForDiscordId).mockReturnValue('guild-A');
     __resetTwitchChannelDiscordIdCacheForTests();
   });
 
@@ -243,7 +237,7 @@ describe('handleTwitchMessage', () => {
 
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(getAllTwitchLinkedUsers).toHaveBeenCalled();
-    expect(getActiveGuildForUser).toHaveBeenCalledWith(expect.anything(), 'streamer-discord-id');
+    expect(resolveGuildIdForDiscordId).toHaveBeenCalledWith('streamer-discord-id');
   });
 
   it('passes a null guildId to handleCommand when the channel has no linked Discord user', async () => {
@@ -255,7 +249,7 @@ describe('handleTwitchMessage', () => {
 
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', null);
-    expect(getActiveGuildForUser).not.toHaveBeenCalled();
+    expect(resolveGuildIdForDiscordId).not.toHaveBeenCalled();
   });
 
   it('falls back to a live lookup when a channel is missing from the bulk cache, so a just-linked streamer works on the very next message', async () => {
@@ -269,7 +263,7 @@ describe('handleTwitchMessage', () => {
 
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(findUserByTwitchName).toHaveBeenCalledWith('streamer');
-    expect(getActiveGuildForUser).toHaveBeenCalledWith(expect.anything(), 'freshly-linked-discord-id');
+    expect(resolveGuildIdForDiscordId).toHaveBeenCalledWith('freshly-linked-discord-id');
   });
 
   it('does not fall back to a live lookup when the channel is already present in the bulk cache', async () => {
@@ -301,7 +295,7 @@ describe('handleTwitchMessage', () => {
     // A subsequent lookup picks up the refreshed mapping.
     sendMessage('#streamer', makeTags(), '!third');
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(3));
-    expect(getActiveGuildForUser).toHaveBeenLastCalledWith(expect.anything(), 'new-streamer-discord-id');
+    expect(resolveGuildIdForDiscordId).toHaveBeenLastCalledWith('new-streamer-discord-id');
   });
 
   it('passes the normalized channel and message to executors', () => {

@@ -16,8 +16,7 @@ import {
   findOwnerUser,
   type RefreshingLookupCache,
 } from '../db';
-import { getDiscordClient } from '../discord/discordBot';
-import { getActiveGuildForUser } from '../discord/voicePresence';
+import { resolveGuildIdForDiscordId } from '../discord/voicePresence';
 
 const log = createLogger('TikTok');
 
@@ -67,9 +66,7 @@ async function resolveOwnerDiscordId(): Promise<string | null> {
 async function resolveGuildIdForTikTokCommand(): Promise<string | null> {
   const ownerDiscordId = await resolveOwnerDiscordId();
   if (!ownerDiscordId) return null;
-  const discordClient = getDiscordClient();
-  if (!discordClient) return null;
-  return getActiveGuildForUser(discordClient, ownerDiscordId);
+  return resolveGuildIdForDiscordId(ownerDiscordId);
 }
 
 /** Test-only: clears the cached owner discord_id so each test starts from a clean slate. */

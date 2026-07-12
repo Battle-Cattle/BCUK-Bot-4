@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { DiscordAPIError, RESTJSONErrorCodes, ChannelType } from 'discord.js';
+import { DiscordAPIError, RESTJSONErrorCodes, ChannelType, type Client, type MessageEditOptions, type TextBasedChannel } from 'discord.js';
 import { getDiscordClient } from './discordBot';
 
 const log = createLogger('Discord');
@@ -44,6 +44,54 @@ export async function tryDeleteDiscordMessage(channelId: string, messageId: stri
   } catch (err) {
     if (isDiscordNotFoundError(err)) return;
     log.error(`Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
+    throw err;
+  }
+}
+
+/**
+ * Fetches `channelId` from `client` and returns it only if it resolves to a
+ * text-based channel. Mirrors the fetch+`isTextBased()` guard duplicated across
+ * `twitchMonitorAnnouncements.ts`, `twitchMonitorMultitwitch.ts`, and
+ * `twitchMonitorStartup.ts` before sending or editing a Discord message.
+ *
+ * @param client - Discord client to fetch the channel from.
+ * @param channelId - ID of the channel to fetch.
+ * @returns The text-based channel, or null if it doesn't exist or isn't text-based.
+ */
+export async function getTextChannel(client: Client, channelId: string): Promise<TextBasedChannel | null> {
+  const channel = await client.channels.fetch(channelId);
+  if (!channel || !channel.isTextBased()) return null;
+  return channel;
+}
+
+/**
+ * Fetches `messageId` from `channelId` (via `client`) and edits it with `payload`.
+ * Returns false — without throwing — when the channel isn't text-based/doesn't
+ * exist, or the channel/message fetch fails with a Discord not-found error (see
+ * {@link isDiscordNotFoundError}), exactly like {@link tryDeleteDiscordMessage}'s
+ * not-found handling. Any other error is logged and rethrown.
+ *
+ * @param client - Discord client to fetch the channel/message from.
+ * @param channelId - ID of the channel containing the message.
+ * @param messageId - ID of the message to edit.
+ * @param payload - Edit payload passed through to `message.edit`.
+ * @returns True if the message was edited; false if the channel/message could not be found.
+ */
+export async function tryEditDiscordMessage(
+  client: Client,
+  channelId: string,
+  messageId: string,
+  payload: MessageEditOptions,
+): Promise<boolean> {
+  try {
+    const channel = await getTextChannel(client, channelId);
+    if (!channel) return false;
+    const message = await channel.messages.fetch(messageId);
+    await message.edit(payload);
+    return true;
+  } catch (err) {
+    if (isDiscordNotFoundError(err)) return false;
+    log.error(`Failed to edit Discord message ${messageId} in channel ${channelId}:`, err);
     throw err;
   }
 }

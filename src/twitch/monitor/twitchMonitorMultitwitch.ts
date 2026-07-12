@@ -2,6 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { getDiscordClient } from '../../discord/discordBot';
 
 const log = createLogger('TwitchMonitor');
+import { tryEditDiscordMessage } from '../../discord/discordUtils';
 import { buildEmbed } from './twitchMonitorEmbed';
 import { LiveState } from './twitchMonitorTypes';
 
@@ -87,6 +88,19 @@ export function getMultitwitchPreview(state: LiveState, context: MultiTwitchCont
   };
 }
 
+/**
+ * Refreshes the MultiTwitch field on every live announcement embed in `groupId`
+ * to reflect the current set of co-streaming participants. Each announcement is
+ * edited independently via {@link tryEditDiscordMessage}, so a Discord not-found
+ * error for one streamer's message (deleted, channel gone, etc.) is silently
+ * skipped rather than logged — matching the not-found handling already used by
+ * the sibling announcement-editing paths in `twitchMonitorAnnouncements.ts` and
+ * `twitchMonitorStartup.ts` — while any other error is logged and does not stop
+ * the remaining states in the group from being updated.
+ *
+ * @param groupId - Stream group whose live announcements should be refreshed.
+ * @param liveStates - All currently-tracked live states, filtered down to `groupId`.
+ */
 export async function updateMultitwitch(groupId: number, liveStates: ReadonlyMap<string, LiveState>): Promise<void> {
   const discordClient = getDiscordClient();
   if (!discordClient) return;
@@ -98,13 +112,10 @@ export async function updateMultitwitch(groupId: number, liveStates: ReadonlyMap
     if (!state.messageId || !state.channelId) continue;
     const multiTwitch = getMultitwitchPreview(state, context);
     const multitwitchUrl = multiTwitch.url ?? undefined;
+    const updated = buildEmbed(state.currentStream, multitwitchUrl);
 
     try {
-      const channel = await discordClient.channels.fetch(state.channelId);
-      if (!channel || !channel.isTextBased()) continue;
-      const message = await channel.messages.fetch(state.messageId);
-      const updated = buildEmbed(state.currentStream, multitwitchUrl);
-      await message.edit({ embeds: [updated] });
+      await tryEditDiscordMessage(discordClient, state.channelId, state.messageId, { embeds: [updated] });
     } catch (err) {
       log.error(`Failed to update multitwitch for ${state.login}:`, err);
     }

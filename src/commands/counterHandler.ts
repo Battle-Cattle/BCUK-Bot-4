@@ -6,24 +6,23 @@ const log = createLogger('Counter');
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { extractCommand } from './commandUtils';
 import { isDiscordNotFoundError } from '../discord/discordUtils';
+import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
 // Same pattern as customCommandHandler.ts to avoid a circular import between
 // twitchBot.ts and counterHandler.ts.
 
-interface TwitchSendRuntime {
-  send: (channel: string, message: string) => Promise<void>;
-}
+const counterRuntime = createRuntimeRegistry<TwitchSendRuntime>();
 
-let _twitchRuntime: TwitchSendRuntime | null = null;
-
+/** Stores the Twitch chat runtime used to send counter responses. Call once from index.ts after the Twitch bot is ready. */
 export function registerCounterTwitchRuntime(runtime: TwitchSendRuntime): void {
-  _twitchRuntime = runtime;
+  counterRuntime.register(runtime);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Replaces every `%d` placeholder in `template` with `value`. */
 function formatCounterMessage(template: string, value: number): string {
   return template.replace(/%d/g, String(value));
 }
@@ -121,7 +120,7 @@ export async function executeCounterCommandForTwitch(
 
   if (!result.canReply) return;
 
-  const runtime = _twitchRuntime;
+  const runtime = counterRuntime.get();
   if (runtime) {
     try {
       await runtime.send(channel, result.response);

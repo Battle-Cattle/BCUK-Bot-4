@@ -17,8 +17,7 @@ import {
   findUserByTwitchName,
   type RefreshingLookupCache,
 } from '../db';
-import { getDiscordClient } from '../discord/discordBot';
-import { getActiveGuildForUser } from '../discord/voicePresence';
+import { resolveGuildIdForDiscordId } from '../discord/voicePresence';
 import {
   setTmiClient,
   setConnected,
@@ -86,9 +85,7 @@ export function __resetTwitchChannelDiscordIdCacheForTests(): void {
 async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promise<string | null> {
   const discordId = await resolveDiscordIdForTwitchChannel(normalizedChannel);
   if (!discordId) return null;
-  const discordClient = getDiscordClient();
-  if (!discordClient) return null;
-  return getActiveGuildForUser(discordClient, discordId);
+  return resolveGuildIdForDiscordId(discordId);
 }
 
 function fireAndForget(promise: Promise<void>, context: string): void {

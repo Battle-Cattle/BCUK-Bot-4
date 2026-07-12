@@ -9,23 +9,24 @@ import { extractCommand, extractArgs } from './commandUtils';
 import { isDiscordNotFoundError } from '../discord/discordUtils';
 import { getMultiTwitchDataForChannel } from '../twitch/monitor/twitchMonitor';
 import { fillTemplate } from '../shared/textTemplate';
+import { sendDedupedBySession } from './twitchBroadcast';
+import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
 // Avoids a circular import: twitchBot.ts → customCommandHandler.ts → twitchBot.ts.
 // index.ts wires the concrete implementations once both modules are loaded.
 
-interface TwitchChatRuntime {
-  send: (channel: string, message: string) => Promise<void>;
+interface TwitchChatRuntime extends TwitchSendRuntime {
   getActiveChannels: () => ReadonlySet<string>;
   getLoginUserIds: () => ReadonlyMap<string, string>;
 }
 
-let _twitchRuntime: TwitchChatRuntime | null = null;
+const twitchChatRuntime = createRuntimeRegistry<TwitchChatRuntime>();
 
 /** Stores the concrete Twitch chat runtime (send/getActiveChannels/getLoginUserIds) so Twitch custom commands can be sent and broadcast. Call once from index.ts after the Twitch bot is ready. */
 export function registerTwitchChatRuntime(runtime: TwitchChatRuntime): void {
-  _twitchRuntime = runtime;
+  twitchChatRuntime.register(runtime);
 }
 
 // ─── Lookup ───────────────────────────────────────────────────────────────────
@@ -128,16 +129,17 @@ export async function resolveSharedChatSessionId(userId: string): Promise<string
  * Sends a multi-twitch custom command's output to every active channel that has the
  * command registered and is part of the source channel's multi-twitch group (falling
  * back to the source channel only if it isn't currently in a group). Channels that
- * share a Twitch shared-chat session are de-duplicated so only one message is sent
- * per session. Returns true if at least one channel received the message.
+ * share a Twitch shared-chat session are de-duplicated via {@link sendDedupedBySession}
+ * so only one message is sent per session. Returns true if at least one channel
+ * received the message.
  */
 async function broadcastToActiveChannels(sourceChannel: string, command: string, output: string): Promise<boolean> {
-  if (!_twitchRuntime) return false;
+  const runtime = twitchChatRuntime.get();
+  if (!runtime) return false;
 
-  const { send, getActiveChannels, getLoginUserIds } = _twitchRuntime;
+  const { send, getActiveChannels, getLoginUserIds } = runtime;
   const activeChannels = getActiveChannels();
   const loginUserIds = getLoginUserIds();
-  const repliedSessionIds = new Set<string>();
 
   // Build ordered list: source channel first, then the rest
   const candidates = [sourceChannel, ...Array.from(activeChannels).filter((ch) => ch !== sourceChannel)];
@@ -155,27 +157,7 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
     ch === sourceChannel || (groupParticipantSet !== null && groupParticipantSet.has(ch)),
   );
 
-  // Pre-resolve all session IDs in parallel to avoid serial Helix calls per channel
-  const userIds = [...new Set(targets.map((ch) => loginUserIds.get(ch)).filter((id): id is string => id !== undefined))];
-  const resolvedIds = await Promise.all(userIds.map((uid) => resolveSharedChatSessionId(uid)));
-  const sessionIdByUserId = new Map(userIds.map((uid, i) => [uid, resolvedIds[i]]));
-
-  let anySent = false;
-  for (const channel of targets) {
-    const userId = loginUserIds.get(channel);
-    const sessionId = userId ? (sessionIdByUserId.get(userId) ?? null) : null;
-
-    if (sessionId && repliedSessionIds.has(sessionId)) continue;
-
-    try {
-      await send(channel, output);
-      if (sessionId) repliedSessionIds.add(sessionId);
-      anySent = true;
-    } catch (err) {
-      log.error(`Failed to send to ${channel}:`, err);
-    }
-  }
-  return anySent;
+  return sendDedupedBySession(targets, loginUserIds, output, send, resolveSharedChatSessionId);
 }
 
 // ─── Execute functions ────────────────────────────────────────────────────────
@@ -275,7 +257,7 @@ export async function executeCustomCommandForTwitch(
     user: username ?? null,
   });
 
-  const runtime = _twitchRuntime;
+  const runtime = twitchChatRuntime.get();
   if (runtime) {
     if (result.isMultiTwitch) {
       try {

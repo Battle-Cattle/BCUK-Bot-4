@@ -5,6 +5,8 @@ const log = createLogger('MultiCmd');
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { resolveSharedChatSessionId } from './customCommandHandler';
 import { extractCommand } from './commandUtils';
+import { sendDedupedBySession } from './twitchBroadcast';
+import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
 
 const MULTI_COMMAND = '!multi';
 
@@ -13,20 +15,26 @@ const MULTI_COMMAND = '!multi';
 // Same injection pattern as customCommandHandler.ts to avoid a circular import
 // between twitchBot.ts and multiCommandHandler.ts.
 
-interface MultiTwitchRuntime {
-  send: (channel: string, message: string) => Promise<void>;
+interface MultiTwitchRuntime extends TwitchSendRuntime {
   getActiveChannels: () => ReadonlySet<string>;
   getLoginUserIds: () => ReadonlyMap<string, string>;
 }
 
-let _runtime: MultiTwitchRuntime | null = null;
+const multiTwitchRuntime = createRuntimeRegistry<MultiTwitchRuntime>();
 
+/** Stores the concrete Twitch chat runtime (send/getActiveChannels/getLoginUserIds) so `!multi` can be broadcast. Call once from index.ts after the Twitch bot is ready. */
 export function registerMultiTwitchRuntime(runtime: MultiTwitchRuntime): void {
-  _runtime = runtime;
+  multiTwitchRuntime.register(runtime);
 }
 
 // ─── Broadcast ────────────────────────────────────────────────────────────────
 
+/**
+ * Broadcasts `message` (the `!multi` URL) to the source channel plus every other
+ * participant channel the bot has currently joined, de-duplicating channels that
+ * share a Twitch shared-chat session via {@link sendDedupedBySession} so only one
+ * message is sent per session.
+ */
 async function broadcastToGroupChannels(
   sourceChannel: string,
   participants: string[],
@@ -41,26 +49,7 @@ async function broadcastToGroupChannels(
   const targets = [sourceChannel, ...participants.filter((p) => p !== sourceChannel)]
     .filter((ch) => activeChannels.has(ch));
 
-  // Pre-resolve all session IDs in parallel to avoid serial Helix calls per channel
-  const userIds = [...new Set(targets.map((ch) => loginUserIds.get(ch)).filter((id): id is string => id !== undefined))];
-  const resolvedIds = await Promise.all(userIds.map((uid) => resolveSharedChatSessionId(uid)));
-  const sessionIdByUserId = new Map(userIds.map((uid, i) => [uid, resolvedIds[i]]));
-
-  const repliedSessionIds = new Set<string>();
-
-  for (const channel of targets) {
-    const userId = loginUserIds.get(channel);
-    const sessionId = userId ? (sessionIdByUserId.get(userId) ?? null) : null;
-
-    if (sessionId && repliedSessionIds.has(sessionId)) continue;
-
-    try {
-      await send(channel, message);
-      if (sessionId) repliedSessionIds.add(sessionId);
-    } catch (err) {
-      log.error(`Failed to send to ${channel}:`, err);
-    }
-  }
+  await sendDedupedBySession(targets, loginUserIds, message, send, resolveSharedChatSessionId);
 }
 
 // ─── Execute ──────────────────────────────────────────────────────────────────
@@ -85,7 +74,7 @@ export async function executeMultiCommandForTwitch(
 
   if (!groupInfo) return;
 
-  const runtime = _runtime;
+  const runtime = multiTwitchRuntime.get();
   if (!runtime) return;
 
   try {

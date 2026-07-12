@@ -2,14 +2,25 @@ import { createLogger } from '../../shared/logger';
 import { getDiscordClient } from '../../discord/discordBot';
 
 const log = createLogger('TwitchMonitor');
-import { isDiscordNotFoundError, tryDeleteDiscordMessage } from '../../discord/discordUtils';
+import { getTextChannel, tryDeleteDiscordMessage, tryEditDiscordMessage } from '../../discord/discordUtils';
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from '../../db';
 import { getStreams, TwitchStream } from '../twitchApi';
 import { LiveState, makeLiveState } from './twitchMonitorTypes';
-import { buildEmbed, fillTemplate, templateVars } from './twitchMonitorEmbed';
+import { buildEmbed, templateVars } from './twitchMonitorEmbed';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
 import { postAnnouncement } from './twitchMonitorAnnouncements';
+import { fillTemplate } from '../../shared/textTemplate';
 
+/**
+ * Tries to edit the streamer's existing startup-time "now live" message in place
+ * (used when the bot restarts while a streamer is already live and previously
+ * posted). Returns false — without throwing — if the client isn't ready, the
+ * streamer has no recorded message/channel, the channel isn't text-based, or the
+ * edit fails with a Discord not-found error (message/channel deleted while the
+ * bot was down); the caller falls back to {@link postAnnouncement} in that case.
+ * Any other error is logged (once here, and again inside
+ * {@link tryEditDiscordMessage} for the underlying Discord failure) and rethrown.
+ */
 export async function tryEditStartupMessage(
   liveStates: Map<string, LiveState>,
   streamer: DbStreamerFull,
@@ -19,18 +30,17 @@ export async function tryEditStartupMessage(
   if (!discordClient) return false;
   if (!streamer.discord_channel_id || !streamer.discord_message_id) return false;
   try {
-    const channel = await discordClient.channels.fetch(streamer.discord_channel_id);
-    if (!channel || !channel.isTextBased()) return false;
+    const channel = await getTextChannel(discordClient, streamer.discord_channel_id);
+    if (!channel) return false;
     const vars = templateVars(liveStream.user_login, liveStream);
-    const content = fillTemplate(streamer.group.live_message, vars);
+    const content = fillTemplate(streamer.group.live_message, vars, 'keep');
     const embed = buildEmbed(liveStream);
-    const message = await channel.messages.fetch(streamer.discord_message_id);
-    await message.edit({ content, embeds: [embed] });
+    const edited = await tryEditDiscordMessage(discordClient, streamer.discord_channel_id, streamer.discord_message_id, { content, embeds: [embed] });
+    if (!edited) return false;
     liveStates.set(String(streamer.id), makeLiveState(streamer, liveStream, streamer.discord_message_id, streamer.discord_channel_id));
     await setStreamerLive(streamer.id, streamer.discord_message_id, streamer.discord_channel_id, liveStream.game_name);
     return true;
   } catch (err) {
-    if (isDiscordNotFoundError(err)) return false;
     log.error(`Failed to edit startup message for ${streamer.twitch_name ?? 'unknown'}:`, err);
     throw err;
   }

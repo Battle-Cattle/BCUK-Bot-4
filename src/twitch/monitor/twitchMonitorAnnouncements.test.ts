@@ -1,10 +1,37 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Shared with the discordUtils mock factory below so tests can still drive
+// isDiscordNotFoundError's return value directly, even though production code
+// now only calls it indirectly (from inside the mocked tryEditDiscordMessage).
+const { isDiscordNotFoundErrorMock } = vi.hoisted(() => ({
+  isDiscordNotFoundErrorMock: vi.fn().mockReturnValue(false),
+}));
+
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }) }));
 vi.mock('../../discord/discordBot', () => ({ getDiscordClient: vi.fn() }));
 vi.mock('../../discord/discordUtils', () => ({
-  isDiscordNotFoundError: vi.fn().mockReturnValue(false),
+  isDiscordNotFoundError: isDiscordNotFoundErrorMock,
   tryDeleteDiscordMessage: vi.fn().mockResolvedValue(undefined),
+  // Minimal re-implementations driven by the same mock Discord client/channel
+  // objects the tests already construct, so call-chain assertions (channel.send,
+  // channel._message.edit, etc.) keep working unchanged.
+  getTextChannel: vi.fn(async (client: any, channelId: string) => {
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || !channel.isTextBased()) return null;
+    return channel;
+  }),
+  tryEditDiscordMessage: vi.fn(async (client: any, channelId: string, messageId: string, payload: any) => {
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || !channel.isTextBased()) return false;
+    try {
+      const message = await channel.messages.fetch(messageId);
+      await message.edit(payload);
+      return true;
+    } catch (err) {
+      if (isDiscordNotFoundErrorMock(err)) return false;
+      throw err;
+    }
+  }),
 }));
 vi.mock('../../db', () => ({
   setStreamerLive: vi.fn().mockResolvedValue(undefined),
@@ -12,8 +39,10 @@ vi.mock('../../db', () => ({
 }));
 vi.mock('./twitchMonitorEmbed', () => ({
   buildEmbed: vi.fn().mockReturnValue({ title: 'embed' }),
-  fillTemplate: vi.fn().mockReturnValue('Live message'),
   templateVars: vi.fn().mockReturnValue({}),
+}));
+vi.mock('../../shared/textTemplate', () => ({
+  fillTemplate: vi.fn().mockReturnValue('Live message'),
 }));
 vi.mock('./twitchMonitorMultitwitch', () => ({
   updateMultitwitch: vi.fn().mockResolvedValue(undefined),
