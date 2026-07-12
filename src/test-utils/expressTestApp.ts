@@ -25,6 +25,49 @@ export interface BuildTestAppOptions {
   mockRender?: MockRenderPreset | ((view: string, locals: unknown, res: Response) => void);
 }
 
+/** Installs the body parser(s) requested via `BuildTestAppOptions.bodyParser`. */
+function applyBodyParser(app: Express, bodyParser: BuildTestAppOptions['bodyParser']): void {
+  if (bodyParser === 'json' || bodyParser === 'both') app.use(express.json());
+  if (bodyParser === 'urlencoded' || bodyParser === 'both') app.use(express.urlencoded({ extended: false }));
+}
+
+/** Builds the `req.session` value for a request, from `session` (verbatim) or `sessionUser` (wrapped as `{ user }`). */
+function resolveSessionValue(options: BuildTestAppOptions): unknown {
+  if (Object.prototype.hasOwnProperty.call(options, 'session')) return options.session;
+  return { user: options.sessionUser };
+}
+
+/** Builds the `res.render` replacement for a given `mockRender` preset or custom function, bound to one response. */
+function makeRenderStub(
+  mockRender: NonNullable<BuildTestAppOptions['mockRender']>,
+  res: Response,
+): Response['render'] {
+  return ((view: string, locals?: Record<string, unknown>) => {
+    if (mockRender === 'spread') return res.json({ view, ...locals });
+    if (mockRender === 'nested') return res.json({ view, locals });
+    if (mockRender === 'text') return res.send(`rendered:${view}`);
+    return mockRender(view, locals, res);
+  }) as unknown as Response['render'];
+}
+
+/** Installs the `req.session`/`res.render` stub middleware for the options that requested one. */
+function applySessionAndRenderStub(app: Express, options: BuildTestAppOptions): void {
+  const hasSessionUser = Object.prototype.hasOwnProperty.call(options, 'sessionUser');
+  const hasSession = Object.prototype.hasOwnProperty.call(options, 'session');
+  const { mockRender } = options;
+  if (!hasSession && !hasSessionUser && !mockRender) return;
+
+  app.use((req, res, next) => {
+    if (hasSession || hasSessionUser) {
+      (req as unknown as { session: unknown }).session = resolveSessionValue(options);
+    }
+    if (mockRender) {
+      res.render = makeRenderStub(mockRender, res);
+    }
+    next();
+  });
+}
+
 /**
  * Builds a minimal Express app for router-level supertest coverage: an optional body parser, an
  * optional `req.session` stub, an optional `res.render` stub that echoes the view/locals back
@@ -33,33 +76,9 @@ export interface BuildTestAppOptions {
  * `src/web/routes/*.test.ts`.
  */
 export function buildTestApp(options: BuildTestAppOptions): Express {
-  const { router, bodyParser, mockRender } = options;
-  const hasSessionUser = Object.prototype.hasOwnProperty.call(options, 'sessionUser');
-  const hasSession = Object.prototype.hasOwnProperty.call(options, 'session');
   const app = express();
-
-  if (bodyParser === 'json' || bodyParser === 'both') app.use(express.json());
-  if (bodyParser === 'urlencoded' || bodyParser === 'both') app.use(express.urlencoded({ extended: false }));
-
-  if (hasSession || hasSessionUser || mockRender) {
-    app.use((req, res, next) => {
-      if (hasSession) {
-        (req as unknown as { session: unknown }).session = options.session;
-      } else if (hasSessionUser) {
-        (req as unknown as { session: unknown }).session = { user: options.sessionUser };
-      }
-      if (mockRender) {
-        res.render = ((view: string, locals?: Record<string, unknown>) => {
-          if (mockRender === 'spread') return res.json({ view, ...locals });
-          if (mockRender === 'nested') return res.json({ view, locals });
-          if (mockRender === 'text') return res.send(`rendered:${view}`);
-          return mockRender(view, locals, res);
-        }) as Response['render'];
-      }
-      next();
-    });
-  }
-
-  for (const r of Array.isArray(router) ? router : [router]) app.use(r);
+  applyBodyParser(app, options.bodyParser);
+  applySessionAndRenderStub(app, options);
+  for (const r of Array.isArray(options.router) ? options.router : [options.router]) app.use(r);
   return app;
 }
