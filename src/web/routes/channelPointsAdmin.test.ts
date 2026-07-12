@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
@@ -30,9 +31,7 @@ vi.mock('../../twitch/eventsub/twitchEventSubSubscriptions', () => ({
   hasAuthFailedSubs: vi.fn(),
 }));
 
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
-}));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('./channelPointsAdminMutations', async () => {
   const { Router } = await import('express');

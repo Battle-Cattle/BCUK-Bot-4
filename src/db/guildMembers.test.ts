@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ACCESS_LEVEL_MOCK } from '../test-utils/accessLevelMock';
 
 vi.mock('./pool', () => ({ getPool: vi.fn() }));
 vi.mock('mysql2/promise', () => ({ default: {} }));
 vi.mock('./users', () => ({
-  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+  AccessLevel: ACCESS_LEVEL_MOCK,
   findUser: vi.fn(),
 }));
 

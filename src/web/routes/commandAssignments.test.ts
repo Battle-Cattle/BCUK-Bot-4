@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => {
   class CommandConflictError extends Error {}
@@ -16,11 +18,9 @@ vi.mock('../csrf', () => ({
 vi.mock('../middleware', () => ({
   requireMod: (_req: any, _res: any, next: any) => next(),
 }));
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
-}));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db/users', () => ({
-  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 import express from 'express';

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -11,9 +12,7 @@ vi.mock('../shared/statusStore', () => ({
 vi.mock('../discord/discordUtils', () => ({
   isPermanentVoiceMisconfigurationError: vi.fn(() => false),
 }));
-vi.mock('../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('discord.js', () => ({
   Client: vi.fn(),
   ChannelType: { GuildVoice: 2 },

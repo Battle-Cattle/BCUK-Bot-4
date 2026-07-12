@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../db', () => ({
   exchangeCodeForToken: vi.fn(),
 }));
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
-}));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 // authLimiter is a process-wide singleton shared with /auth's routes (see
 // rateLimits.ts); stub it out here so the functional tests below aren't subject to
 // real rate limiting. Its wiring is verified separately in companionAuth.rateLimit.test.ts.

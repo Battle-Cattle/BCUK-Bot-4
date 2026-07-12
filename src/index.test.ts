@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mockLogger } from './test-utils/loggerMock';
 
 // All vi.mock calls are hoisted before imports. After vi.resetModules() in beforeEach,
 // re-importing any of these modules will re-run the factory and give fresh vi.fn() instances.
@@ -69,9 +70,7 @@ vi.mock('./twitch/pricing/rewardPricingScheduler', () => ({
 vi.mock('./twitch/pricing/rewardPricingService', () => ({
   registerRewardPricingRuntime: vi.fn(),
 }));
-vi.mock('./shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock('./shared/logger', () => ({ createLogger: mockLogger }));
 
 let exitSpy: ReturnType<typeof vi.spyOn>;
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
 
-vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({ getAllEnabledPricingRows: vi.fn() }));
 vi.mock('./rewardPricingService', () => ({ applyDecayTick: vi.fn() }));
 

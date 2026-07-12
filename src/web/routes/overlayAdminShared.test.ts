@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
 }));
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn() }),
-}));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import { getStreamerByDiscordId } from '../../db';
 import { requireStreamer, toStringArray, parseWeight } from './overlayAdminShared';

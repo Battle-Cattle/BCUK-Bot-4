@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
 
-vi.mock('../shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn() }) }));
+vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../shared/config', () => ({
   TWITCH_CLIENT_ID: 'test-client-id',
   TWITCH_CLIENT_SECRET: 'test-client-secret',

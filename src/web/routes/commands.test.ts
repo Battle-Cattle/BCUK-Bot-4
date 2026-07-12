@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => {
   class CommandConflictError extends Error {}
@@ -41,7 +42,7 @@ vi.mock('../../logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
-vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 
 import express from 'express';
 import supertest from 'supertest';

@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   getAllSfxTriggers: vi.fn().mockResolvedValue([]),
   getAllCategories: vi.fn().mockResolvedValue([]),
 }));
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
-}));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../shared/config', () => ({ SFX_MAX_FILE_MB: 10 }));
 vi.mock('../csrf', () => ({
   csrfProtection: (req: any, _res: any, next: any) => {
@@ -15,7 +15,7 @@ vi.mock('../csrf', () => ({
   },
 }));
 vi.mock('../../db/users', () => ({
-  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 import express from 'express';

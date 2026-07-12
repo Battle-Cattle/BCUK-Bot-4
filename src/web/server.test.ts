@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Router } from 'express';
 import request from 'supertest';
 import { EventEmitter } from 'events';
+import { mockLogger } from '../test-utils/loggerMock';
 
 vi.mock('../shared/config', () => ({
   WEB_PORT: 3000,
@@ -30,9 +31,7 @@ vi.mock('express-mysql-session', () => ({
     },
 }));
 
-vi.mock('../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('./csrf', () => ({
   ensureSessionCsrfToken: vi.fn().mockReturnValue('csrf-token'),

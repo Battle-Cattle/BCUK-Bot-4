@@ -30,7 +30,7 @@ vi.mock('../../shared/config', () => ({
 }));
 
 const { logMock } = vi.hoisted(() => ({
-  logMock: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+  logMock: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 vi.mock('../../shared/logger', () => ({
   createLogger: () => logMock,

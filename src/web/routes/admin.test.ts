@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   findUser: vi.fn(),
@@ -7,7 +8,7 @@ vi.mock('../../db', () => ({
   setMemberAccessLevel: vi.fn(),
   removeGuildMember: vi.fn(),
   ACCESS_LEVEL_LABELS: { 0: 'User', 1: 'Mod', 2: 'Manager', 3: 'Admin' },
-  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../../discord/guildRegistry', () => ({
@@ -57,14 +58,14 @@ vi.mock('./adminUserMutations', () => {
 });
 
 const { mockLog } = vi.hoisted(() => ({
-  mockLog: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+  mockLog: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
 vi.mock('../../shared/logger', () => ({
   createLogger: () => mockLog,
 }));
 
-vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 
 import express from 'express';
 import supertest from 'supertest';

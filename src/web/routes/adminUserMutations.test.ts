@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   findUser: vi.fn(),
@@ -18,7 +19,7 @@ vi.mock('../../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn((name: string | null) => name?.toLowerCase() ?? null),
 }));
 
-vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 
 import {
   addOrUpdateUserMutation,

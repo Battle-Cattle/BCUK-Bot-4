@@ -2,8 +2,9 @@ import { createHash } from 'crypto';
 import { describe, it, expect, vi } from 'vitest';
 import type { Request } from 'express';
 import type { SessionUser } from '../types/express';
+import { ACCESS_LEVEL_MOCK } from '../test-utils/accessLevelMock';
 
-vi.mock('../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+vi.mock('../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 
 import { AccessLevel } from '../db/users';
 import {

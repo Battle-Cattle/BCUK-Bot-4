@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
 
 // ─── Hoisted state (available inside vi.mock factories) ───────────────────────
 
@@ -50,9 +51,7 @@ vi.mock('tiktok-live-connector', () => ({
   ControlEvent: { CONNECTED: 'connected', DISCONNECTED: 'disconnected', ERROR: 'error' },
 }));
 
-vi.mock('../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../commands/commandRouter', () => ({
   handleCommand: vi.fn().mockResolvedValue(undefined),
