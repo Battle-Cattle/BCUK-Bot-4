@@ -4,8 +4,8 @@ vi.mock('../../db', () => ({ getStreamerByDiscordId: vi.fn(), DEFAULT_PRICING_CO
 
 import { getStreamerByDiscordId } from '../../db';
 import {
-  requireStreamer, parsePositiveIntField, parseNonNegativeNumberField, parsePositiveNumberField,
-  parseCheckboxField, parseHexColorField, parseRoundToNearestField, parseRewardIdParam, parseRewardFields,
+  parseNonNegativeNumberField, parsePositiveNumberField,
+  parseCheckboxField, parseHexColorField, parseRoundToNearestField, parseRewardFields,
   effectiveCooldownSeconds, handleRewardDeleteAction,
 } from './channelPointsAdminShared';
 
@@ -16,30 +16,8 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('requireStreamer', () => {
-  function makeReqRes(discordId = '123') {
-    const req = { session: { user: { discordId } } } as any;
-    const res = { redirect: vi.fn() } as any;
-    return { req, res };
-  }
-
-  it('returns the streamer when found', async () => {
-    const streamer = { id: 1 };
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(streamer as any);
-    const { req, res } = makeReqRes();
-    const result = await requireStreamer(req, res);
-    expect(result).toBe(streamer);
-    expect(res.redirect).not.toHaveBeenCalled();
-  });
-
-  it('redirects to /channel-points?error=not_a_streamer and returns null when not found', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
-    const { req, res } = makeReqRes();
-    const result = await requireStreamer(req, res);
-    expect(result).toBeNull();
-    expect(res.redirect).toHaveBeenCalledWith('/channel-points?error=not_a_streamer');
-  });
-});
+// requireStreamer and parseRewardIdParam now live in (and are tested by) shared.test.ts —
+// this file only covers channelPointsAdminShared's own helpers plus their usage below.
 
 describe('handleRewardDeleteAction', () => {
   const streamer = { id: 1 };
@@ -84,36 +62,6 @@ describe('handleRewardDeleteAction', () => {
     await handleRewardDeleteAction(req, res, action, opts);
     expect(opts.log.error).toHaveBeenCalledWith(opts.errorLogLabel, expect.any(Error));
     expect(res.redirect).toHaveBeenCalledWith('/channel-points?error=delete_failed');
-  });
-});
-
-describe('parsePositiveIntField', () => {
-  it('accepts a positive integer string', () => {
-    expect(parsePositiveIntField('200')).toBe(200);
-  });
-
-  it('rejects an array (repeated field)', () => {
-    expect(parsePositiveIntField(['1', '2'])).toBeNull();
-  });
-
-  it('rejects zero', () => {
-    expect(parsePositiveIntField('0')).toBeNull();
-  });
-
-  it('rejects non-numeric input', () => {
-    expect(parsePositiveIntField('abc')).toBeNull();
-  });
-
-  it('rejects a decimal', () => {
-    expect(parsePositiveIntField('1.5')).toBeNull();
-  });
-
-  it('rejects undefined', () => {
-    expect(parsePositiveIntField(undefined)).toBeNull();
-  });
-
-  it('rejects an empty string', () => {
-    expect(parsePositiveIntField('')).toBeNull();
   });
 });
 
@@ -266,20 +214,6 @@ describe('effectiveCooldownSeconds', () => {
 
   it('falls back to the default when the reward has no global cooldown enabled', () => {
     expect(effectiveCooldownSeconds({ global_cooldown_setting: { is_enabled: false, global_cooldown_seconds: 999 } })).toBe(60);
-  });
-});
-
-describe('parseRewardIdParam', () => {
-  it('accepts a valid UUID', () => {
-    expect(parseRewardIdParam(VALID_REWARD_ID)).toBe(VALID_REWARD_ID);
-  });
-
-  it('rejects an array (repeated param)', () => {
-    expect(parseRewardIdParam([VALID_REWARD_ID, VALID_REWARD_ID])).toBeNull();
-  });
-
-  it('rejects a malformed string', () => {
-    expect(parseRewardIdParam('not-a-uuid')).toBeNull();
   });
 });
 

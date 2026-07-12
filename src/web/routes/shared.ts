@@ -1,8 +1,16 @@
 import fs from 'fs';
 import path from 'path';
-import type { Response } from 'express';
+import multer from 'multer';
+import type { Request, Response } from 'express';
 import type { Logger } from 'winston';
 import type { SessionUser } from '../../types/express';
+import {
+  getStreamerByDiscordId,
+  ReservedCommandError,
+  CommandConflictError,
+  isMysqlDuplicateEntryError,
+} from '../../db';
+import type { DbStreamerEventSub } from '../../db';
 
 const VIEWS_DIR = path.join(__dirname, '../../../views');
 let knownViews: Set<string> | undefined;
@@ -41,6 +49,45 @@ export function parsePositiveBigIntId(value: string | string[] | undefined): big
   if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
   const parsed = BigInt(value);
   return parsed > 0n ? parsed : null;
+}
+
+/**
+ * Loads the requesting user's streamer record, redirecting to `notAStreamerRedirectPath`
+ * if they aren't one. Shared by every streamer-scoped admin page (channel points, overlay
+ * settings), each of which passes its own not-a-streamer error redirect so the pages stay
+ * decoupled from one another.
+ * @param req - Express request; reads `session.user.discordId`.
+ * @param res - Express response, used to redirect on failure.
+ * @param notAStreamerRedirectPath - Full redirect target (path + query string) to use when
+ *   the requester has no streamer record.
+ * @returns The streamer record, or `null` if the response has already been redirected.
+ */
+export async function requireStreamer(
+  req: Request,
+  res: Response,
+  notAStreamerRedirectPath: string,
+): Promise<DbStreamerEventSub | null> {
+  const streamer = await getStreamerByDiscordId(req.session.user!.discordId);
+  if (!streamer) {
+    res.redirect(notAStreamerRedirectPath);
+    return null;
+  }
+  return streamer;
+}
+
+/**
+ * Parse a weight form field into a positive integer ≥ 1 (floored), or null when
+ * the value is missing, non-numeric, not positive, or an array (repeated field).
+ * Rejecting arrays is consistent with `parsePositiveIntId` — a duplicated weight
+ * field can't slip through silently.
+ * @param raw - Raw value from a form field.
+ * @returns A positive integer weight, or null when invalid.
+ */
+export function parseWeight(raw: string | string[] | undefined): number | null {
+  if (Array.isArray(raw)) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return Math.floor(n);
 }
 
 /**
@@ -244,4 +291,80 @@ export function logAndRedirectError({
 }: LogAndRedirectErrorOptions): void {
   log.error(logLabel, err);
   res.redirect(`${basePath}?error=${errorCode}`);
+}
+
+/**
+ * Regex for a Twitch custom reward's UUID (v1–v5, RFC 4122 variant), used to validate
+ * `:twitchRewardId` route params and reward-id form fields.
+ */
+const REWARD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Extracts and validates a Twitch reward UUID, or null if malformed/repeated (an array value). */
+export function parseRewardIdParam(value: string | string[]): string | null {
+  if (Array.isArray(value)) return null;
+  return REWARD_ID_RE.test(value) ? value : null;
+}
+
+/** Arguments for {@link handleReservedOrConflictCommandError}. */
+export interface ReservedOrConflictCommandErrorOptions {
+  /** Path to redirect to, without query string (e.g. `/commands`). */
+  basePath: string;
+  /** Value for the `error` query parameter used when the trigger is already taken
+   *  (e.g. `command_taken`, `duplicate_command`). */
+  conflictErrorCode: string;
+}
+
+/**
+ * Handles the two "expected" write errors shared by commands and counters — a reserved
+ * trigger name, or a trigger already taken by another command/counter (either a thrown
+ * `CommandConflictError` or a raw MySQL duplicate-entry error) — redirecting to
+ * `basePath?error=reserved_command` or `basePath?error=<conflictErrorCode>` respectively.
+ * @param err - The caught error.
+ * @param res - Express response, used to redirect when `err` is one of the handled cases.
+ * @param options - See {@link ReservedOrConflictCommandErrorOptions}.
+ * @returns true when `err` was handled and a redirect was sent (caller should stop);
+ *   false when `err` is some other error the caller should still handle itself.
+ */
+export function handleReservedOrConflictCommandError(
+  err: unknown,
+  res: Response,
+  { basePath, conflictErrorCode }: ReservedOrConflictCommandErrorOptions,
+): boolean {
+  if (err instanceof ReservedCommandError) {
+    res.redirect(`${basePath}?error=reserved_command`);
+    return true;
+  }
+  if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
+    res.redirect(`${basePath}?error=${conflictErrorCode}`);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Builds a Multer error-handling callback that translates an oversized-file error
+ * (`LIMIT_FILE_SIZE`) into a `file_too_large` redirect, and any other Multer/middleware
+ * error into a logged `upload_failed` redirect — instead of letting either reach the
+ * centralised 500 handler. Shared by every file-upload route (SFX sounds, overlay videos).
+ * @param basePath - Path to redirect to, without query string (e.g. `/sfx`).
+ * @param log - Logger to record non-size-limit errors on.
+ * @param logLabel - Message prefix passed to `log.error`.
+ * @returns A handler: true when `err` was an error and a redirect was sent (caller should
+ *   stop); false when there was no error (caller should continue).
+ */
+export function createMulterErrorRedirectHandler(
+  basePath: string,
+  log: Logger,
+  logLabel: string,
+): (err: unknown, res: Response) => boolean {
+  return (err: unknown, res: Response): boolean => {
+    if (!err) return false;
+    if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+      res.redirect(`${basePath}?error=file_too_large`);
+      return true;
+    }
+    log.error(logLabel, err);
+    res.redirect(`${basePath}?error=upload_failed`);
+    return true;
+  };
 }

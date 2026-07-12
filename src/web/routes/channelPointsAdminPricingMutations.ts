@@ -8,15 +8,18 @@ import {
 } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { logAndRedirectError } from './shared';
+import { logAndRedirectError, requireStreamer, parsePositiveIntId, parseRewardIdParam } from './shared';
 import {
-  requireStreamer, parsePositiveIntField, parseNonNegativeNumberField, parsePositiveNumberField,
-  parseCheckboxField, parseRoundToNearestField, parseRewardIdParam, effectiveCooldownSeconds, handleRewardDeleteAction,
+  parseNonNegativeNumberField, parsePositiveNumberField,
+  parseCheckboxField, parseRoundToNearestField, effectiveCooldownSeconds, handleRewardDeleteAction,
 } from './channelPointsAdminShared';
 import { applyDecayTick, resetAndDeletePricing } from '../../twitch/pricing/rewardPricingService';
 
 const log = createLogger('ChannelPointsAdminPricingMutations');
 export const router = Router();
+
+/** Redirect target used when the requester isn't a streamer, scoped to the channel-points admin page. */
+const NOT_A_STREAMER_REDIRECT = '/channel-points?error=not_a_streamer';
 
 /**
  * Determines the `cooldown_seconds` a saved pricing config should use: the reward's live Twitch
@@ -55,14 +58,14 @@ async function resolveCooldownSecondsForPricing(streamer: DbStreamerEventSub, tw
  */
 router.post('/rewards/:twitchRewardId/pricing', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const streamer = await requireStreamer(req, res);
+    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
     if (!streamer) return;
 
     const twitchRewardId = parseRewardIdParam(req.params.twitchRewardId);
     if (twitchRewardId === null) return res.redirect('/channel-points?error=invalid_reward_id');
 
     const body = req.body as Record<string, string | string[] | undefined>;
-    const baseCost = parsePositiveIntField(body.base_cost);
+    const baseCost = parsePositiveIntId(body.base_cost);
     const maxMultiplier = parseNonNegativeNumberField(body.max_multiplier);
     const curve = parsePositiveNumberField(body.curve);
     const roundToNearest = parseRoundToNearestField(body.round_to_nearest);
@@ -119,7 +122,7 @@ router.post('/rewards/:twitchRewardId/pricing/delete', requireAuth, csrfProtecti
  */
 router.post('/settings/pricing', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const streamer = await requireStreamer(req, res);
+    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
     if (!streamer) return;
 
     const body = req.body as Record<string, string | string[] | undefined>;

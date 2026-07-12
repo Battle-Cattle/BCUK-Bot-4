@@ -1,13 +1,11 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import type { Response } from 'express';
 import {
   addCustomCommand,
   assignUserToCommand,
   CommandConflictError,
   CommandNotFoundError,
   isMysqlDuplicateEntryError,
-  ReservedCommandError,
   findUser,
   removeCustomCommand,
   updateCustomCommand,
@@ -20,22 +18,14 @@ import {
   normalizeSingleTokenRequiredText,
   parsePositiveIntId,
   normalizeDiscordId,
+  handleReservedOrConflictCommandError,
 } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
 
-function handleCommandWriteError(err: unknown, res: Response): boolean {
-  if (err instanceof ReservedCommandError) {
-    res.redirect('/commands?error=reserved_command');
-    return true;
-  }
-  if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-    res.redirect('/commands?error=command_taken');
-    return true;
-  }
-  return false;
-}
+/** `handleReservedOrConflictCommandError` options scoped to the commands admin page. */
+const COMMAND_WRITE_ERROR_OPTIONS = { basePath: '/commands', conflictErrorCode: 'command_taken' };
 
 /** Assigns users to a newly created command.  On any failure, deletes the command
  *  to avoid leaving it in a partially-assigned state.  Returns an error code, or
@@ -87,7 +77,7 @@ router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
   try {
     commandId = await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
   } catch (err) {
-    if (handleCommandWriteError(err, res)) return;
+    if (handleReservedOrConflictCommandError(err, res, COMMAND_WRITE_ERROR_OPTIONS)) return;
     return logAndRedirectError({ res, log, logLabel: 'Add custom command error:', err, basePath: '/commands', errorCode: 'add_failed' });
   }
 
@@ -135,7 +125,7 @@ router.post('/commands/update', requireMod, csrfProtection, async (req, res) => 
     if (err instanceof CommandNotFoundError) {
       return res.redirect('/commands?error=command_not_found');
     }
-    if (handleCommandWriteError(err, res)) return;
+    if (handleReservedOrConflictCommandError(err, res, COMMAND_WRITE_ERROR_OPTIONS)) return;
     return logAndRedirectError({ res, log, logLabel: 'Update custom command error:', err, basePath: '/commands', errorCode: 'update_failed' });
   }
 

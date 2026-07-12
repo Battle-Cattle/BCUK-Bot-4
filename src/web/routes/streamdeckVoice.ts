@@ -4,12 +4,12 @@ import { getApprovedGuildIdsForKey } from '../../db';
 import { requireApiKey } from '../middleware';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
-import { getDiscordClient } from '../../discord/discordBot';
 import { normalizeDiscordId } from './shared';
 import {
   resolveChannelGuildOrRespond,
   resolvePresenceGuildOrRespond,
   ensureGuildApproved,
+  getReadyDiscordClientOrRespond,
 } from './streamdeckGuildResolution';
 
 const log = createLogger('Streamdeck');
@@ -52,11 +52,8 @@ router.post('/voice/join', requireApiKey, async (req, res) => {
     return;
   }
 
-  const discordClient = getDiscordClient();
-  if (!discordClient) {
-    res.status(503).json({ ok: false, error: 'Discord client not ready' });
-    return;
-  }
+  const discordClient = getReadyDiscordClientOrRespond(res);
+  if (!discordClient) return;
 
   const guildId = await resolveChannelGuildOrRespond(req, res, discordClient, normalizedChannelId);
   if (!guildId) return;
@@ -88,11 +85,8 @@ router.post('/voice/leave', requireApiKey, async (req, res) => {
 
   let guildId = explicitGuildId;
   if (!guildId) {
-    const discordClient = getDiscordClient();
-    if (!discordClient) {
-      res.status(503).json({ ok: false, error: 'Discord client not ready' });
-      return;
-    }
+    const discordClient = getReadyDiscordClientOrRespond(res);
+    if (!discordClient) return;
     guildId = normalizedChannelId
       ? await resolveChannelGuildOrRespond(req, res, discordClient, normalizedChannelId)
       : await resolvePresenceGuildOrRespond(req, res, discordClient);

@@ -1,12 +1,11 @@
 import { Request, Response } from 'express';
 import { createLogger } from '../../shared/logger';
 import { findUser, getMemberAccessLevel, AccessLevel } from '../../db';
-import { trimField } from './shared';
+import { trimField, normalizeDiscordId } from './shared';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 import { isLockWaitTimeoutDbError } from './adminUserMutations';
 
 const log = createLogger('Web');
-const DISCORD_ID_RE = /^\d{17,20}$/;
 
 /**
  * Resolves the acting user's current guild from the session.
@@ -45,9 +44,12 @@ export function resolveValidDiscordId(res: Response, rawId: string | undefined):
   return trimmed;
 }
 
-/** Returns `'invalid_discord_id'` when `id` doesn't look like a Discord snowflake, else null. */
+/**
+ * Returns `'invalid_discord_id'` when `id` doesn't look like a Discord snowflake, else null.
+ * Derives its answer from `normalizeDiscordId` rather than maintaining a second snowflake regex.
+ */
 export function discordIdError(id: string): string | null {
-  return DISCORD_ID_RE.test(id) ? null : 'invalid_discord_id';
+  return normalizeDiscordId(id) ? null : 'invalid_discord_id';
 }
 
 /** Returns `'invalid_access_level'` when `levelStr` isn't a known `AccessLevel` value, else null. */
