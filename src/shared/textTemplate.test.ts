@@ -25,4 +25,25 @@ describe('fillTemplate', () => {
   it('returns an empty string for an empty template', () => {
     expect(fillTemplate('', { user: 'alice' })).toBe('');
   });
+
+  it('defaults to the empty fallback when no fallback argument is given', () => {
+    expect(fillTemplate('Hi {unknown}!', {})).toBe(fillTemplate('Hi {unknown}!', {}, 'empty'));
+  });
+
+  it('replaces unknown placeholders with an empty string when fallback is explicitly "empty"', () => {
+    expect(fillTemplate('Hi {unknown}!', {}, 'empty')).toBe('Hi !');
+  });
+
+  it('leaves unknown placeholders as the literal {key} text when fallback is "keep"', () => {
+    expect(fillTemplate('Hi {unknown}!', {}, 'keep')).toBe('Hi {unknown}!');
+  });
+
+  it('still substitutes known placeholders when fallback is "keep"', () => {
+    expect(fillTemplate('{streamer} is playing {game}', { streamer: 'alice', game: 'Chess' }, 'keep'))
+      .toBe('alice is playing Chess');
+  });
+
+  it('mixes known substitutions and kept-literal unknowns in "keep" mode', () => {
+    expect(fillTemplate('{streamer} — {unknown}', { streamer: 'alice' }, 'keep')).toBe('alice — {unknown}');
+  });
 });

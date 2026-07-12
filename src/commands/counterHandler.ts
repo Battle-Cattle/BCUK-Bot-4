@@ -6,24 +6,23 @@ const log = createLogger('Counter');
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { extractCommand } from './commandUtils';
 import { isDiscordNotFoundError } from '../discord/discordUtils';
+import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
 // Same pattern as customCommandHandler.ts to avoid a circular import between
 // twitchBot.ts and counterHandler.ts.
 
-interface TwitchSendRuntime {
-  send: (channel: string, message: string) => Promise<void>;
-}
+const counterRuntime = createRuntimeRegistry<TwitchSendRuntime>();
 
-let _twitchRuntime: TwitchSendRuntime | null = null;
-
+/** Stores the Twitch chat runtime used to send counter responses. Call once from index.ts after the Twitch bot is ready. */
 export function registerCounterTwitchRuntime(runtime: TwitchSendRuntime): void {
-  _twitchRuntime = runtime;
+  counterRuntime.register(runtime);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Replaces every `%d` placeholder in `template` with `value`. */
 function formatCounterMessage(template: string, value: number): string {
   return template.replace(/%d/g, String(value));
 }
@@ -34,6 +33,15 @@ interface CounterResult {
   canReply: boolean;
 }
 
+/**
+ * Looks up a counter by `command`, increments it if it's a trigger-type counter,
+ * and formats the resulting response message. Shared by the Discord and Twitch
+ * counter handlers so the lookup/increment/format logic isn't duplicated.
+ *
+ * @param command - The full command string (e.g. `!clap`) used to find the counter.
+ * @param errorPrefix - Log-line prefix identifying the calling platform (e.g. `[Discord]`).
+ * @returns The response text, display label, and whether it's safe to send it; null if no counter matches `command`.
+ */
 async function _buildCounterResponse(
   command: string,
   errorPrefix: string,
@@ -70,6 +78,15 @@ async function _buildCounterResponse(
 
 // ─── Execute functions ────────────────────────────────────────────────────────
 
+/**
+ * Handles a Discord message that may be a counter command or check: extracts the
+ * command, builds the counter response, records it for the monitor panel, and
+ * replies in-channel if the counter was safely resolved.
+ *
+ * @param message - The Discord message to check for a counter command.
+ * @param username - Display name of the sender, for monitor-panel logging.
+ * @returns Resolves once the reply (or a no-op) has completed.
+ */
 export async function executeCounterCommandForDiscord(
   message: Message,
   username?: string | null,
@@ -100,6 +117,16 @@ export async function executeCounterCommandForDiscord(
   }
 }
 
+/**
+ * Handles a Twitch chat message that may be a counter command or check: extracts
+ * the command, builds the counter response, records it for the monitor panel, and
+ * sends it to the channel via the registered Twitch runtime if safely resolved.
+ *
+ * @param channel - Twitch channel the message was sent in (also the send target).
+ * @param rawMessage - Raw chat message text.
+ * @param username - Twitch login of the sender, for monitor-panel logging.
+ * @returns Resolves once the send (or a no-op) has completed.
+ */
 export async function executeCounterCommandForTwitch(
   channel: string,
   rawMessage: string,
@@ -121,7 +148,7 @@ export async function executeCounterCommandForTwitch(
 
   if (!result.canReply) return;
 
-  const runtime = _twitchRuntime;
+  const runtime = counterRuntime.get();
   if (runtime) {
     try {
       await runtime.send(channel, result.response);

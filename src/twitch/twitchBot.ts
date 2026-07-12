@@ -17,8 +17,7 @@ import {
   findUserByTwitchName,
   type RefreshingLookupCache,
 } from '../db';
-import { getDiscordClient } from '../discord/discordBot';
-import { getActiveGuildForUser } from '../discord/voicePresence';
+import { resolveGuildIdForDiscordId } from '../discord/voicePresence';
 import {
   setTmiClient,
   setConnected,
@@ -86,15 +85,31 @@ export function __resetTwitchChannelDiscordIdCacheForTests(): void {
 async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promise<string | null> {
   const discordId = await resolveDiscordIdForTwitchChannel(normalizedChannel);
   if (!discordId) return null;
-  const discordClient = getDiscordClient();
-  if (!discordClient) return null;
-  return getActiveGuildForUser(discordClient, discordId);
+  return resolveGuildIdForDiscordId(discordId);
 }
 
+/**
+ * Runs `promise` without awaiting it, logging (rather than throwing) if it rejects.
+ * Used so one command handler's failure can't block or delay the others.
+ * @param promise - The in-flight promise to observe.
+ * @param context - Log-line prefix identifying which handler the promise belongs to.
+ */
 function fireAndForget(promise: Promise<void>, context: string): void {
   promise.catch((err) => log.error(`${context}:`, err));
 }
 
+/**
+ * tmi.js `message` event handler: dispatches an incoming Twitch chat message to
+ * every command handler (custom commands, counters, `!multi`, `!so`, the shared
+ * command router, countdowns) in parallel via {@link fireAndForget}. Ignores the
+ * bot's own messages, messages from channels not in the active set, and messages
+ * shared into this channel from a partner channel in a Twitch shared-chat session
+ * (so each message is only handled once, in its source channel).
+ * @param channel - Twitch channel the message was received in (as `#channel`).
+ * @param tags - tmi.js chat user state (badges, mod status, display name, etc.) for the sender.
+ * @param message - Raw chat message text.
+ * @param self - Whether this message was sent by the bot's own account.
+ */
 function handleTwitchMessage(
   channel: string,
   tags: tmi.ChatUserstate,
@@ -130,6 +145,14 @@ function handleTwitchMessage(
   }
 }
 
+/**
+ * tmi.js `connected` event handler: marks the bot connected, logs the active
+ * channel list, pessimistically resets every active channel's status to
+ * disconnected, then kicks off an async reconciliation of actually-joined
+ * channels via {@link reconcileJoinedChannels}.
+ * @param addr - Address of the Twitch IRC server connected to.
+ * @param port - Port of the Twitch IRC server connected to.
+ */
 function onConnected(addr: string, port: number): void {
   connected = true;
   setConnected(true);
@@ -144,6 +167,13 @@ function onConnected(addr: string, port: number): void {
   });
 }
 
+/**
+ * tmi.js `disconnected` event handler: marks the bot disconnected, clears
+ * tmi.js's internal joined-channel list (which it doesn't reset on disconnect,
+ * to avoid double-joining every channel on reconnect), and marks every active
+ * channel's status as disconnected.
+ * @param reason - Reason string reported by tmi.js for the disconnect.
+ */
 function onDisconnected(reason: string): void {
   connected = false;
   setConnected(false);
@@ -156,6 +186,12 @@ function onDisconnected(reason: string): void {
   getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
 }
 
+/**
+ * Starts the Twitch bot: initializes the active-channel set, creates and
+ * configures the tmi.js client (identity, logging, auto-reconnect), wires up
+ * message/connected/disconnected handlers, and connects.
+ * @returns Resolves once the client has connected; rejects if the connection attempt fails.
+ */
 export async function startTwitchBot(): Promise<void> {
   await initializeActiveChannels();
 
@@ -190,6 +226,13 @@ export async function startTwitchBot(): Promise<void> {
   }
 }
 
+/**
+ * Sends `message` to a Twitch channel via the connected tmi.js client.
+ * @param channel - Twitch channel to send to (normalized before sending).
+ * @param message - Message text to send.
+ * @returns Resolves once the message has been sent.
+ * @throws If `channel` doesn't normalize to a valid channel name, or the client isn't connected.
+ */
 export async function sayInChannel(channel: string, message: string): Promise<void> {
   const normalized = normalizeTwitchChannelName(channel);
   if (!normalized) throw new Error(`[Twitch] Invalid channel name: ${channel}`);
@@ -197,6 +240,12 @@ export async function sayInChannel(channel: string, message: string): Promise<vo
   await client.say(normalized, message);
 }
 
+/**
+ * Stops the Twitch bot: disconnects the tmi.js client (marking channels
+ * disconnected if the disconnect itself fails), tears down the client
+ * reference, and clears channel-membership state.
+ * @returns Resolves once shutdown is complete.
+ */
 export async function stopTwitchBot(): Promise<void> {
   connected = false;
   setConnected(false);
