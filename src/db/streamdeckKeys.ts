@@ -1,6 +1,6 @@
 import { randomBytes, createHash, timingSafeEqual } from 'crypto';
 import mysql from 'mysql2/promise';
-import { getPool } from './pool';
+import { getPool, withTransaction } from './pool';
 import { AccessLevel } from './users';
 
 /** Per-guild approval state for a Streamdeck API key. */
@@ -77,9 +77,7 @@ export async function createApiKeyAndRequestGuildAccess(
   // Both inserts must commit together — a partial failure would strand a key
   // identity with no guild-status row, and the plaintext (only ever returned
   // here) would be unrecoverable.
-  const conn = await getPool().getConnection();
-  try {
-    await conn.beginTransaction();
+  await withTransaction(async (conn) => {
     await conn.execute(
       'INSERT INTO streamdeck_api_keys (discord_id, key_hash, created_at) VALUES (?, ?, ?)',
       [discordId, hash, now],
@@ -90,13 +88,7 @@ export async function createApiKeyAndRequestGuildAccess(
        VALUES (?, ?, ?, ?, ?, ?)`,
       [discordId, guildId, status, now, status === 'approved' ? now : null, status === 'approved' ? discordId : null],
     );
-    await conn.commit();
-  } catch (err) {
-    await conn.rollback().catch(() => {});
-    throw err;
-  } finally {
-    conn.release();
-  }
+  });
 
   return { plain, status };
 }

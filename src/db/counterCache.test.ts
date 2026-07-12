@@ -17,6 +17,10 @@ vi.mock('./commandLocks', () => ({
 }));
 vi.mock('./commandStringUtils', () => ({
   normalizeCommandList: vi.fn((arr: string[]) => arr.map((s: string) => s.trim().toLowerCase())),
+  normalizeCommand: vi.fn((command: string) => {
+    const normalized = command.trim().toLowerCase();
+    return normalized.length > 0 ? normalized : null;
+  }),
 }));
 
 import { findCounterByCommand, isCounterCommandTaken } from './counterCache';

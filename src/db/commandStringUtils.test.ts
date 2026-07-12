@@ -1,12 +1,31 @@
 import { describe, it, expect } from 'vitest';
 import {
   requireTrimmedString,
+  normalizeCommand,
   normalizeCommandList,
   normalizeCommandInputs,
   isMysqlDuplicateEntryError,
   CommandNotFoundError,
   CommandConflictError,
 } from './commandStringUtils';
+
+describe('normalizeCommand', () => {
+  it('trims and lowercases a command string', () => {
+    expect(normalizeCommand('  !Foo  ')).toBe('!foo');
+  });
+
+  it('returns null for an empty string', () => {
+    expect(normalizeCommand('')).toBeNull();
+  });
+
+  it('returns null for a whitespace-only string', () => {
+    expect(normalizeCommand('   ')).toBeNull();
+  });
+
+  it('leaves an already-normalized command unchanged', () => {
+    expect(normalizeCommand('!clap')).toBe('!clap');
+  });
+});
 
 describe('requireTrimmedString', () => {
   it('returns the trimmed string when valid', () => {

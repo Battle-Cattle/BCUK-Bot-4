@@ -1,6 +1,6 @@
 import { createLogger } from '../shared/logger';
 import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
-import { normalizeCommandList } from './commandStringUtils';
+import { normalizeCommandList, normalizeCommand } from './commandStringUtils';
 import { isAnyCommandTakenAcrossTables } from './commandLocks';
 // counters imports invalidateCounterLookupCache from this module;
 // this module imports getAllCounters from counters.
@@ -17,6 +17,11 @@ interface CounterLookupCache extends RefreshingLookupCache {
 
 // ─── Cache builder ────────────────────────────────────────────────────────────
 
+/**
+ * Creates an empty, already-stale counter lookup cache used as the initial/fallback state
+ * before the first successful refresh.
+ * @returns An empty `CounterLookupCache` with `loadedAt` set to 0.
+ */
 function createEmptyCounterLookupCache(): CounterLookupCache {
   return {
     // Keep the fallback cache immediately stale so a new refresh can start as soon
@@ -26,6 +31,12 @@ function createEmptyCounterLookupCache(): CounterLookupCache {
   };
 }
 
+/**
+ * Builds a counter lookup cache keyed by normalized trigger/check command, sorted by counter id
+ * so the lowest id wins on collision. Logs a warning and skips the duplicate on any collision.
+ * @param counters Counters to index.
+ * @returns The populated `CounterLookupCache`.
+ */
 function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
   const byCommand = new Map<string, DbMatchedCounter>();
   const sortedCounters = [...counters].sort((left, right) => left.id - right.id);
@@ -48,8 +59,8 @@ function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
   };
 
   for (const counter of sortedCounters) {
-    registerCounterCommand(counter.trigger_command.trim().toLowerCase(), counter, 'trigger', 'trigger_command');
-    registerCounterCommand(counter.check_command.trim().toLowerCase(), counter, 'check', 'check_command');
+    registerCounterCommand(normalizeCommand(counter.trigger_command) ?? '', counter, 'trigger', 'trigger_command');
+    registerCounterCommand(normalizeCommand(counter.check_command) ?? '', counter, 'check', 'check_command');
   }
 
   return { loadedAt: Date.now(), byCommand };
@@ -75,7 +86,7 @@ export function invalidateCounterLookupCache(): void {
 
 /** Looks up a counter by its trigger or check command string; returns null if not found. */
 export async function findCounterByCommand(command: string): Promise<DbMatchedCounter | null> {
-  const normalizedCommand = command.trim().toLowerCase();
+  const normalizedCommand = normalizeCommand(command);
   if (!normalizedCommand) return null;
 
   const cache = await counterLookupCacheState.getCache();
