@@ -34,6 +34,7 @@ export interface DbUser {
 
 const USER_SELECT = 'discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner';
 
+/** Maps a raw `user` table row to a {@link DbUser}. */
 function mapUser(r: mysql.RowDataPacket): DbUser {
   return {
     discord_id: String(r.discord_id),
@@ -128,7 +129,13 @@ export async function getGuildMemberUsers(guildId: string): Promise<DbUser[]> {
   return rows.map(mapUser);
 }
 
-// Short timeout so callers fail fast instead of hanging 50s under lock contention.
+/**
+ * Runs `fn` on a dedicated connection with a short (5s) `innodb_lock_wait_timeout`, so callers
+ * fail fast instead of hanging up to the default 50s under lock contention. The timeout is reset
+ * to the session default and the connection released before returning.
+ * @param fn Callback that receives the connection and performs the work.
+ * @returns The value returned by `fn`.
+ */
 async function withShortLockTimeout<T>(fn: (conn: mysql.PoolConnection) => Promise<T>): Promise<T> {
   const connection = await getPool().getConnection();
   try {

@@ -17,6 +17,11 @@ interface CounterLookupCache extends RefreshingLookupCache {
 
 // ─── Cache builder ────────────────────────────────────────────────────────────
 
+/**
+ * Creates an empty, already-stale counter lookup cache used as the initial/fallback state
+ * before the first successful refresh.
+ * @returns An empty `CounterLookupCache` with `loadedAt` set to 0.
+ */
 function createEmptyCounterLookupCache(): CounterLookupCache {
   return {
     // Keep the fallback cache immediately stale so a new refresh can start as soon
@@ -26,6 +31,12 @@ function createEmptyCounterLookupCache(): CounterLookupCache {
   };
 }
 
+/**
+ * Builds a counter lookup cache keyed by normalized trigger/check command, sorted by counter id
+ * so the lowest id wins on collision. Logs a warning and skips the duplicate on any collision.
+ * @param counters Counters to index.
+ * @returns The populated `CounterLookupCache`.
+ */
 function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
   const byCommand = new Map<string, DbMatchedCounter>();
   const sortedCounters = [...counters].sort((left, right) => left.id - right.id);

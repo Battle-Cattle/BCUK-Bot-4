@@ -27,6 +27,7 @@ export interface DbStreamerEventSub {
   config: EventSubConfig | null;
 }
 
+/** Maps a raw `streamer_event_config` row to an {@link EventSubConfig}. */
 function mapConfig(r: mysql.RowDataPacket): EventSubConfig {
   return {
     follow_enabled: fromBit(r.follow_enabled),
@@ -41,6 +42,12 @@ function mapConfig(r: mysql.RowDataPacket): EventSubConfig {
   };
 }
 
+/**
+ * Decrypts a stored token value, treating a missing secret or a decryption failure (corrupted
+ * data or wrong key) as an absent token rather than throwing.
+ * @param value Encrypted token value, or null.
+ * @returns The decrypted token, or null if `value` is null, the secret is unset, or decryption fails.
+ */
 function maybeDecrypt(value: string | null): string | null {
   if (!value) return null;
   if (!EVENTSUB_TOKEN_SECRET) return null; // secret absent — treat stored value as unusable
@@ -51,6 +58,7 @@ function maybeDecrypt(value: string | null): string | null {
   }
 }
 
+/** Maps a joined streamer/user/event-config row to a {@link DbStreamerEventSub}, decrypting tokens. */
 function mapStreamerEventSub(r: mysql.RowDataPacket): DbStreamerEventSub {
   return {
     id: r.id,

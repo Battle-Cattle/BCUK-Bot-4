@@ -58,6 +58,7 @@ export interface CounterHistoryEntry {
 
 // ─── Row mapper ───────────────────────────────────────────────────────────────
 
+/** Maps a raw `counter` table row to a {@link DbCounter}. */
 function mapCounter(row: mysql.RowDataPacket): DbCounter {
   return {
     id: row.id,
@@ -79,6 +80,16 @@ interface NormalizedCounterFields {
   incrementMessage: string;
 }
 
+/**
+ * Trims and validates a counter's editable fields (lowercasing the trigger/check commands),
+ * enforcing per-field length limits.
+ * @param triggerCommand Command that increments the counter.
+ * @param checkCommand Command that reports the counter's current value.
+ * @param message Message shown when the counter is checked.
+ * @param incrementMessage Message shown when the counter is incremented.
+ * @returns The normalized fields.
+ * @throws If any field is blank or exceeds its maximum length.
+ */
 function normalizeCounterFields(
   triggerCommand: string,
   checkCommand: string,
@@ -95,6 +106,10 @@ function normalizeCounterFields(
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
+/**
+ * Fetches all counters, ordered by trigger command.
+ * @returns All counters.
+ */
 export async function getAllCounters(): Promise<DbCounter[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value
@@ -211,6 +226,17 @@ export async function getCounterHistory(
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Creates a new counter, starting at 0, after validating fields and checking the trigger/check
+ * commands don't conflict with other reserved or in-use commands.
+ * @param triggerCommand Command that increments the counter.
+ * @param checkCommand Command that reports the counter's current value.
+ * @param message Message shown when the counter is checked.
+ * @param incrementMessage Message shown when the counter is incremented.
+ * @param resetYearly Whether the counter's value is archived and reset each new year.
+ * @throws If `triggerCommand` and `checkCommand` are the same, either is reserved, or either is
+ *   already taken by another command.
+ */
 export async function addCounter(
   triggerCommand: string,
   checkCommand: string,
@@ -241,6 +267,12 @@ export async function addCounter(
   invalidateCounterLookupCache();
 }
 
+/**
+ * Checks whether a counter with the given id exists.
+ * @param id The counter's numeric id.
+ * @param executor Pool or transaction connection to query with.
+ * @returns True if the counter exists.
+ */
 async function counterExists(id: number, executor: SqlExecutor = getPool()): Promise<boolean> {
   const [rows] = await executor.execute<mysql.RowDataPacket[]>(
     'SELECT 1 FROM counter WHERE id = ? LIMIT 1',
@@ -249,6 +281,12 @@ async function counterExists(id: number, executor: SqlExecutor = getPool()): Pro
   return rows.length > 0;
 }
 
+/**
+ * Looks up a counter's current trigger/check command strings by id.
+ * @param id The counter's numeric id.
+ * @param executor Pool or transaction connection to query with.
+ * @returns The counter's trigger and check commands, or `null` if no counter exists with the given id.
+ */
 async function getCounterCommandsById(
   id: number,
   executor: SqlExecutor = getPool(),
@@ -261,6 +299,14 @@ async function getCounterCommandsById(
   return { trigger_command: rows[0].trigger_command, check_command: rows[0].check_command };
 }
 
+/**
+ * Updates an existing counter's fields, locking both its old and new trigger/check commands
+ * so concurrent writes can't create a conflict during the transition.
+ * @param input The counter's id and updated fields.
+ * @throws {CounterNotFoundError} If no counter exists with the given id.
+ * @throws If `triggerCommand` and `checkCommand` are the same, either is reserved, or either is
+ *   already taken by another command.
+ */
 export async function updateCounter(input: UpdateCounterInput): Promise<void> {
   const { id, triggerCommand, checkCommand, message, incrementMessage, resetYearly } = input;
 
@@ -308,6 +354,11 @@ export async function updateCounter(input: UpdateCounterInput): Promise<void> {
   invalidateCounterLookupCache();
 }
 
+/**
+ * Deletes a counter by id, locking its trigger/check commands during the delete.
+ * @param id The counter's numeric id.
+ * @throws {CounterNotFoundError} If no counter exists with the given id.
+ */
 export async function removeCounter(id: number): Promise<void> {
   const current = await getCounterCommandsById(id);
   if (!current) throw new CounterNotFoundError(id);
@@ -327,6 +378,11 @@ export async function removeCounter(id: number): Promise<void> {
   invalidateCounterLookupCache();
 }
 
+/**
+ * Resets a counter's `current_value` to 0.
+ * @param id The counter's numeric id.
+ * @throws {CounterNotFoundError} If no counter exists with the given id.
+ */
 export async function resetCounterCurrentValue(id: number): Promise<void> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
     'UPDATE counter SET current_value = 0 WHERE id = ?',
@@ -365,6 +421,13 @@ export async function incrementCounter(id: number): Promise<number> {
   return newValue;
 }
 
+/**
+ * Archives the current value of every yearly-reset counter into that year's `value<year>`
+ * column (only for counters where the column is still `NULL`), then resets `current_value` to 0.
+ * @param year Calendar year to archive into; must be a key of `ARCHIVE_YEAR_COLUMNS`.
+ * @returns The number of counters archived and reset.
+ * @throws If `year` is not a valid archive year.
+ */
 export async function archiveAndResetYearlyCounters(year: number): Promise<number> {
   const columnName = ARCHIVE_YEAR_COLUMNS.get(year);
   if (!columnName) {

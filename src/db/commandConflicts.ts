@@ -15,6 +15,13 @@ import { fromBit } from './utils';
 
 // ─── Conflict assertions ──────────────────────────────────────────────────────
 
+/**
+ * Throws if a Discord-enabled custom command already uses `triggerString`.
+ * @param triggerString Trigger string to check for conflicts.
+ * @param executor Pool or transaction connection to query with.
+ * @param excludeCommandId Command id to exclude from the conflict check (e.g. the command being edited).
+ * @throws {CommandConflictError} If a conflicting Discord-enabled command exists.
+ */
 export async function assertDiscordTriggerAvailable(
   triggerString: string,
   executor: SqlExecutor,
@@ -40,6 +47,14 @@ export async function assertDiscordTriggerAvailable(
   }
 }
 
+/**
+ * Checks whether `triggerString` is already used by a multi-Twitch command, or by a command
+ * assigned to a user whose Twitch bot is enabled.
+ * @param executor Pool or transaction connection to query with.
+ * @param triggerString Trigger string to check for conflicts.
+ * @param excludeCommandId Command id to exclude from the conflict check.
+ * @returns True if a conflicting command exists.
+ */
 async function hasMultiTwitchTriggerConflict(
   executor: SqlExecutor,
   triggerString: string,
@@ -72,6 +87,14 @@ async function hasMultiTwitchTriggerConflict(
   return conflictRows.length > 0;
 }
 
+/**
+ * Throws if `triggerString` is already used by a multi-Twitch command, or by a command
+ * assigned to a user whose Twitch bot is enabled.
+ * @param executor Pool or transaction connection to query with.
+ * @param triggerString Trigger string to check for conflicts.
+ * @param excludeCommandId Command id to exclude from the conflict check.
+ * @throws {CommandConflictError} If a conflicting command exists.
+ */
 export async function assertMultiTwitchTriggerAvailable(
   executor: SqlExecutor,
   triggerString: string,
@@ -82,6 +105,14 @@ export async function assertMultiTwitchTriggerAvailable(
   }
 }
 
+/**
+ * Checks whether assigning `triggerString` to the command's existing single-Twitch users would
+ * overlap with another command already covering the same Twitch channel (or a multi-Twitch command).
+ * @param executor Pool or transaction connection to query with.
+ * @param commandId Command id whose Twitch-enabled assignees are checked for overlap.
+ * @param triggerString Trigger string being assigned.
+ * @returns True if an overlapping assignment exists.
+ */
 async function hasSingleTwitchAssignmentOverlap(
   executor: SqlExecutor,
   commandId: number,
@@ -114,6 +145,14 @@ async function hasSingleTwitchAssignmentOverlap(
   return overlapRows.length > 0;
 }
 
+/**
+ * Throws if assigning `triggerString` to the command's existing single-Twitch users would
+ * overlap with another command already covering the same Twitch channel (or a multi-Twitch command).
+ * @param executor Pool or transaction connection to query with.
+ * @param commandId Command id whose Twitch-enabled assignees are checked for overlap.
+ * @param triggerString Trigger string being assigned.
+ * @throws {CommandConflictError} If an overlapping assignment exists.
+ */
 export async function assertNoSingleTwitchAssignmentOverlap(
   executor: SqlExecutor,
   commandId: number,
@@ -172,6 +211,15 @@ export async function getUserTwitchEligibility(executor: SqlExecutor, discordId:
   };
 }
 
+/**
+ * Checks whether `triggerString` is already used by another command that is either
+ * multi-Twitch or assigned to a user with the same normalized Twitch channel name.
+ * @param executor Pool or transaction connection to query with.
+ * @param commandId Command id to exclude from the conflict check.
+ * @param triggerString Trigger string to check for conflicts.
+ * @param normalizedTwitchName Normalized (lowercased) Twitch channel name to match against.
+ * @returns True if a conflicting command exists.
+ */
 async function hasTwitchChannelTriggerConflict(
   executor: SqlExecutor,
   commandId: number,
@@ -200,6 +248,15 @@ async function hasTwitchChannelTriggerConflict(
   return conflictRows.length > 0;
 }
 
+/**
+ * Throws if `triggerString` is already used by another command that is either
+ * multi-Twitch or assigned to a user with the same normalized Twitch channel name.
+ * @param executor Pool or transaction connection to query with.
+ * @param commandId Command id to exclude from the conflict check.
+ * @param triggerString Trigger string to check for conflicts.
+ * @param normalizedTwitchName Normalized (lowercased) Twitch channel name to match against.
+ * @throws {CommandConflictError} If a conflicting command exists.
+ */
 export async function assertNoTwitchChannelTriggerConflict(
   executor: SqlExecutor,
   commandId: number,
@@ -211,6 +268,13 @@ export async function assertNoTwitchChannelTriggerConflict(
   }
 }
 
+/**
+ * Inserts (or no-ops if already present) an assignment linking a Discord user to a custom command
+ * for single-Twitch triggering.
+ * @param executor Pool or transaction connection to query with.
+ * @param commandId Command id being assigned.
+ * @param discordId Discord snowflake of the user being assigned.
+ */
 export async function insertUserCommandAssignment(
   executor: SqlExecutor,
   commandId: number,
@@ -225,6 +289,17 @@ export async function insertUserCommandAssignment(
   );
 }
 
+/**
+ * Assigns a Discord user to a custom command for single-Twitch triggering, running the conflict
+ * check and insert inside a transaction guarded by a named lock on the command's trigger string.
+ * Retries on deadlock up to `MAX_DEADLOCK_RETRIES` times, re-acquiring the transaction each attempt
+ * while holding the same session-scoped lock across attempts.
+ * @param connection Transaction-capable pool connection to run the work on.
+ * @param commandId Command id being assigned.
+ * @param discordId Discord snowflake of the user being assigned.
+ * @throws {CommandConflictError} If the assignment would create a Twitch-channel trigger conflict.
+ * @throws If the deadlock retry limit is reached.
+ */
 export async function assignUserToCommandWithinTransaction(
   connection: mysql.PoolConnection,
   commandId: number,

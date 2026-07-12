@@ -24,6 +24,7 @@ export interface OverlayWeightedVideo {
   weight: number;
 }
 
+/** Maps a raw `overlay_video` row to an {@link OverlayVideo}. */
 function mapVideo(r: mysql.RowDataPacket): OverlayVideo {
   return {
     id: r.id,
@@ -34,6 +35,11 @@ function mapVideo(r: mysql.RowDataPacket): OverlayVideo {
   };
 }
 
+/**
+ * Fetches all overlay videos belonging to a streamer, newest first.
+ * @param streamerId DB row ID of the owning streamer.
+ * @returns The streamer's overlay videos.
+ */
 export async function getVideosForStreamer(streamerId: number): Promise<OverlayVideo[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT id, streamer_id, name, filename, created_at
@@ -45,6 +51,13 @@ export async function getVideosForStreamer(streamerId: number): Promise<OverlayV
   return rows.map(mapVideo);
 }
 
+/**
+ * Inserts a new overlay video row.
+ * @param streamerId DB row ID of the owning streamer.
+ * @param name Display name for the video.
+ * @param filename Stored filename of the video.
+ * @returns The new row's primary key.
+ */
 export async function addVideo(streamerId: number, name: string, filename: string): Promise<number> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `INSERT INTO overlay_video (streamer_id, name, filename) VALUES (?, ?, ?)`,
@@ -53,6 +66,12 @@ export async function addVideo(streamerId: number, name: string, filename: strin
   return result.insertId;
 }
 
+/**
+ * Looks up an overlay video by id, scoped to the owning streamer.
+ * @param videoId Primary key of the `overlay_video` row.
+ * @param streamerId DB row ID of the owning streamer.
+ * @returns The video, or null if no matching row exists.
+ */
 export async function getVideoById(videoId: number, streamerId: number): Promise<OverlayVideo | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT id, streamer_id, name, filename, created_at
@@ -95,6 +114,11 @@ export async function deleteVideo(videoId: number, streamerId: number): Promise<
   }
 }
 
+/**
+ * Fetches all overlay rewards belonging to a streamer, each with its assigned weighted videos.
+ * @param streamerId DB row ID of the owning streamer.
+ * @returns The streamer's overlay rewards with their assigned videos.
+ */
 export async function getRewardsForStreamer(streamerId: number): Promise<OverlayRewardWithVideos[]> {
   const [rewardRows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT r.id, r.streamer_id, r.twitch_reward_id,
@@ -129,6 +153,13 @@ export async function getRewardsForStreamer(streamerId: number): Promise<Overlay
   return Array.from(rewardMap.values());
 }
 
+/**
+ * Inserts an overlay reward for a streamer's Twitch channel-point reward, or returns the existing
+ * row's id if one already exists for this streamer+reward.
+ * @param streamerId DB row ID of the owning streamer.
+ * @param twitchRewardId Twitch channel-point reward id.
+ * @returns The reward row's primary key.
+ */
 export async function upsertReward(streamerId: number, twitchRewardId: string): Promise<number> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `INSERT INTO overlay_reward (streamer_id, twitch_reward_id) VALUES (?, ?)
@@ -182,6 +213,11 @@ export async function setRewardVideos(
   }
 }
 
+/**
+ * Deletes an overlay reward row, scoped to the owning streamer.
+ * @param rewardId Primary key of the `overlay_reward` row.
+ * @param streamerId DB row ID of the owning streamer.
+ */
 export async function deleteReward(rewardId: number, streamerId: number): Promise<void> {
   await getPool().execute(
     `DELETE FROM overlay_reward WHERE id = ? AND streamer_id = ?`,
@@ -189,6 +225,13 @@ export async function deleteReward(rewardId: number, streamerId: number): Promis
   );
 }
 
+/**
+ * Fetches the weighted videos assigned to a streamer's Twitch channel-point reward, for use when
+ * randomly selecting a video to play.
+ * @param twitchRewardId Twitch channel-point reward id.
+ * @param streamerId DB row ID of the owning streamer.
+ * @returns The reward's assigned videos with their filenames and weights.
+ */
 export async function getVideosForReward(
   twitchRewardId: string,
   streamerId: number,
