@@ -8,10 +8,12 @@ import { issueToken, findDiscordIdByTokenHash, getTokenStatus, revokeToken } fro
 import { createHash } from 'crypto';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
+/** Builds a fake mysql pool whose `execute`/`query` resolve to the given rows. */
 function makePool(rows: unknown[] = []) {
   return makeMockPool({ rows });
 }
 
+/** Hashes a string with SHA-256 and returns it as a hex digest, matching the stored-token hashing scheme. */
 function sha256hex(s: string) {
   return createHash('sha256').update(s).digest('hex');
 }

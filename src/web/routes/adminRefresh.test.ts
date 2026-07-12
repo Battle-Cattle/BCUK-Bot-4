@@ -29,6 +29,7 @@ import router, { refreshStates, getRefreshState, forgetGuildRefreshState } from 
 const GUILD_ID = '900000000000000001';
 const OTHER_GUILD_ID = '900000000000000002';
 
+/** Builds a supertest-ready app: the admin-refresh router with a manager-level session stubbed to the given guild. */
 function buildApp(currentGuildId: string = GUILD_ID) {
   const app = buildTestApp({
     router,

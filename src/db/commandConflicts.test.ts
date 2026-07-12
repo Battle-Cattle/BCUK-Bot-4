@@ -38,6 +38,7 @@ import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import { acquireNamedLock, releaseNamedLock, isDeadlockError } from './commandLocks';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
+/** Builds a fake mysql pool/executor resolving `execute`/`query` to the given rows. */
 // Cast to any to satisfy SqlExecutor (Pool | PoolConnection) without importing full mysql types
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeExecutor(rows: unknown[] = []): any {

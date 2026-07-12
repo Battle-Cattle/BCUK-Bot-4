@@ -47,6 +47,7 @@ const MOCK_STREAMER = {
 
 const SESSION_USER: SessionUser = makeSessionUser({ discordId: MOCK_STREAMER.discord_id, accessLevel: AccessLevel.MOD });
 
+/** Builds a supertest-ready app: the EventSub-callback router with a valid OAuth-state session for `MOCK_STREAMER`, customizable via `sessionOverrides`. */
 function buildApp(sessionOverrides: Record<string, any> = {}) {
   return buildTestApp({
     router,

@@ -8,6 +8,7 @@ import { createCode, consumeCode, exchangeCodeForToken } from './companionOAuthC
 import { createHash } from 'crypto';
 import { makeMockConnection } from '../test-utils/mockMysqlPool';
 
+/** Hashes a string with SHA-256 and returns it as a hex digest, matching the stored-code hashing scheme. */
 function sha256hex(s: string) {
   return createHash('sha256').update(s).digest('hex');
 }

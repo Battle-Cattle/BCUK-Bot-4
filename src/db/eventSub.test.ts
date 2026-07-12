@@ -25,10 +25,12 @@ import {
 } from './eventSub';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
+/** Builds a fake mysql pool whose `execute`/`query` resolve to the given rows. */
 function makePool(rows: unknown[] = []) {
   return makeMockPool({ rows });
 }
 
+/** Builds a fake `streamer` table row with EventSub config columns defaulted to null (disabled), pass `overrides` to customize. */
 function makeRow(overrides: object = {}): Record<string, unknown> {
   return {
     id: 1,
@@ -51,6 +53,7 @@ function makeRow(overrides: object = {}): Record<string, unknown> {
   };
 }
 
+/** Builds a fake `streamer` table row with a fully-populated (enabled) EventSub config, pass `overrides` to customize. */
 function makeRowWithConfig(overrides: object = {}): Record<string, unknown> {
   return makeRow({
     follow_enabled: 1,

@@ -1,5 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// `fixtures.ts` imports `AccessLevel` from `../db/users` at runtime, which transitively pulls in
+// `../db/pool` (and its required env vars). Mock it out, matching the convention used across
+// `src/web/routes/*.test.ts` (e.g. `rateLimits.test.ts`, `shared.test.ts`).
+vi.mock('../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+
 import { makeSessionUser, makeDbGuild } from './fixtures';
+import { AccessLevel } from '../db/users';
 
 describe('makeSessionUser', () => {
   it('returns a default level-0 test user when called with no overrides', () => {
@@ -7,17 +14,17 @@ describe('makeSessionUser', () => {
       discordId: '100000000000000001',
       discordName: 'TestUser',
       discordAvatar: null,
-      accessLevel: 0,
+      accessLevel: AccessLevel.USER,
     });
   });
 
   it('applies overrides on top of the defaults', () => {
-    const user = makeSessionUser({ accessLevel: 3, currentGuildId: 'g1', isOwner: true });
+    const user = makeSessionUser({ accessLevel: AccessLevel.ADMIN, currentGuildId: 'g1', isOwner: true });
     expect(user).toEqual({
       discordId: '100000000000000001',
       discordName: 'TestUser',
       discordAvatar: null,
-      accessLevel: 3,
+      accessLevel: AccessLevel.ADMIN,
       currentGuildId: 'g1',
       isOwner: true,
     });

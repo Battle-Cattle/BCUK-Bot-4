@@ -31,12 +31,13 @@ import supertest from 'supertest';
 import router from './streamGroups';
 import { addStreamGroup, updateStreamGroup, removeStreamGroupAndStreamers } from '../../db';
 import { restartTwitchMonitor } from '../../twitch/monitor/twitchMonitor';
-import { AccessLevel, AccessLevelValue } from '../../db/users';
+import { AccessLevel } from '../../db/users';
 import { buildTestApp } from '../../test-utils/expressTestApp';
+import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 
 const GUILD_ID = '900000000000000001';
-type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: AccessLevelValue; currentGuildId: string };
-const MANAGER: SessionUser = { discordId: '200000000000000001', discordName: 'ManagerUser', discordAvatar: null, accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID };
+type SessionUser = SessionUserFixture;
+const MANAGER: SessionUser = makeSessionUser({ accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID });
 
 /** Builds a supertest-ready app: the stream groups router with a stubbed session and a render mock that flattens locals into the JSON body. */
 function buildApp(sessionUser: SessionUser = MANAGER) {

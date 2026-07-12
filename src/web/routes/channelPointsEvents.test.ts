@@ -24,6 +24,7 @@ function getRouteHandler(routePath: string): (req: any, res: any, next: any) => 
   return layer.route.stack[0].handle;
 }
 
+/** Builds a fake Express `res` covering the SSE-specific methods (`setHeader`, `flushHeaders`, `write`, `end`) used by the events route handler. */
 function makeSseRes() {
   return {
     setHeader: vi.fn(),
@@ -34,6 +35,7 @@ function makeSseRes() {
   };
 }
 
+/** Builds a fake Express `req` with a session for `discordId` and a `close`-event hook, plus a `triggerClose()` helper to simulate the client disconnecting. */
 function makeSseReq(discordId: string) {
   let closeCb: (() => void) | undefined;
   return {
@@ -47,6 +49,7 @@ function makeSseReq(discordId: string) {
   };
 }
 
+/** Builds a supertest-ready app: the channel-points-events router with a stubbed session user. */
 function buildApp() {
   return buildTestApp({ router, sessionUser: { discordId: 'discord1' } });
 }

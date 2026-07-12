@@ -58,6 +58,7 @@ import router from './streamdeck';
 import { getAllSfxTriggers, getApprovedGuildIdsForKey } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
+/** Builds a supertest-ready app: the streamdeck router with a JSON body parser and no session stub (routes are key-authenticated). */
 function buildApp() {
   return buildTestApp({ router, bodyParser: 'json' });
 }

@@ -72,6 +72,7 @@ function makeClient() {
   return { channels: { fetch: vi.fn() } } as any;
 }
 
+/** Builds a supertest-ready app: the streamdeck-SFX router with a JSON body parser and no session stub (routes are key-authenticated). */
 function buildApp() {
   return buildTestApp({ router, bodyParser: 'json' });
 }

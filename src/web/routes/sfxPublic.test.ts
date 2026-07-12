@@ -20,6 +20,7 @@ import { buildTestApp } from '../../test-utils/expressTestApp';
 
 let router: any;
 
+/** Builds a supertest-ready app: the public-SFX router with a stubbed session user and a nested-JSON render mock. */
 function buildApp(sessionUser: unknown = { discordId: '1', discordName: 'Test', accessLevel: AccessLevel.USER }) {
   return buildTestApp({ router, sessionUser, mockRender: 'nested' });
 }

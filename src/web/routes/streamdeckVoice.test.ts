@@ -55,6 +55,7 @@ function makeClient(channelGuildId: string | null = 'guild-123') {
   } as any;
 }
 
+/** Builds a supertest-ready app: the streamdeck-voice router with a JSON body parser and no session stub (routes are key-authenticated). */
 function buildApp() {
   return buildTestApp({ router, bodyParser: 'json' });
 }

@@ -1,4 +1,4 @@
-import type { AccessLevelValue } from '../db/users';
+import { AccessLevel, type AccessLevelValue } from '../db/users';
 
 /** Shape of the `req.session.user` object used across `src/web/routes/*.test.ts` session stubs. */
 export interface SessionUserFixture {
@@ -20,7 +20,7 @@ export function makeSessionUser(overrides: Partial<SessionUserFixture> = {}): Se
     discordId: '100000000000000001',
     discordName: 'TestUser',
     discordAvatar: null,
-    accessLevel: 0,
+    accessLevel: AccessLevel.USER,
     ...overrides,
   };
 }

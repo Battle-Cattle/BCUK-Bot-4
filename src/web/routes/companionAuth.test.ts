@@ -19,6 +19,7 @@ import router from './companionAuth';
 import { exchangeCodeForToken } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
+/** Builds a supertest-ready app: the companion-auth router with a customizable raw session and a render mock that returns the view/locals as JSON. */
 function buildApp(sessionOverrides: Record<string, unknown> = {}) {
   return buildTestApp({
     router,

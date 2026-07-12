@@ -50,7 +50,7 @@ import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';
 
-// Injects a session with the current guild so the guild-scoped voice routes resolve.
+/** Builds a supertest-ready app: the API router with a session injecting the current guild so the guild-scoped voice routes resolve. */
 function buildApp(currentGuildId: string | null = GUILD_ID) {
   return buildTestApp({ router, bodyParser: 'json', sessionUser: { discordId: 'u1', currentGuildId } });
 }

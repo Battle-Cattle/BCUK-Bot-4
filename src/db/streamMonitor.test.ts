@@ -20,6 +20,7 @@ import { makeMockConnection, makeMockPool } from '../test-utils/mockMysqlPool';
 
 const GUILD_ID = 'guild-1';
 
+/** Builds a fake mysql pool whose `execute`/`query` resolve to the given rows. */
 function makePool(rows: unknown[] = []) {
   return makeMockPool({ rows });
 }
