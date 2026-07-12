@@ -32,9 +32,11 @@ import supertest from 'supertest';
 import router from './eventsubCallback';
 import { getStreamerById, saveStreamerToken, initEventConfig } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { AccessLevel, AccessLevelValue } from '../../db/users';
+import { AccessLevel } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
+import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 
-type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: AccessLevelValue };
+type SessionUser = SessionUserFixture;
 
 const MOCK_STREAMER = {
   id: 1,
@@ -43,26 +45,18 @@ const MOCK_STREAMER = {
   twitch_user_id: 'twitch123',
 };
 
-const SESSION_USER: SessionUser = {
-  discordId: MOCK_STREAMER.discord_id,
-  discordName: 'TestUser',
-  discordAvatar: null,
-  accessLevel: AccessLevel.MOD,
-};
+const SESSION_USER: SessionUser = makeSessionUser({ discordId: MOCK_STREAMER.discord_id, accessLevel: AccessLevel.MOD });
 
 function buildApp(sessionOverrides: Record<string, any> = {}) {
-  const app = express();
-  app.use((req: any, _res: any, next: any) => {
-    req.session = {
+  return buildTestApp({
+    router,
+    session: {
       eventsubOAuthState: { value: 'valid-state-abc', expiresAt: Date.now() + 60_000 },
       eventsubStreamerId: MOCK_STREAMER.id,
       user: SESSION_USER,
       ...sessionOverrides,
-    };
-    next();
+    },
   });
-  app.use(router);
-  return app;
 }
 
 beforeEach(() => {

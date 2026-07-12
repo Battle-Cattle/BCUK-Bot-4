@@ -25,14 +25,10 @@ vi.mock('./counterCache', () => ({
   invalidateCounterLookupCache: vi.fn(),
 }));
 
+import { makeMockConnection } from '../test-utils/mockMysqlPool';
+
 // Shared mock connection used by runSerializedCommandWrite
-const mockConnection = {
-  execute: vi.fn(),
-  beginTransaction: vi.fn().mockResolvedValue(undefined),
-  commit: vi.fn().mockResolvedValue(undefined),
-  rollback: vi.fn().mockResolvedValue(undefined),
-  release: vi.fn(),
-};
+const mockConnection = makeMockConnection();
 
 import { getPool } from './pool';
 import {
@@ -50,21 +46,11 @@ import {
 import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
 import { invalidateCounterLookupCache } from './counterCache';
+import { makeMockPool } from '../test-utils/mockMysqlPool';
 
+/** Builds a fake pool via the shared helper, matching this file's historical `(rows, meta)` call shape. */
 function makePool(rows: unknown[] = [], meta: unknown = {}) {
-  const conn = {
-    execute: vi.fn(),
-    beginTransaction: vi.fn().mockResolvedValue(undefined),
-    commit: vi.fn().mockResolvedValue(undefined),
-    rollback: vi.fn().mockResolvedValue(undefined),
-    release: vi.fn(),
-  };
-  return {
-    execute: vi.fn().mockResolvedValue([[...rows], meta]),
-    query: vi.fn().mockResolvedValue([[], meta]),
-    getConnection: vi.fn().mockResolvedValue(conn),
-    _conn: conn,
-  };
+  return makeMockPool({ rows, meta });
 }
 
 beforeEach(() => {

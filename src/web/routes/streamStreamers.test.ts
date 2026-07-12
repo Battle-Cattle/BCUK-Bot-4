@@ -27,27 +27,20 @@ vi.mock('../../shared/logger', () => ({
 
 vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './streamStreamers';
 import { addStreamer, removeStreamer, findUser } from '../../db';
 import { restartTwitchMonitor } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel, AccessLevelValue } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: AccessLevelValue; currentGuildId: string };
 const MANAGER: SessionUser = { discordId: '200000000000000001', discordName: 'ManagerUser', discordAvatar: null, accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID };
 
+/** Builds a supertest-ready app: the stream streamers router with a stubbed session and a render mock that flattens locals into the JSON body. */
 function buildApp(sessionUser: SessionUser = MANAGER) {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, res: any, next: any) => {
-    req.session = { user: sessionUser };
-    res.render = (view: string, locals?: any) => res.json({ view, ...locals });
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser, mockRender: 'spread' });
 }
 
 beforeEach(() => {

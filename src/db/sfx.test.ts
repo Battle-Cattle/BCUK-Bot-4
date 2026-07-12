@@ -10,27 +10,21 @@ import {
   createSfxTrigger, updateSfxTrigger, deleteSfxTrigger,
   addSfxFile, updateSfxFile, deleteSfxFile,
 } from './sfx';
+import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 /** Pool whose top-level execute returns row data (for SELECT queries). */
 function makePool(rows: unknown[] = []) {
-  return { execute: vi.fn().mockResolvedValue([[...rows], []]) };
+  return makeMockPool({ rows });
 }
 
 /** Pool whose top-level execute returns a ResultSetHeader (for INSERT/UPDATE/DELETE). */
 function makeResultPool(result: unknown = { insertId: 0, affectedRows: 1 }) {
-  return { execute: vi.fn().mockResolvedValue([result, []]) };
+  return makeMockPool({ executeResult: [result, []] });
 }
 
 /** Pool exposing a transaction connection whose execute resolves queued results in order. */
 function makeTxPool() {
-  const conn = {
-    beginTransaction: vi.fn().mockResolvedValue(undefined),
-    commit: vi.fn().mockResolvedValue(undefined),
-    rollback: vi.fn().mockResolvedValue(undefined),
-    release: vi.fn(),
-    execute: vi.fn(),
-  };
-  return { getConnection: vi.fn().mockResolvedValue(conn), _conn: conn };
+  return makeMockPool();
 }
 
 beforeEach(() => {

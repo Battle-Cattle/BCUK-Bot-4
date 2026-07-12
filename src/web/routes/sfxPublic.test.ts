@@ -13,25 +13,15 @@ vi.mock('../../db/users', () => ({
   AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import { getPublicSfxTriggers } from '../../db';
 import { AccessLevel } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 let router: any;
 
 function buildApp(sessionUser: unknown = { discordId: '1', discordName: 'Test', accessLevel: AccessLevel.USER }) {
-  const app = express();
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: sessionUser };
-    next();
-  });
-  app.use((req: any, res: any, next: any) => {
-    res.render = (view: string, locals: unknown) => res.json({ view, locals });
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, sessionUser, mockRender: 'nested' });
 }
 
 beforeEach(async () => {

@@ -45,7 +45,6 @@ vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './streamdeckSfx';
 import { findTrigger, findSoundFiles, getAllSfxTriggers, isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
@@ -54,6 +53,7 @@ import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
 import { getDiscordClient } from '../../discord/discordBot';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const TRIGGER: SfxTrigger = {
   id: BigInt(1),
@@ -73,10 +73,7 @@ function makeClient() {
 }
 
 function buildApp() {
-  const app = express();
-  app.use(express.json());
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'json' });
 }
 
 beforeEach(() => {

@@ -11,10 +11,10 @@ vi.mock('../middleware', () => ({
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }) }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './commandGuildOverrides';
 import { upsertOverride, removeOverride } from '../../db';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';
 
@@ -23,14 +23,7 @@ const GUILD_ID = '900000000000000001';
  * current guild to GUILD_ID. Pass `null` to simulate no guild in session.
  */
 function buildApp(currentGuildId: string | null = GUILD_ID) {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: { discordId: 'u1', currentGuildId } };
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser: { discordId: 'u1', currentGuildId } });
 }
 
 beforeEach(() => {

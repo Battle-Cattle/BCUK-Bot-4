@@ -33,6 +33,7 @@ import {
   approveApiKey, denyApiKey, getAllApiKeys, getPendingRequests,
 } from '../../db';
 import { AccessLevel } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';
 const SESSION_USER = {
@@ -45,19 +46,9 @@ const SESSION_USER = {
 };
 const VALID_DISCORD_ID = '123456789012345678';
 
+/** Builds a supertest-ready app: the streamdeck keys router with a stubbed session and a render mock that nests locals under a `locals` key. */
 function buildApp(sessionUser = SESSION_USER) {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: sessionUser };
-    next();
-  });
-  app.use((req: any, res: any, next: any) => {
-    res.render = (view: string, locals: unknown) => res.json({ view, locals });
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser, mockRender: 'nested' });
 }
 
 beforeEach(() => {

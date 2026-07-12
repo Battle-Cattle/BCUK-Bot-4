@@ -19,24 +19,14 @@ vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './commandMonitor';
 import { getRecentCommandTestEntries } from '../../commands/commandMonitorStore';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a minimal Express app wired with the command-monitor router and a fake session user. */
 function buildApp() {
-  const app = express();
-  app.use((_req: any, res: any, next: any) => {
-    res.render = (view: string, locals: unknown) => res.json({ view, locals });
-    next();
-  });
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: { discordId: '1', discordName: 'TestUser' } };
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, sessionUser: { discordId: '1', discordName: 'TestUser' }, mockRender: 'nested' });
 }
 
 beforeEach(() => {

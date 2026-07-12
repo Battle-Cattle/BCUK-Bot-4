@@ -23,9 +23,10 @@ import {
   initEventConfig,
   saveEventConfig,
 } from './eventSub';
+import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 function makePool(rows: unknown[] = []) {
-  return { execute: vi.fn().mockResolvedValue([[...rows], []]) };
+  return makeMockPool({ rows });
 }
 
 function makeRow(overrides: object = {}): Record<string, unknown> {

@@ -6,6 +6,7 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 import { getPool } from './pool';
 import { createCode, consumeCode, exchangeCodeForToken } from './companionOAuthCodes';
 import { createHash } from 'crypto';
+import { makeMockConnection } from '../test-utils/mockMysqlPool';
 
 function sha256hex(s: string) {
   return createHash('sha256').update(s).digest('hex');
@@ -81,16 +82,7 @@ describe('consumeCode', () => {
 
 // ─── exchangeCodeForToken ───────────────────────────────────────────────────
 
-function buildConn(overrides: Partial<Record<string, unknown>> = {}) {
-  return {
-    beginTransaction: vi.fn().mockResolvedValue(undefined),
-    commit: vi.fn().mockResolvedValue(undefined),
-    rollback: vi.fn().mockResolvedValue(undefined),
-    release: vi.fn(),
-    execute: vi.fn(),
-    ...overrides,
-  };
-}
+const buildConn = makeMockConnection;
 
 describe('exchangeCodeForToken', () => {
   it('rolls back and returns null when the UPDATE affects no rows (invalid/expired/used code)', async () => {

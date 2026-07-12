@@ -23,17 +23,15 @@ vi.mock('../../db/users', () => ({
   AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './commandAssignments';
 import { assignUserToCommand, unassignUserFromCommand, findUser, CommandConflictError, isMysqlDuplicateEntryError } from '../../db';
 import { AccessLevel } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
+/** Builds a supertest-ready app: the command assignments router with a urlencoded body parser (no session or render stub needed). */
 function buildApp() {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded' });
 }
 
 const VALID_COMMAND_ID = '5';

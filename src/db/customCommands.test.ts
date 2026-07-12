@@ -47,22 +47,15 @@ import {
 } from './commandConflicts';
 import { invalidateCustomCommandLookupCache } from './customCommandCache';
 import { assertNotReservedCommand } from './reservedCommands';
+import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 function makePool() {
-  const conn = {
-    execute: vi.fn(),
-    beginTransaction: vi.fn().mockResolvedValue(undefined),
-    commit: vi.fn().mockResolvedValue(undefined),
-    rollback: vi.fn().mockResolvedValue(undefined),
-    release: vi.fn(),
-  };
-  return {
-    execute: vi.fn().mockResolvedValue([[], []]),
-    getConnection: vi.fn().mockResolvedValue(conn),
-    _conn: conn,
-  };
+  return makeMockPool();
 }
 
+// Bespoke: replays a queue of results by call index (falling back to a generic success
+// result) rather than the strict per-call `mockResolvedValueOnce` chaining the shared
+// helper assumes, so it's kept local instead of being folded into makeMockConnection.
 function makeWriteConn(executeResults: unknown[] = []) {
   let callIndex = 0;
   return {

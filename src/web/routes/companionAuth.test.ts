@@ -17,21 +17,15 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './companionAuth';
 import { exchangeCodeForToken } from '../../db';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 function buildApp(sessionOverrides: Record<string, unknown> = {}) {
-  const app = express();
-  app.use(express.json());
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { ...sessionOverrides };
-    next();
+  return buildTestApp({
+    router,
+    bodyParser: 'json',
+    session: { ...sessionOverrides },
+    mockRender: (view, locals, res) => res.status(res.statusCode || 200).json({ view, locals }),
   });
-  app.use((req: any, res: any, next: any) => {
-    res.render = (view: string, locals: unknown) =>
-      res.status((res as any).statusCode || 200).json({ view, locals });
-    next();
-  });
-  app.use(router);
-  return app;
 }
 
 beforeEach(() => {

@@ -26,11 +26,11 @@ vi.mock('../middleware', () => ({
   },
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './eventsubAdmin';
 import { clearStreamerToken } from '../../db';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /**
  * Builds a minimal Express app with the eventsub admin router mounted, a stubbed session, and res.render captured as JSON.
@@ -38,14 +38,7 @@ import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSu
  * @returns The configured Express app, ready to be driven with supertest.
  */
 function buildApp(accessLevel = 3) {
-  const app = express();
-  app.use((req: any, res: any, next: any) => {
-    req.session = { user: { discordId: '1', accessLevel } };
-    res.render = (view: string, locals?: any) => res.json({ view, ...locals });
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, sessionUser: { discordId: '1', accessLevel }, mockRender: 'spread' });
 }
 
 beforeEach(() => {

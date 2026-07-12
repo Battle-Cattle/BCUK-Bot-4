@@ -23,12 +23,12 @@ vi.mock('../csrf', () => ({
   },
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './dashboard';
 import { getStatus } from '../../shared/statusStore';
 import { getStreamerByDiscordId } from '../../db';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const STATUS = { discord: { ready: true }, voice: {}, twitch: {}, tiktok: {} };
 
@@ -37,15 +37,8 @@ const STATUS = { discord: { ready: true }, voice: {}, twitch: {}, tiktok: {} };
  * @param sessionUser - The session user to attach to each request, or undefined for an anonymous session.
  * @returns The configured Express app, ready to be driven with supertest.
  */
-function buildApp(sessionUser: any = undefined) {
-  const app = express();
-  app.use((req: any, res: any, next: any) => {
-    req.session = { user: sessionUser };
-    res.render = (view: string, locals?: any) => res.json({ view, ...locals });
-    next();
-  });
-  app.use(router);
-  return app;
+function buildApp(sessionUser: unknown = undefined) {
+  return buildTestApp({ router, sessionUser, mockRender: 'spread' });
 }
 
 beforeEach(() => {

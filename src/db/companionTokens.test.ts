@@ -6,9 +6,10 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 import { getPool } from './pool';
 import { issueToken, findDiscordIdByTokenHash, getTokenStatus, revokeToken } from './companionTokens';
 import { createHash } from 'crypto';
+import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 function makePool(rows: unknown[] = []) {
-  return { execute: vi.fn().mockResolvedValue([[...rows], []]) };
+  return makeMockPool({ rows });
 }
 
 function sha256hex(s: string) {

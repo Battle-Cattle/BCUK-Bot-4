@@ -42,20 +42,15 @@ import router from './userSettings';
 import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken } from '../../db';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { AccessLevel } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
+import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 
-type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
-const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: AccessLevel.MOD };
+type SessionUser = SessionUserFixture;
+const USER: SessionUser = makeSessionUser({ accessLevel: AccessLevel.MOD });
 
+/** Builds a supertest-ready app: the user settings router (or an override) with a stubbed session and a render mock that flattens locals into the JSON body. */
 function buildApp(sessionUser: SessionUser = USER, routerOverride: typeof router = router) {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, res: any, next: any) => {
-    req.session = { user: sessionUser };
-    res.render = (view: string, locals?: any) => res.json({ view, ...locals });
-    next();
-  });
-  app.use(routerOverride);
-  return app;
+  return buildTestApp({ router: routerOverride, bodyParser: 'urlencoded', sessionUser, mockRender: 'spread' });
 }
 
 beforeEach(() => {

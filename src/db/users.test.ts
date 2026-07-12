@@ -24,21 +24,12 @@ import {
   AccessLevel,
 } from './users';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
+import { makeMockConnection, makeMockPool } from '../test-utils/mockMysqlPool';
 
-function makeConnection(executeResult: unknown = [[], []]) {
-  return {
-    execute: vi.fn().mockResolvedValue(executeResult),
-    release: vi.fn(),
-  };
-}
-
+/** Builds a fake pool via the shared helper, matching this file's historical `(executeResult, connectionExecuteResult)` call shape. */
 function makePool(executeResult: unknown = [[], []], connectionExecuteResult?: unknown) {
-  const conn = makeConnection(connectionExecuteResult ?? [[], []]);
-  return {
-    execute: vi.fn().mockResolvedValue(executeResult),
-    getConnection: vi.fn().mockResolvedValue(conn),
-    _conn: conn,
-  };
+  const connection = makeMockConnection({ execute: vi.fn().mockResolvedValue(connectionExecuteResult ?? [[], []]) });
+  return makeMockPool({ executeResult, connection });
 }
 
 beforeEach(() => {

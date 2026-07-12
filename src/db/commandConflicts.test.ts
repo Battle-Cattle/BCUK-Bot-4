@@ -36,11 +36,12 @@ import {
 import { CommandConflictError } from './commandStringUtils';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import { acquireNamedLock, releaseNamedLock, isDeadlockError } from './commandLocks';
+import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 // Cast to any to satisfy SqlExecutor (Pool | PoolConnection) without importing full mysql types
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeExecutor(rows: unknown[] = []): any {
-  return { execute: vi.fn().mockResolvedValue([[...rows], []]) };
+  return makeMockPool({ rows });
 }
 
 beforeEach(() => {

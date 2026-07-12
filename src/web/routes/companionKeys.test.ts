@@ -21,6 +21,7 @@ import supertest from 'supertest';
 import router from './companionKeys';
 import { issueToken, getTokenStatus, revokeToken } from '../../db';
 import { AccessLevel } from '../../db/users';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';
 const SESSION_USER = {
@@ -32,19 +33,9 @@ const SESSION_USER = {
   guilds: [{ guildId: GUILD_ID, name: 'Test Guild' }],
 };
 
+/** Builds a supertest-ready app: the companion keys router with a stubbed session and a render mock that nests locals under a `locals` key. */
 function buildApp(sessionUser = SESSION_USER) {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: sessionUser };
-    next();
-  });
-  app.use((req: any, res: any, next: any) => {
-    res.render = (view: string, locals: unknown) => res.json({ view, locals });
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser, mockRender: 'nested' });
 }
 
 beforeEach(() => {

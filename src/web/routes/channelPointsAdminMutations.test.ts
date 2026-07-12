@@ -40,13 +40,13 @@ vi.mock('./channelPointsAdminPricingMutations', async () => {
   return { router: Router() };
 });
 
-import express from 'express';
 import supertest from 'supertest';
 import { router } from './channelPointsAdminMutations';
 import { getStreamerByDiscordId, updatePricingCooldownForReward } from '../../db';
 import { createCustomReward, updateCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { deleteRewardAndPricing } from '../../twitch/pricing/rewardPricingService';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3; isOwner: boolean };
 const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: 0, isOwner: false };
@@ -59,15 +59,9 @@ const VALID_REWARD_FORM = {
   title: 'Cool Reward', cost: '200', prompt: '', background_color: '',
 };
 
+/** Builds a supertest-ready app: the channel points admin mutations router with a stubbed session (no render stub — these routes redirect). */
 function buildApp(sessionUser: SessionUser = USER) {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: sessionUser };
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
 }
 
 const VALID_REWARD_TWITCH_DATA = { id: VALID_REWARD_ID, global_cooldown_setting: { is_enabled: true, global_cooldown_seconds: 300 } };

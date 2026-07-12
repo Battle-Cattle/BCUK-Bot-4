@@ -20,8 +20,8 @@ vi.mock('../../shared/logger', () => ({
 
 import { getGuildMemberUsers, updateDiscordName } from '../../db';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
-import express from 'express';
 import supertest from 'supertest';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 // Import module last so mocks are in place before module-level code runs
 import router, { refreshStates, getRefreshState, forgetGuildRefreshState } from './adminRefresh';
@@ -30,14 +30,11 @@ const GUILD_ID = '900000000000000001';
 const OTHER_GUILD_ID = '900000000000000002';
 
 function buildApp(currentGuildId: string = GUILD_ID) {
-  const app = express();
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: { discordId: 'u1', currentGuildId, accessLevel: 2 } };
-    next();
+  const app = buildTestApp({
+    router,
+    bodyParser: 'both',
+    sessionUser: { discordId: 'u1', currentGuildId, accessLevel: 2 },
   });
-  app.use(router);
   return supertest(app);
 }
 

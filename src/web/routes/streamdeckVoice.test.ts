@@ -35,7 +35,6 @@ vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './streamdeckVoice';
 import { isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
@@ -43,6 +42,7 @@ import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
 import { getDiscordClient } from '../../discord/discordBot';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Fake Discord client whose channels.fetch resolves any channel to the given guildId. */
 function makeClient(channelGuildId: string | null = 'guild-123') {
@@ -56,10 +56,7 @@ function makeClient(channelGuildId: string | null = 'guild-123') {
 }
 
 function buildApp() {
-  const app = express();
-  app.use(express.json());
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'json' });
 }
 
 beforeEach(() => {

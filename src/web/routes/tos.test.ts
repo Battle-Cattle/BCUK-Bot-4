@@ -1,21 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import express from 'express';
 import supertest from 'supertest';
 import tosRouter from './tos';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a minimal Express app wired with the tos router, a fake session, and a `res.render` stub that echoes its arguments as JSON instead of rendering EJS. */
 function buildApp(sessionUser: unknown = null) {
-  const app = express();
-  app.use((req: any, _res: any, next: any) => {
-    req.session = { user: sessionUser };
-    next();
-  });
-  app.use((req: any, res: any, next: any) => {
-    res.render = (view: string, locals: unknown) => res.json({ view, locals });
-    next();
-  });
-  app.use(tosRouter);
-  return app;
+  return buildTestApp({ router: tosRouter, sessionUser, mockRender: 'nested' });
 }
 
 describe('GET /tos', () => {

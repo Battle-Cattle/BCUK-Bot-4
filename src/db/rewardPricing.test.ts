@@ -17,11 +17,10 @@ import {
   getPricingSettingsForStreamer,
   savePricingSettingsForStreamer,
 } from './rewardPricing';
+import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 function makePool(rows: unknown[] = [], meta: unknown = {}) {
-  return {
-    execute: vi.fn().mockResolvedValue([[...rows], meta]),
-  };
+  return makeMockPool({ rows, meta });
 }
 
 beforeEach(() => {

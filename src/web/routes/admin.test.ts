@@ -66,7 +66,6 @@ vi.mock('../../shared/logger', () => ({
 
 vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './admin';
 import { findUser, getMemberAccessLevel, getGuildMemberUsers, setMemberAccessLevel, removeGuildMember } from '../../db';
@@ -80,6 +79,7 @@ import {
   addOrUpdateUserMutation,
   toggleTwitchMutation,
 } from './adminUserMutations';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 type SessionUser = {
   discordId: string;
@@ -94,16 +94,9 @@ const GUILD_ID = '900000000000000001';
 const ADMIN: SessionUser = { discordId: '100000000000000001', discordName: 'AdminUser', discordAvatar: null, isOwner: false, accessLevel: AccessLevel.ADMIN, currentGuildId: GUILD_ID };
 const VALID_ID = '300000000000000001';
 
+/** Builds a supertest-ready app: the admin router with a stubbed session and a render mock that flattens locals into the JSON body. */
 function buildApp(sessionUser: SessionUser = ADMIN) {
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-  app.use((req: any, res: any, next: any) => {
-    req.session = { user: sessionUser };
-    res.render = (view: string, locals?: any) => res.json({ view, ...locals });
-    next();
-  });
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser, mockRender: 'spread' });
 }
 
 beforeEach(() => {

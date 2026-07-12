@@ -53,16 +53,13 @@ vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
-import express from 'express';
 import supertest from 'supertest';
 import router from './streamdeck';
 import { getAllSfxTriggers, getApprovedGuildIdsForKey } from '../../db';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 function buildApp() {
-  const app = express();
-  app.use(express.json());
-  app.use(router);
-  return app;
+  return buildTestApp({ router, bodyParser: 'json' });
 }
 
 beforeEach(() => {
