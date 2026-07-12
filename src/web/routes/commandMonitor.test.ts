@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+/**
+ * Isolates this test from the real DB module — required at runtime only by shared.ts's
+ * requireStreamer/handleReservedOrConflictCommandError, neither of which this route uses,
+ * but a real (unmocked) import would otherwise try to build a live connection pool.
+ */
+vi.mock('../../db', () => ({}));
+
 vi.mock('../../commands/commandMonitorStore', () => ({
   getRecentCommandTestEntries: vi.fn().mockReturnValue([]),
 }));

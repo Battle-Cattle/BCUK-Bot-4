@@ -1,12 +1,8 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import type { Response } from 'express';
 import {
   addCounter,
-  CommandConflictError,
   CounterNotFoundError,
-  isMysqlDuplicateEntryError,
-  ReservedCommandError,
   getAllCounters,
   isCounterCommandTaken,
   removeCounter,
@@ -23,22 +19,14 @@ import {
   renderError,
   filterQueryParam,
   renderView,
+  handleReservedOrConflictCommandError,
 } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
 
-function handleCounterWriteError(err: unknown, res: Response): boolean {
-  if (err instanceof ReservedCommandError) {
-    res.redirect('/counters?error=reserved_command');
-    return true;
-  }
-  if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-    res.redirect('/counters?error=duplicate_command');
-    return true;
-  }
-  return false;
-}
+/** `handleReservedOrConflictCommandError` options scoped to the counters admin page. */
+const COUNTER_WRITE_ERROR_OPTIONS = { basePath: '/counters', conflictErrorCode: 'duplicate_command' };
 
 const KNOWN_ERRORS = new Set([
   'missing_fields',
@@ -150,7 +138,7 @@ router.post('/counters/add', requireMod, csrfProtection, async (req, res) => {
       form.resetYearly,
     );
   } catch (err) {
-    if (handleCounterWriteError(err, res)) return;
+    if (handleReservedOrConflictCommandError(err, res, COUNTER_WRITE_ERROR_OPTIONS)) return;
     return logAndRedirectError({ res, log, logLabel: 'Add counter error:', err, basePath: '/counters', errorCode: 'add_failed' });
   }
 
@@ -202,7 +190,7 @@ router.post('/counters/update', requireMod, csrfProtection, async (req, res) => 
     if (err instanceof CounterNotFoundError) {
       return res.redirect('/counters?error=counter_not_found');
     }
-    if (handleCounterWriteError(err, res)) return;
+    if (handleReservedOrConflictCommandError(err, res, COUNTER_WRITE_ERROR_OPTIONS)) return;
     return logAndRedirectError({ res, log, logLabel: 'Update counter error:', err, basePath: '/counters', errorCode: 'update_failed' });
   }
 

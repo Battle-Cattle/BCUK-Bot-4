@@ -3,11 +3,11 @@ import { Router, type Request, type Response } from 'express';
 import { getStatus } from '../../shared/statusStore';
 import { requireAuth, requireMod } from '../middleware';
 import { connect, disconnect, getCurrentChannelId } from '../../audio/audioPlayer';
-import { getDiscordClient } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { getGuildById } from '../../db';
 import { normalizeDiscordId } from './shared';
+import { getReadyDiscordClientOrRespond } from './streamdeckGuildResolution';
 
 const log = createLogger('API');
 const router = Router();
@@ -84,11 +84,8 @@ router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
 
-  const discordClient = getDiscordClient();
-  if (!discordClient) {
-    res.status(503).json({ ok: false, error: 'Discord client not ready' });
-    return;
-  }
+  const discordClient = getReadyDiscordClientOrRespond(res);
+  if (!discordClient) return;
   try {
     const { channelId } = req.body as { channelId?: unknown };
     if (channelId !== undefined && typeof channelId !== 'string') {

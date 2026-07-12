@@ -2,6 +2,23 @@ import { Request, Response } from 'express';
 import { Client } from 'discord.js';
 import { isKeyApprovedForGuild } from '../../db';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
+import { getDiscordClient } from '../../discord/discordBot';
+
+/**
+ * Returns the ready Discord client, or sends a 503 JSON error response and returns
+ * null if the client isn't connected yet. Consolidates the "Discord client not ready"
+ * check duplicated across the REST API and Streamdeck voice/SFX routes.
+ * @param res - Express response, used to send the 503 when the client isn't ready.
+ * @returns The ready Discord client, or null if a 503 response was already sent.
+ */
+export function getReadyDiscordClientOrRespond(res: Response): Client | null {
+  const client = getDiscordClient();
+  if (!client) {
+    res.status(503).json({ ok: false, error: 'Discord client not ready' });
+    return null;
+  }
+  return client;
+}
 
 /**
  * Resolves which guild a voice-channel ID belongs to, or null if the channel
