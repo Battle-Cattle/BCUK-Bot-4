@@ -299,7 +299,11 @@ export function logAndRedirectError({
  */
 const REWARD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Extracts and validates a Twitch reward UUID, or null if malformed/repeated (an array value). */
+/**
+ * Extracts and validates a Twitch reward UUID.
+ * @param value - The `:twitchRewardId` route param or form field value.
+ * @returns The validated UUID, or null if malformed or repeated (an array value).
+ */
 export function parseRewardIdParam(value: string | string[]): string | null {
   if (Array.isArray(value)) return null;
   return REWARD_ID_RE.test(value) ? value : null;
