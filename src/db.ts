@@ -19,10 +19,43 @@ export {
 } from './db/guildMembers';
 export type { DbGuildMember } from './db/guildMembers';
 
-export {
-  getOverridesForGuild, getAllOverrides, upsertOverride, removeOverride,
-} from './db/guildCommandOverrides';
+export { getOverridesForGuild, getAllOverrides } from './db/guildCommandOverrides';
 export type { DbGuildCommandOverride } from './db/guildCommandOverrides';
+
+import {
+  upsertOverride as upsertOverrideRecord,
+  removeOverride as removeOverrideRecord,
+} from './db/guildCommandOverrides';
+
+/**
+ * Inserts or updates a guild's override for a catalog command and invalidates
+ * the custom-command lookup cache, since overrides affect Discord command resolution.
+ * @param guildId - BIGINT snowflake as a string.
+ * @param commandId - The catalog command's command_id.
+ * @param override.isDisabled - When true, the command does not fire in this guild.
+ * @param override.output - Replacement Discord output, or null to use the catalog output.
+ * @returns Resolves once the upsert (and cache invalidation) completes.
+ */
+export async function upsertOverride(
+  guildId: string,
+  commandId: number,
+  override: { isDisabled: boolean; output: string | null },
+): Promise<void> {
+  await upsertOverrideRecord(guildId, commandId, override);
+  invalidateCustomCommandLookupCache();
+}
+
+/**
+ * Removes a guild's override for a command and invalidates the custom-command
+ * lookup cache. No-op if the override is absent.
+ * @param guildId - BIGINT snowflake as a string.
+ * @param commandId - The catalog command's command_id.
+ * @returns Resolves once the deletion (and cache invalidation) completes.
+ */
+export async function removeOverride(guildId: string, commandId: number): Promise<void> {
+  await removeOverrideRecord(guildId, commandId);
+  invalidateCustomCommandLookupCache();
+}
 
 // ─── User / access-level ────────────────────────────────────────────────────
 

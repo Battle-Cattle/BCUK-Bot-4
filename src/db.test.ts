@@ -24,6 +24,13 @@ vi.mock('./db/customCommandCache', () => ({
   getCustomCommandForDiscord: vi.fn(),
 }));
 
+vi.mock('./db/guildCommandOverrides', () => ({
+  getOverridesForGuild: vi.fn(),
+  getAllOverrides: vi.fn(),
+  upsertOverride: vi.fn(),
+  removeOverride: vi.fn(),
+}));
+
 vi.mock('./db/customCommands', () => ({
   getAllCustomCommandsWithAssignments: vi.fn(),
   addCustomCommand: vi.fn(),
@@ -128,13 +135,16 @@ vi.mock('./db/lookupCache', () => ({
 
 import { upsertUserRecord, setTwitchBotEnabledRecord, removeUserRecord } from './db/users';
 import { invalidateCustomCommandLookupCache } from './db/customCommandCache';
-import { upsertUser, updateTwitchBotEnabled, removeUser } from './db';
+import { upsertOverride as upsertOverrideRecord, removeOverride as removeOverrideRecord } from './db/guildCommandOverrides';
+import { upsertUser, updateTwitchBotEnabled, removeUser, upsertOverride, removeOverride } from './db';
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(upsertUserRecord).mockResolvedValue(false);
   vi.mocked(setTwitchBotEnabledRecord).mockResolvedValue(undefined);
   vi.mocked(removeUserRecord).mockResolvedValue(undefined);
+  vi.mocked(upsertOverrideRecord).mockResolvedValue(undefined);
+  vi.mocked(removeOverrideRecord).mockResolvedValue(undefined);
 });
 
 // ─── upsertUser ───────────────────────────────────────────────────────────────
@@ -196,6 +206,38 @@ describe('removeUser', () => {
   it('propagates errors from removeUserRecord', async () => {
     vi.mocked(removeUserRecord).mockRejectedValue(new Error('DB error'));
     await expect(removeUser('1')).rejects.toThrow('DB error');
+    expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
+  });
+});
+
+// ─── upsertOverride ─────────────────────────────────────────────────────────
+
+describe('upsertOverride', () => {
+  it('always calls invalidateCustomCommandLookupCache on success', async () => {
+    await upsertOverride('1', 5, { isDisabled: false, output: null });
+    expect(upsertOverrideRecord).toHaveBeenCalledWith('1', 5, { isDisabled: false, output: null });
+    expect(invalidateCustomCommandLookupCache).toHaveBeenCalledOnce();
+  });
+
+  it('propagates errors from upsertOverrideRecord without calling invalidate', async () => {
+    vi.mocked(upsertOverrideRecord).mockRejectedValue(new Error('DB error'));
+    await expect(upsertOverride('1', 5, { isDisabled: true, output: 'hi' })).rejects.toThrow('DB error');
+    expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
+  });
+});
+
+// ─── removeOverride ─────────────────────────────────────────────────────────
+
+describe('removeOverride', () => {
+  it('always calls invalidateCustomCommandLookupCache on success', async () => {
+    await removeOverride('1', 5);
+    expect(removeOverrideRecord).toHaveBeenCalledWith('1', 5);
+    expect(invalidateCustomCommandLookupCache).toHaveBeenCalledOnce();
+  });
+
+  it('propagates errors from removeOverrideRecord without calling invalidate', async () => {
+    vi.mocked(removeOverrideRecord).mockRejectedValue(new Error('DB error'));
+    await expect(removeOverride('1', 5)).rejects.toThrow('DB error');
     expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
   });
 });
