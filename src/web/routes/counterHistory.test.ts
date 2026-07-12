@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+/** Hoisted so the `vi.mock` factories below can safely reference these — `vi.mock` factories are hoisted above imports, so plain imported bindings could throw `ReferenceError` depending on import order. */
+const { mockLogger, ACCESS_LEVEL_MOCK } = vi.hoisted(() => ({
+  mockLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+  ACCESS_LEVEL_MOCK: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+}));
+
 vi.mock('../../db', () => ({
   getCounterHistory: vi.fn().mockResolvedValue(null),
 }));
@@ -15,11 +21,11 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
-}));
+/** Mocks the shared logger so route handlers don't write real log output during tests. */
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+/** Mocks `db/users` so `AccessLevel` resolves to the shared hoisted mock instead of hitting the real module. */
+vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 
 import express from 'express';
 import supertest from 'supertest';

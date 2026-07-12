@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
 
 // Shared with the discordUtils mock factory below so tests can still drive
 // isDiscordNotFoundError's return value directly, even though production code
@@ -7,7 +8,7 @@ const { isDiscordNotFoundErrorMock } = vi.hoisted(() => ({
   isDiscordNotFoundErrorMock: vi.fn().mockReturnValue(false),
 }));
 
-vi.mock('../../shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }) }));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../discord/discordBot', () => ({ getDiscordClient: vi.fn() }));
 vi.mock('../../discord/discordUtils', () => ({
   isDiscordNotFoundError: isDiscordNotFoundErrorMock,

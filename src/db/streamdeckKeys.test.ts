@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ACCESS_LEVEL_MOCK } from '../test-utils/accessLevelMock';
 
 // `withTransaction` is reimplemented here (rather than via `importOriginal`) so this
 // test doesn't pull in pool.ts's real `../shared/config` import chain, which throws
@@ -26,7 +27,7 @@ vi.mock('./pool', () => {
 });
 vi.mock('mysql2/promise', () => ({ default: {} }));
 vi.mock('./users', () => ({
-  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 import { getPool } from './pool';

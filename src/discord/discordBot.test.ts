@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../test-utils/accessLevelMock';
 
 vi.mock('../shared/config', () => ({
   DISCORD_TOKEN: 'mock-token',
@@ -28,9 +30,9 @@ vi.mock('../db', () => ({
   findUser: vi.fn().mockResolvedValue(null),
   upsertUser: vi.fn().mockResolvedValue(undefined),
   setMemberAccessLevel: vi.fn().mockResolvedValue(undefined),
-  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
-vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
+vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('discord.js', () => ({
   Client: vi.fn(),
   GatewayIntentBits: { Guilds: 1, GuildMessages: 2, MessageContent: 4, GuildVoiceStates: 8 },

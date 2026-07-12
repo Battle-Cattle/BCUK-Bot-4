@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
 
 const API_KEY_OWNER = 'user-1';
 
@@ -31,9 +32,7 @@ vi.mock('../../discord/voicePresence', () => ({
   getActiveGuildForUser: vi.fn(),
 }));
 
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
-}));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import express from 'express';
 import supertest from 'supertest';

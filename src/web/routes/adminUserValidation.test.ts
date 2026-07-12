@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db/users', () => ({
-  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('../../db', () => ({
   findUser: vi.fn(),
   getMemberAccessLevel: vi.fn(),
-  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('../../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn((name: string) => (name ? name.toLowerCase() : null)),
@@ -18,9 +20,7 @@ vi.mock('./shared', () => ({
 vi.mock('./adminUserMutations', () => ({
   isLockWaitTimeoutDbError: vi.fn().mockReturnValue(false),
 }));
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn() }),
-}));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import { findUser, getMemberAccessLevel } from '../../db';
 import { AccessLevel } from '../../db/users';

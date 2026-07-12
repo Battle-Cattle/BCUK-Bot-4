@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
+/** Hoisted so the `vi.mock('../../shared/logger', ...)` factory below can safely reference it — `vi.mock` factories are hoisted above imports, so a plain imported binding could throw `ReferenceError` depending on import order. */
+const { mockLogger } = vi.hoisted(() => ({
+  mockLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+}));
+
+/** Mocks the shared logger so the scheduler's log calls don't produce real output during tests. */
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({ getAllEnabledPricingRows: vi.fn() }));
 vi.mock('./rewardPricingService', () => ({ applyDecayTick: vi.fn() }));
 

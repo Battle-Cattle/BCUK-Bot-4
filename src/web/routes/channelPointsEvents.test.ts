@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
@@ -8,9 +9,7 @@ vi.mock('../../shared/config', () => ({
   CHANNEL_POINTS_MAX_SSE_PER_STREAMER: 5,
 }));
 
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
-}));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import express from 'express';
 import supertest from 'supertest';

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
 
-vi.mock('../shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), error: vi.fn() }) }));
+/** Mocks the shared logger so this module's log calls don't produce real output during tests. */
+vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('./discordBot', () => ({ getDiscordClient: vi.fn() }));
 
 vi.mock('discord.js', () => {

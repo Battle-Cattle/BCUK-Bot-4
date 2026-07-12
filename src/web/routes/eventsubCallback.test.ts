@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
 
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
-}));
+/** Mocks the shared logger so route handlers don't write real log output during tests. */
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../../db', () => ({
   getStreamerById: vi.fn(),

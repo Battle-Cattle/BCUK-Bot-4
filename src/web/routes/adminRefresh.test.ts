@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../db', () => ({
   getGuildMemberUsers: vi.fn(),
@@ -14,9 +15,8 @@ vi.mock('../middleware', () => ({
 vi.mock('../csrf', () => ({
   csrfProtection: (_req: any, _res: any, next: any) => next(),
 }));
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn() }),
-}));
+/** Mocks the shared logger so route handlers don't write real log output during tests. */
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import { getGuildMemberUsers, updateDiscordName } from '../../db';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';

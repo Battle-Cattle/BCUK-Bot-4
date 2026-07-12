@@ -1,8 +1,8 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
 
-vi.mock('../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
-}));
+/** Mocks the shared logger so the scheduler's log calls don't produce real output during tests. */
+vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../db', () => ({ archiveAndResetYearlyCounters: vi.fn() }));
 

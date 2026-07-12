@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
 
 // ─── Hoisted state (available inside vi.mock factories) ───────────────────────
 
@@ -26,9 +27,7 @@ vi.mock('tmi.js', () => ({
   },
 }));
 
-vi.mock('../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../shared/config', () => ({
   TWITCH_USERNAME: 'testbot',

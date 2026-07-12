@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { logMock } = vi.hoisted(() => ({
-  logMock: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
+  logMock: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => logMock }));
 vi.mock('../twitchApi', () => ({ getStreams: vi.fn() }));

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
 
-vi.mock('../../shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }) }));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../discord/discordBot', () => ({ getDiscordClient: vi.fn().mockReturnValue(null) }));
 vi.mock('../../discord/discordUtils', () => ({ tryEditDiscordMessage: vi.fn() }));
 vi.mock('./twitchMonitorEmbed', () => ({ buildEmbed: vi.fn().mockReturnValue({ title: 'embed' }) }));

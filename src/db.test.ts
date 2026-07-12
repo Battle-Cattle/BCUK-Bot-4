@@ -1,13 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from './test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from './test-utils/accessLevelMock';
 
-vi.mock('./shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }) }));
+/** Mocks the shared logger so `db.ts`'s log calls don't produce real output during tests. */
+vi.mock('./shared/logger', () => ({ createLogger: mockLogger }));
+/** Mocks the DB connection pool so no real MySQL connection is attempted during tests. */
 vi.mock('./db/pool', () => ({ getPool: vi.fn(), closePool: vi.fn() }));
 
 vi.mock('./db/users', () => ({
   upsertUserRecord: vi.fn(),
   setTwitchBotEnabledRecord: vi.fn(),
   removeUserRecord: vi.fn(),
-  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+  AccessLevel: ACCESS_LEVEL_MOCK,
   ACCESS_LEVEL_LABELS: {},
   findUser: vi.fn(),
   findUserByTwitchName: vi.fn(),
