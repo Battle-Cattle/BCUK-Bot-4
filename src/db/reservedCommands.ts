@@ -1,3 +1,5 @@
+import { normalizeCommand } from './commandStringUtils';
+
 export interface BuiltInCommandMeta {
   description: string;
 }
@@ -22,8 +24,9 @@ export class ReservedCommandError extends Error {
   }
 }
 
+/** Throws {@link ReservedCommandError} if `trigger` (trimmed, lowercased) matches a built-in command. */
 export function assertNotReservedCommand(trigger: string): void {
-  const normalized = trigger.trim().toLowerCase();
+  const normalized = normalizeCommand(trigger) ?? '';
   if (RESERVED_BUILT_IN_COMMANDS.has(normalized)) {
     throw new ReservedCommandError(normalized);
   }

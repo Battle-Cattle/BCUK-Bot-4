@@ -3,17 +3,22 @@ import { TextChannel } from 'discord.js';
 
 const log = createLogger('TwitchMonitor');
 import { getDiscordClient } from '../../discord/discordBot';
-import { isDiscordNotFoundError, tryDeleteDiscordMessage } from '../../discord/discordUtils';
+import { getTextChannel, tryDeleteDiscordMessage, tryEditDiscordMessage } from '../../discord/discordUtils';
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from '../../db';
 import { TwitchStream } from '../twitchApi';
 import { LiveState, makeLiveState } from './twitchMonitorTypes';
-import { buildEmbed, fillTemplate, templateVars } from './twitchMonitorEmbed';
+import { buildEmbed, templateVars } from './twitchMonitorEmbed';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
+import { fillTemplate } from '../../shared/textTemplate';
 
 /**
  * Posts a new "now live" announcement message for a streamer and records the
  * resulting message location in both the in-memory live-state map and the DB.
  * No-ops (storing a state with null message fields) if the Discord client isn't ready.
+ * @param liveStates - Map of live streamer states, keyed by streamer DB row id.
+ * @param streamerData - Full streamer record (including its stream group) from the database.
+ * @param stream - The live Twitch stream data.
+ * @returns Resolves once the announcement is posted (or skipped) and state is updated.
  */
 export async function postAnnouncement(
   liveStates: Map<string, LiveState>,
@@ -31,12 +36,12 @@ export async function postAnnouncement(
   }
 
   const vars = templateVars(stream.user_login, stream);
-  const content = fillTemplate(group.live_message, vars);
+  const content = fillTemplate(group.live_message, vars, 'keep');
   const embed = buildEmbed(stream);
 
   try {
-    const channel = await discordClient.channels.fetch(group.discord_channel);
-    if (!channel || !channel.isTextBased()) {
+    const channel = await getTextChannel(discordClient, group.discord_channel);
+    if (!channel) {
       log.error(`Channel ${group.discord_channel} not found or not text-based`);
       return;
     }
@@ -60,6 +65,11 @@ export async function postAnnouncement(
  * notifications during stream start-up can't repeatedly delete and repost the
  * announcement. If the previously-announced message is gone, falls back to
  * posting a fresh one instead of silently failing on every subsequent call.
+ * @param liveStates - Map of live streamer states, keyed by streamer DB row id.
+ * @param state - Current live state for the streamer being updated.
+ * @param stream - The updated Twitch stream data.
+ * @param templateKey - Which group template to render: 'live_message' or 'new_game_message'.
+ * @returns Resolves once the announcement is edited or reposted and state is updated.
  */
 export async function editAnnouncement(
   liveStates: Map<string, LiveState>,
@@ -79,12 +89,13 @@ export async function editAnnouncement(
   const content = fillTemplate(
     templateKey === 'new_game_message' ? group.new_game_message : group.live_message,
     vars,
+    'keep',
   );
   const embed = buildEmbed(stream);
 
   try {
-    const channel = await discordClient.channels.fetch(state.channelId);
-    if (!channel || !channel.isTextBased()) return;
+    const channel = await getTextChannel(discordClient, state.channelId);
+    if (!channel) return;
     const textChannel = channel as TextChannel;
 
     if (group.delete_old_posts && templateKey === 'new_game_message') {
@@ -97,11 +108,8 @@ export async function editAnnouncement(
       state.messageId = msg.id;
       state.channelId = msg.channelId;
     } else {
-      try {
-        const message = await textChannel.messages.fetch(state.messageId);
-        await message.edit({ content, embeds: [embed] });
-      } catch (err) {
-        if (!isDiscordNotFoundError(err)) throw err;
+      const edited = await tryEditDiscordMessage(discordClient, state.channelId, state.messageId, { content, embeds: [embed] });
+      if (!edited) {
         const msg = await textChannel.send({ content, embeds: [embed] });
         state.messageId = msg.id;
         state.channelId = msg.channelId;

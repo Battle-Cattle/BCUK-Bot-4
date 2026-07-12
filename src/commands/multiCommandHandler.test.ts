@@ -113,6 +113,19 @@ describe('executeMultiCommandForTwitch', () => {
     expect(mockRuntime.send).toHaveBeenCalledTimes(1);
   });
 
+  it('does not throw and sends nothing when no participant channel is active', async () => {
+    vi.mocked(getMultiTwitchDataForChannel).mockReturnValue({
+      url: 'multitwitch.tv/a/b',
+      participants: ['#a', '#b'],
+    } as any);
+
+    // Neither the source channel nor its participants are active
+    mockRuntime.getActiveChannels.mockReturnValue(new Set<string>());
+
+    await expect(executeMultiCommandForTwitch('#a', '!multi', 'user1')).resolves.toBeUndefined();
+    expect(mockRuntime.send).not.toHaveBeenCalled();
+  });
+
   it('records the multitwitch URL in the command monitor entry', async () => {
     vi.mocked(getMultiTwitchDataForChannel).mockReturnValue({
       url: 'multitwitch.tv/a/b',

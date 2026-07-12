@@ -1,24 +1,14 @@
 import type { Request, Response } from 'express';
 import type { Logger } from 'winston';
-import { getStreamerByDiscordId, DEFAULT_PRICING_COOLDOWN_SECONDS } from '../../db';
+import { DEFAULT_PRICING_COOLDOWN_SECONDS } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import type { CustomRewardInput, TwitchCustomReward } from '../../twitch/twitchApi';
-import { trimField, logAndRedirectError } from './shared';
+import {
+  trimField, logAndRedirectError, requireStreamer, parsePositiveIntId, parseRewardIdParam,
+} from './shared';
 
-/**
- * Loads the requesting user's streamer record, redirecting to
- * `/channel-points?error=not_a_streamer` if they aren't one. Kept separate from
- * overlayAdminShared's requireStreamer (which redirects to `/overlay/settings`), so the two
- * admin pages stay fully decoupled.
- */
-export async function requireStreamer(req: Request, res: Response): Promise<DbStreamerEventSub | null> {
-  const streamer = await getStreamerByDiscordId(req.session.user!.discordId);
-  if (!streamer) {
-    res.redirect('/channel-points?error=not_a_streamer');
-    return null;
-  }
-  return streamer;
-}
+/** Redirect target used when the requester isn't a streamer, scoped to the channel-points admin page. */
+const NOT_A_STREAMER_REDIRECT = '/channel-points?error=not_a_streamer';
 
 /**
  * Shared body for reward-scoped "delete" routes (deleting a reward entirely, or just turning
@@ -34,7 +24,7 @@ export async function handleRewardDeleteAction(
   opts: { log: Logger; successCode: string; errorLogLabel: string; errorCode: string },
 ): Promise<void> {
   try {
-    const streamer = await requireStreamer(req, res);
+    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
     if (!streamer) return;
 
     const twitchRewardId = parseRewardIdParam(req.params.twitchRewardId);
@@ -67,17 +57,6 @@ export function parseHexColorField(value: string | string[] | undefined): string
   const trimmed = typeof value === 'string' ? value.trim() : '';
   if (trimmed === '') return undefined;
   return /^#[0-9A-Fa-f]{6}$/.test(trimmed) ? trimmed : null;
-}
-
-/**
- * Parses a required positive integer form field (e.g. base_cost, cooldown_seconds).
- * Rejects arrays (repeated fields), non-numeric input, and non-positive values.
- */
-export function parsePositiveIntField(value: string | string[] | undefined): number | null {
-  if (Array.isArray(value)) return null;
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 /**
@@ -127,15 +106,8 @@ export function effectiveCooldownSeconds(reward: Pick<TwitchCustomReward, 'globa
     : DEFAULT_PRICING_COOLDOWN_SECONDS;
 }
 
-const REWARD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TITLE_MAX_LENGTH = 45; // Twitch's own limit for a custom reward's title
 const PROMPT_MAX_LENGTH = 200; // Twitch's own limit for a custom reward's prompt
-
-/** Extracts and validates a `:twitchRewardId` route param, or null if malformed/repeated. */
-export function parseRewardIdParam(value: string | string[]): string | null {
-  if (Array.isArray(value)) return null;
-  return REWARD_ID_RE.test(value) ? value : null;
-}
 
 /** True unless `condition` holds without `requirement` also holding — e.g. a limit's checkbox is checked but its numeric field is missing. */
 function impliesTruth(condition: boolean, requirement: boolean): boolean {
@@ -150,16 +122,16 @@ function impliesTruth(condition: boolean, requirement: boolean): boolean {
  */
 export function parseRewardFields(body: Record<string, string | string[] | undefined>): CustomRewardInput | null {
   const title = trimField(body.title);
-  const cost = parsePositiveIntField(body.cost);
+  const cost = parsePositiveIntId(body.cost);
   const prompt = trimField(body.prompt);
   const isUserInputRequired = parseCheckboxField(body.is_user_input_required);
   const backgroundColor = parseHexColorField(body.background_color); // null = malformed; undefined = not provided (fine)
   const isMaxPerStreamEnabled = parseCheckboxField(body.is_max_per_stream_enabled);
-  const maxPerStream = parsePositiveIntField(body.max_per_stream);
+  const maxPerStream = parsePositiveIntId(body.max_per_stream);
   const isMaxPerUserPerStreamEnabled = parseCheckboxField(body.is_max_per_user_per_stream_enabled);
-  const maxPerUserPerStream = parsePositiveIntField(body.max_per_user_per_stream);
+  const maxPerUserPerStream = parsePositiveIntId(body.max_per_user_per_stream);
   const isGlobalCooldownEnabled = parseCheckboxField(body.is_global_cooldown_enabled);
-  const globalCooldownSeconds = parsePositiveIntField(body.global_cooldown_seconds);
+  const globalCooldownSeconds = parsePositiveIntId(body.global_cooldown_seconds);
 
   const isValid = [
     title !== '' && title.length <= TITLE_MAX_LENGTH,

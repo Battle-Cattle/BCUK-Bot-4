@@ -74,12 +74,8 @@ vi.mock('../db', async () => {
   };
 });
 
-vi.mock('../discord/discordBot', () => ({
-  getDiscordClient: vi.fn(),
-}));
-
 vi.mock('../discord/voicePresence', () => ({
-  getActiveGuildForUser: vi.fn(),
+  resolveGuildIdForDiscordId: vi.fn(),
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -88,7 +84,6 @@ type TikTokBotModule = typeof import('./tiktokBot');
 type CommandRouterModule = typeof import('../commands/commandRouter');
 type StatusStoreModule = typeof import('../shared/statusStore');
 type DbModule = typeof import('../db');
-type DiscordBotModule = typeof import('../discord/discordBot');
 type VoicePresenceModule = typeof import('../discord/voicePresence');
 
 const RECONNECT_DELAY_MS = 30_000;
@@ -102,8 +97,7 @@ async function setup(
   handleCommand: CommandRouterModule['handleCommand'];
   setTikTokChannel: StatusStoreModule['setTikTokChannel'];
   findOwnerUser: DbModule['findOwnerUser'];
-  getDiscordClient: DiscordBotModule['getDiscordClient'];
-  getActiveGuildForUser: VoicePresenceModule['getActiveGuildForUser'];
+  resolveGuildIdForDiscordId: VoicePresenceModule['resolveGuildIdForDiscordId'];
 }> {
   vi.resetModules();
   vi.doMock('../shared/config', () => ({
@@ -113,19 +107,16 @@ async function setup(
   const commandRouter = await import('../commands/commandRouter.js') as CommandRouterModule;
   const statusStore = await import('../shared/statusStore.js') as StatusStoreModule;
   const db = await import('../db.js') as DbModule;
-  const discordBot = await import('../discord/discordBot.js') as DiscordBotModule;
   const voicePresence = await import('../discord/voicePresence.js') as VoicePresenceModule;
   const bot = await import('./tiktokBot.js') as TikTokBotModule;
   vi.mocked(db.findOwnerUser).mockResolvedValue({ discord_id: 'owner-discord-id' } as any);
-  vi.mocked(discordBot.getDiscordClient).mockReturnValue({} as any);
-  vi.mocked(voicePresence.getActiveGuildForUser).mockReturnValue('guild-A');
+  vi.mocked(voicePresence.resolveGuildIdForDiscordId).mockReturnValue('guild-A');
   return {
     bot,
     handleCommand: commandRouter.handleCommand,
     setTikTokChannel: statusStore.setTikTokChannel,
     findOwnerUser: db.findOwnerUser,
-    getDiscordClient: discordBot.getDiscordClient,
-    getActiveGuildForUser: voicePresence.getActiveGuildForUser,
+    resolveGuildIdForDiscordId: voicePresence.resolveGuildIdForDiscordId,
   };
 }
 
@@ -226,7 +217,7 @@ describe('startTikTokBot', () => {
 
 describe('chat handling', () => {
   it('forwards chat messages to handleCommand with the tiktok source, resolved via the bot owner\'s active voice guild', async () => {
-    const { bot, handleCommand, findOwnerUser, getActiveGuildForUser } = await setup(['alice']);
+    const { bot, handleCommand, findOwnerUser, resolveGuildIdForDiscordId } = await setup(['alice']);
     activeBot = bot;
 
     await bot.startTikTokBot();
@@ -235,7 +226,7 @@ describe('chat handling', () => {
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(handleCommand).toHaveBeenCalledWith('!clap', 'tiktok', 'guild-A');
     expect(findOwnerUser).toHaveBeenCalled();
-    expect(getActiveGuildForUser).toHaveBeenCalledWith(expect.anything(), 'owner-discord-id');
+    expect(resolveGuildIdForDiscordId).toHaveBeenCalledWith('owner-discord-id');
   });
 
   it('passes a null guildId when no bot owner is found', async () => {
@@ -275,7 +266,7 @@ describe('chat handling', () => {
   });
 
   it('re-resolves the owner after the cache TTL expires, picking up an ownership change', async () => {
-    const { bot, handleCommand, findOwnerUser, getActiveGuildForUser } = await setup(['alice']);
+    const { bot, handleCommand, findOwnerUser, resolveGuildIdForDiscordId } = await setup(['alice']);
     activeBot = bot;
 
     await bot.startTikTokBot();
@@ -296,7 +287,7 @@ describe('chat handling', () => {
     // A subsequent lookup picks up the refreshed owner.
     getConnection('alice').emit('chat', { content: '!third' });
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(3));
-    expect(getActiveGuildForUser).toHaveBeenLastCalledWith(expect.anything(), 'new-owner-discord-id');
+    expect(resolveGuildIdForDiscordId).toHaveBeenLastCalledWith('new-owner-discord-id');
   });
 });
 

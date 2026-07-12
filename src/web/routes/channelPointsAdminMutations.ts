@@ -5,15 +5,18 @@ import { requireAuth } from '../middleware';
 import { updatePricingCooldownForReward } from '../../db';
 import { createCustomReward, updateCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { logAndRedirectError } from './shared';
+import { logAndRedirectError, requireStreamer, parseRewardIdParam } from './shared';
 import {
-  requireStreamer, parseRewardIdParam, parseRewardFields, effectiveCooldownSeconds, handleRewardDeleteAction,
+  parseRewardFields, effectiveCooldownSeconds, handleRewardDeleteAction,
 } from './channelPointsAdminShared';
 import { deleteRewardAndPricing } from '../../twitch/pricing/rewardPricingService';
 import { router as pricingMutationsRouter } from './channelPointsAdminPricingMutations';
 
 const log = createLogger('ChannelPointsAdminMutations');
 export const router = Router();
+
+/** Redirect target used when the requester isn't a streamer, scoped to the channel-points admin page. */
+const NOT_A_STREAMER_REDIRECT = '/channel-points?error=not_a_streamer';
 
 /**
  * POST /channel-points/rewards — creates a new custom reward on Twitch.
@@ -25,7 +28,7 @@ export const router = Router();
  */
 router.post('/rewards', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const streamer = await requireStreamer(req, res);
+    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
     if (!streamer) return;
 
     const input = parseRewardFields(req.body as Record<string, string | string[] | undefined>);
@@ -55,7 +58,7 @@ router.post('/rewards', requireAuth, csrfProtection, async (req, res) => {
  */
 router.post('/rewards/:twitchRewardId', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const streamer = await requireStreamer(req, res);
+    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
     if (!streamer) return;
 
     const twitchRewardId = parseRewardIdParam(req.params.twitchRewardId);

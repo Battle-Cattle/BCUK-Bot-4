@@ -15,6 +15,7 @@ vi.mock('../../twitch/twitchChannelName', () => ({
 }));
 vi.mock('./shared', () => ({
   trimField: (v: unknown) => (typeof v === 'string' ? v.trim() : ''),
+  normalizeDiscordId: (v: unknown) => (typeof v === 'string' && /^\d{17,20}$/.test(v.trim()) ? v.trim() : null),
 }));
 vi.mock('./adminUserMutations', () => ({
   isLockWaitTimeoutDbError: vi.fn().mockReturnValue(false),

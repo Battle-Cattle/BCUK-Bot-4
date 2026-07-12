@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { fromBit } from './utils';
+import { describe, it, expect, vi } from 'vitest';
+import { fromBit, affectedOrExists } from './utils';
 
 describe('fromBit', () => {
   it('returns true for Buffer with first byte 1', () => {
@@ -28,5 +28,27 @@ describe('fromBit', () => {
 
   it('returns false for undefined', () => {
     expect(fromBit(undefined)).toBe(false);
+  });
+});
+
+describe('affectedOrExists', () => {
+  it('returns true without calling existsCheck when affectedRows > 0', async () => {
+    const existsCheck = vi.fn().mockResolvedValue(false);
+    const result = await affectedOrExists(1, existsCheck);
+    expect(result).toBe(true);
+    expect(existsCheck).not.toHaveBeenCalled();
+  });
+
+  it('calls existsCheck and returns its result when affectedRows is 0', async () => {
+    const existsCheck = vi.fn().mockResolvedValue(true);
+    const result = await affectedOrExists(0, existsCheck);
+    expect(result).toBe(true);
+    expect(existsCheck).toHaveBeenCalledOnce();
+  });
+
+  it('returns false when affectedRows is 0 and existsCheck resolves false', async () => {
+    const existsCheck = vi.fn().mockResolvedValue(false);
+    const result = await affectedOrExists(0, existsCheck);
+    expect(result).toBe(false);
   });
 });

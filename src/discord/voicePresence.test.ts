@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('./guildRegistry', () => ({ getRegisteredGuildIds: vi.fn() }));
+vi.mock('./discordBot', () => ({ getDiscordClient: vi.fn() }));
 
 import { getRegisteredGuildIds } from './guildRegistry';
-import { getActiveGuildForUser } from './voicePresence';
+import { getDiscordClient } from './discordBot';
+import { getActiveGuildForUser, resolveGuildIdForDiscordId } from './voicePresence';
 
 function makeClient(guildVoiceChannels: Record<string, Record<string, string>>) {
   const cache = new Map(
@@ -65,5 +67,38 @@ describe('getActiveGuildForUser', () => {
     const client = makeClient({});
 
     expect(getActiveGuildForUser(client, 'user-1')).toBeNull();
+  });
+});
+
+describe('resolveGuildIdForDiscordId', () => {
+  it('returns null without touching the client when discordId is null', () => {
+    const client = makeClient({ 'guild-A': { 'user-1': 'chan-1' } });
+    vi.mocked(getDiscordClient).mockReturnValue(client);
+    vi.mocked(getRegisteredGuildIds).mockReturnValue(['guild-A']);
+
+    expect(resolveGuildIdForDiscordId(null)).toBeNull();
+    expect(getDiscordClient).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the discord client is not ready', () => {
+    vi.mocked(getDiscordClient).mockReturnValue(null);
+
+    expect(resolveGuildIdForDiscordId('user-1')).toBeNull();
+  });
+
+  it('returns the active guild for a resolved discordId', () => {
+    const client = makeClient({ 'guild-A': { 'user-1': 'chan-1' } });
+    vi.mocked(getDiscordClient).mockReturnValue(client);
+    vi.mocked(getRegisteredGuildIds).mockReturnValue(['guild-A']);
+
+    expect(resolveGuildIdForDiscordId('user-1')).toBe('guild-A');
+  });
+
+  it('returns null when the resolved discordId is not in voice anywhere', () => {
+    const client = makeClient({ 'guild-A': { 'user-2': 'chan-1' } });
+    vi.mocked(getDiscordClient).mockReturnValue(client);
+    vi.mocked(getRegisteredGuildIds).mockReturnValue(['guild-A']);
+
+    expect(resolveGuildIdForDiscordId('user-1')).toBeNull();
   });
 });

@@ -10,14 +10,16 @@ import { requireAuth } from '../middleware';
 import type { DbStreamerEventSub } from '../../db';
 import { addVideo, deleteVideo } from '../../db';
 import { OVERLAY_FOLDER, OVERLAY_MAX_FILE_MB } from '../../shared/config';
-import { logAndRedirectError, parsePositiveIntId } from './shared';
+import {
+  logAndRedirectError, parsePositiveIntId, requireStreamer, createMulterErrorRedirectHandler,
+} from './shared';
 import { safeResolve } from '../../shared/pathUtils';
-import { requireStreamer } from './overlayAdminShared';
-
-export { requireStreamer, toStringArray, parseWeight } from './overlayAdminShared';
 
 const log = createLogger('OverlayAdmin');
 export const router = Router();
+
+/** Redirect target used when the requester isn't a streamer, scoped to the overlay admin page. */
+const NOT_A_STREAMER_REDIRECT = '/overlay/settings?error=not_a_streamer';
 
 /** Maximum upload size in megabytes, passed to templates to avoid direct process.env access in EJS. */
 export const MAX_UPLOAD_MB = OVERLAY_MAX_FILE_MB;
@@ -73,16 +75,7 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.
  * @returns true when `err` was an error and a redirect was sent (caller should
  *   stop); false when there was no error (caller should continue).
  */
-export function handleUploadError(err: unknown, res: Response): boolean {
-  if (!err) return false;
-  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
-    res.redirect('/overlay/settings?error=file_too_large');
-    return true;
-  }
-  log.error('Overlay upload middleware error:', err);
-  res.redirect('/overlay/settings?error=upload_failed');
-  return true;
-}
+export const handleUploadError = createMulterErrorRedirectHandler('/overlay/settings', log, 'Overlay upload middleware error:');
 
 /**
  * Express middleware that runs Multer's single-file (`video`) parser and, on a
@@ -117,7 +110,7 @@ function uploadVideo(req: Request, res: Response, next: NextFunction): void {
  */
 router.post('/settings/videos/upload', requireAuth, csrfProtection, uploadVideo, async (req, res) => {
   try {
-    const streamer = await requireStreamer(req, res);
+    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
     if (!streamer) return;
     if (!req.file) return res.redirect('/overlay/settings?error=invalid_file');
     const name = (typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 100) : '') || req.file.originalname.trim().slice(0, 100);
@@ -142,7 +135,7 @@ router.post('/settings/videos/upload', requireAuth, csrfProtection, uploadVideo,
  */
 router.post('/settings/videos/:id/delete', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const streamer = await requireStreamer(req, res);
+    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
     if (!streamer) return;
 
     const videoId = parsePositiveIntId(req.params.id);

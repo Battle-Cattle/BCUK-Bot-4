@@ -8,6 +8,7 @@ import { SFX_FOLDER, GLOBAL_COOLDOWN_MS } from '../shared/config';
 import { setVoicePlaying } from '../shared/statusStore';
 import { safeResolve } from '../shared/pathUtils';
 import { recordCommandTestEntry } from './commandMonitorStore';
+import { getOrCreate } from '../shared/mapUtils';
 
 const log = createLogger('CommandRouter');
 
@@ -20,12 +21,7 @@ const guildStates = new Map<string, GuildCommandState>();
 
 /** Returns the cooldown/in-flight state for a guild, creating a fresh record on first use. */
 function getGuildCommandState(guildId: string): GuildCommandState {
-  let state = guildStates.get(guildId);
-  if (!state) {
-    state = { lastPlayedAt: 0, inFlight: false };
-    guildStates.set(guildId, state);
-  }
-  return state;
+  return getOrCreate(guildStates, guildId, () => ({ lastPlayedAt: 0, inFlight: false }));
 }
 
 /**

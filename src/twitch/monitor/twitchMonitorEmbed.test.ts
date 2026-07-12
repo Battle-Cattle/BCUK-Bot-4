@@ -16,7 +16,6 @@ vi.mock('../twitchApi', () => ({}));
 vi.mock('./twitchMonitorTypes', () => ({}));
 
 import {
-  fillTemplate,
   getStreamUrl,
   getThumbnailUrl,
   buildEmbedPreview,
@@ -39,25 +38,6 @@ function makeStream(overrides: Partial<TwitchStream> = {}): TwitchStream {
     ...overrides,
   };
 }
-
-describe('fillTemplate', () => {
-  it('replaces known variables', () => {
-    expect(fillTemplate('{streamer} is playing {game}', { streamer: 'alice', game: 'Chess' }))
-      .toBe('alice is playing Chess');
-  });
-
-  it('leaves unknown variables as-is (with braces)', () => {
-    expect(fillTemplate('{unknown}', {})).toBe('{unknown}');
-  });
-
-  it('handles template with no variables', () => {
-    expect(fillTemplate('Hello world', { streamer: 'alice' })).toBe('Hello world');
-  });
-
-  it('replaces multiple occurrences of the same variable', () => {
-    expect(fillTemplate('{a} and {a}', { a: 'x' })).toBe('x and x');
-  });
-});
 
 describe('getStreamUrl', () => {
   it('returns the correct Twitch channel URL', () => {
@@ -210,5 +190,19 @@ describe('buildMessagePreview', () => {
     const state = makeLiveState();
     const preview = buildMessagePreview(state, 'live_message', { url: null });
     expect(preview.embed.fields.map((f) => f.name)).not.toContain('MultiTwitch');
+  });
+
+  it('leaves an unknown placeholder as literal {key} text instead of blanking it', () => {
+    const state = makeLiveState({
+      group: {
+        id: 1,
+        live_message: 'Watch {streamer} play {typo_field}',
+        new_game_message: '{streamer} switched to {game}',
+        discord_channel_id: 'chan-1',
+        delete_old_posts: false,
+      } as any,
+    });
+    const preview = buildMessagePreview(state, 'live_message', { url: null });
+    expect(preview.content).toBe('Watch streamer1 play {typo_field}');
   });
 });

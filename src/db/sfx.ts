@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
-import { getPool } from './pool';
-import { fromBit } from './utils';
+import { getPool, withTransaction } from './pool';
+import { fromBit, affectedOrExists } from './utils';
 
 export interface SfxTrigger {
   id: bigint;
@@ -133,12 +133,13 @@ export async function renameCategory(id: number, name: string): Promise<boolean>
     `UPDATE sfxcategory SET name = ? WHERE id = ?`,
     [name, id],
   );
-  if (result.affectedRows > 0) return true;
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT id FROM sfxcategory WHERE id = ?`,
-    [id],
-  );
-  return rows.length > 0;
+  return affectedOrExists(result.affectedRows, async () => {
+    const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+      `SELECT id FROM sfxcategory WHERE id = ?`,
+      [id],
+    );
+    return rows.length > 0;
+  });
 }
 
 /**
@@ -203,12 +204,13 @@ export async function updateSfxTrigger(
      WHERE id = ?`,
     [command, categoryId, description, hidden ? 1 : 0, id.toString()],
   );
-  if (result.affectedRows > 0) return true;
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT id FROM sfxtrigger WHERE id = ?`,
-    [id.toString()],
-  );
-  return rows.length > 0;
+  return affectedOrExists(result.affectedRows, async () => {
+    const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+      `SELECT id FROM sfxtrigger WHERE id = ?`,
+      [id.toString()],
+    );
+    return rows.length > 0;
+  });
 }
 
 /**
@@ -226,31 +228,28 @@ export async function updateSfxTrigger(
  * @param id Trigger id.
  */
 export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } | null> {
-  const conn = await getPool().getConnection();
+  class TriggerNotFound extends Error {}
   try {
-    await conn.beginTransaction();
-    const [triggerRows] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT id FROM sfxtrigger WHERE id = ? FOR UPDATE`,
-      [id.toString()],
-    );
-    if (triggerRows.length === 0) {
-      await conn.rollback();
-      return null;
-    }
-    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT file FROM sfx WHERE trigger_id = ? FOR UPDATE`,
-      [id.toString()],
-    );
-    const files = rows.map((r) => r.file as string);
-    await conn.execute(`DELETE FROM sfx WHERE trigger_id = ?`, [id.toString()]);
-    await conn.execute(`DELETE FROM sfxtrigger WHERE id = ?`, [id.toString()]);
-    await conn.commit();
-    return { files };
+    return await withTransaction(async (conn) => {
+      const [triggerRows] = await conn.execute<mysql.RowDataPacket[]>(
+        `SELECT id FROM sfxtrigger WHERE id = ? FOR UPDATE`,
+        [id.toString()],
+      );
+      if (triggerRows.length === 0) {
+        throw new TriggerNotFound();
+      }
+      const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+        `SELECT file FROM sfx WHERE trigger_id = ? FOR UPDATE`,
+        [id.toString()],
+      );
+      const files = rows.map((r) => r.file as string);
+      await conn.execute(`DELETE FROM sfx WHERE trigger_id = ?`, [id.toString()]);
+      await conn.execute(`DELETE FROM sfxtrigger WHERE id = ?`, [id.toString()]);
+      return { files };
+    });
   } catch (err) {
-    await conn.rollback().catch(() => {});
+    if (err instanceof TriggerNotFound) return null;
     throw err;
-  } finally {
-    conn.release();
   }
 }
 
@@ -290,9 +289,10 @@ export async function updateSfxFile(id: number, weight: number, hidden: boolean)
     `UPDATE sfx SET weight = ?, hidden = ? WHERE id = ?`,
     [weight, hidden ? 1 : 0, id],
   );
-  if (result.affectedRows > 0) return true;
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT id FROM sfx WHERE id = ?`, [id]);
-  return rows.length > 0;
+  return affectedOrExists(result.affectedRows, async () => {
+    const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT id FROM sfx WHERE id = ?`, [id]);
+    return rows.length > 0;
+  });
 }
 
 /**
@@ -306,30 +306,26 @@ export async function updateSfxFile(id: number, weight: number, hidden: boolean)
  * @param id sfx row id.
  */
 export async function deleteSfxFile(id: number): Promise<string | null> {
-  const conn = await getPool().getConnection();
+  class FileNotFound extends Error {}
   try {
-    await conn.beginTransaction();
-    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT file FROM sfx WHERE id = ? FOR UPDATE`,
-      [id],
-    );
-    if (rows.length === 0) {
-      await conn.rollback();
-      return null;
-    }
-    const file: string = rows[0].file;
-    const [result] = await conn.execute<mysql.ResultSetHeader>(`DELETE FROM sfx WHERE id = ?`, [id]);
-    if (result.affectedRows === 0) {
-      await conn.rollback();
-      return null;
-    }
-    await conn.commit();
-    return file;
+    return await withTransaction(async (conn) => {
+      const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+        `SELECT file FROM sfx WHERE id = ? FOR UPDATE`,
+        [id],
+      );
+      if (rows.length === 0) {
+        throw new FileNotFound();
+      }
+      const file: string = rows[0].file;
+      const [result] = await conn.execute<mysql.ResultSetHeader>(`DELETE FROM sfx WHERE id = ?`, [id]);
+      if (result.affectedRows === 0) {
+        throw new FileNotFound();
+      }
+      return file;
+    });
   } catch (err) {
-    await conn.rollback().catch(() => {});
+    if (err instanceof FileNotFound) return null;
     throw err;
-  } finally {
-    conn.release();
   }
 }
 

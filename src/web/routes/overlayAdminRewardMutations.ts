@@ -3,11 +3,16 @@ import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { upsertReward, setRewardVideos, deleteReward } from '../../db';
-import { logAndRedirectError, parsePositiveIntId } from './shared';
-import { requireStreamer, toStringArray, parseWeight } from './overlayAdminShared';
+import {
+  logAndRedirectError, parsePositiveIntId, requireStreamer, parseWeight, parseRewardIdParam,
+} from './shared';
+import { toStringArray } from './overlayAdminShared';
 
 const log = createLogger('OverlayAdminReward');
 export const router = Router();
+
+/** Redirect target used when the requester isn't a streamer, scoped to the overlay admin page. */
+const NOT_A_STREAMER_REDIRECT = '/overlay/settings?error=not_a_streamer';
 
 /**
  * POST /overlay/settings/rewards — creates or updates a reward assignment,
@@ -22,13 +27,14 @@ export const router = Router();
  */
 router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const streamer = await requireStreamer(req, res);
+    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
     if (!streamer) return;
 
     const body = req.body as Record<string, string | string[] | undefined>;
-    const twitchRewardId = (typeof body.twitch_reward_id === 'string' ? body.twitch_reward_id : '').trim();
+    const rawTwitchRewardId = (typeof body.twitch_reward_id === 'string' ? body.twitch_reward_id : '').trim();
+    const twitchRewardId = parseRewardIdParam(rawTwitchRewardId);
 
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(twitchRewardId)) {
+    if (twitchRewardId === null) {
       return res.redirect('/overlay/settings?error=invalid_reward_id');
     }
 
@@ -60,7 +66,7 @@ router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) =
  */
 router.post('/settings/rewards/:id/delete', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const streamer = await requireStreamer(req, res);
+    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
     if (!streamer) return;
 
     const rewardId = parsePositiveIntId(req.params.id);
