@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   getEffectiveAccessLevel: vi.fn().mockResolvedValue(0),
@@ -7,7 +9,7 @@ vi.mock('../../db', () => ({
   findUser: vi.fn(),
 }));
 vi.mock('../../db/users', () => ({
-  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('../csrf', () => ({
   csrfProtection: (_req: any, _res: any, next: any) => next(),
@@ -15,9 +17,7 @@ vi.mock('../csrf', () => ({
 vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
-}));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import express from 'express';
 import supertest from 'supertest';

@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+/** Hoisted so the `vi.mock('../../db/users', ...)` factory below can safely reference it — `vi.mock` factories are hoisted above imports, so a plain imported binding could throw `ReferenceError` depending on import order. */
+const { ACCESS_LEVEL_MOCK } = vi.hoisted(() => ({
+  ACCESS_LEVEL_MOCK: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+}));
+
 vi.mock('../../db', () => {
   class CommandConflictError extends Error {}
   class CommandNotFoundError extends Error {}
@@ -41,7 +46,8 @@ vi.mock('../../logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
-vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+/** Mocks `db/users` so `AccessLevel` resolves to the shared hoisted mock instead of hitting the real module. */
+vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 
 import express from 'express';
 import supertest from 'supertest';

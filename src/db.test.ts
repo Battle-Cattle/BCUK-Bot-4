@@ -1,13 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from './test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from './test-utils/accessLevelMock';
 
-vi.mock('./shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }) }));
+/** Mocks the shared logger so `db.ts`'s log calls don't produce real output during tests. */
+vi.mock('./shared/logger', () => ({ createLogger: mockLogger }));
+/** Mocks the DB connection pool so no real MySQL connection is attempted during tests. */
 vi.mock('./db/pool', () => ({ getPool: vi.fn(), closePool: vi.fn() }));
 
 vi.mock('./db/users', () => ({
   upsertUserRecord: vi.fn(),
   setTwitchBotEnabledRecord: vi.fn(),
   removeUserRecord: vi.fn(),
-  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+  AccessLevel: ACCESS_LEVEL_MOCK,
   ACCESS_LEVEL_LABELS: {},
   findUser: vi.fn(),
   findUserByTwitchName: vi.fn(),
@@ -22,6 +26,13 @@ vi.mock('./db/customCommandCache', () => ({
   invalidateCustomCommandLookupCache: vi.fn(),
   getCustomCommandForTwitchChannel: vi.fn(),
   getCustomCommandForDiscord: vi.fn(),
+}));
+
+vi.mock('./db/guildCommandOverrides', () => ({
+  getOverridesForGuild: vi.fn(),
+  getAllOverrides: vi.fn(),
+  upsertOverride: vi.fn(),
+  removeOverride: vi.fn(),
 }));
 
 vi.mock('./db/customCommands', () => ({
@@ -128,13 +139,16 @@ vi.mock('./db/lookupCache', () => ({
 
 import { upsertUserRecord, setTwitchBotEnabledRecord, removeUserRecord } from './db/users';
 import { invalidateCustomCommandLookupCache } from './db/customCommandCache';
-import { upsertUser, updateTwitchBotEnabled, removeUser } from './db';
+import { upsertOverride as upsertOverrideRecord, removeOverride as removeOverrideRecord } from './db/guildCommandOverrides';
+import { upsertUser, updateTwitchBotEnabled, removeUser, upsertOverride, removeOverride } from './db';
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(upsertUserRecord).mockResolvedValue(false);
   vi.mocked(setTwitchBotEnabledRecord).mockResolvedValue(undefined);
   vi.mocked(removeUserRecord).mockResolvedValue(undefined);
+  vi.mocked(upsertOverrideRecord).mockResolvedValue(undefined);
+  vi.mocked(removeOverrideRecord).mockResolvedValue(undefined);
 });
 
 // ─── upsertUser ───────────────────────────────────────────────────────────────
@@ -196,6 +210,38 @@ describe('removeUser', () => {
   it('propagates errors from removeUserRecord', async () => {
     vi.mocked(removeUserRecord).mockRejectedValue(new Error('DB error'));
     await expect(removeUser('1')).rejects.toThrow('DB error');
+    expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
+  });
+});
+
+// ─── upsertOverride ─────────────────────────────────────────────────────────
+
+describe('upsertOverride', () => {
+  it('always calls invalidateCustomCommandLookupCache on success', async () => {
+    await upsertOverride('1', 5, { isDisabled: false, output: null });
+    expect(upsertOverrideRecord).toHaveBeenCalledWith('1', 5, { isDisabled: false, output: null });
+    expect(invalidateCustomCommandLookupCache).toHaveBeenCalledOnce();
+  });
+
+  it('propagates errors from upsertOverrideRecord without calling invalidate', async () => {
+    vi.mocked(upsertOverrideRecord).mockRejectedValue(new Error('DB error'));
+    await expect(upsertOverride('1', 5, { isDisabled: true, output: 'hi' })).rejects.toThrow('DB error');
+    expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
+  });
+});
+
+// ─── removeOverride ─────────────────────────────────────────────────────────
+
+describe('removeOverride', () => {
+  it('always calls invalidateCustomCommandLookupCache on success', async () => {
+    await removeOverride('1', 5);
+    expect(removeOverrideRecord).toHaveBeenCalledWith('1', 5);
+    expect(invalidateCustomCommandLookupCache).toHaveBeenCalledOnce();
+  });
+
+  it('propagates errors from removeOverrideRecord without calling invalidate', async () => {
+    vi.mocked(removeOverrideRecord).mockRejectedValue(new Error('DB error'));
+    await expect(removeOverride('1', 5)).rejects.toThrow('DB error');
     expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
   });
 });

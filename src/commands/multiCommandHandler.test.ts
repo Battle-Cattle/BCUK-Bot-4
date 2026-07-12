@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
 
-vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: vi.fn() }) }));
+vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../twitch/monitor/twitchMonitor', () => ({
   getMultiTwitchDataForChannel: vi.fn(),
@@ -110,6 +111,19 @@ describe('executeMultiCommandForTwitch', () => {
     await executeMultiCommandForTwitch('#a', '!multi', 'user1');
 
     expect(mockRuntime.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not throw and sends nothing when no participant channel is active', async () => {
+    vi.mocked(getMultiTwitchDataForChannel).mockReturnValue({
+      url: 'multitwitch.tv/a/b',
+      participants: ['#a', '#b'],
+    } as any);
+
+    // Neither the source channel nor its participants are active
+    mockRuntime.getActiveChannels.mockReturnValue(new Set<string>());
+
+    await expect(executeMultiCommandForTwitch('#a', '!multi', 'user1')).resolves.toBeUndefined();
+    expect(mockRuntime.send).not.toHaveBeenCalled();
   });
 
   it('records the multitwitch URL in the command monitor entry', async () => {

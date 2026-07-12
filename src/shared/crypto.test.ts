@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
 
-vi.mock('./logger', () => ({ createLogger: () => ({ warn: vi.fn(), error: vi.fn() }) }));
+vi.mock('./logger', () => ({ createLogger: mockLogger }));
 
 import { encryptToken, decryptToken } from './crypto';
 

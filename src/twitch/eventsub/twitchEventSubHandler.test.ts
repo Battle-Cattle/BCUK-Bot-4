@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../db', () => ({ getVideosForReward: vi.fn(), getStreamerById: vi.fn() }));
 vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../commands/shoutoutHandler', () => ({ buildShoutoutMessage: vi.fn() }));
 vi.mock('../../commands/commandMonitorStore', () => ({ recordCommandTestEntry: vi.fn() }));
-vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../monitor/twitchMonitor', () => ({ triggerImmediateLiveCheck: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../pricing/rewardPricingService', () => ({ applyRedemptionPricing: vi.fn().mockResolvedValue(undefined) }));
 

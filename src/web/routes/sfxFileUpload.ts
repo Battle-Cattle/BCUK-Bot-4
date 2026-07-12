@@ -9,8 +9,7 @@ import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
 import { SFX_FOLDER, SFX_MAX_FILE_MB } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
-import { parsePositiveIntId } from './shared';
-import { parseWeight } from './sfxMutationsShared';
+import { parsePositiveIntId, createMulterErrorRedirectHandler } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -196,16 +195,7 @@ async function persistUploadedSound(
  * @returns true when `err` was an error and a redirect was sent (caller should
  *   stop); false when there was no error (caller should continue).
  */
-export function handleUploadError(err: unknown, res: Response): boolean {
-  if (!err) return false;
-  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
-    res.redirect('/sfx?error=file_too_large');
-    return true;
-  }
-  log.error('SFX upload middleware error:', err);
-  res.redirect('/sfx?error=upload_failed');
-  return true;
-}
+export const handleUploadError = createMulterErrorRedirectHandler('/sfx', log, 'SFX upload middleware error:');
 
 /**
  * Express middleware that runs Multer's single-file (`sound`) parser and, on a
@@ -239,7 +229,7 @@ router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
   if (!req.file) return res.redirect('/sfx?error=invalid_file');
 
-  const weight = parseWeight(req.body.weight);
+  const weight = parsePositiveIntId(req.body.weight);
   if (weight === null) return res.redirect('/sfx?error=invalid_weight');
   const hidden = req.body.file_hidden === 'on';
 

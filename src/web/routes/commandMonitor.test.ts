@@ -1,4 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
+
+/**
+ * Isolates this test from the real DB module — required at runtime only by shared.ts's
+ * requireStreamer/handleReservedOrConflictCommandError, neither of which this route uses,
+ * but a real (unmocked) import would otherwise try to build a live connection pool.
+ */
+vi.mock('../../db', () => ({}));
 
 vi.mock('../../commands/commandMonitorStore', () => ({
   getRecentCommandTestEntries: vi.fn().mockReturnValue([]),
@@ -15,9 +23,8 @@ vi.mock('../middleware', () => ({
   requireManager: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../shared/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
-}));
+/** Mocks the shared logger so route handlers don't write real log output during tests. */
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import supertest from 'supertest';
 import router from './commandMonitor';

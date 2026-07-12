@@ -5,8 +5,7 @@ import { pickWeightedRandom } from '../../commands/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
 import { requireApiKey } from '../middleware';
-import { getDiscordClient } from '../../discord/discordBot';
-import { resolvePresenceGuildOrRespond } from './streamdeckGuildResolution';
+import { resolvePresenceGuildOrRespond, getReadyDiscordClientOrRespond } from './streamdeckGuildResolution';
 
 const log = createLogger('Streamdeck');
 const router = Router();
@@ -43,11 +42,8 @@ router.post('/sfx', requireApiKey, async (req, res) => {
     return;
   }
 
-  const discordClient = getDiscordClient();
-  if (!discordClient) {
-    res.status(503).json({ ok: false, error: 'Discord client not ready' });
-    return;
-  }
+  const discordClient = getReadyDiscordClientOrRespond(res);
+  if (!discordClient) return;
   const guildId = await resolvePresenceGuildOrRespond(req, res, discordClient);
   if (!guildId) return;
 

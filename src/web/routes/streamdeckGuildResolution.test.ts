@@ -8,13 +8,19 @@ vi.mock('../../discord/voicePresence', () => ({
   getActiveGuildForUser: vi.fn(),
 }));
 
+vi.mock('../../discord/discordBot', () => ({
+  getDiscordClient: vi.fn(),
+}));
+
 import { isKeyApprovedForGuild } from '../../db';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
+import { getDiscordClient } from '../../discord/discordBot';
 import {
   resolveGuildIdFromChannelId,
   ensureGuildApproved,
   resolveChannelGuildOrRespond,
   resolvePresenceGuildOrRespond,
+  getReadyDiscordClientOrRespond,
 } from './streamdeckGuildResolution';
 
 const API_KEY_OWNER = 'user-1';
@@ -120,5 +126,23 @@ describe('resolvePresenceGuildOrRespond', () => {
     const client = makeClient();
     await expect(resolvePresenceGuildOrRespond(req, res, client)).resolves.toBeNull();
     expect(res.status).toHaveBeenCalledWith(403);
+  });
+});
+
+describe('getReadyDiscordClientOrRespond', () => {
+  it('returns the client when it is ready', () => {
+    const client = makeClient();
+    vi.mocked(getDiscordClient).mockReturnValue(client);
+    const { res } = makeReqRes();
+    expect(getReadyDiscordClientOrRespond(res)).toBe(client);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('returns null and sends 503 when the client is not ready', () => {
+    vi.mocked(getDiscordClient).mockReturnValue(null);
+    const { res } = makeReqRes();
+    expect(getReadyDiscordClientOrRespond(res)).toBeNull();
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'Discord client not ready' });
   });
 });

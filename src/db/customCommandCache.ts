@@ -1,6 +1,7 @@
 import { createLogger } from '../shared/logger';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
+import { normalizeCommand } from './commandStringUtils';
 import { getTwitchEnabledChannels } from './users';
 // customCommands imports invalidateCustomCommandLookupCache from this module;
 // this module imports getAllCustomCommandsWithAssignments from customCommands.
@@ -38,6 +39,11 @@ interface TwitchCandidateContext {
 
 // ─── Cache builder helpers ────────────────────────────────────────────────────
 
+/**
+ * Creates an empty, already-stale custom command lookup cache used as the initial/fallback
+ * state before the first successful refresh.
+ * @returns An empty `CustomCommandLookupCache` with `loadedAt` set to 0.
+ */
 function createEmptyCustomCommandLookupCache(): CustomCommandLookupCache {
   return {
     // Keep the fallback cache immediately stale so a new refresh can start as soon
@@ -65,9 +71,16 @@ function buildOverridesByGuild(
   return byGuild;
 }
 
+/**
+ * Builds the cache key used to look up a Twitch custom command, combining the normalized
+ * channel name and trigger string.
+ * @param channelName Twitch channel name to normalize.
+ * @param triggerString Trigger string to normalize.
+ * @returns The composite cache key, or null if either input normalizes to nothing.
+ */
 function getTwitchCommandCacheKey(channelName: string, triggerString: string): string | null {
   const normalizedChannelName = normalizeTwitchChannelName(channelName);
-  const normalizedTriggerString = triggerString.trim().toLowerCase();
+  const normalizedTriggerString = normalizeCommand(triggerString);
 
   if (!normalizedChannelName || !normalizedTriggerString) {
     return null;
@@ -76,12 +89,25 @@ function getTwitchCommandCacheKey(channelName: string, triggerString: string): s
   return `${normalizedChannelName}::${normalizedTriggerString}`;
 }
 
+/**
+ * Normalizes a list of Twitch channel names, dropping any that fail to normalize.
+ * @param activeTwitchChannels Raw Twitch channel names.
+ * @returns The normalized channel names.
+ */
 function normalizeActiveTwitchChannels(activeTwitchChannels: string[]): string[] {
   return activeTwitchChannels
     .map((channel) => normalizeTwitchChannelName(channel))
     .filter((channel): channel is string => channel !== null);
 }
 
+/**
+ * Picks which of two competing Twitch command candidates for the same channel+trigger should
+ * win: same command wins trivially, otherwise higher `priority` wins, and ties break toward the
+ * lower `command_id`.
+ * @param existingCandidate The candidate currently registered for the cache key.
+ * @param nextCandidate The new candidate being considered.
+ * @returns The candidate that should occupy the cache key.
+ */
 function pickPreferredTwitchCandidate(
   existingCandidate: TwitchCommandCandidate,
   nextCandidate: TwitchCommandCandidate,
@@ -99,6 +125,13 @@ function pickPreferredTwitchCandidate(
     : existingCandidate;
 }
 
+/**
+ * Registers a Discord-enabled command under its trigger string, logging and skipping on collision
+ * with an already-registered command. No-ops if the command isn't Discord-enabled.
+ * @param discordByTrigger Map being built from trigger string to command.
+ * @param triggerString Normalized trigger string to register under.
+ * @param command Command to register.
+ */
 function registerDiscordCommand(
   discordByTrigger: Map<string, DbCustomCommand>,
   triggerString: string,
@@ -120,6 +153,16 @@ function registerDiscordCommand(
   discordByTrigger.set(triggerString, command);
 }
 
+/**
+ * Registers a Twitch command candidate under a channel+trigger cache key, resolving collisions
+ * via {@link pickPreferredTwitchCandidate} and logging the outcome (info on a priority-driven
+ * remap, warn on a same-priority remap or an ignored duplicate).
+ * @param context Mutable candidate map being built.
+ * @param cacheKey Composite channel+trigger cache key.
+ * @param triggerString Trigger string, used only for log messages.
+ * @param channelName Twitch channel name, used only for log messages.
+ * @param candidate Candidate being registered.
+ */
 function registerTwitchCandidate(
   context: TwitchCandidateContext,
   cacheKey: string,
@@ -156,6 +199,15 @@ function registerTwitchCandidate(
   context.candidateByCacheKey.set(cacheKey, preferredCandidate);
 }
 
+/**
+ * Registers a multi-Twitch command as a candidate on every active Twitch channel. No-ops if the
+ * command isn't multi-Twitch.
+ * @param context Mutable candidate map being built.
+ * @param activeChannels Normalized names of currently active Twitch channels.
+ * @param triggerString Normalized trigger string.
+ * @param command Command to register.
+ * @param isMultiTwitch Whether the command is flagged as multi-Twitch.
+ */
 function registerMultiTwitchCandidates(
   context: TwitchCandidateContext,
   activeChannels: string[],
@@ -182,6 +234,14 @@ function registerMultiTwitchCandidates(
   }
 }
 
+/**
+ * Registers a command as a candidate on each assigned user's Twitch channel, skipping users
+ * without a Twitch name or with Twitch bot disabled.
+ * @param context Mutable candidate map being built.
+ * @param assignedUsers Users the command is individually assigned to.
+ * @param triggerString Normalized trigger string.
+ * @param command Command to register.
+ */
 function registerAssignedTwitchCandidates(
   context: TwitchCandidateContext,
   assignedUsers: DbCustomCommandAssignedUser[],
@@ -207,6 +267,16 @@ function registerAssignedTwitchCandidates(
   }
 }
 
+/**
+ * Builds the full custom command lookup cache: indexes Discord-enabled commands by trigger,
+ * resolves the winning Twitch command per channel+trigger among multi-Twitch and per-user
+ * assigned candidates, and indexes per-guild overrides. Commands are processed in ascending
+ * `command_id` order so collisions resolve deterministically.
+ * @param commands All custom commands with their assigned users.
+ * @param activeTwitchChannels Names of currently active Twitch channels.
+ * @param overrides All per-guild command overrides.
+ * @returns The populated `CustomCommandLookupCache`.
+ */
 function buildCustomCommandLookupCache(
   commands: DbCustomCommandWithAssignments[],
   activeTwitchChannels: string[],
@@ -221,7 +291,7 @@ function buildCustomCommandLookupCache(
   };
 
   for (const command of sortedCommands) {
-    const normalizedTriggerString = command.trigger_string.trim().toLowerCase();
+    const normalizedTriggerString = normalizeCommand(command.trigger_string);
     if (!normalizedTriggerString) {
       continue;
     }
@@ -287,10 +357,17 @@ const customCommandLookupCacheState = createManagedLookupCache<CustomCommandLook
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/** Marks the custom command lookup cache as stale so the next read triggers a refresh. */
 export function invalidateCustomCommandLookupCache(): void {
   customCommandLookupCacheState.invalidate();
 }
 
+/**
+ * Looks up the custom command that fires for a trigger string on a given Twitch channel.
+ * @param channelName Twitch channel the message came from.
+ * @param triggerString Trigger string to match, matched case-insensitively.
+ * @returns The matching command, or null if none matches or either input is invalid.
+ */
 export async function getCustomCommandForTwitchChannel(channelName: string, triggerString: string): Promise<DbCustomCommand | null> {
   const cacheKey = getTwitchCommandCacheKey(channelName, triggerString);
   if (!cacheKey) {
@@ -318,7 +395,7 @@ export async function getCustomCommandForDiscord(
   triggerString: string,
   guildId: string,
 ): Promise<DbCustomCommand | null> {
-  const normalizedTriggerString = triggerString.trim().toLowerCase();
+  const normalizedTriggerString = normalizeCommand(triggerString);
   if (!normalizedTriggerString) {
     return null;
   }

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
 
-vi.mock('../shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), error: vi.fn() }) }));
+/** Mocks the shared logger so this module's log calls don't produce real output during tests. */
+vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('./discordBot', () => ({ getDiscordClient: vi.fn() }));
 
 vi.mock('discord.js', () => {
@@ -33,6 +35,8 @@ import {
   isPermanentVoiceMisconfigurationError,
   tryDeleteDiscordMessage,
   getAvailableVoiceChannels,
+  getTextChannel,
+  tryEditDiscordMessage,
 } from './discordUtils';
 import { DiscordAPIError } from 'discord.js';
 import { getDiscordClient } from './discordBot';
@@ -168,6 +172,79 @@ describe('tryDeleteDiscordMessage', () => {
     vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: channelsFetch } } as any);
 
     await expect(tryDeleteDiscordMessage('chan1', 'msg1')).rejects.toThrow('network blip');
+  });
+});
+
+describe('getTextChannel', () => {
+  it('returns the channel when it is text-based', async () => {
+    const channel = { isTextBased: () => true };
+    const channelsFetch = vi.fn().mockResolvedValue(channel);
+    const client = { channels: { fetch: channelsFetch } } as any;
+
+    await expect(getTextChannel(client, 'chan1')).resolves.toBe(channel);
+    expect(channelsFetch).toHaveBeenCalledWith('chan1');
+  });
+
+  it('returns null when the channel is not text-based', async () => {
+    const channelsFetch = vi.fn().mockResolvedValue({ isTextBased: () => false });
+    const client = { channels: { fetch: channelsFetch } } as any;
+
+    await expect(getTextChannel(client, 'chan1')).resolves.toBeNull();
+  });
+
+  it('returns null when the channel fetch resolves to null', async () => {
+    const channelsFetch = vi.fn().mockResolvedValue(null);
+    const client = { channels: { fetch: channelsFetch } } as any;
+
+    await expect(getTextChannel(client, 'chan1')).resolves.toBeNull();
+  });
+});
+
+describe('tryEditDiscordMessage', () => {
+  it('returns false without fetching a message when the channel is not text-based', async () => {
+    const fetchMessage = vi.fn();
+    const channelsFetch = vi.fn().mockResolvedValue({ isTextBased: () => false, messages: { fetch: fetchMessage } });
+    const client = { channels: { fetch: channelsFetch } } as any;
+
+    await expect(tryEditDiscordMessage(client, 'chan1', 'msg1', { content: 'hi' })).resolves.toBe(false);
+    expect(fetchMessage).not.toHaveBeenCalled();
+  });
+
+  it('returns false when the channel fetch resolves to null', async () => {
+    const channelsFetch = vi.fn().mockResolvedValue(null);
+    const client = { channels: { fetch: channelsFetch } } as any;
+
+    await expect(tryEditDiscordMessage(client, 'chan1', 'msg1', { content: 'hi' })).resolves.toBe(false);
+  });
+
+  it('fetches and edits the message when the channel is text-based', async () => {
+    const editMessage = vi.fn().mockResolvedValue(undefined);
+    const fetchMessage = vi.fn().mockResolvedValue({ edit: editMessage });
+    const channelsFetch = vi.fn().mockResolvedValue({ isTextBased: () => true, messages: { fetch: fetchMessage } });
+    const client = { channels: { fetch: channelsFetch } } as any;
+
+    await expect(tryEditDiscordMessage(client, 'chan1', 'msg1', { content: 'hi' })).resolves.toBe(true);
+    expect(channelsFetch).toHaveBeenCalledWith('chan1');
+    expect(fetchMessage).toHaveBeenCalledWith('msg1');
+    expect(editMessage).toHaveBeenCalledWith({ content: 'hi' });
+  });
+
+  it('returns false without throwing on a not-found error', async () => {
+    const notFoundErr = new MockedDiscordAPIError({ code: UNKNOWN_MESSAGE, status: 200 });
+    const fetchMessage = vi.fn().mockRejectedValue(notFoundErr);
+    const channelsFetch = vi.fn().mockResolvedValue({ isTextBased: () => true, messages: { fetch: fetchMessage } });
+    const client = { channels: { fetch: channelsFetch } } as any;
+
+    await expect(tryEditDiscordMessage(client, 'chan1', 'msg1', { content: 'hi' })).resolves.toBe(false);
+  });
+
+  it('rethrows an unrelated error', async () => {
+    const otherErr = new Error('network blip');
+    const fetchMessage = vi.fn().mockRejectedValue(otherErr);
+    const channelsFetch = vi.fn().mockResolvedValue({ isTextBased: () => true, messages: { fetch: fetchMessage } });
+    const client = { channels: { fetch: channelsFetch } } as any;
+
+    await expect(tryEditDiscordMessage(client, 'chan1', 'msg1', { content: 'hi' })).rejects.toThrow('network blip');
   });
 });
 

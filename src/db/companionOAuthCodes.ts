@@ -1,6 +1,6 @@
 import { randomBytes, createHash } from 'crypto';
 import mysql from 'mysql2/promise';
-import { getPool } from './pool';
+import { getPool, withTransaction } from './pool';
 import { issueTokenOnConnection } from './companionTokens';
 
 const CODE_TTL_SECONDS = 60;
@@ -64,36 +64,31 @@ export async function consumeCode(code: string): Promise<string | null> {
  */
 export async function exchangeCodeForToken(code: string): Promise<string | null> {
   const hash = createHash('sha256').update(code).digest('hex');
-  const conn = await getPool().getConnection();
+  class CodeNotFound extends Error {}
   try {
-    await conn.beginTransaction();
-    const [result] = await conn.execute<mysql.ResultSetHeader>(
-      `UPDATE companion_oauth_codes
-       SET used_at = NOW()
-       WHERE code_hash = ? AND used_at IS NULL AND expires_at > NOW()`,
-      [hash],
-    );
-    if (result.affectedRows === 0) {
-      await conn.rollback();
-      return null;
-    }
+    return await withTransaction(async (conn) => {
+      const [result] = await conn.execute<mysql.ResultSetHeader>(
+        `UPDATE companion_oauth_codes
+         SET used_at = NOW()
+         WHERE code_hash = ? AND used_at IS NULL AND expires_at > NOW()`,
+        [hash],
+      );
+      if (result.affectedRows === 0) {
+        throw new CodeNotFound();
+      }
 
-    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT discord_id FROM companion_oauth_codes WHERE code_hash = ?`,
-      [hash],
-    );
-    if (rows.length === 0) {
-      await conn.rollback();
-      return null;
-    }
+      const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+        `SELECT discord_id FROM companion_oauth_codes WHERE code_hash = ?`,
+        [hash],
+      );
+      if (rows.length === 0) {
+        throw new CodeNotFound();
+      }
 
-    const token = await issueTokenOnConnection(conn, String(rows[0].discord_id));
-    await conn.commit();
-    return token;
+      return issueTokenOnConnection(conn, String(rows[0].discord_id));
+    });
   } catch (err) {
-    await conn.rollback().catch(() => {});
+    if (err instanceof CodeNotFound) return null;
     throw err;
-  } finally {
-    conn.release();
   }
 }

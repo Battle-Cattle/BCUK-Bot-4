@@ -4,23 +4,24 @@ import { getUsers, getChannelInfo, getStreams, TwitchChannelInfo, TwitchStream }
 const log = createLogger('Shoutout');
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { extractCommand } from './commandUtils';
+import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
 
 const SO_COMMAND = '!so';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 
-interface ShoutoutRuntime {
-  send: (channel: string, message: string) => Promise<void>;
-}
+type ShoutoutRuntime = TwitchSendRuntime;
 
-let _runtime: ShoutoutRuntime | null = null;
+const shoutoutRuntime = createRuntimeRegistry<ShoutoutRuntime>();
 
+/** Stores the Twitch chat runtime used to send `!so` shoutouts. Call once from index.ts after the Twitch bot is ready. */
 export function registerShoutoutRuntime(runtime: ShoutoutRuntime): void {
-  _runtime = runtime;
+  shoutoutRuntime.register(runtime);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Builds the `!so` shoutout message text for `login`, tailored to whether they're currently live and/or have a known last-played game. */
 function formatShoutoutMessage(login: string, gameName: string | null, isLive: boolean): string {
   const url = `twitch.tv/${login}`;
   if (isLive && gameName) return `Go check out @${login}, they're live playing ${gameName}! ${url}`;
@@ -28,6 +29,14 @@ function formatShoutoutMessage(login: string, gameName: string | null, isLive: b
   return `Go give @${login} a follow at ${url}!`;
 }
 
+/**
+ * Looks up `target` on Twitch and resolves the login, most recent/current game
+ * name, and live status needed to build a shoutout message. Channel info and
+ * stream lookups run independently so a failure in one doesn't block the other.
+ *
+ * @param target - Twitch login to look up.
+ * @returns The resolved shoutout data, or null if `target` isn't a valid Twitch user.
+ */
 async function resolveShoutoutData(
   target: string,
 ): Promise<{ login: string; gameName: string | null; isLive: boolean } | null> {
@@ -52,8 +61,15 @@ async function resolveShoutoutData(
   };
 }
 
+/**
+ * Sends a shoutout `message` to `channel` via the registered Twitch runtime.
+ *
+ * @param channel - Twitch channel to send the shoutout to.
+ * @param message - Shoutout text to send.
+ * @returns True if the message was sent; false if no runtime is registered or the send failed.
+ */
 async function dispatchShoutout(channel: string, message: string): Promise<boolean> {
-  const runtime = _runtime;
+  const runtime = shoutoutRuntime.get();
   if (!runtime) return false;
   try {
     await runtime.send(channel, message);

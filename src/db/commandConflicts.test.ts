@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
 
-vi.mock('../shared/logger', () => ({ createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }) }));
+vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('./pool', () => ({ getPool: vi.fn() }));
 vi.mock('mysql2/promise', () => ({ default: {} }));
 vi.mock('../twitch/twitchChannelName', () => ({
@@ -21,6 +22,10 @@ vi.mock('./commandStringUtils', () => ({
       this.commands = cmds;
     }
   },
+  normalizeCommand: vi.fn((command: string) => {
+    const normalized = command.trim().toLowerCase();
+    return normalized.length > 0 ? normalized : null;
+  }),
 }));
 
 import {

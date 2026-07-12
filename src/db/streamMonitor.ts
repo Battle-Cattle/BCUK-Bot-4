@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import { getPool } from './pool';
+import { getPool, withTransaction } from './pool';
 import { fromBit } from './utils';
 
 export interface DbStreamGroup {
@@ -48,18 +48,44 @@ export interface DbStreamerFull {
   group: DbStreamGroup;
 }
 
+/** Raw group-related field values, keyed the way `mapStreamGroup`/`buildStreamGroup` expect them, regardless of the source row's own column aliases. */
+interface RawStreamGroupFields {
+  id: number;
+  guild_id: unknown;
+  name: string;
+  discord_channel: unknown;
+  live_message: string;
+  new_game_message: string;
+  multi_twitch: unknown;
+  delete_old_posts: unknown;
+}
+
+/** Converts raw group field values to a `DbStreamGroup`, converting BIGINT/bit columns to string/boolean. */
+function buildStreamGroup(fields: RawStreamGroupFields): DbStreamGroup {
+  return {
+    id: fields.id,
+    guild_id: String(fields.guild_id),
+    name: fields.name,
+    discord_channel: String(fields.discord_channel),
+    live_message: fields.live_message,
+    new_game_message: fields.new_game_message,
+    multi_twitch: fromBit(fields.multi_twitch),
+    delete_old_posts: fromBit(fields.delete_old_posts),
+  };
+}
+
 /** Maps a `stream_group` row to a `DbStreamGroup`, converting BIGINT/bit columns to string/boolean. */
 function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
-  return {
+  return buildStreamGroup({
     id: r.id,
-    guild_id: String(r.guild_id),
+    guild_id: r.guild_id,
     name: r.name,
-    discord_channel: String(r.discord_channel),
+    discord_channel: r.discord_channel,
     live_message: r.live_message,
     new_game_message: r.new_game_message,
-    multi_twitch: fromBit(r.multi_twitch),
-    delete_old_posts: fromBit(r.delete_old_posts),
-  };
+    multi_twitch: r.multi_twitch,
+    delete_old_posts: r.delete_old_posts,
+  });
 }
 
 /** Extracts the shared column values (everything but `guildId`/`id`) from an add/update input, in SQL parameter order. */
@@ -174,16 +200,16 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
     discord_message_id: r.discord_message_id ?? null,
     discord_channel_id: r.discord_channel_id !== null && r.discord_channel_id !== undefined ? String(r.discord_channel_id) : null,
     live_game: r.live_game ?? null,
-    group: {
+    group: buildStreamGroup({
       id: r.group_id,
-      guild_id: String(r.guild_id),
+      guild_id: r.guild_id,
       name: r.group_name,
-      discord_channel: String(r.discord_channel),
+      discord_channel: r.discord_channel,
       live_message: r.live_message,
       new_game_message: r.new_game_message,
-      multi_twitch: fromBit(r.multi_twitch),
-      delete_old_posts: fromBit(r.delete_old_posts),
-    },
+      multi_twitch: r.multi_twitch,
+      delete_old_posts: r.delete_old_posts,
+    }),
   }));
 }
 
@@ -237,9 +263,7 @@ export async function removeStreamer(id: number, guildId: string): Promise<boole
  * @returns True if the group was actually deleted; false if it didn't belong to `guildId`.
  */
 export async function removeStreamGroupAndStreamers(groupId: number, guildId: string): Promise<boolean> {
-  const conn = await getPool().getConnection();
-  try {
-    await conn.beginTransaction();
+  return withTransaction(async (conn) => {
     await conn.execute(
       `DELETE s FROM streamer s JOIN stream_group g ON s.group_id = g.id WHERE s.group_id = ? AND g.guild_id = ?`,
       [groupId, guildId],
@@ -247,15 +271,8 @@ export async function removeStreamGroupAndStreamers(groupId: number, guildId: st
     const [result] = await conn.execute<mysql.ResultSetHeader>(
       'DELETE FROM stream_group WHERE id = ? AND guild_id = ?', [groupId, guildId],
     );
-    await conn.commit();
     return result.affectedRows > 0;
-  } catch (err) {
-    // Swallow rollback failures (e.g. connection already dropped) so the original error propagates.
-    await conn.rollback().catch(() => {});
-    throw err;
-  } finally {
-    conn.release();
-  }
+  });
 }
 
 /**

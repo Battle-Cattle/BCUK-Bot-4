@@ -1,3 +1,5 @@
+import { getOrCreate } from './mapUtils';
+
 /** Live connection and stream status for a single Twitch or TikTok channel. */
 export interface ChannelStatus {
   connected: boolean;
@@ -28,16 +30,6 @@ function defaultVoiceStatus(): VoiceStatus {
     lastSource: null,
     lastPlayedAt: null,
   };
-}
-
-/** Returns the value for `key` in `map`, creating and inserting `makeDefault()` if absent. */
-function getOrCreate<K, V>(map: Map<K, V>, key: K, makeDefault: () => V): V {
-  let value = map.get(key);
-  if (!value) {
-    value = makeDefault();
-    map.set(key, value);
-  }
-  return value;
 }
 
 const state = {
@@ -125,6 +117,15 @@ function defaultChannelStatus(): ChannelStatus {
   return { connected: false, lastConnectedAt: null, lastDisconnectedAt: null, isLive: false };
 }
 
+/**
+ * Updates a channel's connected flag within `map`, creating a default status
+ * record on first use and stamping `lastConnectedAt`/`lastDisconnectedAt`
+ * whenever the connected state actually transitions.
+ *
+ * @param map - The Twitch or TikTok channel-status map to update.
+ * @param key - Channel key to update.
+ * @param connected - New connected state for the channel.
+ */
 function updateChannel(map: Map<string, ChannelStatus>, key: string, connected: boolean): void {
   const existing = getOrCreate(map, key, defaultChannelStatus);
   if (connected && !existing.connected) existing.lastConnectedAt = new Date();

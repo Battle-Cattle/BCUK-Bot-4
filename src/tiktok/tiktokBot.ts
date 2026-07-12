@@ -16,8 +16,7 @@ import {
   findOwnerUser,
   type RefreshingLookupCache,
 } from '../db';
-import { getDiscordClient } from '../discord/discordBot';
-import { getActiveGuildForUser } from '../discord/voicePresence';
+import { resolveGuildIdForDiscordId } from '../discord/voicePresence';
 
 const log = createLogger('TikTok');
 
@@ -67,9 +66,7 @@ async function resolveOwnerDiscordId(): Promise<string | null> {
 async function resolveGuildIdForTikTokCommand(): Promise<string | null> {
   const ownerDiscordId = await resolveOwnerDiscordId();
   if (!ownerDiscordId) return null;
-  const discordClient = getDiscordClient();
-  if (!discordClient) return null;
-  return getActiveGuildForUser(discordClient, ownerDiscordId);
+  return resolveGuildIdForDiscordId(ownerDiscordId);
 }
 
 /** Test-only: clears the cached owner discord_id so each test starts from a clean slate. */
@@ -98,6 +95,14 @@ const activeConnections = new Map<string, Connection>();
 const pendingReconnectTimers = new Set<ReturnType<typeof setTimeout>>();
 let stopped = false;
 
+/**
+ * Opens a TikTok Live connection for `username`, replacing any existing
+ * connection for that channel, and wires up event handlers for chat commands,
+ * status tracking, and automatic reconnection on disconnect/stream-end/error.
+ *
+ * @param username - TikTok channel username to connect to.
+ * @param modules - Dynamically-imported `tiktok-live-connector` classes/enums.
+ */
 function connectToChannel(username: string, modules: TikTokModules): void {
   const { TikTokLiveConnection, WebcastEvent, ControlEvent } = modules;
 
@@ -115,6 +120,14 @@ function connectToChannel(username: string, modules: TikTokModules): void {
   let permanentFailure = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * Schedules a reconnect attempt for this connection after `RECONNECT_DELAY_MS`,
+   * disconnecting the current connection first. No-ops if the bot has been
+   * stopped, a reconnect is already scheduled, or the connection hit a
+   * permanent failure. Only takes ownership of the `activeConnections` entry
+   * (and clears the timer set) if this connection is still the active one for
+   * `username`, so a newer connection that already replaced it isn't clobbered.
+   */
   function scheduleReconnect(): void {
     if (stopped || reconnectScheduled || permanentFailure) return;
     reconnectScheduled = true;
@@ -187,6 +200,13 @@ function connectToChannel(username: string, modules: TikTokModules): void {
     });
 }
 
+/**
+ * Starts the TikTok listener: connects to every channel configured in
+ * `TIKTOK_CHANNELS` (no-op if none are configured), marking each as
+ * disconnected before dialing in.
+ *
+ * @returns Resolves once a connection attempt has been kicked off for every configured channel.
+ */
 export async function startTikTokBot(): Promise<void> {
   stopped = false;
   if (TIKTOK_CHANNELS.length === 0) {
@@ -205,6 +225,10 @@ export async function startTikTokBot(): Promise<void> {
   }
 }
 
+/**
+ * Stops the TikTok listener: disconnects every active channel connection,
+ * clears pending reconnect timers, and prevents further reconnect attempts.
+ */
 export function stopTikTokBot(): void {
   stopped = true;
   for (const [username, conn] of activeConnections) {

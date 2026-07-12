@@ -1,6 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('./pool', () => ({ getPool: vi.fn() }));
+// `withTransaction` is reimplemented here (rather than via `importOriginal`) so this
+// test doesn't pull in pool.ts's real `../shared/config` import chain, which throws
+// in a test environment with no DISCORD_TOKEN etc. set. The logic mirrors pool.ts's
+// real implementation exactly, driven by the same mocked `getPool()`.
+vi.mock('./pool', () => {
+  const getPool = vi.fn();
+  return {
+    getPool,
+    withTransaction: async (work: (conn: unknown) => Promise<unknown>) => {
+      const conn = await getPool().getConnection();
+      try {
+        await conn.beginTransaction();
+        const result = await work(conn);
+        await conn.commit();
+        return result;
+      } catch (err) {
+        await conn.rollback().catch(() => {});
+        throw err;
+      } finally {
+        conn.release();
+      }
+    },
+  };
+});
 vi.mock('mysql2/promise', () => ({ default: {} }));
 vi.mock('./commandLocks', () => ({
   runSerializedCommandWrite: vi.fn(async (_cmds: unknown, _opts: unknown, fn: (conn: unknown) => Promise<unknown>) => fn(mockConnection)),
@@ -10,6 +33,10 @@ vi.mock('./commandStringUtils', () => ({
     const t = v.trim();
     if (!t) throw new Error(`${_name} is required`);
     return t;
+  }),
+  normalizeCommand: vi.fn((command: string) => {
+    const normalized = command.trim().toLowerCase();
+    return normalized.length > 0 ? normalized : null;
   }),
   CommandConflictError: class CommandConflictError extends Error {
     constructor(cmds: string[]) { super(String(cmds)); }

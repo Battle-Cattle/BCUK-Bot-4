@@ -4,7 +4,7 @@ import { updateSfxFile, deleteSfxFile } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
 import { logAndRedirectError, parsePositiveIntId } from './shared';
-import { removeSfxFiles, parseWeight } from './sfxMutationsShared';
+import { removeSfxFiles } from './sfxMutationsShared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -21,7 +21,7 @@ router.post('/sfx/file/update', requireMod, csrfProtection, async (req, res) => 
   const fileId = parsePositiveIntId(req.body.file_id);
   if (fileId === null) return res.redirect('/sfx?error=invalid_id');
 
-  const weight = parseWeight(req.body.weight);
+  const weight = parsePositiveIntId(req.body.weight);
   if (weight === null) return res.redirect('/sfx?error=invalid_weight');
   const hidden = req.body.file_hidden === 'on';
 

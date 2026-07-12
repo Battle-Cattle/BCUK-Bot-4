@@ -1,10 +1,29 @@
 import { describe, it, expect, vi } from 'vitest';
+import multer from 'multer';
 import type { Response } from 'express';
 import type { SessionUser } from '../../types/express';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
-vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
+
+vi.mock('../../db', () => {
+  class ReservedCommandError extends Error {}
+  class CommandConflictError extends Error {}
+  return {
+    getStreamerByDiscordId: vi.fn(),
+    ReservedCommandError,
+    CommandConflictError,
+    isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
+  };
+});
 
 import { AccessLevel } from '../../db/users';
+import {
+  getStreamerByDiscordId,
+  ReservedCommandError,
+  CommandConflictError,
+  isMysqlDuplicateEntryError,
+} from '../../db';
 import {
   parsePositiveIntId,
   trimField,
@@ -15,6 +34,11 @@ import {
   renderView,
   filterQueryParam,
   logAndRedirectError,
+  requireStreamer,
+  parseWeight,
+  parseRewardIdParam,
+  handleReservedOrConflictCommandError,
+  createMulterErrorRedirectHandler,
 } from './shared';
 
 describe('parsePositiveIntId', () => {
@@ -361,5 +385,191 @@ describe('logAndRedirectError', () => {
     logAndRedirectError({ res, log, logLabel: 'Remove error:', err: 'not an error object', basePath: '/counters', errorCode: 'remove_failed' });
     expect(error).toHaveBeenCalledWith('Remove error:', 'not an error object');
     expect(redirect).toHaveBeenCalledWith('/counters?error=remove_failed');
+  });
+});
+
+describe('requireStreamer', () => {
+  function makeReqRes(discordId = '123') {
+    const req = { session: { user: { discordId } } } as any;
+    const res = { redirect: vi.fn() } as any;
+    return { req, res };
+  }
+
+  it('returns the streamer when found', async () => {
+    const streamer = { id: 1 };
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(streamer as any);
+    const { req, res } = makeReqRes();
+    const result = await requireStreamer(req, res, '/channel-points?error=not_a_streamer');
+    expect(result).toBe(streamer);
+    expect(res.redirect).not.toHaveBeenCalled();
+  });
+
+  it('redirects to the caller-supplied path and returns null when not found', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+    const { req, res } = makeReqRes();
+    const result = await requireStreamer(req, res, '/overlay/settings?error=not_a_streamer');
+    expect(result).toBeNull();
+    expect(res.redirect).toHaveBeenCalledWith('/overlay/settings?error=not_a_streamer');
+  });
+
+  it("calls getStreamerByDiscordId with the session user's discordId", async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+    const { req, res } = makeReqRes('200000000000000002');
+    await requireStreamer(req, res, '/channel-points?error=not_a_streamer');
+    expect(getStreamerByDiscordId).toHaveBeenCalledWith('200000000000000002');
+  });
+});
+
+describe('parseWeight', () => {
+  it('returns null for undefined', () => {
+    expect(parseWeight(undefined)).toBeNull();
+  });
+
+  it('returns null for a non-numeric string', () => {
+    expect(parseWeight('abc')).toBeNull();
+  });
+
+  it('returns null for zero', () => {
+    expect(parseWeight('0')).toBeNull();
+  });
+
+  it('returns null for a negative number', () => {
+    expect(parseWeight('-5')).toBeNull();
+  });
+
+  it('returns the parsed integer for a valid positive number', () => {
+    expect(parseWeight('10')).toBe(10);
+  });
+
+  it('floors a float string', () => {
+    expect(parseWeight('3.9')).toBe(3);
+  });
+
+  it('floors a float close to the next integer', () => {
+    expect(parseWeight('2.99')).toBe(2);
+  });
+
+  it('returns null for an array (repeated field)', () => {
+    expect(parseWeight(['7', '99'])).toBeNull();
+  });
+
+  it('returns null for an array with a non-numeric first element', () => {
+    expect(parseWeight(['abc'])).toBeNull();
+  });
+
+  it('returns null for an empty array', () => {
+    expect(parseWeight([])).toBeNull();
+  });
+
+  it('returns null for Infinity (not finite)', () => {
+    expect(parseWeight('Infinity')).toBeNull();
+  });
+
+  it('returns null for a single-element array (repeated field)', () => {
+    expect(parseWeight(['7'])).toBeNull();
+  });
+});
+
+describe('parseRewardIdParam', () => {
+  const VALID_REWARD_ID = '12345678-1234-1234-8234-123456789abc';
+
+  it('accepts a valid UUID', () => {
+    expect(parseRewardIdParam(VALID_REWARD_ID)).toBe(VALID_REWARD_ID);
+  });
+
+  it('rejects an array (repeated param)', () => {
+    expect(parseRewardIdParam([VALID_REWARD_ID, VALID_REWARD_ID])).toBeNull();
+  });
+
+  it('rejects a malformed string', () => {
+    expect(parseRewardIdParam('not-a-uuid')).toBeNull();
+  });
+});
+
+describe('handleReservedOrConflictCommandError', () => {
+  function mockRes() {
+    const redirect = vi.fn();
+    return { res: { redirect } as unknown as Response, redirect };
+  }
+
+  const OPTIONS = { basePath: '/commands', conflictErrorCode: 'command_taken' };
+
+  it('redirects to basePath?error=reserved_command for a ReservedCommandError and returns true', () => {
+    const { res, redirect } = mockRes();
+    const handled = handleReservedOrConflictCommandError(new ReservedCommandError('reserved'), res, OPTIONS);
+    expect(handled).toBe(true);
+    expect(redirect).toHaveBeenCalledWith('/commands?error=reserved_command');
+  });
+
+  it('redirects to basePath?error=<conflictErrorCode> for a CommandConflictError and returns true', () => {
+    const { res, redirect } = mockRes();
+    const handled = handleReservedOrConflictCommandError(new CommandConflictError(['conflict']), res, OPTIONS);
+    expect(handled).toBe(true);
+    expect(redirect).toHaveBeenCalledWith('/commands?error=command_taken');
+  });
+
+  it('redirects to basePath?error=<conflictErrorCode> for a raw MySQL duplicate-entry error and returns true', () => {
+    vi.mocked(isMysqlDuplicateEntryError).mockReturnValueOnce(true);
+    const { res, redirect } = mockRes();
+    const handled = handleReservedOrConflictCommandError(new Error('ER_DUP_ENTRY'), res, OPTIONS);
+    expect(handled).toBe(true);
+    expect(redirect).toHaveBeenCalledWith('/commands?error=command_taken');
+  });
+
+  it('returns false and does not redirect for an unrelated error', () => {
+    const { res, redirect } = mockRes();
+    const handled = handleReservedOrConflictCommandError(new Error('boom'), res, OPTIONS);
+    expect(handled).toBe(false);
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('uses the caller-supplied basePath and conflictErrorCode', () => {
+    const { res, redirect } = mockRes();
+    handleReservedOrConflictCommandError(
+      new CommandConflictError(['conflict']),
+      res,
+      { basePath: '/counters', conflictErrorCode: 'duplicate_command' },
+    );
+    expect(redirect).toHaveBeenCalledWith('/counters?error=duplicate_command');
+  });
+});
+
+describe('createMulterErrorRedirectHandler', () => {
+  function mockRes() {
+    const redirect = vi.fn();
+    return { res: { redirect } as unknown as Response, redirect };
+  }
+
+  function mockLog() {
+    const error = vi.fn();
+    return { log: { error } as unknown as import('winston').Logger, error };
+  }
+
+  it('returns false and does not redirect when there is no error', () => {
+    const { log } = mockLog();
+    const { res, redirect } = mockRes();
+    const handler = createMulterErrorRedirectHandler('/sfx', log, 'SFX upload middleware error:');
+    expect(handler(null, res)).toBe(false);
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('redirects oversized files to file_too_large without logging', () => {
+    const { log, error } = mockLog();
+    const { res, redirect } = mockRes();
+    const handler = createMulterErrorRedirectHandler('/sfx', log, 'SFX upload middleware error:');
+    const err = new multer.MulterError('LIMIT_FILE_SIZE', 'sound');
+    expect(handler(err, res)).toBe(true);
+    expect(redirect).toHaveBeenCalledWith('/sfx?error=file_too_large');
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('logs and redirects other errors to upload_failed, using the caller-supplied basePath and log label', () => {
+    const { log, error } = mockLog();
+    const { res, redirect } = mockRes();
+    const handler = createMulterErrorRedirectHandler('/overlay/settings', log, 'Overlay upload middleware error:');
+    const err = new Error('boom');
+    expect(handler(err, res)).toBe(true);
+    expect(error).toHaveBeenCalledWith('Overlay upload middleware error:', err);
+    expect(redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_failed');
   });
 });

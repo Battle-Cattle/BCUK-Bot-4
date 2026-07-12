@@ -15,6 +15,7 @@ import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from '../shared
 
 const log = createLogger('AudioPlayer');
 import { isPermanentVoiceMisconfigurationError } from '../discord/discordUtils';
+import { getOrCreate } from '../shared/mapUtils';
 import { createVoiceAdapterFactory, type VoiceAdapterFactory } from './voiceAdapter';
 import {
   type ConnectionHandlerDeps,
@@ -54,25 +55,20 @@ const states = new Map<string, GuildVoiceState>();
 
 /** Returns the voice state for a guild, creating an empty record on first use. */
 function getState(guildId: string): GuildVoiceState {
-  let state = states.get(guildId);
-  if (!state) {
-    state = {
-      guildId,
-      connection: null,
-      currentChannelId: null,
-      targetChannelId: undefined,
-      client: null,
-      reconnectTimer: null,
-      reconnectAttempts: 0,
-      shouldAutoReconnect: false,
-      currentAttemptId: 0,
-      adapterFactory: createVoiceAdapterFactory(),
-      player: null,
-      playing: false,
-    };
-    states.set(guildId, state);
-  }
-  return state;
+  return getOrCreate(states, guildId, () => ({
+    guildId,
+    connection: null,
+    currentChannelId: null,
+    targetChannelId: undefined,
+    client: null,
+    reconnectTimer: null,
+    reconnectAttempts: 0,
+    shouldAutoReconnect: false,
+    currentAttemptId: 0,
+    adapterFactory: createVoiceAdapterFactory(),
+    player: null,
+    playing: false,
+  }));
 }
 
 /** True if any guild currently holds a live voice connection. */
