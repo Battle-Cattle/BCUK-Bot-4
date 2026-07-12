@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { findTrigger, findSoundFiles, getAllSfxTriggers, getApprovedGuildIdsForKey } from '../../db';
+import { findCachedSfxTrigger, getAllSfxTriggers, getApprovedGuildIdsForKey } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
@@ -49,27 +49,19 @@ router.post('/sfx', requireApiKey, async (req, res) => {
 
   const normalizedCommand = command.trim().toLowerCase();
 
-  let trigger;
+  let lookup;
   try {
-    trigger = await findTrigger(normalizedCommand);
+    lookup = await findCachedSfxTrigger(normalizedCommand);
   } catch (err) {
     log.error('DB error looking up trigger:', err);
     res.status(500).json({ ok: false, error: 'Database error' });
     return;
   }
-  if (!trigger) {
+  if (!lookup) {
     res.status(404).json({ ok: false, error: 'Unknown command' });
     return;
   }
-
-  let files;
-  try {
-    files = await findSoundFiles(trigger.id);
-  } catch (err) {
-    log.error('DB error fetching sound files:', err);
-    res.status(500).json({ ok: false, error: 'Database error' });
-    return;
-  }
+  const { files } = lookup;
   if (files.length === 0) {
     res.status(404).json({ ok: false, error: 'No sound files for this command' });
     return;
