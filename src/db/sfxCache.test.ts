@@ -13,9 +13,17 @@ vi.mock('../shared/logger', () => ({
   createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }),
 }));
 
-import { findCachedSfxTrigger } from './sfxCache';
+import { findCachedSfxTrigger, invalidateSfxLookupCache } from './sfxCache';
+import { createManagedLookupCache } from './lookupCache';
 import { getAllSfxTriggers } from './sfx';
 import type { SfxTriggerRow } from './sfx';
+
+// sfxCache.ts calls createManagedLookupCache exactly once at module load, before any
+// `vi.clearAllMocks()` in beforeEach can wipe its call history — so the mocked cache
+// manager instance (and its `invalidate` spy) must be captured here, once, up front.
+const mockedCacheManager = vi.mocked(createManagedLookupCache).mock.results[0]?.value as
+  | { invalidate: ReturnType<typeof vi.fn> }
+  | undefined;
 
 function makeTriggerRow(triggerId: string, triggerCommand: string, files: SfxTriggerRow['files'] = []): SfxTriggerRow {
   return {
@@ -144,5 +152,12 @@ describe('findCachedSfxTrigger', () => {
     const result = await findCachedSfxTrigger('!anything');
 
     expect(result).toBeNull();
+  });
+});
+
+describe('invalidateSfxLookupCache', () => {
+  it('delegates to the underlying cache manager\'s invalidate', () => {
+    invalidateSfxLookupCache();
+    expect(mockedCacheManager?.invalidate).toHaveBeenCalledOnce();
   });
 });

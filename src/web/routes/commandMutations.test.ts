@@ -148,6 +148,16 @@ describe('POST /commands/add', () => {
     expect(res.headers.location).toBe('/commands?error=assign_failed');
     expect(removeCustomCommand).toHaveBeenCalledWith(1); // cleanup
   });
+
+  it('still redirects to ?error=assign_failed when the cleanup delete itself also fails', async () => {
+    vi.mocked(findUsersByIds).mockRejectedValueOnce(new Error('DB down'));
+    vi.mocked(removeCustomCommand).mockRejectedValueOnce(new Error('cleanup also failed'));
+    const res = await supertest(buildApp())
+      .post('/commands/add')
+      .send(`trigger_string=!clap&output=Clap&discord_ids=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/commands?error=assign_failed');
+    expect(removeCustomCommand).toHaveBeenCalledWith(1);
+  });
 });
 
 // ─── POST /commands/update ────────────────────────────────────────────────────
