@@ -15,6 +15,7 @@ vi.mock('../middleware', () => ({
 vi.mock('../csrf', () => ({
   csrfProtection: (_req: any, _res: any, next: any) => next(),
 }));
+/** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import { getGuildMemberUsers, updateDiscordName } from '../../db';

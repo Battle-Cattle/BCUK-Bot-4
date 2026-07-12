@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
+/** Mocks `../../db` so `exchangeCodeForToken` is stubbed instead of hitting a real Twitch/DB call. */
 vi.mock('../../db', () => ({
   exchangeCodeForToken: vi.fn(),
 }));
+/** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 // authLimiter is a process-wide singleton shared with /auth's routes (see
 // rateLimits.ts); stub it out here so the functional tests below aren't subject to

@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from './test-utils/loggerMock';
 import { ACCESS_LEVEL_MOCK } from './test-utils/accessLevelMock';
 
+/** Mocks the shared logger so `db.ts`'s log calls don't produce real output during tests. */
 vi.mock('./shared/logger', () => ({ createLogger: mockLogger }));
+/** Mocks the DB connection pool so no real MySQL connection is attempted during tests. */
 vi.mock('./db/pool', () => ({ getPool: vi.fn(), closePool: vi.fn() }));
 
 vi.mock('./db/users', () => ({
