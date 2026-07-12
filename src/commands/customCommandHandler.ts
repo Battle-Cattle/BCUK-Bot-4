@@ -10,17 +10,14 @@ import { isDiscordNotFoundError } from '../discord/discordUtils';
 import { getMultiTwitchDataForChannel } from '../twitch/monitor/twitchMonitor';
 import { fillTemplate } from '../shared/textTemplate';
 import { sendDedupedBySession } from './twitchBroadcast';
-import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
+import { createRuntimeRegistry, type TwitchBroadcastRuntime } from './twitchRuntime';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
 // Avoids a circular import: twitchBot.ts → customCommandHandler.ts → twitchBot.ts.
 // index.ts wires the concrete implementations once both modules are loaded.
 
-interface TwitchChatRuntime extends TwitchSendRuntime {
-  getActiveChannels: () => ReadonlySet<string>;
-  getLoginUserIds: () => ReadonlyMap<string, string>;
-}
+type TwitchChatRuntime = TwitchBroadcastRuntime;
 
 const twitchChatRuntime = createRuntimeRegistry<TwitchChatRuntime>();
 

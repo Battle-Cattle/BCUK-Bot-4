@@ -29,6 +29,14 @@ function formatShoutoutMessage(login: string, gameName: string | null, isLive: b
   return `Go give @${login} a follow at ${url}!`;
 }
 
+/**
+ * Looks up `target` on Twitch and resolves the login, most recent/current game
+ * name, and live status needed to build a shoutout message. Channel info and
+ * stream lookups run independently so a failure in one doesn't block the other.
+ *
+ * @param target - Twitch login to look up.
+ * @returns The resolved shoutout data, or null if `target` isn't a valid Twitch user.
+ */
 async function resolveShoutoutData(
   target: string,
 ): Promise<{ login: string; gameName: string | null; isLive: boolean } | null> {
@@ -53,6 +61,13 @@ async function resolveShoutoutData(
   };
 }
 
+/**
+ * Sends a shoutout `message` to `channel` via the registered Twitch runtime.
+ *
+ * @param channel - Twitch channel to send the shoutout to.
+ * @param message - Shoutout text to send.
+ * @returns True if the message was sent; false if no runtime is registered or the send failed.
+ */
 async function dispatchShoutout(channel: string, message: string): Promise<boolean> {
   const runtime = shoutoutRuntime.get();
   if (!runtime) return false;

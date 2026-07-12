@@ -4,6 +4,14 @@ import { getDiscordClient } from './discordBot';
 
 const log = createLogger('Discord');
 
+/**
+ * Checks whether `err` represents a Discord "not found" condition (unknown
+ * message/channel or an HTTP 404) that callers should treat as a benign no-op
+ * rather than a failure to log/retry.
+ *
+ * @param err - Caught error to inspect.
+ * @returns True if `err` is a Discord not-found error.
+ */
 export function isDiscordNotFoundError(err: unknown): boolean {
   return err instanceof DiscordAPIError && (
     err.code === RESTJSONErrorCodes.UnknownMessage ||
@@ -33,6 +41,15 @@ export function isPermanentVoiceMisconfigurationError(err: unknown): boolean {
   return isConfigError || isForbidden || isDiscordNotFoundError(err);
 }
 
+/**
+ * Fetches `messageId` from `channelId` and deletes it, if a Discord client is
+ * available and the channel is text-based. Not-found errors (message/channel
+ * already gone) are swallowed; any other error is logged and rethrown.
+ *
+ * @param channelId - ID of the channel containing the message.
+ * @param messageId - ID of the message to delete.
+ * @returns Resolves once the delete (or a no-op) has completed.
+ */
 export async function tryDeleteDiscordMessage(channelId: string, messageId: string): Promise<void> {
   const discordClient = getDiscordClient();
   if (!discordClient) return;

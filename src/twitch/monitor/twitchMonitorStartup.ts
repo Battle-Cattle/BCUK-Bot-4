@@ -46,6 +46,17 @@ export async function tryEditStartupMessage(
   }
 }
 
+/**
+ * Handles a streamer found to already be live at bot startup: if a previous
+ * announcement message is recorded, tries to edit it in place via
+ * {@link tryEditStartupMessage}; otherwise (or if the edit isn't possible)
+ * falls back to posting a fresh announcement via {@link postAnnouncement}.
+ * @param liveStates - Map of live streamer states, keyed by streamer DB row id.
+ * @param streamer - Full streamer record (including its stream group) from the database.
+ * @param liveStream - The current live Twitch stream data.
+ * @param groupsWithChanges - Accumulator of stream group IDs whose MultiTwitch state needs refreshing.
+ * @returns Resolves once the streamer's announcement has been reconciled.
+ */
 export async function handleLiveStreamerOnStartup(
   liveStates: Map<string, LiveState>,
   streamer: DbStreamerFull,
@@ -70,6 +81,16 @@ export async function handleLiveStreamerOnStartup(
   await postAnnouncement(liveStates, streamer, liveStream);
 }
 
+/**
+ * Handles a streamer found to be offline at bot startup despite having a
+ * recorded live announcement: deletes the stale Discord message (best-effort)
+ * and clears the streamer's live state in the DB. `liveStates` is empty at
+ * startup, so {@link deleteAnnouncement}'s in-memory-map path can't be reused —
+ * the cleanup is done directly here instead.
+ * @param streamer - Full streamer record (including its stream group) from the database.
+ * @param groupsWithChanges - Accumulator of stream group IDs whose MultiTwitch state needs refreshing.
+ * @returns Resolves once the stale announcement is cleaned up (or skipped on delete failure).
+ */
 export async function handleOfflineStreamerOnStartup(
   streamer: DbStreamerFull,
   groupsWithChanges: Set<number>,
@@ -88,6 +109,17 @@ export async function handleOfflineStreamerOnStartup(
   groupsWithChanges.add(streamer.group.id);
 }
 
+/**
+ * Runs the one-time live-status reconciliation performed when the bot starts:
+ * fetches current live streams for all tracked streamers, reconciles each
+ * streamer's announcement state via {@link handleLiveStreamerOnStartup} or
+ * {@link handleOfflineStreamerOnStartup}, then refreshes MultiTwitch fields for
+ * every stream group that changed.
+ * @param liveStates - Map of live streamer states, keyed by streamer DB row id (mutated in place).
+ * @param loginToUserId - Map of lowercased Twitch login to Twitch user ID for all tracked streamers.
+ * @param streamersData - Full streamer records (including stream group) from the database.
+ * @returns Resolves once startup reconciliation and MultiTwitch refresh are complete.
+ */
 export async function performStartupLiveCheck(
   liveStates: Map<string, LiveState>,
   loginToUserId: Map<string, string>,

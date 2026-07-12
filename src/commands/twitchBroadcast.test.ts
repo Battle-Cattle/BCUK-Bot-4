@@ -83,6 +83,21 @@ describe('sendDedupedBySession', () => {
     expect(result).toBe(false);
   });
 
+  it('treats a rejected session lookup as no session, sending anyway, instead of aborting all sends', async () => {
+    const loginUserIds = new Map([['#a', 'u1'], ['#b', 'u2']]);
+    resolveSessionId.mockImplementation(async (uid: string) => {
+      if (uid === 'u1') throw new Error('Helix lookup failed');
+      return `session-${uid}`;
+    });
+
+    const result = await sendDedupedBySession(['#a', '#b'], loginUserIds, 'hi', send, resolveSessionId);
+
+    expect(send).toHaveBeenCalledWith('#a', 'hi');
+    expect(send).toHaveBeenCalledWith('#b', 'hi');
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(result).toBe(true);
+  });
+
   it('does not mark a session as replied when the first channel in it fails to send', async () => {
     const loginUserIds = new Map([['#a', 'u1'], ['#b', 'u1']]);
     resolveSessionId.mockResolvedValue('shared-session');

@@ -10,10 +10,10 @@
  * @returns The existing value for `key`, or the newly-created and inserted default.
  */
 export function getOrCreate<K, V>(map: Map<K, V>, key: K, makeDefault: () => V): V {
-  let value = map.get(key);
-  if (!value) {
-    value = makeDefault();
+  if (!map.has(key)) {
+    const value = makeDefault();
     map.set(key, value);
+    return value;
   }
-  return value;
+  return map.get(key) as V;
 }

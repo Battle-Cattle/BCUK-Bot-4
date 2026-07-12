@@ -8,9 +8,9 @@ const log = createLogger('TwitchBroadcast');
  * received the message, later channels resolving to that same session are
  * skipped. Session IDs are resolved once per unique user ID (via `loginUserIds`
  * and `resolveSessionId`) in parallel before sending, to avoid a serial Helix
- * lookup per channel. A channel with no entry in `loginUserIds` is treated as
- * having no session and is always sent to. Per-channel send failures are
- * logged and do not abort the remaining sends.
+ * lookup per channel. A channel with no entry in `loginUserIds`, or whose
+ * session lookup rejects, is treated as having no session and is always sent
+ * to. Per-channel send failures are logged and do not abort the remaining sends.
  *
  * @param targets - Ordered list of channel logins to send to.
  * @param loginUserIds - Map from channel login to Twitch user ID, used to resolve shared-chat sessions.
@@ -28,7 +28,9 @@ export async function sendDedupedBySession(
 ): Promise<boolean> {
   // Pre-resolve all session IDs in parallel to avoid serial Helix calls per channel
   const userIds = [...new Set(targets.map((ch) => loginUserIds.get(ch)).filter((id): id is string => id !== undefined))];
-  const resolvedIds = await Promise.all(userIds.map((uid) => resolveSessionId(uid)));
+  const resolvedIds = await Promise.all(
+    userIds.map((uid) => resolveSessionId(uid).catch(() => null)),
+  );
   const sessionIdByUserId = new Map(userIds.map((uid, i) => [uid, resolvedIds[i]]));
 
   const repliedSessionIds = new Set<string>();

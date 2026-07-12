@@ -15,6 +15,10 @@ import { fillTemplate } from '../../shared/textTemplate';
  * Posts a new "now live" announcement message for a streamer and records the
  * resulting message location in both the in-memory live-state map and the DB.
  * No-ops (storing a state with null message fields) if the Discord client isn't ready.
+ * @param liveStates - Map of live streamer states, keyed by streamer DB row id.
+ * @param streamerData - Full streamer record (including its stream group) from the database.
+ * @param stream - The live Twitch stream data.
+ * @returns Resolves once the announcement is posted (or skipped) and state is updated.
  */
 export async function postAnnouncement(
   liveStates: Map<string, LiveState>,
@@ -61,6 +65,11 @@ export async function postAnnouncement(
  * notifications during stream start-up can't repeatedly delete and repost the
  * announcement. If the previously-announced message is gone, falls back to
  * posting a fresh one instead of silently failing on every subsequent call.
+ * @param liveStates - Map of live streamer states, keyed by streamer DB row id.
+ * @param state - Current live state for the streamer being updated.
+ * @param stream - The updated Twitch stream data.
+ * @param templateKey - Which group template to render: 'live_message' or 'new_game_message'.
+ * @returns Resolves once the announcement is edited or reposted and state is updated.
  */
 export async function editAnnouncement(
   liveStates: Map<string, LiveState>,

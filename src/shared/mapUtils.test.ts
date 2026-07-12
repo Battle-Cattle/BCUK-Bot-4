@@ -41,4 +41,21 @@ describe('getOrCreate', () => {
 
     expect(second).toBe(first);
   });
+
+  it.each([0, false, '', null, NaN])(
+    'returns a stored falsy value (%p) without overwriting it',
+    (falsyValue) => {
+      const map = new Map<string, unknown>([['a', falsyValue]]);
+      const makeDefault = vi.fn().mockReturnValue('overwritten');
+
+      const result = getOrCreate(map, 'a', makeDefault);
+
+      if (typeof falsyValue === 'number' && Number.isNaN(falsyValue)) {
+        expect(Number.isNaN(result as number)).toBe(true);
+      } else {
+        expect(result).toBe(falsyValue);
+      }
+      expect(makeDefault).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -6,7 +6,7 @@ import { recordCommandTestEntry } from './commandMonitorStore';
 import { resolveSharedChatSessionId } from './customCommandHandler';
 import { extractCommand } from './commandUtils';
 import { sendDedupedBySession } from './twitchBroadcast';
-import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
+import { createRuntimeRegistry, type TwitchBroadcastRuntime } from './twitchRuntime';
 
 const MULTI_COMMAND = '!multi';
 
@@ -15,10 +15,7 @@ const MULTI_COMMAND = '!multi';
 // Same injection pattern as customCommandHandler.ts to avoid a circular import
 // between twitchBot.ts and multiCommandHandler.ts.
 
-interface MultiTwitchRuntime extends TwitchSendRuntime {
-  getActiveChannels: () => ReadonlySet<string>;
-  getLoginUserIds: () => ReadonlyMap<string, string>;
-}
+type MultiTwitchRuntime = TwitchBroadcastRuntime;
 
 const multiTwitchRuntime = createRuntimeRegistry<MultiTwitchRuntime>();
 
@@ -34,13 +31,14 @@ export function registerMultiTwitchRuntime(runtime: MultiTwitchRuntime): void {
  * participant channel the bot has currently joined, de-duplicating channels that
  * share a Twitch shared-chat session via {@link sendDedupedBySession} so only one
  * message is sent per session.
+ * @returns True if the message was sent to at least one channel/session.
  */
 async function broadcastToGroupChannels(
   sourceChannel: string,
   participants: string[],
   message: string,
   runtime: MultiTwitchRuntime,
-): Promise<void> {
+): Promise<boolean> {
   const { send, getActiveChannels, getLoginUserIds } = runtime;
   const activeChannels = getActiveChannels();
   const loginUserIds = getLoginUserIds();
@@ -49,11 +47,22 @@ async function broadcastToGroupChannels(
   const targets = [sourceChannel, ...participants.filter((p) => p !== sourceChannel)]
     .filter((ch) => activeChannels.has(ch));
 
-  await sendDedupedBySession(targets, loginUserIds, message, send, resolveSharedChatSessionId);
+  return sendDedupedBySession(targets, loginUserIds, message, send, resolveSharedChatSessionId);
 }
 
 // ─── Execute ──────────────────────────────────────────────────────────────────
 
+/**
+ * Handles a Twitch chat `!multi` command: looks up the multitwitch group for
+ * `channel`, records the outcome for the monitor panel, and — if the channel is
+ * part of an active group — broadcasts the multitwitch URL to the group via
+ * {@link broadcastToGroupChannels}.
+ *
+ * @param channel - Twitch channel the command was sent in.
+ * @param rawMessage - Raw chat message text.
+ * @param username - Twitch login of the sender, for monitor-panel logging.
+ * @returns Resolves once the broadcast (or a no-op) has completed.
+ */
 export async function executeMultiCommandForTwitch(
   channel: string,
   rawMessage: string,
@@ -78,8 +87,12 @@ export async function executeMultiCommandForTwitch(
   if (!runtime) return;
 
   try {
-    await broadcastToGroupChannels(channel, groupInfo.participants, groupInfo.url, runtime);
-    log.info(`[Twitch] Sent !multi in ${channel} — ${groupInfo.url}`);
+    const sent = await broadcastToGroupChannels(channel, groupInfo.participants, groupInfo.url, runtime);
+    if (sent) {
+      log.info(`[Twitch] Sent !multi in ${channel} — ${groupInfo.url}`);
+    } else {
+      log.info(`[Twitch] Broadcast !multi in ${channel} reached no channels.`);
+    }
   } catch (err) {
     log.error(`[Twitch] Failed to broadcast !multi in ${channel}:`, err);
   }
