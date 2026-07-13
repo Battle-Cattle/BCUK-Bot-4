@@ -15,6 +15,7 @@ import {
   normalizeSingleTokenRequiredText,
   parsePositiveIntId,
   parsePositiveBigIntId,
+  parseCheckboxField,
 } from './shared';
 import { removeSfxFiles } from './sfxMutationsShared';
 
@@ -45,7 +46,7 @@ router.post('/sfx/trigger/add', requireMod, csrfProtection, async (req, res) => 
   const categoryId = parseCategoryId(req.body.category_id);
   if (categoryId === undefined) return res.redirect('/sfx?error=invalid_id');
   const description = normalizeRequiredText(req.body.description);
-  const hidden = req.body.hidden === 'on';
+  const hidden = parseCheckboxField(req.body.hidden);
 
   try {
     if (await findTrigger(command)) return res.redirect('/sfx?error=command_taken');
@@ -68,7 +69,7 @@ router.post('/sfx/trigger/update', requireMod, csrfProtection, async (req, res) 
   const categoryId = parseCategoryId(req.body.category_id);
   if (categoryId === undefined) return res.redirect('/sfx?error=invalid_id');
   const description = normalizeRequiredText(req.body.description);
-  const hidden = req.body.hidden === 'on';
+  const hidden = parseCheckboxField(req.body.hidden);
 
   try {
     const existing = await findTrigger(command);

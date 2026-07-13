@@ -212,17 +212,32 @@ app.use('/overlay', requireAuth, overlayAdminRouter);
 app.use('/channel-points', requireAuth, channelPointsAdminRouter);
 
 /**
+ * Renders the `error` view with the given status and message, including a real CSRF
+ * token when a session user is present (needed for the logout form in `partials/nav`).
+ * Shared by the 404, CSRF-failure, and catch-all error handlers below — unlike
+ * `routes/shared.ts`'s `renderError`, which always passes an empty `csrfToken` and is
+ * meant for already-authenticated route handlers rather than this app-wide fallback tier.
+ * @param req - Express request; reads `req.session.user` if present.
+ * @param res - Express response; renders the `error` view with `status`.
+ * @param status - HTTP status code to set.
+ * @param message - Human-readable error message shown to the user.
+ */
+function renderErrorPage(req: express.Request, res: express.Response, status: number, message: string): void {
+  res.status(status);
+  renderView(res, 'error', {
+    message,
+    user: req.session.user ?? null,
+    csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
+  });
+}
+
+/**
  * 404 handler — catches any request that fell through every mounted router.
  * @param req - Express request; reads `req.session.user` if present.
  * @param res - Express response; renders the `error` view with a 404 status.
  */
 app.use((req, res) => {
-  res.status(404);
-  renderView(res, 'error', {
-    message: 'Page not found.',
-    user: req.session.user ?? null,
-    csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
-  });
+  renderErrorPage(req, res, 404, 'Page not found.');
 });
 
 /**
@@ -250,12 +265,7 @@ const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
     return;
   }
 
-  res.status(403);
-  renderView(res, 'error', {
-    message: 'Your form session expired or the request could not be verified. Please reload the page and try again.',
-    user: req.session.user ?? null,
-    csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
-  });
+  renderErrorPage(req, res, 403, 'Your form session expired or the request could not be verified. Please reload the page and try again.');
 };
 
 app.use(csrfErrorHandler);
@@ -269,12 +279,7 @@ app.use(csrfErrorHandler);
  */
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   log.error('Unhandled error:', err);
-  res.status(500);
-  renderView(res, 'error', {
-    message: 'An unexpected error occurred.',
-    user: req.session.user ?? null,
-    csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
-  });
+  renderErrorPage(req, res, 500, 'An unexpected error occurred.');
 });
 
 // Exported so server.test.ts can drive the real route/middleware wiring with supertest

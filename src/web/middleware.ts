@@ -84,43 +84,67 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
 }
 
 /**
- * Ensures the current-guild access level is Manager or above, otherwise renders a 403.
- * @param req - Express request; reads `req.session.user.accessLevel`.
- * @param res - Express response; used to render the 403 error page on denial.
- * @param next - Called when the access level check passes.
- * @returns Nothing; either calls `next()` or renders an error response.
+ * Creates a middleware that ensures the current-guild access level is at least `level`,
+ * otherwise renders a 403. Shared factory behind `requireMod`/`requireManager`/`requireAdmin`.
+ * @param level - Minimum required `AccessLevel` value.
+ * @param label - Requirement described in the 403 message, e.g. `'Manager or above'`.
+ * @returns An Express middleware: calls `next()` when the session user meets `level`,
+ *   otherwise renders a 403 error page.
  */
-export function requireManager(req: Request, res: Response, next: NextFunction): void {
-  if (req.session.user && req.session.user.accessLevel >= AccessLevel.MANAGER) {
-    next();
-  } else {
-    res.status(403);
-    renderView(res, 'error', {
-      message: 'Access denied — Manager or above required.',
-      user: req.session.user ?? null,
-      csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
-    });
-  }
+function requireAccessLevel(level: number, label: string): (req: Request, res: Response, next: NextFunction) => void {
+  return (req, res, next) => {
+    if (req.session.user && req.session.user.accessLevel >= level) {
+      next();
+    } else {
+      res.status(403);
+      renderView(res, 'error', {
+        message: `Access denied — ${label} required.`,
+        user: req.session.user ?? null,
+        csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
+      });
+    }
+  };
 }
 
+/** Ensures the current-guild access level is Mod or above, otherwise renders a 403. */
+export const requireMod = requireAccessLevel(AccessLevel.MOD, 'Mod or above');
+
+/** Ensures the current-guild access level is Manager or above, otherwise renders a 403. */
+export const requireManager = requireAccessLevel(AccessLevel.MANAGER, 'Manager or above');
+
 /**
- * Ensures the current-guild access level is Mod or above, otherwise renders a 403.
- * @param req - Express request; reads `req.session.user.accessLevel`.
- * @param res - Express response; used to render the 403 error page on denial.
- * @param next - Called when the access level check passes.
- * @returns Nothing; either calls `next()` or renders an error response.
+ * Creates a middleware that authenticates a request via a `Bearer` token: hashes it with
+ * SHA-256, resolves the hash to an identity via `lookup`, and stores it on `req` via `assign`
+ * on success. Responds 401 when the header is missing/empty or `lookup` finds no match, and
+ * 500 on any other lookup failure. Shared factory behind `requireApiKey`/`requireCompanionKey`.
+ * @param lookup - Resolves a SHA-256 hex hash to the authenticated identity, or null if no match.
+ * @param assign - Stores the resolved identity on `req` for downstream handlers.
+ * @returns An Express middleware.
  */
-export function requireMod(req: Request, res: Response, next: NextFunction): void {
-  if (req.session.user && req.session.user.accessLevel >= AccessLevel.MOD) {
-    next();
-  } else {
-    res.status(403);
-    renderView(res, 'error', {
-      message: 'Access denied — Mod or above required.',
-      user: req.session.user ?? null,
-      csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
-    });
-  }
+function authenticateBearerToken<T>(
+  lookup: (hash: string) => Promise<T | null>,
+  assign: (req: Request, value: T) => void,
+): (req: Request, res: Response, next: NextFunction) => Promise<void> {
+  return async (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!token) {
+      res.status(401).json({ ok: false, error: 'Unauthorized' });
+      return;
+    }
+    const hash = createHash('sha256').update(token).digest('hex');
+    try {
+      const value = await lookup(hash);
+      if (value === null) {
+        res.status(401).json({ ok: false, error: 'Unauthorized' });
+        return;
+      }
+      assign(req, value);
+      next();
+    } catch {
+      res.status(500).json({ ok: false, error: 'Internal server error' });
+    }
+  };
 }
 
 /**
@@ -128,78 +152,21 @@ export function requireMod(req: Request, res: Response, next: NextFunction): voi
  * up by identity only. On success, attaches the key owner's Discord ID to the request —
  * the same key may be approved for more than one guild (or none yet), so each route must
  * resolve its own target guild and check {@link isKeyApprovedForGuild} before acting.
- * @param req - Express request; reads the `Authorization` header.
- * @param res - Express response; used to respond 401/500 on failure.
- * @param next - Called once `req.apiKeyOwner` has been set.
- * @returns A promise that resolves once `next()` or an error response has been issued.
  */
-export async function requireApiKey(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!token) {
-    res.status(401).json({ ok: false, error: 'Unauthorized' });
-    return;
-  }
-  const hash = createHash('sha256').update(token).digest('hex');
-  try {
-    const row = await findKeyByHash(hash);
-    if (!row) {
-      res.status(401).json({ ok: false, error: 'Unauthorized' });
-      return;
-    }
-    req.apiKeyOwner = row.discordId;
-    next();
-  } catch {
-    res.status(500).json({ ok: false, error: 'Internal server error' });
-  }
-}
+export const requireApiKey = authenticateBearerToken(
+  async (hash) => (await findKeyByHash(hash))?.discordId ?? null,
+  (req, discordId: string) => { req.apiKeyOwner = discordId; },
+);
 
 /**
  * Authenticates a companion app request via a `Bearer` token, hashing it and looking it
  * up against active (non-revoked) companion tokens. On success, attaches the token
  * owner's Discord ID to the request.
- * @param req - Express request; reads the `Authorization` header.
- * @param res - Express response; used to respond 401/500 on failure.
- * @param next - Called once `req.companionDiscordId` has been set.
- * @returns A promise that resolves once `next()` or an error response has been issued.
  */
-export async function requireCompanionKey(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!token) {
-    res.status(401).json({ ok: false, error: 'Unauthorized' });
-    return;
-  }
-  const hash = createHash('sha256').update(token).digest('hex');
-  try {
-    const discordId = await findDiscordIdByTokenHash(hash);
-    if (!discordId) {
-      res.status(401).json({ ok: false, error: 'Unauthorized' });
-      return;
-    }
-    req.companionDiscordId = discordId;
-    next();
-  } catch {
-    res.status(500).json({ ok: false, error: 'Internal server error' });
-  }
-}
+export const requireCompanionKey = authenticateBearerToken(
+  findDiscordIdByTokenHash,
+  (req, discordId: string) => { req.companionDiscordId = discordId; },
+);
 
-/**
- * Ensures the current-guild access level is Admin, otherwise renders a 403.
- * @param req - Express request; reads `req.session.user.accessLevel`.
- * @param res - Express response; used to render the 403 error page on denial.
- * @param next - Called when the access level check passes.
- * @returns Nothing; either calls `next()` or renders an error response.
- */
-export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  if (req.session.user && req.session.user.accessLevel >= AccessLevel.ADMIN) {
-    next();
-  } else {
-    res.status(403);
-    renderView(res, 'error', {
-      message: 'Access denied — Admin required.',
-      user: req.session.user ?? null,
-      csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
-    });
-  }
-}
+/** Ensures the current-guild access level is Admin, otherwise renders a 403. */
+export const requireAdmin = requireAccessLevel(AccessLevel.ADMIN, 'Admin');

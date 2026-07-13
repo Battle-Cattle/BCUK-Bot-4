@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { updateSfxFile, deleteSfxFile } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
-import { logAndRedirectError, parsePositiveIntId } from './shared';
+import { logAndRedirectError, parsePositiveIntId, parseCheckboxField } from './shared';
 import { removeSfxFiles } from './sfxMutationsShared';
 
 const log = createLogger('Web');
@@ -23,7 +23,7 @@ router.post('/sfx/file/update', requireMod, csrfProtection, async (req, res) => 
 
   const weight = parsePositiveIntId(req.body.weight);
   if (weight === null) return res.redirect('/sfx?error=invalid_weight');
-  const hidden = req.body.file_hidden === 'on';
+  const hidden = parseCheckboxField(req.body.file_hidden);
 
   try {
     const updated = await updateSfxFile(fileId, weight, hidden);

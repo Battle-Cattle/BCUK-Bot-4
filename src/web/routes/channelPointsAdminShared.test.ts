@@ -5,7 +5,7 @@ vi.mock('../../db', () => ({ getStreamerByDiscordId: vi.fn(), DEFAULT_PRICING_CO
 import { getStreamerByDiscordId } from '../../db';
 import {
   parseNonNegativeNumberField, parsePositiveNumberField,
-  parseCheckboxField, parseHexColorField, parseRoundToNearestField, parseRewardFields,
+  parseHexColorField, parseRoundToNearestField, parseRewardFields,
   effectiveCooldownSeconds, handleRewardDeleteAction,
 } from './channelPointsAdminShared';
 
@@ -16,8 +16,9 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// requireStreamer and parseRewardIdParam now live in (and are tested by) shared.test.ts —
-// this file only covers channelPointsAdminShared's own helpers plus their usage below.
+// requireStreamer, parseRewardIdParam, and parseCheckboxField now live in (and are tested
+// by) shared.test.ts — this file only covers channelPointsAdminShared's own helpers plus
+// their usage below.
 
 describe('handleRewardDeleteAction', () => {
   const streamer = { id: 1 };
@@ -122,24 +123,6 @@ describe('parsePositiveNumberField', () => {
 
   it('rejects a whitespace-only string instead of silently coercing to 0', () => {
     expect(parsePositiveNumberField('   ')).toBeNull();
-  });
-});
-
-describe('parseCheckboxField', () => {
-  it('returns true when the value is "on"', () => {
-    expect(parseCheckboxField('on')).toBe(true);
-  });
-
-  it('returns false when undefined (checkbox unchecked)', () => {
-    expect(parseCheckboxField(undefined)).toBe(false);
-  });
-
-  it('returns false for an array (repeated field)', () => {
-    expect(parseCheckboxField(['on', 'on'])).toBe(false);
-  });
-
-  it('returns false for any other string value', () => {
-    expect(parseCheckboxField('off')).toBe(false);
   });
 });
 

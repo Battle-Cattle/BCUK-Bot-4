@@ -4,7 +4,7 @@ import { DEFAULT_PRICING_COOLDOWN_SECONDS } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import type { CustomRewardInput, TwitchCustomReward } from '../../twitch/twitchApi';
 import {
-  trimField, logAndRedirectError, requireStreamer, parsePositiveIntId, parseRewardIdParam,
+  trimField, logAndRedirectError, requireStreamer, parsePositiveIntId, parseRewardIdParam, parseCheckboxField,
 } from './shared';
 
 /** Redirect target used when the requester isn't a streamer, scoped to the channel-points admin page. */
@@ -36,14 +36,6 @@ export async function handleRewardDeleteAction(
   } catch (err) {
     logAndRedirectError({ res, log: opts.log, logLabel: opts.errorLogLabel, err, basePath: '/channel-points', errorCode: opts.errorCode });
   }
-}
-
-/**
- * Parses an HTML checkbox field: present and `'on'` means checked. Absent (checkbox
- * unchecked) or an array (repeated field) is treated as unchecked.
- */
-export function parseCheckboxField(value: string | string[] | undefined): boolean {
-  return !Array.isArray(value) && value === 'on';
 }
 
 /**

@@ -8,10 +8,10 @@ import {
 } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { logAndRedirectError, requireStreamer, parsePositiveIntId, parseRewardIdParam } from './shared';
+import { logAndRedirectError, requireStreamer, parsePositiveIntId, parseRewardIdParam, parseCheckboxField } from './shared';
 import {
   parseNonNegativeNumberField, parsePositiveNumberField,
-  parseCheckboxField, parseRoundToNearestField, effectiveCooldownSeconds, handleRewardDeleteAction,
+  parseRoundToNearestField, effectiveCooldownSeconds, handleRewardDeleteAction,
 } from './channelPointsAdminShared';
 import { applyDecayTick, resetAndDeletePricing } from '../../twitch/pricing/rewardPricingService';
 
