@@ -1,6 +1,12 @@
 import { createLogger } from '../shared/logger';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
-import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
+import {
+  createManagedLookupCache,
+  type RefreshingLookupCache,
+  DEFAULT_CACHE_TTL_MS,
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
+} from './lookupCache';
 import { normalizeCommand } from './commandStringUtils';
 import { getTwitchEnabledChannels } from './users';
 // customCommands imports invalidateCustomCommandLookupCache from this module;
@@ -335,15 +341,11 @@ function buildCustomCommandLookupCache(
 
 // ─── Cache state ──────────────────────────────────────────────────────────────
 
-const CACHE_TTL_MS = 300_000;
-const CACHE_REFRESH_FAILURE_BACKOFF_MS = 5_000;
-const CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS = 60_000;
-
 const customCommandLookupCacheState = createManagedLookupCache<CustomCommandLookupCache>({
   cacheName: 'custom command cache',
-  ttlMs: CACHE_TTL_MS,
-  refreshFailureBackoffMs: CACHE_REFRESH_FAILURE_BACKOFF_MS,
-  refreshFailureMaxBackoffMs: CACHE_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  ttlMs: DEFAULT_CACHE_TTL_MS,
+  refreshFailureBackoffMs: DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  refreshFailureMaxBackoffMs: DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
   createEmptyCache: createEmptyCustomCommandLookupCache,
   loadCache: async () => {
     const [commands, activeTwitchChannels, overrides] = await Promise.all([

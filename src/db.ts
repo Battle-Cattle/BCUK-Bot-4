@@ -28,6 +28,19 @@ import {
 } from './db/guildCommandOverrides';
 
 /**
+ * Runs `operation`, then unconditionally invalidates the custom-command lookup cache.
+ * Shared by the facade wrappers below that always need a post-write invalidation —
+ * `users.ts`/`guildCommandOverrides.ts` are pure DB layers with no cache knowledge.
+ * @param operation - The DB write to perform.
+ * @returns The value returned by `operation`.
+ */
+async function withInvalidation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = await operation();
+  invalidateCustomCommandLookupCache();
+  return result;
+}
+
+/**
  * Inserts or updates a guild's override for a catalog command and invalidates
  * the custom-command lookup cache, since overrides affect Discord command resolution.
  * @param guildId - BIGINT snowflake as a string.
@@ -41,8 +54,7 @@ export async function upsertOverride(
   commandId: number,
   override: { isDisabled: boolean; output: string | null },
 ): Promise<void> {
-  await upsertOverrideRecord(guildId, commandId, override);
-  invalidateCustomCommandLookupCache();
+  await withInvalidation(() => upsertOverrideRecord(guildId, commandId, override));
 }
 
 /**
@@ -53,8 +65,7 @@ export async function upsertOverride(
  * @returns Resolves once the deletion (and cache invalidation) completes.
  */
 export async function removeOverride(guildId: string, commandId: number): Promise<void> {
-  await removeOverrideRecord(guildId, commandId);
-  invalidateCustomCommandLookupCache();
+  await withInvalidation(() => removeOverrideRecord(guildId, commandId));
 }
 
 // ─── User / access-level ────────────────────────────────────────────────────
@@ -99,8 +110,7 @@ export async function upsertUser(
  * @returns Resolves once the update (and cache invalidation) completes.
  */
 export async function updateTwitchBotEnabled(discordId: string, enabled: boolean): Promise<void> {
-  await setTwitchBotEnabledRecord(discordId, enabled);
-  invalidateCustomCommandLookupCache();
+  await withInvalidation(() => setTwitchBotEnabledRecord(discordId, enabled));
 }
 
 /**
@@ -109,8 +119,7 @@ export async function updateTwitchBotEnabled(discordId: string, enabled: boolean
  * @returns Resolves once the deletion (and cache invalidation) completes.
  */
 export async function removeUser(discordId: string): Promise<void> {
-  await removeUserRecord(discordId);
-  invalidateCustomCommandLookupCache();
+  await withInvalidation(() => removeUserRecord(discordId));
 }
 
 // ─── Custom commands ────────────────────────────────────────────────────────

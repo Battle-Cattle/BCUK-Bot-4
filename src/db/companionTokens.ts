@@ -1,6 +1,7 @@
-import { randomBytes, createHash, timingSafeEqual } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
+import { hashesMatch } from './utils';
 
 export interface CompanionTokenStatus {
   hasToken: boolean;
@@ -64,10 +65,7 @@ export async function findDiscordIdByTokenHash(hash: string): Promise<string | n
     `SELECT discord_id, key_hash FROM companion_app_tokens WHERE key_hash = ? AND revoked_at IS NULL`,
     [hash],
   );
-  if (rows.length === 0) return null;
-  const stored = Buffer.from(String(rows[0].key_hash), 'hex');
-  const incoming = Buffer.from(hash, 'hex');
-  if (stored.length !== incoming.length || !timingSafeEqual(stored, incoming)) return null;
+  if (rows.length === 0 || !hashesMatch(String(rows[0].key_hash), hash)) return null;
   return String(rows[0].discord_id);
 }
 

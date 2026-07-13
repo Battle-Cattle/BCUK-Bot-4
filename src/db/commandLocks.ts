@@ -10,6 +10,7 @@ import {
   normalizeCommandInputs,
   buildInClausePlaceholders,
 } from './commandStringUtils';
+import { rowExists } from './utils';
 
 export type { SqlExecutor } from './commandStringUtils';
 export {
@@ -170,11 +171,7 @@ export async function isCustomCommandTriggerTaken(triggerString: string, exclude
 // ─── Serialized write ─────────────────────────────────────────────────────────
 
 export async function commandExists(id: number, executor: SqlExecutor = getPool()): Promise<boolean> {
-  const [rows] = await executor.execute<mysql.RowDataPacket[]>(
-    'SELECT 1 FROM custom_command WHERE command_id = ? LIMIT 1',
-    [id],
-  );
-  return rows.length > 0;
+  return rowExists(executor, 'custom_command', 'command_id', id);
 }
 
 export async function runSerializedCommandWrite<T>(
