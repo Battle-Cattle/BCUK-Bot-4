@@ -384,44 +384,6 @@ describe('assignUserToCommandWithinTransaction', () => {
     await expect(assignUserToCommandWithinTransaction(connection, 1, 'user1')).resolves.toBeUndefined();
   });
 
-  it('runs the trigger-string and eligibility reads concurrently rather than sequentially', async () => {
-    let triggerStarted = false;
-    let eligibilityStarted = false;
-    let triggerResolve!: (v: [unknown[], unknown[]]) => void;
-    let eligibilityResolve!: (v: [unknown[], unknown[]]) => void;
-
-    const execute = vi.fn()
-      .mockImplementationOnce(() => {
-        triggerStarted = true;
-        return new Promise((resolve) => { triggerResolve = resolve; });
-      })
-      .mockImplementationOnce(() => {
-        eligibilityStarted = true;
-        return new Promise((resolve) => { eligibilityResolve = resolve; });
-      })
-      .mockResolvedValueOnce([[], []]); // insertUserCommandAssignment
-    const connection = {
-      execute,
-      beginTransaction: vi.fn().mockResolvedValue(undefined),
-      commit: vi.fn().mockResolvedValue(undefined),
-      rollback: vi.fn().mockResolvedValue(undefined),
-    };
-
-    const runPromise = assignUserToCommandWithinTransaction(connection as any, 1, 'user1');
-
-    // Both reads should have been issued before either resolves — proving they were
-    // pipelined via Promise.all rather than awaited one after the other.
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(triggerStarted).toBe(true);
-    expect(eligibilityStarted).toBe(true);
-
-    triggerResolve([[{ trigger_string: '!clap' }], []]);
-    eligibilityResolve([[{ twitch_name: null, is_twitch_bot_enabled: 0 }], []]);
-
-    await runPromise;
-    expect(connection.commit).toHaveBeenCalledOnce();
-  });
 });
 
 // ─── getUserTwitchEligibilityBatch ─────────────────────────────────────────────

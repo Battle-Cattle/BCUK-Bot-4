@@ -352,12 +352,8 @@ export async function assignUserToCommandWithinTransaction(
     for (let attempt = 0; attempt < MAX_DEADLOCK_RETRIES; attempt++) {
       await connection.beginTransaction();
       try {
-        // These two reads are independent (different tables, no data dependency), so pipeline
-        // them over the same connection instead of paying two sequential round trips.
-        const [normalizedTriggerString, userEligibility] = await Promise.all([
-          getCommandTriggerStringById(connection, commandId),
-          getUserTwitchEligibility(connection, discordId),
-        ]);
+        const normalizedTriggerString = await getCommandTriggerStringById(connection, commandId);
+        const userEligibility = await getUserTwitchEligibility(connection, discordId);
 
         if (!lockNameByTrigger) {
           lockNameByTrigger = getCommandWriteLockName(normalizedTriggerString);
@@ -447,7 +443,10 @@ async function assertUserAssignable(
 }
 
 /**
- * Runs {@link assertUserAssignable} concurrently for every `discordId`.
+ * Runs {@link assertUserAssignable} for every `discordId`, in order. A single MySQL connection
+ * only ever has one command in flight (mysql2 queues, rather than pipelines, queries issued
+ * without awaiting the previous one), so these checks are issued sequentially rather than via
+ * `Promise.all` — that would add complexity without reducing round trips.
  * @param connection Transaction-capable pool connection to query with.
  * @param commandId Command id being assigned.
  * @param discordIds Discord snowflakes of the users being checked.
@@ -463,9 +462,9 @@ async function assertAllUsersAssignable(
   normalizedTriggerString: string,
   eligibilityByDiscordId: Map<string, UserTwitchEligibility>,
 ): Promise<void> {
-  await Promise.all(discordIds.map((discordId) => assertUserAssignable(
-    connection, commandId, discordId, normalizedTriggerString, eligibilityByDiscordId,
-  )));
+  for (const discordId of discordIds) {
+    await assertUserAssignable(connection, commandId, discordId, normalizedTriggerString, eligibilityByDiscordId);
+  }
 }
 
 /**
@@ -494,10 +493,8 @@ export async function assignUsersToCommandWithinTransaction(
     for (let attempt = 0; attempt < MAX_DEADLOCK_RETRIES; attempt++) {
       await connection.beginTransaction();
       try {
-        const [normalizedTriggerString, eligibilityByDiscordId] = await Promise.all([
-          getCommandTriggerStringById(connection, commandId),
-          getUserTwitchEligibilityBatch(connection, discordIds),
-        ]);
+        const normalizedTriggerString = await getCommandTriggerStringById(connection, commandId);
+        const eligibilityByDiscordId = await getUserTwitchEligibilityBatch(connection, discordIds);
 
         if (!lockNameByTrigger) {
           lockNameByTrigger = getCommandWriteLockName(normalizedTriggerString);
