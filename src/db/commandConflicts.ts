@@ -420,6 +420,55 @@ export async function insertUserCommandAssignments(
 }
 
 /**
+ * Throws if `discordId` has no matching eligibility entry, or if it's eligible for a
+ * Twitch-channel conflict check and that check finds one.
+ * @param connection Transaction-capable pool connection to query with.
+ * @param commandId Command id being assigned.
+ * @param discordId Discord snowflake of the user being checked.
+ * @param normalizedTriggerString Normalized trigger string being assigned.
+ * @param eligibilityByDiscordId Batch-fetched eligibility, keyed by `discordId`.
+ * @throws {CommandConflictError} If the user's Twitch channel would create a trigger conflict.
+ * @throws If `discordId` has no matching entry in `eligibilityByDiscordId`.
+ */
+async function assertUserAssignable(
+  connection: mysql.PoolConnection,
+  commandId: number,
+  discordId: string,
+  normalizedTriggerString: string,
+  eligibilityByDiscordId: Map<string, UserTwitchEligibility>,
+): Promise<void> {
+  const eligibility = eligibilityByDiscordId.get(discordId);
+  if (!eligibility) {
+    throw new Error(`User not found: ${discordId}`);
+  }
+  if (eligibility.normalizedTwitchName && eligibility.isTwitchBotEnabled) {
+    await assertNoTwitchChannelTriggerConflict(connection, commandId, normalizedTriggerString, eligibility.normalizedTwitchName);
+  }
+}
+
+/**
+ * Runs {@link assertUserAssignable} concurrently for every `discordId`.
+ * @param connection Transaction-capable pool connection to query with.
+ * @param commandId Command id being assigned.
+ * @param discordIds Discord snowflakes of the users being checked.
+ * @param normalizedTriggerString Normalized trigger string being assigned.
+ * @param eligibilityByDiscordId Batch-fetched eligibility, keyed by `discordId`.
+ * @throws {CommandConflictError} If any user's Twitch channel would create a trigger conflict.
+ * @throws If any `discordId` has no matching entry in `eligibilityByDiscordId`.
+ */
+async function assertAllUsersAssignable(
+  connection: mysql.PoolConnection,
+  commandId: number,
+  discordIds: string[],
+  normalizedTriggerString: string,
+  eligibilityByDiscordId: Map<string, UserTwitchEligibility>,
+): Promise<void> {
+  await Promise.all(discordIds.map((discordId) => assertUserAssignable(
+    connection, commandId, discordId, normalizedTriggerString, eligibilityByDiscordId,
+  )));
+}
+
+/**
  * Assigns multiple Discord users to a custom command for single-Twitch triggering in a single
  * transaction guarded by a named lock on the command's trigger string, mirroring
  * {@link assignUserToCommandWithinTransaction} but batching the eligibility lookup, conflict
@@ -455,22 +504,7 @@ export async function assignUsersToCommandWithinTransaction(
           await acquireNamedLock(connection, lockNameByTrigger);
         }
 
-        await Promise.all(discordIds.map((discordId) => {
-          const eligibility = eligibilityByDiscordId.get(discordId);
-          if (!eligibility) {
-            throw new Error(`User not found: ${discordId}`);
-          }
-          if (eligibility.normalizedTwitchName && eligibility.isTwitchBotEnabled) {
-            return assertNoTwitchChannelTriggerConflict(
-              connection,
-              commandId,
-              normalizedTriggerString,
-              eligibility.normalizedTwitchName,
-            );
-          }
-          return undefined;
-        }));
-
+        await assertAllUsersAssignable(connection, commandId, discordIds, normalizedTriggerString, eligibilityByDiscordId);
         await insertUserCommandAssignments(connection, commandId, discordIds);
         await connection.commit();
         return;
