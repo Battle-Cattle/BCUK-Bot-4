@@ -58,4 +58,17 @@ describe('getOrCreate', () => {
       expect(makeDefault).not.toHaveBeenCalled();
     },
   );
+
+  it('treats a stored undefined as a miss — calls makeDefault and overwrites it', () => {
+    // Documented edge case: a single map.get(key) can't distinguish "no entry" from
+    // "entry holding undefined", so this is intentional, not a regression.
+    const map = new Map<string, unknown>([['a', undefined]]);
+    const makeDefault = vi.fn().mockReturnValue('overwritten');
+
+    const result = getOrCreate(map, 'a', makeDefault);
+
+    expect(result).toBe('overwritten');
+    expect(map.get('a')).toBe('overwritten');
+    expect(makeDefault).toHaveBeenCalledOnce();
+  });
 });

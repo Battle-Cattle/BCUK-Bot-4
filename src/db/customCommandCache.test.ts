@@ -117,12 +117,11 @@ describe('getCustomCommandForDiscord', () => {
     expect(result?.output).toBe('first');
   });
 
-  it('returns a copy — mutating result does not affect subsequent lookups', async () => {
+  it('returns the cache entry directly (frozen), not a defensive copy — mutating it throws', async () => {
     vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([makeCommand()] as any);
-    const first = await getCustomCommandForDiscord('!clap', GUILD);
-    (first as any).output = 'mutated';
-    const second = await getCustomCommandForDiscord('!clap', GUILD);
-    expect(second?.output).toBe('*claps*');
+    const result = await getCustomCommandForDiscord('!clap', GUILD);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(() => { (result as any).output = 'mutated'; }).toThrow();
   });
 });
 
@@ -171,6 +170,16 @@ describe('getCustomCommandForDiscord — per-guild overrides', () => {
     ] as any);
     expect((await getCustomCommandForDiscord('!clap', GUILD))?.output).toBe('only here');
     expect((await getCustomCommandForDiscord('!clap', 'other-guild'))?.output).toBe('*claps*');
+  });
+
+  it('the override-output branch returns a distinct, unfrozen object with only output replaced', async () => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([makeCommand()] as any);
+    vi.mocked(getAllOverrides).mockResolvedValue([
+      { guild_id: GUILD, command_id: 1, is_disabled: false, output: 'guild text' },
+    ] as any);
+    const result = await getCustomCommandForDiscord('!clap', GUILD);
+    expect(result).toEqual(expect.objectContaining({ output: 'guild text', trigger_string: '!clap' }));
+    expect(Object.isFrozen(result)).toBe(false);
   });
 });
 
@@ -292,7 +301,7 @@ describe('getCustomCommandForTwitchChannel', () => {
     expect(await getCustomCommandForTwitchChannel('#MyChan', '!clap')).not.toBeNull();
   });
 
-  it('returns a copy — mutating result does not affect subsequent lookups', async () => {
+  it('returns the cache entry directly (frozen), not a defensive copy — mutating it throws', async () => {
     vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
       makeCommand({
         assigned_users: [
@@ -300,9 +309,8 @@ describe('getCustomCommandForTwitchChannel', () => {
         ],
       }),
     ] as any);
-    const first = await getCustomCommandForTwitchChannel('mychan', '!clap');
-    (first as any).output = 'mutated';
-    const second = await getCustomCommandForTwitchChannel('mychan', '!clap');
-    expect(second?.output).toBe('*claps*');
+    const result = await getCustomCommandForTwitchChannel('mychan', '!clap');
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(() => { (result as any).output = 'mutated'; }).toThrow();
   });
 });

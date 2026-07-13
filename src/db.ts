@@ -128,7 +128,7 @@ import { invalidateCustomCommandLookupCache } from './db/customCommandCache';
 export {
   getAllCustomCommandsWithAssignments,
   addCustomCommand, updateCustomCommand, removeCustomCommand,
-  assignUserToCommand, unassignUserFromCommand,
+  assignUserToCommand, assignUsersToCommand, unassignUserFromCommand,
 } from './db/customCommands';
 export type {
   DbCustomCommand, DbCustomCommandAssignedUser, DbCustomCommandWithAssignments,

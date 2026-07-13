@@ -8,7 +8,7 @@ import { requireTrimmedString, CommandNotFoundError, type SqlExecutor } from './
 import { acquireNamedLock, releaseNamedLock, commandExists, runSerializedCommandWrite } from './commandLocks';
 import {
   assertDiscordTriggerAvailable, assertMultiTwitchTriggerAvailable, assertNoSingleTwitchAssignmentOverlap,
-  assignUserToCommandWithinTransaction,
+  assignUserToCommandWithinTransaction, assignUsersToCommandWithinTransaction,
 } from './commandConflicts';
 import { invalidateCustomCommandLookupCache } from './customCommandCache';
 
@@ -259,6 +259,34 @@ export async function assignUserToCommand(commandId: number, discordId: string):
     invalidateCustomCommandLookupCache();
   } finally {
     // Always release the id lock
+    await releaseNamedLock(connection, lockNameById);
+    connection.release();
+  }
+}
+
+/**
+ * Assign multiple Discord users to a custom command's Twitch streamer list in one transaction.
+ * Acquires the command ID's named lock once, then delegates to
+ * {@link assignUsersToCommandWithinTransaction} to check cross-command conflicts and insert all
+ * assignments before invalidating the lookup cache once. A no-op (no connection opened) when
+ * `discordIds` is empty.
+ *
+ * @param commandId - ID of the command to assign the users to.
+ * @param discordIds - Discord snowflakes of the users to assign.
+ */
+export async function assignUsersToCommand(commandId: number, discordIds: string[]): Promise<void> {
+  if (discordIds.length === 0) return;
+
+  const connection = await getPool().getConnection();
+
+  const lockNameById = `bcuk_cmdid_${commandId}`;
+  try {
+    await acquireNamedLock(connection, lockNameById);
+
+    await assignUsersToCommandWithinTransaction(connection, commandId, discordIds);
+
+    invalidateCustomCommandLookupCache();
+  } finally {
     await releaseNamedLock(connection, lockNameById);
     connection.release();
   }

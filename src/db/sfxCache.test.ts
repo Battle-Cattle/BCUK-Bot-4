@@ -113,18 +113,17 @@ describe('findCachedSfxTrigger', () => {
     expect(result!.files[0].hidden).toBe(true);
   });
 
-  it('returns a copy — mutating the result does not affect subsequent lookups', async () => {
+  it('returns the cache entry directly (frozen), not a defensive copy — mutating it throws', async () => {
     const row = makeTriggerRow('1', '!bang', [{ id: 10, file: 'bang.mp3', weight: 1, hidden: false }]);
     vi.mocked(getAllSfxTriggers).mockResolvedValue([row]);
 
-    const first = await findCachedSfxTrigger('!bang');
-    expect(first).not.toBeNull();
-    first!.files[0].weight = 999;
-
-    const second = await findCachedSfxTrigger('!bang');
-    expect(second).not.toBeNull();
-    expect(second!.files).not.toBe(first!.files);
-    expect(second!.files[0].weight).toBe(1);
+    const result = await findCachedSfxTrigger('!bang');
+    expect(result).not.toBeNull();
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result!.trigger)).toBe(true);
+    expect(Object.isFrozen(result!.files)).toBe(true);
+    expect(Object.isFrozen(result!.files[0])).toBe(true);
+    expect(() => { result!.files[0].weight = 999; }).toThrow();
   });
 
   it('collision — lower id wins when two triggers normalize to the same command', async () => {

@@ -1,7 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { getAllStreamersWithGroups, DbStreamerFull } from '../../db';
 import { getUsers, getStreams } from '../twitchApi';
-import { LiveState } from './twitchMonitorTypes';
+import { LiveStateMap } from './twitchMonitorTypes';
 import {
   DiscordMessagePreview,
   buildMessagePreview,
@@ -21,8 +21,8 @@ const log = createLogger('TwitchMonitor');
 
 // ─── Module-level state ──────────────────────────────────────────────────────
 
-/** Keyed by lowercase broadcaster login */
-const liveStates = new Map<string, LiveState>();
+/** Keyed by streamer DB row id; also indexed by login via {@link LiveStateMap.getByLogin}. */
+const liveStates = new LiveStateMap();
 let loginToUserId = new Map<string, string>();
 let streamersData: DbStreamerFull[] = [];
 
@@ -189,7 +189,7 @@ export async function restartTwitchMonitor(): Promise<void> {
  */
 export function getMultiTwitchDataForChannel(login: string): MultiTwitchGroupInfo | null {
   const loginLower = login.toLowerCase();
-  const state = Array.from(liveStates.values()).find((s) => s.login === loginLower);
+  const state = liveStates.getByLogin(loginLower);
   if (!state) return null;
 
   const groupLive = Array.from(liveStates.values()).filter((s) => s.groupId === state.groupId);

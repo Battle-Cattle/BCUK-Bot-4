@@ -10,7 +10,7 @@ vi.mock('../../db', () => {
     addCustomCommand: vi.fn().mockResolvedValue(1),
     updateCustomCommand: vi.fn().mockResolvedValue(undefined),
     removeCustomCommand: vi.fn().mockResolvedValue(undefined),
-    assignUserToCommand: vi.fn().mockResolvedValue(undefined),
+    assignUsersToCommand: vi.fn().mockResolvedValue(undefined),
     findUsersByIds: vi.fn().mockResolvedValue(new Map()),
     CommandConflictError,
     CommandNotFoundError,
@@ -29,7 +29,7 @@ import supertest from 'supertest';
 import router from './commandMutations';
 import {
   addCustomCommand, updateCustomCommand, removeCustomCommand,
-  assignUserToCommand, findUsersByIds,
+  assignUsersToCommand, findUsersByIds,
   CommandConflictError, CommandNotFoundError, ReservedCommandError,
   isMysqlDuplicateEntryError,
 } from '../../db';
@@ -48,7 +48,7 @@ beforeEach(() => {
   vi.mocked(addCustomCommand).mockResolvedValue(1);
   vi.mocked(updateCustomCommand).mockResolvedValue(undefined);
   vi.mocked(removeCustomCommand).mockResolvedValue(undefined);
-  vi.mocked(assignUserToCommand).mockResolvedValue(undefined);
+  vi.mocked(assignUsersToCommand).mockResolvedValue(undefined);
   vi.mocked(findUsersByIds).mockResolvedValue(new Map());
   vi.mocked(isMysqlDuplicateEntryError).mockReturnValue(false);
 });
@@ -105,7 +105,7 @@ describe('POST /commands/add', () => {
       .post('/commands/add')
       .send(`trigger_string=!clap&output=Clap&discord_ids=${VALID_DISCORD_ID}`);
     expect(res.headers.location).toBe('/commands');
-    expect(assignUserToCommand).toHaveBeenCalledWith(1, VALID_DISCORD_ID);
+    expect(assignUsersToCommand).toHaveBeenCalledWith(1, [VALID_DISCORD_ID]);
   });
 
   it('skips assigning user when findUsersByIds does not return a matching entry', async () => {
@@ -114,14 +114,14 @@ describe('POST /commands/add', () => {
       .post('/commands/add')
       .send(`trigger_string=!clap&output=Clap&discord_ids=${VALID_DISCORD_ID}`);
     expect(res.headers.location).toBe('/commands');
-    expect(assignUserToCommand).not.toHaveBeenCalled();
+    expect(assignUsersToCommand).toHaveBeenCalledWith(1, []);
   });
 
-  it('redirects to ?error=command_taken when assignUserToCommand throws CommandConflictError', async () => {
+  it('redirects to ?error=command_taken when assignUsersToCommand throws CommandConflictError', async () => {
     vi.mocked(findUsersByIds).mockResolvedValue(new Map([
       [VALID_DISCORD_ID, { discord_id: VALID_DISCORD_ID, twitch_name: 'alice', discord_name: null, is_twitch_bot_enabled: false, access_level: AccessLevel.USER } as any],
     ]));
-    vi.mocked(assignUserToCommand).mockRejectedValueOnce(new (CommandConflictError as any)('conflict'));
+    vi.mocked(assignUsersToCommand).mockRejectedValueOnce(new (CommandConflictError as any)('conflict'));
     const res = await supertest(buildApp())
       .post('/commands/add')
       .send(`trigger_string=!clap&output=Clap&discord_ids=${VALID_DISCORD_ID}`);
@@ -133,7 +133,7 @@ describe('POST /commands/add', () => {
     vi.mocked(findUsersByIds).mockResolvedValue(new Map([
       [VALID_DISCORD_ID, { discord_id: VALID_DISCORD_ID, twitch_name: 'alice', discord_name: null, is_twitch_bot_enabled: false, access_level: AccessLevel.USER } as any],
     ]));
-    vi.mocked(assignUserToCommand).mockRejectedValueOnce(new Error('DB error'));
+    vi.mocked(assignUsersToCommand).mockRejectedValueOnce(new Error('DB error'));
     const res = await supertest(buildApp())
       .post('/commands/add')
       .send(`trigger_string=!clap&output=Clap&discord_ids=${VALID_DISCORD_ID}`);
