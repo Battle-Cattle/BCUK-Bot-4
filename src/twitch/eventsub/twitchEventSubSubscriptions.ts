@@ -124,9 +124,10 @@ const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
     specs: (uid) => [{ type: 'channel.channel_points_custom_reward_redemption.add', version: '1', condition: { broadcaster_user_id: uid } }],
   },
   {
-    // stream.online/offline and channel.update require no scope beyond a valid token, so
-    // subscribe whenever EventSub is connected at all — this drives an immediate live-check
-    // that supplements (not replaces) the 60s poller.
+    // stream.online/offline and channel.update require no scope beyond a valid token — but,
+    // like the redemption group above, still gated on config (not just token) to keep
+    // subscription and dispatch aligned, since dispatchNotification early-exits without
+    // config. This drives an immediate live-check that supplements (not replaces) the 60s poller.
     enabled: (config) => Boolean(config),
     specs: (uid) => [
       { type: 'stream.online', version: '1', condition: { broadcaster_user_id: uid } },
