@@ -30,7 +30,11 @@ interface EventSubOverlayRuntime {
 
 const overlayRuntimeRegistry = createRuntimeRegistry<EventSubOverlayRuntime>();
 
-/** Register the overlay push function. Called from index.ts after startWebPanel(). */
+/**
+ * Register the overlay push function. Called from index.ts after startWebPanel().
+ * @param runtime - The {@link EventSubOverlayRuntime} to store.
+ * @returns void
+ */
 export function registerEventSubOverlayRuntime(runtime: EventSubOverlayRuntime): void {
   overlayRuntimeRegistry.register(runtime);
 }
@@ -54,7 +58,11 @@ interface EventSubCompanionRuntime {
 
 const companionRuntimeRegistry = createRuntimeRegistry<EventSubCompanionRuntime>();
 
-/** Register the companion app push function. Called from index.ts before startWebPanel(). */
+/**
+ * Register the companion app push function. Called from index.ts before startWebPanel().
+ * @param runtime - The {@link EventSubCompanionRuntime} to store.
+ * @returns void
+ */
 export function registerEventSubCompanionRuntime(runtime: EventSubCompanionRuntime): void {
   companionRuntimeRegistry.register(runtime);
 }

@@ -73,10 +73,25 @@ async function postTokenRequest(grantParams: Record<string, string>, label: stri
   return res.json() as Promise<OAuthTokens>;
 }
 
+/**
+ * Exchanges an authorization code from Twitch's OAuth redirect for an access/refresh token pair.
+ * @param code - Authorization code received from Twitch's OAuth redirect.
+ * @param redirectUri - The exact redirect URI used in the authorization request (must match).
+ * @returns The issued OAuth tokens.
+ * @throws {TwitchAuthError} If Twitch returns 400 or 401 (invalid/expired code).
+ * @throws If Twitch returns any other non-OK status.
+ */
 export async function exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
   return postTokenRequest({ code, grant_type: 'authorization_code', redirect_uri: redirectUri }, 'exchangeCode');
 }
 
+/**
+ * Exchanges a stored refresh token for a fresh access/refresh token pair.
+ * @param refreshToken - The previously-issued refresh token.
+ * @returns The refreshed OAuth tokens.
+ * @throws {TwitchAuthError} If Twitch returns 400 or 401 (invalid/expired refresh token).
+ * @throws If Twitch returns any other non-OK status.
+ */
 export async function refreshUserToken(refreshToken: string): Promise<OAuthTokens> {
   return postTokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken }, 'refreshUserToken');
 }

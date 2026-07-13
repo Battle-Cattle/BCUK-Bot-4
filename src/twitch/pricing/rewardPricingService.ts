@@ -17,7 +17,11 @@ interface RewardPricingRuntime {
 }
 const runtimeRegistry = createRuntimeRegistry<RewardPricingRuntime>();
 
-/** Registers the live-pricing-update push hook. Call once from index.ts after startup. */
+/**
+ * Registers the live-pricing-update push hook. Call once from index.ts after startup.
+ * @param runtime - The {@link RewardPricingRuntime} to store.
+ * @returns void
+ */
 export function registerRewardPricingRuntime(runtime: RewardPricingRuntime): void {
   runtimeRegistry.register(runtime);
 }

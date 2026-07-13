@@ -82,7 +82,16 @@ async function resolveBroadcasterId(streamer: DbStreamerEventSub, config: EventS
 
 /** One gated group of EventSub subscriptions: created together whenever `enabled` passes. */
 interface SubscriptionGroup {
+  /**
+   * Returns true if this group's subscriptions should be created for the streamer.
+   * @param config - The streamer's event response configuration, or null if unset.
+   */
   enabled: (config: EventSubConfig | null) => boolean;
+  /**
+   * Builds this group's subscription specs.
+   * @param uid - The broadcaster's Twitch user ID.
+   * @returns The subscription specs to create for this group.
+   */
   specs: (uid: string) => SubSpec[];
 }
 

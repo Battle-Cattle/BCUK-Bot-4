@@ -137,6 +137,12 @@ export interface TwitchUser {
   id: string;
 }
 
+/**
+ * Looks up Twitch users by login name, via Helix, batched 100 per request.
+ * @param logins - Twitch login names to look up.
+ * @returns Matching users (login + id); logins Twitch doesn't recognize are simply omitted.
+ * @throws If any batch request returns a non-OK response.
+ */
 export async function getUsers(logins: string[]): Promise<TwitchUser[]> {
   const rows = await fetchHelixPaged<{ login: string; id: string }>('users', 'login', logins, 'getUsers');
   return rows.map((u) => ({ login: u.login, id: u.id }));
@@ -152,6 +158,12 @@ export interface TwitchStream {
   type: string;
 }
 
+/**
+ * Looks up live stream info for a set of Twitch user IDs, via Helix, batched 100 per request.
+ * @param userIds - Twitch user IDs to look up.
+ * @returns Stream info for currently-live channels among `userIds`; offline channels are omitted.
+ * @throws If any batch request returns a non-OK response.
+ */
 export async function getStreams(userIds: string[]): Promise<TwitchStream[]> {
   return fetchHelixPaged<TwitchStream>('streams', 'user_id', userIds, 'getStreams', '&first=100');
 }
@@ -163,6 +175,13 @@ export interface TwitchChannelInfo {
   title: string;
 }
 
+/**
+ * Looks up channel info (title/game) for a set of Twitch broadcaster IDs, via Helix, batched
+ * 100 per request.
+ * @param broadcasterIds - Twitch broadcaster (user) IDs to look up.
+ * @returns Channel info for each broadcaster Twitch recognizes; unknown ids are omitted.
+ * @throws If any batch request returns a non-OK response.
+ */
 export async function getChannelInfo(broadcasterIds: string[]): Promise<TwitchChannelInfo[]> {
   return fetchHelixPaged<TwitchChannelInfo>('channels', 'broadcaster_id', broadcasterIds, 'getChannelInfo');
 }
