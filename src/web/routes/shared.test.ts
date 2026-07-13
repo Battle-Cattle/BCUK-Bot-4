@@ -26,6 +26,7 @@ import {
 } from '../../db';
 import {
   parsePositiveIntId,
+  parseCheckboxField,
   trimField,
   normalizeRequiredText,
   normalizeSingleTokenRequiredText,
@@ -40,6 +41,24 @@ import {
   handleReservedOrConflictCommandError,
   createMulterErrorRedirectHandler,
 } from './shared';
+
+describe('parseCheckboxField', () => {
+  it('returns true when the value is "on"', () => {
+    expect(parseCheckboxField('on')).toBe(true);
+  });
+
+  it('returns false when undefined (checkbox unchecked)', () => {
+    expect(parseCheckboxField(undefined)).toBe(false);
+  });
+
+  it('returns false for an array (repeated field)', () => {
+    expect(parseCheckboxField(['on', 'on'])).toBe(false);
+  });
+
+  it('returns false for any other string value', () => {
+    expect(parseCheckboxField('off')).toBe(false);
+  });
+});
 
 describe('parsePositiveIntId', () => {
   it('returns null for undefined', () => {

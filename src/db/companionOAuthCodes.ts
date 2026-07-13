@@ -27,17 +27,18 @@ export async function createCode(discordId: string): Promise<string> {
 }
 
 /**
- * Atomically consumes a companion OAuth code: marks it used and returns the
- * Discord ID it was issued for, but only if it exists, hasn't expired, and
- * hasn't already been consumed. The UPDATE's `used_at IS NULL AND expires_at >
- * NOW()` guard makes this safe against a code being redeemed twice concurrently.
+ * Marks a companion OAuth code hash used (if it exists, hasn't expired, and hasn't
+ * already been consumed) and returns the Discord ID it was issued for. The UPDATE's
+ * `used_at IS NULL AND expires_at > NOW()` guard makes this safe against the same code
+ * being redeemed twice concurrently. Shared by `consumeCode` (standalone) and
+ * `exchangeCodeForToken` (within a transaction), so both run identical mark-used-then-lookup SQL.
  *
- * @param code - Plaintext code presented by the companion app.
+ * @param executor - Pool or transaction connection to run the query on.
+ * @param hash - SHA-256 hash of the plaintext code.
  * @returns The Discord ID the code was issued for, or null if invalid/expired/already used.
  */
-export async function consumeCode(code: string): Promise<string | null> {
-  const hash = createHash('sha256').update(code).digest('hex');
-  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+async function consumeCodeOnConnection(executor: mysql.Pool | mysql.PoolConnection, hash: string): Promise<string | null> {
+  const [result] = await executor.execute<mysql.ResultSetHeader>(
     `UPDATE companion_oauth_codes
      SET used_at = NOW()
      WHERE code_hash = ? AND used_at IS NULL AND expires_at > NOW()`,
@@ -45,11 +46,24 @@ export async function consumeCode(code: string): Promise<string | null> {
   );
   if (result.affectedRows === 0) return null;
 
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+  const [rows] = await executor.execute<mysql.RowDataPacket[]>(
     `SELECT discord_id FROM companion_oauth_codes WHERE code_hash = ?`,
     [hash],
   );
   return rows.length === 0 ? null : String(rows[0].discord_id);
+}
+
+/**
+ * Atomically consumes a companion OAuth code: marks it used and returns the
+ * Discord ID it was issued for, but only if it exists, hasn't expired, and
+ * hasn't already been consumed.
+ *
+ * @param code - Plaintext code presented by the companion app.
+ * @returns The Discord ID the code was issued for, or null if invalid/expired/already used.
+ */
+export async function consumeCode(code: string): Promise<string | null> {
+  const hash = createHash('sha256').update(code).digest('hex');
+  return consumeCodeOnConnection(getPool(), hash);
 }
 
 /**
@@ -67,25 +81,13 @@ export async function exchangeCodeForToken(code: string): Promise<string | null>
   class CodeNotFound extends Error {}
   try {
     return await withTransaction(async (conn) => {
-      const [result] = await conn.execute<mysql.ResultSetHeader>(
-        `UPDATE companion_oauth_codes
-         SET used_at = NOW()
-         WHERE code_hash = ? AND used_at IS NULL AND expires_at > NOW()`,
-        [hash],
-      );
-      if (result.affectedRows === 0) {
-        throw new CodeNotFound();
-      }
-
-      const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-        `SELECT discord_id FROM companion_oauth_codes WHERE code_hash = ?`,
-        [hash],
-      );
-      if (rows.length === 0) {
-        throw new CodeNotFound();
-      }
-
-      return issueTokenOnConnection(conn, String(rows[0].discord_id));
+      const discordId = await consumeCodeOnConnection(conn, hash);
+      // Throwing (rather than returning null) rolls back the "used" mark applied by
+      // consumeCodeOnConnection above, so an invalid/expired/already-used code — or the
+      // edge case where the row vanishes between the UPDATE and the follow-up SELECT —
+      // doesn't permanently burn the code with no token to show for it.
+      if (!discordId) throw new CodeNotFound();
+      return issueTokenOnConnection(conn, discordId);
     });
   } catch (err) {
     if (err instanceof CodeNotFound) return null;

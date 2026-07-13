@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { extractCommand, extractArgs } from './commandUtils';
+import { describe, it, expect, vi } from 'vitest';
+import { extractCommand, extractArgs, fireAndForget } from './commandUtils';
 
 describe('extractCommand', () => {
   it('returns null for an empty string', () => {
@@ -50,5 +50,26 @@ describe('extractArgs', () => {
 
   it('preserves original casing of the args', () => {
     expect(extractArgs('!Cmd Hello World')).toBe('Hello World');
+  });
+});
+
+describe('fireAndForget', () => {
+  it('does not log when the promise resolves', async () => {
+    const log = { error: vi.fn() };
+    fireAndForget(Promise.resolve(), 'context', log);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it('logs the context and error when the promise rejects', async () => {
+    const log = { error: vi.fn() };
+    const err = new Error('boom');
+    fireAndForget(Promise.reject(err), 'Custom command error', log);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(log.error).toHaveBeenCalledWith('Custom command error:', err);
+  });
+
+  it('does not throw synchronously for a rejecting promise', () => {
+    expect(() => fireAndForget(Promise.reject(new Error('boom')), 'context', { error: vi.fn() })).not.toThrow();
   });
 });

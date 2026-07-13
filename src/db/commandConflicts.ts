@@ -16,6 +16,21 @@ import { fromBit } from './utils';
 // ─── Conflict assertions ──────────────────────────────────────────────────────
 
 /**
+ * Throws a {@link CommandConflictError} for `triggerString` if `checkFn` reports a conflict.
+ * Factors out the repeated "run a conflict check, throw if true" shape shared by
+ * {@link assertMultiTwitchTriggerAvailable}, {@link assertNoSingleTwitchAssignmentOverlap},
+ * and {@link assertNoTwitchChannelTriggerConflict}.
+ * @param triggerString Trigger string to include in the thrown error.
+ * @param checkFn Callback that resolves true if a conflicting command exists.
+ * @throws {CommandConflictError} If `checkFn` resolves true.
+ */
+async function assertConflictFree(triggerString: string, checkFn: () => Promise<boolean>): Promise<void> {
+  if (await checkFn()) {
+    throw new CommandConflictError([triggerString]);
+  }
+}
+
+/**
  * Throws if a Discord-enabled custom command already uses `triggerString`.
  * @param triggerString Trigger string to check for conflicts.
  * @param executor Pool or transaction connection to query with.
@@ -100,9 +115,7 @@ export async function assertMultiTwitchTriggerAvailable(
   triggerString: string,
   excludeCommandId?: number,
 ): Promise<void> {
-  if (await hasMultiTwitchTriggerConflict(executor, triggerString, excludeCommandId)) {
-    throw new CommandConflictError([triggerString]);
-  }
+  await assertConflictFree(triggerString, () => hasMultiTwitchTriggerConflict(executor, triggerString, excludeCommandId));
 }
 
 /**
@@ -158,9 +171,7 @@ export async function assertNoSingleTwitchAssignmentOverlap(
   commandId: number,
   triggerString: string,
 ): Promise<void> {
-  if (await hasSingleTwitchAssignmentOverlap(executor, commandId, triggerString)) {
-    throw new CommandConflictError([triggerString]);
-  }
+  await assertConflictFree(triggerString, () => hasSingleTwitchAssignmentOverlap(executor, commandId, triggerString));
 }
 
 /**
@@ -263,9 +274,7 @@ export async function assertNoTwitchChannelTriggerConflict(
   triggerString: string,
   normalizedTwitchName: string,
 ): Promise<void> {
-  if (await hasTwitchChannelTriggerConflict(executor, commandId, triggerString, normalizedTwitchName)) {
-    throw new CommandConflictError([triggerString]);
-  }
+  await assertConflictFree(triggerString, () => hasTwitchChannelTriggerConflict(executor, commandId, triggerString, normalizedTwitchName));
 }
 
 /**

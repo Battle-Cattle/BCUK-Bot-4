@@ -3,9 +3,15 @@ import { getPool, withTransaction } from './pool';
 import { requireTrimmedString, normalizeCommand, type SqlExecutor } from './commandStringUtils';
 import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
-import { fromBit } from './utils';
+import { fromBit, rowExists, affectedOrExists } from './utils';
 import { invalidateCounterLookupCache } from './counterCache';
-import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
+import {
+  createManagedLookupCache,
+  type RefreshingLookupCache,
+  DEFAULT_CACHE_TTL_MS,
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
+} from './lookupCache';
 
 // ─── Archive column allowlist ─────────────────────────────────────────────────
 // MySQL does not support parameterised column names. Rather than building the
@@ -138,9 +144,9 @@ interface ArchiveColumnsCache extends RefreshingLookupCache {
 
 const archiveColumnsCacheState = createManagedLookupCache<ArchiveColumnsCache>({
   cacheName: 'counter archive columns cache',
-  ttlMs: 300_000,
-  refreshFailureBackoffMs: 5_000,
-  refreshFailureMaxBackoffMs: 60_000,
+  ttlMs: DEFAULT_CACHE_TTL_MS,
+  refreshFailureBackoffMs: DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  refreshFailureMaxBackoffMs: DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
   createEmptyCache: () => ({ loadedAt: 0, columns: [] }),
   loadCache: async () => {
     const [rows] = await getPool().query<mysql.RowDataPacket[]>(
@@ -274,11 +280,7 @@ export async function addCounter(
  * @returns True if the counter exists.
  */
 async function counterExists(id: number, executor: SqlExecutor = getPool()): Promise<boolean> {
-  const [rows] = await executor.execute<mysql.RowDataPacket[]>(
-    'SELECT 1 FROM counter WHERE id = ? LIMIT 1',
-    [id],
-  );
-  return rows.length > 0;
+  return rowExists(executor, 'counter', 'id', id);
 }
 
 /**
@@ -345,7 +347,7 @@ export async function updateCounter(input: UpdateCounterInput): Promise<void> {
         [fields.triggerCommand, fields.checkCommand, fields.message, fields.incrementMessage, resetYearly ? 1 : 0, id],
       );
 
-      if (result.affectedRows === 0 && !(await counterExists(id, connection))) {
+      if (!(await affectedOrExists(result.affectedRows, () => counterExists(id, connection)))) {
         throw new CounterNotFoundError(id);
       }
     },
@@ -389,8 +391,10 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
     [id],
   );
 
+  if (!(await affectedOrExists(result.affectedRows, () => counterExists(id)))) {
+    throw new CounterNotFoundError(id);
+  }
   if (result.affectedRows === 0) {
-    if (!(await counterExists(id))) throw new CounterNotFoundError(id);
     // Counter exists but value was already 0 — nothing changed, skip invalidation.
     return;
   }

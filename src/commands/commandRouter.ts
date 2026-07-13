@@ -84,6 +84,41 @@ async function lookupAndPlay(
 }
 
 /**
+ * Checks a guild's cooldown and in-flight state and, if both checks pass, claims the slot
+ * (sets `state.inFlight = true`) so a concurrent handler can't also start playing. Callers
+ * that get `true` back must reset `state.inFlight = false` once done (typically in a
+ * `finally`).
+ *
+ * @param guildId - Guild being checked; used only for logging.
+ * @param source - Where the command came from; used for logging.
+ * @param command - The trigger command being attempted; used for logging.
+ * @param state - The guild's cooldown/in-flight state.
+ * @returns True if the slot was claimed; false if the guild is on cooldown or already
+ *   playing/in-flight, in which case `state` is left untouched.
+ */
+function tryClaimGuildSlot(
+  guildId: string,
+  source: 'twitch' | 'discord' | 'tiktok',
+  command: string,
+  state: GuildCommandState,
+): boolean {
+  const now = Date.now();
+  if (now - state.lastPlayedAt < GLOBAL_COOLDOWN_MS) {
+    log.info(`[${source}] Cooldown active for guild ${guildId}, ignoring '${command}'`);
+    return false;
+  }
+
+  if (isPlaying(guildId) || state.inFlight) {
+    log.info(`[${source}] Already playing in guild ${guildId}, ignoring '${command}'`);
+    return false;
+  }
+
+  // Claim the slot before any await so concurrent message handlers see the flag.
+  state.inFlight = true;
+  return true;
+}
+
+/**
  * Handle a raw chat message from Twitch, Discord, or TikTok.
  * Performs all checks (prefix, cooldown, playing state, DB lookup) before playing.
  * Cooldown and in-flight state are tracked per guild so a trigger in one guild
@@ -113,22 +148,8 @@ export async function handleCommand(
   }
 
   const state = getGuildCommandState(guildId);
+  if (!tryClaimGuildSlot(guildId, source, command, state)) return;
 
-  // Per-guild cooldown check
-  const now = Date.now();
-  if (now - state.lastPlayedAt < GLOBAL_COOLDOWN_MS) {
-    log.info(`[${source}] Cooldown active for guild ${guildId}, ignoring '${command}'`);
-    return;
-  }
-
-  // Ignore if this guild is already playing or another handler is mid-lookup
-  if (isPlaying(guildId) || state.inFlight) {
-    log.info(`[${source}] Already playing in guild ${guildId}, ignoring '${command}'`);
-    return;
-  }
-
-  // Claim the slot before any await so concurrent message handlers see the flag.
-  state.inFlight = true;
   try {
     await lookupAndPlay(command, source, guildId, state);
   } finally {

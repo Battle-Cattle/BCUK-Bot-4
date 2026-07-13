@@ -80,6 +80,63 @@ async function resolveBroadcasterId(streamer: DbStreamerEventSub, config: EventS
   }
 }
 
+/** One gated group of EventSub subscriptions: created together whenever `enabled` passes. */
+interface SubscriptionGroup {
+  /**
+   * Returns true if this group's subscriptions should be created for the streamer.
+   * @param config - The streamer's event response configuration, or null if unset.
+   */
+  enabled: (config: EventSubConfig | null) => boolean;
+  /**
+   * Builds this group's subscription specs.
+   * @param uid - The broadcaster's Twitch user ID.
+   * @returns The subscription specs to create for this group.
+   */
+  specs: (uid: string) => SubSpec[];
+}
+
+// Every group also requires a broadcaster token (WebSocket transport only works with a user
+// token, not an app token — see createSubscriptionsForStreamer's upfront `!token` check).
+const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
+  {
+    enabled: (config) => Boolean(config?.follow_enabled),
+    specs: (uid) => [{ type: 'channel.follow', version: '2', condition: { broadcaster_user_id: uid, moderator_user_id: uid } }],
+  },
+  {
+    enabled: (config) => Boolean(config?.sub_enabled),
+    specs: (uid) => [
+      { type: 'channel.subscribe', version: '1', condition: { broadcaster_user_id: uid } },
+      { type: 'channel.subscription.message', version: '1', condition: { broadcaster_user_id: uid } },
+      { type: 'channel.subscription.gift', version: '1', condition: { broadcaster_user_id: uid } },
+    ],
+  },
+  {
+    // Subscribe when either the welcome message or the auto-shoutout toggle is on —
+    // handleRaid gates its own two behaviours independently, but the subscription itself
+    // must exist for either to fire.
+    enabled: (config) => Boolean(config?.raid_enabled || config?.raid_shoutout_enabled),
+    specs: (uid) => [{ type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }],
+  },
+  {
+    // Gated on config (not just token) to keep subscription and dispatch aligned —
+    // dispatchNotification early-exits without config.
+    enabled: (config) => Boolean(config),
+    specs: (uid) => [{ type: 'channel.channel_points_custom_reward_redemption.add', version: '1', condition: { broadcaster_user_id: uid } }],
+  },
+  {
+    // stream.online/offline and channel.update require no scope beyond a valid token — but,
+    // like the redemption group above, still gated on config (not just token) to keep
+    // subscription and dispatch aligned, since dispatchNotification early-exits without
+    // config. This drives an immediate live-check that supplements (not replaces) the 60s poller.
+    enabled: (config) => Boolean(config),
+    specs: (uid) => [
+      { type: 'stream.online', version: '1', condition: { broadcaster_user_id: uid } },
+      { type: 'stream.offline', version: '1', condition: { broadcaster_user_id: uid } },
+      { type: 'channel.update', version: '2', condition: { broadcaster_user_id: uid } },
+    ],
+  },
+];
+
 /** Creates all desired EventSub subscriptions for a single streamer and returns the desired-types set. */
 async function createSubscriptionsForStreamer(
   sid: string, uid: string, token: string | null, config: EventSubConfig | null, name: string,
@@ -91,52 +148,14 @@ async function createSubscriptionsForStreamer(
   }
 
   const desired = new Set<string>();
+  if (!token) return desired;
 
-  if (config?.follow_enabled && token) {
-    desired.add('channel.follow');
-    await subscribe(sid, { type: 'channel.follow', version: '2',
-      condition: { broadcaster_user_id: uid, moderator_user_id: uid } }, token, name);
-  }
-
-  if (config?.sub_enabled && token) {
-    desired.add('channel.subscribe');
-    desired.add('channel.subscription.message');
-    desired.add('channel.subscription.gift');
-    await subscribe(sid, { type: 'channel.subscribe', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
-    await subscribe(sid, { type: 'channel.subscription.message', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
-    await subscribe(sid, { type: 'channel.subscription.gift', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
-  }
-
-  // WebSocket transport requires a user token — app tokens only work with webhook transport.
-  // Raids therefore also require the broadcaster's OAuth token. Subscribe when either the
-  // welcome message or the auto-shoutout toggle is on — handleRaid gates its own two
-  // behaviours independently, but the subscription itself must exist for either to fire.
-  if ((config?.raid_enabled || config?.raid_shoutout_enabled) && token) {
-    desired.add('channel.raid');
-    await subscribe(sid, { type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }, token, name);
-  }
-
-  // Subscribe to channel points redemptions when a broadcaster token and config are available.
-  // Gated on config to keep subscription and dispatch aligned (dispatchNotification early-exits without config).
-  if (config && token) {
-    desired.add('channel.channel_points_custom_reward_redemption.add');
-    await subscribe(sid, {
-      type: 'channel.channel_points_custom_reward_redemption.add',
-      version: '1',
-      condition: { broadcaster_user_id: uid },
-    }, token, name);
-  }
-
-  // stream.online/offline and channel.update require no scope beyond a valid token, so
-  // subscribe whenever EventSub is connected at all — this drives an immediate live-check
-  // that supplements (not replaces) the 60s poller.
-  if (config && token) {
-    desired.add('stream.online');
-    desired.add('stream.offline');
-    desired.add('channel.update');
-    await subscribe(sid, { type: 'stream.online', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
-    await subscribe(sid, { type: 'stream.offline', version: '1', condition: { broadcaster_user_id: uid } }, token, name);
-    await subscribe(sid, { type: 'channel.update', version: '2', condition: { broadcaster_user_id: uid } }, token, name);
+  for (const group of SUBSCRIPTION_GROUPS) {
+    if (!group.enabled(config)) continue;
+    for (const spec of group.specs(uid)) {
+      desired.add(spec.type);
+      await subscribe(sid, spec, token, name);
+    }
   }
 
   return desired;

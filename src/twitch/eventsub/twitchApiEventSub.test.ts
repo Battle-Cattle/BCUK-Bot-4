@@ -149,11 +149,16 @@ describe('exchangeCode', () => {
     expect(tokens).toEqual(body);
   });
 
-  it('throws on a non-200 response', async () => {
+  it('throws TwitchAuthError on a 400 response', async () => {
     vi.mocked(twitchFetch).mockResolvedValue(mockFetch(400, {}));
-    await expect(exchangeCode('bad-code', 'https://example.com/callback')).rejects.toThrow(
-      'exchangeCode failed: 400',
-    );
+    await expect(exchangeCode('bad-code', 'https://example.com/callback')).rejects.toThrow(TwitchAuthError);
+  });
+
+  it('throws a generic Error on a 500 response', async () => {
+    vi.mocked(twitchFetch).mockResolvedValue(mockFetch(500, {}));
+    const err = await exchangeCode('code123', 'https://example.com/callback').catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(TwitchAuthError);
   });
 });
 

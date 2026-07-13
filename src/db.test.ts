@@ -133,6 +133,7 @@ vi.mock('./db/streamdeckKeys', () => ({
 
 vi.mock('./db/lookupCache', () => ({
   createManagedLookupCache: vi.fn(),
+  DEFAULT_CACHE_TTL_MS: 300_000,
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS: 5_000,
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60_000,
 }));

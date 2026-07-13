@@ -1,7 +1,8 @@
-import { randomBytes, createHash, timingSafeEqual } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 import { AccessLevel } from './users';
+import { hashesMatch } from './utils';
 
 /** Per-guild approval state for a Streamdeck API key. */
 export interface StreamdeckKeyGuildStatusRow {
@@ -167,10 +168,7 @@ export async function findKeyByHash(hash: string): Promise<{ discordId: string }
     'SELECT discord_id, key_hash FROM streamdeck_api_keys WHERE key_hash = ?',
     [hash],
   );
-  if (rows.length === 0) return null;
-  const stored = Buffer.from(String(rows[0].key_hash), 'hex');
-  const incoming = Buffer.from(hash, 'hex');
-  if (stored.length !== incoming.length || !timingSafeEqual(stored, incoming)) return null;
+  if (rows.length === 0 || !hashesMatch(String(rows[0].key_hash), hash)) return null;
   return { discordId: String(rows[0].discord_id) };
 }
 

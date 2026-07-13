@@ -28,6 +28,14 @@ function getKnownViews(): Set<string> {
 }
 
 /**
+ * Parses an HTML checkbox form field: present-and-`'on'` means checked, anything else
+ * (absent, unchecked, or a repeated field arriving as an array) means unchecked.
+ */
+export function parseCheckboxField(value: string | string[] | undefined): boolean {
+  return !Array.isArray(value) && value === 'on';
+}
+
+/**
  * Parse a positive integer id form field. A repeated field (arriving as an array) is
  * rejected rather than silently taking the first value, so a duplicated/tampered id
  * can't slip past validation — mirrors `parsePositiveBigIntId`.

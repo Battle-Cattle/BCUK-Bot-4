@@ -18,7 +18,7 @@ vi.mock('./commandStringUtils', () => ({
 }));
 
 import { getPool } from './pool';
-import { isDeadlockError, getCommandWriteLockName, acquireNamedLock, isAnyCommandTakenAcrossTables, runSerializedCommandWrite, MAX_DEADLOCK_RETRIES } from './commandLocks';
+import { isDeadlockError, getCommandWriteLockName, acquireNamedLock, isAnyCommandTakenAcrossTables, runSerializedCommandWrite, commandExists, MAX_DEADLOCK_RETRIES } from './commandLocks';
 import { CommandConflictError } from './commandStringUtils';
 
 describe('isDeadlockError', () => {
@@ -201,6 +201,43 @@ describe('isAnyCommandTakenAcrossTables', () => {
     const customCmdCall = pool.execute.mock.calls.find((args) => (args[0] as string).includes('custom_command'));
     expect(customCmdCall).toBeDefined();
     expect(customCmdCall![1]).toContain(7);
+  });
+});
+
+// ─── commandExists ────────────────────────────────────────────────────────────
+
+describe('commandExists', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns true when a matching custom_command row exists', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[{ '1': 1 }], []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await commandExists(1)).toBe(true);
+  });
+
+  it('returns false when no matching row exists', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[], []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await commandExists(999)).toBe(false);
+  });
+
+  it('queries custom_command by command_id', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[], []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await commandExists(42);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('custom_command');
+    expect(sql).toContain('command_id');
+    expect(params).toEqual([42]);
+  });
+
+  it('queries against a given executor instead of the default pool', async () => {
+    const conn = { execute: vi.fn().mockResolvedValue([[{ '1': 1 }], []]) };
+    const result = await commandExists(1, conn as any);
+    expect(result).toBe(true);
+    expect(getPool).not.toHaveBeenCalled();
   });
 });
 

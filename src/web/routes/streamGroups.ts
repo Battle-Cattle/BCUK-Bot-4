@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { addStreamGroup, updateStreamGroup, removeStreamGroupAndStreamers } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
-import { parsePositiveIntId } from './shared';
+import { parsePositiveIntId, parseCheckboxField } from './shared';
 import { redirectStreamsInvalid, redirectStreamsFailure } from './streamsErrors';
 import { triggerRestart } from './streamRestart';
 
@@ -27,8 +27,8 @@ function hasMissingValues(...values: Array<string | undefined>): boolean {
  */
 router.post('/streams/groups/add', requireManager, csrfProtection, async (req, res) => {
   const { name, discord_channel, live_message, new_game_message } = req.body as Record<string, string | undefined>;
-  const multi_twitch = req.body.multi_twitch === 'on';
-  const delete_old_posts = req.body.delete_old_posts === 'on';
+  const multi_twitch = parseCheckboxField(req.body.multi_twitch);
+  const delete_old_posts = parseCheckboxField(req.body.delete_old_posts);
 
   if (hasMissingValues(name, discord_channel, live_message, new_game_message)) {
     return redirectStreamsInvalid(res, 'missing_fields');
@@ -63,8 +63,8 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
  */
 router.post('/streams/groups/update', requireManager, csrfProtection, async (req, res) => {
   const { group_id, name, discord_channel, live_message, new_game_message } = req.body as Record<string, string | undefined>;
-  const multi_twitch = req.body.multi_twitch === 'on';
-  const delete_old_posts = req.body.delete_old_posts === 'on';
+  const multi_twitch = parseCheckboxField(req.body.multi_twitch);
+  const delete_old_posts = parseCheckboxField(req.body.delete_old_posts);
 
   if (hasMissingValues(group_id, name, discord_channel, live_message, new_game_message)) {
     return redirectStreamsInvalid(res, 'missing_fields');

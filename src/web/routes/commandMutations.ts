@@ -17,6 +17,7 @@ import {
   normalizeRequiredText,
   normalizeSingleTokenRequiredText,
   parsePositiveIntId,
+  parseCheckboxField,
   normalizeDiscordId,
   handleReservedOrConflictCommandError,
 } from './shared';
@@ -65,8 +66,8 @@ async function assignUsersToNewCommand(commandId: number, discordIds: string[]):
  */
 router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
   const { trigger_string, output } = req.body as Record<string, string | undefined>;
-  const isDiscordEnabled = req.body.is_discord_enabled === 'on';
-  const isMultiTwitch = req.body.is_multi_twitch === 'on';
+  const isDiscordEnabled = parseCheckboxField(req.body.is_discord_enabled);
+  const isMultiTwitch = parseCheckboxField(req.body.is_multi_twitch);
   const normalizedTriggerString = normalizeSingleTokenRequiredText(trigger_string);
   const normalizedOutput = normalizeRequiredText(output);
 
@@ -106,8 +107,8 @@ router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
  */
 router.post('/commands/update', requireMod, csrfProtection, async (req, res) => {
   const { command_id, trigger_string, output } = req.body as Record<string, string | undefined>;
-  const isDiscordEnabled = req.body.is_discord_enabled === 'on';
-  const isMultiTwitch = req.body.is_multi_twitch === 'on';
+  const isDiscordEnabled = parseCheckboxField(req.body.is_discord_enabled);
+  const isMultiTwitch = parseCheckboxField(req.body.is_multi_twitch);
   const normalizedTriggerString = normalizeSingleTokenRequiredText(trigger_string);
   const normalizedOutput = normalizeRequiredText(output);
   const parsedCommandId = parsePositiveIntId(command_id);

@@ -9,7 +9,7 @@ import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
 import { SFX_FOLDER, SFX_MAX_FILE_MB } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
-import { parsePositiveIntId, createMulterErrorRedirectHandler } from './shared';
+import { parsePositiveIntId, createMulterErrorRedirectHandler, parseCheckboxField } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -231,7 +231,7 @@ router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (
 
   const weight = parsePositiveIntId(req.body.weight);
   if (weight === null) return res.redirect('/sfx?error=invalid_weight');
-  const hidden = req.body.file_hidden === 'on';
+  const hidden = parseCheckboxField(req.body.file_hidden);
 
   const stored = await storeUploadedSound(req.file);
   if ('errorCode' in stored) return res.redirect(`/sfx?error=${stored.errorCode}`);

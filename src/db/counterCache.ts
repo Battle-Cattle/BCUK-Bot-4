@@ -1,5 +1,11 @@
 import { createLogger } from '../shared/logger';
-import { createManagedLookupCache, type RefreshingLookupCache } from './lookupCache';
+import {
+  createManagedLookupCache,
+  type RefreshingLookupCache,
+  DEFAULT_CACHE_TTL_MS,
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
+} from './lookupCache';
 import { normalizeCommandList, normalizeCommand } from './commandStringUtils';
 import { isAnyCommandTakenAcrossTables } from './commandLocks';
 // counters imports invalidateCounterLookupCache from this module;
@@ -70,9 +76,9 @@ function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
 
 const counterLookupCacheState = createManagedLookupCache<CounterLookupCache>({
   cacheName: 'counter cache',
-  ttlMs: 300_000,
-  refreshFailureBackoffMs: 5_000,
-  refreshFailureMaxBackoffMs: 60_000,
+  ttlMs: DEFAULT_CACHE_TTL_MS,
+  refreshFailureBackoffMs: DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+  refreshFailureMaxBackoffMs: DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
   createEmptyCache: createEmptyCounterLookupCache,
   loadCache: async () => buildCounterLookupCache(await getAllCounters()),
 });

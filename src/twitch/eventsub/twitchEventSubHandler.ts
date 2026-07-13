@@ -7,6 +7,7 @@ import { createLogger } from '../../shared/logger';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 import { fillTemplate } from '../../shared/textTemplate';
 import { applyRedemptionPricing } from '../pricing/rewardPricingService';
+import { createRuntimeRegistry } from '../../commands/twitchRuntime';
 
 const log = createLogger('EventSubHandler');
 
@@ -27,11 +28,15 @@ interface EventSubOverlayRuntime {
   pushOverlayEvent: (login: string, videoPath: string) => void;
 }
 
-let _overlayRuntime: EventSubOverlayRuntime | null = null;
+const overlayRuntimeRegistry = createRuntimeRegistry<EventSubOverlayRuntime>();
 
-/** Register the overlay push function. Called from index.ts after startWebPanel(). */
+/**
+ * Register the overlay push function. Called from index.ts after startWebPanel().
+ * @param runtime - The {@link EventSubOverlayRuntime} to store.
+ * @returns void
+ */
 export function registerEventSubOverlayRuntime(runtime: EventSubOverlayRuntime): void {
-  _overlayRuntime = runtime;
+  overlayRuntimeRegistry.register(runtime);
 }
 
 // Runtime injection for the companion app push function — same rationale as
@@ -51,11 +56,15 @@ interface EventSubCompanionRuntime {
   pushCompanionEvent: (discordId: string, event: import('../../web/routes/companionEvents').CompanionEvent) => void;
 }
 
-let _companionRuntime: EventSubCompanionRuntime | null = null;
+const companionRuntimeRegistry = createRuntimeRegistry<EventSubCompanionRuntime>();
 
-/** Register the companion app push function. Called from index.ts before startWebPanel(). */
+/**
+ * Register the companion app push function. Called from index.ts before startWebPanel().
+ * @param runtime - The {@link EventSubCompanionRuntime} to store.
+ * @returns void
+ */
 export function registerEventSubCompanionRuntime(runtime: EventSubCompanionRuntime): void {
-  _companionRuntime = runtime;
+  companionRuntimeRegistry.register(runtime);
 }
 
 // Runtime injection for the Twitch chat send function — avoids a direct import
@@ -64,19 +73,18 @@ interface EventSubTwitchRuntime {
   send: (channel: string, message: string) => Promise<void>;
 }
 
-let _twitchRuntime: EventSubTwitchRuntime | null = null;
+const twitchRuntimeRegistry = createRuntimeRegistry<EventSubTwitchRuntime>();
 
 /**
  * Register the Twitch chat send function. Called from index.ts during initialisation,
  * before startTwitchBot(), so the runtime is in place before the first event arrives.
- * Stores the provided runtime in the module-level _twitchRuntime variable for later use.
  *
  * @param runtime - The {@link EventSubTwitchRuntime} to store; must supply a `send` function
  *   that delivers a chat message to the given channel.
  * @returns void
  */
 export function registerEventSubTwitchRuntime(runtime: EventSubTwitchRuntime): void {
-  _twitchRuntime = runtime;
+  twitchRuntimeRegistry.register(runtime);
 }
 
 export interface FollowEvent {
@@ -133,8 +141,8 @@ function tierName(tier: string): string {
 
 /**
  * Handle a channel.follow EventSub notification.
- * Sends a chat message to the broadcaster's channel using the injected `_twitchRuntime`.
- * No-ops when `config.follow_enabled` is false or `_twitchRuntime` has not been registered.
+ * Sends a chat message to the broadcaster's channel using the injected Twitch runtime.
+ * No-ops when `config.follow_enabled` is false or no Twitch runtime has been registered.
  *
  * @param login - Broadcaster login name (chat channel to send to).
  * @param event - Follow event payload from Twitch EventSub.
@@ -146,12 +154,12 @@ export async function handleFollow(login: string, event: FollowEvent, config: Ev
     username: event.user_login,
     display_name: event.user_name,
   });
-  await _twitchRuntime?.send(login, msg);
+  await twitchRuntimeRegistry.get()?.send(login, msg);
 }
 
 /**
  * Handle a channel.subscribe EventSub notification.
- * No-ops when `config.sub_enabled` is false, the subscription is a gift, or `_twitchRuntime` is absent.
+ * No-ops when `config.sub_enabled` is false, the subscription is a gift, or no Twitch runtime is registered.
  *
  * @param login - Broadcaster login name.
  * @param event - Subscribe event payload; gift subs are silently skipped (handled by handleGiftSub).
@@ -165,12 +173,12 @@ export async function handleSub(login: string, event: SubEvent, config: EventSub
     tier: event.tier,
     tier_name: tierName(event.tier),
   });
-  await _twitchRuntime?.send(login, msg);
+  await twitchRuntimeRegistry.get()?.send(login, msg);
 }
 
 /**
  * Handle a channel.subscription.message (resub) EventSub notification.
- * No-ops when `config.sub_enabled` is false or `_twitchRuntime` is absent.
+ * No-ops when `config.sub_enabled` is false or no Twitch runtime is registered.
  *
  * @param login - Broadcaster login name.
  * @param event - Resub event payload including cumulative and streak month counts.
@@ -186,13 +194,13 @@ export async function handleResub(login: string, event: ResubEvent, config: Even
     months: String(event.cumulative_months),
     streak: event.streak_months != null ? String(event.streak_months) : '0',
   });
-  await _twitchRuntime?.send(login, msg);
+  await twitchRuntimeRegistry.get()?.send(login, msg);
 }
 
 /**
  * Handle a channel.subscription.gift EventSub notification.
  * Anonymous gifters are reported as "anonymous" / "Anonymous".
- * No-ops when `config.sub_enabled` is false or `_twitchRuntime` is absent.
+ * No-ops when `config.sub_enabled` is false or no Twitch runtime is registered.
  *
  * @param login - Broadcaster login name.
  * @param event - Gift-sub event payload; `is_anonymous` controls gifter display name.
@@ -209,7 +217,7 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
     tier: event.tier,
     tier_name: tierName(event.tier),
   });
-  await _twitchRuntime?.send(login, msg);
+  await twitchRuntimeRegistry.get()?.send(login, msg);
 }
 
 /**
@@ -221,7 +229,7 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
  *    and sends the resulting shoutout, recording the match via `recordCommandTestEntry`
  *    for monitor-panel visibility. No-ops silently if the raiding channel can't be
  *    resolved on Twitch.
- * Both branches no-op when `_twitchRuntime` has not been registered.
+ * Both branches no-op when no Twitch runtime has been registered.
  *
  * @param login - Broadcaster login name (the raid target's channel).
  * @param event - Raid event payload including the raiding channel and viewer count.
@@ -234,13 +242,13 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
       from_display: event.from_broadcaster_user_name,
       viewers: String(event.viewers),
     });
-    await _twitchRuntime?.send(login, msg);
+    await twitchRuntimeRegistry.get()?.send(login, msg);
   }
 
   if (config.raid_shoutout_enabled) {
     const shoutoutMsg = await buildShoutoutMessage(event.from_broadcaster_user_login);
     if (shoutoutMsg) {
-      await _twitchRuntime?.send(login, shoutoutMsg);
+      await twitchRuntimeRegistry.get()?.send(login, shoutoutMsg);
       recordCommandTestEntry({
         source: 'twitch',
         command: '!so (raid)',
@@ -258,7 +266,7 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
  * is connected), fires off dynamic pricing for the redeemed reward (a no-op if the reward
  * doesn't have dynamic pricing enabled), then separately looks up videos configured for
  * the redeemed reward and triggers an overlay event if found. The overlay push still
- * no-ops when no videos are configured for the reward or `_overlayRuntime` is absent.
+ * no-ops when no videos are configured for the reward or no overlay runtime is registered.
  * The companion push is isolated in its own try/catch, and the pricing update is
  * intentionally not awaited (its errors are caught via `.catch` instead), so a failure or
  * network latency in either (e.g. a DB error, or a slow/failed Twitch price push) cannot
@@ -278,7 +286,7 @@ export async function handleRedemption(
   try {
     const streamer = await getStreamerById(streamerId);
     if (streamer) {
-      _companionRuntime?.pushCompanionEvent(streamer.discord_id, {
+      companionRuntimeRegistry.get()?.pushCompanionEvent(streamer.discord_id, {
         type: 'channel_points_redemption',
         rewardId: event.reward.id,
         rewardTitle: event.reward.title,
@@ -303,7 +311,7 @@ export async function handleRedemption(
 
   const filename = pickWeightedRandom(videos);
   const videoPath = `/overlay/videos/${streamerId}/${filename}`;
-  _overlayRuntime?.pushOverlayEvent(login, videoPath);
+  overlayRuntimeRegistry.get()?.pushOverlayEvent(login, videoPath);
   log.info(`Overlay triggered for ${login}: reward="${event.reward.title}" video=${filename}`);
 }
 

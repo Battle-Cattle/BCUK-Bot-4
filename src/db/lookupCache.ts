@@ -2,6 +2,9 @@ import { createLogger } from '../shared/logger';
 
 const log = createLogger('DB');
 
+/** Default freshness window (ms) before a cache triggers a background refresh. */
+export const DEFAULT_CACHE_TTL_MS = 300_000;
+
 /** Default backoff (ms) before retrying after a failed background refresh. */
 export const DEFAULT_REFRESH_FAILURE_BACKOFF_MS = 5_000;
 

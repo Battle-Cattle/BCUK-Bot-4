@@ -96,26 +96,56 @@ async function fetchHelixWithRetry(url: string, headers: Record<string, string>)
   return res!;
 }
 
+/**
+ * Fetches every `data[]` row from a Helix list endpoint across as many requests as needed to
+ * cover all of `ids`, batching 100 per request (Helix's per-call cap) and querying each batch
+ * as repeated `paramName=id` query params. Shared by `getUsers`/`getStreams`/`getChannelInfo`,
+ * which only differ in endpoint path, query param name, and any extra fixed query string.
+ * @param path Helix endpoint path under `/helix/`, e.g. `'users'`.
+ * @param paramName Query parameter name repeated once per id, e.g. `'login'`.
+ * @param ids The ids/logins to fetch, batched 100 per request.
+ * @param label Human-readable label used in the thrown error message on failure.
+ * @param extraQuery Optional fixed query string suffix appended to every batch request (e.g. `'&first=100'`).
+ * @returns The concatenated `data[]` rows across all batches, in Helix's response shape.
+ * @throws If any batch request returns a non-OK response.
+ */
+async function fetchHelixPaged<T>(
+  path: string,
+  paramName: string,
+  ids: string[],
+  label: string,
+  extraQuery = '',
+): Promise<T[]> {
+  if (ids.length === 0) return [];
+  const token = await getAppToken();
+  const results: T[] = [];
+  for (const batch of chunks(ids, 100)) {
+    const params = batch.map((id) => `${paramName}=${encodeURIComponent(id)}`).join('&');
+    const res = await fetchHelixWithRetry(`https://api.twitch.tv/helix/${path}?${params}${extraQuery}`, authHeaders(token));
+    if (!res.ok) {
+      invalidateAppTokenIfUnauthorized(res);
+      throw new Error(`[TwitchAPI] ${label} failed: ${res.status}`);
+    }
+    const data = await res.json() as { data: T[] };
+    results.push(...data.data);
+  }
+  return results;
+}
+
 export interface TwitchUser {
   login: string;
   id: string;
 }
 
+/**
+ * Looks up Twitch users by login name, via Helix, batched 100 per request.
+ * @param logins - Twitch login names to look up.
+ * @returns Matching users (login + id); logins Twitch doesn't recognize are simply omitted.
+ * @throws If any batch request returns a non-OK response.
+ */
 export async function getUsers(logins: string[]): Promise<TwitchUser[]> {
-  if (logins.length === 0) return [];
-  const token = await getAppToken();
-  const results: TwitchUser[] = [];
-  for (const batch of chunks(logins, 100)) {
-    const params = batch.map((l) => `login=${encodeURIComponent(l)}`).join('&');
-    const res = await fetchHelixWithRetry(`https://api.twitch.tv/helix/users?${params}`, authHeaders(token));
-    if (!res.ok) {
-      invalidateAppTokenIfUnauthorized(res);
-      throw new Error(`[TwitchAPI] getUsers failed: ${res.status}`);
-    }
-    const data = await res.json() as { data: Array<{ login: string; id: string }> };
-    results.push(...data.data.map((u) => ({ login: u.login, id: u.id })));
-  }
-  return results;
+  const rows = await fetchHelixPaged<{ login: string; id: string }>('users', 'login', logins, 'getUsers');
+  return rows.map((u) => ({ login: u.login, id: u.id }));
 }
 
 export interface TwitchStream {
@@ -128,21 +158,14 @@ export interface TwitchStream {
   type: string;
 }
 
+/**
+ * Looks up live stream info for a set of Twitch user IDs, via Helix, batched 100 per request.
+ * @param userIds - Twitch user IDs to look up.
+ * @returns Stream info for currently-live channels among `userIds`; offline channels are omitted.
+ * @throws If any batch request returns a non-OK response.
+ */
 export async function getStreams(userIds: string[]): Promise<TwitchStream[]> {
-  if (userIds.length === 0) return [];
-  const token = await getAppToken();
-  const results: TwitchStream[] = [];
-  for (const batch of chunks(userIds, 100)) {
-    const params = batch.map((id) => `user_id=${encodeURIComponent(id)}`).join('&');
-    const res = await fetchHelixWithRetry(`https://api.twitch.tv/helix/streams?${params}&first=100`, authHeaders(token));
-    if (!res.ok) {
-      invalidateAppTokenIfUnauthorized(res);
-      throw new Error(`[TwitchAPI] getStreams failed: ${res.status}`);
-    }
-    const data = await res.json() as { data: TwitchStream[] };
-    results.push(...data.data);
-  }
-  return results;
+  return fetchHelixPaged<TwitchStream>('streams', 'user_id', userIds, 'getStreams', '&first=100');
 }
 
 export interface TwitchChannelInfo {
@@ -152,21 +175,15 @@ export interface TwitchChannelInfo {
   title: string;
 }
 
+/**
+ * Looks up channel info (title/game) for a set of Twitch broadcaster IDs, via Helix, batched
+ * 100 per request.
+ * @param broadcasterIds - Twitch broadcaster (user) IDs to look up.
+ * @returns Channel info for each broadcaster Twitch recognizes; unknown ids are omitted.
+ * @throws If any batch request returns a non-OK response.
+ */
 export async function getChannelInfo(broadcasterIds: string[]): Promise<TwitchChannelInfo[]> {
-  if (broadcasterIds.length === 0) return [];
-  const token = await getAppToken();
-  const results: TwitchChannelInfo[] = [];
-  for (const batch of chunks(broadcasterIds, 100)) {
-    const params = batch.map((id) => `broadcaster_id=${encodeURIComponent(id)}`).join('&');
-    const res = await fetchHelixWithRetry(`https://api.twitch.tv/helix/channels?${params}`, authHeaders(token));
-    if (!res.ok) {
-      invalidateAppTokenIfUnauthorized(res);
-      throw new Error(`[TwitchAPI] getChannelInfo failed: ${res.status}`);
-    }
-    const data = await res.json() as { data: TwitchChannelInfo[] };
-    results.push(...data.data);
-  }
-  return results;
+  return fetchHelixPaged<TwitchChannelInfo>('channels', 'broadcaster_id', broadcasterIds, 'getChannelInfo');
 }
 
 /** A custom reward's per-stream redemption limit, as returned by Twitch (`max_per_stream_setting`). */

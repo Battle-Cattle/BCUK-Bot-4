@@ -47,6 +47,14 @@ vi.mock('./reservedCommands', () => ({
 }));
 vi.mock('./utils', () => ({
   fromBit: vi.fn((v: unknown) => (Buffer.isBuffer(v) ? v[0] === 1 : v == 1)),
+  rowExists: vi.fn(async (executor: any, table: string, column: string, value: unknown) => {
+    const [rows] = await executor.execute(`SELECT 1 FROM ${table} WHERE ${column} = ? LIMIT 1`, [value]);
+    return rows.length > 0;
+  }),
+  affectedOrExists: vi.fn(async (affectedRows: number, existsCheck: () => Promise<boolean>) => {
+    if (affectedRows > 0) return true;
+    return existsCheck();
+  }),
 }));
 vi.mock('./counterCache', () => ({
   invalidateCounterLookupCache: vi.fn(),

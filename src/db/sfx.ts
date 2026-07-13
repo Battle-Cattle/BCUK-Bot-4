@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
-import { fromBit, affectedOrExists } from './utils';
+import { fromBit, affectedOrExists, rowExists } from './utils';
 // sfxCache imports getAllSfxTriggers from this module; this module imports
 // invalidateSfxLookupCache from sfxCache. Both calls happen inside function
 // bodies, so CommonJS resolves the cycle correctly.
@@ -137,13 +137,7 @@ export async function renameCategory(id: number, name: string): Promise<boolean>
     `UPDATE sfxcategory SET name = ? WHERE id = ?`,
     [name, id],
   );
-  return affectedOrExists(result.affectedRows, async () => {
-    const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-      `SELECT id FROM sfxcategory WHERE id = ?`,
-      [id],
-    );
-    return rows.length > 0;
-  });
+  return affectedOrExists(result.affectedRows, () => rowExists(getPool(), 'sfxcategory', 'id', id));
 }
 
 /**
@@ -209,13 +203,7 @@ export async function updateSfxTrigger(
      WHERE id = ?`,
     [command, categoryId, description, hidden ? 1 : 0, id.toString()],
   );
-  const updated = await affectedOrExists(result.affectedRows, async () => {
-    const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-      `SELECT id FROM sfxtrigger WHERE id = ?`,
-      [id.toString()],
-    );
-    return rows.length > 0;
-  });
+  const updated = await affectedOrExists(result.affectedRows, () => rowExists(getPool(), 'sfxtrigger', 'id', id.toString()));
   if (updated) invalidateSfxLookupCache();
   return updated;
 }
@@ -299,10 +287,7 @@ export async function updateSfxFile(id: number, weight: number, hidden: boolean)
     `UPDATE sfx SET weight = ?, hidden = ? WHERE id = ?`,
     [weight, hidden ? 1 : 0, id],
   );
-  const updated = await affectedOrExists(result.affectedRows, async () => {
-    const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT id FROM sfx WHERE id = ?`, [id]);
-    return rows.length > 0;
-  });
+  const updated = await affectedOrExists(result.affectedRows, () => rowExists(getPool(), 'sfx', 'id', id));
   if (updated) invalidateSfxLookupCache();
   return updated;
 }

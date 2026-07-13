@@ -16,6 +16,7 @@ import {
   normalizeRequiredText,
   normalizeSingleTokenRequiredText,
   parsePositiveIntId,
+  parseCheckboxField,
   renderError,
   filterQueryParam,
   renderView,
@@ -61,7 +62,7 @@ function validateAndNormalizeCounterForm(
   const normalizedCheckCommand = normalizeSingleTokenRequiredText(rawForm.check_command);
   const normalizedMessage = normalizeRequiredText(rawForm.message);
   const normalizedIncrementMessage = normalizeRequiredText(rawForm.increment_message);
-  const resetYearly = rawForm.reset_yearly === 'on';
+  const resetYearly = parseCheckboxField(rawForm.reset_yearly);
 
   if (!normalizedTriggerCommand || !normalizedCheckCommand || !normalizedMessage || !normalizedIncrementMessage) {
     return { error: 'missing_fields' };
