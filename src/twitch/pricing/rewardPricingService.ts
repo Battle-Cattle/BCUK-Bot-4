@@ -1,12 +1,13 @@
 import { createMutationQueue } from '../../shared/mutationQueue';
 import {
   getPricingForReward, recordPricingUpdate, recordPricingHistory, markPricingUnsupported, deletePricingConfig,
-  getPricingSettingsForStreamer, getStreamerById, type StreamerPricingSettings,
+  getPricingSettingsForStreamer, getStreamerById, type StreamerPricingSettings, type DbStreamerEventSub,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
 import { computePrice, decayDemand, applyRedemption, computeRedemptionIncrement } from './rewardPricingMath';
 import { createLogger } from '../../shared/logger';
+import { createRuntimeRegistry } from '../../commands/twitchRuntime';
 
 const log = createLogger('RewardPricing');
 
@@ -14,11 +15,11 @@ const log = createLogger('RewardPricing');
 interface RewardPricingRuntime {
   pushPricingUpdate: (streamerId: number, event: import('../../web/routes/channelPointsEvents').PricingUpdateEvent) => void;
 }
-let _runtime: RewardPricingRuntime | null = null;
+const runtimeRegistry = createRuntimeRegistry<RewardPricingRuntime>();
 
 /** Registers the live-pricing-update push hook. Call once from index.ts after startup. */
 export function registerRewardPricingRuntime(runtime: RewardPricingRuntime): void {
-  _runtime = runtime;
+  runtimeRegistry.register(runtime);
 }
 
 // Serializes read-modify-write cycles per reward, so a redemption and a concurrent
@@ -28,6 +29,27 @@ const pricingQueue = createMutationQueue<string>();
 
 function queueKey(streamerId: number, twitchRewardId: string): string {
   return `${streamerId}:${twitchRewardId}`;
+}
+
+/** A streamer paired with a currently-valid broadcaster token, as resolved by {@link resolveBroadcasterToken}. */
+interface ResolvedBroadcasterToken {
+  streamer: DbStreamerEventSub & { twitch_user_id: string };
+  token: string;
+}
+
+/**
+ * Looks up a streamer and their currently-valid broadcaster token together, since every
+ * reward-management call needs both. Shared by `pushRewardCostUpdate`, `resetAndDeletePricing`,
+ * and `deleteRewardAndPricing`.
+ * @param streamerId - DB row ID of the streamer.
+ * @returns The streamer (with `twitch_user_id` guaranteed non-null) and their valid token, or
+ *   null if the streamer doesn't exist, has no linked Twitch account, or has no usable token.
+ */
+async function resolveBroadcasterToken(streamerId: number): Promise<ResolvedBroadcasterToken | null> {
+  const streamer = await getStreamerById(streamerId);
+  const token = streamer ? await getValidToken(streamer) : null;
+  if (!streamer?.twitch_user_id || !token) return null;
+  return { streamer: streamer as DbStreamerEventSub & { twitch_user_id: string }, token };
 }
 
 // Caps how often a single reward's cost is actually pushed to Twitch, even if demand keeps
@@ -80,13 +102,12 @@ async function pushRewardCostUpdate(
     return { lastPushedCost: previousLastPushedCost, unsupported: false };
   }
   try {
-    const streamer = await getStreamerById(streamerId);
-    const token = streamer ? await getValidToken(streamer) : null;
-    if (!streamer?.twitch_user_id || !token) {
+    const resolved = await resolveBroadcasterToken(streamerId);
+    if (!resolved) {
       log.warn(`No valid broadcaster token for streamer ${streamerId} — skipping Twitch price push for reward ${twitchRewardId}`);
       return { lastPushedCost: previousLastPushedCost, unsupported: false };
     }
-    await updateRewardCost(streamer.twitch_user_id, twitchRewardId, newCost, token);
+    await updateRewardCost(resolved.streamer.twitch_user_id, twitchRewardId, newCost, resolved.token);
     lastPushedAt.set(key, Date.now());
     return { lastPushedCost: newCost, unsupported: false };
   } catch (err) {
@@ -166,7 +187,7 @@ async function syncRewardPrice(
   }
 
   try {
-    _runtime?.pushPricingUpdate(streamerId, { rewardId: twitchRewardId, cost: newCost, demand: newDemand, recordedAt: now });
+    runtimeRegistry.get()?.pushPricingUpdate(streamerId, { rewardId: twitchRewardId, cost: newCost, demand: newDemand, recordedAt: now });
   } catch (err) {
     log.warn(`Failed to push live price update for reward ${twitchRewardId}:`, err);
   }
@@ -216,10 +237,9 @@ export async function resetAndDeletePricing(streamerId: number, twitchRewardId: 
     if (!row) return;
     if (!row.twitch_unsupported) {
       try {
-        const streamer = await getStreamerById(streamerId);
-        const token = streamer ? await getValidToken(streamer) : null;
-        if (streamer?.twitch_user_id && token) {
-          await updateRewardCost(streamer.twitch_user_id, twitchRewardId, row.base_cost, token);
+        const resolved = await resolveBroadcasterToken(streamerId);
+        if (resolved) {
+          await updateRewardCost(resolved.streamer.twitch_user_id, twitchRewardId, row.base_cost, resolved.token);
         }
       } catch (err) {
         log.warn(`Failed to reset Twitch reward cost before deleting pricing config for reward ${twitchRewardId}:`, err);
@@ -245,12 +265,11 @@ export async function resetAndDeletePricing(streamerId: number, twitchRewardId: 
  */
 export async function deleteRewardAndPricing(streamerId: number, twitchRewardId: string): Promise<void> {
   await pricingQueue.run(queueKey(streamerId, twitchRewardId), async () => {
-    const streamer = await getStreamerById(streamerId);
-    const token = streamer ? await getValidToken(streamer) : null;
-    if (!streamer?.twitch_user_id || !token) {
+    const resolved = await resolveBroadcasterToken(streamerId);
+    if (!resolved) {
       throw new Error(`No valid broadcaster token for streamer ${streamerId} — cannot delete reward ${twitchRewardId}`);
     }
-    await deleteCustomReward(streamer.twitch_user_id, twitchRewardId, token);
+    await deleteCustomReward(resolved.streamer.twitch_user_id, twitchRewardId, resolved.token);
 
     const row = await getPricingForReward(streamerId, twitchRewardId);
     if (row) await deletePricingConfig(row.id, streamerId);

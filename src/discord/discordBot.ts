@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits, Guild } from 'discord.js';
 import { DISCORD_TOKEN } from '../shared/config';
 import { handleCommand, forgetGuildCommandState } from '../commands/commandRouter';
+import { fireAndForget } from '../commands/commandUtils';
 import { executeCustomCommandForDiscord } from '../commands/customCommandHandler';
 import { executeCounterCommandForDiscord } from '../commands/counterHandler';
 import { setDiscordReady, clearVoiceStatus } from '../shared/statusStore';
@@ -124,17 +125,9 @@ export function startDiscordBot(): void {
     const displayName = message.member?.displayName ?? message.author.username;
     const guildId = message.guildId;
 
-    executeCustomCommandForDiscord(message, displayName, guildId).catch((err) =>
-      log.error('Custom command error:', err),
-    );
-
-    executeCounterCommandForDiscord(message, displayName).catch((err) =>
-      log.error('Counter command error:', err),
-    );
-
-    handleCommand(message.content, 'discord', guildId).catch((err) =>
-      log.error('Command handler error:', err),
-    );
+    fireAndForget(executeCustomCommandForDiscord(message, displayName, guildId), 'Custom command error', log);
+    fireAndForget(executeCounterCommandForDiscord(message, displayName), 'Counter command error', log);
+    fireAndForget(handleCommand(message.content, 'discord', guildId), 'Command handler error', log);
   });
 
   // Bootstrap: when the bot is added to a server for the first time, record the

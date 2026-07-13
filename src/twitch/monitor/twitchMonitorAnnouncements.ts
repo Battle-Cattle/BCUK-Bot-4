@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { TextChannel } from 'discord.js';
+import { TextChannel, EmbedBuilder } from 'discord.js';
 
 const log = createLogger('TwitchMonitor');
 import { getDiscordClient } from '../../discord/discordBot';
@@ -58,6 +58,21 @@ export async function postAnnouncement(
 }
 
 /**
+ * Sends a fresh announcement message and records its location on `state`. Shared by
+ * `editAnnouncement`'s delete-and-repost and edit-fallback-repost branches.
+ * @param textChannel - Discord channel to post into.
+ * @param content - Rendered message content.
+ * @param embed - Rendered stream embed.
+ * @param state - Live state to update with the new message's id/channel.
+ * @returns Resolves once the message is sent and `state` is updated.
+ */
+async function repost(textChannel: TextChannel, content: string, embed: EmbedBuilder, state: LiveState): Promise<void> {
+  const msg = await textChannel.send({ content, embeds: [embed] });
+  state.messageId = msg.id;
+  state.channelId = msg.channelId;
+}
+
+/**
  * Updates an existing "now live" announcement to reflect a new game/title.
  * Delete+repost (when the group has `delete_old_posts` enabled) is reserved
  * for actual game changes (`templateKey === 'new_game_message'`) — title-only
@@ -99,20 +114,18 @@ export async function editAnnouncement(
     const textChannel = channel as TextChannel;
 
     if (group.delete_old_posts && templateKey === 'new_game_message') {
-      const msg = await textChannel.send({ content, embeds: [embed] });
+      const staleMessageId = state.messageId;
+      const staleChannelId = state.channelId;
+      await repost(textChannel, content, embed, state);
       try {
-        await tryDeleteDiscordMessage(state.channelId, state.messageId);
+        await tryDeleteDiscordMessage(staleChannelId, staleMessageId);
       } catch (err) {
         log.error(`Failed to delete old announcement for ${state.login}, continuing:`, err);
       }
-      state.messageId = msg.id;
-      state.channelId = msg.channelId;
     } else {
       const edited = await tryEditDiscordMessage(discordClient, state.channelId, state.messageId, { content, embeds: [embed] });
       if (!edited) {
-        const msg = await textChannel.send({ content, embeds: [embed] });
-        state.messageId = msg.id;
-        state.channelId = msg.channelId;
+        await repost(textChannel, content, embed, state);
       }
     }
 

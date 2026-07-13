@@ -14,18 +14,18 @@ export interface TwitchBroadcastRuntime extends TwitchSendRuntime {
 }
 
 /**
- * Creates a private module-level singleton slot for a Twitch command runtime of
- * type `T`, along with `register`/`get` accessors. Factors out the
+ * Creates a private module-level singleton slot for an injected runtime of type
+ * `T`, along with `register`/`get` accessors. Factors out the
  * `let _runtime: T | null = null; registerXRuntime(); getXRuntime()` boilerplate
- * that each command handler (countdown, counter, shoutout, custom command,
- * multi-command) previously duplicated for its own runtime shape — handlers with
- * extra fields (e.g. `getActiveChannels`/`getLoginUserIds`) just parameterize `T`
- * with their richer interface.
+ * that command handlers (countdown, counter, shoutout, custom command,
+ * multi-command) and other runtime-injection sites (EventSub overlay/companion/chat
+ * push, reward pricing) previously duplicated for their own runtime shape — any
+ * plain runtime interface can parameterize `T`, not just ones with a `send` method.
  *
  * @returns `register(runtime)` to store the runtime, and `get()` to retrieve the
  *   currently registered runtime, or null if none has been registered yet.
  */
-export function createRuntimeRegistry<T extends TwitchSendRuntime>(): {
+export function createRuntimeRegistry<T>(): {
   register: (runtime: T) => void;
   get: () => T | null;
 } {

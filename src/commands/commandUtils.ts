@@ -1,3 +1,21 @@
+/** Minimal logger contract accepted by {@link fireAndForget} — matches `shared/logger`'s `createLogger()` return shape. */
+interface ErrorLogger {
+  error: (message: string, err: unknown) => void;
+}
+
+/**
+ * Runs `promise` without awaiting it, logging (rather than throwing) if it rejects. Used so
+ * one command handler's failure can't block or delay independent handlers dispatched
+ * alongside it (e.g. Twitch/Discord message handling firing several handlers per message).
+ *
+ * @param promise - The in-flight promise to observe.
+ * @param context - Log-line prefix identifying which handler the promise belongs to.
+ * @param log - Logger to report the rejection to, so the log line keeps the caller's module tag.
+ */
+export function fireAndForget(promise: Promise<void>, context: string, log: ErrorLogger): void {
+  promise.catch((err) => log.error(`${context}:`, err));
+}
+
 /**
  * Extracts the command token from a raw message: the first whitespace-delimited
  * token, lowercased. Leading/trailing whitespace is trimmed before splitting.

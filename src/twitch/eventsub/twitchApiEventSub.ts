@@ -47,38 +47,38 @@ export interface OAuthTokens {
   expires_in?: number;
 }
 
-export async function exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
+/**
+ * POSTs a form-encoded request to Twitch's OAuth token endpoint and returns the parsed tokens.
+ * Shared by `exchangeCode` and `refreshUserToken`, which only differ in the grant-type-specific
+ * params they send — `client_id`/`client_secret` are added here for both.
+ * @param grantParams - Grant-type-specific form params (e.g. `code`/`redirect_uri`, or `refresh_token`).
+ * @param label - Human-readable label used in the thrown error message on failure.
+ * @returns The parsed OAuth tokens.
+ * @throws {TwitchAuthError} If Twitch returns 400 or 401 (invalid/expired code or refresh token).
+ * @throws If Twitch returns any other non-OK status.
+ */
+async function postTokenRequest(grantParams: Record<string, string>, label: string): Promise<OAuthTokens> {
   const body = new URLSearchParams({
     client_id: TWITCH_CLIENT_ID,
     client_secret: TWITCH_CLIENT_SECRET,
-    code,
-    grant_type: 'authorization_code',
-    redirect_uri: redirectUri,
+    ...grantParams,
   });
   const res = await twitchFetch('https://id.twitch.tv/oauth2/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
   });
-  if (!res.ok) throw new Error(`[TwitchAPI] exchangeCode failed: ${res.status}`);
+  if (res.status === 400 || res.status === 401) throw new TwitchAuthError(`[TwitchAPI] ${label}: invalid/expired credentials (${res.status})`);
+  if (!res.ok) throw new Error(`[TwitchAPI] ${label} failed: ${res.status}`);
   return res.json() as Promise<OAuthTokens>;
 }
 
+export async function exchangeCode(code: string, redirectUri: string): Promise<OAuthTokens> {
+  return postTokenRequest({ code, grant_type: 'authorization_code', redirect_uri: redirectUri }, 'exchangeCode');
+}
+
 export async function refreshUserToken(refreshToken: string): Promise<OAuthTokens> {
-  const body = new URLSearchParams({
-    client_id: TWITCH_CLIENT_ID,
-    client_secret: TWITCH_CLIENT_SECRET,
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-  });
-  const res = await twitchFetch('https://id.twitch.tv/oauth2/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
-  if (res.status === 400 || res.status === 401) throw new TwitchAuthError(`[TwitchAPI] refreshUserToken: invalid/expired credentials (${res.status})`);
-  if (!res.ok) throw new Error(`[TwitchAPI] refreshUserToken failed: ${res.status}`);
-  return res.json() as Promise<OAuthTokens>;
+  return postTokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken }, 'refreshUserToken');
 }
 
 /** Validates a user access token and returns the owning user's ID and login, or null if invalid. */
