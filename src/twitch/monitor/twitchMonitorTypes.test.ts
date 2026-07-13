@@ -153,15 +153,30 @@ describe('LiveStateMap', () => {
     expect(map.has('10')).toBe(false);
   });
 
-  it('delete does not clear a login index entry that now points at a different key', () => {
-    // Reproduces the case where login "alice" moved from key "10" to key "11" (a streamer
-    // re-registering under a new DB row id) before the stale key "10" is cleaned up.
+  it('set() evicts a stale entry under a different key when the same login moves without delete()', () => {
+    // A login moving from key "10" to key "11" (a streamer re-registering under a new DB
+    // row id) without an intervening delete("10") must not leave two Map entries for the
+    // same login.
+    const map = new LiveStateMap();
+    const first = makeState({ login: 'alice' });
+    const second = makeState({ login: 'alice' });
+    map.set('10', first);
+    map.set('11', second);
+
+    expect(map.has('10')).toBe(false);
+    expect(map.get('11')).toBe(second);
+    expect(map.getByLogin('alice')).toBe(second);
+    expect(map.size).toBe(1);
+  });
+
+  it('delete on a key already evicted by a later set() is a harmless no-op', () => {
     const map = new LiveStateMap();
     map.set('10', makeState({ login: 'alice' }));
-    map.set('11', makeState({ login: 'alice' }));
+    map.set('11', makeState({ login: 'alice' })); // evicts key "10" already
     map.delete('10');
 
     expect(map.getByLogin('alice')).toBe(map.get('11'));
+    expect(map.size).toBe(1);
   });
 
   it('clear empties both the map and the login index', () => {
