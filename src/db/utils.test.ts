@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fromBit, affectedOrExists } from './utils';
+import { fromBit, affectedOrExists, rowExists, hashesMatch } from './utils';
 
 describe('fromBit', () => {
   it('returns true for Buffer with first byte 1', () => {
@@ -50,5 +50,57 @@ describe('affectedOrExists', () => {
     const existsCheck = vi.fn().mockResolvedValue(false);
     const result = await affectedOrExists(0, existsCheck);
     expect(result).toBe(false);
+  });
+});
+
+describe('rowExists', () => {
+  it('returns true when the query returns a row', async () => {
+    const executor = { execute: vi.fn().mockResolvedValue([[{ '1': 1 }], []]) };
+    const result = await rowExists(executor as any, 'counter', 'id', 5);
+    expect(result).toBe(true);
+  });
+
+  it('returns false when the query returns no rows', async () => {
+    const executor = { execute: vi.fn().mockResolvedValue([[], []]) };
+    const result = await rowExists(executor as any, 'counter', 'id', 5);
+    expect(result).toBe(false);
+  });
+
+  it('builds SQL from the given table/column and passes value as the only param', async () => {
+    const executor = { execute: vi.fn().mockResolvedValue([[], []]) };
+    await rowExists(executor as any, 'custom_command', 'command_id', 42);
+    const [sql, params] = executor.execute.mock.calls[0];
+    expect(sql).toBe('SELECT 1 FROM custom_command WHERE command_id = ? LIMIT 1');
+    expect(params).toEqual([42]);
+  });
+
+  it('accepts a string value (e.g. a BIGINT id passed as a string)', async () => {
+    const executor = { execute: vi.fn().mockResolvedValue([[{ '1': 1 }], []]) };
+    const result = await rowExists(executor as any, 'sfxtrigger', 'id', '123456789012345');
+    expect(result).toBe(true);
+    expect(executor.execute.mock.calls[0][1]).toEqual(['123456789012345']);
+  });
+});
+
+describe('hashesMatch', () => {
+  it('returns true for identical hex hashes', () => {
+    const hash = 'a'.repeat(64);
+    expect(hashesMatch(hash, hash)).toBe(true);
+  });
+
+  it('returns false for hashes that differ', () => {
+    expect(hashesMatch('a'.repeat(64), 'b'.repeat(64))).toBe(false);
+  });
+
+  it('returns true when only hex casing differs — both decode to the same bytes, so a row matched loosely by a case-insensitive column collation still validates correctly', () => {
+    expect(hashesMatch('ABCDEF'.repeat(4), 'abcdef'.repeat(4))).toBe(true);
+  });
+
+  it('returns false for genuinely different bytes even if hex-decodable and same length', () => {
+    expect(hashesMatch('aa'.repeat(32), 'ab'.repeat(32))).toBe(false);
+  });
+
+  it('returns false for hashes of different lengths without throwing', () => {
+    expect(hashesMatch('ab', 'abcd')).toBe(false);
   });
 });

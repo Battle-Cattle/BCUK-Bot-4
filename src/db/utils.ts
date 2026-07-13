@@ -30,11 +30,14 @@ export async function rowExists(
 }
 
 /**
- * Timing-safe-compares a stored hex-encoded hash against an incoming one, guarding against
- * a case-insensitive column collation matching hashes that differ only by case.
+ * Timing-safe-compares a stored hex-encoded hash against an incoming one by decoding both to
+ * bytes first. Byte-decoding (rather than a plain string compare) means a lookup row matched
+ * loosely by the hash column's case-insensitive collation is still validated correctly — the
+ * hex casing doesn't affect the underlying bytes — while anything that only matched due to
+ * some other collation quirk, but decodes to genuinely different bytes, is still rejected.
  * @param storedHex Hex-encoded hash value read from the database.
  * @param incomingHex Hex-encoded hash computed from the caller-supplied secret.
- * @returns True if the two hashes match exactly, including case.
+ * @returns True if the two hashes decode to the same bytes.
  */
 export function hashesMatch(storedHex: string, incomingHex: string): boolean {
   const stored = Buffer.from(storedHex, 'hex');
