@@ -17,6 +17,7 @@ vi.mock('../../db', () => {
     updateCustomCommand: vi.fn().mockResolvedValue(undefined),
     removeCustomCommand: vi.fn().mockResolvedValue(undefined),
     assignUserToCommand: vi.fn().mockResolvedValue(undefined),
+    assignUsersToCommand: vi.fn().mockResolvedValue(undefined),
     unassignUserFromCommand: vi.fn().mockResolvedValue(undefined),
     findUser: vi.fn().mockResolvedValue(null),
     findUsersByIds: vi.fn().mockResolvedValue(new Map()),
@@ -58,6 +59,7 @@ import {
   updateCustomCommand,
   removeCustomCommand,
   assignUserToCommand,
+  assignUsersToCommand,
   unassignUserFromCommand,
   findUser,
   findUsersByIds,
@@ -91,6 +93,7 @@ beforeEach(() => {
   vi.mocked(updateCustomCommand).mockResolvedValue(undefined);
   vi.mocked(removeCustomCommand).mockResolvedValue(undefined);
   vi.mocked(assignUserToCommand).mockResolvedValue(undefined);
+  vi.mocked(assignUsersToCommand).mockResolvedValue(undefined);
   vi.mocked(unassignUserFromCommand).mockResolvedValue(undefined);
   vi.mocked(findUser).mockResolvedValue(null);
   vi.mocked(findUsersByIds).mockResolvedValue(new Map());
@@ -166,10 +169,10 @@ describe('POST /commands/add', () => {
       .send({ trigger_string: '!hello', output: 'Hello!', discord_ids: '123456789012345678' });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/commands');
-    expect(vi.mocked(assignUserToCommand)).not.toHaveBeenCalled();
+    expect(vi.mocked(assignUsersToCommand)).toHaveBeenCalledWith(1, []);
   });
 
-  it('8. calls assignUserToCommand and redirects /commands when user has twitch_name', async () => {
+  it('8. calls assignUsersToCommand and redirects /commands when user has twitch_name', async () => {
     vi.mocked(findUsersByIds).mockResolvedValue(new Map([
       ['123456789012345678', { discord_id: '123456789012345678', twitch_name: 'streamer' } as any],
     ]));
@@ -179,7 +182,7 @@ describe('POST /commands/add', () => {
       .send({ trigger_string: '!hello', output: 'Hello!', discord_ids: '123456789012345678' });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/commands');
-    expect(vi.mocked(assignUserToCommand)).toHaveBeenCalledWith(1, '123456789012345678');
+    expect(vi.mocked(assignUsersToCommand)).toHaveBeenCalledWith(1, ['123456789012345678']);
   });
 });
 
@@ -402,11 +405,11 @@ describe('POST /commands/add — additional coverage', () => {
     expect(res.headers.location).toBe('/commands?error=add_failed');
   });
 
-  it('28. redirects ?error=command_taken when assignUserToCommand throws CommandConflictError during add', async () => {
+  it('28. redirects ?error=command_taken when assignUsersToCommand throws CommandConflictError during add', async () => {
     vi.mocked(findUsersByIds).mockResolvedValue(new Map([
       ['123456789012345678', { discord_id: '123456789012345678', twitch_name: 'streamer' } as any],
     ]));
-    vi.mocked(assignUserToCommand).mockRejectedValue(new CommandConflictError(['conflict']));
+    vi.mocked(assignUsersToCommand).mockRejectedValue(new CommandConflictError(['conflict']));
     const res = await supertest(buildApp())
       .post('/commands/add')
       .type('form')
@@ -415,11 +418,11 @@ describe('POST /commands/add — additional coverage', () => {
     expect(res.headers.location).toBe('/commands?error=command_taken');
   });
 
-  it('29. redirects ?error=assign_failed when assignUserToCommand throws generic error during add', async () => {
+  it('29. redirects ?error=assign_failed when assignUsersToCommand throws generic error during add', async () => {
     vi.mocked(findUsersByIds).mockResolvedValue(new Map([
       ['123456789012345678', { discord_id: '123456789012345678', twitch_name: 'streamer' } as any],
     ]));
-    vi.mocked(assignUserToCommand).mockRejectedValue(new Error('db error'));
+    vi.mocked(assignUsersToCommand).mockRejectedValue(new Error('db error'));
     const res = await supertest(buildApp())
       .post('/commands/add')
       .type('form')
@@ -626,6 +629,6 @@ describe('POST /commands/add — array discord_ids', () => {
       .send('trigger_string=!hello&output=Hello!&discord_ids=111111111111111111&discord_ids=222222222222222222');
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/commands');
-    expect(vi.mocked(assignUserToCommand)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(assignUsersToCommand)).toHaveBeenCalledWith(1, ['111111111111111111', '222222222222222222']);
   });
 });

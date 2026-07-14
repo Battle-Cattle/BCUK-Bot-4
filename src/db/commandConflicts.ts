@@ -3,7 +3,7 @@ import mysql from 'mysql2/promise';
 
 const log = createLogger('DB');
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
-import { type SqlExecutor, CommandConflictError, normalizeCommand } from './commandStringUtils';
+import { type SqlExecutor, CommandConflictError, normalizeCommand, buildInClausePlaceholders } from './commandStringUtils';
 import {
   acquireNamedLock,
   releaseNamedLock,
@@ -193,7 +193,7 @@ export async function getCommandTriggerStringById(executor: SqlExecutor, command
   return normalizeCommand(String(commandRows[0].trigger_string)) ?? '';
 }
 
-interface UserTwitchEligibility {
+export interface UserTwitchEligibility {
   normalizedTwitchName: string | null;
   isTwitchBotEnabled: boolean;
 }
@@ -220,6 +220,36 @@ export async function getUserTwitchEligibility(executor: SqlExecutor, discordId:
     normalizedTwitchName: twitchName ? normalizeTwitchChannelName(twitchName) : null,
     isTwitchBotEnabled: fromBit(userRows[0].is_twitch_bot_enabled),
   };
+}
+
+/**
+ * Looks up multiple users' normalized Twitch channel names and Twitch-bot-enabled flags in one
+ * query, used by the batch assignment path to avoid a per-user round trip.
+ * @param executor Pool or transaction connection to query with.
+ * @param discordIds Discord snowflakes of the users to look up.
+ * @returns A map from `discordId` to its eligibility. `discordId`s with no matching user are omitted.
+ */
+export async function getUserTwitchEligibilityBatch(
+  executor: SqlExecutor,
+  discordIds: string[],
+): Promise<Map<string, UserTwitchEligibility>> {
+  const result = new Map<string, UserTwitchEligibility>();
+  if (discordIds.length === 0) return result;
+
+  const [userRows] = await executor.execute<mysql.RowDataPacket[]>(
+    `SELECT discord_id, twitch_name, is_twitch_bot_enabled FROM \`user\` WHERE discord_id IN (${buildInClausePlaceholders(discordIds.length)})`,
+    discordIds,
+  );
+
+  for (const row of userRows) {
+    const twitchName = row.twitch_name ? String(row.twitch_name) : null;
+    result.set(String(row.discord_id), {
+      normalizedTwitchName: twitchName ? normalizeTwitchChannelName(twitchName) : null,
+      isTwitchBotEnabled: fromBit(row.is_twitch_bot_enabled),
+    });
+  }
+
+  return result;
 }
 
 /**
@@ -323,13 +353,13 @@ export async function assignUserToCommandWithinTransaction(
       await connection.beginTransaction();
       try {
         const normalizedTriggerString = await getCommandTriggerStringById(connection, commandId);
+        const userEligibility = await getUserTwitchEligibility(connection, discordId);
 
         if (!lockNameByTrigger) {
           lockNameByTrigger = getCommandWriteLockName(normalizedTriggerString);
           await acquireNamedLock(connection, lockNameByTrigger);
         }
 
-        const userEligibility = await getUserTwitchEligibility(connection, discordId);
         if (userEligibility.normalizedTwitchName && userEligibility.isTwitchBotEnabled) {
           await assertNoTwitchChannelTriggerConflict(
             connection,
@@ -353,6 +383,139 @@ export async function assignUserToCommandWithinTransaction(
     }
 
     throw new Error('[DB] Deadlock retry limit reached in assignUserToCommandWithinTransaction.');
+  } finally {
+    if (lockNameByTrigger) {
+      try { await releaseNamedLock(connection, lockNameByTrigger); } catch (err) { log.warn('Failed to release named lock:', err); }
+    }
+  }
+}
+
+/**
+ * Inserts (or no-ops if already present) assignments linking multiple Discord users to a custom
+ * command for single-Twitch triggering, in one multi-row upsert.
+ * @param executor Pool or transaction connection to query with.
+ * @param commandId Command id being assigned.
+ * @param discordIds Discord snowflakes of the users being assigned.
+ */
+export async function insertUserCommandAssignments(
+  executor: SqlExecutor,
+  commandId: number,
+  discordIds: string[],
+): Promise<void> {
+  if (discordIds.length === 0) return;
+
+  const placeholders = discordIds.map(() => '(?, ?)').join(', ');
+  const params = discordIds.flatMap((discordId) => [commandId, discordId]);
+  await executor.execute(
+    `INSERT INTO twitch_user_commands (command_id, discord_id)
+     VALUES ${placeholders} AS new_row
+     ON DUPLICATE KEY UPDATE
+       command_id = new_row.command_id`,
+    params,
+  );
+}
+
+/**
+ * Throws if `discordId` has no matching eligibility entry, or if it's eligible for a
+ * Twitch-channel conflict check and that check finds one.
+ * @param connection Transaction-capable pool connection to query with.
+ * @param commandId Command id being assigned.
+ * @param discordId Discord snowflake of the user being checked.
+ * @param normalizedTriggerString Normalized trigger string being assigned.
+ * @param eligibilityByDiscordId Batch-fetched eligibility, keyed by `discordId`.
+ * @throws {CommandConflictError} If the user's Twitch channel would create a trigger conflict.
+ * @throws If `discordId` has no matching entry in `eligibilityByDiscordId`.
+ */
+async function assertUserAssignable(
+  connection: mysql.PoolConnection,
+  commandId: number,
+  discordId: string,
+  normalizedTriggerString: string,
+  eligibilityByDiscordId: Map<string, UserTwitchEligibility>,
+): Promise<void> {
+  const eligibility = eligibilityByDiscordId.get(discordId);
+  if (!eligibility) {
+    throw new Error(`User not found: ${discordId}`);
+  }
+  if (eligibility.normalizedTwitchName && eligibility.isTwitchBotEnabled) {
+    await assertNoTwitchChannelTriggerConflict(connection, commandId, normalizedTriggerString, eligibility.normalizedTwitchName);
+  }
+}
+
+/**
+ * Runs {@link assertUserAssignable} for every `discordId`, in order. A single MySQL connection
+ * only ever has one command in flight (mysql2 queues, rather than pipelines, queries issued
+ * without awaiting the previous one), so these checks are issued sequentially rather than via
+ * `Promise.all` — that would add complexity without reducing round trips.
+ * @param connection Transaction-capable pool connection to query with.
+ * @param commandId Command id being assigned.
+ * @param discordIds Discord snowflakes of the users being checked.
+ * @param normalizedTriggerString Normalized trigger string being assigned.
+ * @param eligibilityByDiscordId Batch-fetched eligibility, keyed by `discordId`.
+ * @throws {CommandConflictError} If any user's Twitch channel would create a trigger conflict.
+ * @throws If any `discordId` has no matching entry in `eligibilityByDiscordId`.
+ */
+async function assertAllUsersAssignable(
+  connection: mysql.PoolConnection,
+  commandId: number,
+  discordIds: string[],
+  normalizedTriggerString: string,
+  eligibilityByDiscordId: Map<string, UserTwitchEligibility>,
+): Promise<void> {
+  for (const discordId of discordIds) {
+    await assertUserAssignable(connection, commandId, discordId, normalizedTriggerString, eligibilityByDiscordId);
+  }
+}
+
+/**
+ * Assigns multiple Discord users to a custom command for single-Twitch triggering in a single
+ * transaction guarded by a named lock on the command's trigger string, mirroring
+ * {@link assignUserToCommandWithinTransaction} but batching the eligibility lookup, conflict
+ * checks, and insert across all users instead of paying a lock/transaction/round-trip per user.
+ * Retries on deadlock up to `MAX_DEADLOCK_RETRIES` times, re-acquiring the transaction each attempt
+ * while holding the same session-scoped lock across attempts.
+ * @param connection Transaction-capable pool connection to run the work on.
+ * @param commandId Command id being assigned.
+ * @param discordIds Discord snowflakes of the users being assigned.
+ * @throws {CommandConflictError} If any assignment would create a Twitch-channel trigger conflict.
+ * @throws If a `discordId` has no matching user, or the deadlock retry limit is reached.
+ */
+export async function assignUsersToCommandWithinTransaction(
+  connection: mysql.PoolConnection,
+  commandId: number,
+  discordIds: string[],
+): Promise<void> {
+  if (discordIds.length === 0) return;
+
+  let lockNameByTrigger: string | null = null;
+
+  try {
+    for (let attempt = 0; attempt < MAX_DEADLOCK_RETRIES; attempt++) {
+      await connection.beginTransaction();
+      try {
+        const normalizedTriggerString = await getCommandTriggerStringById(connection, commandId);
+        const eligibilityByDiscordId = await getUserTwitchEligibilityBatch(connection, discordIds);
+
+        if (!lockNameByTrigger) {
+          lockNameByTrigger = getCommandWriteLockName(normalizedTriggerString);
+          await acquireNamedLock(connection, lockNameByTrigger);
+        }
+
+        await assertAllUsersAssignable(connection, commandId, discordIds, normalizedTriggerString, eligibilityByDiscordId);
+        await insertUserCommandAssignments(connection, commandId, discordIds);
+        await connection.commit();
+        return;
+      } catch (error) {
+        await connection.rollback();
+        if (isDeadlockError(error) && attempt < MAX_DEADLOCK_RETRIES - 1) {
+          log.warn(`Deadlock in assignUsersToCommand, retrying (attempt ${attempt + 1}/${MAX_DEADLOCK_RETRIES}).`);
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw new Error('[DB] Deadlock retry limit reached in assignUsersToCommandWithinTransaction.');
   } finally {
     if (lockNameByTrigger) {
       try { await releaseNamedLock(connection, lockNameByTrigger); } catch (err) { log.warn('Failed to release named lock:', err); }

@@ -194,18 +194,24 @@ export async function setRewardVideos(
         throw new RewardNotFound();
       }
       await conn.execute(`DELETE FROM overlay_reward_video WHERE reward_id = ?`, [rewardId]);
-      for (const v of videos) {
-        const [insert] = await conn.execute<mysql.ResultSetHeader>(
-          `INSERT INTO overlay_reward_video (reward_id, video_id, weight)
-           SELECT ?, ov.id, ?
-           FROM overlay_video ov
-           WHERE ov.id = ? AND ov.streamer_id = ?`,
-          [rewardId, Math.max(1, v.weight), v.videoId, streamerId],
-        );
-        if (insert.affectedRows !== 1) {
-          throw new Error(`Video ${v.videoId} does not belong to streamer ${streamerId}`);
-        }
+      if (videos.length === 0) return;
+
+      const [ownedRows] = await conn.execute<mysql.RowDataPacket[]>(
+        `SELECT id FROM overlay_video WHERE streamer_id = ? AND id IN (${videos.map(() => '?').join(', ')})`,
+        [streamerId, ...videos.map((v) => v.videoId)],
+      );
+      const ownedIds = new Set<number>(ownedRows.map((r) => r.id));
+      const invalid = videos.find((v) => !ownedIds.has(v.videoId));
+      if (invalid) {
+        throw new Error(`Video ${invalid.videoId} does not belong to streamer ${streamerId}`);
       }
+
+      const placeholders = videos.map(() => '(?, ?, ?)').join(', ');
+      const params = videos.flatMap((v) => [rewardId, v.videoId, Math.max(1, v.weight)]);
+      await conn.execute(
+        `INSERT INTO overlay_reward_video (reward_id, video_id, weight) VALUES ${placeholders}`,
+        params,
+      );
     });
   } catch (err) {
     if (err instanceof RewardNotFound) return;

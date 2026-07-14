@@ -26,6 +26,7 @@ vi.mock('./commandStringUtils', () => ({
     const normalized = command.trim().toLowerCase();
     return normalized.length > 0 ? normalized : null;
   }),
+  buildInClausePlaceholders: vi.fn((count: number) => Array(count).fill('?').join(', ')),
 }));
 
 import {
@@ -35,8 +36,11 @@ import {
   assertNoTwitchChannelTriggerConflict,
   getCommandTriggerStringById,
   getUserTwitchEligibility,
+  getUserTwitchEligibilityBatch,
   insertUserCommandAssignment,
+  insertUserCommandAssignments,
   assignUserToCommandWithinTransaction,
+  assignUsersToCommandWithinTransaction,
 } from './commandConflicts';
 import { CommandConflictError } from './commandStringUtils';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
@@ -360,6 +364,7 @@ describe('assignUserToCommandWithinTransaction', () => {
   it('still releases the lock in the finally block when acquiring it failed', async () => {
     const connection = makeConnection([
       [{ trigger_string: '!clap' }],
+      [{ twitch_name: null, is_twitch_bot_enabled: 0 }],
     ]);
     vi.mocked(acquireNamedLock).mockRejectedValueOnce(new Error('lock timeout'));
 
@@ -377,5 +382,175 @@ describe('assignUserToCommandWithinTransaction', () => {
     vi.mocked(releaseNamedLock).mockRejectedValueOnce(new Error('release failed'));
 
     await expect(assignUserToCommandWithinTransaction(connection, 1, 'user1')).resolves.toBeUndefined();
+  });
+
+});
+
+// ─── getUserTwitchEligibilityBatch ─────────────────────────────────────────────
+
+describe('getUserTwitchEligibilityBatch', () => {
+  it('returns an empty map without querying when discordIds is empty', async () => {
+    const exec = makeExecutor();
+    const result = await getUserTwitchEligibilityBatch(exec, []);
+    expect(result.size).toBe(0);
+    expect(exec.execute).not.toHaveBeenCalled();
+  });
+
+  it('maps each returned row by discord_id, normalizing twitch_name', async () => {
+    vi.mocked(normalizeTwitchChannelName).mockImplementation((s: string) => s.toLowerCase());
+    const exec = makeExecutor([
+      { discord_id: 'user1', twitch_name: 'Alice', is_twitch_bot_enabled: 1 },
+      { discord_id: 'user2', twitch_name: null, is_twitch_bot_enabled: 0 },
+    ]);
+    const result = await getUserTwitchEligibilityBatch(exec, ['user1', 'user2']);
+    expect(result.get('user1')).toEqual({ normalizedTwitchName: 'alice', isTwitchBotEnabled: true });
+    expect(result.get('user2')).toEqual({ normalizedTwitchName: null, isTwitchBotEnabled: false });
+  });
+
+  it('omits discordIds with no matching row', async () => {
+    const exec = makeExecutor([{ discord_id: 'user1', twitch_name: null, is_twitch_bot_enabled: 0 }]);
+    const result = await getUserTwitchEligibilityBatch(exec, ['user1', 'missing']);
+    expect(result.has('missing')).toBe(false);
+    expect(result.size).toBe(1);
+  });
+
+  it('queries with a single IN clause covering all discordIds', async () => {
+    const exec = makeExecutor([]);
+    await getUserTwitchEligibilityBatch(exec, ['a', 'b', 'c']);
+    expect(exec.execute).toHaveBeenCalledOnce();
+    const [sql, params] = exec.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('IN (?, ?, ?)');
+    expect(params).toEqual(['a', 'b', 'c']);
+  });
+});
+
+// ─── insertUserCommandAssignments ──────────────────────────────────────────────
+
+describe('insertUserCommandAssignments', () => {
+  it('does not query when discordIds is empty', async () => {
+    const exec = makeExecutor();
+    await insertUserCommandAssignments(exec, 5, []);
+    expect(exec.execute).not.toHaveBeenCalled();
+  });
+
+  it('issues a single multi-row INSERT covering all discordIds', async () => {
+    const exec = makeExecutor();
+    await insertUserCommandAssignments(exec, 5, ['user1', 'user2', 'user3']);
+    expect(exec.execute).toHaveBeenCalledOnce();
+    const [sql, params] = exec.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('INSERT INTO twitch_user_commands');
+    expect(sql).toContain('AS new_row');
+    expect(params).toEqual([5, 'user1', 5, 'user2', 5, 'user3']);
+  });
+});
+
+// ─── assignUsersToCommandWithinTransaction ─────────────────────────────────────
+
+describe('assignUsersToCommandWithinTransaction', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function makeConnection(executeResults: unknown[][]): any {
+    const execute = vi.fn();
+    for (const result of executeResults) {
+      execute.mockResolvedValueOnce([result, []]);
+    }
+    return {
+      execute,
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  it('no-ops without opening a transaction when discordIds is empty', async () => {
+    const connection = makeConnection([]);
+    await assignUsersToCommandWithinTransaction(connection, 1, []);
+    expect(connection.beginTransaction).not.toHaveBeenCalled();
+    expect(acquireNamedLock).not.toHaveBeenCalled();
+  });
+
+  it('acquires the lock once, inserts all users in one batch, and commits', async () => {
+    const connection = makeConnection([
+      [{ trigger_string: '!clap' }], // getCommandTriggerStringById
+      [
+        { discord_id: 'user1', twitch_name: null, is_twitch_bot_enabled: 0 },
+        { discord_id: 'user2', twitch_name: null, is_twitch_bot_enabled: 0 },
+      ], // getUserTwitchEligibilityBatch
+      [], // insertUserCommandAssignments
+    ]);
+
+    await assignUsersToCommandWithinTransaction(connection, 1, ['user1', 'user2']);
+
+    expect(connection.beginTransaction).toHaveBeenCalledOnce();
+    expect(connection.commit).toHaveBeenCalledOnce();
+    expect(connection.execute).toHaveBeenCalledTimes(3);
+    expect(acquireNamedLock).toHaveBeenCalledOnce();
+    expect(releaseNamedLock).toHaveBeenCalledOnce();
+  });
+
+  it('runs a channel trigger conflict check for each eligible user', async () => {
+    const connection = makeConnection([
+      [{ trigger_string: '!clap' }],
+      [
+        { discord_id: 'user1', twitch_name: 'alice', is_twitch_bot_enabled: 1 },
+        { discord_id: 'user2', twitch_name: 'bob', is_twitch_bot_enabled: 1 },
+      ],
+      [], // conflict check for user1
+      [], // conflict check for user2
+      [], // insert
+    ]);
+
+    await assignUsersToCommandWithinTransaction(connection, 1, ['user1', 'user2']);
+
+    expect(connection.commit).toHaveBeenCalledOnce();
+    expect(connection.execute).toHaveBeenCalledTimes(5);
+  });
+
+  it('rolls back and throws CommandConflictError when any eligible user has a channel conflict', async () => {
+    const connection = makeConnection([
+      [{ trigger_string: '!clap' }],
+      [{ discord_id: 'user1', twitch_name: 'alice', is_twitch_bot_enabled: 1 }],
+      [{ command_id: 99 }], // conflict row found
+    ]);
+
+    await expect(assignUsersToCommandWithinTransaction(connection, 1, ['user1'])).rejects.toBeInstanceOf(CommandConflictError);
+    expect(connection.rollback).toHaveBeenCalledOnce();
+    expect(connection.commit).not.toHaveBeenCalled();
+  });
+
+  it('rolls back and throws when a discordId has no matching user', async () => {
+    const connection = makeConnection([
+      [{ trigger_string: '!clap' }],
+      [], // no rows for either user — nobody found
+    ]);
+
+    await expect(assignUsersToCommandWithinTransaction(connection, 1, ['ghost'])).rejects.toThrow('User not found: ghost');
+    expect(connection.rollback).toHaveBeenCalledOnce();
+    expect(releaseNamedLock).toHaveBeenCalledOnce();
+  });
+
+  it('retries once on a deadlock and succeeds on the second attempt, acquiring the lock only once', async () => {
+    const deadlockErr = new Error('deadlock');
+    const triggerRow = [{ trigger_string: '!clap' }];
+    const eligibilityRows = [{ discord_id: 'user1', twitch_name: null, is_twitch_bot_enabled: 0 }];
+    const execute = vi.fn()
+      .mockResolvedValueOnce([triggerRow, []])
+      .mockResolvedValueOnce([eligibilityRows, []])
+      .mockRejectedValueOnce(deadlockErr) // attempt 1: insert fails
+      .mockResolvedValueOnce([triggerRow, []])
+      .mockResolvedValueOnce([eligibilityRows, []])
+      .mockResolvedValueOnce([[], []]); // attempt 2: insert succeeds
+    const connection = {
+      execute,
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.mocked(isDeadlockError).mockReturnValueOnce(true);
+
+    await assignUsersToCommandWithinTransaction(connection as any, 1, ['user1']);
+
+    expect(connection.beginTransaction).toHaveBeenCalledTimes(2);
+    expect(connection.commit).toHaveBeenCalledOnce();
+    expect(acquireNamedLock).toHaveBeenCalledOnce();
   });
 });

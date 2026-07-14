@@ -270,6 +270,29 @@ describe('executeCustomCommandForTwitch', () => {
     expect(mockRuntime.send).toHaveBeenCalledWith('#chan', 'args=[] arg=[]');
   });
 
+  it('only checks registration for channels in the active multi-twitch group, not every active channel', async () => {
+    // Source channel is #a; #b is in the group, #c is active but not in the group.
+    vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({
+      output: 'Multi!',
+      is_multi_twitch: true,
+    } as any);
+    vi.mocked(getMultiTwitchDataForChannel).mockReturnValue({
+      url: 'multitwitch.tv/a/b',
+      participants: ['#a', '#b'],
+    } as any);
+    mockRuntime.getActiveChannels.mockReturnValue(new Set(['#a', '#b', '#c']));
+
+    await executeCustomCommandForTwitch('#a', '!multi', null);
+
+    expect(mockRuntime.send).toHaveBeenCalledWith('#a', 'Multi!');
+    expect(mockRuntime.send).toHaveBeenCalledWith('#b', 'Multi!');
+    expect(mockRuntime.send).not.toHaveBeenCalledWith('#c', 'Multi!');
+    const checkedChannels = vi.mocked(getCustomCommandForTwitchChannel).mock.calls.map((call) => call[0]);
+    expect(checkedChannels).toContain('#a');
+    expect(checkedChannels).toContain('#b');
+    expect(checkedChannels).not.toContain('#c');
+  });
+
   it('reuses the same filled response for every channel in a multi-twitch broadcast', async () => {
     vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({
       output: '{user} said {args}',

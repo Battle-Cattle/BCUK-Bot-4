@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import {
   addCustomCommand,
-  assignUserToCommand,
+  assignUsersToCommand,
   CommandConflictError,
   CommandNotFoundError,
   isMysqlDuplicateEntryError,
@@ -34,11 +34,11 @@ const COMMAND_WRITE_ERROR_OPTIONS = { basePath: '/commands', conflictErrorCode: 
 async function assignUsersToNewCommand(commandId: number, discordIds: string[]): Promise<string | null> {
   try {
     const users = await findUsersByIds(discordIds);
-    for (const discordId of discordIds) {
+    const eligibleDiscordIds = discordIds.filter((discordId) => {
       const user = users.get(discordId);
-      if (!user || !user.twitch_name) continue;
-      await assignUserToCommand(commandId, discordId);
-    }
+      return !!user && !!user.twitch_name;
+    });
+    await assignUsersToCommand(commandId, eligibleDiscordIds);
   } catch (err) {
     try {
       await removeCustomCommand(commandId);

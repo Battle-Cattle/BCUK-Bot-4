@@ -16,6 +16,7 @@ vi.mock('./commandConflicts', () => ({
   assertMultiTwitchTriggerAvailable: vi.fn().mockResolvedValue(undefined),
   assertNoSingleTwitchAssignmentOverlap: vi.fn().mockResolvedValue(undefined),
   assignUserToCommandWithinTransaction: vi.fn().mockResolvedValue(undefined),
+  assignUsersToCommandWithinTransaction: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./customCommandCache', () => ({
   invalidateCustomCommandLookupCache: vi.fn(),
@@ -38,6 +39,7 @@ import {
   updateCustomCommand,
   removeCustomCommand,
   assignUserToCommand,
+  assignUsersToCommand,
   unassignUserFromCommand,
 } from './customCommands';
 import { runSerializedCommandWrite, acquireNamedLock, releaseNamedLock } from './commandLocks';
@@ -46,6 +48,7 @@ import {
   assertMultiTwitchTriggerAvailable,
   assertNoSingleTwitchAssignmentOverlap,
   assignUserToCommandWithinTransaction,
+  assignUsersToCommandWithinTransaction,
 } from './commandConflicts';
 import { invalidateCustomCommandLookupCache } from './customCommandCache';
 import { assertNotReservedCommand } from './reservedCommands';
@@ -360,6 +363,45 @@ describe('assignUserToCommand', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     vi.mocked(assignUserToCommandWithinTransaction).mockRejectedValueOnce(new Error('conflict'));
     await expect(assignUserToCommand(3, 'user1')).rejects.toThrow('conflict');
+    expect(releaseNamedLock).toHaveBeenCalled();
+    expect(pool._conn.release).toHaveBeenCalled();
+  });
+});
+
+// ─── assignUsersToCommand ──────────────────────────────────────────────────────
+
+describe('assignUsersToCommand', () => {
+  it('no-ops without opening a connection when discordIds is empty', async () => {
+    vi.mocked(getPool).mockClear();
+    await assignUsersToCommand(3, []);
+    expect(getPool).not.toHaveBeenCalled();
+    expect(assignUsersToCommandWithinTransaction).not.toHaveBeenCalled();
+  });
+
+  it('acquires lock once, calls assignUsersToCommandWithinTransaction with all ids, releases lock and connection', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await assignUsersToCommand(3, ['user1', 'user2']);
+    expect(acquireNamedLock).toHaveBeenCalledTimes(1);
+    expect(acquireNamedLock).toHaveBeenCalledWith(conn, 'bcuk_cmdid_3');
+    expect(assignUsersToCommandWithinTransaction).toHaveBeenCalledWith(conn, 3, ['user1', 'user2']);
+    expect(releaseNamedLock).toHaveBeenCalledWith(conn, 'bcuk_cmdid_3');
+    expect(conn.release).toHaveBeenCalled();
+  });
+
+  it('calls invalidateCustomCommandLookupCache once on success', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool() as any);
+    vi.mocked(invalidateCustomCommandLookupCache).mockClear();
+    await assignUsersToCommand(3, ['user1', 'user2']);
+    expect(invalidateCustomCommandLookupCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases lock and connection even when assignUsersToCommandWithinTransaction throws', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    vi.mocked(assignUsersToCommandWithinTransaction).mockRejectedValueOnce(new Error('conflict'));
+    await expect(assignUsersToCommand(3, ['user1'])).rejects.toThrow('conflict');
     expect(releaseNamedLock).toHaveBeenCalled();
     expect(pool._conn.release).toHaveBeenCalled();
   });

@@ -302,13 +302,17 @@ function buildCustomCommandLookupCache(
       continue;
     }
 
-    const baseCommand = {
+    // Frozen once here (not copied per-lookup in getCustomCommandFor*) since callers only ever
+    // read this object; freezing turns any future accidental mutation into a loud failure
+    // instead of silently corrupting the shared cache entry. Shared by reference across
+    // discordByTrigger and every Twitch-candidate cache key that resolves to this command.
+    const baseCommand = Object.freeze({
       command_id: command.command_id,
       trigger_string: command.trigger_string,
       output: command.output,
       is_discord_enabled: command.is_discord_enabled,
       is_multi_twitch: command.is_multi_twitch,
-    };
+    });
 
     registerDiscordCommand(discordByTrigger, normalizedTriggerString, baseCommand);
     registerMultiTwitchCandidates(
@@ -377,8 +381,7 @@ export async function getCustomCommandForTwitchChannel(channelName: string, trig
   }
 
   const cache = await customCommandLookupCacheState.getCache();
-  const cachedCommand = cache.twitchByChannelAndTrigger.get(cacheKey);
-  return cachedCommand ? { ...cachedCommand } : null;
+  return cache.twitchByChannelAndTrigger.get(cacheKey) ?? null;
 }
 
 /**
@@ -418,5 +421,5 @@ export async function getCustomCommandForDiscord(
     }
   }
 
-  return { ...cachedCommand };
+  return cachedCommand;
 }

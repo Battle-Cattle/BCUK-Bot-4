@@ -63,15 +63,19 @@ function buildSfxLookupCache(triggers: Awaited<ReturnType<typeof getAllSfxTrigge
       continue;
     }
 
-    byTrigger.set(normalizedTriggerCommand, {
-      trigger: {
+    // Frozen once here (not copied per-lookup in findCachedSfxTrigger) since callers only ever
+    // read these objects; freezing turns any future accidental mutation into a loud failure
+    // instead of silently corrupting the shared cache entry. Cast back to the mutable interface
+    // shape (Object.freeze's return type is Readonly<T>) since callers never mutate in practice.
+    const result: SfxLookupResult = {
+      trigger: Object.freeze({
         id: BigInt(row.triggerId),
         trigger_command: row.triggerCommand,
         category_id: row.categoryId,
         hidden: row.hidden,
         description: row.description,
-      },
-      files: row.files.map((file) => ({
+      }),
+      files: Object.freeze(row.files.map((file) => Object.freeze({
         id: file.id,
         trigger_id: BigInt(row.triggerId),
         file: file.file,
@@ -79,8 +83,9 @@ function buildSfxLookupCache(triggers: Awaited<ReturnType<typeof getAllSfxTrigge
         weight: file.weight,
         hidden: file.hidden,
         category_id: row.categoryId,
-      })),
-    });
+      }))) as SfxFile[],
+    };
+    byTrigger.set(normalizedTriggerCommand, Object.freeze(result));
   }
 
   return { loadedAt: Date.now(), byTrigger };
@@ -115,6 +120,5 @@ export async function findCachedSfxTrigger(command: string): Promise<SfxLookupRe
   if (!normalizedCommand) return null;
 
   const cache = await sfxLookupCacheState.getCache();
-  const cached = cache.byTrigger.get(normalizedCommand);
-  return cached ? { trigger: { ...cached.trigger }, files: cached.files.map((file) => ({ ...file })) } : null;
+  return cache.byTrigger.get(normalizedCommand) ?? null;
 }

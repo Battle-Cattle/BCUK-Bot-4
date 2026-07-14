@@ -138,21 +138,22 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
   const activeChannels = getActiveChannels();
   const loginUserIds = getLoginUserIds();
 
-  // Build ordered list: source channel first, then the rest
-  const candidates = [sourceChannel, ...Array.from(activeChannels).filter((ch) => ch !== sourceChannel)];
+  // Restrict candidates to the active multi-twitch group before checking registration, so the
+  // (more expensive) per-channel cache lookup below only runs for channels that could possibly
+  // be targets. When the source channel is not in an active group (e.g. offline), fall back to
+  // the source channel only so the command does not broadcast to unrelated channels.
+  const groupInfo = getMultiTwitchDataForChannel(sourceChannel);
+  const groupParticipantSet = groupInfo ? new Set([sourceChannel, ...groupInfo.participants]) : new Set([sourceChannel]);
+
+  // Build ordered list: source channel first, then the rest, restricted to the group.
+  const candidates = [
+    sourceChannel,
+    ...Array.from(activeChannels).filter((ch) => ch !== sourceChannel && groupParticipantSet.has(ch)),
+  ];
 
   // Only send to channels where the command is registered (in-memory cache lookup)
   const registrationResults = await Promise.all(candidates.map((ch) => getCustomCommandForTwitchChannel(ch, command)));
-  const registered = candidates.filter((_, i) => registrationResults[i] !== null);
-
-  // Restrict to the active multi-twitch group. When the source channel is not in an
-  // active group (e.g. offline), fall back to the source channel only so the command
-  // does not broadcast to unrelated channels.
-  const groupInfo = getMultiTwitchDataForChannel(sourceChannel);
-  const groupParticipantSet = groupInfo ? new Set(groupInfo.participants) : null;
-  const targets = registered.filter((ch) =>
-    ch === sourceChannel || (groupParticipantSet !== null && groupParticipantSet.has(ch)),
-  );
+  const targets = candidates.filter((_, i) => registrationResults[i] !== null);
 
   return sendDedupedBySession(targets, loginUserIds, output, send, resolveSharedChatSessionId);
 }

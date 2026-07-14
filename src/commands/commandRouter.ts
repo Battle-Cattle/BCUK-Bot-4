@@ -9,6 +9,7 @@ import { setVoicePlaying } from '../shared/statusStore';
 import { safeResolve } from '../shared/pathUtils';
 import { recordCommandTestEntry } from './commandMonitorStore';
 import { getOrCreate } from '../shared/mapUtils';
+import { extractCommand } from './commandUtils';
 
 const log = createLogger('CommandRouter');
 
@@ -135,11 +136,9 @@ export async function handleCommand(
   source: 'twitch' | 'discord' | 'tiktok',
   guildId: string | null,
 ): Promise<void> {
-  const trimmed = rawMessage.trim();
-
   // Extract the first word of the message — this is matched directly against
   // trigger_command in the DB, which already includes whatever prefix is used
-  const command = trimmed.split(/\s+/)[0].toLowerCase();
+  const command = extractCommand(rawMessage);
   if (!command) return;
 
   if (guildId === null) {
