@@ -12,7 +12,7 @@ const log = createLogger('Web');
  * Resolves the acting user's current guild from the session.
  * Redirects to the guild picker and returns null when no guild is selected.
  *
- * @param req The incoming request (reads `session.user.currentGuildId`).
+ * @param req The incoming request (reads `getSessionUser(req).currentGuildId`).
  * @param res The response, used to redirect when no guild is set.
  */
 export function resolveGuildId(req: Request, res: Response): string | null {

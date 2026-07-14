@@ -106,7 +106,7 @@ const router = Router();
 /**
  * GET /admin/users/refresh-status — polling endpoint for the current guild's
  * in-progress (or most recent) Discord-name-refresh job.
- * @param req - Express request; reads `req.session.user.currentGuildId`.
+ * @param req - Express request; reads `getSessionUser(req).currentGuildId`.
  * @param res - Express response; always responds 200 with the guild's `RefreshState`
  *   as JSON.
  */
@@ -118,7 +118,7 @@ router.get('/users/refresh-status', requireManager, (req, res) => {
  * POST /admin/users/refresh-names — kicks off a background job that re-fetches each
  * guild member's Discord display name and updates it if changed. No-ops if a refresh
  * is already running for the guild.
- * @param req - Express request; reads `req.session.user.currentGuildId`.
+ * @param req - Express request; reads `getSessionUser(req).currentGuildId`.
  * @param res - Express response; always redirects to `/admin/users` immediately —
  *   the refresh itself runs asynchronously and is polled via `/users/refresh-status`.
  */

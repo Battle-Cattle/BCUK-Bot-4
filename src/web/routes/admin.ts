@@ -43,7 +43,7 @@ const KNOWN_ERRORS = new Set([
 /**
  * GET /admin/users — renders the member-management page for the current guild,
  * listing every member with their access level and Twitch state.
- * @param req - Express request; reads `req.session.user.currentGuildId` and the
+ * @param req - Express request; reads `getSessionUser(req).currentGuildId` and the
  *   `error` query param.
  * @param res - Express response; renders the `admin` view, or a 500 error page if
  *   loading members fails.
@@ -86,7 +86,7 @@ async function reloadRegistrySafe(): Promise<void> {
  * may provision a previously-inert guild.
  * @param req - Express request; reads `discord_id`, `discord_name`, `access_level`,
  *   `twitch_name`, and `clear_twitch_name` from `req.body`, plus the acting manager's
- *   `req.session.user` and current guild.
+ *   `getSessionUser(req)` and current guild.
  * @param res - Express response; redirects to `/admin/users` on success, or to
  *   `/admin/users?error=<code>` for validation failures (e.g. `invalid_discord_id`,
  *   `invalid_access_level`, `access_level_too_high`, `invalid_twitch_name`,
