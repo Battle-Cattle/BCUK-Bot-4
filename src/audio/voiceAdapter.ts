@@ -57,6 +57,7 @@ function getOrCreateDispatcher(client: Client): ClientDispatcher {
   if (existing) return existing;
 
   const dispatcher: ClientDispatcher = { guildMethods: new Map() };
+  /** Forwards each raw gateway packet from `client` to this dispatcher's routing logic. */
   client.on('raw', (packet: RawPacket) => dispatchRawPacket(dispatcher, packet));
   dispatchers.set(client, dispatcher);
   return dispatcher;
@@ -91,6 +92,10 @@ function registerAdapter(
   dispatcher.guildMethods.set(guildId, methods);
 
   let cleanedUp = false;
+  /**
+   * Removes this registration's entry from the dispatcher, but only if it hasn't already
+   * been superseded by a newer registration for the same guild. Idempotent.
+   */
   const cleanup = (): void => {
     if (cleanedUp) return;
     cleanedUp = true;
