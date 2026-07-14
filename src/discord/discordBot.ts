@@ -169,7 +169,7 @@ export function startDiscordBot(): void {
   localClient.once('clientReady', async (c) => {
     if (bootingClient !== localClient) {
       // stopDiscordBot() ran during boot — discard this ready client
-      try { c.destroy(); } catch { /* ignore */ }
+      await c.destroy().catch(() => { /* ignore */ });
       return;
     }
     bootingClient = null;
@@ -197,22 +197,14 @@ export function startDiscordBot(): void {
 /**
  * Disconnect and destroy the Discord client, including any client that is
  * still connecting. Idempotent — safe to call before {@link startDiscordBot}.
- * Errors thrown by `destroy()` are caught and logged rather than propagated.
+ * `destroy()` rejections are caught and logged rather than left unhandled.
  */
 export function stopDiscordBot(): void {
   const existingReady = client;
   const existingBooting = bootingClient;
   client = null;
   bootingClient = null;
-  try {
-    existingReady?.destroy();
-  } catch (err) {
-    log.error('Error destroying client:', err);
-  }
-  try {
-    existingBooting?.destroy();
-  } catch (err) {
-    log.error('Error destroying booting client:', err);
-  }
+  existingReady?.destroy().catch((err: unknown) => log.error('Error destroying client:', err));
+  existingBooting?.destroy().catch((err: unknown) => log.error('Error destroying booting client:', err));
   log.info('Client destroyed.');
 }

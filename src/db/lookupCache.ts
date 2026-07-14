@@ -118,7 +118,7 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
 
     if (this.cache) {
       if (now - this.cache.loadedAt >= this.options.ttlMs && now >= this.refreshAllowedAt) {
-        this.startRefresh(now);
+        void this.startRefresh(now);
       }
       return this.cache;
     }

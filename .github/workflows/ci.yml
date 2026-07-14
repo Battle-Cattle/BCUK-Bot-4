@@ -47,6 +47,9 @@ jobs:
       - name: Build (TypeScript)
         run: npm run build
 
+      - name: Lint
+        run: npm run lint
+
       - name: Run tests with coverage
         run: npm run test:coverage
 

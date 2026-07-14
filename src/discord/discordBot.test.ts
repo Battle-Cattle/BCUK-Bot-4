@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../test-utils/loggerMock';
 import { ACCESS_LEVEL_MOCK } from '../test-utils/accessLevelMock';
+import { flushMicrotasks } from '../test-utils/flushMicrotasks';
 
 vi.mock('../shared/config', () => ({
   DISCORD_TOKEN: 'mock-token',
@@ -54,7 +55,7 @@ function makeMockClient() {
     on: vi.fn().mockReturnThis(),
     once: vi.fn().mockReturnThis(),
     login: vi.fn().mockResolvedValue(undefined),
-    destroy: vi.fn(),
+    destroy: vi.fn().mockResolvedValue(undefined),
     user: { tag: 'Bot#1234' },
     guilds: {
       cache: { get: vi.fn().mockReturnValue(null) },
@@ -136,7 +137,7 @@ describe('fetchMemberDisplayName', () => {
 describe('startDiscordBot — messageCreate handler', () => {
   function getMessageCreateCb() {
     mod.startDiscordBot();
-    return mockInstance.on.mock.calls.find(([event]: string[]) => event === 'messageCreate')?.[1] as Function;
+    return mockInstance.on.mock.calls.find(([event]: string[]) => event === 'messageCreate')?.[1] as (...args: any[]) => unknown;
   }
 
   it('skips bot messages without calling command handlers', () => {
@@ -171,7 +172,7 @@ describe('startDiscordBot — messageCreate handler', () => {
 describe('startDiscordBot — guildCreate handler', () => {
   function getGuildCreateCb() {
     mod.startDiscordBot();
-    return mockInstance.on.mock.calls.find(([event]: string[]) => event === 'guildCreate')?.[1] as Function;
+    return mockInstance.on.mock.calls.find(([event]: string[]) => event === 'guildCreate')?.[1] as (...args: any[]) => unknown;
   }
 
   /** Builds a minimal discord.js Guild-like object for a brand-new guild, with a mocked `fetchOwner`. */
@@ -280,7 +281,7 @@ describe('startDiscordBot — guildCreate handler', () => {
 describe('startDiscordBot — guildDelete handler', () => {
   function getGuildDeleteCb() {
     mod.startDiscordBot();
-    return mockInstance.on.mock.calls.find(([event]: string[]) => event === 'guildDelete')?.[1] as Function;
+    return mockInstance.on.mock.calls.find(([event]: string[]) => event === 'guildDelete')?.[1] as (...args: any[]) => unknown;
   }
 
   it('forgets the departed guild\'s in-memory voice, command, status, and refresh state', async () => {
@@ -332,7 +333,7 @@ describe('startDiscordBot — clientReady error path', () => {
 describe('startDiscordBot — error event', () => {
   it('registers an error handler that does not throw', () => {
     mod.startDiscordBot();
-    const errorCb = mockInstance.on.mock.calls.find(([event]: string[]) => event === 'error')?.[1] as Function;
+    const errorCb = mockInstance.on.mock.calls.find(([event]: string[]) => event === 'error')?.[1] as (...args: any[]) => unknown;
     expect(() => errorCb(new Error('ws error'))).not.toThrow();
   });
 });
@@ -361,10 +362,11 @@ describe('stopDiscordBot', () => {
     mod.startDiscordBot();
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await readyCb(mockInstance);
-    mockInstance.destroy.mockImplementationOnce(() => { throw new Error('destroy failed'); });
+    mockInstance.destroy.mockRejectedValueOnce(new Error('destroy failed'));
 
     expect(() => mod.stopDiscordBot()).not.toThrow();
     expect(mod.getDiscordClient()).toBeNull();
+    await flushMicrotasks();
   });
 
   it('destroys a booting client when stopDiscordBot is called before clientReady fires', () => {

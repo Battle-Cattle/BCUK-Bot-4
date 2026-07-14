@@ -49,7 +49,6 @@ import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 /** Builds a fake mysql pool/executor resolving `execute`/`query` to the given rows. */
 // Cast to any to satisfy SqlExecutor (Pool | PoolConnection) without importing full mysql types
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeExecutor(rows: unknown[] = []): any {
   return makeMockPool({ rows });
 }
@@ -240,7 +239,6 @@ describe('insertUserCommandAssignment', () => {
 // ─── assignUserToCommandWithinTransaction ─────────────────────────────────────
 
 describe('assignUserToCommandWithinTransaction', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function makeConnection(executeResults: unknown[][]): any {
     const execute = vi.fn();
     for (const result of executeResults) {
@@ -447,7 +445,6 @@ describe('insertUserCommandAssignments', () => {
 // ─── assignUsersToCommandWithinTransaction ─────────────────────────────────────
 
 describe('assignUsersToCommandWithinTransaction', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function makeConnection(executeResults: unknown[][]): any {
     const execute = vi.fn();
     for (const result of executeResults) {

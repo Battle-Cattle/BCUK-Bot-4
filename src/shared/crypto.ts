@@ -1,7 +1,4 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { createLogger } from './logger';
-
-const log = createLogger('Crypto');
 
 const ALGORITHM = 'aes-256-gcm';
 const ENC_PREFIX = 'enc:';

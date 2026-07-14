@@ -55,7 +55,7 @@ export async function playFile(filePath: string, guildId: string): Promise<void>
     resolved = await fs.promises.realpath(candidatePath);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`Sound file not found: ${candidatePath}`);
+      throw new Error(`Sound file not found: ${candidatePath}`, { cause: err });
     }
     throw err;
   }

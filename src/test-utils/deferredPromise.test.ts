@@ -17,7 +17,7 @@ describe('deferred', () => {
   it('does not settle until resolve or reject is called', async () => {
     const { promise, resolve } = deferred<number>();
     const onResolve = vi.fn();
-    promise.then(onResolve);
+    void promise.then(onResolve);
     await Promise.resolve();
     expect(onResolve).not.toHaveBeenCalled();
     resolve(42);

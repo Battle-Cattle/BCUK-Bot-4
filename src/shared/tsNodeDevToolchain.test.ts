@@ -27,7 +27,8 @@ describe('ts-node dev toolchain', () => {
     } catch (err) {
       const e = err as { stderr?: Buffer; message: string };
       throw new Error(
-        `ts-node failed to register/transpile a project module — this breaks \`npm run dev\`:\n${e.stderr?.toString() ?? e.message}`
+        `ts-node failed to register/transpile a project module — this breaks \`npm run dev\`:\n${e.stderr?.toString() ?? e.message}`,
+        { cause: err },
       );
     }
   }, 15000);
