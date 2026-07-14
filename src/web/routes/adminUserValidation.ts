@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { createLogger } from '../../shared/logger';
 import { findUser, getMemberAccessLevel, AccessLevel } from '../../db';
 import { trimField, normalizeDiscordId } from './shared';
+import { getSessionUser } from '../session';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 import { isLockWaitTimeoutDbError } from './adminUserMutations';
 
@@ -15,7 +16,7 @@ const log = createLogger('Web');
  * @param res The response, used to redirect when no guild is set.
  */
 export function resolveGuildId(req: Request, res: Response): string | null {
-  const guildId = req.session.user!.currentGuildId;
+  const guildId = getSessionUser(req).currentGuildId;
   if (!guildId) {
     res.redirect('/guild/select');
     return null;

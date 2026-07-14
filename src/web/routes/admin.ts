@@ -10,6 +10,7 @@ import {
 import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { csrfProtection } from '../csrf';
 import { requireManager, requireAdmin } from '../middleware';
+import { getSessionUser } from '../session';
 import { trimField, renderError, filterQueryParam, renderView } from './shared';
 import { userMutationQueue } from './adminUserMutationQueue';
 import adminRefreshRouter, { getRefreshState } from './adminRefresh';
@@ -48,7 +49,7 @@ const KNOWN_ERRORS = new Set([
  *   loading members fails.
  */
 router.get('/users', requireManager, csrfProtection, async (req, res) => {
-  const guildId = req.session.user!.currentGuildId!;
+  const guildId = getSessionUser(req).currentGuildId!;
   try {
     const users = await getGuildMemberUsers(guildId);
     renderView(res, 'admin', {
@@ -92,7 +93,7 @@ async function reloadRegistrySafe(): Promise<void> {
  *   `duplicate_twitch_name`) or a DB failure (`add_failed`).
  */
 router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
-  const guildId = req.session.user!.currentGuildId!;
+  const guildId = getSessionUser(req).currentGuildId!;
 
   const { discord_id, discord_name, access_level, twitch_name, clear_twitch_name } = req.body as {
     discord_id?: string;
@@ -112,7 +113,7 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
   const { normalizedTwitchName, shouldClearTwitchName, error: twitchErr } = parseTwitchNameInput(twitch_name, clear_twitch_name);
   if (twitchErr) return res.redirect(`/admin/users?error=${twitchErr}`);
 
-  const addAuthErr = await checkManagerEditAuth(req.session.user!, trimmedDiscordId, level, guildId);
+  const addAuthErr = await checkManagerEditAuth(getSessionUser(req), trimmedDiscordId, level, guildId);
   if (addAuthErr) return res.redirect(`/admin/users?error=${addAuthErr}`);
   try {
     const trimmedDiscordName = trimField(discord_name);
@@ -151,7 +152,7 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
  *   failure (`update_failed`).
  */
 router.post('/users/update', requireManager, csrfProtection, async (req, res) => {
-  const guildId = req.session.user!.currentGuildId!;
+  const guildId = getSessionUser(req).currentGuildId!;
 
   const { discord_id, access_level } = req.body as { discord_id?: string; access_level?: string };
   if (access_level === undefined) return res.redirect('/admin/users');
@@ -162,7 +163,7 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
   if (levelErr) return res.redirect(`/admin/users?error=${levelErr}`);
 
   const level = Number(access_level);
-  const updateAuthErr = await checkManagerEditAuth(req.session.user!, trimmedDiscordId, level, guildId);
+  const updateAuthErr = await checkManagerEditAuth(getSessionUser(req), trimmedDiscordId, level, guildId);
   if (updateAuthErr) return res.redirect(`/admin/users?error=${updateAuthErr}`);
   try {
     await userMutationQueue.run(trimmedDiscordId, () => setMemberAccessLevel(guildId, trimmedDiscordId, level));
@@ -186,13 +187,13 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
  *   (`remove_failed`).
  */
 router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
-  const guildId = req.session.user!.currentGuildId!;
+  const guildId = getSessionUser(req).currentGuildId!;
 
   const { discord_id } = req.body as { discord_id?: string };
   const trimmedDiscordId = resolveValidDiscordId(res, discord_id);
   if (!trimmedDiscordId) return;
 
-  if (trimmedDiscordId === req.session.user!.discordId) {
+  if (trimmedDiscordId === getSessionUser(req).discordId) {
     return res.redirect('/admin/users?error=self_remove_forbidden');
   }
   try {
@@ -217,7 +218,7 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
  *   `invalid_twitch_state`) or a DB failure (`toggle_failed`).
  */
 router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, res) => {
-  const guildId = req.session.user!.currentGuildId!;
+  const guildId = getSessionUser(req).currentGuildId!;
 
   const { discord_id, is_twitch_bot_enabled } = req.body as {
     discord_id?: string;
@@ -226,7 +227,7 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   const trimmedDiscordId = resolveValidDiscordId(res, discord_id);
   if (!trimmedDiscordId) return;
 
-  const nextEnabled = await resolveToggleTwitchInputs(res, req.session.user!, guildId, trimmedDiscordId, is_twitch_bot_enabled);
+  const nextEnabled = await resolveToggleTwitchInputs(res, getSessionUser(req), guildId, trimmedDiscordId, is_twitch_bot_enabled);
   if (nextEnabled === null) return;
 
   try {

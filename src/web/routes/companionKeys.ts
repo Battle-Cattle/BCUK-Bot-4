@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { issueToken, getTokenStatus, revokeToken } from '../../db';
 import { csrfProtection } from '../csrf';
 import { logAndRedirectError, renderError, filterQueryParam, renderView } from './shared';
+import { getSessionUser } from '../session';
 
 const log = createLogger('Web');
 const router = Router();
@@ -12,7 +13,7 @@ const KNOWN_ERRORS = new Set(['request_failed', 'revoke_failed']);
 /** Renders the current user's companion app token status page. */
 router.get('/companion-key', csrfProtection, async (req, res) => {
   try {
-    const tokenStatus = await getTokenStatus(req.session.user!.discordId);
+    const tokenStatus = await getTokenStatus(getSessionUser(req).discordId);
     renderView(res, 'companion-keys', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
@@ -36,7 +37,7 @@ router.get('/companion-key', csrfProtection, async (req, res) => {
 router.post('/companion-key/request', csrfProtection, async (req, res) => {
   let plain: string;
   try {
-    plain = await issueToken(req.session.user!.discordId);
+    plain = await issueToken(getSessionUser(req).discordId);
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Companion key request error:', err, basePath: '/companion-key', errorCode: 'request_failed' });
     return;
@@ -44,7 +45,7 @@ router.post('/companion-key/request', csrfProtection, async (req, res) => {
 
   let tokenStatus;
   try {
-    tokenStatus = await getTokenStatus(req.session.user!.discordId);
+    tokenStatus = await getTokenStatus(getSessionUser(req).discordId);
   } catch (err) {
     log.error('Companion key status refresh after issue failed:', err);
     tokenStatus = { hasToken: true, createdAt: new Date() };
@@ -62,7 +63,7 @@ router.post('/companion-key/request', csrfProtection, async (req, res) => {
 /** Revokes the current user's companion app token. */
 router.post('/companion-key/revoke', csrfProtection, async (req, res) => {
   try {
-    await revokeToken(req.session.user!.discordId);
+    await revokeToken(getSessionUser(req).discordId);
     res.redirect('/companion-key');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Companion key revoke error:', err, basePath: '/companion-key', errorCode: 'revoke_failed' });

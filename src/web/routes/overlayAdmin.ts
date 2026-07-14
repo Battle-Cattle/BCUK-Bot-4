@@ -2,6 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
+import { getSessionUser } from '../session';
 import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import { getVideosForStreamer, getRewardsForStreamer } from '../../db';
@@ -47,7 +48,7 @@ async function fetchTwitchRewards(streamer: DbStreamerEventSub): Promise<TwitchC
  */
 router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const streamer = await getStreamerByDiscordId(req.session.user!.discordId);
+    const streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
     const [videos, rewards, twitchRewards] = streamer
       ? await Promise.all([
           getVideosForStreamer(streamer.id),

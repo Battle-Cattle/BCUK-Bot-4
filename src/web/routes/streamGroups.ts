@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { addStreamGroup, updateStreamGroup, removeStreamGroupAndStreamers } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
+import { getSessionUser } from '../session';
 import { parsePositiveIntId, parseCheckboxField } from './shared';
 import { redirectStreamsInvalid, redirectStreamsFailure } from './streamsErrors';
 import { triggerRestart } from './streamRestart';
@@ -36,7 +37,7 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
 
   try {
     await addStreamGroup({
-      guildId: req.session.user!.currentGuildId!,
+      guildId: getSessionUser(req).currentGuildId!,
       name: name!.trim().slice(0, 100),
       discordChannel: discord_channel!.trim().slice(0, 20),
       liveMessage: live_message!.trim().slice(0, 2000),
@@ -76,7 +77,7 @@ router.post('/streams/groups/update', requireManager, csrfProtection, async (req
   try {
     const updated = await updateStreamGroup({
       id: parsedGroupId,
-      guildId: req.session.user!.currentGuildId!,
+      guildId: getSessionUser(req).currentGuildId!,
       name: name!.trim().slice(0, 100),
       discordChannel: discord_channel!.trim().slice(0, 20),
       liveMessage: live_message!.trim().slice(0, 2000),
@@ -107,7 +108,7 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
   if (parsedGroupId === null) return redirectStreamsInvalid(res, 'invalid_id');
 
   try {
-    const guildId = req.session.user!.currentGuildId!;
+    const guildId = getSessionUser(req).currentGuildId!;
     const removed = await removeStreamGroupAndStreamers(parsedGroupId, guildId);
     if (!removed) return redirectStreamsInvalid(res, 'remove_group_failed');
     triggerRestart();

@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { getGuildMemberUsers, updateDiscordName } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
+import { getSessionUser } from '../session';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
 import { userMutationQueue } from './adminUserMutationQueue';
 
@@ -110,7 +111,7 @@ const router = Router();
  *   as JSON.
  */
 router.get('/users/refresh-status', requireManager, (req, res) => {
-  res.json(getRefreshState(req.session.user!.currentGuildId!));
+  res.json(getRefreshState(getSessionUser(req).currentGuildId!));
 });
 
 /**
@@ -122,7 +123,7 @@ router.get('/users/refresh-status', requireManager, (req, res) => {
  *   the refresh itself runs asynchronously and is polled via `/users/refresh-status`.
  */
 router.post('/users/refresh-names', requireManager, csrfProtection, async (req, res) => {
-  const guildId = req.session.user!.currentGuildId!;
+  const guildId = getSessionUser(req).currentGuildId!;
   if (getRefreshState(guildId).outcome === 'running') {
     return res.redirect('/admin/users');
   }

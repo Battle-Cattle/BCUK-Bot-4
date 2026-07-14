@@ -15,6 +15,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
+import { getSessionUser } from '../session';
 import { WEB_PORT } from '../../shared/config';
 import { logAndRedirectError, normalizeDiscordId, renderError, filterQueryParam, renderView } from './shared';
 import { userMutationQueue } from './adminUserMutationQueue';
@@ -59,7 +60,7 @@ const USER_KNOWN_ERRORS = new Set(['request_failed', 'rotate_failed', 'revoke_fa
  */
 router.get('/streamdeck-key', csrfProtection, async (req, res) => {
   try {
-    const keyRow = await getGuildStatusForKey(req.session.user!.discordId, req.session.user!.currentGuildId!);
+    const keyRow = await getGuildStatusForKey(getSessionUser(req).discordId, getSessionUser(req).currentGuildId!);
     renderView(res, 'streamdeck-keys', {
       user: req.session.user,
       csrfToken: req.csrfToken(),
@@ -98,9 +99,9 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
  * @returns A promise that resolves once the view has been rendered or the error redirect issued.
  */
 router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
-  const discordId = req.session.user!.discordId;
-  const accessLevel = req.session.user!.accessLevel;
-  const guildId = req.session.user!.currentGuildId!;
+  const discordId = getSessionUser(req).discordId;
+  const accessLevel = getSessionUser(req).accessLevel;
+  const guildId = getSessionUser(req).currentGuildId!;
   try {
     const { plain, keyRow } = await userMutationQueue.run(discordId, async () => {
       const existingGuildStatus = await getGuildStatusForKey(discordId, guildId);
@@ -183,8 +184,8 @@ export function __resetRecentRotationsForTests(): void {
  * @returns A promise that resolves once the view has been rendered or the error redirect issued.
  */
 router.post('/streamdeck-key/rotate', csrfProtection, async (req, res) => {
-  const discordId = req.session.user!.discordId;
-  const guildId = req.session.user!.currentGuildId!;
+  const discordId = getSessionUser(req).discordId;
+  const guildId = getSessionUser(req).currentGuildId!;
   try {
     const keyRow = await getGuildStatusForKey(discordId, guildId);
     const plain = await userMutationQueue.run(discordId, async () => {
@@ -217,7 +218,7 @@ router.post('/streamdeck-key/rotate', csrfProtection, async (req, res) => {
  */
 router.post('/streamdeck-key/revoke', csrfProtection, async (req, res) => {
   try {
-    await revokeApiKey(req.session.user!.discordId, req.session.user!.currentGuildId!);
+    await revokeApiKey(getSessionUser(req).discordId, getSessionUser(req).currentGuildId!);
     res.redirect('/streamdeck-key');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key revoke error:', err, basePath: '/streamdeck-key', errorCode: 'revoke_failed' });
@@ -231,7 +232,7 @@ const ADMIN_KNOWN_ERRORS = new Set(['approve_failed', 'deny_failed', 'revoke_fai
 /** Renders the admin Streamdeck key management page, listing pending and all key requests for the admin's current guild. */
 router.get('/admin/streamdeck-keys', requireAdmin, csrfProtection, async (req, res) => {
   try {
-    const guildId = req.session.user!.currentGuildId!;
+    const guildId = getSessionUser(req).currentGuildId!;
     const [pending, all] = await Promise.all([getPendingRequests(guildId), getAllApiKeys(guildId)]);
     renderView(res, 'streamdeck-keys-admin', {
       user: req.session.user,
@@ -251,7 +252,7 @@ router.post('/admin/streamdeck-keys/approve', requireAdmin, csrfProtection, asyn
   const validId = normalizeDiscordId((req.body as { discord_id?: string }).discord_id);
   if (!validId) return res.redirect('/admin/streamdeck-keys?error=invalid_discord_id');
   try {
-    await approveApiKey(validId, req.session.user!.discordId, req.session.user!.currentGuildId!);
+    await approveApiKey(validId, getSessionUser(req).discordId, getSessionUser(req).currentGuildId!);
     res.redirect('/admin/streamdeck-keys');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key approve error:', err, basePath: '/admin/streamdeck-keys', errorCode: 'approve_failed' });
@@ -263,7 +264,7 @@ router.post('/admin/streamdeck-keys/deny', requireAdmin, csrfProtection, async (
   const validId = normalizeDiscordId((req.body as { discord_id?: string }).discord_id);
   if (!validId) return res.redirect('/admin/streamdeck-keys?error=invalid_discord_id');
   try {
-    await denyApiKey(validId, req.session.user!.currentGuildId!);
+    await denyApiKey(validId, getSessionUser(req).currentGuildId!);
     res.redirect('/admin/streamdeck-keys');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key deny error:', err, basePath: '/admin/streamdeck-keys', errorCode: 'deny_failed' });
@@ -275,7 +276,7 @@ router.post('/admin/streamdeck-keys/revoke', requireAdmin, csrfProtection, async
   const validId = normalizeDiscordId((req.body as { discord_id?: string }).discord_id);
   if (!validId) return res.redirect('/admin/streamdeck-keys?error=invalid_discord_id');
   try {
-    await revokeApiKey(validId, req.session.user!.currentGuildId!);
+    await revokeApiKey(validId, getSessionUser(req).currentGuildId!);
     res.redirect('/admin/streamdeck-keys');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key admin revoke error:', err, basePath: '/admin/streamdeck-keys', errorCode: 'revoke_failed' });

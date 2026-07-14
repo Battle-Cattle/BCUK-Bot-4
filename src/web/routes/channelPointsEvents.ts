@@ -2,6 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { getStreamerByDiscordId } from '../../db';
 import { CHANNEL_POINTS_MAX_SSE_PER_STREAMER } from '../../shared/config';
+import { getSessionUser } from '../session';
 
 const log = createLogger('ChannelPointsEvents');
 const router = Router();
@@ -51,7 +52,7 @@ export function pushPricingUpdate(streamerId: number, event: PricingUpdateEvent)
 router.get('/events', async (req, res) => {
   let streamer;
   try {
-    streamer = await getStreamerByDiscordId(req.session.user!.discordId);
+    streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
   } catch (err) {
     log.error('Failed to resolve streamer for SSE events:', err);
     res.status(500).end();
