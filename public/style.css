@@ -380,3 +380,86 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
   transition: transform .15s ease;
 }
 details[open] > .disclosure-toggle::before { transform: rotate(90deg); }
+
+/* ── Utility classes ───────────────────────────────────────
+   Small atomic helpers replacing one-off inline style="" attributes, which
+   CSP's style-src can't allow without 'unsafe-inline'. */
+.mt-025 { margin-top: .25rem; }
+.mt-04  { margin-top: .4rem; }
+.mt-05  { margin-top: .5rem; }
+.mt-075 { margin-top: .75rem; }
+.mt-1   { margin-top: 1rem; }
+.mt-125 { margin-top: 1.25rem; }
+.mb-04  { margin-bottom: .4rem; }
+.mb-075 { margin-bottom: .75rem; }
+.mb-1   { margin-bottom: 1rem; }
+.ml-1   { margin-left: 1rem; }
+.m-0    { margin: 0; }
+.p-0    { padding: 0; }
+.pt-0   { padding-top: 0; }
+
+.w-auto  { width: auto; }
+.w-5rem  { width: 5rem; }
+.w-6rem  { width: 6rem; }
+.w-7rem  { width: 7rem; }
+.w-8rem  { width: 8rem; }
+.w-14rem { width: 14rem; }
+.max-w-28rem { max-width: 28rem; }
+.min-w-120   { min-width: 120px; }
+
+.d-flex   { display: flex; }
+.d-inline { display: inline; }
+.d-block  { display: block; }
+.items-center     { align-items: center; }
+.items-end        { align-items: flex-end; }
+.justify-between  { justify-content: space-between; }
+.justify-center   { justify-content: center; }
+.flex-wrap { flex-wrap: wrap; }
+.gap-04  { gap: .4rem; }
+.gap-05  { gap: .5rem; }
+.gap-075 { gap: .75rem; }
+.flex-1  { flex: 1; }
+.flex-3  { flex: 3; }
+
+.fs-075 { font-size: .75rem; }
+.fs-08  { font-size: .8rem; }
+.fs-08em { font-size: .8em; }
+.nowrap { white-space: nowrap; }
+
+.visually-hidden { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.avatar-lg { width: 48px; height: 48px; border-radius: 50%; }
+.token-display { font-size: .85rem; word-break: break-all; flex: 1; min-width: 0; }
+.event-feed-sample { font-size: .8rem; white-space: pre-wrap; }
+.overlay-url-display { display: block; margin-top: .4rem; user-select: all; word-break: break-all; overflow-wrap: anywhere; }
+.reward-id-display { word-break: break-all; overflow-wrap: anywhere; }
+
+/* ── Reconnect modal (dashboard) ──────────────────────── */
+.reconnect-modal-overlay {
+  position: fixed; inset: 0; z-index: 9999; display: flex;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,.85); padding: 1.5rem;
+}
+.reconnect-modal-card {
+  background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius);
+  max-width: 480px; width: 100%; padding: 2rem; text-align: center;
+}
+.reconnect-modal-icon    { font-size: 2.5rem; margin-bottom: .75rem; }
+.reconnect-modal-title   { color: var(--danger); margin-bottom: .75rem; font-size: 1.25rem; }
+.reconnect-modal-text    { color: var(--text); margin-bottom: .5rem; }
+.reconnect-modal-subtext { color: var(--muted); font-size: .875rem; margin-bottom: 1.5rem; }
+.reconnect-modal-actions { display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap; }
+
+.subsection-divider { margin-top: .75rem; border-top: 1px solid var(--border); padding-top: .75rem; }
+
+/* ── Key/value instruction table (streamdeck-keys) ────── */
+.kv-table { margin: .75rem 0; border-collapse: collapse; font-size: .85rem; width: 100%; }
+.kv-table td.kv-label { padding: .35rem .75rem .35rem 0; white-space: nowrap; font-weight: 600; vertical-align: top; }
+.kv-table td.kv-label-w { width: 5rem; }
+.kv-table td.kv-value { padding: .35rem 0; }
+
+/* ── Assigned-user badge (commands page) ──────────────────
+   Hue is a per-user hash computed and applied via CSSOM (element.style.setProperty)
+   in commands.js rather than an inline style attribute, so it works under CSP
+   style-src without 'unsafe-inline'. */
+.badge-user-hue { color: hsl(var(--hue, 0), 65%, 60%); background: hsla(var(--hue, 0), 65%, 60%, 0.12); }
+.badge-user-hue.badge-user-self { color: hsl(var(--hue, 0), 90%, 78%); background: hsla(var(--hue, 0), 90%, 78%, 0.22); }

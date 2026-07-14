@@ -90,7 +90,7 @@
     <section class="section">
       <div class="section-header">
         <h2 class="section-title">SFX Commands (<span id="cmd-count"><%= triggers.length %></span>)</h2>
-        <label for="sfx-search" style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden;">Filter SFX commands</label>
+        <label for="sfx-search" class="visually-hidden">Filter SFX commands</label>
         <input type="search" id="sfx-search" class="search-input" placeholder="Filter commands…">
       </div>
 
@@ -145,12 +145,12 @@
                     <tr>
                       <% if (canManage) { %>
                       <td colspan="<%= canManage ? 4 : 3 %>">
-                        <form method="POST" action="/sfx/file/update" class="form-row-wrap" style="align-items:flex-end;gap:0.5rem;">
+                        <form method="POST" action="/sfx/file/update" class="form-row-wrap items-end gap-05">
                           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                           <input type="hidden" name="file_id" value="<%= f.id %>">
                           <span class="mono form-col-grow"><%= f.file %></span>
                           <label class="form-label">Weight
-                            <input class="input" type="number" name="weight" min="1" value="<%= f.weight %>" style="width:6rem;">
+                            <input class="input w-6rem" type="number" name="weight" min="1" value="<%= f.weight %>">
                           </label>
                           <label class="input checkbox-input-label">
                             <input type="checkbox" name="file_hidden" <%= f.hidden ? 'checked' : '' %>> Hidden
@@ -166,7 +166,7 @@
                     </tr>
                     <% if (canManage) { %>
                     <tr>
-                      <td colspan="4" style="padding-top:0;">
+                      <td colspan="4" class="pt-0">
                         <form method="POST" action="/sfx/file/remove" class="inline-form-sm js-confirm-remove-file" data-file-name="<%= f.file %>">
                           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                           <input type="hidden" name="file_id" value="<%= f.id %>">
@@ -188,14 +188,14 @@
                        header, so the session token is never placed in the URL (history/Referer). -->
                   <form method="POST" action="/sfx/file/upload" enctype="multipart/form-data" class="js-sfx-upload">
                     <input type="hidden" name="trigger_id" value="<%= t.triggerId %>">
-                    <div class="form-row-wrap form-section-gap" style="align-items:flex-end;">
+                    <div class="form-row-wrap form-section-gap items-end">
                       <div class="form-col-grow">
                         <label class="form-label">Add sound <span class="muted">(mp3, ogg, wav — max <%= maxUploadMb %>MB)</span>
                           <input class="input full-width" type="file" name="sound" accept=".mp3,.ogg,.wav,audio/mpeg,audio/ogg,audio/wav" required>
                         </label>
                       </div>
                       <label class="form-label">Weight
-                        <input class="input" type="number" name="weight" min="1" value="1" style="width:6rem;">
+                        <input class="input w-6rem" type="number" name="weight" min="1" value="1">
                       </label>
                       <label class="input checkbox-input-label">
                         <input type="checkbox" name="file_hidden"> Hidden
@@ -264,7 +264,7 @@
       <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">🏷️</span><span class="card-label">Categories</span></div>
         <div class="card-body">
-          <form method="POST" action="/sfx/category/add" class="form-row-wrap form-section-gap" style="align-items:flex-end;">
+          <form method="POST" action="/sfx/category/add" class="form-row-wrap form-section-gap items-end">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
             <div class="form-col-grow">
               <label for="category_name" class="form-label">New Category</label>
@@ -280,7 +280,7 @@
               <% categories.forEach(function(c) { %>
               <tr>
                 <td>
-                  <form method="POST" action="/sfx/category/rename" class="form-row-wrap" style="align-items:flex-end;gap:0.5rem;">
+                  <form method="POST" action="/sfx/category/rename" class="form-row-wrap items-end gap-05">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <input type="hidden" name="category_id" value="<%= c.id %>">
                     <input class="input form-col-grow" type="text" name="name" value="<%= c.name %>" aria-label="Category name" required>

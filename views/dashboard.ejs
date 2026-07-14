@@ -46,8 +46,8 @@ function htmlAttrJson(value) {
             <div class="stat-row"><span class="stat-label">State</span><span class="stat-value" id="voice-state">Idle</span></div>
             <% if (user && user.accessLevel >= 1) { %>
             <div class="stat-row stat-row-top-gap">
-              <div style="display: flex; gap: 0.5rem; align-items: center;">
-                <select class="btn btn-sm" id="voice-channel-select" style="flex: 1; min-width: 120px;">
+              <div class="d-flex gap-05 items-center">
+                <select class="btn btn-sm flex-1 min-w-120" id="voice-channel-select">
                   <option value="">Loading channels...</option>
                 </select>
                 <button class="btn btn-sm" id="btn-rejoin-voice"><%= status.voice.connected ? 'Leave Voice' : 'Join Voice' %></button>
@@ -98,13 +98,13 @@ function htmlAttrJson(value) {
   <script src="/app.js"></script>
 
   <% if (needsReconnect) { %>
-  <div id="reconnect-modal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);padding:1.5rem;">
-    <div style="background:var(--bg-card);border:1px solid var(--danger);border-radius:var(--radius);max-width:480px;width:100%;padding:2rem;text-align:center;">
-      <div style="font-size:2.5rem;margin-bottom:0.75rem;">⚠️</div>
-      <h2 style="color:var(--danger);margin-bottom:0.75rem;font-size:1.25rem;">Twitch Reconnection Required</h2>
-      <p style="color:var(--text);margin-bottom:0.5rem;">Your Twitch connection is missing required permissions and some notifications are not working.</p>
-      <p style="color:var(--muted);font-size:0.875rem;margin-bottom:1.5rem;">Please reconnect your Twitch account to restore full functionality.</p>
-      <div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap;">
+  <div id="reconnect-modal" class="reconnect-modal-overlay">
+    <div class="reconnect-modal-card">
+      <div class="reconnect-modal-icon">⚠️</div>
+      <h2 class="reconnect-modal-title">Twitch Reconnection Required</h2>
+      <p class="reconnect-modal-text">Your Twitch connection is missing required permissions and some notifications are not working.</p>
+      <p class="reconnect-modal-subtext">Please reconnect your Twitch account to restore full functionality.</p>
+      <div class="reconnect-modal-actions">
         <a href="/user/settings/twitch-connect" class="btn">Reconnect Twitch</a>
         <button id="dismiss-reconnect-modal" class="btn btn-ghost">Dismiss</button>
       </div>

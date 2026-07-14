@@ -28,12 +28,12 @@
       <% if (newKey) { %>
       <div class="card card-alert-success" role="alert">
         <p><strong>&#10003; Your API key has been generated.</strong> Copy it now — it will not be shown again.</p>
-        <div style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
-          <code class="mono" id="new-key" style="font-size:.85rem;word-break:break-all;flex:1;min-width:0;"><%= newKey %></code>
+        <div class="mt-075 d-flex gap-05 items-center flex-wrap">
+          <code class="mono token-display" id="new-key"><%= newKey %></code>
           <button type="button" class="btn btn-sm" id="copy-key-btn">Copy</button>
         </div>
         <% if (keyRow && keyRow.status === 'pending') { %>
-        <p style="margin-top:.75rem;" class="muted">Your key is pending admin approval. It will become active once an Admin approves your request.</p>
+        <p class="muted mt-075">Your key is pending admin approval. It will become active once an Admin approves your request.</p>
         <% } %>
       </div>
       <% } %>
@@ -51,31 +51,31 @@
         <% } else { %>
         <p class="muted">Your request will be reviewed by an Admin before the key becomes active.</p>
         <% } %>
-        <form method="POST" action="/streamdeck-key/request" style="margin-top:1rem;">
+        <form method="POST" action="/streamdeck-key/request" class="mt-1">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
           <button type="submit" class="btn">Request API Key</button>
         </form>
 
         <% } else if (keyRow.status === 'pending') { %>
-        <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;">
+        <div class="d-flex items-center gap-075 flex-wrap mb-1">
           <span class="badge badge-hidden">Pending Approval</span>
-          <span class="muted" style="font-size:.85rem;">Requested <%= keyRow.requested_at.toLocaleDateString() %></span>
+          <span class="text-muted-sm">Requested <%= keyRow.requested_at.toLocaleDateString() %></span>
         </div>
         <p>Your key is awaiting Admin approval. No further action is needed — the key you already copied will become active automatically once an Admin approves your request. Refresh this page to check the current status.</p>
-        <p class="muted" style="margin-top:.5rem;">Lost the key you copied? Generating a new one won't affect your approval status, but the old key will immediately stop working<%= user.guilds && user.guilds.length > 1 ? ' — in every server it was approved for, not just this one' : '' %>.</p>
-        <form method="POST" action="/streamdeck-key/rotate" class="js-confirm-rotate-key" style="margin-top:1rem;">
+        <p class="muted mt-05">Lost the key you copied? Generating a new one won't affect your approval status, but the old key will immediately stop working<%= user.guilds && user.guilds.length > 1 ? ' — in every server it was approved for, not just this one' : '' %>.</p>
+        <form method="POST" action="/streamdeck-key/rotate" class="js-confirm-rotate-key mt-1">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
           <button type="submit" class="btn btn-sm btn-ghost">Lost your key?</button>
         </form>
 
         <% } else if (keyRow.status === 'approved') { %>
-        <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;">
+        <div class="d-flex items-center gap-075 flex-wrap mb-1">
           <span class="badge badge-active">Active</span>
-          <span class="muted" style="font-size:.85rem;">Approved <%= keyRow.approved_at ? keyRow.approved_at.toLocaleDateString() : '' %></span>
+          <span class="text-muted-sm">Approved <%= keyRow.approved_at ? keyRow.approved_at.toLocaleDateString() : '' %></span>
         </div>
         <p>Your API key is active. See the <strong>How to Use</strong> section below for setup instructions.</p>
         <p class="muted">If you have lost your key, you can generate a new one. The old key will immediately stop working<%= user.guilds && user.guilds.length > 1 ? ' — in every server it was approved for, not just this one' : '' %>.</p>
-        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:1rem;">
+        <div class="d-flex gap-05 flex-wrap mt-1">
           <form method="POST" action="/streamdeck-key/rotate" class="js-confirm-rotate-key">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
             <button type="submit" class="btn btn-sm btn-ghost">Lost your key?</button>
@@ -86,11 +86,11 @@
           </form>
         </div>
         <% if (user.guilds && user.guilds.length > 1) { %>
-        <p class="muted" style="margin-top:.5rem;">Revoking only removes access for this server — the key stays active in any other server it's approved for. Use <strong>Lost your key?</strong> to invalidate it everywhere.</p>
+        <p class="muted mt-05">Revoking only removes access for this server — the key stays active in any other server it's approved for. Use <strong>Lost your key?</strong> to invalidate it everywhere.</p>
         <% } %>
 
         <% } else if (keyRow.status === 'revoked') { %>
-        <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;">
+        <div class="d-flex items-center gap-075 flex-wrap mb-1">
           <span class="badge badge-offline">Revoked</span>
         </div>
         <p>Your API key has been revoked and is no longer active. You can request a new one.</p>
@@ -99,7 +99,7 @@
         <% } else { %>
         <p class="muted">A new request will need Admin approval.</p>
         <% } %>
-        <form method="POST" action="/streamdeck-key/request" style="margin-top:1rem;">
+        <form method="POST" action="/streamdeck-key/request" class="mt-1">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
           <button type="submit" class="btn">Request New API Key</button>
         </form>
@@ -114,35 +114,35 @@
 
         <p><strong>1. Download &amp; install the plugin</strong></p>
         <p>Download the plugin file and double-click it to install it in the Streamdeck software:</p>
-        <p style="margin:.75rem 0;">
+        <p class="mt-075">
           <a href="/downloads/com.expiredminotaur.bcuk.streamDeckPlugin" class="btn" download>&#11015;&nbsp;Download Plugin</a>
         </p>
 
-        <p style="margin-top:1.25rem;"><strong>2. Add a Play SFX action</strong></p>
+        <p class="mt-125"><strong>2. Add a Play SFX action</strong></p>
         <p>Drag the <strong>Play SFX</strong> action from the BCUK Bot category onto a key, then open its Property Inspector and enter:</p>
-        <table style="margin:.75rem 0;border-collapse:collapse;font-size:.85rem;width:100%;">
+        <table class="kv-table">
           <tr>
-            <td style="padding:.35rem .75rem .35rem 0;white-space:nowrap;font-weight:600;vertical-align:top;width:5rem;">Host</td>
-            <td style="padding:.35rem 0;font-family:monospace;" id="sd-host-cell">–</td>
+            <td class="kv-label kv-label-w">Host</td>
+            <td class="kv-value mono" id="sd-host-cell">–</td>
           </tr>
           <tr>
-            <td style="padding:.35rem .75rem .35rem 0;white-space:nowrap;font-weight:600;vertical-align:top;">Port</td>
-            <td style="padding:.35rem 0;font-family:monospace;"><%= webPort %></td>
+            <td class="kv-label">Port</td>
+            <td class="kv-value mono"><%= webPort %></td>
           </tr>
           <tr>
-            <td style="padding:.35rem .75rem .35rem 0;white-space:nowrap;font-weight:600;vertical-align:top;">API Key</td>
-            <td style="padding:.35rem 0;">Paste your key from the Key Status section above</td>
+            <td class="kv-label">API Key</td>
+            <td class="kv-value">Paste your key from the Key Status section above</td>
           </tr>
         </table>
         <p class="muted">These settings are shared across all your BCUK Bot Streamdeck buttons — you only need to enter them once.</p>
 
-        <p style="margin-top:1.25rem;"><strong>3. Load your commands</strong></p>
+        <p class="mt-125"><strong>3. Load your commands</strong></p>
         <p>Press <strong>Refresh Commands</strong> in the Property Inspector. This connects to the bot and populates the command dropdown with all available sound effects. Then select the command you want this key to trigger.</p>
 
-        <p style="margin-top:1.25rem;"><strong>4. Press the key</strong></p>
+        <p class="mt-125"><strong>4. Press the key</strong></p>
         <p>If your API key is active the bot will play the sound effect in the Discord voice channel immediately.</p>
 
-        <p class="muted" style="margin-top:1.25rem;">Streamdeck triggers bypass the chat cooldown and will interrupt any currently playing sound.</p>
+        <p class="muted mt-125">Streamdeck triggers bypass the chat cooldown and will interrupt any currently playing sound.</p>
       </div>
     </section>
   </main>

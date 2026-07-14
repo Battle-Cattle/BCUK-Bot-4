@@ -62,7 +62,7 @@ app.use(
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
         scriptSrcAttr: ["'none'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'"],
         imgSrc: ["'self'", 'data:', 'https://cdn.discordapp.com', 'https://static-cdn.jtvnw.net'],
         fontSrc: ["'self'"],
         connectSrc: ["'self'"],

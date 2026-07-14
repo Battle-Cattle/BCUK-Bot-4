@@ -178,6 +178,13 @@ describe('CSP header', () => {
     expect(csp).toContain("font-src 'self'");
     expect(csp).not.toMatch(/font-src[^;]*https:/);
   });
+
+  it('restricts style-src to self, without allowing unsafe-inline', async () => {
+    const res = await request(app).get('/__marker_dashboard');
+    const csp = res.headers['content-security-policy'];
+    expect(csp).toContain("style-src 'self'");
+    expect(csp).not.toMatch(/style-src[^;]*unsafe-inline/);
+  });
 });
 
 describe('HSTS header', () => {
