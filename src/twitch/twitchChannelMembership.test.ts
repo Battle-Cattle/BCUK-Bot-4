@@ -1,9 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mockLogger } from '../test-utils/loggerMock';
 import { deferred } from '../test-utils/deferredPromise';
 import { flushMicrotasks } from '../test-utils/flushMicrotasks';
 
-vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
+// A single hoisted instance (rather than the shared mockLogger() factory, which mints a
+// fresh object per call) so tests can assert on it — the module captures `log` once at
+// import time, so every createLogger() call here must return the same object.
+const mockLog = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
+vi.mock('../shared/logger', () => ({ createLogger: () => mockLog }));
 vi.mock('../db', () => ({ getTwitchEnabledChannels: vi.fn() }));
 vi.mock('./twitchApi', () => ({ getUsers: vi.fn() }));
 vi.mock('../shared/statusStore', () => ({ setTwitchChannel: vi.fn() }));
@@ -56,10 +59,15 @@ describe('joinTwitchChannel', () => {
   });
 
   it('queues the channel locally without calling client.join when not connected', async () => {
+    const client = makeMockClient();
+    setTmiClient(client as any); // client present but disconnected — isolates the !_connected guard
     setConnected(false);
+
     await joinTwitchChannel('alice');
+
     expect(getActiveChannels().has('alice')).toBe(true);
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('alice', false);
+    expect(client.join).not.toHaveBeenCalled();
   });
 
   it('joins via the client and marks the channel active when connected', async () => {
@@ -124,6 +132,7 @@ describe('joinTwitchChannel', () => {
     await expect(joinTwitchChannel('alice')).resolves.toBeUndefined();
 
     expect(getActiveChannels().has('alice')).toBe(true);
+    expect(mockLog.error).toHaveBeenCalledWith('Channel joined hook error:', expect.any(Error));
   });
 });
 
@@ -144,12 +153,15 @@ describe('partTwitchChannel', () => {
   });
 
   it('removes local state without calling client.part when not connected', async () => {
+    const client = makeMockClient();
+    setTmiClient(client as any); // client present but disconnected — isolates the !_connected guard
     setConnected(false);
     await joinTwitchChannel('alice');
 
     await partTwitchChannel('alice');
 
     expect(getActiveChannels().has('alice')).toBe(false);
+    expect(client.part).not.toHaveBeenCalled();
   });
 
   it('parts via the client when connected and joined', async () => {
@@ -227,12 +239,23 @@ describe('membershipMutationQueue serialization', () => {
 // ─── reconcileJoinedChannels ────────────────────────────────────────────────
 
 describe('reconcileJoinedChannels', () => {
-  it('no-ops when there is no client or the client is not connected', async () => {
+  it('no-ops when there is no client, even if connected is true', async () => {
     setTmiClient(null);
+    setConnected(true);
+
+    await expect(reconcileJoinedChannels()).resolves.toBeUndefined();
+
+    expect(vi.mocked(setTwitchChannel)).not.toHaveBeenCalled();
+  });
+
+  it('no-ops when the client is not connected, even with a client present', async () => {
+    const client = makeMockClient(['#stale']);
+    setTmiClient(client as any);
     setConnected(false);
 
     await expect(reconcileJoinedChannels()).resolves.toBeUndefined();
 
+    expect(client.getChannels).not.toHaveBeenCalled();
     expect(vi.mocked(setTwitchChannel)).not.toHaveBeenCalled();
   });
 
@@ -345,6 +368,7 @@ describe('initializeActiveChannels', () => {
 
     expect(getActiveChannels().size).toBe(0);
     expect(vi.mocked(getUsers)).not.toHaveBeenCalled();
+    expect(mockLog.warn).toHaveBeenCalledWith('No enabled Twitch channels found in DB; connecting with no joined channels.');
   });
 
   it('populates the user ID cache from getUsers', async () => {
@@ -363,6 +387,10 @@ describe('initializeActiveChannels', () => {
     await expect(initializeActiveChannels()).resolves.toBeUndefined();
 
     expect(getActiveChannelUserIds().size).toBe(0);
+    expect(mockLog.error).toHaveBeenCalledWith(
+      'Failed to resolve channel user IDs (shared-chat dedup unavailable):',
+      expect.any(Error),
+    );
   });
 });
 
