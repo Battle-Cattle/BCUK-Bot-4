@@ -4,7 +4,7 @@ import { flushMicrotasks } from './flushMicrotasks';
 describe('flushMicrotasks', () => {
   it('resolves once all pending microtasks have settled', async () => {
     let settled = false;
-    Promise.resolve().then(() => Promise.resolve()).then(() => { settled = true; });
+    void Promise.resolve().then(() => Promise.resolve()).then(() => { settled = true; });
     await flushMicrotasks();
     expect(settled).toBe(true);
   });

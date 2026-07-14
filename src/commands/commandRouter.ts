@@ -1,4 +1,3 @@
-import path from 'path';
 import { createLogger } from '../shared/logger';
 import { findCachedSfxTrigger } from '../db';
 import { pickWeightedRandom } from './soundSelector';

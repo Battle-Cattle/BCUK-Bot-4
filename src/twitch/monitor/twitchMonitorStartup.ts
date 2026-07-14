@@ -128,7 +128,7 @@ export async function performStartupLiveCheck(
   const userIds = Array.from(loginToUserId.values());
   if (userIds.length === 0) return;
 
-  let liveStreams: TwitchStream[] = [];
+  let liveStreams: TwitchStream[];
   try {
     liveStreams = await getStreams(userIds);
   } catch (err) {
