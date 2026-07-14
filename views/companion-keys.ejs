@@ -27,8 +27,8 @@
       <% if (newToken) { %>
       <div class="card card-alert-success" role="alert">
         <p><strong>&#10003; Your companion app token has been generated.</strong> Copy it now — it will not be shown again.</p>
-        <div style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
-          <code class="mono" id="new-token" style="font-size:.85rem;word-break:break-all;flex:1;min-width:0;"><%= newToken %></code>
+        <div class="mt-075 d-flex gap-05 items-center flex-wrap">
+          <code class="mono token-display" id="new-token"><%= newToken %></code>
           <button type="button" class="btn btn-sm" id="copy-token-btn">Copy</button>
         </div>
       </div>
@@ -43,20 +43,20 @@
         <p class="muted">The companion app normally logs in itself via Discord — it opens your browser, you log in, and it receives a token automatically. You should not normally need to generate or paste a token by hand.</p>
 
         <% if (!tokenStatus || !tokenStatus.hasToken) { %>
-        <p style="margin-top:.75rem;">You do not have an active companion app token.</p>
-        <form method="POST" action="/companion-key/request" style="margin-top:1rem;">
+        <p class="mt-075">You do not have an active companion app token.</p>
+        <form method="POST" action="/companion-key/request" class="mt-1">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
           <button type="submit" class="btn btn-sm">Generate Token Manually (advanced)</button>
         </form>
 
         <% } else { %>
-        <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;">
+        <div class="d-flex items-center gap-075 flex-wrap mb-1">
           <span class="badge badge-active">Active</span>
-          <span class="muted" style="font-size:.85rem;">Issued <%= tokenStatus.createdAt.toLocaleDateString() %></span>
+          <span class="text-muted-sm">Issued <%= tokenStatus.createdAt.toLocaleDateString() %></span>
         </div>
         <p>Your companion app token is active. It is read-only — it can only receive your own channel-point redemption events.</p>
         <p class="muted">If you have lost your device or believe the token has leaked, you can revoke it. The companion app can log in again afterwards to get a fresh token.</p>
-        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:1rem;">
+        <div class="d-flex gap-05 flex-wrap mt-1">
           <form method="POST" action="/companion-key/request">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
             <button type="submit" class="btn btn-sm">Generate New Token Manually (advanced)</button>
@@ -84,9 +84,9 @@
         </ol>
         <p class="muted">Only loopback redirect URIs (<code>http://127.0.0.1:*</code> or <code>http://localhost:*</code>) are accepted.</p>
 
-        <p style="margin-top:1rem;"><strong>Event feed:</strong></p>
+        <p class="mt-1"><strong>Event feed:</strong></p>
         <p>Connect to <code>GET /api/companion/events</code> with <code>Authorization: Bearer &lt;token&gt;</code>. This is a Server-Sent Events stream that delivers one event per line as it happens:</p>
-        <pre class="mono" style="font-size:.8rem;white-space:pre-wrap;">data: {"type":"channel_points_redemption","rewardId":"...","rewardTitle":"...","userLogin":"...","userName":"...","userInput":"...","redeemedAt":"2026-01-01T00:00:00.000Z"}</pre>
+        <pre class="mono event-feed-sample">data: {"type":"channel_points_redemption","rewardId":"...","rewardTitle":"...","userLogin":"...","userName":"...","userInput":"...","redeemedAt":"2026-01-01T00:00:00.000Z"}</pre>
         <p class="muted">Events are only sent for redemptions on your own channel. What the companion app does with an event (play a sound, run a script, show a notification) is entirely up to it.</p>
       </div>
     </section>

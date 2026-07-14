@@ -59,7 +59,7 @@
         <% } else { %>
         Your Twitch connection is missing required permissions. Reconnect to manage Channel Point rewards.
         <% } %>
-        <a href="/user/settings/twitch-connect" class="btn btn-sm" style="margin-left:1rem;">Reconnect Twitch</a>
+        <a href="/user/settings/twitch-connect" class="btn btn-sm ml-1">Reconnect Twitch</a>
       </div>
     </section>
     <% } else { %>
@@ -67,14 +67,14 @@
     <!-- ── Pricing Settings ────────────────────────────────────────── -->
     <section class="section">
       <h2 class="section-title">Pricing Settings</h2>
-      <p class="hint" style="margin-bottom:0.75rem;">
+      <p class="hint mb-075">
         Shared by every one of your rewards' demand calculations.
       </p>
       <div class="card">
         <div class="card-body">
           <form method="POST" action="/channel-points/settings/pricing">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-            <div class="form-row-wrap" style="align-items:flex-end;">
+            <div class="form-row-wrap items-end">
               <div>
                 <label class="hint hint-compact" for="half-life-minutes">Demand half-life (minutes)</label>
                 <input id="half-life-minutes" class="input" type="number" step="0.5" min="0.5" name="half_life_minutes"
@@ -109,7 +109,7 @@
                 max_per_user_per_stream_setting: { is_enabled: false, max_per_user_per_stream: 1 },
                 global_cooldown_setting: { is_enabled: false, global_cooldown_seconds: 60 },
               } }) %>
-              <div style="margin-top:0.75rem;">
+              <div class="mt-075">
                 <button type="submit" class="btn">Create Reward</button>
               </div>
             </form>
@@ -121,14 +121,14 @@
     <!-- ── Rewards ──────────────────────────────────────────────────── -->
     <section class="section">
       <h2 class="section-title">Channel Point Rewards</h2>
-      <p class="hint" style="margin-bottom:0.75rem;">
+      <p class="hint mb-075">
         Turn on dynamic pricing per reward to have its channel point cost automatically rise with usage and decay when idle.
       </p>
 
       <% if (rewards.some((r) => r.config)) { %>
-      <form method="GET" action="/channel-points" class="form-row-wrap" style="align-items:center;margin-bottom:0.75rem;">
-        <label class="hint hint-compact" for="history-hours" style="padding:0;">Price history range</label>
-        <select id="history-hours" class="input" name="hours" style="width:auto;">
+      <form method="GET" action="/channel-points" class="form-row-wrap items-center mb-075">
+        <label class="hint hint-compact p-0" for="history-hours">Price history range</label>
+        <select id="history-hours" class="input w-auto" name="hours">
           <% for (const h of historyHourOptions) { %>
           <option value="<%= h %>" <%= h === historyHours ? 'selected' : '' %>><%= h %>h</option>
           <% } %>
@@ -146,7 +146,7 @@
       <% for (const r of rewards) { %>
       <div class="card card-spaced">
         <div class="card-body">
-          <div class="form-row-wrap" style="align-items:center;justify-content:space-between;">
+          <div class="form-row-wrap items-center justify-between">
             <div>
               <% if (r.twitchReward) { %>
               <strong><%= r.twitchReward.title %></strong>
@@ -159,13 +159,13 @@
               <p class="hint hint-compact">No longer found on Twitch (deleted, or not visible with the current connection) — reward ID: <code class="mono"><%= r.rewardId %></code></p>
               <% } %>
               <% if (r.config && r.config.twitch_unsupported) { %>
-              <p class="hint hint-compact" style="color:var(--danger, #c0392b);">This reward can't be managed by the bot — it was created via the Twitch dashboard (or another app), and Twitch only allows the app that created a reward to change its cost. Dynamic pricing has been disabled.</p>
+              <p class="hint hint-compact text-danger">This reward can't be managed by the bot — it was created via the Twitch dashboard (or another app), and Twitch only allows the app that created a reward to change its cost. Dynamic pricing has been disabled.</p>
               <% } else if (r.config) { %>
               <p class="hint hint-compact">Demand: <span id="demand-<%= r.rewardId %>"><%= (r.config.demand * 100).toFixed(1) %>%</span> — computed price (updates live as demand changes): <span id="price-<%= r.rewardId %>"><%= r.previewPrice.toLocaleString() %></span> pts</p>
               <% } %>
             </div>
             <% if (r.twitchReward) { %>
-            <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>/delete" style="margin:0;">
+            <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>/delete" class="m-0">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button type="submit" class="btn btn-ghost btn-sm">Delete Reward</button>
             </form>
@@ -173,14 +173,14 @@
           </div>
 
           <% if (r.config) { %>
-          <div class="price-history-container" data-reward-id="<%= r.rewardId %>" data-range-ms="<%= historyHours * 60 * 60 * 1000 %>" style="margin-top:0.5rem;">
+          <div class="price-history-container mt-05" data-reward-id="<%= r.rewardId %>" data-range-ms="<%= historyHours * 60 * 60 * 1000 %>">
             <%# historyChartSafeHtml is pre-escaped SVG from renderPriceHistoryChart(); the "SafeHtml" suffix is the contract that the raw-output tag below is safe. %>
             <%- r.historyChartSafeHtml %>
           </div>
           <% } %>
 
           <% if (r.config && r.simulationChartSafeHtml) { %>
-          <div style="margin-top:0.75rem;">
+          <div class="mt-075">
             <p class="hint hint-compact">Simulated: constant use &rarr; cooldown</p>
             <%# simulationChartSafeHtml is pre-escaped SVG from renderPriceHistoryChart(); the "SafeHtml" suffix is the contract that the raw-output tag below is safe. %>
             <%- r.simulationChartSafeHtml %>
@@ -189,12 +189,12 @@
           <% } %>
 
           <% if (r.twitchReward) { %>
-          <details style="margin-top:0.5rem;">
+          <details class="mt-05">
             <summary class="hint hint-compact disclosure-toggle">Edit reward</summary>
-            <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>" style="margin-top:0.5rem;">
+            <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>" class="mt-05">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <%- include('partials/rewardFields', { idPrefix: r.rewardId, values: r.twitchReward }) %>
-              <div style="margin-top:0.75rem;">
+              <div class="mt-075">
                 <button type="submit" class="btn">Save Changes</button>
               </div>
             </form>
@@ -202,49 +202,49 @@
           <% } %>
 
           <!-- Dynamic pricing sub-section -->
-          <div style="margin-top:0.75rem;border-top:1px solid var(--border);padding-top:0.75rem;">
-            <div class="form-row-wrap" style="align-items:center;justify-content:space-between;">
+          <div class="subsection-divider">
+            <div class="form-row-wrap items-center justify-between">
               <strong class="hint hint-compact">Dynamic pricing</strong>
               <% if (r.config) { %>
-              <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>/pricing/delete" style="margin:0;">
+              <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>/pricing/delete" class="m-0">
                 <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <button type="submit" class="btn btn-ghost btn-sm">Disable Pricing</button>
               </form>
               <% } %>
             </div>
-            <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>/pricing" style="margin-top:0.5rem;">
+            <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>/pricing" class="mt-05">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-              <div class="form-row-wrap" style="align-items:flex-end;">
-                <label style="display:flex;align-items:center;gap:0.4rem;">
+              <div class="form-row-wrap items-end">
+                <label class="checkbox-input-label">
                   <input type="checkbox" name="enabled" <%= r.config && r.config.enabled ? 'checked' : '' %>>
                   Enabled
                 </label>
                 <div>
                   <label class="hint hint-compact" for="base-cost-<%= r.rewardId %>">Base cost</label>
-                  <input id="base-cost-<%= r.rewardId %>" class="input" type="number" min="1" step="1" name="base_cost" style="width:7rem;"
+                  <input id="base-cost-<%= r.rewardId %>" class="input w-7rem" type="number" min="1" step="1" name="base_cost"
                     value="<%= r.config ? r.config.base_cost : (r.twitchReward ? r.twitchReward.cost : '') %>" required>
                 </div>
                 <div>
                   <span class="hint hint-compact">Cooldown (s)</span>
-                  <p class="hint hint-compact" style="margin:0;">
+                  <p class="hint hint-compact m-0">
                     <%= r.config ? r.config.cooldown_seconds : (r.twitchReward && r.twitchReward.global_cooldown_setting.is_enabled ? r.twitchReward.global_cooldown_setting.global_cooldown_seconds : 60) %>
                     (synced from the reward's Twitch global cooldown)
                   </p>
                 </div>
                 <div>
                   <label class="hint hint-compact" for="max-mult-<%= r.rewardId %>">Max multiplier</label>
-                  <input id="max-mult-<%= r.rewardId %>" class="input" type="number" step="0.1" min="0" name="max_multiplier" style="width:7rem;"
+                  <input id="max-mult-<%= r.rewardId %>" class="input w-7rem" type="number" step="0.1" min="0" name="max_multiplier"
                     value="<%= r.config ? r.config.max_multiplier : 1 %>" required>
                 </div>
                 <div>
                   <label class="hint hint-compact" for="curve-<%= r.rewardId %>">Curve</label>
-                  <input id="curve-<%= r.rewardId %>" class="input" type="number" step="0.1" min="0.1" name="curve" style="width:7rem;"
+                  <input id="curve-<%= r.rewardId %>" class="input w-7rem" type="number" step="0.1" min="0.1" name="curve"
                     value="<%= r.config ? r.config.curve : 1 %>" required>
                 </div>
                 <div>
                   <label class="hint hint-compact" for="round-to-nearest-<%= r.rewardId %>">Round to nearest</label>
                   <% const roundToNearest = r.config ? r.config.round_to_nearest : 0; %>
-                  <select id="round-to-nearest-<%= r.rewardId %>" class="input" name="round_to_nearest" style="width:7rem;">
+                  <select id="round-to-nearest-<%= r.rewardId %>" class="input w-7rem" name="round_to_nearest">
                     <option value="0" <%= roundToNearest === 0 ? 'selected' : '' %>>Off</option>
                     <option value="5" <%= roundToNearest === 5 ? 'selected' : '' %>>5</option>
                     <option value="10" <%= roundToNearest === 10 ? 'selected' : '' %>>10</option>

@@ -58,8 +58,8 @@
         <div class="card-body">
           <p class="hint hint-compact">Add this URL as a Browser Source in OBS (1920×1080, transparent background):</p>
           <% const login = streamer.twitch_name ? streamer.twitch_name.toLowerCase() : ''; %>
-          <code class="mono" style="display:block;margin-top:0.4rem;user-select:all;word-break:break-all;overflow-wrap:anywhere;"><%= baseUrl %>/overlay/<%= login %></code>
-          <p class="hint" style="margin-top:0.5rem;">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the URL above.</p>
+          <code class="mono overlay-url-display"><%= baseUrl %>/overlay/<%= login %></code>
+          <p class="hint mt-05">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the URL above.</p>
         </div>
       </div>
     </section>
@@ -70,8 +70,8 @@
       <div class="card">
         <div class="card-body">
           <p class="hint hint-compact">Add this URL as a Browser Source in OBS to display a gamepad input visualiser (throttle, brake, steering, handbrake):</p>
-          <code class="mono" style="display:block;margin-top:0.4rem;user-select:all;word-break:break-all;overflow-wrap:anywhere;"><%= baseUrl %>/overlay/controller</code>
-          <p class="hint" style="margin-top:0.5rem;">Works with any Xbox / PlayStation / generic controller. Transparent background — native size is <strong>332&times;212px</strong> (set the OBS browser source to these dimensions, then scale to taste).</p>
+          <code class="mono overlay-url-display"><%= baseUrl %>/overlay/controller</code>
+          <p class="hint mt-05">Works with any Xbox / PlayStation / generic controller. Transparent background — native size is <strong>332&times;212px</strong> (set the OBS browser source to these dimensions, then scale to taste).</p>
         </div>
       </div>
     </section>
@@ -86,12 +86,12 @@
                X-CSRF-Token header, so the session token is never placed in the URL
                (browser history / Referer). -->
           <form method="POST" action="/overlay/settings/videos/upload" enctype="multipart/form-data" class="js-overlay-upload">
-            <div class="form-row-wrap" style="align-items:flex-end;">
-              <div style="flex:1;">
+            <div class="form-row-wrap items-end">
+              <div class="flex-1">
                 <label class="hint hint-compact" for="video-name">Name</label>
                 <input id="video-name" class="input" type="text" name="name" maxlength="100" placeholder="e.g. Confetti Explosion">
               </div>
-              <div style="flex:1;">
+              <div class="flex-1">
                 <label class="hint hint-compact" for="video-file">Video file (WebM or MP4)</label>
                 <input id="video-file" class="input" type="file" name="video" accept="video/webm,video/mp4" required>
               </div>
@@ -99,7 +99,7 @@
                 <button type="submit" class="btn">Upload</button>
               </div>
             </div>
-            <p class="hint" style="margin-top:0.4rem;">WebM with alpha channel recommended for transparent overlays. Max <%= maxFileMb %> MB.</p>
+            <p class="hint mt-04">WebM with alpha channel recommended for transparent overlays. Max <%= maxFileMb %> MB.</p>
           </form>
         </div>
       </div>
@@ -113,7 +113,7 @@
       <% } else { %>
       <div class="card">
         <div class="table-scroll">
-          <table class="table" style="width:100%;">
+          <table class="table full-width">
             <thead>
               <tr>
                 <th>Name</th>
@@ -126,10 +126,10 @@
               <% for (const v of videos) { %>
               <tr>
                 <td><%= v.name %></td>
-                <td class="mono" style="font-size:0.8em;"><%= v.filename %></td>
+                <td class="mono fs-08em"><%= v.filename %></td>
                 <td><%= new Date(v.created_at).toLocaleDateString() %></td>
                 <td>
-                  <form method="POST" action="/overlay/settings/videos/<%= v.id %>/delete" style="margin:0;" class="js-confirm-delete-video">
+                  <form method="POST" action="/overlay/settings/videos/<%= v.id %>/delete" class="m-0 js-confirm-delete-video">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <button type="submit" class="btn btn-ghost btn-sm">
                       Delete
@@ -148,7 +148,7 @@
     <!-- ── Reward Assignments ─────────────────────────────────────── -->
     <section class="section">
       <h2 class="section-title">Reward Assignments</h2>
-      <p class="hint" style="margin-bottom:0.75rem;">
+      <p class="hint mb-075">
         Assign channel point rewards to overlay videos. Each reward can have multiple videos — one is picked at random (weighted) when redeemed.
       </p>
 
@@ -164,7 +164,7 @@
         <div class="card-body">
           <form method="POST" action="/overlay/settings/rewards" id="reward-form">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-            <div style="margin-bottom:0.75rem;">
+            <div class="mb-075">
               <label class="hint hint-compact" for="reward-id">Twitch Reward</label>
               <% if (twitchRewards.length > 0) { %>
               <select id="reward-id" class="input" name="twitch_reward_id" required>
@@ -177,25 +177,25 @@
               <input id="reward-id" class="input" type="text" name="twitch_reward_id"
                 pattern="[0-9a-fA-F\-]{36}" maxlength="36" required
                 placeholder="e.g. 12345678-abcd-1234-abcd-1234567890ab">
-              <p class="hint" style="margin-top:0.25rem;">Connect your Twitch account in <a href="/user/settings">User Settings</a> to pick rewards by name.</p>
+              <p class="hint mt-025">Connect your Twitch account in <a href="/user/settings">User Settings</a> to pick rewards by name.</p>
               <% } %>
             </div>
             <p class="hint hint-compact">Videos &amp; weights (higher weight = more likely):</p>
-            <div id="video-assignments" style="margin-top:0.4rem;">
+            <div id="video-assignments" class="mt-04">
               <% for (const v of videos) { %>
-              <div class="form-row-wrap" style="margin-bottom:0.4rem;align-items:center;">
-                <label style="flex:3;display:flex;align-items:center;gap:0.5rem;">
+              <div class="form-row-wrap mb-04 items-center">
+                <label class="flex-3 d-flex items-center gap-05">
                   <input type="checkbox" name="video_ids" value="<%= v.id %>">
                   <%= v.name %>
                 </label>
-                <div style="flex:1;display:flex;align-items:center;gap:0.4rem;">
-                  <span class="hint hint-compact" style="white-space:nowrap;">Weight</span>
-                  <input class="input" type="number" name="weight_<%= v.id %>" value="1" min="1" max="100" style="width:5rem;">
+                <div class="flex-1 d-flex items-center gap-04">
+                  <span class="hint hint-compact nowrap">Weight</span>
+                  <input class="input w-5rem" type="number" name="weight_<%= v.id %>" value="1" min="1" max="100">
                 </div>
               </div>
               <% } %>
             </div>
-            <div class="button-row-wrap" style="margin-top:0.75rem;">
+            <div class="button-row-wrap mt-075">
               <button type="submit" class="btn">Save Assignment</button>
             </div>
           </form>
@@ -209,12 +209,12 @@
       <% for (const r of rewards) { %>
       <div class="card card-spaced">
         <div class="card-body">
-          <div class="form-row-wrap" style="align-items:center;justify-content:space-between;">
+          <div class="form-row-wrap items-center justify-between">
             <div>
               <p class="hint hint-compact">Reward ID</p>
-              <code class="mono" style="word-break:break-all;overflow-wrap:anywhere;"><%= r.twitch_reward_id %></code>
+              <code class="mono reward-id-display"><%= r.twitch_reward_id %></code>
             </div>
-            <form method="POST" action="/overlay/settings/rewards/<%= r.id %>/delete" style="margin:0;" class="js-confirm-delete-reward">
+            <form method="POST" action="/overlay/settings/rewards/<%= r.id %>/delete" class="m-0 js-confirm-delete-reward">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button type="submit" class="btn btn-ghost btn-sm">
                 Remove
@@ -222,8 +222,8 @@
             </form>
           </div>
           <% if (r.videos.length > 0) { %>
-          <div class="table-scroll" style="margin-top:0.75rem;">
-            <table class="table" style="width:100%;">
+          <div class="table-scroll mt-075">
+            <table class="table full-width">
               <thead>
                 <tr><th>Video</th><th>Weight</th></tr>
               </thead>
@@ -238,7 +238,7 @@
             </table>
           </div>
           <% } else { %>
-          <p class="hint" style="margin-top:0.5rem;">No videos assigned.</p>
+          <p class="hint mt-05">No videos assigned.</p>
           <% } %>
         </div>
       </div>

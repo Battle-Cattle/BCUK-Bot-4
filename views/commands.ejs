@@ -88,18 +88,6 @@
               </tr>
             </thead>
             <tbody>
-              <%
-              function assignedUserStyle(discordId, isSelf) {
-                let h = 5381;
-                for (let i = 0; i < discordId.length; i++) {
-                  h = ((h << 5) + h) ^ discordId.charCodeAt(i);
-                  h >>>= 0;
-                }
-                const hue = h % 360;
-                if (isSelf) return `color:hsl(${hue},90%,78%);background:hsla(${hue},90%,78%,0.22)`;
-                return `color:hsl(${hue},65%,60%);background:hsla(${hue},65%,60%,0.12)`;
-              }
-              %>
               <% commands.forEach(function(command) { %>
               <tr class="sfx-row">
                 <td class="mono"><strong><%= command.trigger_string %></strong></td>
@@ -123,7 +111,7 @@
                     <div class="badge-list-wrap">
                       <% command.assigned_users.forEach(function(assignedUser) { %>
                         <% const isSelf = user && assignedUser.discord_id === user.discordId; %>
-                        <span class="badge" style="<%= assignedUserStyle(assignedUser.discord_id, isSelf) %>">
+                        <span class="badge badge-user-hue<%= isSelf ? ' badge-user-self' : '' %>" data-user-hue="<%= assignedUser.discord_id %>">
                           <%= assignedUser.discord_name || assignedUser.discord_id %>
                           <% if (assignedUser.twitch_name) { %>
                             (<%= assignedUser.twitch_name %>)

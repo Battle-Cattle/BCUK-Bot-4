@@ -3,64 +3,63 @@
      (an object shaped like TwitchCustomReward — title/cost/prompt/is_enabled/background_color/
      is_user_input_required/should_redemptions_skip_request_queue/max_per_stream_setting/
      max_per_user_per_stream_setting/global_cooldown_setting). -->
-<div class="form-row-wrap" style="align-items:flex-end;">
+<div class="form-row-wrap items-end">
   <div>
     <label class="hint hint-compact" for="title-<%= idPrefix %>">Title</label>
-    <input id="title-<%= idPrefix %>" class="input" type="text" name="title" maxlength="45" style="width:14rem;"
+    <input id="title-<%= idPrefix %>" class="input w-14rem" type="text" name="title" maxlength="45"
       value="<%= values.title %>" required>
   </div>
   <div>
     <label class="hint hint-compact" for="cost-<%= idPrefix %>">Cost</label>
-    <input id="cost-<%= idPrefix %>" class="input" type="number" min="1" step="1" name="cost" style="width:7rem;"
+    <input id="cost-<%= idPrefix %>" class="input w-7rem" type="number" min="1" step="1" name="cost"
       value="<%= values.cost %>" required>
   </div>
-  <label style="display:flex;align-items:center;gap:0.4rem;">
+  <label class="checkbox-input-label">
     <input type="checkbox" name="is_enabled" <%= values.is_enabled ? 'checked' : '' %>>
     Enabled
   </label>
 </div>
 
-<div style="margin-top:0.5rem;">
+<div class="mt-05">
   <label class="hint hint-compact" for="prompt-<%= idPrefix %>">Prompt (shown to viewers)</label>
-  <textarea id="prompt-<%= idPrefix %>" class="input" name="prompt" maxlength="200" rows="2"
-    style="width:100%;max-width:28rem;display:block;"><%= values.prompt %></textarea>
+  <textarea id="prompt-<%= idPrefix %>" class="input full-width max-w-28rem d-block" name="prompt" maxlength="200" rows="2"><%= values.prompt %></textarea>
 </div>
 
-<div class="form-row-wrap" style="align-items:center;margin-top:0.5rem;">
-  <label style="display:flex;align-items:center;gap:0.4rem;">
+<div class="form-row-wrap items-center mt-05">
+  <label class="checkbox-input-label">
     <input type="checkbox" name="is_user_input_required" <%= values.is_user_input_required ? 'checked' : '' %>>
     Require viewer text input
   </label>
-  <label style="display:flex;align-items:center;gap:0.4rem;">
+  <label class="checkbox-input-label">
     <input type="checkbox" name="should_redemptions_skip_request_queue" <%= values.should_redemptions_skip_request_queue ? 'checked' : '' %>>
     Skip request queue (auto-fulfill)
   </label>
   <div>
     <label class="hint hint-compact" for="bg-color-<%= idPrefix %>">Background color</label>
-    <input id="bg-color-<%= idPrefix %>" class="input" type="text" name="background_color" placeholder="#00E5CB" style="width:8rem;"
+    <input id="bg-color-<%= idPrefix %>" class="input w-8rem" type="text" name="background_color" placeholder="#00E5CB"
       value="<%= values.background_color || '' %>">
   </div>
 </div>
 
-<div class="form-row-wrap" style="align-items:center;margin-top:0.5rem;">
-  <label style="display:flex;align-items:center;gap:0.4rem;">
+<div class="form-row-wrap items-center mt-05">
+  <label class="checkbox-input-label">
     <input type="checkbox" name="is_max_per_stream_enabled" <%= values.max_per_stream_setting.is_enabled ? 'checked' : '' %>>
     Limit per stream
   </label>
-  <input class="input" type="number" min="1" step="1" name="max_per_stream" aria-label="Max redemptions per stream" style="width:6rem;"
+  <input class="input w-6rem" type="number" min="1" step="1" name="max_per_stream" aria-label="Max redemptions per stream"
     value="<%= values.max_per_stream_setting.max_per_stream %>">
 
-  <label style="display:flex;align-items:center;gap:0.4rem;">
+  <label class="checkbox-input-label">
     <input type="checkbox" name="is_max_per_user_per_stream_enabled" <%= values.max_per_user_per_stream_setting.is_enabled ? 'checked' : '' %>>
     Limit per user per stream
   </label>
-  <input class="input" type="number" min="1" step="1" name="max_per_user_per_stream" aria-label="Max redemptions per user per stream" style="width:6rem;"
+  <input class="input w-6rem" type="number" min="1" step="1" name="max_per_user_per_stream" aria-label="Max redemptions per user per stream"
     value="<%= values.max_per_user_per_stream_setting.max_per_user_per_stream %>">
 
-  <label style="display:flex;align-items:center;gap:0.4rem;">
+  <label class="checkbox-input-label">
     <input type="checkbox" name="is_global_cooldown_enabled" <%= values.global_cooldown_setting.is_enabled ? 'checked' : '' %>>
     Global cooldown (s)
   </label>
-  <input class="input" type="number" min="1" step="1" name="global_cooldown_seconds" aria-label="Global cooldown in seconds" style="width:6rem;"
+  <input class="input w-6rem" type="number" min="1" step="1" name="global_cooldown_seconds" aria-label="Global cooldown in seconds"
     value="<%= values.global_cooldown_setting.global_cooldown_seconds %>">
 </div>

@@ -31,7 +31,7 @@
         <div class="card-body">
           <div class="form-row-wrap">
             <% if (user && user.discordAvatar) { %>
-            <img src="<%= user.discordAvatar %>?size=64" class="avatar" style="width:48px;height:48px;border-radius:50%;" alt="">
+            <img src="<%= user.discordAvatar %>?size=64" class="avatar-lg" alt="">
             <% } %>
             <div>
               <p class="hint hint-compact">Discord</p>
@@ -68,15 +68,15 @@
       <% } else { %>
 
       <% if (needsReconnect) { %>
-      <div class="card card-alert-danger" style="margin-bottom:0.75rem;">
+      <div class="card card-alert-danger mb-075">
         Your Twitch connection is missing required permissions. Please reconnect your Twitch account to restore channel point redemption notifications.
-        <a href="/user/settings/twitch-connect" class="btn btn-sm" style="margin-left:1rem;">Reconnect Twitch</a>
+        <a href="/user/settings/twitch-connect" class="btn btn-sm ml-1">Reconnect Twitch</a>
       </div>
       <% } %>
 
       <div class="card card-spaced">
         <div class="card-body">
-          <div class="form-row-wrap" style="align-items:center;">
+          <div class="form-row-wrap items-center">
             <div>
               <% if (isConnected) { %>
               <span class="badge badge-active">✓ Connected</span>
@@ -117,9 +117,9 @@
               </label>
               <p class="hint hint-compact">New sub — variables: <code>{username} {display_name} {tier} {tier_name}</code></p>
               <textarea class="input stream-textarea" name="sub_message" rows="2" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.sub_message) ? cfg.sub_message : 'Thanks {display_name} for subscribing! ({tier_name})' %></textarea>
-              <p class="hint hint-compact" style="margin-top:0.4rem;">Resub — variables: <code>{username} {display_name} {tier} {tier_name} {months} {streak}</code></p>
+              <p class="hint hint-compact mt-04">Resub — variables: <code>{username} {display_name} {tier} {tier_name} {months} {streak}</code></p>
               <textarea class="input stream-textarea" name="resub_message" rows="2" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.resub_message) ? cfg.resub_message : 'Thanks {display_name} for {months} months! ({tier_name})' %></textarea>
-              <p class="hint hint-compact" style="margin-top:0.4rem;">Gift sub — variables: <code>{gifter} {gifter_display} {count} {tier} {tier_name}</code></p>
+              <p class="hint hint-compact mt-04">Gift sub — variables: <code>{gifter} {gifter_display} {count} {tier} {tier_name}</code></p>
               <textarea class="input stream-textarea" name="giftsub_message" rows="2" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.giftsub_message) ? cfg.giftsub_message : '{gifter_display} gifted {count} sub(s) to the community!' %></textarea>
             </div>
 
@@ -130,7 +130,7 @@
               </label>
               <p class="hint hint-compact">Variables: <code>{from_channel} {from_display} {viewers}</code></p>
               <textarea class="input stream-textarea" name="raid_message" rows="2" maxlength="500" <%= !isConnected ? 'disabled' : '' %>><%= (cfg && cfg.raid_message) ? cfg.raid_message : 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!' %></textarea>
-              <label class="input checkbox-input-label" style="margin-top:0.4rem;">
+              <label class="input checkbox-input-label mt-04">
                 <input type="checkbox" name="raid_shoutout_enabled" <%= (cfg && cfg.raid_shoutout_enabled) ? 'checked' : '' %> <%= !isConnected ? 'disabled' : '' %>>
                 Auto-shoutout raiders <% if (!isConnected) { %><span class="hint">(requires Twitch connection)</span><% } %>
               </label>
