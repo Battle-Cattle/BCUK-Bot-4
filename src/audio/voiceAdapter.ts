@@ -3,51 +3,64 @@ import type {
   DiscordGatewayAdapterImplementerMethods,
   DiscordGatewayAdapterLibraryMethods,
 } from '@discordjs/voice';
-import type { VoiceBasedChannel } from 'discord.js';
+import type { Client, VoiceBasedChannel } from 'discord.js';
 
 // ─── Voice adapter ────────────────────────────────────────────────────────────
 // Bypasses discord.js's built-in voiceAdapterCreator to avoid type/version
 // incompatibilities with discord.js v14. Listens to raw gateway events instead.
+//
+// Every guild connected to voice shares ONE 'raw' listener per Client (registered
+// lazily on first use, tracked in `dispatchers` below) instead of each guild adding
+// its own — with N guilds in voice, every gateway dispatch event (not just voice
+// ones) would otherwise fan out to N separate handlers. The shared listener routes
+// each VOICE_STATE_UPDATE/VOICE_SERVER_UPDATE packet to the right guild's methods
+// by `packet.d.guild_id`.
 //
 // The pieces are kept as flat module-level helpers (rather than closures nested
 // inside the factory) so each stays simple and independently testable.
 
 type RawPacket = { t: string; d: Record<string, unknown> };
 
-/** Tracks the cleanup for a guild's currently-registered adapter listener. */
+/** Tracks the cleanup for a guild's currently-registered adapter methods. */
 interface AdapterCleanupState {
   activeCleanup: (() => void) | null;
 }
 
-/** Creates the raw-gateway event handler that routes voice state and server update packets to the library. */
-function makeOnRaw(methods: DiscordGatewayAdapterLibraryMethods): (packet: RawPacket) => void {
-  return function onRaw(packet: RawPacket): void {
-    if (packet.t === 'VOICE_STATE_UPDATE') {
-      methods.onVoiceStateUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceStateUpdate>[0]);
-    }
-    if (packet.t === 'VOICE_SERVER_UPDATE') {
-      methods.onVoiceServerUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceServerUpdate>[0]);
-    }
-  };
+/** Per-`Client` dispatch state: the guilds currently registered for voice packet routing. */
+interface ClientDispatcher {
+  guildMethods: Map<string, DiscordGatewayAdapterLibraryMethods>;
 }
 
-/** Builds the idempotent cleanup that removes the raw listener and decrements the cap. */
-function makeCleanup(
-  channel: VoiceBasedChannel,
-  onRaw: (packet: RawPacket) => void,
-  increment: number,
-  state: AdapterCleanupState,
-): () => void {
-  let cleanedUp = false;
-  return function cleanup(): void {
-    if (cleanedUp) return;
-    cleanedUp = true;
-    channel.client.off('raw', onRaw);
-    // Decrement rather than restore to a snapshot so that cross-guild adapters
-    // sharing the same client do not race each other's cap bookkeeping.
-    if (increment > 0) channel.client.setMaxListeners(channel.client.getMaxListeners() - increment);
-    state.activeCleanup = null;
-  };
+// WeakMap so a client that's discarded (e.g. in tests) doesn't keep its dispatcher alive.
+const dispatchers = new WeakMap<Client, ClientDispatcher>();
+
+/** Routes one raw gateway packet to its guild's registered methods, if any. No-ops for non-voice packets or unregistered guilds. */
+function dispatchRawPacket(dispatcher: ClientDispatcher, packet: RawPacket): void {
+  if (packet.t !== 'VOICE_STATE_UPDATE' && packet.t !== 'VOICE_SERVER_UPDATE') return;
+
+  const guildId = (packet.d as { guild_id?: string }).guild_id;
+  if (!guildId) return;
+
+  const methods = dispatcher.guildMethods.get(guildId);
+  if (!methods) return;
+
+  if (packet.t === 'VOICE_STATE_UPDATE') {
+    methods.onVoiceStateUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceStateUpdate>[0]);
+  } else {
+    methods.onVoiceServerUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceServerUpdate>[0]);
+  }
+}
+
+/** Returns `client`'s shared dispatcher, registering its single 'raw' listener on first use. */
+function getOrCreateDispatcher(client: Client): ClientDispatcher {
+  const existing = dispatchers.get(client);
+  if (existing) return existing;
+
+  const dispatcher: ClientDispatcher = { guildMethods: new Map() };
+  /** Forwards each raw gateway packet from `client` to this dispatcher's routing logic. */
+  client.on('raw', (packet: RawPacket) => dispatchRawPacket(dispatcher, packet));
+  dispatchers.set(client, dispatcher);
+  return dispatcher;
 }
 
 /** Creates the gateway payload sender that routes voice data through the channel's guild shard. */
@@ -65,7 +78,7 @@ function makeSendPayload(channel: VoiceBasedChannel): (payload: unknown) => bool
 
 /**
  * Registers a raw-gateway adapter for one connection, tearing down the guild's
- * previous adapter first so listeners do not accumulate across reconnects.
+ * previous adapter first so registrations do not accumulate across reconnects.
  */
 function registerAdapter(
   channel: VoiceBasedChannel,
@@ -74,14 +87,25 @@ function registerAdapter(
 ): DiscordGatewayAdapterImplementerMethods {
   if (state.activeCleanup) state.activeCleanup();
 
-  const onRaw = makeOnRaw(methods);
-  const currentMax = channel.client.getMaxListeners();
-  // 0 means unlimited — don't touch it.
-  const increment = currentMax !== 0 ? 1 : 0;
-  if (increment > 0) channel.client.setMaxListeners(currentMax + 1);
-  channel.client.on('raw', onRaw);
+  const dispatcher = getOrCreateDispatcher(channel.client);
+  const guildId = channel.guild.id;
+  dispatcher.guildMethods.set(guildId, methods);
 
-  const cleanup = makeCleanup(channel, onRaw, increment, state);
+  let cleanedUp = false;
+  /**
+   * Removes this registration's entry from the dispatcher, but only if it hasn't already
+   * been superseded by a newer registration for the same guild. Idempotent.
+   */
+  const cleanup = (): void => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    // Only remove this guild's entry if it still points at these methods — a newer
+    // registration's cleanup must never be able to clobber a more recent one.
+    if (dispatcher.guildMethods.get(guildId) === methods) {
+      dispatcher.guildMethods.delete(guildId);
+    }
+    state.activeCleanup = null;
+  };
   state.activeCleanup = cleanup;
 
   return { sendPayload: makeSendPayload(channel), destroy: cleanup };
