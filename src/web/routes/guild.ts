@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { AccessLevel, findUser, getAllGuilds, getEffectiveAccessLevelForUser, getGuildsForMember } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
+import { getSessionUser } from '../session';
 import { normalizeDiscordId, renderView } from './shared';
 
 const log = createLogger('Web');
@@ -21,7 +22,7 @@ const router = Router();
  *   has at most one guild (single-guild users are sent straight to the dashboard).
  */
 router.get('/select', requireAuth, csrfProtection, (req, res) => {
-  const user = req.session.user!;
+  const user = getSessionUser(req);
   if (user.guilds.length <= 1) {
     return res.redirect('/');
   }
@@ -40,7 +41,7 @@ router.get('/select', requireAuth, csrfProtection, (req, res) => {
  * reflects the current guild, never the previous one.
  */
 router.post('/select', requireAuth, csrfProtection, async (req, res) => {
-  const user = req.session.user!;
+  const user = getSessionUser(req);
   const { guild_id } = req.body as { guild_id?: unknown };
   const requestedGuildId = typeof guild_id === 'string' ? normalizeDiscordId(guild_id) : null;
 

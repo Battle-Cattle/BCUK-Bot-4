@@ -2,6 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
+import { getSessionUser } from '../session';
 import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import { getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards } from '../../db';
@@ -132,7 +133,7 @@ async function fetchTwitchRewards(streamer: DbStreamerEventSub): Promise<TwitchC
  */
 router.get('/', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const streamer = await getStreamerByDiscordId(req.session.user!.discordId);
+    const streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
     const isConnected = !!streamer?.eventsub_access_token;
     const needsReconnect = isConnected && !!streamer?.twitch_name && hasAuthFailedSubs(streamer.twitch_name);
 

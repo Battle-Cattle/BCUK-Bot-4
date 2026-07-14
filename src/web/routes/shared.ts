@@ -11,6 +11,7 @@ import {
   isMysqlDuplicateEntryError,
 } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
+import { getSessionUser } from '../session';
 
 const VIEWS_DIR = path.join(__dirname, '../../../views');
 let knownViews: Set<string> | undefined;
@@ -75,7 +76,7 @@ export async function requireStreamer(
   res: Response,
   notAStreamerRedirectPath: string,
 ): Promise<DbStreamerEventSub | null> {
-  const streamer = await getStreamerByDiscordId(req.session.user!.discordId);
+  const streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
   if (!streamer) {
     res.redirect(notAStreamerRedirectPath);
     return null;

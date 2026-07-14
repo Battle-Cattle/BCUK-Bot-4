@@ -4,6 +4,7 @@ import { randomBytes } from 'crypto';
 import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, EventSubConfig } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
+import { getSessionUser } from '../session';
 import { logAndRedirectError, trimField, renderError, filterQueryParam, renderView } from './shared';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
@@ -56,7 +57,7 @@ function getFriendlyError(key: string): string {
  */
 router.get('/', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const discordId = req.session.user!.discordId;
+    const discordId = getSessionUser(req).discordId;
     const [dbUser, streamer] = await Promise.all([
       findUser(discordId),
       getStreamerByDiscordId(discordId),
@@ -110,7 +111,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
  */
 router.get('/twitch-connect', requireAuth, async (req, res) => {
   try {
-    const discordId = req.session.user!.discordId;
+    const discordId = getSessionUser(req).discordId;
 
     const [dbUser, streamer] = await Promise.all([
       findUser(discordId),
@@ -156,7 +157,7 @@ router.get('/twitch-connect', requireAuth, async (req, res) => {
  */
 router.post('/twitch-disconnect', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const discordId = req.session.user!.discordId;
+    const discordId = getSessionUser(req).discordId;
     const streamer = await getStreamerByDiscordId(discordId);
     if (!streamer) return res.redirect('/user/settings?error=no_streamer_record');
 
@@ -185,7 +186,7 @@ router.post('/twitch-disconnect', requireAuth, csrfProtection, async (req, res) 
  */
 router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const discordId = req.session.user!.discordId;
+    const discordId = getSessionUser(req).discordId;
 
     const [dbUser, streamer] = await Promise.all([
       findUser(discordId),
