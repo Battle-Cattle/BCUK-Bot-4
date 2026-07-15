@@ -144,12 +144,14 @@ describe('partTwitchChannel', () => {
   });
 
   it('is a no-op when the channel is neither active nor joined', async () => {
-    setTmiClient(makeMockClient() as any);
+    const client = makeMockClient();
+    setTmiClient(client as any);
     setConnected(true);
 
     await partTwitchChannel('alice');
 
     expect(vi.mocked(setTwitchChannel)).not.toHaveBeenCalled();
+    expect(client.part).not.toHaveBeenCalled();
   });
 
   it('removes local state without calling client.part when not connected', async () => {
@@ -290,7 +292,7 @@ describe('reconcileJoinedChannels', () => {
   });
 
   it('refreshes status to online for a joined channel that is still in activeChannels', async () => {
-    const client = makeMockClient(['alice']);
+    const client = makeMockClient(['#alice']); // real tmi.js channel names are #-prefixed
     setTmiClient(client as any);
     setConnected(true);
     await joinTwitchChannel('alice'); // already-joined branch — adds to activeChannels
