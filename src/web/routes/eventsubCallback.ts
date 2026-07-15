@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getStreamerById, saveStreamerToken, initEventConfig } from '../../db';
+import { getStreamerById, saveStreamerToken, initEventConfig, initAlertConfigs } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { TWITCH_EVENTSUB_REDIRECT_URI } from '../../shared/config';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
@@ -83,6 +83,7 @@ router.get('/twitch/eventsub/callback', async (req, res) => {
     const expiryMs = tokens.expires_in != null ? Date.now() + tokens.expires_in * 1000 - 60_000 : null;
     await saveStreamerToken(streamerId, twitchUser.id, tokens.access_token, tokens.refresh_token, expiryMs);
     await initEventConfig(streamerId);
+    await initAlertConfigs(streamerId);
     clearAuthFailedSubs(twitchUser.login.toLowerCase());
     reloadEventSubSubscriptions();
     log.info(`EventSub OAuth connected for ${streamer.twitch_name}`);

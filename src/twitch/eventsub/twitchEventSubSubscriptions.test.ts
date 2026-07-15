@@ -7,6 +7,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: () => logMock }));
 vi.mock('../../db', () => ({
   getAllEventSubStreamers: vi.fn(),
   clearStreamerToken: vi.fn().mockResolvedValue(undefined),
+  getAlertConfigsForStreamer: vi.fn().mockResolvedValue([]),
 }));
 vi.mock('../twitchApi', () => ({ getUsers: vi.fn() }));
 vi.mock('../twitchChannelMembership', () => ({ getActiveChannels: vi.fn().mockReturnValue(new Set<string>()) }));
@@ -39,7 +40,7 @@ import {
   removeStreamerFromMap,
   handleRevocation,
 } from './twitchEventSubSubscriptions';
-import { getAllEventSubStreamers, clearStreamerToken } from '../../db';
+import { getAllEventSubStreamers, clearStreamerToken, getAlertConfigsForStreamer } from '../../db';
 import { getValidToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
@@ -189,6 +190,27 @@ describe('loadStreamersForEventSub', () => {
     expect(result).toHaveLength(1);
     expect(result[0].uid).toBe('uid-shoutout');
   });
+
+  it('builds enabledAlerts from the streamer\'s enabled alert_config rows', async () => {
+    const fakeStreamer = {
+      id: 14,
+      twitch_name: 'alertOnly',
+      twitch_user_id: 'uid-14',
+      config: { follow_enabled: true },
+    };
+    vi.mocked(getAllEventSubStreamers).mockResolvedValue([fakeStreamer] as any);
+    vi.mocked(getValidToken).mockResolvedValue('tok-14');
+    vi.mocked(getAlertConfigsForStreamer).mockResolvedValue([
+      { event_type: 'follow', enabled: false },
+      { event_type: 'raid', enabled: true },
+      { event_type: 'giftsub', enabled: true },
+    ] as any);
+
+    const result = await loadStreamersForEventSub();
+
+    expect(getAlertConfigsForStreamer).toHaveBeenCalledWith(14);
+    expect(result[0].enabledAlerts).toEqual(new Set(['raid', 'giftsub']));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -335,6 +357,86 @@ describe('subscribeForStreamer', () => {
       'channel.raid', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
     );
   });
+
+  // Subscription-gating fix: a streamer who wants a browser-source alert but no chat message
+  // for the same event type must still get the underlying EventSub subscription created —
+  // otherwise the alert could never fire, since dispatchNotification only routes notifications
+  // for subscriptions that actually exist.
+  it('subscribes to channel.follow when only the follow alert is enabled (chat message off)', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+
+    await subscribeForStreamer('sess-alert-follow', {
+      uid: 'uid-alert-follow',
+      token: 'tok-alert-follow',
+      name: 'botInChannel',
+      config: { follow_enabled: false, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 26,
+      enabledAlerts: new Set(['follow']),
+    });
+
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.follow', '2', { broadcaster_user_id: 'uid-alert-follow', moderator_user_id: 'uid-alert-follow' }, 'sess-alert-follow', 'tok-alert-follow',
+    );
+  });
+
+  it('subscribes to the sub/resub/giftsub group when only a gift-sub alert is enabled (chat message off)', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+
+    await subscribeForStreamer('sess-alert-giftsub', {
+      uid: 'uid-alert-giftsub',
+      token: 'tok-alert-giftsub',
+      name: 'botInChannel',
+      config: { follow_enabled: false, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 27,
+      enabledAlerts: new Set(['giftsub']),
+    });
+
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.subscription.gift', '1', { broadcaster_user_id: 'uid-alert-giftsub' }, 'sess-alert-giftsub', 'tok-alert-giftsub',
+    );
+  });
+
+  it('subscribes to channel.raid when only the raid alert is enabled (both chat flags off)', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+
+    await subscribeForStreamer('sess-alert-raid', {
+      uid: 'uid-alert-raid',
+      token: 'tok-alert-raid',
+      name: 'botInChannel',
+      config: { follow_enabled: false, sub_enabled: false, raid_enabled: false, raid_shoutout_enabled: false } as any,
+      streamerId: 28,
+      enabledAlerts: new Set(['raid']),
+    });
+
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.raid', '1', { to_broadcaster_user_id: 'uid-alert-raid' }, 'sess-alert-raid', 'tok-alert-raid',
+    );
+  });
+
+  it('does not subscribe to channel.follow when neither the chat message nor the alert is enabled', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+
+    await subscribeForStreamer('sess-noalert', {
+      uid: 'uid-noalert',
+      token: 'tok-noalert',
+      name: 'botInChannel',
+      config: { follow_enabled: false, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 29,
+      enabledAlerts: new Set(),
+    });
+
+    expect(createEventSubSubscription).not.toHaveBeenCalledWith(
+      'channel.follow', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -442,27 +544,27 @@ describe('dispatchNotification routes chat-alert and redemption events', () => {
 
   it('routes channel.follow to handleFollow', () => {
     dispatchNotification('channel.follow', { user_name: 'follower' }, { broadcaster_user_id: 'uid-alert' });
-    expect(handleFollow).toHaveBeenCalledWith('alertStreamer', { user_name: 'follower' }, expect.anything());
+    expect(handleFollow).toHaveBeenCalledWith('alertStreamer', { user_name: 'follower' }, expect.anything(), 50);
   });
 
   it('routes channel.subscribe to handleSub', () => {
     dispatchNotification('channel.subscribe', { tier: '1000' }, { broadcaster_user_id: 'uid-alert' });
-    expect(handleSub).toHaveBeenCalledWith('alertStreamer', { tier: '1000' }, expect.anything());
+    expect(handleSub).toHaveBeenCalledWith('alertStreamer', { tier: '1000' }, expect.anything(), 50);
   });
 
   it('routes channel.subscription.message to handleResub', () => {
     dispatchNotification('channel.subscription.message', { cumulative_months: 5 }, { broadcaster_user_id: 'uid-alert' });
-    expect(handleResub).toHaveBeenCalledWith('alertStreamer', { cumulative_months: 5 }, expect.anything());
+    expect(handleResub).toHaveBeenCalledWith('alertStreamer', { cumulative_months: 5 }, expect.anything(), 50);
   });
 
   it('routes channel.subscription.gift to handleGiftSub', () => {
     dispatchNotification('channel.subscription.gift', { total: 3 }, { broadcaster_user_id: 'uid-alert' });
-    expect(handleGiftSub).toHaveBeenCalledWith('alertStreamer', { total: 3 }, expect.anything());
+    expect(handleGiftSub).toHaveBeenCalledWith('alertStreamer', { total: 3 }, expect.anything(), 50);
   });
 
   it('routes channel.raid to handleRaid using to_broadcaster_user_id', () => {
     dispatchNotification('channel.raid', { from_broadcaster_user_name: 'raider' }, { to_broadcaster_user_id: 'uid-alert' });
-    expect(handleRaid).toHaveBeenCalledWith('alertStreamer', { from_broadcaster_user_name: 'raider' }, expect.anything());
+    expect(handleRaid).toHaveBeenCalledWith('alertStreamer', { from_broadcaster_user_name: 'raider' }, expect.anything(), 50);
   });
 
   it('routes a channel-points redemption to handleRedemption with the streamerId', () => {

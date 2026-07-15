@@ -8,6 +8,7 @@ vi.mock('../../db', () => ({
   getStreamerById: vi.fn(),
   saveStreamerToken: vi.fn(),
   initEventConfig: vi.fn(),
+  initAlertConfigs: vi.fn(),
 }));
 
 vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
@@ -30,7 +31,7 @@ vi.mock('../../twitch/eventsub/twitchEventSubSubscriptions', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router from './eventsubCallback';
-import { getStreamerById, saveStreamerToken, initEventConfig } from '../../db';
+import { getStreamerById, saveStreamerToken, initEventConfig, initAlertConfigs } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { AccessLevel } from '../../db/users';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -71,6 +72,7 @@ beforeEach(() => {
   vi.mocked(getUserFromToken).mockResolvedValue({ login: 'teststreamer', id: 'twitch123' } as any);
   vi.mocked(saveStreamerToken).mockResolvedValue(undefined);
   vi.mocked(initEventConfig).mockResolvedValue(undefined);
+  vi.mocked(initAlertConfigs).mockResolvedValue(undefined);
 });
 
 describe('GET /twitch/eventsub/callback — state validation', () => {
@@ -128,6 +130,8 @@ describe('GET /twitch/eventsub/callback — user binding', () => {
       .get('/twitch/eventsub/callback?code=abc&state=valid-state-abc');
     expect(res.headers.location).toContain('success=twitch_connected');
     expect(vi.mocked(saveStreamerToken)).toHaveBeenCalled();
+    expect(vi.mocked(initEventConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id);
+    expect(vi.mocked(initAlertConfigs)).toHaveBeenCalledWith(MOCK_STREAMER.id);
   });
 
   it('succeeds when there is no authenticated user in session (unauthenticated callback)', async () => {

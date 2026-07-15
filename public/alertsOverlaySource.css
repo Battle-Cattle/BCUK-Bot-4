@@ -1,0 +1,33 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: transparent; overflow: hidden; width: 1920px; height: 1080px; font-family: sans-serif; }
+
+.alert-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.9);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  opacity: 0;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  text-align: center;
+}
+
+.alert-card.is-visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.alert-card img {
+  max-width: 480px;
+  max-height: 480px;
+}
+
+.alert-card .alert-message {
+  color: #fff;
+  font-size: 42px;
+  font-weight: 700;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.8);
+}

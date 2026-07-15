@@ -1,5 +1,5 @@
-import type { EventSubConfig } from '../../db';
-import { getVideosForReward, getStreamerById } from '../../db';
+import type { EventSubConfig, AlertEventType } from '../../db';
+import { getVideosForReward, getStreamerById, getAlertConfig } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
@@ -65,6 +65,48 @@ const companionRuntimeRegistry = createRuntimeRegistry<EventSubCompanionRuntime>
  */
 export function registerEventSubCompanionRuntime(runtime: EventSubCompanionRuntime): void {
   companionRuntimeRegistry.register(runtime);
+}
+
+// Runtime injection for the alerts overlay push function — same rationale as
+// EventSubOverlayRuntime above. Registered from index.ts before startWebPanel(),
+// since pushAlertEvent is just a function reference and doesn't require the HTTP
+// server to be running yet.
+/** A customisable alert (follow/sub/resub/giftsub/raid) pushed to a streamer's alerts browser source. */
+export interface AlertPayload {
+  /** Which event type this alert is for. */
+  type: AlertEventType;
+  /** On-screen text, already filled from the streamer's message template. */
+  message: string;
+  /** Server-relative URL of the configured image/GIF, or null if none is set. */
+  imageUrl: string | null;
+  /** Server-relative URL of the configured sound, or null if none is set. */
+  soundUrl: string | null;
+  /** How long (ms) the alert should stay on screen. */
+  durationMs: number;
+}
+
+/**
+ * Public contract for the alerts overlay runtime injection.
+ * Passed to {@link registerEventSubAlertRuntime} from index.ts.
+ */
+interface EventSubAlertRuntime {
+  /**
+   * Push an alert to the named channel's alerts-overlay SSE stream.
+   * @param login - Broadcaster login name.
+   * @param alert - The alert payload to display.
+   */
+  pushAlertEvent: (login: string, alert: AlertPayload) => void;
+}
+
+const alertRuntimeRegistry = createRuntimeRegistry<EventSubAlertRuntime>();
+
+/**
+ * Register the alerts overlay push function. Called from index.ts after startWebPanel().
+ * @param runtime - The {@link EventSubAlertRuntime} to store.
+ * @returns void
+ */
+export function registerEventSubAlertRuntime(runtime: EventSubAlertRuntime): void {
+  alertRuntimeRegistry.register(runtime);
 }
 
 // Runtime injection for the Twitch chat send function — avoids a direct import
@@ -140,108 +182,164 @@ function tierName(tier: string): string {
 }
 
 /**
+ * Looks up a streamer's alerts-overlay config for one event type and, if enabled, pushes a
+ * filled {@link AlertPayload} via the injected alert runtime. Independent of the chat-message
+ * `*_enabled` flags on `EventSubConfig` — a streamer may enable the browser-source alert for an
+ * event type without enabling its chat message, or vice versa. No-ops silently if no config row
+ * exists, the alert is disabled, or no alert runtime has been registered.
+ *
+ * @param login - Broadcaster login name (alerts-overlay channel to push to).
+ * @param streamerId - DB row ID of the streamer, used to look up alert config and build asset URLs.
+ * @param eventType - Which alert config row to look up.
+ * @param vars - Template variables to fill the alert's message template with.
+ */
+async function maybePushAlert(
+  login: string,
+  streamerId: number,
+  eventType: AlertEventType,
+  vars: Record<string, string>,
+): Promise<void> {
+  const alert = await getAlertConfig(streamerId, eventType);
+  if (!alert || !alert.enabled) return;
+  const message = fillTemplate(alert.message_template, vars);
+  const imageUrl = alert.image_filename ? `/alerts/assets/${streamerId}/${alert.image_filename}` : null;
+  const soundUrl = alert.sound_filename ? `/alerts/assets/${streamerId}/${alert.sound_filename}` : null;
+  alertRuntimeRegistry.get()?.pushAlertEvent(login, {
+    type: eventType,
+    message,
+    imageUrl,
+    soundUrl,
+    durationMs: alert.duration_ms,
+  });
+}
+
+/**
  * Handle a channel.follow EventSub notification.
- * Sends a chat message to the broadcaster's channel using the injected Twitch runtime.
- * No-ops when `config.follow_enabled` is false or no Twitch runtime has been registered.
+ * Sends a chat message to the broadcaster's channel using the injected Twitch runtime when
+ * `config.follow_enabled` is true, and independently pushes a browser-source alert via
+ * {@link maybePushAlert} when the streamer's follow alert is enabled.
  *
  * @param login - Broadcaster login name (chat channel to send to).
  * @param event - Follow event payload from Twitch EventSub.
  * @param config - Streamer's event response configuration.
+ * @param streamerId - DB row ID of the streamer, used to look up alert config.
  */
-export async function handleFollow(login: string, event: FollowEvent, config: EventSubConfig): Promise<void> {
-  if (!config.follow_enabled) return;
-  const msg = fillTemplate(config.follow_message, {
-    username: event.user_login,
-    display_name: event.user_name,
-  });
-  await twitchRuntimeRegistry.get()?.send(login, msg);
+export async function handleFollow(login: string, event: FollowEvent, config: EventSubConfig, streamerId: number): Promise<void> {
+  const vars = { username: event.user_login, display_name: event.user_name };
+  if (config.follow_enabled) {
+    const msg = fillTemplate(config.follow_message, vars);
+    await twitchRuntimeRegistry.get()?.send(login, msg);
+  }
+  await maybePushAlert(login, streamerId, 'follow', vars);
 }
 
 /**
- * Handle a channel.subscribe EventSub notification.
- * No-ops when `config.sub_enabled` is false, the subscription is a gift, or no Twitch runtime is registered.
+ * Handle a channel.subscribe EventSub notification. Gift subs are silently skipped entirely
+ * (handled by handleGiftSub) for both the chat message and the alert. Otherwise sends a chat
+ * message when `config.sub_enabled` is true, and independently pushes a browser-source alert
+ * via {@link maybePushAlert} when the streamer's sub alert is enabled.
  *
  * @param login - Broadcaster login name.
  * @param event - Subscribe event payload; gift subs are silently skipped (handled by handleGiftSub).
  * @param config - Streamer's event response configuration.
+ * @param streamerId - DB row ID of the streamer, used to look up alert config.
  */
-export async function handleSub(login: string, event: SubEvent, config: EventSubConfig): Promise<void> {
-  if (!config.sub_enabled || event.is_gift) return;
-  const msg = fillTemplate(config.sub_message, {
+export async function handleSub(login: string, event: SubEvent, config: EventSubConfig, streamerId: number): Promise<void> {
+  if (event.is_gift) return;
+  const vars = {
     username: event.user_login,
     display_name: event.user_name,
     tier: event.tier,
     tier_name: tierName(event.tier),
-  });
-  await twitchRuntimeRegistry.get()?.send(login, msg);
+  };
+  if (config.sub_enabled) {
+    const msg = fillTemplate(config.sub_message, vars);
+    await twitchRuntimeRegistry.get()?.send(login, msg);
+  }
+  await maybePushAlert(login, streamerId, 'sub', vars);
 }
 
 /**
  * Handle a channel.subscription.message (resub) EventSub notification.
- * No-ops when `config.sub_enabled` is false or no Twitch runtime is registered.
+ * Sends a chat message when `config.sub_enabled` is true, and independently pushes a
+ * browser-source alert via {@link maybePushAlert} when the streamer's resub alert is enabled.
  *
  * @param login - Broadcaster login name.
  * @param event - Resub event payload including cumulative and streak month counts.
  * @param config - Streamer's event response configuration.
+ * @param streamerId - DB row ID of the streamer, used to look up alert config.
  */
-export async function handleResub(login: string, event: ResubEvent, config: EventSubConfig): Promise<void> {
-  if (!config.sub_enabled) return;
-  const msg = fillTemplate(config.resub_message, {
+export async function handleResub(login: string, event: ResubEvent, config: EventSubConfig, streamerId: number): Promise<void> {
+  const vars = {
     username: event.user_login,
     display_name: event.user_name,
     tier: event.tier,
     tier_name: tierName(event.tier),
     months: String(event.cumulative_months),
     streak: event.streak_months != null ? String(event.streak_months) : '0',
-  });
-  await twitchRuntimeRegistry.get()?.send(login, msg);
+  };
+  if (config.sub_enabled) {
+    const msg = fillTemplate(config.resub_message, vars);
+    await twitchRuntimeRegistry.get()?.send(login, msg);
+  }
+  await maybePushAlert(login, streamerId, 'resub', vars);
 }
 
 /**
  * Handle a channel.subscription.gift EventSub notification.
- * Anonymous gifters are reported as "anonymous" / "Anonymous".
- * No-ops when `config.sub_enabled` is false or no Twitch runtime is registered.
+ * Anonymous gifters are reported as "anonymous" / "Anonymous". Sends a chat message when
+ * `config.sub_enabled` is true, and independently pushes a browser-source alert via
+ * {@link maybePushAlert} when the streamer's gift-sub alert is enabled.
  *
  * @param login - Broadcaster login name.
  * @param event - Gift-sub event payload; `is_anonymous` controls gifter display name.
  * @param config - Streamer's event response configuration.
+ * @param streamerId - DB row ID of the streamer, used to look up alert config.
  */
-export async function handleGiftSub(login: string, event: GiftSubEvent, config: EventSubConfig): Promise<void> {
-  if (!config.sub_enabled) return;
+export async function handleGiftSub(login: string, event: GiftSubEvent, config: EventSubConfig, streamerId: number): Promise<void> {
   const gifter = event.is_anonymous ? 'anonymous' : event.user_login;
   const gifterDisplay = event.is_anonymous ? 'Anonymous' : event.user_name;
-  const msg = fillTemplate(config.giftsub_message, {
+  const vars = {
     gifter,
     gifter_display: gifterDisplay,
     count: String(event.total),
     tier: event.tier,
     tier_name: tierName(event.tier),
-  });
-  await twitchRuntimeRegistry.get()?.send(login, msg);
+  };
+  if (config.sub_enabled) {
+    const msg = fillTemplate(config.giftsub_message, vars);
+    await twitchRuntimeRegistry.get()?.send(login, msg);
+  }
+  await maybePushAlert(login, streamerId, 'giftsub', vars);
 }
 
 /**
- * Handle a channel.raid EventSub notification. Two independent behaviours are gated
- * by their own config flags and neither depends on the other:
+ * Handle a channel.raid EventSub notification. Three independent behaviours are gated by
+ * their own flags and none depends on the others:
  *  - `config.raid_enabled` — sends the configured welcome message.
  *  - `config.raid_shoutout_enabled` — looks up the raiding channel via
  *    {@link buildShoutoutMessage} (the same Helix lookup path as the `!so` command)
  *    and sends the resulting shoutout, recording the match via `recordCommandTestEntry`
  *    for monitor-panel visibility. No-ops silently if the raiding channel can't be
  *    resolved on Twitch.
- * Both branches no-op when no Twitch runtime has been registered.
+ *  - The streamer's raid alert config (via {@link maybePushAlert}) — pushes a browser-source
+ *    alert independently of both of the above.
+ * The chat-message branches no-op when no Twitch runtime has been registered.
  *
  * @param login - Broadcaster login name (the raid target's channel).
  * @param event - Raid event payload including the raiding channel and viewer count.
  * @param config - Streamer's event response configuration.
+ * @param streamerId - DB row ID of the streamer, used to look up alert config.
  */
-export async function handleRaid(login: string, event: RaidEvent, config: EventSubConfig): Promise<void> {
+export async function handleRaid(login: string, event: RaidEvent, config: EventSubConfig, streamerId: number): Promise<void> {
+  const vars = {
+    from_channel: event.from_broadcaster_user_login,
+    from_display: event.from_broadcaster_user_name,
+    viewers: String(event.viewers),
+  };
+
   if (config.raid_enabled) {
-    const msg = fillTemplate(config.raid_message, {
-      from_channel: event.from_broadcaster_user_login,
-      from_display: event.from_broadcaster_user_name,
-      viewers: String(event.viewers),
-    });
+    const msg = fillTemplate(config.raid_message, vars);
     await twitchRuntimeRegistry.get()?.send(login, msg);
   }
 
@@ -258,6 +356,8 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
       });
     }
   }
+
+  await maybePushAlert(login, streamerId, 'raid', vars);
 }
 
 /**

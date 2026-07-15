@@ -55,9 +55,11 @@ vi.mock('./twitch/eventsub/twitchEventSubHandler', () => ({
   registerEventSubOverlayRuntime: vi.fn(),
   registerEventSubTwitchRuntime: vi.fn(),
   registerEventSubCompanionRuntime: vi.fn(),
+  registerEventSubAlertRuntime: vi.fn(),
 }));
 vi.mock('./web/routes/overlaySource', () => ({ pushOverlayEvent: vi.fn() }));
 vi.mock('./web/routes/companionEvents', () => ({ pushCompanionEvent: vi.fn() }));
+vi.mock('./web/routes/alertsOverlaySource', () => ({ pushAlertEvent: vi.fn() }));
 vi.mock('./web/routes/channelPointsEvents', () => ({ pushPricingUpdate: vi.fn() }));
 vi.mock('./commands/counterScheduler', () => ({
   startCounterScheduler: vi.fn(),
@@ -131,6 +133,15 @@ describe('startup — guild registry preload', () => {
     await runMain();
 
     expect(vi.mocked(registerEventSubCompanionRuntime)).toHaveBeenCalledWith({ pushCompanionEvent });
+  });
+
+  it('registers the alerts overlay runtime with pushAlertEvent on a clean startup', async () => {
+    const { registerEventSubAlertRuntime } = await import('./twitch/eventsub/twitchEventSubHandler.js');
+    const { pushAlertEvent } = await import('./web/routes/alertsOverlaySource.js');
+
+    await runMain();
+
+    expect(vi.mocked(registerEventSubAlertRuntime)).toHaveBeenCalledWith({ pushAlertEvent });
   });
 
   it('registers the reward pricing runtime with pushPricingUpdate on a clean startup', async () => {

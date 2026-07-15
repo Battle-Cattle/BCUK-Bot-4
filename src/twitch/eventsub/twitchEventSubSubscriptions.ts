@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
-import { getAllEventSubStreamers, clearStreamerToken } from '../../db';
-import type { DbStreamerEventSub, EventSubConfig } from '../../db';
+import { getAllEventSubStreamers, clearStreamerToken, getAlertConfigsForStreamer } from '../../db';
+import type { DbStreamerEventSub, EventSubConfig, AlertEventType } from '../../db';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
 import { normalizeTwitchChannelName } from '../twitchChannelName';
@@ -41,11 +41,11 @@ export function clearAuthFailedSubs(login: string): void {
 // Using Map instead of a plain object prevents prototype-chain lookup on user-controlled keys.
 type NotificationHandler = (login: string, event: unknown, config: EventSubConfig, streamerId: number) => Promise<void>;
 const notificationHandlers = new Map<string, NotificationHandler>([
-  ['channel.follow',                                   (l, e, c) => handleFollow(l, e as FollowEvent, c)],
-  ['channel.subscribe',                                (l, e, c) => handleSub(l, e as SubEvent, c)],
-  ['channel.subscription.message',                     (l, e, c) => handleResub(l, e as ResubEvent, c)],
-  ['channel.subscription.gift',                        (l, e, c) => handleGiftSub(l, e as GiftSubEvent, c)],
-  ['channel.raid',                                     (l, e, c) => handleRaid(l, e as RaidEvent, c)],
+  ['channel.follow',                                   (l, e, c, sid) => handleFollow(l, e as FollowEvent, c, sid)],
+  ['channel.subscribe',                                (l, e, c, sid) => handleSub(l, e as SubEvent, c, sid)],
+  ['channel.subscription.message',                     (l, e, c, sid) => handleResub(l, e as ResubEvent, c, sid)],
+  ['channel.subscription.gift',                        (l, e, c, sid) => handleGiftSub(l, e as GiftSubEvent, c, sid)],
+  ['channel.raid',                                     (l, e, c, sid) => handleRaid(l, e as RaidEvent, c, sid)],
   ['channel.channel_points_custom_reward_redemption.add',  (l, e, c, sid) => handleRedemption(l, e as RedemptionEvent, c, sid)],
   ['stream.online',                                    (l) => handleStreamOnline(l)],
   ['stream.offline',                                   (l) => handleStreamOffline(l)],
@@ -85,8 +85,11 @@ interface SubscriptionGroup {
   /**
    * Returns true if this group's subscriptions should be created for the streamer.
    * @param config - The streamer's event response configuration, or null if unset.
+   * @param enabledAlerts - Event types with an enabled alerts-overlay config row for this
+   *   streamer. Independent of `config`'s chat-message flags — a streamer can want the
+   *   subscription created purely to drive a browser-source alert, with chat messages off.
    */
-  enabled: (config: EventSubConfig | null) => boolean;
+  enabled: (config: EventSubConfig | null, enabledAlerts: ReadonlySet<AlertEventType>) => boolean;
   /**
    * Builds this group's subscription specs.
    * @param uid - The broadcaster's Twitch user ID.
@@ -99,11 +102,12 @@ interface SubscriptionGroup {
 // token, not an app token — see createSubscriptionsForStreamer's upfront `!token` check).
 const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
   {
-    enabled: (config) => Boolean(config?.follow_enabled),
+    enabled: (config, enabledAlerts) => Boolean(config?.follow_enabled) || enabledAlerts.has('follow'),
     specs: (uid) => [{ type: 'channel.follow', version: '2', condition: { broadcaster_user_id: uid, moderator_user_id: uid } }],
   },
   {
-    enabled: (config) => Boolean(config?.sub_enabled),
+    enabled: (config, enabledAlerts) => Boolean(config?.sub_enabled)
+      || enabledAlerts.has('sub') || enabledAlerts.has('resub') || enabledAlerts.has('giftsub'),
     specs: (uid) => [
       { type: 'channel.subscribe', version: '1', condition: { broadcaster_user_id: uid } },
       { type: 'channel.subscription.message', version: '1', condition: { broadcaster_user_id: uid } },
@@ -111,10 +115,10 @@ const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
     ],
   },
   {
-    // Subscribe when either the welcome message or the auto-shoutout toggle is on —
-    // handleRaid gates its own two behaviours independently, but the subscription itself
-    // must exist for either to fire.
-    enabled: (config) => Boolean(config?.raid_enabled || config?.raid_shoutout_enabled),
+    // Subscribe when the welcome message, the auto-shoutout toggle, or the raid alert is on —
+    // handleRaid gates its three behaviours independently, but the subscription itself must
+    // exist for any of them to fire.
+    enabled: (config, enabledAlerts) => Boolean(config?.raid_enabled || config?.raid_shoutout_enabled) || enabledAlerts.has('raid'),
     specs: (uid) => [{ type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }],
   },
   {
@@ -140,6 +144,7 @@ const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
 /** Creates all desired EventSub subscriptions for a single streamer and returns the desired-types set. */
 async function createSubscriptionsForStreamer(
   sid: string, uid: string, token: string | null, config: EventSubConfig | null, name: string,
+  enabledAlerts: ReadonlySet<AlertEventType>,
 ): Promise<Set<string>> {
   const normalizedName = normalizeTwitchChannelName(name) ?? name.toLowerCase();
   if (!getActiveChannels().has(normalizedName)) {
@@ -151,7 +156,7 @@ async function createSubscriptionsForStreamer(
   if (!token) return desired;
 
   for (const group of SUBSCRIPTION_GROUPS) {
-    if (!group.enabled(config)) continue;
+    if (!group.enabled(config, enabledAlerts)) continue;
     for (const spec of group.specs(uid)) {
       desired.add(spec.type);
       await subscribe(sid, spec, token, name);
@@ -168,6 +173,9 @@ export interface StreamerEventSubData {
   name: string;
   config: EventSubConfig | null;
   streamerId: number;
+  /** Event types with an enabled alerts-overlay config row for this streamer. Defaults to
+   *  empty when omitted (e.g. by callers that don't care about the alerts overlay). */
+  enabledAlerts?: ReadonlySet<AlertEventType>;
 }
 
 /** Fetches all streamers from the DB, resolves their broadcaster IDs and valid tokens. */
@@ -179,7 +187,9 @@ export async function loadStreamersForEventSub(): Promise<StreamerEventSubData[]
     const config = streamer.config;
     const uid = await resolveBroadcasterId(streamer, config);
     if (!uid) continue;
-    result.push({ uid, token, name: streamer.twitch_name ?? '', config, streamerId: streamer.id });
+    const alertConfigs = await getAlertConfigsForStreamer(streamer.id);
+    const enabledAlerts = new Set(alertConfigs.filter((a) => a.enabled).map((a) => a.event_type));
+    result.push({ uid, token, name: streamer.twitch_name ?? '', config, streamerId: streamer.id, enabledAlerts });
   }
   return result;
 }
@@ -189,9 +199,9 @@ export async function loadStreamersForEventSub(): Promise<StreamerEventSubData[]
 export async function subscribeForStreamer(
   sessionId: string, data: StreamerEventSubData,
 ): Promise<number> {
-  const { uid, token, name, config, streamerId } = data;
+  const { uid, token, name, config, streamerId, enabledAlerts = new Set<AlertEventType>() } = data;
   streamerMap.set(uid, { login: name, streamerId, config });
-  const desired = await createSubscriptionsForStreamer(sessionId, uid, token, config, name);
+  const desired = await createSubscriptionsForStreamer(sessionId, uid, token, config, name, enabledAlerts);
   await deleteStaleSubscriptions(uid, desired, token);
   return desired.size;
 }

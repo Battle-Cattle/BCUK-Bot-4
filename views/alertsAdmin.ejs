@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Alerts</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body data-csrf-token="<%= csrfToken %>">
+  <%- include('partials/nav') %>
+
+  <main class="container">
+
+    <% if (error) { %>
+    <div class="card card-alert-danger">
+      <% const errorMessages = {
+        not_a_streamer:     'You are not configured as a monitored streamer, or have no Twitch channel connected.',
+        invalid_event_type: 'Invalid alert event type.',
+        invalid_file:       'No valid file was uploaded, or the file type is not supported.',
+        invalid_message:    'The on-screen message cannot be blank.',
+        upload_failed:      'Upload failed — please try again.',
+        delete_failed:      'Delete failed — please try again.',
+        save_failed:        'Failed to save — please try again.',
+        invalid_path:       'Invalid request.',
+        file_too_large:     `That file is too large (max ${maxImageMb} MB for images, ${maxSoundMb} MB for sounds).`,
+      }; %>
+      <%= errorMessages[error] ?? `An error occurred (${error}).` %>
+    </div>
+    <% } %>
+
+    <% if (success) { %>
+    <div class="card card-alert-success">
+      <% const successMessages = {
+        image_uploaded: 'Image uploaded.',
+        sound_uploaded: 'Sound uploaded.',
+        image_deleted:  'Image removed.',
+        sound_deleted:  'Sound removed.',
+        config_saved:   'Alert settings saved.',
+        test_sent:      'Test alert sent — check your browser source.',
+      }; %>
+      <%= successMessages[success] ?? 'Done.' %>
+    </div>
+    <% } %>
+
+    <% if (!streamer) { %>
+    <section class="section">
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">You are not configured as a monitored streamer. Contact a Manager or Admin.</p>
+        </div>
+      </div>
+    </section>
+    <% } else { %>
+
+    <!-- ── Browser Source URL ──────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">OBS Browser Source</h2>
+      <div class="card">
+        <div class="card-body">
+          <p class="hint hint-compact">Add this URL as a Browser Source in OBS (1920×1080, transparent background):</p>
+          <% const login = streamer.twitch_name ? streamer.twitch_name.toLowerCase() : ''; %>
+          <code class="mono overlay-url-display"><%= baseUrl %>/alerts/<%= login %></code>
+          <p class="hint mt-05">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the URL above.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Per-event-type alert configuration ─────────────────────── -->
+    <% const labels = { follow: 'Follow', sub: 'Sub', resub: 'Resub', giftsub: 'Gift Sub', raid: 'Raid' };
+       const placeholders = {
+         follow:  '{username}, {display_name}',
+         sub:     '{username}, {display_name}, {tier}, {tier_name}',
+         resub:   '{username}, {display_name}, {tier}, {tier_name}, {months}, {streak}',
+         giftsub: '{gifter}, {gifter_display}, {count}, {tier}, {tier_name}',
+         raid:    '{from_channel}, {from_display}, {viewers}',
+       };
+    %>
+    <% for (const eventType of eventTypes) { %>
+    <% const cfg = configByType.get(eventType) ?? { enabled: false, message_template: '', image_filename: null, sound_filename: null, duration_ms: 6000 }; %>
+    <section class="section">
+      <h2 class="section-title"><%= labels[eventType] ?? eventType %> Alert</h2>
+      <div class="card">
+        <div class="card-body">
+
+          <form method="POST" action="/alerts/settings/<%= eventType %>" class="mb-1">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <label class="d-flex items-center gap-05 mb-075">
+              <input type="checkbox" name="enabled" <%= cfg.enabled ? 'checked' : '' %>>
+              Enabled
+            </label>
+
+            <label class="hint hint-compact" for="message-<%= eventType %>">On-screen message</label>
+            <textarea id="message-<%= eventType %>" class="input" name="message_template" maxlength="500" rows="2"><%= cfg.message_template %></textarea>
+            <p class="hint mt-025">Placeholders: <%= placeholders[eventType] %></p>
+
+            <label class="hint hint-compact mt-075" for="duration-<%= eventType %>">Display duration (ms)</label>
+            <input id="duration-<%= eventType %>" class="input w-8rem" type="number" name="duration_ms" min="1000" max="60000" step="500" value="<%= cfg.duration_ms %>">
+
+            <div class="button-row-wrap mt-075">
+              <button type="submit" class="btn">Save</button>
+            </div>
+          </form>
+
+          <div class="form-row-wrap items-end mt-1">
+            <div class="flex-1">
+              <label class="hint hint-compact" for="image-<%= eventType %>">Image / GIF (max <%= maxImageMb %> MB)</label>
+              <form method="POST" action="/alerts/settings/<%= eventType %>/image" enctype="multipart/form-data" class="js-alert-upload d-flex gap-05 items-end">
+                <input id="image-<%= eventType %>" class="input" type="file" name="image" accept="image/png,image/gif,image/jpeg,image/webp" required>
+                <button type="submit" class="btn btn-sm">Upload</button>
+              </form>
+              <% if (cfg.image_filename) { %>
+              <div class="mt-05 d-flex items-center gap-05">
+                <img src="/alerts/assets/<%= streamer.id %>/<%= cfg.image_filename %>" alt="" class="alert-asset-preview">
+                <form method="POST" action="/alerts/settings/<%= eventType %>/image/delete" class="m-0 js-confirm-delete-asset">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <button type="submit" class="btn btn-ghost btn-sm">Remove</button>
+                </form>
+              </div>
+              <% } %>
+            </div>
+
+            <div class="flex-1">
+              <label class="hint hint-compact" for="sound-<%= eventType %>">Sound (max <%= maxSoundMb %> MB)</label>
+              <form method="POST" action="/alerts/settings/<%= eventType %>/sound" enctype="multipart/form-data" class="js-alert-upload d-flex gap-05 items-end">
+                <input id="sound-<%= eventType %>" class="input" type="file" name="sound" accept="audio/mpeg,audio/ogg,audio/wav" required>
+                <button type="submit" class="btn btn-sm">Upload</button>
+              </form>
+              <% if (cfg.sound_filename) { %>
+              <div class="mt-05 d-flex items-center gap-05">
+                <audio controls src="/alerts/assets/<%= streamer.id %>/<%= cfg.sound_filename %>"></audio>
+                <form method="POST" action="/alerts/settings/<%= eventType %>/sound/delete" class="m-0 js-confirm-delete-asset">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <button type="submit" class="btn btn-ghost btn-sm">Remove</button>
+                </form>
+              </div>
+              <% } %>
+            </div>
+          </div>
+
+          <form method="POST" action="/alerts/settings/<%= eventType %>/test" class="mt-075 m-0">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <button type="submit" class="btn btn-ghost btn-sm">Send Test Alert</button>
+          </form>
+
+        </div>
+      </div>
+    </section>
+    <% } %>
+
+    <% } %>
+
+  </main>
+
+  <%- include('partials/pwa-register') %>
+  <%- include('partials/footer') %>
+  <script src="/utils.js"></script>
+  <script src="/alertsAdmin.js"></script>
+</body>
+</html>

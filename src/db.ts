@@ -176,6 +176,15 @@ export {
 } from './db/eventSub';
 export type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 
+// ─── Alerts overlay ─────────────────────────────────────────────────────────
+
+export type { AlertConfig, AlertEventType } from './db/alertConfig';
+export { ALERT_EVENT_TYPES } from './db/alertConfig';
+export {
+  getAlertConfigsForStreamer, getAlertConfig, initAlertConfigs,
+  saveAlertConfig, setAlertImage, setAlertSound,
+} from './db/alertConfig';
+
 // ─── SFX ────────────────────────────────────────────────────────────────────
 
 export type { SfxTrigger, SfxFile, SfxTriggerRow, PublicSfxTrigger, SfxCategory } from './db/sfx';
