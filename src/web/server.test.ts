@@ -105,6 +105,7 @@ vi.mock('./routes/overlayAdmin', () => ({ default: emptyRouter() }));
 vi.mock('./routes/channelPointsAdmin', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionAuth', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionEvents', () => ({ default: emptyRouter() }));
+vi.mock('./routes/companionRewards', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionKeys', () => ({ default: emptyRouter() }));
 
 import { app } from './server';

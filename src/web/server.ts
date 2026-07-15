@@ -30,6 +30,7 @@ import streamdeckRouter from './routes/streamdeck';
 import streamdeckKeysRouter from './routes/streamdeckKeys';
 import companionAuthRouter from './routes/companionAuth';
 import companionEventsRouter from './routes/companionEvents';
+import companionRewardsRouter from './routes/companionRewards';
 import companionKeysRouter from './routes/companionKeys';
 import userSettingsRouter from './routes/userSettings';
 import overlaySourceRouter from './routes/overlaySource';
@@ -168,6 +169,7 @@ app.use('/overlay', overlaySourceRouter);
 // request on the site, not just the companion app's OAuth routes.
 app.use('/', companionAuthRouter);
 app.use('/api/companion', companionEventsRouter);
+app.use('/api/companion', companionRewardsRouter);
 app.use('/guild', requireAuth, guildRouter);
 app.use('/api', requireAuth, apiRouter);
 
