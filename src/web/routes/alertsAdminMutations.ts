@@ -77,27 +77,35 @@ async function removeOldAsset(streamerId: number, filename: string | null): Prom
 /** Persists a new asset filename for a streamer's alert config row (`setAlertImage`/`setAlertSound`). */
 type AssetSetter = (streamerId: number, eventType: AlertEventType, filename: string | null) => Promise<string | null>;
 
+/** Options for {@link saveUploadedAsset}, bundled to keep the function to a single parameter. */
+interface SaveUploadedAssetOptions {
+  /** The requesting streamer, already verified to own the target config row. */
+  streamer: DbStreamerEventSub;
+  /** Which alert event type the upload is for. */
+  eventType: AlertEventType;
+  /** The uploaded file from Multer, or undefined if none was attached. */
+  file: Express.Multer.File | undefined;
+  /** Magic-byte detector returning the file's extension, or null if unrecognised. */
+  detect: (buf: Buffer) => string | null;
+  /** DB setter (`setAlertImage`/`setAlertSound`) to persist the new filename. */
+  setAsset: AssetSetter;
+  /** `'image'` or `'sound'`, used for the success code and log message. */
+  assetLabel: 'image' | 'sound';
+}
+
 /**
  * Validates (via `detect`), writes, and persists an uploaded asset file (image or sound) for
  * one of a streamer's alert event types, removing any previously-uploaded file of the same kind
  * on disk. Shared by the image and sound upload routes below, which differ only in their magic-byte
  * detector, DB setter, and multer field/label names.
- * @param streamer - The requesting streamer, already verified to own the target config row.
- * @param eventType - Which alert event type the upload is for.
- * @param file - The uploaded file from Multer, or undefined if none was attached.
- * @param detect - Magic-byte detector returning the file's extension, or null if unrecognised.
- * @param setAsset - DB setter (`setAlertImage`/`setAlertSound`) to persist the new filename.
- * @param assetLabel - `'image'` or `'sound'`, used for the success code and log message.
+ * @param options - See {@link SaveUploadedAssetOptions}.
  * @returns An error code to redirect with, or a success code to redirect with.
  */
 async function saveUploadedAsset(
-  streamer: DbStreamerEventSub,
-  eventType: AlertEventType,
-  file: Express.Multer.File | undefined,
-  detect: (buf: Buffer) => string | null,
-  setAsset: AssetSetter,
-  assetLabel: 'image' | 'sound',
+  options: SaveUploadedAssetOptions,
 ): Promise<{ errorCode: string } | { successCode: string }> {
+  const { streamer, eventType, file, detect, setAsset, assetLabel } = options;
+
   if (!file) return { errorCode: 'invalid_file' };
   const ext = detect(file.buffer);
   if (!ext) return { errorCode: 'invalid_file' };
@@ -128,6 +136,67 @@ async function saveUploadedAsset(
 async function deleteAsset(streamerId: number, eventType: AlertEventType, setAsset: AssetSetter): Promise<void> {
   const previous = await setAsset(streamerId, eventType, null);
   await removeOldAsset(streamerId, previous);
+}
+
+/**
+ * Builds the POST /settings/:eventType/<image|sound> route handler for one asset kind: verifies
+ * the requester is a streamer, validates `:eventType`, delegates to {@link saveUploadedAsset},
+ * and redirects based on the result. Shared by the image and sound upload routes, which
+ * previously differed only in their detector/setter/field name — this collapses that remaining
+ * boilerplate down to a single factory call per route.
+ * @param detect - Magic-byte detector for this asset kind.
+ * @param setAsset - DB setter (`setAlertImage`/`setAlertSound`) for this asset kind.
+ * @param assetLabel - `'image'` or `'sound'`, used for error/log labelling.
+ * @returns An Express route handler for the upload route.
+ */
+function makeUploadHandler(
+  detect: (buf: Buffer) => string | null,
+  setAsset: AssetSetter,
+  assetLabel: 'image' | 'sound',
+): (req: Request, res: Response) => Promise<void> {
+  return async (req, res) => {
+    try {
+      const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
+      if (!streamer) return;
+
+      const eventType = parseEventType(req.params.eventType);
+      if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
+
+      const result = await saveUploadedAsset({ streamer, eventType, file: req.file, detect, setAsset, assetLabel });
+      if ('errorCode' in result) return res.redirect(`/alerts/settings?error=${result.errorCode}`);
+      res.redirect(`/alerts/settings?success=${result.successCode}`);
+    } catch (err) {
+      logAndRedirectError({ res, log, logLabel: `Alert ${assetLabel} upload error:`, err, basePath: '/alerts/settings', errorCode: 'upload_failed' });
+    }
+  };
+}
+
+/**
+ * Builds the POST /settings/:eventType/<image|sound>/delete route handler for one asset kind:
+ * verifies the requester is a streamer, validates `:eventType`, and delegates to
+ * {@link deleteAsset}. Shared by the image and sound delete routes.
+ * @param setAsset - DB setter (`setAlertImage`/`setAlertSound`) for this asset kind.
+ * @param assetLabel - `'image'` or `'sound'`, used for the success code and log labelling.
+ * @returns An Express route handler for the delete route.
+ */
+function makeDeleteHandler(
+  setAsset: AssetSetter,
+  assetLabel: 'image' | 'sound',
+): (req: Request, res: Response) => Promise<void> {
+  return async (req, res) => {
+    try {
+      const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
+      if (!streamer) return;
+
+      const eventType = parseEventType(req.params.eventType);
+      if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
+
+      await deleteAsset(streamer.id, eventType, setAsset);
+      res.redirect(`/alerts/settings?success=${assetLabel}_deleted`);
+    } catch (err) {
+      logAndRedirectError({ res, log, logLabel: `Alert ${assetLabel} delete error:`, err, basePath: '/alerts/settings', errorCode: 'delete_failed' });
+    }
+  };
 }
 
 /**
@@ -165,21 +234,7 @@ function uploadSound(req: Request, res: Response, next: NextFunction): void {
  *   (`invalid_path`), the file exceeds the size limit (`file_too_large`), or saving fails
  *   (`upload_failed`).
  */
-router.post('/settings/:eventType/image', requireAuth, csrfProtection, uploadImage, async (req, res) => {
-  try {
-    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-    if (!streamer) return;
-
-    const eventType = parseEventType(req.params.eventType);
-    if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
-
-    const result = await saveUploadedAsset(streamer, eventType, req.file, detectImageType, setAlertImage, 'image');
-    if ('errorCode' in result) return res.redirect(`/alerts/settings?error=${result.errorCode}`);
-    res.redirect(`/alerts/settings?success=${result.successCode}`);
-  } catch (err) {
-    logAndRedirectError({ res, log, logLabel: 'Alert image upload error:', err, basePath: '/alerts/settings', errorCode: 'upload_failed' });
-  }
-});
+router.post('/settings/:eventType/image', requireAuth, csrfProtection, uploadImage, makeUploadHandler(detectImageType, setAlertImage, 'image'));
 
 /**
  * POST /alerts/settings/:eventType/sound — uploads a sound (magic-byte validated, via the
@@ -190,21 +245,7 @@ router.post('/settings/:eventType/image', requireAuth, csrfProtection, uploadIma
  *   success, or to `/alerts/settings?error=<code>` with the same error codes as the image
  *   upload route above.
  */
-router.post('/settings/:eventType/sound', requireAuth, csrfProtection, uploadSound, async (req, res) => {
-  try {
-    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-    if (!streamer) return;
-
-    const eventType = parseEventType(req.params.eventType);
-    if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
-
-    const result = await saveUploadedAsset(streamer, eventType, req.file, detectAudioType, setAlertSound, 'sound');
-    if ('errorCode' in result) return res.redirect(`/alerts/settings?error=${result.errorCode}`);
-    res.redirect(`/alerts/settings?success=${result.successCode}`);
-  } catch (err) {
-    logAndRedirectError({ res, log, logLabel: 'Alert sound upload error:', err, basePath: '/alerts/settings', errorCode: 'upload_failed' });
-  }
-});
+router.post('/settings/:eventType/sound', requireAuth, csrfProtection, uploadSound, makeUploadHandler(detectAudioType, setAlertSound, 'sound'));
 
 /**
  * POST /alerts/settings/:eventType/image/delete — removes the requesting streamer's uploaded
@@ -215,20 +256,7 @@ router.post('/settings/:eventType/sound', requireAuth, csrfProtection, uploadSou
  *   (`not_a_streamer`), `eventType` is invalid (`invalid_event_type`), or the delete fails
  *   (`delete_failed`).
  */
-router.post('/settings/:eventType/image/delete', requireAuth, csrfProtection, async (req, res) => {
-  try {
-    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-    if (!streamer) return;
-
-    const eventType = parseEventType(req.params.eventType);
-    if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
-
-    await deleteAsset(streamer.id, eventType, setAlertImage);
-    res.redirect('/alerts/settings?success=image_deleted');
-  } catch (err) {
-    logAndRedirectError({ res, log, logLabel: 'Alert image delete error:', err, basePath: '/alerts/settings', errorCode: 'delete_failed' });
-  }
-});
+router.post('/settings/:eventType/image/delete', requireAuth, csrfProtection, makeDeleteHandler(setAlertImage, 'image'));
 
 /**
  * POST /alerts/settings/:eventType/sound/delete — removes the requesting streamer's uploaded
@@ -238,20 +266,7 @@ router.post('/settings/:eventType/image/delete', requireAuth, csrfProtection, as
  *   success, or to `/alerts/settings?error=<code>` with the same error codes as the image
  *   delete route above.
  */
-router.post('/settings/:eventType/sound/delete', requireAuth, csrfProtection, async (req, res) => {
-  try {
-    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-    if (!streamer) return;
-
-    const eventType = parseEventType(req.params.eventType);
-    if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
-
-    await deleteAsset(streamer.id, eventType, setAlertSound);
-    res.redirect('/alerts/settings?success=sound_deleted');
-  } catch (err) {
-    logAndRedirectError({ res, log, logLabel: 'Alert sound delete error:', err, basePath: '/alerts/settings', errorCode: 'delete_failed' });
-  }
-});
+router.post('/settings/:eventType/sound/delete', requireAuth, csrfProtection, makeDeleteHandler(setAlertSound, 'sound'));
 
 /**
  * POST /alerts/settings/:eventType — saves the non-file fields (enable flag, message template,

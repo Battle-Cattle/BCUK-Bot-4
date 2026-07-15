@@ -5,6 +5,7 @@ import type { AlertPayload } from '../../twitch/eventsub/twitchEventSubHandler';
 import { ALERT_ASSETS_FOLDER, ALERT_MAX_SSE_PER_CHANNEL } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
 import { renderView } from './shared';
+import { createSseEventsHandler } from './sseChannel';
 
 const log = createLogger('AlertsOverlaySource');
 const router = Router();
@@ -66,55 +67,20 @@ router.get('/:login', (req, res, next) => {
 /**
  * GET /alerts/:login/events — SSE endpoint that streams `pushAlertEvent` alert notifications
  * to a connected browser source for a channel login (no auth, opened directly by OBS).
+ * Connection lifecycle (validation, connection-limit enforcement, SSE handshake, keepalive,
+ * and disconnect cleanup) is shared with the reward-video overlay via `createSseEventsHandler`.
  * @param req - Express request; reads the `login` route param.
  * @param res - Express response; on a valid login, upgrades to an `text/event-stream`
  *   connection kept alive with periodic pings and torn down on client disconnect; replies
  *   429 if the channel's connection limit (`MAX_SSE_CONNECTIONS_PER_CHANNEL`) is exceeded,
  *   or calls `next()` if `login` is malformed or reserved.
  */
-router.get('/:login/events', (req, res, next) => {
-  const { login } = req.params;
-  if (!LOGIN_RE.test(login) || RESERVED_LOGINS.has(login.toLowerCase())) { next(); return; }
-  const key = login.toLowerCase();
-
-  if (!connections.has(key)) connections.set(key, new Set());
-  const clients = connections.get(key)!;
-  clients.add(res);
-  if (clients.size > MAX_SSE_CONNECTIONS_PER_CHANNEL) {
-    clients.delete(res);
-    res.status(429).end();
-    return;
-  }
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // disable Nginx buffering if behind proxy
-  res.flushHeaders();
-
-  res.write(': connected\n\n');
-
-  const keepalive = setInterval(() => {
-    try {
-      res.write(': ping\n\n');
-    } catch {
-      clearInterval(keepalive);
-      const clients = connections.get(key);
-      if (clients) {
-        clients.delete(res);
-        if (clients.size === 0) connections.delete(key);
-      }
-    }
-  }, 25_000);
-
-  req.on('close', () => {
-    clearInterval(keepalive);
-    const clients = connections.get(key);
-    if (!clients) return;
-    clients.delete(res);
-    if (clients.size === 0) connections.delete(key);
-  });
-});
+router.get('/:login/events', createSseEventsHandler({
+  connections,
+  loginRe: LOGIN_RE,
+  reservedLogins: RESERVED_LOGINS,
+  maxPerChannel: MAX_SSE_CONNECTIONS_PER_CHANNEL,
+}));
 
 /**
  * GET /alerts/assets/:streamerId/:filename — serves an uploaded alert image/GIF/sound file
