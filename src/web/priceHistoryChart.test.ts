@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { renderPriceHistoryChart } from './priceHistoryChart';
+import { renderPriceHistoryChart, assertSafeChartHtml } from './priceHistoryChart';
 
 describe('renderPriceHistoryChart', () => {
   it('renders a placeholder when there are no points', () => {
@@ -130,5 +130,29 @@ describe('renderPriceHistoryChart', () => {
       expect(svg).not.toContain('<script>');
       expect(svg).toContain('&lt;/text&gt;&lt;script&gt;alert(1)&lt;/script&gt;');
     });
+  });
+});
+
+describe('assertSafeChartHtml', () => {
+  it('passes through valid svg chart markup unchanged', () => {
+    const html = '<svg class="price-history-chart"><polyline points="1,2 3,4"/></svg>';
+    expect(assertSafeChartHtml(html)).toBe(html);
+  });
+
+  it('passes through the empty-state placeholder unchanged', () => {
+    const html = '<div class="hint price-history-empty" style="height:120px;">No price history yet for this range.</div>';
+    expect(assertSafeChartHtml(html)).toBe(html);
+  });
+
+  it('throws when the markup does not start with the expected svg or placeholder shape', () => {
+    expect(() => assertSafeChartHtml('<script>alert(1)</script>')).toThrow('unexpected HTML structure');
+  });
+
+  it('throws when a script tag is smuggled in after a valid-looking opening tag', () => {
+    expect(() => assertSafeChartHtml('<svg ><script>alert(1)</script></svg>')).toThrow('unsafe content');
+  });
+
+  it('is case-insensitive when detecting smuggled script tags', () => {
+    expect(() => assertSafeChartHtml('<svg ><SCRIPT>alert(1)</SCRIPT></svg>')).toThrow('unsafe content');
   });
 });

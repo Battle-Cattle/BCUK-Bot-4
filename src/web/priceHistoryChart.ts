@@ -19,6 +19,25 @@ function escapeHtml(value: string | number): string {
 }
 
 /**
+ * Asserts that generated chart markup is either the `<svg>` chart or the empty-state
+ * placeholder `<div>`, and contains no `<script` tag, before it's returned to callers that
+ * render it raw (`<%- %>`) in the view. `renderPriceHistoryChart` is the sole place responsible
+ * for escaping attacker-reachable content into that markup; this is a defense-in-depth backstop
+ * so a future change to this function that breaks escaping fails loudly instead of shipping XSS.
+ */
+export function assertSafeChartHtml(html: string): string {
+  const isSvg = html.startsWith('<svg ');
+  const isEmptyPlaceholder = html.startsWith('<div class="hint price-history-empty"');
+  if (!isSvg && !isEmptyPlaceholder) {
+    throw new Error('renderPriceHistoryChart produced unexpected HTML structure');
+  }
+  if (html.toLowerCase().includes('<script')) {
+    throw new Error('renderPriceHistoryChart produced unsafe content');
+  }
+  return html;
+}
+
+/**
  * Renders an inline SVG line chart of a reward's price over `[rangeStartMs, rangeEndMs]`.
  * A single series needs no legend (the card title above it already names what's plotted).
  * Embeds the plotted points as a `data-points` JSON attribute so `priceHistoryChart.js`
@@ -39,6 +58,9 @@ function escapeHtml(value: string | number): string {
  *   time (via a `data-elapsed` attribute), so `priceHistoryChart.js`'s hover tooltip formats it as
  *   a duration instead of a clock time.
  * @returns Self-contained `<svg>` markup, or a "no data yet" placeholder if `points` is empty.
+ * @throws If the generated markup doesn't match the expected shape (see `assertSafeChartHtml`) —
+ *   indicates a bug in this function that would otherwise risk shipping unescaped content to the
+ *   view's raw (`<%- %>`) output.
  */
 export function renderPriceHistoryChart(
   points: PriceHistoryPoint[],
@@ -47,7 +69,7 @@ export function renderPriceHistoryChart(
   options?: { ariaLabel?: string; elapsedTimeAxis?: boolean },
 ): string {
   if (points.length === 0) {
-    return `<div class="hint price-history-empty" style="height:${HEIGHT}px;display:flex;align-items:center;justify-content:center;">No price history yet for this range.</div>`;
+    return assertSafeChartHtml(`<div class="hint price-history-empty" style="height:${HEIGHT}px;display:flex;align-items:center;justify-content:center;">No price history yet for this range.</div>`);
   }
 
   const sorted = [...points].sort((a, b) => a.t - b.t);
@@ -79,7 +101,7 @@ export function renderPriceHistoryChart(
       ?? `Price history from ${new Date(rangeStartMs).toLocaleString()} to ${new Date(rangeEndMs).toLocaleString()}, ranging from ${minCost} to ${maxCost} points`
   );
 
-  return `
+  return assertSafeChartHtml(`
 <svg class="price-history-chart" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="100%" height="${HEIGHT}" preserveAspectRatio="none"
      data-points='${escapeHtml(dataPoints)}'
      data-plot-left="${plotLeft}" data-plot-right="${plotRight}"
@@ -97,5 +119,5 @@ export function renderPriceHistoryChart(
     <line class="price-history-crosshair-line" y1="${plotTop}" y2="${plotBottom}" stroke="var(--muted)" stroke-width="1"/>
     <circle class="price-history-crosshair-dot" r="4" fill="var(--primary)" stroke="var(--bg-card)" stroke-width="2"/>
   </g>
-</svg>`.trim();
+</svg>`.trim());
 }
