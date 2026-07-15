@@ -27,7 +27,7 @@
     "libsodium-wrappers": "^0.8.4",
     "mediaplex": "^1.0.0",
     "multer": "^2.2.0",
-    "mysql2": "^3.22.6",
+    "mysql2": "^3.23.0",
     "tiktok-live-connector": "2.4.0",
     "tmi.js": "^1.8.5",
     "winston": "^3.19.0",
