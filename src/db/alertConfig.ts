@@ -114,10 +114,41 @@ export async function saveAlertConfig(
 }
 
 /**
- * Sets (or clears, when `filename` is null) the image asset for a streamer's alert config row,
+ * Sets (or clears, when `filename` is null) one asset column of a streamer's alert config row,
  * returning the previous filename so the caller can remove the now-orphaned file on disk.
  * A no-op (returns null) if no matching row exists — the row is expected to already exist via
- * {@link initAlertConfigs}.
+ * {@link initAlertConfigs}. Shared by {@link setAlertImage} and {@link setAlertSound}, which
+ * differ only in which fixed, trusted column name they target — never derived from user input.
+ * @param column The asset column to update (`image_filename` or `sound_filename`).
+ * @param streamerId DB row ID of the streamer.
+ * @param eventType The alert event type being configured.
+ * @param filename The new stored filename, or null to clear the asset.
+ * @returns The previous filename, or null if there was none (or no matching row existed).
+ */
+async function setAlertAssetColumn(
+  column: 'image_filename' | 'sound_filename',
+  streamerId: number,
+  eventType: AlertEventType,
+  filename: string | null,
+): Promise<string | null> {
+  return withTransaction(async (conn) => {
+    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+      `SELECT ${column} FROM alert_config WHERE streamer_id = ? AND event_type = ?`,
+      [streamerId, eventType],
+    );
+    if (rows.length === 0) return null;
+    const previous: string | null = rows[0][column] ?? null;
+    await conn.execute(
+      `UPDATE alert_config SET ${column} = ? WHERE streamer_id = ? AND event_type = ?`,
+      [filename, streamerId, eventType],
+    );
+    return previous;
+  });
+}
+
+/**
+ * Sets (or clears, when `filename` is null) the image asset for a streamer's alert config row.
+ * See {@link setAlertAssetColumn} for the shared behaviour.
  * @param streamerId DB row ID of the streamer.
  * @param eventType The alert event type being configured.
  * @param filename The new stored filename, or null to clear the image.
@@ -128,26 +159,12 @@ export async function setAlertImage(
   eventType: AlertEventType,
   filename: string | null,
 ): Promise<string | null> {
-  return withTransaction(async (conn) => {
-    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT image_filename FROM alert_config WHERE streamer_id = ? AND event_type = ?`,
-      [streamerId, eventType],
-    );
-    if (rows.length === 0) return null;
-    const previous: string | null = rows[0].image_filename ?? null;
-    await conn.execute(
-      `UPDATE alert_config SET image_filename = ? WHERE streamer_id = ? AND event_type = ?`,
-      [filename, streamerId, eventType],
-    );
-    return previous;
-  });
+  return setAlertAssetColumn('image_filename', streamerId, eventType, filename);
 }
 
 /**
- * Sets (or clears, when `filename` is null) the sound asset for a streamer's alert config row,
- * returning the previous filename so the caller can remove the now-orphaned file on disk.
- * A no-op (returns null) if no matching row exists — the row is expected to already exist via
- * {@link initAlertConfigs}.
+ * Sets (or clears, when `filename` is null) the sound asset for a streamer's alert config row.
+ * See {@link setAlertAssetColumn} for the shared behaviour.
  * @param streamerId DB row ID of the streamer.
  * @param eventType The alert event type being configured.
  * @param filename The new stored filename, or null to clear the sound.
@@ -158,17 +175,5 @@ export async function setAlertSound(
   eventType: AlertEventType,
   filename: string | null,
 ): Promise<string | null> {
-  return withTransaction(async (conn) => {
-    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT sound_filename FROM alert_config WHERE streamer_id = ? AND event_type = ?`,
-      [streamerId, eventType],
-    );
-    if (rows.length === 0) return null;
-    const previous: string | null = rows[0].sound_filename ?? null;
-    await conn.execute(
-      `UPDATE alert_config SET sound_filename = ? WHERE streamer_id = ? AND event_type = ?`,
-      [filename, streamerId, eventType],
-    );
-    return previous;
-  });
+  return setAlertAssetColumn('sound_filename', streamerId, eventType, filename);
 }

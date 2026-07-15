@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { ALERT_EVENT_TYPES, saveAlertConfig, setAlertImage, setAlertSound } from '../../db';
-import type { AlertEventType } from '../../db';
+import type { AlertEventType, DbStreamerEventSub } from '../../db';
 import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
 import {
@@ -74,6 +74,62 @@ async function removeOldAsset(streamerId: number, filename: string | null): Prom
   await fs.promises.rm(fullPath, { force: true });
 }
 
+/** Persists a new asset filename for a streamer's alert config row (`setAlertImage`/`setAlertSound`). */
+type AssetSetter = (streamerId: number, eventType: AlertEventType, filename: string | null) => Promise<string | null>;
+
+/**
+ * Validates (via `detect`), writes, and persists an uploaded asset file (image or sound) for
+ * one of a streamer's alert event types, removing any previously-uploaded file of the same kind
+ * on disk. Shared by the image and sound upload routes below, which differ only in their magic-byte
+ * detector, DB setter, and multer field/label names.
+ * @param streamer - The requesting streamer, already verified to own the target config row.
+ * @param eventType - Which alert event type the upload is for.
+ * @param file - The uploaded file from Multer, or undefined if none was attached.
+ * @param detect - Magic-byte detector returning the file's extension, or null if unrecognised.
+ * @param setAsset - DB setter (`setAlertImage`/`setAlertSound`) to persist the new filename.
+ * @param assetLabel - `'image'` or `'sound'`, used for the success code and log message.
+ * @returns An error code to redirect with, or a success code to redirect with.
+ */
+async function saveUploadedAsset(
+  streamer: DbStreamerEventSub,
+  eventType: AlertEventType,
+  file: Express.Multer.File | undefined,
+  detect: (buf: Buffer) => string | null,
+  setAsset: AssetSetter,
+  assetLabel: 'image' | 'sound',
+): Promise<{ errorCode: string } | { successCode: string }> {
+  if (!file) return { errorCode: 'invalid_file' };
+  const ext = detect(file.buffer);
+  if (!ext) return { errorCode: 'invalid_file' };
+
+  const dir = safeResolve(ALERT_ASSETS_FOLDER, String(streamer.id));
+  if (!dir) return { errorCode: 'invalid_path' };
+
+  const filename = `${eventType}-${randomUUID()}.${ext}`;
+  await fs.promises.mkdir(dir, { recursive: true });
+  const fullPath = safeResolve(ALERT_ASSETS_FOLDER, String(streamer.id), filename);
+  if (!fullPath) return { errorCode: 'invalid_path' };
+  await fs.promises.writeFile(fullPath, file.buffer);
+
+  let previous: string | null;
+  try {
+    previous = await setAsset(streamer.id, eventType, filename);
+  } catch (err) {
+    await fs.promises.rm(fullPath, { force: true });
+    throw err;
+  }
+  await removeOldAsset(streamer.id, previous);
+
+  log.info(`Alert ${assetLabel} uploaded for ${streamer.twitch_name} (${eventType}): ${filename}`);
+  return { successCode: `${assetLabel}_uploaded` };
+}
+
+/** Clears a streamer's asset for one alert event type, removing both the DB reference and the file on disk. */
+async function deleteAsset(streamerId: number, eventType: AlertEventType, setAsset: AssetSetter): Promise<void> {
+  const previous = await setAsset(streamerId, eventType, null);
+  await removeOldAsset(streamerId, previous);
+}
+
 /**
  * Translate a Multer error into a user-facing redirect. An oversized file (`LIMIT_FILE_SIZE`)
  * gets the `file_too_large` code; any other error falls back to `upload_failed`.
@@ -116,31 +172,10 @@ router.post('/settings/:eventType/image', requireAuth, csrfProtection, uploadIma
 
     const eventType = parseEventType(req.params.eventType);
     if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
-    if (!req.file) return res.redirect('/alerts/settings?error=invalid_file');
 
-    const ext = detectImageType(req.file.buffer);
-    if (!ext) return res.redirect('/alerts/settings?error=invalid_file');
-
-    const dir = safeResolve(ALERT_ASSETS_FOLDER, String(streamer.id));
-    if (!dir) return res.redirect('/alerts/settings?error=invalid_path');
-
-    const filename = `${eventType}-${randomUUID()}.${ext}`;
-    await fs.promises.mkdir(dir, { recursive: true });
-    const fullPath = safeResolve(ALERT_ASSETS_FOLDER, String(streamer.id), filename);
-    if (!fullPath) return res.redirect('/alerts/settings?error=invalid_path');
-    await fs.promises.writeFile(fullPath, req.file.buffer);
-
-    let previous: string | null;
-    try {
-      previous = await setAlertImage(streamer.id, eventType, filename);
-    } catch (err) {
-      await fs.promises.rm(fullPath, { force: true });
-      throw err;
-    }
-    await removeOldAsset(streamer.id, previous);
-
-    log.info(`Alert image uploaded for ${streamer.twitch_name} (${eventType}): ${filename}`);
-    res.redirect('/alerts/settings?success=image_uploaded');
+    const result = await saveUploadedAsset(streamer, eventType, req.file, detectImageType, setAlertImage, 'image');
+    if ('errorCode' in result) return res.redirect(`/alerts/settings?error=${result.errorCode}`);
+    res.redirect(`/alerts/settings?success=${result.successCode}`);
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Alert image upload error:', err, basePath: '/alerts/settings', errorCode: 'upload_failed' });
   }
@@ -162,31 +197,10 @@ router.post('/settings/:eventType/sound', requireAuth, csrfProtection, uploadSou
 
     const eventType = parseEventType(req.params.eventType);
     if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
-    if (!req.file) return res.redirect('/alerts/settings?error=invalid_file');
 
-    const ext = detectAudioType(req.file.buffer);
-    if (!ext) return res.redirect('/alerts/settings?error=invalid_file');
-
-    const dir = safeResolve(ALERT_ASSETS_FOLDER, String(streamer.id));
-    if (!dir) return res.redirect('/alerts/settings?error=invalid_path');
-
-    const filename = `${eventType}-${randomUUID()}.${ext}`;
-    await fs.promises.mkdir(dir, { recursive: true });
-    const fullPath = safeResolve(ALERT_ASSETS_FOLDER, String(streamer.id), filename);
-    if (!fullPath) return res.redirect('/alerts/settings?error=invalid_path');
-    await fs.promises.writeFile(fullPath, req.file.buffer);
-
-    let previous: string | null;
-    try {
-      previous = await setAlertSound(streamer.id, eventType, filename);
-    } catch (err) {
-      await fs.promises.rm(fullPath, { force: true });
-      throw err;
-    }
-    await removeOldAsset(streamer.id, previous);
-
-    log.info(`Alert sound uploaded for ${streamer.twitch_name} (${eventType}): ${filename}`);
-    res.redirect('/alerts/settings?success=sound_uploaded');
+    const result = await saveUploadedAsset(streamer, eventType, req.file, detectAudioType, setAlertSound, 'sound');
+    if ('errorCode' in result) return res.redirect(`/alerts/settings?error=${result.errorCode}`);
+    res.redirect(`/alerts/settings?success=${result.successCode}`);
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Alert sound upload error:', err, basePath: '/alerts/settings', errorCode: 'upload_failed' });
   }
@@ -209,9 +223,7 @@ router.post('/settings/:eventType/image/delete', requireAuth, csrfProtection, as
     const eventType = parseEventType(req.params.eventType);
     if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
 
-    const previous = await setAlertImage(streamer.id, eventType, null);
-    await removeOldAsset(streamer.id, previous);
-
+    await deleteAsset(streamer.id, eventType, setAlertImage);
     res.redirect('/alerts/settings?success=image_deleted');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Alert image delete error:', err, basePath: '/alerts/settings', errorCode: 'delete_failed' });
@@ -234,9 +246,7 @@ router.post('/settings/:eventType/sound/delete', requireAuth, csrfProtection, as
     const eventType = parseEventType(req.params.eventType);
     if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
 
-    const previous = await setAlertSound(streamer.id, eventType, null);
-    await removeOldAsset(streamer.id, previous);
-
+    await deleteAsset(streamer.id, eventType, setAlertSound);
     res.redirect('/alerts/settings?success=sound_deleted');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Alert sound delete error:', err, basePath: '/alerts/settings', errorCode: 'delete_failed' });

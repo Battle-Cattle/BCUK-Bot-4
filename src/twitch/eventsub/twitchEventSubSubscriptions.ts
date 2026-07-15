@@ -141,11 +141,23 @@ const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
   },
 ];
 
+/** Data bundle passed to a StreamerConnection for setting up EventSub subscriptions. */
+export interface StreamerEventSubData {
+  uid: string;
+  token: string | null;
+  name: string;
+  config: EventSubConfig | null;
+  streamerId: number;
+  /** Event types with an enabled alerts-overlay config row for this streamer. Defaults to
+   *  empty when omitted (e.g. by callers that don't care about the alerts overlay). */
+  enabledAlerts?: ReadonlySet<AlertEventType>;
+}
+
 /** Creates all desired EventSub subscriptions for a single streamer and returns the desired-types set. */
 async function createSubscriptionsForStreamer(
-  sid: string, uid: string, token: string | null, config: EventSubConfig | null, name: string,
-  enabledAlerts: ReadonlySet<AlertEventType>,
+  sessionId: string, data: StreamerEventSubData,
 ): Promise<Set<string>> {
+  const { uid, token, name, config, enabledAlerts = new Set<AlertEventType>() } = data;
   const normalizedName = normalizeTwitchChannelName(name) ?? name.toLowerCase();
   if (!getActiveChannels().has(normalizedName)) {
     log.info(`Skipping EventSub subscriptions for ${name} — bot not in channel`);
@@ -159,23 +171,11 @@ async function createSubscriptionsForStreamer(
     if (!group.enabled(config, enabledAlerts)) continue;
     for (const spec of group.specs(uid)) {
       desired.add(spec.type);
-      await subscribe(sid, spec, token, name);
+      await subscribe(sessionId, spec, token, name);
     }
   }
 
   return desired;
-}
-
-/** Data bundle passed to a StreamerConnection for setting up EventSub subscriptions. */
-export interface StreamerEventSubData {
-  uid: string;
-  token: string | null;
-  name: string;
-  config: EventSubConfig | null;
-  streamerId: number;
-  /** Event types with an enabled alerts-overlay config row for this streamer. Defaults to
-   *  empty when omitted (e.g. by callers that don't care about the alerts overlay). */
-  enabledAlerts?: ReadonlySet<AlertEventType>;
 }
 
 /** Fetches all streamers from the DB, resolves their broadcaster IDs and valid tokens. */
@@ -199,9 +199,9 @@ export async function loadStreamersForEventSub(): Promise<StreamerEventSubData[]
 export async function subscribeForStreamer(
   sessionId: string, data: StreamerEventSubData,
 ): Promise<number> {
-  const { uid, token, name, config, streamerId, enabledAlerts = new Set<AlertEventType>() } = data;
+  const { uid, token, name, config, streamerId } = data;
   streamerMap.set(uid, { login: name, streamerId, config });
-  const desired = await createSubscriptionsForStreamer(sessionId, uid, token, config, name, enabledAlerts);
+  const desired = await createSubscriptionsForStreamer(sessionId, data);
   await deleteStaleSubscriptions(uid, desired, token);
   return desired.size;
 }
