@@ -45,7 +45,7 @@
     "@types/express-session": "^1.19.0",
     "@types/multer": "^2.2.0",
     "@types/node": "^26.1.1",
-    "@types/supertest": "^7.2.0",
+    "@types/supertest": "^7.2.1",
     "@types/tmi.js": "^1.8.6",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.1.10",
