@@ -294,6 +294,26 @@ Expected constraints:
 - Composite primary key `(guild_id, command_id)`.
 - Both foreign keys use `ON DELETE CASCADE`, so deleting a catalog command or a guild removes its override rows.
 
+## `alert_config`
+
+Per-streamer, per-event-type configuration for the customisable alerts overlay (a browser-source SSE overlay separate from the existing channel-point video overlay). Created by `migrations/alerts_overlay.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK, auto-increment | |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `event_type` | `ENUM('follow','sub','resub','giftsub','raid')` | Which Twitch EventSub event this row configures |
+| `enabled` | `TINYINT(1)` | Whether the browser-source alert fires for this event type |
+| `message_template` | `VARCHAR(500)` | On-screen text template; supports the same `{placeholder}` syntax (via `fillTemplate`) as the existing chat-message templates in `streamer_event_config` |
+| `image_filename` | `VARCHAR(255)` nullable | Uploaded image/GIF filename, relative to `ALERT_ASSETS_FOLDER/<streamer_id>/` |
+| `sound_filename` | `VARCHAR(255)` nullable | Uploaded sound filename, relative to `ALERT_ASSETS_FOLDER/<streamer_id>/` |
+| `duration_ms` | `INT` | How long the alert stays on screen before being dismissed |
+
+Expected constraints:
+
+- `UNIQUE KEY uq_alert_config (streamer_id, event_type)` — one row per streamer per event type.
+- Independent of `streamer_event_config` (Twitch chat messages) and `overlay_reward`/`overlay_video` (channel-point video overlay) — a streamer may enable an alert for an event type without enabling the corresponding chat message, or vice versa.
+
 ## `streamdeck_api_keys`
 
 Per-user Streamdeck API keys. Defined in `schema.sql`. For existing deployments where this table was created externally (before the multi-guild migration), `migrations/multi_guild.sql` conditionally adds the `guild_id` column.

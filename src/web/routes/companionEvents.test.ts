@@ -8,6 +8,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 // (that's covered in middleware.test.ts).
 vi.mock('../../shared/config', () => ({
   COMPANION_MAX_SSE_PER_TOKEN: 3,
+  SSE_MAX_TOTAL_CONNECTIONS: 1000,
 }));
 
 vi.mock('../middleware', () => ({

@@ -432,6 +432,7 @@ details[open] > .disclosure-toggle::before { transform: rotate(90deg); }
 .event-feed-sample { font-size: .8rem; white-space: pre-wrap; }
 .overlay-url-display { display: block; margin-top: .4rem; user-select: all; word-break: break-all; overflow-wrap: anywhere; }
 .reward-id-display { word-break: break-all; overflow-wrap: anywhere; }
+.alert-asset-preview { max-width: 6rem; max-height: 6rem; border-radius: 4px; }
 
 /* ── Reconnect modal (dashboard) ──────────────────────── */
 .reconnect-modal-overlay {

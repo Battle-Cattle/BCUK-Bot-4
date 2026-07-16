@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
-vi.mock('../../db', () => ({ getVideosForReward: vi.fn(), getStreamerById: vi.fn() }));
+vi.mock('../../db', () => ({ getVideosForReward: vi.fn(), getStreamerById: vi.fn(), findCachedAlertConfig: vi.fn() }));
 vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../commands/shoutoutHandler', () => ({ buildShoutoutMessage: vi.fn() }));
 vi.mock('../../commands/commandMonitorStore', () => ({ recordCommandTestEntry: vi.fn() }));
@@ -13,8 +13,9 @@ import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
   handleStreamOnline, handleStreamOffline, handleChannelUpdate,
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
+  registerEventSubAlertRuntime,
 } from './twitchEventSubHandler';
-import { getVideosForReward, getStreamerById } from '../../db';
+import { getVideosForReward, getStreamerById, findCachedAlertConfig } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
@@ -29,6 +30,12 @@ registerEventSubOverlayRuntime({ pushOverlayEvent: mockPushOverlayEvent });
 
 const mockPushCompanionEvent = vi.fn();
 registerEventSubCompanionRuntime({ pushCompanionEvent: mockPushCompanionEvent });
+
+const mockPushAlertEvent = vi.fn();
+registerEventSubAlertRuntime({ pushAlertEvent: mockPushAlertEvent });
+
+// Fixed streamerId used by tests that don't care about alert-config lookup specifics.
+const STREAMER_ID = 7;
 
 // Minimal EventSubConfig helper — avoids importing from db/eventSub
 function makeConfig(overrides: Partial<{
@@ -58,6 +65,7 @@ function makeConfig(overrides: Partial<{
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(findCachedAlertConfig).mockResolvedValue(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -71,7 +79,7 @@ describe('handleFollow', () => {
   };
 
   it('does not call injected runtime when follow_enabled is false', async () => {
-    await handleFollow('streamer', event, makeConfig({ follow_enabled: false }));
+    await handleFollow('streamer', event, makeConfig({ follow_enabled: false }), STREAMER_ID);
     expect(mockSend).not.toHaveBeenCalled();
   });
 
@@ -79,7 +87,7 @@ describe('handleFollow', () => {
     await handleFollow('streamer', event, makeConfig({
       follow_enabled: true,
       follow_message: 'Welcome {username} aka {display_name}!',
-    }));
+    }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledOnce();
     expect(mockSend).toHaveBeenCalledWith('streamer', 'Welcome testuser aka TestUser!');
   });
@@ -98,12 +106,12 @@ describe('handleSub', () => {
   };
 
   it('does not call injected runtime when sub_enabled is false', async () => {
-    await handleSub('streamer', { ...baseEvent }, makeConfig({ sub_enabled: false }));
+    await handleSub('streamer', { ...baseEvent }, makeConfig({ sub_enabled: false }), STREAMER_ID);
     expect(mockSend).not.toHaveBeenCalled();
   });
 
   it('does not call injected runtime when is_gift is true even if sub_enabled is true', async () => {
-    await handleSub('streamer', { ...baseEvent, is_gift: true }, makeConfig({ sub_enabled: true }));
+    await handleSub('streamer', { ...baseEvent, is_gift: true }, makeConfig({ sub_enabled: true }), STREAMER_ID);
     expect(mockSend).not.toHaveBeenCalled();
   });
 
@@ -111,7 +119,7 @@ describe('handleSub', () => {
     await handleSub('streamer', { ...baseEvent, tier: '1000' }, makeConfig({
       sub_enabled: true,
       sub_message: 'tier={tier} name={tier_name}',
-    }));
+    }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledWith('streamer', 'tier=1000 name=Tier 1');
   });
 
@@ -119,7 +127,7 @@ describe('handleSub', () => {
     await handleSub('streamer', { ...baseEvent, tier: '2000' }, makeConfig({
       sub_enabled: true,
       sub_message: 'name={tier_name}',
-    }));
+    }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledWith('streamer', 'name=Tier 2');
   });
 
@@ -127,7 +135,7 @@ describe('handleSub', () => {
     await handleSub('streamer', { ...baseEvent, tier: '3000' }, makeConfig({
       sub_enabled: true,
       sub_message: 'name={tier_name}',
-    }));
+    }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledWith('streamer', 'name=Tier 3');
   });
 
@@ -135,7 +143,7 @@ describe('handleSub', () => {
     await handleSub('streamer', { ...baseEvent, tier: 'prime' }, makeConfig({
       sub_enabled: true,
       sub_message: 'name={tier_name}',
-    }));
+    }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledWith('streamer', 'name=prime');
   });
 });
@@ -157,7 +165,7 @@ describe('handleResub', () => {
     await handleResub('streamer', baseEvent, makeConfig({
       sub_enabled: true,
       resub_message: 'months={months} streak={streak}',
-    }));
+    }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledWith('streamer', 'months=6 streak=3');
   });
 
@@ -165,7 +173,7 @@ describe('handleResub', () => {
     await handleResub('streamer', { ...baseEvent, streak_months: null }, makeConfig({
       sub_enabled: true,
       resub_message: 'streak={streak}',
-    }));
+    }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledWith('streamer', 'streak=0');
   });
 
@@ -173,12 +181,12 @@ describe('handleResub', () => {
     await handleResub('streamer', { ...baseEvent, streak_months: 12 }, makeConfig({
       sub_enabled: true,
       resub_message: 'streak={streak}',
-    }));
+    }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledWith('streamer', 'streak=12');
   });
 
   it('does not call injected runtime when sub_enabled is false', async () => {
-    await handleResub('streamer', baseEvent, makeConfig({ sub_enabled: false }));
+    await handleResub('streamer', baseEvent, makeConfig({ sub_enabled: false }), STREAMER_ID);
     expect(mockSend).not.toHaveBeenCalled();
   });
 });
@@ -197,7 +205,7 @@ describe('handleGiftSub', () => {
   };
 
   it('does not call injected runtime when sub_enabled is false', async () => {
-    await handleGiftSub('streamer', baseEvent, makeConfig({ sub_enabled: false }));
+    await handleGiftSub('streamer', baseEvent, makeConfig({ sub_enabled: false }), STREAMER_ID);
     expect(mockSend).not.toHaveBeenCalled();
   });
 
@@ -205,7 +213,7 @@ describe('handleGiftSub', () => {
     await handleGiftSub('streamer', { ...baseEvent, is_anonymous: true }, makeConfig({
       sub_enabled: true,
       giftsub_message: '{gifter} / {gifter_display}',
-    }));
+    }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledWith('streamer', 'anonymous / Anonymous');
   });
 
@@ -213,7 +221,7 @@ describe('handleGiftSub', () => {
     await handleGiftSub('streamer', { ...baseEvent, is_anonymous: false }, makeConfig({
       sub_enabled: true,
       giftsub_message: '{gifter} / {gifter_display}',
-    }));
+    }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledWith('streamer', 'gifter / GifterDisplay');
   });
 
@@ -221,7 +229,7 @@ describe('handleGiftSub', () => {
     await handleGiftSub('streamer', { ...baseEvent, total: 3 }, makeConfig({
       sub_enabled: true,
       giftsub_message: 'count={count}',
-    }));
+    }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledWith('streamer', 'count=3');
   });
 });
@@ -238,7 +246,7 @@ describe('handleRaid', () => {
   };
 
   it('does not call injected runtime when raid_enabled is false', async () => {
-    await handleRaid('streamer', event, makeConfig({ raid_enabled: false }));
+    await handleRaid('streamer', event, makeConfig({ raid_enabled: false }), STREAMER_ID);
     expect(mockSend).not.toHaveBeenCalled();
   });
 
@@ -246,14 +254,14 @@ describe('handleRaid', () => {
     await handleRaid('streamer', event, makeConfig({
       raid_enabled: true,
       raid_message: '{from_channel} ({from_display}) viewers={viewers}',
-    }));
+    }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledWith('streamer', 'raider (RaiderDisplay) viewers=42');
   });
 
   it('sends the shoutout for the raiding channel when raid_shoutout_enabled is true, even if raid_enabled is false', async () => {
     vi.mocked(buildShoutoutMessage).mockResolvedValue('Go check out @raider!');
 
-    await handleRaid('streamer', event, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }));
+    await handleRaid('streamer', event, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }), STREAMER_ID);
 
     expect(buildShoutoutMessage).toHaveBeenCalledWith('raider');
     expect(mockSend).toHaveBeenCalledTimes(1);
@@ -263,7 +271,7 @@ describe('handleRaid', () => {
   it('records the auto-shoutout via recordCommandTestEntry for monitor-panel visibility', async () => {
     vi.mocked(buildShoutoutMessage).mockResolvedValue('Go check out @raider!');
 
-    await handleRaid('streamer', event, makeConfig({ raid_shoutout_enabled: true }));
+    await handleRaid('streamer', event, makeConfig({ raid_shoutout_enabled: true }), STREAMER_ID);
 
     expect(recordCommandTestEntry).toHaveBeenCalledWith(expect.objectContaining({
       source: 'twitch',
@@ -281,7 +289,7 @@ describe('handleRaid', () => {
       raid_enabled: true,
       raid_message: 'Welcome {from_channel}!',
       raid_shoutout_enabled: true,
-    }));
+    }), STREAMER_ID);
 
     expect(mockSend).toHaveBeenCalledWith('streamer', 'Welcome raider!');
     expect(mockSend).toHaveBeenCalledWith('streamer', 'Go check out @raider!');
@@ -291,16 +299,238 @@ describe('handleRaid', () => {
   it('does not send a shoutout when raid_shoutout_enabled is true but the raiding channel is not found on Twitch', async () => {
     vi.mocked(buildShoutoutMessage).mockResolvedValue(null);
 
-    await handleRaid('streamer', event, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }));
+    await handleRaid('streamer', event, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }), STREAMER_ID);
 
     expect(mockSend).not.toHaveBeenCalled();
     expect(recordCommandTestEntry).not.toHaveBeenCalled();
   });
 
   it('does not look up a shoutout when raid_shoutout_enabled is false', async () => {
-    await handleRaid('streamer', event, makeConfig({ raid_enabled: true, raid_shoutout_enabled: false }));
+    await handleRaid('streamer', event, makeConfig({ raid_enabled: true, raid_shoutout_enabled: false }), STREAMER_ID);
 
     expect(buildShoutoutMessage).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Alerts overlay push — independent of the chat-message *_enabled flags
+// ---------------------------------------------------------------------------
+describe('alerts overlay push', () => {
+  /** Builds a fake alert_config row, pass `overrides` to customize. */
+  function makeAlert(overrides: object = {}) {
+    return {
+      id: 1,
+      streamer_id: STREAMER_ID,
+      event_type: 'follow',
+      enabled: true,
+      message_template: 'template',
+      image_filename: null,
+      sound_filename: null,
+      duration_ms: 6000,
+      ...overrides,
+    } as any;
+  }
+
+  it('handleFollow does not push an alert when findCachedAlertConfig returns null', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(null);
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig({ follow_enabled: false }), STREAMER_ID);
+    expect(mockPushAlertEvent).not.toHaveBeenCalled();
+  });
+
+  it('handleFollow does not push an alert when the alert config is disabled', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ enabled: false }));
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig({ follow_enabled: false }), STREAMER_ID);
+    expect(mockPushAlertEvent).not.toHaveBeenCalled();
+  });
+
+  it('handleFollow pushes an alert even when follow_enabled (chat message) is false — independent flags', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({
+      message_template: 'Welcome {username} aka {display_name}!',
+      duration_ms: 4000,
+    }));
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig({ follow_enabled: false }), STREAMER_ID);
+
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(findCachedAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'follow');
+    expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', {
+      type: 'follow',
+      message: 'Welcome testuser aka TestUser!',
+      imageUrl: null,
+      soundUrl: null,
+      durationMs: 4000,
+    });
+  });
+
+  it('builds asset URLs from image_filename/sound_filename when set', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({
+      image_filename: 'follow.png',
+      sound_filename: 'follow.mp3',
+    }));
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig(), STREAMER_ID);
+
+    expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({
+      imageUrl: `/alerts/assets/${STREAMER_ID}/follow.png`,
+      soundUrl: `/alerts/assets/${STREAMER_ID}/follow.mp3`,
+    }));
+  });
+
+  it('handleSub does not push a "sub" alert for gift subs — handled by handleGiftSub instead', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'sub' }));
+    await handleSub('streamer', {
+      user_login: 'subuser', user_name: 'SubUser', broadcaster_user_login: 'streamer', tier: '1000', is_gift: true,
+    }, makeConfig({ sub_enabled: true }), STREAMER_ID);
+    expect(mockPushAlertEvent).not.toHaveBeenCalled();
+  });
+
+  it('handleSub pushes a "sub" alert independent of sub_enabled (chat message)', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'sub', message_template: 'tier={tier_name}' }));
+    await handleSub('streamer', {
+      user_login: 'subuser', user_name: 'SubUser', broadcaster_user_login: 'streamer', tier: '1000', is_gift: false,
+    }, makeConfig({ sub_enabled: false }), STREAMER_ID);
+
+    expect(findCachedAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'sub');
+    expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({ type: 'sub', message: 'tier=Tier 1' }));
+  });
+
+  it('handleResub pushes a "resub" alert with {months}/{streak} substituted', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'resub', message_template: 'months={months} streak={streak}' }));
+    await handleResub('streamer', {
+      user_login: 'resubuser', user_name: 'ResubUser', broadcaster_user_login: 'streamer',
+      tier: '1000', cumulative_months: 6, streak_months: 3,
+    }, makeConfig({ sub_enabled: false }), STREAMER_ID);
+
+    expect(findCachedAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'resub');
+    expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({ type: 'resub', message: 'months=6 streak=3' }));
+  });
+
+  it('handleGiftSub pushes a "giftsub" alert with gifter vars substituted', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'giftsub', message_template: '{gifter_display} x{count}' }));
+    await handleGiftSub('streamer', {
+      user_login: 'gifter', user_name: 'GifterDisplay', broadcaster_user_login: 'streamer',
+      total: 5, tier: '1000', is_anonymous: false,
+    }, makeConfig({ sub_enabled: false }), STREAMER_ID);
+
+    expect(findCachedAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'giftsub');
+    expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({ type: 'giftsub', message: 'GifterDisplay x5' }));
+  });
+
+  it('handleRaid pushes a "raid" alert independent of raid_enabled and raid_shoutout_enabled', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'raid', message_template: '{from_display} x{viewers}' }));
+    await handleRaid('streamer', {
+      from_broadcaster_user_login: 'raider', from_broadcaster_user_name: 'RaiderDisplay',
+      to_broadcaster_user_login: 'streamer', viewers: 42,
+    }, makeConfig({ raid_enabled: false, raid_shoutout_enabled: false }), STREAMER_ID);
+
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(findCachedAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'raid');
+    expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({ type: 'raid', message: 'RaiderDisplay x42' }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Chat-send failures must not block the independent alert push
+// ---------------------------------------------------------------------------
+describe('chat-send failures are isolated from the alert push', () => {
+  const followEvent = { user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer' };
+  const subEvent = {
+    user_login: 'subuser', user_name: 'SubUser', broadcaster_user_login: 'streamer', tier: '1000', is_gift: false,
+  };
+  const resubEvent = {
+    user_login: 'resubuser', user_name: 'ResubUser', broadcaster_user_login: 'streamer',
+    tier: '1000', cumulative_months: 6, streak_months: 3,
+  };
+  const giftSubEvent = {
+    user_login: 'gifter', user_name: 'GifterDisplay', broadcaster_user_login: 'streamer',
+    total: 5, tier: '1000', is_anonymous: false,
+  };
+  const raidEvent = {
+    from_broadcaster_user_login: 'raider', from_broadcaster_user_name: 'RaiderDisplay',
+    to_broadcaster_user_login: 'streamer', viewers: 42,
+  };
+
+  beforeEach(() => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue({
+      id: 1, streamer_id: STREAMER_ID, event_type: 'follow', enabled: true,
+      message_template: 'alert fired', image_filename: null, sound_filename: null, duration_ms: 6000,
+    } as any);
+  });
+
+  it('handleFollow still pushes the alert when the chat send rejects', async () => {
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+    await handleFollow('streamer', followEvent, makeConfig({ follow_enabled: true }), STREAMER_ID);
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('handleSub still pushes the alert when the chat send rejects', async () => {
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+    await handleSub('streamer', subEvent, makeConfig({ sub_enabled: true }), STREAMER_ID);
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('handleResub still pushes the alert when the chat send rejects', async () => {
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+    await handleResub('streamer', resubEvent, makeConfig({ sub_enabled: true }), STREAMER_ID);
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('handleGiftSub still pushes the alert when the chat send rejects', async () => {
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+    await handleGiftSub('streamer', giftSubEvent, makeConfig({ sub_enabled: true }), STREAMER_ID);
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('handleRaid still sends the welcome message, sends the shoutout, and pushes the alert when the welcome-message send rejects', async () => {
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+    vi.mocked(buildShoutoutMessage).mockResolvedValue('Go check out @raider!');
+
+    await handleRaid('streamer', raidEvent, makeConfig({ raid_enabled: true, raid_shoutout_enabled: true }), STREAMER_ID);
+
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'Go check out @raider!');
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('handleRaid still pushes the alert when buildShoutoutMessage rejects', async () => {
+    vi.mocked(buildShoutoutMessage).mockRejectedValueOnce(new Error('helix lookup failed'));
+
+    await handleRaid('streamer', raidEvent, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }), STREAMER_ID);
+
+    expect(recordCommandTestEntry).not.toHaveBeenCalled();
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('does not record the raid shoutout via recordCommandTestEntry when the shoutout send fails', async () => {
+    vi.mocked(buildShoutoutMessage).mockResolvedValue('Go check out @raider!');
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+
+    await handleRaid('streamer', raidEvent, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }), STREAMER_ID);
+
+    expect(recordCommandTestEntry).not.toHaveBeenCalled();
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('handleFollow does not reject when findCachedAlertConfig rejects (chat message still already sent)', async () => {
+    vi.mocked(findCachedAlertConfig).mockRejectedValueOnce(new Error('db unavailable'));
+    await expect(
+      handleFollow('streamer', followEvent, makeConfig({ follow_enabled: true }), STREAMER_ID),
+    ).resolves.toBeUndefined();
+    expect(mockSend).toHaveBeenCalled();
+    expect(mockPushAlertEvent).not.toHaveBeenCalled();
+  });
+
+  it('handleFollow does not reject when pushAlertEvent throws', async () => {
+    mockPushAlertEvent.mockImplementationOnce(() => { throw new Error('overlay push failed'); });
+    await expect(
+      handleFollow('streamer', followEvent, makeConfig({ follow_enabled: false }), STREAMER_ID),
+    ).resolves.toBeUndefined();
+    expect(mockPushAlertEvent).toHaveBeenCalledOnce();
   });
 });
 

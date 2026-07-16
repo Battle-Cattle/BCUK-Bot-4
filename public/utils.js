@@ -32,6 +32,50 @@ function registerCopyToClipboardHandler(buttonId, sourceId, idleLabel) {
   });
 }
 
+/**
+ * Registers a global 'submit' listener that intercepts forms carrying `formClassName`,
+ * submitting them via fetch with the CSRF token in an X-CSRF-Token header instead of the
+ * page's normal multipart POST — so the session token is never placed in the URL (browser
+ * history/Referer). csrfProtection validates the header before Multer parses the multipart
+ * body. fetch follows the server redirect; on success we then navigate to the resulting page.
+ * Shared by every file-upload admin page (overlay videos, alert images/sounds).
+ * @param {string} formClassName - CSS class marking a form as one this handler should intercept.
+ * @param {string} fallbackPath - Path to navigate to on success if the response wasn't a
+ *   redirect, or on a network/parsing failure (with `?error=upload_failed` appended).
+ * @returns {void}
+ */
+function registerUploadFormHandler(formClassName, fallbackPath) {
+  document.addEventListener('submit', function (event) {
+    var form = event.target;
+    if (!(form instanceof HTMLFormElement) || !form.classList.contains(formClassName)) return;
+    event.preventDefault();
+
+    var token = (document.body && document.body.dataset.csrfToken) || '';
+    var submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+
+    fetch(form.action, {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': token },
+      body: new FormData(form),
+    })
+      .then(function (res) {
+        // Only follow an actual server redirect (success/error → `fallbackPath?…`).
+        // A non-redirect response (e.g. 403 CSRF, 500) keeps res.url at the POST-only
+        // upload route, so treat any non-OK response as a failure instead.
+        if (res.redirected && res.url) {
+          window.location.assign(res.url);
+          return;
+        }
+        if (!res.ok) throw new Error('Upload failed');
+        window.location.assign(fallbackPath);
+      })
+      .catch(function () {
+        window.location.assign(fallbackPath + '?error=upload_failed');
+      });
+  });
+}
+
 function registerToggleEditHandler(buttonClass, idAttr, rowPrefix) {
   document.addEventListener('click', function (event) {
     var target = event.target;

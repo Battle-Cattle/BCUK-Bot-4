@@ -14,9 +14,13 @@ import { registerCounterTwitchRuntime } from './commands/counterHandler';
 import { registerMultiTwitchRuntime } from './commands/multiCommandHandler';
 import { registerShoutoutRuntime } from './commands/shoutoutHandler';
 import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
-import { registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime } from './twitch/eventsub/twitchEventSubHandler';
+import {
+  registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
+  registerEventSubAlertRuntime,
+} from './twitch/eventsub/twitchEventSubHandler';
 import { pushOverlayEvent } from './web/routes/overlaySource';
 import { pushCompanionEvent } from './web/routes/companionEvents';
+import { pushAlertEvent } from './web/routes/alertsOverlaySource';
 import { pushPricingUpdate } from './web/routes/channelPointsEvents';
 import { startCounterScheduler, stopCounterScheduler } from './commands/counterScheduler';
 import { startRewardPricingScheduler, stopRewardPricingScheduler } from './twitch/pricing/rewardPricingScheduler';
@@ -74,6 +78,7 @@ async function main(): Promise<void> {
   registerCountdownTwitchRuntime({ send: sayInChannel });
   registerEventSubOverlayRuntime({ pushOverlayEvent });
   registerEventSubCompanionRuntime({ pushCompanionEvent });
+  registerEventSubAlertRuntime({ pushAlertEvent });
   registerEventSubTwitchRuntime({ send: sayInChannel });
   registerRewardPricingRuntime({ pushPricingUpdate });
 

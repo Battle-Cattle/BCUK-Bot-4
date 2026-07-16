@@ -173,8 +173,19 @@ export type {
 export {
   getAllEventSubStreamers, getStreamerByDiscordId, getStreamerById,
   saveStreamerToken, clearStreamerToken, initEventConfig, saveEventConfig,
+  DEFAULT_EVENT_CONFIG,
 } from './db/eventSub';
 export type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
+
+// ─── Alerts overlay ─────────────────────────────────────────────────────────
+
+export type { AlertConfig, AlertEventType } from './db/alertConfig';
+export { ALERT_EVENT_TYPES } from './db/alertConfig';
+export {
+  getAlertConfigsForStreamer, getAlertConfig, getEnabledAlertEventTypesBatch, initAlertConfigs,
+  saveAlertConfig, setAlertImage, setAlertSound,
+} from './db/alertConfig';
+export { findCachedAlertConfig } from './db/alertConfigCache';
 
 // ─── SFX ────────────────────────────────────────────────────────────────────
 

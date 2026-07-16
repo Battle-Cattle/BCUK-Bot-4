@@ -7,6 +7,7 @@ vi.mock('../../db', () => ({
 
 vi.mock('../../shared/config', () => ({
   CHANNEL_POINTS_MAX_SSE_PER_STREAMER: 5,
+  SSE_MAX_TOTAL_CONNECTIONS: 1000,
 }));
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
@@ -31,6 +32,7 @@ function makeSseRes() {
     write: vi.fn(),
     status: vi.fn().mockReturnThis(),
     end: vi.fn(),
+    on: vi.fn(),
   };
 }
 

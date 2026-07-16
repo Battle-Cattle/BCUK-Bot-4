@@ -178,7 +178,14 @@ function eventConfigParams(config: EventSubConfig): Array<string | number> {
   ];
 }
 
-const DEFAULT_EVENT_CONFIG: EventSubConfig = {
+/**
+ * All chat-message flags disabled, with placeholder message templates that are never used while
+ * disabled. Used both to seed a new streamer's config row and as a fallback when dispatching an
+ * EventSub notification for a streamer who has no `streamer_event_config` row at all (e.g. an
+ * alert-only streamer who has never completed the chat-message OAuth setup) — see
+ * `dispatchNotification` in `twitchEventSubSubscriptions.ts`.
+ */
+export const DEFAULT_EVENT_CONFIG: EventSubConfig = {
   follow_enabled: false,
   follow_message: 'Thanks {display_name} for the follow!',
   sub_enabled: false,

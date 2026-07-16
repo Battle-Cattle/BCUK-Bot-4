@@ -4,6 +4,7 @@ import fs from 'fs';
 import { OVERLAY_FOLDER, OVERLAY_MAX_SSE_PER_CHANNEL } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
 import { renderView } from './shared';
+import { createSseEventsHandler, createLoginValidator, broadcastToChannel } from './sseChannel';
 
 const log = createLogger('OverlaySource');
 const router = Router();
@@ -12,6 +13,9 @@ const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
 const FILENAME_RE = /^[\w-]+\.(webm|mp4)$/i;
 // Words reserved for admin routes — must not be treated as channel logins.
 const RESERVED_LOGINS = new Set(['settings', 'videos', 'controller']);
+// Shared by the plain browser-source route below and the /events SSE route, so both apply the
+// identical login-validity rule from one place.
+const isValidLogin = createLoginValidator(LOGIN_RE, RESERVED_LOGINS);
 
 // In-memory map of active SSE connections keyed by Twitch channel login (lowercase).
 export const connections = new Map<string, Set<import('express').Response>>();
@@ -21,20 +25,8 @@ export const MAX_SSE_CONNECTIONS_PER_CHANNEL = OVERLAY_MAX_SSE_PER_CHANNEL;
 /** Push a video URL to all browser sources connected for this channel. */
 export function pushOverlayEvent(login: string, videoPath: string): void {
   const key = login.toLowerCase();
-  const clients = connections.get(key);
-  if (!clients || clients.size === 0) return;
-  const payload = JSON.stringify({ video: videoPath });
-  const dead: import('express').Response[] = [];
-  for (const res of clients) {
-    try {
-      res.write(`data: ${payload}\n\n`);
-    } catch {
-      dead.push(res);
-    }
-  }
-  for (const res of dead) clients.delete(res);
-  if (clients.size === 0) connections.delete(key);
-  log.info(`Pushed overlay event to ${clients.size} client(s) for ${login}`);
+  const remaining = broadcastToChannel(connections, key, { video: videoPath });
+  if (remaining !== null) log.info(`Pushed overlay event to ${remaining} client(s) for ${login}`);
 }
 
 /**
@@ -56,15 +48,17 @@ router.get('/controller', (_req, res) => {
  *   reserved (e.g. `settings`, `videos`, `controller`).
  */
 router.get('/:login', (req, res, next) => {
-  const { login } = req.params;
-  if (!LOGIN_RE.test(login) || RESERVED_LOGINS.has(login.toLowerCase())) { next(); return; }
-  renderView(res, 'overlaySource', { login: login.toLowerCase() });
+  const login = isValidLogin(req.params.login);
+  if (login === null) { next(); return; }
+  renderView(res, 'overlaySource', { login });
 });
 
 /**
  * GET /overlay/:login/events — SSE endpoint that streams `pushOverlayEvent`
  * video notifications to a connected browser source for a channel login (no
  * auth, opened directly by OBS).
+ * Connection lifecycle (validation, connection-limit enforcement, SSE handshake, keepalive,
+ * and disconnect cleanup) is shared with the alerts overlay via `createSseEventsHandler`.
  * @param req - Express request; reads the `login` route param.
  * @param res - Express response; on a valid login, upgrades to an
  *   `text/event-stream` connection kept alive with periodic pings and torn
@@ -72,49 +66,11 @@ router.get('/:login', (req, res, next) => {
  *   (`MAX_SSE_CONNECTIONS_PER_CHANNEL`) is exceeded, or calls `next()` if
  *   `login` is malformed or reserved.
  */
-router.get('/:login/events', (req, res, next) => {
-  const { login } = req.params;
-  if (!LOGIN_RE.test(login) || RESERVED_LOGINS.has(login.toLowerCase())) { next(); return; }
-  const key = login.toLowerCase();
-
-  if (!connections.has(key)) connections.set(key, new Set());
-  const clients = connections.get(key)!;
-  clients.add(res);
-  if (clients.size > MAX_SSE_CONNECTIONS_PER_CHANNEL) {
-    clients.delete(res);
-    res.status(429).end();
-    return;
-  }
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // disable Nginx buffering if behind proxy
-  res.flushHeaders();
-
-  res.write(': connected\n\n');
-
-  const keepalive = setInterval(() => {
-    try {
-      res.write(': ping\n\n');
-    } catch {
-      clearInterval(keepalive);
-      const clients = connections.get(key);
-      if (clients) {
-        clients.delete(res);
-        if (clients.size === 0) connections.delete(key);
-      }
-    }
-  }, 25_000);
-
-  req.on('close', () => {
-    clearInterval(keepalive);
-    const clients = connections.get(key);
-    if (!clients) return;
-    clients.delete(res);
-    if (clients.size === 0) connections.delete(key);
-  });
-});
+router.get('/:login/events', createSseEventsHandler({
+  connections,
+  isValidLogin,
+  maxPerChannel: MAX_SSE_CONNECTIONS_PER_CHANNEL,
+}));
 
 /**
  * GET /overlay/videos/:streamerId/:filename — serves an overlay video file
@@ -141,7 +97,15 @@ router.get('/videos/:streamerId/:filename', async (req, res) => {
     return;
   }
 
-  res.sendFile(resolved);
+  // A TOCTOU race is possible here: the file can be removed between the access() check above
+  // and sendFile() actually reading it (e.g. a concurrent delete). Passing a callback stops
+  // Express from falling through to the default error handler (a 500) for that race — reply
+  // 404 instead, as long as headers haven't already gone out.
+  res.sendFile(resolved, (err) => {
+    if (err && !res.headersSent) {
+      res.status(404).end();
+    }
+  });
 });
 
 export default router;

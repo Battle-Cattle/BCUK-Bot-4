@@ -144,7 +144,16 @@ router.post('/settings/videos/:id/delete', requireAuth, csrfProtection, async (r
     const filename = await deleteVideo(videoId, streamer.id);
     if (filename) {
       const filePath = safeResolve(OVERLAY_FOLDER, String(streamer.id), filename);
-      if (filePath) await fs.promises.rm(filePath, { force: true });
+      // Post-commit cleanup: the DB row is already gone by this point, so a failed removal
+      // must not turn an already-successful delete into a `delete_failed` response — it just
+      // leaves a stale file on disk.
+      if (filePath) {
+        try {
+          await fs.promises.rm(filePath, { force: true });
+        } catch (err) {
+          log.error(`Failed to remove orphaned overlay video ${filePath}:`, err);
+        }
+      }
     }
 
     res.redirect('/overlay/settings?success=video_deleted');

@@ -182,6 +182,26 @@ describe('config — parsePositiveIntEnv-backed values', () => {
     const config = await loadConfig({ CHANNEL_POINTS_MAX_SSE_PER_STREAMER: undefined });
     expect(config.CHANNEL_POINTS_MAX_SSE_PER_STREAMER).toBe(5);
   });
+
+  it('defaults ALERT_MAX_IMAGE_MB to 10 when unset', async () => {
+    const config = await loadConfig({ ALERT_MAX_IMAGE_MB: undefined });
+    expect(config.ALERT_MAX_IMAGE_MB).toBe(10);
+  });
+
+  it('defaults ALERT_MAX_SOUND_MB to 5 when unset', async () => {
+    const config = await loadConfig({ ALERT_MAX_SOUND_MB: undefined });
+    expect(config.ALERT_MAX_SOUND_MB).toBe(5);
+  });
+
+  it('defaults ALERT_MAX_SSE_PER_CHANNEL to 10 when unset', async () => {
+    const config = await loadConfig({ ALERT_MAX_SSE_PER_CHANNEL: undefined });
+    expect(config.ALERT_MAX_SSE_PER_CHANNEL).toBe(10);
+  });
+
+  it('defaults SSE_MAX_TOTAL_CONNECTIONS to 500 when unset', async () => {
+    const config = await loadConfig({ SSE_MAX_TOTAL_CONNECTIONS: undefined });
+    expect(config.SSE_MAX_TOTAL_CONNECTIONS).toBe(500);
+  });
 });
 
 describe('config — GLOBAL_COOLDOWN_MS', () => {
@@ -281,5 +301,15 @@ describe('config — SFX/OVERLAY folder defaults', () => {
     const config = await loadConfig({ SFX_FOLDER: '/custom/sfx', OVERLAY_FOLDER: '/custom/overlay' });
     expect(config.SFX_FOLDER).toBe('/custom/sfx');
     expect(config.OVERLAY_FOLDER).toBe('/custom/overlay');
+  });
+
+  it('defaults ALERT_ASSETS_FOLDER when unset', async () => {
+    const config = await loadConfig({ ALERT_ASSETS_FOLDER: undefined });
+    expect(config.ALERT_ASSETS_FOLDER).toBe('./alert-assets');
+  });
+
+  it('passes through ALERT_ASSETS_FOLDER when set', async () => {
+    const config = await loadConfig({ ALERT_ASSETS_FOLDER: '/custom/alerts' });
+    expect(config.ALERT_ASSETS_FOLDER).toBe('/custom/alerts');
   });
 });

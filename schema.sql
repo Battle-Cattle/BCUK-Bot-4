@@ -261,6 +261,26 @@ CREATE TABLE IF NOT EXISTS overlay_reward_video (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- alert_config
+-- Per-streamer, per-event-type alerts overlay configuration. Independent of
+-- streamer_event_config (Twitch chat messages) and overlay_reward/overlay_video
+-- (channel-point video overlay) — created by migrations/alerts_overlay.sql.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS alert_config (
+  id               INT                                             NOT NULL AUTO_INCREMENT,
+  streamer_id      INT                                             NOT NULL,
+  event_type       ENUM('follow','sub','resub','giftsub','raid')   NOT NULL,
+  enabled          TINYINT(1)                                      NOT NULL DEFAULT 0,
+  message_template VARCHAR(500)                                    NOT NULL,
+  image_filename   VARCHAR(255)                                    NULL,
+  sound_filename   VARCHAR(255)                                    NULL,
+  duration_ms      INT                                             NOT NULL DEFAULT 6000,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_alert_config (streamer_id, event_type),
+  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
 -- reward_pricing
 -- Dynamic Channel Point Pricing: per-reward config/demand. Independent of
 -- overlay_reward — a reward can have dynamic pricing without overlay videos.

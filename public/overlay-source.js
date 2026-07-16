@@ -6,6 +6,11 @@
   const queue = [];
   let playing = false;
 
+  /**
+   * Plays the next queued video full-screen, removing it and advancing the queue once it ends
+   * or errors. No-ops if a video is already playing or the queue is empty.
+   * @returns {void}
+   */
   function playNext() {
     if (playing || queue.length === 0) return;
     const videoUrl = queue.shift();
@@ -32,30 +37,10 @@
     document.body.appendChild(v);
   }
 
-  function connect() {
-    const es = new EventSource('/overlay/' + login + '/events');
-
-    es.onmessage = function (e) {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.video) {
-          queue.push(data.video);
-          playNext();
-        }
-      } catch (_) {}
-    };
-
-    es.onerror = function () {
-      es.close();
-      // Reconnect with exponential backoff (2s → 4s → 8s → cap 30s)
-      const delay = Math.min(30000, (connect.retryMs = (connect.retryMs || 1000) * 2));
-      setTimeout(connect, delay);
-    };
-
-    es.onopen = function () {
-      connect.retryMs = 1000;
-    };
-  }
-
-  connect();
+  connectSse('/overlay/' + login + '/events', function (data) {
+    if (data && data.video) {
+      queue.push(data.video);
+      playNext();
+    }
+  });
 })();
