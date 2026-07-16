@@ -9,6 +9,15 @@ const KEEPALIVE_INTERVAL_MS = 25_000;
 // many distinct regex-valid-but-unregistered keys, each well under its own per-key cap.
 let totalConnections = 0;
 
+/**
+ * Maps a live SSE `Response` to its idempotent teardown (clears its keepalive interval, releases
+ * its `totalConnections` slot, and evicts it from its connections map), registered once by
+ * {@link attachSseConnection}. Consulted by {@link broadcastToChannel} so a failed broadcast
+ * write releases the same resources a close/error event would, instead of only removing the
+ * `Response` from its Set and leaving the interval/global slot to self-heal on the next ping.
+ */
+const connectionCleanups = new WeakMap<Response, () => void>();
+
 /** Removes `res` from the channel's client Set, deleting the map entry once it's empty. */
 function removeClient<K>(connections: Map<K, Set<Response>>, key: K, res: Response): void {
   const clients = connections.get(key);
@@ -20,9 +29,12 @@ function removeClient<K>(connections: Map<K, Set<Response>>, key: K, res: Respon
 /**
  * Serializes `payload` and writes it as an SSE `data:` frame to every client connected under
  * `key`, evicting any client whose write fails (and dropping the map entry if that empties it).
- * Shared by every SSE endpoint's push function (reward-video overlay, alerts overlay, companion
- * app, channel-points prices) so the broadcast-and-evict logic only needs to be gotten right in
- * one place.
+ * A failed client is torn down via its registered {@link attachSseConnection} cleanup when one
+ * exists (clearing its keepalive interval and releasing its `totalConnections` slot immediately,
+ * rather than leaving that to the next keepalive tick); falls back to removing it from the Set
+ * directly for a client that was never registered that way. Shared by every SSE endpoint's push
+ * function (reward-video overlay, alerts overlay, companion app, channel-points prices) so the
+ * broadcast-and-evict logic only needs to be gotten right in one place.
  * @param connections - The channel's connections map.
  * @param key - Which key (channel login, Discord ID, streamer ID, etc) to broadcast to.
  * @param payload - The value to JSON-serialize and send as the event's data.
@@ -33,15 +45,15 @@ export function broadcastToChannel<K>(connections: Map<K, Set<Response>>, key: K
   const clients = connections.get(key);
   if (!clients || clients.size === 0) return null;
   const serialized = JSON.stringify(payload);
-  const dead: Response[] = [];
   for (const res of clients) {
     try {
       res.write(`data: ${serialized}\n\n`);
     } catch {
-      dead.push(res);
+      const cleanup = connectionCleanups.get(res);
+      if (cleanup) cleanup();
+      else clients.delete(res);
     }
   }
-  for (const res of dead) clients.delete(res);
   if (clients.size === 0) connections.delete(key);
   return clients.size;
 }
@@ -124,24 +136,37 @@ export function attachSseConnection<K>(
   }
 
   totalConnections++;
-  sendSseHandshake(res);
 
   let cleaned = false;
-  // Idempotent: 'close' and 'error' can both fire for the same dead connection, and the keepalive
-  // ping's own write failure also routes here — must only clear/evict (and release the global
-  // slot) once.
+  let keepalive: NodeJS.Timeout | null = null;
+  // Idempotent: 'close' and 'error' can both fire for the same dead connection, a failed
+  // keepalive ping routes here too, and a failed broadcastToChannel write now also routes here —
+  // must only clear/evict (and release the global slot) once. Registered (and wired up to
+  // req/res events) BEFORE the handshake below so a throw from sendSseHandshake itself still
+  // releases this connection's slot instead of leaking it forever — with nothing registered yet,
+  // no close/error event would ever fire for it otherwise.
   const cleanup = (): void => {
     if (cleaned) return;
     cleaned = true;
+    connectionCleanups.delete(res);
     totalConnections--;
-    clearInterval(keepalive);
+    if (keepalive) clearInterval(keepalive);
     removeClient(connections, key, res);
   };
-  const keepalive = startKeepalive(res, cleanup);
+  connectionCleanups.set(res, cleanup);
 
   req.on('close', cleanup);
   res.on('close', cleanup);
   res.on('error', cleanup);
+
+  try {
+    sendSseHandshake(res);
+  } catch (err) {
+    cleanup();
+    throw err;
+  }
+
+  keepalive = startKeepalive(res, cleanup);
   return true;
 }
 

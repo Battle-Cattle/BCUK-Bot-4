@@ -264,6 +264,19 @@ describe('attachSseConnection', () => {
       vi.useRealTimers();
     }
   });
+
+  it('runs cleanup and rethrows when sending the handshake throws (e.g. a dead socket)', () => {
+    const res = makeRes();
+    res.flushHeaders.mockImplementation(() => { throw new Error('socket hang up'); });
+    const { req } = makeReq('unused');
+
+    expect(() =>
+      attachSseConnection(req as any, res as any, { connections, key: 'somekey', maxPerChannel: 5 }),
+    ).toThrow('socket hang up');
+
+    // Cleanup ran even though close/error never fired — the connection isn't left registered.
+    expect(connections.get('somekey')).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -310,6 +323,29 @@ describe('attachSseConnection — process-wide connection cap', () => {
     triggerClose();
     opened.slice(1).forEach((close) => close());
   });
+
+  it('releases its process-wide connection slot when the handshake throws, instead of leaking it', () => {
+    const badRes = makeRes();
+    badRes.flushHeaders.mockImplementation(() => { throw new Error('dead socket'); });
+    const { req: badReq } = makeReq('unused');
+
+    expect(() =>
+      attachSseConnection(badReq as any, badRes as any, { connections, key: 'bad', maxPerChannel: 100 }),
+    ).toThrow();
+
+    // If the failed handshake had leaked its slot, only 9 of these would fit under the
+    // process-wide cap of 10 (mocked at the top of this file).
+    const opened: Array<() => void> = [];
+    for (let i = 0; i < 10; i++) {
+      const res = makeRes();
+      const { req, triggerClose } = makeReq('unused');
+      const attached = attachSseConnection(req as any, res as any, { connections, key: `key-${i}`, maxPerChannel: 100 });
+      expect(attached).toBe(true);
+      opened.push(triggerClose);
+    }
+
+    opened.forEach((close) => close());
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -355,5 +391,55 @@ describe('broadcastToChannel', () => {
 
     expect(result).toBe(0);
     expect(connections.has('somekey')).toBe(false);
+  });
+
+  it('clears the keepalive interval for a client registered via attachSseConnection whose broadcast write fails', () => {
+    vi.useFakeTimers();
+    try {
+      const res = makeRes();
+      const { req } = makeReq('unused');
+      attachSseConnection(req as any, res as any, { connections, key: 'somekey', maxPerChannel: 5 });
+
+      res.write.mockImplementation(() => { throw new Error('broken pipe'); });
+      const result = broadcastToChannel(connections, 'somekey', { x: 1 });
+
+      expect(result).toBe(0);
+      expect(connections.has('somekey')).toBe(false);
+
+      // If the keepalive interval hadn't been cleared by the broadcast-triggered cleanup, the
+      // next tick would attempt another write on this already-evicted response.
+      res.write.mockClear();
+      vi.advanceTimersByTime(25_000);
+      expect(res.write).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('frees a process-wide connection slot immediately on a failed broadcast write, not just on the next keepalive tick', () => {
+    const opened: Array<() => void> = [];
+    for (let i = 0; i < 9; i++) {
+      const res = makeRes();
+      const { req, triggerClose } = makeReq('unused');
+      attachSseConnection(req as any, res as any, { connections, key: `key-${i}`, maxPerChannel: 100 });
+      opened.push(triggerClose);
+    }
+
+    const deadRes = makeRes();
+    const { req: deadReq } = makeReq('unused');
+    attachSseConnection(deadReq as any, deadRes as any, { connections, key: 'dead', maxPerChannel: 100 });
+    // 10 connections now open, at the process-wide cap of 10 (mocked at the top of this file).
+
+    deadRes.write.mockImplementation(() => { throw new Error('broken pipe'); });
+    broadcastToChannel(connections, 'dead', { x: 1 });
+
+    // The cap should already have room again, without waiting on a keepalive tick.
+    const res = makeRes();
+    const { req, triggerClose } = makeReq('unused');
+    const attached = attachSseConnection(req as any, res as any, { connections, key: 'new', maxPerChannel: 100 });
+
+    expect(attached).toBe(true);
+    triggerClose();
+    opened.forEach((close) => close());
   });
 });

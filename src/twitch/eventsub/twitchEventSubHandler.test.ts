@@ -530,6 +530,7 @@ describe('chat-send failures are isolated from the alert push', () => {
     await expect(
       handleFollow('streamer', followEvent, makeConfig({ follow_enabled: false }), STREAMER_ID),
     ).resolves.toBeUndefined();
+    expect(mockPushAlertEvent).toHaveBeenCalledOnce();
   });
 });
 
