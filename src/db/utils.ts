@@ -22,6 +22,12 @@ export async function rowExists(
   column: string,
   value: string | number,
 ): Promise<boolean> {
+  if (!/^[a-zA-Z0-9_]+$/.test(table)) {
+    throw new Error('Invalid input');
+  }
+  if (!/^[a-zA-Z0-9_]+$/.test(column)) {
+    throw new Error('Invalid input');
+  }
   const [rows] = await executor.execute<mysql.RowDataPacket[]>(
     `SELECT 1 FROM ${table} WHERE ${column} = ? LIMIT 1`,
     [value],
