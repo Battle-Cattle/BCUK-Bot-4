@@ -6,6 +6,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../../db', () => ({
   ALERT_EVENT_TYPES: ['follow', 'sub', 'resub', 'giftsub', 'raid'],
+  ALERT_TEXT_ANIMATIONS: ['none', 'wave', 'pulse', 'glitch'],
   getStreamerByDiscordId: vi.fn(),
   saveAlertConfig: vi.fn(),
   getAlertConfig: vi.fn(),
@@ -88,13 +89,23 @@ describe('POST /settings/:eventType', () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const res = await supertest(buildApp())
       .post('/settings/follow')
-      .send('enabled=on&message_template=  Welcome {display_name}!  &duration_ms=4500');
+      .send('enabled=on&message_template=  Welcome {display_name}!  &duration_ms=4500&text_animation=pulse');
     expect(res.headers.location).toBe('/alerts/settings?success=config_saved');
     expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', {
       enabled: true,
       message_template: 'Welcome {display_name}!',
       duration_ms: 4500,
+      text_animation: 'pulse',
     });
+  });
+
+  it('defaults text_animation to "none" when missing or unrecognised', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    await supertest(buildApp()).post('/settings/follow').send('message_template=hi');
+    expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', expect.objectContaining({ text_animation: 'none' }));
+
+    await supertest(buildApp()).post('/settings/follow').send('message_template=hi&text_animation=bogus');
+    expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', expect.objectContaining({ text_animation: 'none' }));
   });
 
   it('reloads EventSub subscriptions after a successful save, so an alert-only enable takes effect', async () => {
@@ -162,10 +173,11 @@ describe('POST /settings/:eventType/test', () => {
       imageUrl: null,
       soundUrl: null,
       durationMs: 6000,
+      textAnimation: 'none',
     });
   });
 
-  it('pushes the streamer\'s actual saved config (message/image/sound/duration) when one exists', async () => {
+  it('pushes the streamer\'s actual saved config (message/image/sound/duration/animation) when one exists, with placeholders filled by sample values', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(getAlertConfig).mockResolvedValue({
       id: 1,
@@ -176,6 +188,7 @@ describe('POST /settings/:eventType/test', () => {
       image_filename: 'follow.png',
       sound_filename: 'follow.mp3',
       duration_ms: 4000,
+      text_animation: 'wave',
     } as any);
 
     const res = await supertest(buildApp()).post('/settings/follow/test');
@@ -184,10 +197,32 @@ describe('POST /settings/:eventType/test', () => {
     expect(vi.mocked(getAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow');
     expect(vi.mocked(pushAlertEvent)).toHaveBeenCalledWith('teststreamer', {
       type: 'follow',
-      message: '[Test] Welcome {display_name}!',
+      message: '[Test] Welcome TestUser!',
       imageUrl: `/alerts/assets/${MOCK_STREAMER.id}/follow.png`,
       soundUrl: `/alerts/assets/${MOCK_STREAMER.id}/follow.mp3`,
       durationMs: 4000,
+      textAnimation: 'wave',
     });
+  });
+
+  it('leaves an unrecognised placeholder in place as a typo hint instead of blanking it', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(getAlertConfig).mockResolvedValue({
+      id: 1,
+      streamer_id: MOCK_STREAMER.id,
+      event_type: 'follow',
+      enabled: true,
+      message_template: 'Hi {display_nam}!',
+      image_filename: null,
+      sound_filename: null,
+      duration_ms: 4000,
+      text_animation: 'none',
+    } as any);
+
+    await supertest(buildApp()).post('/settings/follow/test');
+
+    expect(vi.mocked(pushAlertEvent)).toHaveBeenCalledWith('teststreamer', expect.objectContaining({
+      message: '[Test] Hi {display_nam}!',
+    }));
   });
 });

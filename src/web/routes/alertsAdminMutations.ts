@@ -2,23 +2,43 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { saveAlertConfig, getAlertConfig } from '../../db';
+import { saveAlertConfig, getAlertConfig, ALERT_TEXT_ANIMATIONS } from '../../db';
+import type { AlertEventType, TextAnimation } from '../../db';
 import { logAndRedirectError, requireStreamer, parseCheckboxField } from './shared';
 import { pushAlertEvent } from './alertsOverlaySource';
 import { NOT_A_STREAMER_REDIRECT, parseEventType } from './alertsShared';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
+import { fillTemplate } from '../../shared/textTemplate';
 
 const log = createLogger('AlertsAdmin');
 export const router = Router();
 
 /**
+ * Realistic sample template variables per event type, used only to preview what a real,
+ * substituted message would look like when a streamer clicks "Send Test Alert" — mirrors the
+ * variable names actually built for each handler in `twitchEventSubHandler.ts`.
+ */
+const TEST_ALERT_VARS: Record<AlertEventType, Record<string, string>> = {
+  follow: { username: 'testuser', display_name: 'TestUser' },
+  sub: { username: 'testuser', display_name: 'TestUser', tier: '1000', tier_name: 'Tier 1' },
+  resub: { username: 'testuser', display_name: 'TestUser', tier: '1000', tier_name: 'Tier 1', months: '6', streak: '3' },
+  giftsub: { gifter: 'testgifter', gifter_display: 'TestGifter', count: '5', tier: '1000', tier_name: 'Tier 1' },
+  raid: { from_channel: 'testraider', from_display: 'TestRaider', viewers: '42' },
+};
+
+/** Parses a `text_animation` form field, falling back to `'none'` for a missing/unknown value. */
+function parseTextAnimation(value: unknown): TextAnimation {
+  return (ALERT_TEXT_ANIMATIONS as readonly string[]).includes(value as string) ? (value as TextAnimation) : 'none';
+}
+
+/**
  * POST /alerts/settings/:eventType — saves the non-file fields (enable flag, message template,
- * display duration) of one of the requesting streamer's alert configs, then reloads EventSub
- * subscriptions so an alert-only `enabled` flip (with no chat-message flag on) takes effect
- * immediately rather than waiting for some unrelated reload trigger — mirrors the same call
- * after `saveEventConfig` in `userSettings.ts`.
+ * display duration, text animation) of one of the requesting streamer's alert configs, then
+ * reloads EventSub subscriptions so an alert-only `enabled` flip (with no chat-message flag on)
+ * takes effect immediately rather than waiting for some unrelated reload trigger — mirrors the
+ * same call after `saveEventConfig` in `userSettings.ts`.
  * @param req - Express request; reads the `eventType` route param and `enabled`,
- *   `message_template`, `duration_ms` fields from `req.body`.
+ *   `message_template`, `duration_ms`, `text_animation` fields from `req.body`.
  * @param res - Express response; redirects to `/alerts/settings?success=config_saved` on
  *   success, or to `/alerts/settings?error=<code>` if the requester isn't a streamer
  *   (`not_a_streamer`), `eventType` is invalid (`invalid_event_type`), the message template is
@@ -42,6 +62,7 @@ router.post('/settings/:eventType', requireAuth, csrfProtection, async (req, res
       enabled: parseCheckboxField(req.body?.enabled),
       message_template: messageTemplate,
       duration_ms: durationMs,
+      text_animation: parseTextAnimation(req.body?.text_animation),
     });
     reloadEventSubSubscriptions();
 
@@ -53,9 +74,14 @@ router.post('/settings/:eventType', requireAuth, csrfProtection, async (req, res
 
 /**
  * POST /alerts/settings/:eventType/test — pushes the requesting streamer's actual saved
- * configuration (message template, image, sound, duration) for one event type through their
- * alerts-overlay SSE stream, so they can preview their real setup live in OBS without waiting
- * for a real Twitch event. Falls back to a generic message if no config row exists yet.
+ * configuration (message template, image, sound, duration, text animation) for one event type
+ * through their alerts-overlay SSE stream, so they can preview their real setup live in OBS
+ * without waiting for a real Twitch event. The message template's placeholders are filled with
+ * realistic sample values (see {@link TEST_ALERT_VARS}) — same as a real event — rather than
+ * left as raw `{placeholder}` text, so the streamer can actually see whether their template
+ * reads correctly; any placeholder not recognised for the event type is left in place (via
+ * `fillTemplate`'s `'keep'` fallback) as a hint of a possible typo. Falls back to a generic
+ * message if no config row exists yet.
  * @param req - Express request; reads the `eventType` route param.
  * @param res - Express response; redirects to `/alerts/settings?success=test_sent` on success,
  *   or to `/alerts/settings?error=<code>` if the requester isn't a streamer
@@ -72,13 +98,17 @@ router.post('/settings/:eventType/test', requireAuth, csrfProtection, async (req
     if (!streamer.twitch_name) return res.redirect(NOT_A_STREAMER_REDIRECT);
 
     const config = await getAlertConfig(streamer.id, eventType);
+    const message = config
+      ? `[Test] ${fillTemplate(config.message_template, TEST_ALERT_VARS[eventType], 'keep')}`
+      : `Test alert — ${eventType}`;
 
     pushAlertEvent(streamer.twitch_name.toLowerCase(), {
       type: eventType,
-      message: config ? `[Test] ${config.message_template}` : `Test alert — ${eventType}`,
+      message,
       imageUrl: config?.image_filename ? `/alerts/assets/${streamer.id}/${config.image_filename}` : null,
       soundUrl: config?.sound_filename ? `/alerts/assets/${streamer.id}/${config.sound_filename}` : null,
       durationMs: config?.duration_ms ?? 6000,
+      textAnimation: config?.text_animation ?? 'none',
     });
 
     res.redirect('/alerts/settings?success=test_sent');

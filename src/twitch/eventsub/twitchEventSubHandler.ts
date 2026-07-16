@@ -1,4 +1,4 @@
-import type { EventSubConfig, AlertEventType } from '../../db';
+import type { EventSubConfig, AlertEventType, TextAnimation } from '../../db';
 import { getVideosForReward, getStreamerById, findCachedAlertConfig } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
@@ -83,6 +83,8 @@ export interface AlertPayload {
   soundUrl: string | null;
   /** How long (ms) the alert should stay on screen. */
   durationMs: number;
+  /** On-screen text animation style to apply to `message`. */
+  textAnimation: TextAnimation;
 }
 
 /**
@@ -254,6 +256,7 @@ async function maybePushAlert(
       imageUrl: alert.image_filename ? `/alerts/assets/${streamerId}/${alert.image_filename}` : null,
       soundUrl: alert.sound_filename ? `/alerts/assets/${streamerId}/${alert.sound_filename}` : null,
       durationMs: alert.duration_ms,
+      textAnimation: alert.text_animation,
     });
   } catch (err) {
     log.error(`Failed to push ${eventType} alert for ${login}:`, err);

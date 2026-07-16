@@ -31,3 +31,43 @@ body { background: transparent; overflow: hidden; width: 1920px; height: 1080px;
   font-weight: 700;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.8);
 }
+
+/* text_animation: 'pulse' — the whole message loops a gentle scale pulse. */
+.alert-card .alert-message.anim-pulse {
+  display: inline-block;
+  animation: alert-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes alert-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+/* text_animation: 'glitch' — the whole message loops a stepped RGB-split/jitter glitch. */
+.alert-card .alert-message.anim-glitch {
+  display: inline-block;
+  animation: alert-glitch 1.6s steps(1, end) infinite;
+}
+
+@keyframes alert-glitch {
+  0%, 100% {
+    transform: translate(0, 0);
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.8);
+  }
+  20% { transform: translate(-2px, 1px); text-shadow: -2px 0 #ff3b3b, 2px 0 #3bd6ff; }
+  40% { transform: translate(2px, -1px); text-shadow: 2px 0 #ff3b3b, -2px 0 #3bd6ff; }
+  60% { transform: translate(-1px, 0); text-shadow: -1px 0 #ff3b3b, 1px 0 #3bd6ff; }
+  80% { transform: translate(1px, 1px); text-shadow: 1px 0 #ff3b3b, -1px 0 #3bd6ff; }
+}
+
+/* text_animation: 'wave' — each `.letter` span (one per character, see alerts-overlay.js)
+   bobs up and down with a per-letter animation-delay so the motion ripples across the text. */
+.alert-card .alert-message.anim-wave .letter {
+  display: inline-block;
+  animation: alert-wave 1.2s ease-in-out infinite;
+}
+
+@keyframes alert-wave {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}

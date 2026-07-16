@@ -13,6 +13,12 @@ export type AlertEventType = 'follow' | 'sub' | 'resub' | 'giftsub' | 'raid';
 /** All alert event types, in the fixed display order used by the settings page. */
 export const ALERT_EVENT_TYPES: readonly AlertEventType[] = ['follow', 'sub', 'resub', 'giftsub', 'raid'];
 
+/** On-screen text animation styles the alerts overlay can apply to an alert's message. */
+export type TextAnimation = 'none' | 'wave' | 'pulse' | 'glitch';
+
+/** All text animation styles, in the fixed display order used by the settings page. */
+export const ALERT_TEXT_ANIMATIONS: readonly TextAnimation[] = ['none', 'wave', 'pulse', 'glitch'];
+
 /** A single streamer's alert configuration for one event type. */
 export interface AlertConfig {
   id: number;
@@ -23,6 +29,7 @@ export interface AlertConfig {
   image_filename: string | null;
   sound_filename: string | null;
   duration_ms: number;
+  text_animation: TextAnimation;
 }
 
 /** Default message templates seeded for a new streamer, mirroring the tone of `DEFAULT_EVENT_CONFIG` in `eventSub.ts`. */
@@ -45,6 +52,7 @@ function mapRow(r: mysql.RowDataPacket): AlertConfig {
     image_filename: r.image_filename ?? null,
     sound_filename: r.sound_filename ?? null,
     duration_ms: r.duration_ms,
+    text_animation: r.text_animation,
   };
 }
 
@@ -56,7 +64,7 @@ function mapRow(r: mysql.RowDataPacket): AlertConfig {
  */
 export async function getAlertConfigsForStreamer(streamerId: number): Promise<AlertConfig[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT id, streamer_id, event_type, enabled, message_template, image_filename, sound_filename, duration_ms
+    `SELECT id, streamer_id, event_type, enabled, message_template, image_filename, sound_filename, duration_ms, text_animation
      FROM alert_config
      WHERE streamer_id = ?`,
     [streamerId],
@@ -96,7 +104,7 @@ export async function getEnabledAlertEventTypesBatch(streamerIds: number[]): Pro
  */
 export async function getAlertConfig(streamerId: number, eventType: AlertEventType): Promise<AlertConfig | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT id, streamer_id, event_type, enabled, message_template, image_filename, sound_filename, duration_ms
+    `SELECT id, streamer_id, event_type, enabled, message_template, image_filename, sound_filename, duration_ms, text_animation
      FROM alert_config
      WHERE streamer_id = ? AND event_type = ?`,
     [streamerId, eventType],
@@ -111,7 +119,7 @@ export async function getAlertConfig(streamerId: number, eventType: AlertEventTy
  */
 export async function getAllAlertConfigs(): Promise<AlertConfig[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT id, streamer_id, event_type, enabled, message_template, image_filename, sound_filename, duration_ms
+    `SELECT id, streamer_id, event_type, enabled, message_template, image_filename, sound_filename, duration_ms, text_animation
      FROM alert_config`,
   );
   return rows.map(mapRow);
@@ -135,9 +143,10 @@ export async function initAlertConfigs(streamerId: number): Promise<void> {
 }
 
 /**
- * Upserts the non-file fields (enable flag, message template, display duration) of a
- * streamer's alert config for one event type. Image/sound filenames are managed separately
- * via {@link setAlertImage}/{@link setAlertSound} and are left untouched by this call.
+ * Upserts the non-file fields (enable flag, message template, display duration, text
+ * animation) of a streamer's alert config for one event type. Image/sound filenames are
+ * managed separately via {@link setAlertImage}/{@link setAlertSound} and are left untouched
+ * by this call.
  * @param streamerId DB row ID of the streamer.
  * @param eventType The alert event type being configured.
  * @param config The fields to persist.
@@ -145,14 +154,15 @@ export async function initAlertConfigs(streamerId: number): Promise<void> {
 export async function saveAlertConfig(
   streamerId: number,
   eventType: AlertEventType,
-  config: { enabled: boolean; message_template: string; duration_ms: number },
+  config: { enabled: boolean; message_template: string; duration_ms: number; text_animation: TextAnimation },
 ): Promise<void> {
   await getPool().execute(
-    `INSERT INTO alert_config (streamer_id, event_type, enabled, message_template, duration_ms)
-     VALUES (?, ?, ?, ?, ?) AS new_row
+    `INSERT INTO alert_config (streamer_id, event_type, enabled, message_template, duration_ms, text_animation)
+     VALUES (?, ?, ?, ?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE
-       enabled=new_row.enabled, message_template=new_row.message_template, duration_ms=new_row.duration_ms`,
-    [streamerId, eventType, config.enabled ? 1 : 0, config.message_template, config.duration_ms],
+       enabled=new_row.enabled, message_template=new_row.message_template, duration_ms=new_row.duration_ms,
+       text_animation=new_row.text_animation`,
+    [streamerId, eventType, config.enabled ? 1 : 0, config.message_template, config.duration_ms, config.text_animation],
   );
   invalidateAlertConfigLookupCache();
 }

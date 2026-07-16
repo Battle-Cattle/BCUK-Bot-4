@@ -327,6 +327,7 @@ describe('alerts overlay push', () => {
       image_filename: null,
       sound_filename: null,
       duration_ms: 6000,
+      text_animation: 'none',
       ...overrides,
     } as any;
   }
@@ -364,6 +365,7 @@ describe('alerts overlay push', () => {
       imageUrl: null,
       soundUrl: null,
       durationMs: 4000,
+      textAnimation: 'none',
     });
   });
 
@@ -379,6 +381,17 @@ describe('alerts overlay push', () => {
     expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({
       imageUrl: `/alerts/assets/${STREAMER_ID}/follow.png`,
       soundUrl: `/alerts/assets/${STREAMER_ID}/follow.mp3`,
+    }));
+  });
+
+  it('passes through the alert config\'s text_animation as textAnimation', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ text_animation: 'wave' }));
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig(), STREAMER_ID);
+
+    expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({
+      textAnimation: 'wave',
     }));
   });
 
@@ -460,6 +473,7 @@ describe('chat-send failures are isolated from the alert push', () => {
     vi.mocked(findCachedAlertConfig).mockResolvedValue({
       id: 1, streamer_id: STREAMER_ID, event_type: 'follow', enabled: true,
       message_template: 'alert fired', image_filename: null, sound_filename: null, duration_ms: 6000,
+      text_animation: 'none',
     } as any);
   });
 
