@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../db', () => ({
   ALERT_EVENT_TYPES: ['follow', 'sub', 'resub', 'giftsub', 'raid'],
-  ALERT_TEXT_ANIMATIONS: ['none', 'wave', 'pulse', 'glitch'],
+  ALERT_TEXT_ANIMATIONS: ['none', 'wave', 'pulse', 'glitch', 'shake', 'rainbow', 'flicker', 'tilt', 'bounce-in', 'typewriter'],
   getStreamerByDiscordId: vi.fn(),
   getAlertConfigsForStreamer: vi.fn(),
 }));
@@ -131,6 +131,6 @@ describe('GET /settings — streamer and alert config loading', () => {
   it('exposes the fixed ALERT_TEXT_ANIMATIONS list to the template', async () => {
     const res = await supertest(buildApp()).get('/settings');
     expect(res.status).toBe(200);
-    expect(res.body.textAnimations).toEqual(['none', 'wave', 'pulse', 'glitch']);
+    expect(res.body.textAnimations).toEqual(['none', 'wave', 'pulse', 'glitch', 'shake', 'rainbow', 'flicker', 'tilt', 'bounce-in', 'typewriter']);
   });
 });

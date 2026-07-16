@@ -75,7 +75,10 @@
          giftsub: '{gifter}, {gifter_display}, {count}, {tier}, {tier_name}',
          raid:    '{from_channel}, {from_display}, {viewers}',
        };
-       const animationLabels = { none: 'None', wave: 'Wave', pulse: 'Pulse', glitch: 'Glitch' };
+       const animationLabels = {
+         none: 'None', wave: 'Wave', pulse: 'Pulse', glitch: 'Glitch', shake: 'Shake',
+         rainbow: 'Rainbow', flicker: 'Flicker', tilt: 'Tilt', 'bounce-in': 'Bounce In', typewriter: 'Typewriter',
+       };
     %>
     <% for (const eventType of eventTypes) { %>
     <% const cfg = configByType[eventType] ?? { enabled: false, message_template: '', image_filename: null, sound_filename: null, duration_ms: 6000, text_animation: 'none' }; %>

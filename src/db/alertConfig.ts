@@ -14,10 +14,12 @@ export type AlertEventType = 'follow' | 'sub' | 'resub' | 'giftsub' | 'raid';
 export const ALERT_EVENT_TYPES: readonly AlertEventType[] = ['follow', 'sub', 'resub', 'giftsub', 'raid'];
 
 /** On-screen text animation styles the alerts overlay can apply to an alert's message. */
-export type TextAnimation = 'none' | 'wave' | 'pulse' | 'glitch';
+export type TextAnimation =
+  | 'none' | 'wave' | 'pulse' | 'glitch' | 'shake' | 'rainbow' | 'flicker' | 'tilt' | 'bounce-in' | 'typewriter';
 
 /** All text animation styles, in the fixed display order used by the settings page. */
-export const ALERT_TEXT_ANIMATIONS: readonly TextAnimation[] = ['none', 'wave', 'pulse', 'glitch'];
+export const ALERT_TEXT_ANIMATIONS: readonly TextAnimation[] =
+  ['none', 'wave', 'pulse', 'glitch', 'shake', 'rainbow', 'flicker', 'tilt', 'bounce-in', 'typewriter'];
 
 /** A single streamer's alert configuration for one event type. */
 export interface AlertConfig {

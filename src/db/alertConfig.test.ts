@@ -79,8 +79,10 @@ describe('ALERT_EVENT_TYPES', () => {
 // ─── ALERT_TEXT_ANIMATIONS ────────────────────────────────────────────────────
 
 describe('ALERT_TEXT_ANIMATIONS', () => {
-  it('lists all four text animation styles', () => {
-    expect(ALERT_TEXT_ANIMATIONS).toEqual(['none', 'wave', 'pulse', 'glitch']);
+  it('lists all ten text animation styles', () => {
+    expect(ALERT_TEXT_ANIMATIONS).toEqual([
+      'none', 'wave', 'pulse', 'glitch', 'shake', 'rainbow', 'flicker', 'tilt', 'bounce-in', 'typewriter',
+    ]);
   });
 });
 

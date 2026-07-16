@@ -6,7 +6,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../../db', () => ({
   ALERT_EVENT_TYPES: ['follow', 'sub', 'resub', 'giftsub', 'raid'],
-  ALERT_TEXT_ANIMATIONS: ['none', 'wave', 'pulse', 'glitch'],
+  ALERT_TEXT_ANIMATIONS: ['none', 'wave', 'pulse', 'glitch', 'shake', 'rainbow', 'flicker', 'tilt', 'bounce-in', 'typewriter'],
   getStreamerByDiscordId: vi.fn(),
   saveAlertConfig: vi.fn(),
   getAlertConfig: vi.fn(),
@@ -106,6 +106,14 @@ describe('POST /settings/:eventType', () => {
 
     await supertest(buildApp()).post('/settings/follow').send('message_template=hi&text_animation=bogus');
     expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', expect.objectContaining({ text_animation: 'none' }));
+  });
+
+  it('accepts each of the newer text animation styles', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    for (const anim of ['shake', 'rainbow', 'flicker', 'tilt', 'bounce-in', 'typewriter']) {
+      await supertest(buildApp()).post('/settings/follow').send(`message_template=hi&text_animation=${anim}`);
+      expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', expect.objectContaining({ text_animation: anim }));
+    }
   });
 
   it('reloads EventSub subscriptions after a successful save, so an alert-only enable takes effect', async () => {

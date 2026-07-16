@@ -5,33 +5,44 @@
 
   const queue = [];
   let playing = false;
-  const KNOWN_ANIMATIONS = ['wave', 'pulse', 'glitch'];
+
+  // Animations whose motion ripples per-character (each gets its own <span class="letter">,
+  // staggered by this many seconds per character) vs. ones that just loop/play on the whole
+  // `.alert-message` element as a single unit. 'wave'/'pulse'/'glitch' shipped first; the rest
+  // add more variety: 'shake'/'rainbow'/'flicker'/'tilt' are continuous whole-element loops
+  // like pulse/glitch, while 'bounce-in'/'typewriter' are per-letter one-shot entrances like
+  // wave's per-letter split, but play once instead of looping (see alertsOverlaySource.css).
+  const PER_LETTER_ANIMATION_STEP_S = { wave: 0.05, 'bounce-in': 0.04, typewriter: 0.03 };
+  const WHOLE_ELEMENT_ANIMATIONS = ['pulse', 'glitch', 'shake', 'rainbow', 'flicker', 'tilt'];
 
   /**
-   * Fills `message` with `text`, rendering it per the requested animation style. `'wave'` wraps
-   * each character in its own `<span class="letter">` with a staggered `animation-delay` so the
-   * CSS wave keyframes ripple across the text; `'pulse'`/`'glitch'` just add a class driving a
-   * whole-element looping CSS animation, and plain text otherwise. Any value outside
-   * {@link KNOWN_ANIMATIONS} is treated as no animation.
+   * Fills `message` with `text`, rendering it per the requested animation style: a per-letter
+   * animation (see {@link PER_LETTER_ANIMATION_STEP_S}) wraps each character in its own
+   * `<span class="letter">` with a staggered `animation-delay` so the CSS keyframes ripple
+   * across the text; a whole-element animation (see {@link WHOLE_ELEMENT_ANIMATIONS}) just adds
+   * a class driving a single looping CSS animation on `message` itself; anything else (including
+   * `'none'` or an unrecognised value) renders as plain, unanimated text.
    * @param {HTMLElement} message - The `.alert-message` element to fill.
    * @param {string} text - The already-filled alert text to render.
-   * @param {string} [animation] - `'wave' | 'pulse' | 'glitch'`, or anything else for none.
+   * @param {string} [animation] - One of the values in {@link PER_LETTER_ANIMATION_STEP_S} or
+   *   {@link WHOLE_ELEMENT_ANIMATIONS}, or anything else for no animation.
    * @returns {void}
    */
   function renderAlertMessage(message, text, animation) {
-    if (animation !== 'wave') {
+    const perLetterStep = PER_LETTER_ANIMATION_STEP_S[animation];
+    if (perLetterStep === undefined) {
       message.textContent = text;
-      if (KNOWN_ANIMATIONS.indexOf(animation) !== -1) message.classList.add('anim-' + animation);
+      if (WHOLE_ELEMENT_ANIMATIONS.indexOf(animation) !== -1) message.classList.add('anim-' + animation);
       return;
     }
-    message.classList.add('anim-wave');
+    message.classList.add('anim-' + animation);
     for (let i = 0; i < text.length; i++) {
       const ch = text[i];
       const span = document.createElement('span');
       span.className = 'letter';
-      span.style.animationDelay = (i * 0.05) + 's';
+      span.style.animationDelay = (i * perLetterStep) + 's';
       // A plain space collapses visually once wrapped in an inline-block span — a non-breaking
-      // space renders with the same width but keeps the wave's per-letter timing intact.
+      // space renders with the same width but keeps the per-letter timing intact.
       span.textContent = ch === ' ' ? '\u00A0' : ch;
       message.appendChild(span);
     }

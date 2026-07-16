@@ -308,7 +308,7 @@ Per-streamer, per-event-type configuration for the customisable alerts overlay (
 | `image_filename` | `VARCHAR(255)` nullable | Uploaded image/GIF filename, relative to `ALERT_ASSETS_FOLDER/<streamer_id>/` |
 | `sound_filename` | `VARCHAR(255)` nullable | Uploaded sound filename, relative to `ALERT_ASSETS_FOLDER/<streamer_id>/` |
 | `duration_ms` | `INT` | How long the alert stays on screen before being dismissed |
-| `text_animation` | `ENUM('none','wave','pulse','glitch')` | On-screen text animation style applied to the message; added by `migrations/alert_config_text_animation.sql` |
+| `text_animation` | `ENUM('none','wave','pulse','glitch','shake','rainbow','flicker','tilt','bounce-in','typewriter')` | On-screen text animation style applied to the message; added by `migrations/alert_config_text_animation.sql`, widened by `migrations/alert_config_text_animation_more_options.sql` |
 
 Expected constraints:
 
