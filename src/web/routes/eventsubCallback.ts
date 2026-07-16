@@ -17,8 +17,8 @@ const router = Router();
  * GET /auth/twitch/eventsub/callback — completes the Twitch OAuth flow started by
  * `/user/twitch-connect`. Validates the OAuth state and streamer ownership, exchanges
  * the code for tokens, verifies the connecting Twitch account matches the expected
- * streamer login, saves the token, initializes EventSub config, and reloads
- * subscriptions.
+ * streamer login, saves the token, initializes the chat-message EventSub config and the
+ * alerts-overlay config (`initAlertConfigs`), and reloads subscriptions.
  * @param req - Express request; reads `code`/`state`/`error` query params and the
  *   stored `eventsubOAuthState`/`eventsubStreamerId` session values.
  * @param res - Express response; redirects to `/user/settings?success=twitch_connected`

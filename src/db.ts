@@ -173,6 +173,7 @@ export type {
 export {
   getAllEventSubStreamers, getStreamerByDiscordId, getStreamerById,
   saveStreamerToken, clearStreamerToken, initEventConfig, saveEventConfig,
+  DEFAULT_EVENT_CONFIG,
 } from './db/eventSub';
 export type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 

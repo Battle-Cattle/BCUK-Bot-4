@@ -101,7 +101,7 @@ interface EventSubAlertRuntime {
 const alertRuntimeRegistry = createRuntimeRegistry<EventSubAlertRuntime>();
 
 /**
- * Register the alerts overlay push function. Called from index.ts after startWebPanel().
+ * Register the alerts overlay push function. Called from index.ts before startWebPanel().
  * @param runtime - The {@link EventSubAlertRuntime} to store.
  * @returns void
  */
@@ -182,6 +182,23 @@ function tierName(tier: string): string {
 }
 
 /**
+ * Sends a chat message via the injected Twitch runtime, logging and swallowing any failure
+ * (e.g. the bot lacking channel access, or a transient Twitch API error) instead of letting it
+ * propagate — a chat-send failure must never prevent the independent {@link maybePushAlert} call
+ * that follows it in each handler below.
+ *
+ * @param login - Broadcaster login name (chat channel to send to).
+ * @param message - Chat message to send.
+ */
+async function sendChatMessage(login: string, message: string): Promise<void> {
+  try {
+    await twitchRuntimeRegistry.get()?.send(login, message);
+  } catch (err) {
+    log.error(`Failed to send chat message to ${login}:`, err);
+  }
+}
+
+/**
  * Looks up a streamer's alerts-overlay config for one event type and, if enabled, pushes a
  * filled {@link AlertPayload} via the injected alert runtime. Independent of the chat-message
  * `*_enabled` flags on `EventSubConfig` — a streamer may enable the browser-source alert for an
@@ -228,7 +245,7 @@ export async function handleFollow(login: string, event: FollowEvent, config: Ev
   const vars = { username: event.user_login, display_name: event.user_name };
   if (config.follow_enabled) {
     const msg = fillTemplate(config.follow_message, vars);
-    await twitchRuntimeRegistry.get()?.send(login, msg);
+    await sendChatMessage(login, msg);
   }
   await maybePushAlert(login, streamerId, 'follow', vars);
 }
@@ -254,7 +271,7 @@ export async function handleSub(login: string, event: SubEvent, config: EventSub
   };
   if (config.sub_enabled) {
     const msg = fillTemplate(config.sub_message, vars);
-    await twitchRuntimeRegistry.get()?.send(login, msg);
+    await sendChatMessage(login, msg);
   }
   await maybePushAlert(login, streamerId, 'sub', vars);
 }
@@ -280,7 +297,7 @@ export async function handleResub(login: string, event: ResubEvent, config: Even
   };
   if (config.sub_enabled) {
     const msg = fillTemplate(config.resub_message, vars);
-    await twitchRuntimeRegistry.get()?.send(login, msg);
+    await sendChatMessage(login, msg);
   }
   await maybePushAlert(login, streamerId, 'resub', vars);
 }
@@ -308,7 +325,7 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
   };
   if (config.sub_enabled) {
     const msg = fillTemplate(config.giftsub_message, vars);
-    await twitchRuntimeRegistry.get()?.send(login, msg);
+    await sendChatMessage(login, msg);
   }
   await maybePushAlert(login, streamerId, 'giftsub', vars);
 }
@@ -340,20 +357,24 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
 
   if (config.raid_enabled) {
     const msg = fillTemplate(config.raid_message, vars);
-    await twitchRuntimeRegistry.get()?.send(login, msg);
+    await sendChatMessage(login, msg);
   }
 
   if (config.raid_shoutout_enabled) {
-    const shoutoutMsg = await buildShoutoutMessage(event.from_broadcaster_user_login);
-    if (shoutoutMsg) {
-      await twitchRuntimeRegistry.get()?.send(login, shoutoutMsg);
-      recordCommandTestEntry({
-        source: 'twitch',
-        command: '!so (raid)',
-        response: shoutoutMsg,
-        channel: login,
-        user: event.from_broadcaster_user_login,
-      });
+    try {
+      const shoutoutMsg = await buildShoutoutMessage(event.from_broadcaster_user_login);
+      if (shoutoutMsg) {
+        await sendChatMessage(login, shoutoutMsg);
+        recordCommandTestEntry({
+          source: 'twitch',
+          command: '!so (raid)',
+          response: shoutoutMsg,
+          channel: login,
+          user: event.from_broadcaster_user_login,
+        });
+      }
+    } catch (err) {
+      log.error(`Failed to build raid shoutout for ${login}:`, err);
     }
   }
 

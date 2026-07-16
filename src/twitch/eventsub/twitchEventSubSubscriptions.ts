@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { getAllEventSubStreamers, clearStreamerToken, getEnabledAlertEventTypesBatch } from '../../db';
+import { getAllEventSubStreamers, clearStreamerToken, getEnabledAlertEventTypesBatch, DEFAULT_EVENT_CONFIG } from '../../db';
 import type { DbStreamerEventSub, EventSubConfig, AlertEventType } from '../../db';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
@@ -275,13 +275,22 @@ async function subscribe(sessionId: string, spec: SubSpec, token: string, login:
 }
 
 
-/** Routes an EventSub notification to the appropriate handler based on subscription type. */
+/**
+ * Routes an EventSub notification to the appropriate handler based on subscription type.
+ * A streamer with no `streamer_event_config` row (`info.config` null) — e.g. one who has only
+ * ever enabled a browser-source alert and never completed the chat-message OAuth setup — still
+ * dispatches, using `DEFAULT_EVENT_CONFIG` (every chat-message flag disabled) in place of the
+ * missing config, so their alert-only subscriptions aren't silently discarded here. Without
+ * this fallback, `isGroupEnabled`'s alert-driven subscription creation and this dispatch gate
+ * would disagree: the subscription would exist but every notification for it would be dropped.
+ */
 export function dispatchNotification(type: string, event: Record<string, unknown>, condition: Record<string, string>): void {
   const broadcasterId = condition.broadcaster_user_id ?? condition.to_broadcaster_user_id;
   if (!broadcasterId) return;
 
   const info = streamerMap.get(broadcasterId);
-  if (!info?.config) return;
+  if (!info) return;
+  const config = info.config ?? DEFAULT_EVENT_CONFIG;
 
   const handler = notificationHandlers.get(type);
   if (!handler) {
@@ -294,7 +303,7 @@ export function dispatchNotification(type: string, event: Record<string, unknown
     log.warn(`Invalid EventSub handler for type: ${type}`);
     return;
   }
-  handler(info.login, event, info.config, info.streamerId)
+  handler(info.login, event, config, info.streamerId)
     .catch((err) => log.error(`${type} handler error:`, err));
 }
 

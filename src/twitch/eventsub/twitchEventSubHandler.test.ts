@@ -436,6 +436,78 @@ describe('alerts overlay push', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Chat-send failures must not block the independent alert push
+// ---------------------------------------------------------------------------
+describe('chat-send failures are isolated from the alert push', () => {
+  const followEvent = { user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer' };
+  const subEvent = {
+    user_login: 'subuser', user_name: 'SubUser', broadcaster_user_login: 'streamer', tier: '1000', is_gift: false,
+  };
+  const resubEvent = {
+    user_login: 'resubuser', user_name: 'ResubUser', broadcaster_user_login: 'streamer',
+    tier: '1000', cumulative_months: 6, streak_months: 3,
+  };
+  const giftSubEvent = {
+    user_login: 'gifter', user_name: 'GifterDisplay', broadcaster_user_login: 'streamer',
+    total: 5, tier: '1000', is_anonymous: false,
+  };
+  const raidEvent = {
+    from_broadcaster_user_login: 'raider', from_broadcaster_user_name: 'RaiderDisplay',
+    to_broadcaster_user_login: 'streamer', viewers: 42,
+  };
+
+  beforeEach(() => {
+    vi.mocked(getAlertConfig).mockResolvedValue({
+      id: 1, streamer_id: STREAMER_ID, event_type: 'follow', enabled: true,
+      message_template: 'alert fired', image_filename: null, sound_filename: null, duration_ms: 6000,
+    } as any);
+  });
+
+  it('handleFollow still pushes the alert when the chat send rejects', async () => {
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+    await handleFollow('streamer', followEvent, makeConfig({ follow_enabled: true }), STREAMER_ID);
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('handleSub still pushes the alert when the chat send rejects', async () => {
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+    await handleSub('streamer', subEvent, makeConfig({ sub_enabled: true }), STREAMER_ID);
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('handleResub still pushes the alert when the chat send rejects', async () => {
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+    await handleResub('streamer', resubEvent, makeConfig({ sub_enabled: true }), STREAMER_ID);
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('handleGiftSub still pushes the alert when the chat send rejects', async () => {
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+    await handleGiftSub('streamer', giftSubEvent, makeConfig({ sub_enabled: true }), STREAMER_ID);
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('handleRaid still sends the welcome message, sends the shoutout, and pushes the alert when the welcome-message send rejects', async () => {
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+    vi.mocked(buildShoutoutMessage).mockResolvedValue('Go check out @raider!');
+
+    await handleRaid('streamer', raidEvent, makeConfig({ raid_enabled: true, raid_shoutout_enabled: true }), STREAMER_ID);
+
+    expect(mockSend).toHaveBeenCalledWith('streamer', 'Go check out @raider!');
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('handleRaid still pushes the alert when buildShoutoutMessage rejects', async () => {
+    vi.mocked(buildShoutoutMessage).mockRejectedValueOnce(new Error('helix lookup failed'));
+
+    await handleRaid('streamer', raidEvent, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }), STREAMER_ID);
+
+    expect(recordCommandTestEntry).not.toHaveBeenCalled();
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // handleRedemption
 // ---------------------------------------------------------------------------
 describe('handleRedemption', () => {

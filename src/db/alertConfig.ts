@@ -146,6 +146,12 @@ export async function saveAlertConfig(
  * asset, so an upload is never accepted without actually being persisted. Shared by
  * {@link setAlertImage} and {@link setAlertSound}, which differ only in which fixed, trusted
  * column name they target — never derived from user input.
+ *
+ * Locks the row with `SELECT … FOR UPDATE` before the snapshot (mirroring `deleteSfxFile`'s
+ * rationale in `db/sfx.ts`), so two concurrent uploads/deletes for the same streamer/eventType
+ * can't both read the same "previous" filename — which would otherwise let one request's newly
+ * uploaded file be silently orphaned on disk (never recorded as "previous" by the other, and so
+ * never cleaned up by either).
  * @param column The asset column to update (`image_filename` or `sound_filename`).
  * @param streamerId DB row ID of the streamer.
  * @param eventType The alert event type being configured.
@@ -161,7 +167,7 @@ async function setAlertAssetColumn(
 ): Promise<string | null> {
   return withTransaction(async (conn) => {
     const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT ${column} FROM alert_config WHERE streamer_id = ? AND event_type = ?`,
+      `SELECT ${column} FROM alert_config WHERE streamer_id = ? AND event_type = ? FOR UPDATE`,
       [streamerId, eventType],
     );
     if (rows.length === 0) {

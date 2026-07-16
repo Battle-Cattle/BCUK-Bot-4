@@ -252,6 +252,8 @@ describe('setAlertImage', () => {
     vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
     const result = await setAlertImage(1, 'follow', 'new.png');
     expect(result).toBe('old.png');
+    const [selectSql] = conn.execute.mock.calls[0];
+    expect(selectSql.toUpperCase()).toContain('FOR UPDATE');
     const [updateSql, updateParams] = conn.execute.mock.calls[1];
     expect(updateSql.toUpperCase()).toContain('UPDATE');
     expect(updateParams).toEqual(['new.png', 1, 'follow']);

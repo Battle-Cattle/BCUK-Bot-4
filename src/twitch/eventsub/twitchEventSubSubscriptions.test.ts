@@ -9,6 +9,17 @@ vi.mock('../../db', () => ({
   clearStreamerToken: vi.fn().mockResolvedValue(undefined),
   getEnabledAlertEventTypesBatch: vi.fn().mockResolvedValue(new Map()),
   ALERT_EVENT_TYPES: ['follow', 'sub', 'resub', 'giftsub', 'raid'],
+  DEFAULT_EVENT_CONFIG: {
+    follow_enabled: false,
+    follow_message: 'Thanks {display_name} for the follow!',
+    sub_enabled: false,
+    sub_message: 'Thanks {display_name} for subscribing! ({tier_name})',
+    resub_message: 'Thanks {display_name} for {months} months! ({tier_name})',
+    giftsub_message: '{gifter_display} gifted {count} sub(s) to the community!',
+    raid_enabled: false,
+    raid_message: 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!',
+    raid_shoutout_enabled: false,
+  },
 }));
 vi.mock('../twitchApi', () => ({ getUsers: vi.fn() }));
 vi.mock('../twitchChannelMembership', () => ({ getActiveChannels: vi.fn().mockReturnValue(new Set<string>()) }));
@@ -42,7 +53,9 @@ import {
   handleRevocation,
   getAlertTypesCoveredBySubscriptionGroups,
 } from './twitchEventSubSubscriptions';
-import { getAllEventSubStreamers, clearStreamerToken, getEnabledAlertEventTypesBatch, ALERT_EVENT_TYPES } from '../../db';
+import {
+  getAllEventSubStreamers, clearStreamerToken, getEnabledAlertEventTypesBatch, ALERT_EVENT_TYPES, DEFAULT_EVENT_CONFIG,
+} from '../../db';
 import { getValidToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
@@ -612,6 +625,31 @@ describe('dispatchNotification routes chat-alert and redemption events', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(logMock.error).toHaveBeenCalledWith('channel.follow handler error:', expect.any(Error));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dispatchNotification — streamer with no streamer_event_config row
+// ---------------------------------------------------------------------------
+describe('dispatchNotification with a null streamer config (alert-only streamer)', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    clearAuthFailedSubs('alertOnlyStreamer');
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['alertonlystreamer']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+    await subscribeForStreamer('sess-alert-only', {
+      uid: 'uid-alert-only',
+      token: 'tok-alert-only',
+      name: 'alertOnlyStreamer',
+      config: null,
+      streamerId: 60,
+    });
+  });
+
+  it('still routes the notification, falling back to DEFAULT_EVENT_CONFIG instead of dropping it', () => {
+    dispatchNotification('channel.follow', { user_name: 'follower' }, { broadcaster_user_id: 'uid-alert-only' });
+    expect(handleFollow).toHaveBeenCalledWith('alertOnlyStreamer', { user_name: 'follower' }, DEFAULT_EVENT_CONFIG, 60);
   });
 });
 
