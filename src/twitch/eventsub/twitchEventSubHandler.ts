@@ -189,12 +189,18 @@ function tierName(tier: string): string {
  *
  * @param login - Broadcaster login name (chat channel to send to).
  * @param message - Chat message to send.
+ * @returns True if a runtime was registered and the send succeeded; false if no runtime is
+ *   registered or the send failed, so callers can avoid recording an unsent message as sent.
  */
-async function sendChatMessage(login: string, message: string): Promise<void> {
+async function sendChatMessage(login: string, message: string): Promise<boolean> {
+  const runtime = twitchRuntimeRegistry.get();
+  if (!runtime) return false;
   try {
-    await twitchRuntimeRegistry.get()?.send(login, message);
+    await runtime.send(login, message);
+    return true;
   } catch (err) {
     log.error(`Failed to send chat message to ${login}:`, err);
+    return false;
   }
 }
 
@@ -203,7 +209,10 @@ async function sendChatMessage(login: string, message: string): Promise<void> {
  * filled {@link AlertPayload} via the injected alert runtime. Independent of the chat-message
  * `*_enabled` flags on `EventSubConfig` — a streamer may enable the browser-source alert for an
  * event type without enabling its chat message, or vice versa. No-ops silently if no config row
- * exists, the alert is disabled, or no alert runtime has been registered.
+ * exists, the alert is disabled, or no alert runtime has been registered. A failed config lookup
+ * or push is logged and swallowed rather than rejecting, so a transient DB/alert problem can't
+ * surface as a failure of the EventSub handler that called this (which has already, independently,
+ * sent its own chat message if enabled).
  *
  * @param login - Broadcaster login name (alerts-overlay channel to push to).
  * @param streamerId - DB row ID of the streamer, used to look up alert config and build asset URLs.
@@ -216,18 +225,21 @@ async function maybePushAlert(
   eventType: AlertEventType,
   vars: Record<string, string>,
 ): Promise<void> {
-  const alert = await getAlertConfig(streamerId, eventType);
-  if (!alert || !alert.enabled) return;
-  const message = fillTemplate(alert.message_template, vars);
-  const imageUrl = alert.image_filename ? `/alerts/assets/${streamerId}/${alert.image_filename}` : null;
-  const soundUrl = alert.sound_filename ? `/alerts/assets/${streamerId}/${alert.sound_filename}` : null;
-  alertRuntimeRegistry.get()?.pushAlertEvent(login, {
-    type: eventType,
-    message,
-    imageUrl,
-    soundUrl,
-    durationMs: alert.duration_ms,
-  });
+  const runtime = alertRuntimeRegistry.get();
+  if (!runtime) return;
+  try {
+    const alert = await getAlertConfig(streamerId, eventType);
+    if (!alert || !alert.enabled) return;
+    runtime.pushAlertEvent(login, {
+      type: eventType,
+      message: fillTemplate(alert.message_template, vars),
+      imageUrl: alert.image_filename ? `/alerts/assets/${streamerId}/${alert.image_filename}` : null,
+      soundUrl: alert.sound_filename ? `/alerts/assets/${streamerId}/${alert.sound_filename}` : null,
+      durationMs: alert.duration_ms,
+    });
+  } catch (err) {
+    log.error(`Failed to push ${eventType} alert for ${login}:`, err);
+  }
 }
 
 /**
@@ -364,8 +376,8 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
     try {
       const shoutoutMsg = await buildShoutoutMessage(event.from_broadcaster_user_login);
       if (shoutoutMsg) {
-        await sendChatMessage(login, shoutoutMsg);
-        recordCommandTestEntry({
+        const sent = await sendChatMessage(login, shoutoutMsg);
+        if (sent) recordCommandTestEntry({
           source: 'twitch',
           command: '!so (raid)',
           response: shoutoutMsg,

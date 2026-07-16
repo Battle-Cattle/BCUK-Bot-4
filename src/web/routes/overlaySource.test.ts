@@ -7,6 +7,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../shared/config', () => ({
   OVERLAY_FOLDER: '/app/overlay-videos',
   OVERLAY_MAX_SSE_PER_CHANNEL: 10,
+  SSE_MAX_TOTAL_CONNECTIONS: 1000,
 }));
 
 vi.mock('fs', () => ({

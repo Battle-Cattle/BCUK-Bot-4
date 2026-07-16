@@ -4,23 +4,32 @@ const { logMock } = vi.hoisted(() => ({
   logMock: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => logMock }));
-vi.mock('../../db', () => ({
-  getAllEventSubStreamers: vi.fn(),
-  clearStreamerToken: vi.fn().mockResolvedValue(undefined),
-  getEnabledAlertEventTypesBatch: vi.fn().mockResolvedValue(new Map()),
-  ALERT_EVENT_TYPES: ['follow', 'sub', 'resub', 'giftsub', 'raid'],
-  DEFAULT_EVENT_CONFIG: {
-    follow_enabled: false,
-    follow_message: 'Thanks {display_name} for the follow!',
-    sub_enabled: false,
-    sub_message: 'Thanks {display_name} for subscribing! ({tier_name})',
-    resub_message: 'Thanks {display_name} for {months} months! ({tier_name})',
-    giftsub_message: '{gifter_display} gifted {count} sub(s) to the community!',
-    raid_enabled: false,
-    raid_message: 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!',
-    raid_shoutout_enabled: false,
-  },
-}));
+// Pulled in transitively via '../../db/alertConfig' (for the real ALERT_EVENT_TYPES below)
+// importing './pool', which reads real env vars at module load time — an empty mock keeps
+// that side effect out.
+vi.mock('../../shared/config', () => ({}));
+vi.mock('../../db', async () => {
+  // Reuses the real ALERT_EVENT_TYPES (rather than a hard-coded copy) so this file's
+  // exhaustiveness test can't silently go stale if a new alert type is ever added there.
+  const { ALERT_EVENT_TYPES } = await vi.importActual<typeof import('../../db/alertConfig')>('../../db/alertConfig');
+  return {
+    getAllEventSubStreamers: vi.fn(),
+    clearStreamerToken: vi.fn().mockResolvedValue(undefined),
+    getEnabledAlertEventTypesBatch: vi.fn().mockResolvedValue(new Map()),
+    ALERT_EVENT_TYPES,
+    DEFAULT_EVENT_CONFIG: {
+      follow_enabled: false,
+      follow_message: 'Thanks {display_name} for the follow!',
+      sub_enabled: false,
+      sub_message: 'Thanks {display_name} for subscribing! ({tier_name})',
+      resub_message: 'Thanks {display_name} for {months} months! ({tier_name})',
+      giftsub_message: '{gifter_display} gifted {count} sub(s) to the community!',
+      raid_enabled: false,
+      raid_message: 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!',
+      raid_shoutout_enabled: false,
+    },
+  };
+});
 vi.mock('../twitchApi', () => ({ getUsers: vi.fn() }));
 vi.mock('../twitchChannelMembership', () => ({ getActiveChannels: vi.fn().mockReturnValue(new Set<string>()) }));
 vi.mock('../twitchChannelName', () => ({ normalizeTwitchChannelName: vi.fn((n: string) => n.toLowerCase()) }));

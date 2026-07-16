@@ -77,7 +77,7 @@
        };
     %>
     <% for (const eventType of eventTypes) { %>
-    <% const cfg = configByType.get(eventType) ?? { enabled: false, message_template: '', image_filename: null, sound_filename: null, duration_ms: 6000 }; %>
+    <% const cfg = configByType[eventType] ?? { enabled: false, message_template: '', image_filename: null, sound_filename: null, duration_ms: 6000 }; %>
     <section class="section">
       <h2 class="section-title"><%= labels[eventType] ?? eventType %> Alert</h2>
       <div class="card">

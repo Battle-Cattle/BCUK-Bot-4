@@ -52,12 +52,21 @@ export function detectImageType(buf: Buffer): 'png' | 'gif' | 'jpeg' | 'webp' | 
   return null;
 }
 
-/** Removes a previously-stored asset file, tolerating it already being gone. */
+/**
+ * Removes a previously-stored asset file, tolerating it already being gone. Always called after
+ * the DB mutation (`setAsset`) that orphaned it has already committed, so a failure here is
+ * logged and swallowed rather than thrown — it must never turn an already-successful config
+ * change into a failure response; it just leaves a stale file on disk for later cleanup.
+ */
 async function removeOldAsset(streamerId: number, filename: string | null): Promise<void> {
   if (!filename) return;
   const fullPath = safeResolve(ALERT_ASSETS_FOLDER, String(streamerId), filename);
   if (!fullPath) return;
-  await fs.promises.rm(fullPath, { force: true });
+  try {
+    await fs.promises.rm(fullPath, { force: true });
+  } catch (err) {
+    log.error(`Failed to remove orphaned alert asset ${fullPath}:`, err);
+  }
 }
 
 /** Persists a new asset filename for a streamer's alert config row (`setAlertImage`/`setAlertSound`). */

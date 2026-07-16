@@ -118,6 +118,7 @@ describe('GET /settings — streamer and alert config loading', () => {
     expect(res.status).toBe(200);
     expect(getAlertConfigsForStreamer).toHaveBeenCalledWith(42);
     expect(res.body.streamer).toMatchObject({ id: 42 });
+    expect(res.body.configByType.follow).toMatchObject({ event_type: 'follow', message_template: 'hi' });
   });
 
   it('exposes the fixed ALERT_EVENT_TYPES list to the template', async () => {

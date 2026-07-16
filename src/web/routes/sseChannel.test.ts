@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('../../shared/config', () => ({ SSE_MAX_TOTAL_CONNECTIONS: 10 }));
+
 import { createSseEventsHandler, createLoginValidator, attachSseConnection } from './sseChannel';
 
 const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
@@ -168,7 +171,7 @@ describe('createSseEventsHandler', () => {
     const res1 = makeRes();
     const res2 = makeRes();
     const { req: req1, triggerClose: closeReq1 } = makeReq('sharedchannel');
-    const { req: req2 } = makeReq('sharedchannel');
+    const { req: req2, triggerClose: closeReq2 } = makeReq('sharedchannel');
 
     handler(req1 as any, res1 as any, vi.fn());
     handler(req2 as any, res2 as any, vi.fn());
@@ -176,6 +179,7 @@ describe('createSseEventsHandler', () => {
     closeReq1();
     expect(connections.get('sharedchannel')?.has(res1 as any)).toBe(false);
     expect(connections.get('sharedchannel')?.has(res2 as any)).toBe(true);
+    closeReq2();
   });
 });
 
@@ -259,5 +263,51 @@ describe('attachSseConnection', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Process-wide SSE connection cap (SSE_MAX_TOTAL_CONNECTIONS, mocked to 10 above)
+// ---------------------------------------------------------------------------
+describe('attachSseConnection — process-wide connection cap', () => {
+  it('rejects with 429 once the process-wide cap is reached, even under distinct keys well under their own maxPerChannel', () => {
+    const opened: Array<() => void> = [];
+    for (let i = 0; i < 10; i++) {
+      const res = makeRes();
+      const { req, triggerClose } = makeReq('unused');
+      const attached = attachSseConnection(req as any, res as any, { connections, key: `key-${i}`, maxPerChannel: 100 });
+      expect(attached).toBe(true);
+      opened.push(triggerClose);
+    }
+
+    const overflowRes = makeRes();
+    const { req: overflowReq } = makeReq('unused');
+    const attached = attachSseConnection(overflowReq as any, overflowRes as any, { connections, key: 'key-overflow', maxPerChannel: 100 });
+
+    expect(attached).toBe(false);
+    expect(overflowRes.status).toHaveBeenCalledWith(429);
+    expect(connections.get('key-overflow')).toBeUndefined();
+
+    opened.forEach((close) => close());
+  });
+
+  it('frees a slot when a connection cleans up, allowing a new one to attach', () => {
+    const opened: Array<() => void> = [];
+    for (let i = 0; i < 10; i++) {
+      const res = makeRes();
+      const { req, triggerClose } = makeReq('unused');
+      attachSseConnection(req as any, res as any, { connections, key: `key-${i}`, maxPerChannel: 100 });
+      opened.push(triggerClose);
+    }
+
+    opened[0]();
+
+    const res = makeRes();
+    const { req, triggerClose } = makeReq('unused');
+    const attached = attachSseConnection(req as any, res as any, { connections, key: 'key-new', maxPerChannel: 100 });
+
+    expect(attached).toBe(true);
+    triggerClose();
+    opened.slice(1).forEach((close) => close());
   });
 });

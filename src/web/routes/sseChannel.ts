@@ -1,6 +1,13 @@
 import type { Request, Response, NextFunction } from 'express';
+import { SSE_MAX_TOTAL_CONNECTIONS } from '../../shared/config';
 
 const KEEPALIVE_INTERVAL_MS = 25_000;
+
+// Process-wide cap across every SSE endpoint (reward-video overlay, alerts overlay, companion
+// app, channel-points prices), on top of each endpoint's own per-key `maxPerChannel` limit. Without
+// this, an unauthenticated caller could exhaust sockets/timers/memory by opening connections under
+// many distinct regex-valid-but-unregistered keys, each well under its own per-key cap.
+let totalConnections = 0;
 
 /** Removes `res` from the channel's client Set, deleting the map entry once it's empty. */
 function removeClient<K>(connections: Map<K, Set<Response>>, key: K, res: Response): void {
@@ -63,8 +70,9 @@ export interface AttachSseConnectionOptions<K> {
  * @param res - Express response to register and stream to; also listened to for 'close'/'error'
  *   (an abrupt socket failure can fire these without `req` ever emitting 'close').
  * @param options - See {@link AttachSseConnectionOptions}.
- * @returns false if the key was already at `maxPerChannel` (a 429 has already been sent to `res`
- *   and the caller should stop handling the request); true once the connection is attached.
+ * @returns false if the process-wide cap (`SSE_MAX_TOTAL_CONNECTIONS`) or the key was already at
+ *   `maxPerChannel` (a 429 has already been sent to `res` and the caller should stop handling the
+ *   request); true once the connection is attached.
  */
 export function attachSseConnection<K>(
   req: Request,
@@ -72,6 +80,11 @@ export function attachSseConnection<K>(
   options: AttachSseConnectionOptions<K>,
 ): boolean {
   const { connections, key, maxPerChannel } = options;
+  if (totalConnections >= SSE_MAX_TOTAL_CONNECTIONS) {
+    res.status(429).end();
+    return false;
+  }
+
   if (!connections.has(key)) connections.set(key, new Set());
   const clients = connections.get(key)!;
   clients.add(res);
@@ -81,14 +94,17 @@ export function attachSseConnection<K>(
     return false;
   }
 
+  totalConnections++;
   sendSseHandshake(res);
 
   let cleaned = false;
   // Idempotent: 'close' and 'error' can both fire for the same dead connection, and the keepalive
-  // ping's own write failure also routes here — must only clear/evict once.
+  // ping's own write failure also routes here — must only clear/evict (and release the global
+  // slot) once.
   const cleanup = (): void => {
     if (cleaned) return;
     cleaned = true;
+    totalConnections--;
     clearInterval(keepalive);
     removeClient(connections, key, res);
   };

@@ -32,7 +32,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
   try {
     const streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
     const configs = streamer ? await getAlertConfigsForStreamer(streamer.id) : [];
-    const configByType = new Map(configs.map((c) => [c.event_type, c]));
+    const configByType = Object.fromEntries(configs.map((c) => [c.event_type, c]));
 
     renderView(res, 'alertsAdmin', {
       user: req.session.user,

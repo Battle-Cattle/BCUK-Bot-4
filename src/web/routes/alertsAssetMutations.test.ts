@@ -138,6 +138,16 @@ describe('POST /settings/:eventType/image', () => {
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith('/app/alert-assets/123/follow-old.png', { force: true });
   });
 
+  it('still reports success when removing the old file fails (post-commit cleanup, not rolled back)', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(setAlertImage).mockResolvedValue('follow-old.png');
+    vi.mocked(fs.promises.rm).mockRejectedValueOnce(new Error('EACCES'));
+    const res = await supertest(buildApp())
+      .post('/settings/follow/image')
+      .attach('image', PNG_BUF, { filename: 'test.png', contentType: 'image/png' });
+    expect(res.headers.location).toBe('/alerts/settings?success=image_uploaded');
+  });
+
   it('rolls back the written file when setAlertImage fails', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(setAlertImage).mockRejectedValue(new Error('DB error'));
@@ -241,6 +251,14 @@ describe('POST /settings/:eventType/image/delete', () => {
     expect(res.headers.location).toBe('/alerts/settings?success=image_deleted');
     expect(vi.mocked(setAlertImage)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', null);
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith('/app/alert-assets/123/follow-old.png', { force: true });
+  });
+
+  it('still reports success when removing the file fails (post-commit cleanup, not rolled back)', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(setAlertImage).mockResolvedValue('follow-old.png');
+    vi.mocked(fs.promises.rm).mockRejectedValueOnce(new Error('EACCES'));
+    const res = await supertest(buildApp()).post('/settings/follow/image/delete');
+    expect(res.headers.location).toBe('/alerts/settings?success=image_deleted');
   });
 
   it('skips rm when there was no previous image', async () => {

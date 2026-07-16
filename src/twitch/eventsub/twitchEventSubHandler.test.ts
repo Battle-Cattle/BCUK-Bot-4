@@ -505,6 +505,32 @@ describe('chat-send failures are isolated from the alert push', () => {
     expect(recordCommandTestEntry).not.toHaveBeenCalled();
     expect(mockPushAlertEvent).toHaveBeenCalled();
   });
+
+  it('does not record the raid shoutout via recordCommandTestEntry when the shoutout send fails', async () => {
+    vi.mocked(buildShoutoutMessage).mockResolvedValue('Go check out @raider!');
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+
+    await handleRaid('streamer', raidEvent, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }), STREAMER_ID);
+
+    expect(recordCommandTestEntry).not.toHaveBeenCalled();
+    expect(mockPushAlertEvent).toHaveBeenCalled();
+  });
+
+  it('handleFollow does not reject when getAlertConfig rejects (chat message still already sent)', async () => {
+    vi.mocked(getAlertConfig).mockRejectedValueOnce(new Error('db unavailable'));
+    await expect(
+      handleFollow('streamer', followEvent, makeConfig({ follow_enabled: true }), STREAMER_ID),
+    ).resolves.toBeUndefined();
+    expect(mockSend).toHaveBeenCalled();
+    expect(mockPushAlertEvent).not.toHaveBeenCalled();
+  });
+
+  it('handleFollow does not reject when pushAlertEvent throws', async () => {
+    mockPushAlertEvent.mockImplementationOnce(() => { throw new Error('overlay push failed'); });
+    await expect(
+      handleFollow('streamer', followEvent, makeConfig({ follow_enabled: false }), STREAMER_ID),
+    ).resolves.toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

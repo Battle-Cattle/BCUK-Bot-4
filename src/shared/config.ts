@@ -52,6 +52,7 @@ export const ALERT_MAX_IMAGE_MB = parsePositiveIntEnv(process.env.ALERT_MAX_IMAG
 export const ALERT_MAX_SOUND_MB = parsePositiveIntEnv(process.env.ALERT_MAX_SOUND_MB, 5);
 export const ALERT_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.ALERT_MAX_SSE_PER_CHANNEL, 10);
 export const CHANNEL_POINTS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.CHANNEL_POINTS_MAX_SSE_PER_STREAMER, 5);
+export const SSE_MAX_TOTAL_CONNECTIONS = parsePositiveIntEnv(process.env.SSE_MAX_TOTAL_CONNECTIONS, 500);
 const _COOLDOWN = parseInt(process.env.GLOBAL_COOLDOWN_MS ?? '3000', 10);
 if (Number.isNaN(_COOLDOWN)) throw new Error('Invalid GLOBAL_COOLDOWN_MS: must be a number');
 export const GLOBAL_COOLDOWN_MS = _COOLDOWN;

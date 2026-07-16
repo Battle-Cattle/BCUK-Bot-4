@@ -197,6 +197,11 @@ describe('config — parsePositiveIntEnv-backed values', () => {
     const config = await loadConfig({ ALERT_MAX_SSE_PER_CHANNEL: undefined });
     expect(config.ALERT_MAX_SSE_PER_CHANNEL).toBe(10);
   });
+
+  it('defaults SSE_MAX_TOTAL_CONNECTIONS to 500 when unset', async () => {
+    const config = await loadConfig({ SSE_MAX_TOTAL_CONNECTIONS: undefined });
+    expect(config.SSE_MAX_TOTAL_CONNECTIONS).toBe(500);
+  });
 });
 
 describe('config — GLOBAL_COOLDOWN_MS', () => {
