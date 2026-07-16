@@ -46,6 +46,9 @@ export function pushCompanionEvent(discordId: string, event: CompanionEvent): vo
  * `requireCompanionKey`. Streams companion events for the authenticated Discord
  * user until the client disconnects, sending a keepalive ping every 25s and
  * capping concurrent connections per user at `MAX_SSE_CONNECTIONS_PER_TOKEN`.
+ * @param req - Express request; `req.companionDiscordId` is set by `requireCompanionKey`.
+ * @param res - Express response; upgraded to a `text/event-stream` connection by
+ *   `attachSseConnection`, kept alive with periodic pings and torn down on client disconnect.
  */
 router.get('/events', requireCompanionKey, (req, res) => {
   const discordId = req.companionDiscordId!;
