@@ -1,6 +1,5 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import type { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -9,7 +8,7 @@ import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
 import { SFX_FOLDER, SFX_MAX_FILE_MB } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
-import { parsePositiveIntId, createMulterErrorRedirectHandler, parseCheckboxField } from './shared';
+import { parsePositiveIntId, createMulterErrorRedirectHandler, makeUploadMiddleware, parseCheckboxField } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -197,21 +196,8 @@ async function persistUploadedSound(
  */
 export const handleUploadError = createMulterErrorRedirectHandler('/sfx', log, 'SFX upload middleware error:');
 
-/**
- * Express middleware that runs Multer's single-file (`sound`) parser and, on a
- * Multer error (e.g. an oversized file), redirects via `handleUploadError`
- * instead of letting it fall through to the centralised 500 handler.
- * @param req - Express request carrying the multipart upload.
- * @param res - Express response (used for the error redirect).
- * @param next - Called to continue to the route handler when parsing succeeds.
- * @returns {void}
- */
-function uploadSound(req: Request, res: Response, next: NextFunction): void {
-  upload.single('sound')(req, res, (err: unknown) => {
-    if (handleUploadError(err, res)) return;
-    next();
-  });
-}
+/** Express middleware running Multer's single-file (`sound`) parser, redirecting on error. */
+const uploadSound = makeUploadMiddleware(upload, 'sound', handleUploadError);
 
 // csrfProtection runs BEFORE uploadSound so a bad token is rejected before Multer
 // buffers the file. The client (sfx.js) sends the token in an X-CSRF-Token header

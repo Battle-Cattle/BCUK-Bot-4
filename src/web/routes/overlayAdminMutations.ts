@@ -1,6 +1,5 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import type { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -11,7 +10,7 @@ import type { DbStreamerEventSub } from '../../db';
 import { addVideo, deleteVideo } from '../../db';
 import { OVERLAY_FOLDER, OVERLAY_MAX_FILE_MB } from '../../shared/config';
 import {
-  logAndRedirectError, parsePositiveIntId, requireStreamer, createMulterErrorRedirectHandler,
+  logAndRedirectError, parsePositiveIntId, requireStreamer, createMulterErrorRedirectHandler, makeUploadMiddleware,
 } from './shared';
 import { safeResolve } from '../../shared/pathUtils';
 
@@ -77,21 +76,8 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.
  */
 export const handleUploadError = createMulterErrorRedirectHandler('/overlay/settings', log, 'Overlay upload middleware error:');
 
-/**
- * Express middleware that runs Multer's single-file (`video`) parser and, on a
- * Multer error (e.g. an oversized file), redirects via `handleUploadError`
- * instead of letting it fall through to the centralised 500 handler.
- * @param req - Express request carrying the multipart upload.
- * @param res - Express response (used for the error redirect).
- * @param next - Called to continue to the route handler when parsing succeeds.
- * @returns {void}
- */
-function uploadVideo(req: Request, res: Response, next: NextFunction): void {
-  upload.single('video')(req, res, (err: unknown) => {
-    if (handleUploadError(err, res)) return;
-    next();
-  });
-}
+/** Express middleware running Multer's single-file (`video`) parser, redirecting on error. */
+const uploadVideo = makeUploadMiddleware(upload, 'video', handleUploadError);
 
 /**
  * POST /overlay/settings/videos/upload — uploads a video file (webm/mp4,
