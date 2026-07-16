@@ -234,6 +234,12 @@ async function maybeSendChatMessage(login: string, enabled: boolean, template: s
  * (a TTL cache invalidated on every alert-config/asset save), not a live query, since this runs
  * on every single follow/sub/resub/giftsub/raid notification.
  *
+ * Fills the template with `fillTemplate`'s `'keep'` fallback (an unrecognised `{placeholder}` is
+ * left in place rather than blanked) — the same fallback the "Send Test Alert" preview route
+ * uses (`alertsAdminMutations.ts`), so a streamer's test preview matches what actually ships live
+ * for a typo'd placeholder instead of the preview showing the typo while the live alert silently
+ * blanks it.
+ *
  * @param login - Broadcaster login name (alerts-overlay channel to push to).
  * @param streamerId - DB row ID of the streamer, used to look up alert config and build asset URLs.
  * @param eventType - Which alert config row to look up.
@@ -252,7 +258,7 @@ async function maybePushAlert(
     if (!alert || !alert.enabled) return;
     runtime.pushAlertEvent(login, {
       type: eventType,
-      message: fillTemplate(alert.message_template, vars),
+      message: fillTemplate(alert.message_template, vars, 'keep'),
       imageUrl: alert.image_filename ? `/alerts/assets/${streamerId}/${alert.image_filename}` : null,
       soundUrl: alert.sound_filename ? `/alerts/assets/${streamerId}/${alert.sound_filename}` : null,
       durationMs: alert.duration_ms,

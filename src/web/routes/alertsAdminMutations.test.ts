@@ -85,11 +85,11 @@ describe('POST /settings/:eventType', () => {
     expect(res.headers.location).toBe('/alerts/settings?error=invalid_message');
   });
 
-  it('saves enabled=true, the trimmed message, and a clamped duration', async () => {
+  it('saves enabled=true, the trimmed message, and a clamped duration converted from seconds to ms', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const res = await supertest(buildApp())
       .post('/settings/follow')
-      .send('enabled=on&message_template=  Welcome {display_name}!  &duration_ms=4500&text_animation=pulse');
+      .send('enabled=on&message_template=  Welcome {display_name}!  &duration_seconds=4.5&text_animation=pulse');
     expect(res.headers.location).toBe('/alerts/settings?success=config_saved');
     expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', {
       enabled: true,
@@ -130,23 +130,47 @@ describe('POST /settings/:eventType', () => {
 
   it('saves enabled=false when the checkbox is absent', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    await supertest(buildApp()).post('/settings/follow').send('message_template=hi&duration_ms=5000');
+    await supertest(buildApp()).post('/settings/follow').send('message_template=hi&duration_seconds=5');
     expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', expect.objectContaining({ enabled: false }));
   });
 
-  it('clamps duration_ms to the 1000-60000 range', async () => {
+  it('clamps duration_seconds to the 1-60 second range before converting to ms', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    await supertest(buildApp()).post('/settings/follow').send('message_template=hi&duration_ms=999999');
+    await supertest(buildApp()).post('/settings/follow').send('message_template=hi&duration_seconds=999');
     expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', expect.objectContaining({ duration_ms: 60000 }));
 
-    await supertest(buildApp()).post('/settings/follow').send('message_template=hi&duration_ms=1');
+    await supertest(buildApp()).post('/settings/follow').send('message_template=hi&duration_seconds=0.001');
     expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', expect.objectContaining({ duration_ms: 1000 }));
   });
 
-  it('defaults duration_ms to 6000 when missing or non-numeric', async () => {
+  it('converts fractional seconds to the nearest ms', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    await supertest(buildApp()).post('/settings/follow').send('message_template=hi&duration_seconds=4.567');
+    expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', expect.objectContaining({ duration_ms: 4567 }));
+  });
+
+  it('defaults duration_ms to 6000 when duration_seconds is missing or non-numeric', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     await supertest(buildApp()).post('/settings/follow').send('message_template=hi');
     expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', expect.objectContaining({ duration_ms: 6000 }));
+
+    await supertest(buildApp()).post('/settings/follow').send('message_template=hi&duration_seconds=notanumber');
+    expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', expect.objectContaining({ duration_ms: 6000 }));
+  });
+
+  it('converts the exact value the settings page renders (e.g. "4.50") with no client-side JS involved', async () => {
+    // The `duration_seconds` field is a real named form field (rendered by the ejs as
+    // `(cfg.duration_ms / 1000).toFixed(2)`) submitted directly by the browser — regression
+    // guard for a prior bug where this value only reached the server via a JS-populated hidden
+    // `duration_ms` field, silently discarding the edit whenever JS failed to run.
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    await supertest(buildApp()).post('/settings/follow').send('enabled=on&message_template=hi&duration_seconds=4.50&text_animation=wave');
+    expect(vi.mocked(saveAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow', {
+      enabled: true,
+      message_template: 'hi',
+      duration_ms: 4500,
+      text_animation: 'wave',
+    });
   });
 });
 
