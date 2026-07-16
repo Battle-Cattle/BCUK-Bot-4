@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response } from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
@@ -10,7 +10,7 @@ import { setAlertImage, setAlertSound } from '../../db';
 import type { AlertEventType, DbStreamerEventSub } from '../../db';
 import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
-import { logAndRedirectError, requireStreamer, createMulterErrorRedirectHandler } from './shared';
+import { logAndRedirectError, requireStreamer, createMulterErrorRedirectHandler, makeUploadMiddleware } from './shared';
 import { detectAudioType } from './sfxFileUpload';
 import { NOT_A_STREAMER_REDIRECT, parseEventType } from './alertsShared';
 
@@ -201,20 +201,10 @@ function makeDeleteHandler(
 const handleUploadError = createMulterErrorRedirectHandler('/alerts/settings', log, 'Alert upload middleware error:');
 
 /** Express middleware running Multer's single-file (`image`) parser, redirecting on error. */
-function uploadImage(req: Request, res: Response, next: NextFunction): void {
-  imageUpload.single('image')(req, res, (err: unknown) => {
-    if (handleUploadError(err, res)) return;
-    next();
-  });
-}
+const uploadImage = makeUploadMiddleware(imageUpload, 'image', handleUploadError);
 
 /** Express middleware running Multer's single-file (`sound`) parser, redirecting on error. */
-function uploadSound(req: Request, res: Response, next: NextFunction): void {
-  soundUpload.single('sound')(req, res, (err: unknown) => {
-    if (handleUploadError(err, res)) return;
-    next();
-  });
-}
+const uploadSound = makeUploadMiddleware(soundUpload, 'sound', handleUploadError);
 
 /**
  * POST /alerts/settings/:eventType/image — uploads an image/GIF (magic-byte validated) for one

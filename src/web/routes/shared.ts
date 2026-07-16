@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
-import type { Request, Response } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import type { Logger } from 'winston';
 import type { SessionUser } from '../../types/express';
 import {
@@ -379,5 +379,29 @@ export function createMulterErrorRedirectHandler(
     log.error(logLabel, err);
     res.redirect(`${basePath}?error=upload_failed`);
     return true;
+  };
+}
+
+/**
+ * Builds Express middleware that runs Multer's single-file parser for `field` and, on a Multer
+ * error (e.g. an oversized file), redirects via `handleUploadError` instead of letting it fall
+ * through to the centralised 500 handler. Shared by every file-upload route (SFX sounds, overlay
+ * videos, alert images/sounds) — they previously each defined their own copy of this wrapper,
+ * differing only in the Multer instance and field name.
+ * @param upload - Multer instance configured for this upload (storage + size limit).
+ * @param field - Form field name Multer should parse as the single uploaded file.
+ * @param handleUploadError - Error handler from `createMulterErrorRedirectHandler`, run on a Multer error.
+ * @returns Express middleware: parses `field` via Multer, then calls `next()` on success.
+ */
+export function makeUploadMiddleware(
+  upload: multer.Multer,
+  field: string,
+  handleUploadError: (err: unknown, res: Response) => boolean,
+): (req: Request, res: Response, next: NextFunction) => void {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    upload.single(field)(req, res, (err: unknown) => {
+      if (handleUploadError(err, res)) return;
+      next();
+    });
   };
 }
