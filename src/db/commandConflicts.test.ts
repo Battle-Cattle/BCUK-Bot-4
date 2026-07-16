@@ -347,6 +347,35 @@ describe('assignUserToCommandWithinTransaction', () => {
     expect(acquireNamedLock).toHaveBeenCalledOnce();
   });
 
+  it('throws the stable retry-limit error, not the raw driver error, when a deadlock persists through every attempt', async () => {
+    const deadlockErr = new Error('deadlock');
+    const eligibilityRow = [{ twitch_name: null, is_twitch_bot_enabled: 0 }];
+    const triggerRow = [{ trigger_string: '!clap' }];
+    const execute = vi.fn()
+      .mockResolvedValueOnce([triggerRow, []]).mockResolvedValueOnce([eligibilityRow, []]).mockRejectedValueOnce(deadlockErr)
+      .mockResolvedValueOnce([triggerRow, []]).mockResolvedValueOnce([eligibilityRow, []]).mockRejectedValueOnce(deadlockErr)
+      .mockResolvedValueOnce([triggerRow, []]).mockResolvedValueOnce([eligibilityRow, []]).mockRejectedValueOnce(deadlockErr);
+    const connection = {
+      execute,
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+    };
+    // isDeadlockError reports true on every attempt, including the last — unlike the
+    // "no further retry" case above, where it reports false on the last attempt. Queued as
+    // one-time values (not a persistent mockReturnValue) so this doesn't leak into later tests.
+    vi.mocked(isDeadlockError).mockReturnValueOnce(true).mockReturnValueOnce(true).mockReturnValueOnce(true);
+
+    await expect(assignUserToCommandWithinTransaction(connection as any, 1, 'user1'))
+      .rejects.toThrow('[DB] Deadlock retry limit reached in assignUserToCommandWithinTransaction.');
+
+    expect(connection.beginTransaction).toHaveBeenCalledTimes(3);
+    expect(connection.rollback).toHaveBeenCalledTimes(3);
+    expect(connection.commit).not.toHaveBeenCalled();
+    expect(acquireNamedLock).toHaveBeenCalledOnce();
+    expect(releaseNamedLock).toHaveBeenCalledOnce();
+  });
+
   it('rethrows a non-deadlock error immediately without retrying', async () => {
     const connection = makeConnection([
       [{ trigger_string: '!clap' }],
