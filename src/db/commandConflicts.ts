@@ -342,9 +342,8 @@ export async function insertUserCommandAssignment(
  * @param retryLimitFnName Full name of the calling function, used in the retry-limit-reached error message.
  * @param body Per-attempt work to run inside the transaction, given the command's normalized
  *   trigger string. Must not itself begin/commit/rollback a transaction.
- * @throws Whatever `body` throws (e.g. {@link CommandConflictError}), once retries are exhausted
- *   or the error isn't a deadlock.
- * @throws If the deadlock retry limit is reached.
+ * @throws Whatever `body` throws (e.g. {@link CommandConflictError}), when that error isn't a deadlock.
+ * @throws If a deadlock persists through all `MAX_DEADLOCK_RETRIES` attempts.
  */
 async function withDeadlockRetryAndTriggerLock(
   connection: mysql.PoolConnection,
@@ -373,9 +372,12 @@ async function withDeadlockRetryAndTriggerLock(
         return;
       } catch (error) {
         await connection.rollback();
-        if (isDeadlockError(error) && attempt < MAX_DEADLOCK_RETRIES - 1) {
-          log.warn(`Deadlock in ${retryLogLabel}, retrying (attempt ${attempt + 1}/${MAX_DEADLOCK_RETRIES}).`);
-          continue;
+        if (isDeadlockError(error)) {
+          if (attempt < MAX_DEADLOCK_RETRIES - 1) {
+            log.warn(`Deadlock in ${retryLogLabel}, retrying (attempt ${attempt + 1}/${MAX_DEADLOCK_RETRIES}).`);
+            continue;
+          }
+          break;
         }
         throw error;
       }
