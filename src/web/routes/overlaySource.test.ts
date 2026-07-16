@@ -344,4 +344,16 @@ describe('GET /videos/:streamerId/:filename', () => {
     expect(res.status).toBe(200);
     expect(res.body.sentFile).toBe('/app/overlay-videos/123/clip.mp4');
   });
+
+  it('replies 404 instead of a raw 500 when sendFile errors after the access() check passed (TOCTOU race)', async () => {
+    vi.mocked(fs.promises.access).mockResolvedValueOnce(undefined);
+    const app = express();
+    app.use((req, res, next) => {
+      (res as any).sendFile = (_filePath: string, cb: (err: Error) => void) => cb(new Error('ENOENT'));
+      next();
+    });
+    app.use(router);
+    const res = await supertest(app).get('/videos/123/clip.mp4');
+    expect(res.status).toBe(404);
+  });
 });

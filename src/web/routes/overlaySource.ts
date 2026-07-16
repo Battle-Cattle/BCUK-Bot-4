@@ -4,7 +4,7 @@ import fs from 'fs';
 import { OVERLAY_FOLDER, OVERLAY_MAX_SSE_PER_CHANNEL } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
 import { renderView } from './shared';
-import { createSseEventsHandler, createLoginValidator } from './sseChannel';
+import { createSseEventsHandler, createLoginValidator, broadcastToChannel } from './sseChannel';
 
 const log = createLogger('OverlaySource');
 const router = Router();
@@ -25,20 +25,8 @@ export const MAX_SSE_CONNECTIONS_PER_CHANNEL = OVERLAY_MAX_SSE_PER_CHANNEL;
 /** Push a video URL to all browser sources connected for this channel. */
 export function pushOverlayEvent(login: string, videoPath: string): void {
   const key = login.toLowerCase();
-  const clients = connections.get(key);
-  if (!clients || clients.size === 0) return;
-  const payload = JSON.stringify({ video: videoPath });
-  const dead: import('express').Response[] = [];
-  for (const res of clients) {
-    try {
-      res.write(`data: ${payload}\n\n`);
-    } catch {
-      dead.push(res);
-    }
-  }
-  for (const res of dead) clients.delete(res);
-  if (clients.size === 0) connections.delete(key);
-  log.info(`Pushed overlay event to ${clients.size} client(s) for ${login}`);
+  const remaining = broadcastToChannel(connections, key, { video: videoPath });
+  if (remaining !== null) log.info(`Pushed overlay event to ${remaining} client(s) for ${login}`);
 }
 
 /**
@@ -109,7 +97,15 @@ router.get('/videos/:streamerId/:filename', async (req, res) => {
     return;
   }
 
-  res.sendFile(resolved);
+  // A TOCTOU race is possible here: the file can be removed between the access() check above
+  // and sendFile() actually reading it (e.g. a concurrent delete). Passing a callback stops
+  // Express from falling through to the default error handler (a 500) for that race — reply
+  // 404 instead, as long as headers haven't already gone out.
+  res.sendFile(resolved, (err) => {
+    if (err && !res.headersSent) {
+      res.status(404).end();
+    }
+  });
 });
 
 export default router;

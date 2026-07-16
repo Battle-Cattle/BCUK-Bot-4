@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../shared/config', () => ({ SSE_MAX_TOTAL_CONNECTIONS: 10 }));
 
-import { createSseEventsHandler, createLoginValidator, attachSseConnection } from './sseChannel';
+import { createSseEventsHandler, createLoginValidator, attachSseConnection, broadcastToChannel } from './sseChannel';
 
 const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
 const RESERVED_LOGINS = new Set(['settings']);
@@ -309,5 +309,51 @@ describe('attachSseConnection — process-wide connection cap', () => {
     expect(attached).toBe(true);
     triggerClose();
     opened.slice(1).forEach((close) => close());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// broadcastToChannel
+// ---------------------------------------------------------------------------
+describe('broadcastToChannel', () => {
+  it('returns null and writes nothing when no clients are connected under the key', () => {
+    const result = broadcastToChannel(connections, 'nobody', { hello: 'world' });
+    expect(result).toBeNull();
+  });
+
+  it('writes the JSON-serialized payload as an SSE data frame to every connected client', () => {
+    const res1 = makeRes();
+    const res2 = makeRes();
+    connections.set('somekey', new Set([res1 as any, res2 as any]));
+
+    const result = broadcastToChannel(connections, 'somekey', { hello: 'world' });
+
+    expect(result).toBe(2);
+    expect(res1.write).toHaveBeenCalledWith('data: {"hello":"world"}\n\n');
+    expect(res2.write).toHaveBeenCalledWith('data: {"hello":"world"}\n\n');
+  });
+
+  it('evicts a client whose write fails and returns the remaining count', () => {
+    const good = makeRes();
+    const dead = makeRes();
+    dead.write.mockImplementation(() => { throw new Error('broken pipe'); });
+    connections.set('somekey', new Set([good as any, dead as any]));
+
+    const result = broadcastToChannel(connections, 'somekey', { x: 1 });
+
+    expect(result).toBe(1);
+    expect(connections.get('somekey')?.has(dead as any)).toBe(false);
+    expect(connections.get('somekey')?.has(good as any)).toBe(true);
+  });
+
+  it('deletes the map entry and returns 0 when every client fails to write', () => {
+    const dead = makeRes();
+    dead.write.mockImplementation(() => { throw new Error('broken pipe'); });
+    connections.set('somekey', new Set([dead as any]));
+
+    const result = broadcastToChannel(connections, 'somekey', { x: 1 });
+
+    expect(result).toBe(0);
+    expect(connections.has('somekey')).toBe(false);
   });
 });

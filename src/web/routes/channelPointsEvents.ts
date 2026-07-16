@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { getStreamerByDiscordId } from '../../db';
 import { CHANNEL_POINTS_MAX_SSE_PER_STREAMER } from '../../shared/config';
 import { getSessionUser } from '../session';
-import { attachSseConnection } from './sseChannel';
+import { attachSseConnection, broadcastToChannel } from './sseChannel';
 
 const log = createLogger('ChannelPointsEvents');
 const router = Router();
@@ -23,19 +23,7 @@ export const MAX_SSE_CONNECTIONS_PER_STREAMER = CHANNEL_POINTS_MAX_SSE_PER_STREA
 
 /** Push a reward price/demand update to every open Channel Points admin page for this streamer. */
 export function pushPricingUpdate(streamerId: number, event: PricingUpdateEvent): void {
-  const clients = connections.get(streamerId);
-  if (!clients || clients.size === 0) return;
-  const payload = JSON.stringify(event);
-  const dead: import('express').Response[] = [];
-  for (const res of clients) {
-    try {
-      res.write(`data: ${payload}\n\n`);
-    } catch {
-      dead.push(res);
-    }
-  }
-  for (const res of dead) clients.delete(res);
-  if (clients.size === 0) connections.delete(streamerId);
+  broadcastToChannel(connections, streamerId, event);
 }
 
 /**

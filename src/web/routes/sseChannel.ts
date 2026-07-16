@@ -17,6 +17,35 @@ function removeClient<K>(connections: Map<K, Set<Response>>, key: K, res: Respon
   if (clients.size === 0) connections.delete(key);
 }
 
+/**
+ * Serializes `payload` and writes it as an SSE `data:` frame to every client connected under
+ * `key`, evicting any client whose write fails (and dropping the map entry if that empties it).
+ * Shared by every SSE endpoint's push function (reward-video overlay, alerts overlay, companion
+ * app, channel-points prices) so the broadcast-and-evict logic only needs to be gotten right in
+ * one place.
+ * @param connections - The channel's connections map.
+ * @param key - Which key (channel login, Discord ID, streamer ID, etc) to broadcast to.
+ * @param payload - The value to JSON-serialize and send as the event's data.
+ * @returns The number of clients still connected under `key` after eviction, or null if there
+ *   were no connections registered under `key` at all (nothing was sent).
+ */
+export function broadcastToChannel<K>(connections: Map<K, Set<Response>>, key: K, payload: unknown): number | null {
+  const clients = connections.get(key);
+  if (!clients || clients.size === 0) return null;
+  const serialized = JSON.stringify(payload);
+  const dead: Response[] = [];
+  for (const res of clients) {
+    try {
+      res.write(`data: ${serialized}\n\n`);
+    } catch {
+      dead.push(res);
+    }
+  }
+  for (const res of dead) clients.delete(res);
+  if (clients.size === 0) connections.delete(key);
+  return clients.size;
+}
+
 /** Writes the SSE handshake headers and the initial `: connected` comment. */
 function sendSseHandshake(res: Response): void {
   res.setHeader('Content-Type', 'text/event-stream');

@@ -25,18 +25,21 @@ vi.mock('./pool', () => {
   };
 });
 vi.mock('mysql2/promise', () => ({ default: {} }));
+vi.mock('./alertConfigCache', () => ({ invalidateAlertConfigLookupCache: vi.fn() }));
 
 import { getPool } from './pool';
 import {
   ALERT_EVENT_TYPES,
   getAlertConfigsForStreamer,
   getAlertConfig,
+  getAllAlertConfigs,
   getEnabledAlertEventTypesBatch,
   initAlertConfigs,
   saveAlertConfig,
   setAlertImage,
   setAlertSound,
 } from './alertConfig';
+import { invalidateAlertConfigLookupCache } from './alertConfigCache';
 import { makeMockPool, makeMockConnection } from '../test-utils/mockMysqlPool';
 
 /** Builds a fake mysql pool whose `execute`/`query` resolve to the given rows. */
@@ -135,6 +138,31 @@ describe('getAlertConfig', () => {
   });
 });
 
+// ─── getAllAlertConfigs ─────────────────────────────────────────────────────────
+
+describe('getAllAlertConfigs', () => {
+  it('returns an empty array when the table is empty', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([]) as any);
+    expect(await getAllAlertConfigs()).toEqual([]);
+  });
+
+  it('maps every row across all streamers, with no WHERE filter', async () => {
+    const pool = makePool([
+      makeRow({ id: 1, streamer_id: 1, event_type: 'follow' }),
+      makeRow({ id: 2, streamer_id: 2, event_type: 'raid', enabled: 1 }),
+    ]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    const rows = await getAllAlertConfigs();
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0].streamer_id).toBe(1);
+    expect(rows[1].streamer_id).toBe(2);
+    expect(rows[1].enabled).toBe(true);
+    expect(pool.execute.mock.calls[0][0]).not.toContain('WHERE');
+  });
+});
+
 // ─── getEnabledAlertEventTypesBatch ────────────────────────────────────────────
 
 describe('getEnabledAlertEventTypesBatch', () => {
@@ -198,6 +226,13 @@ describe('initAlertConfigs', () => {
     }
     expect(params.filter((p) => p === 5)).toHaveLength(ALERT_EVENT_TYPES.length);
   });
+
+  it('invalidates the alert config lookup cache after inserting', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await initAlertConfigs(3);
+    expect(invalidateAlertConfigLookupCache).toHaveBeenCalledOnce();
+  });
 });
 
 // ─── saveAlertConfig ───────────────────────────────────────────────────────────
@@ -226,6 +261,13 @@ describe('saveAlertConfig', () => {
     await saveAlertConfig(1, 'sub', { enabled: false, message_template: 'msg', duration_ms: 4000 });
     const params: unknown[] = pool.execute.mock.calls[0][1];
     expect(params).toEqual([1, 'sub', 0, 'msg', 4000]);
+  });
+
+  it('invalidates the alert config lookup cache after saving', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await saveAlertConfig(1, 'follow', { enabled: true, message_template: 'hi', duration_ms: 5000 });
+    expect(invalidateAlertConfigLookupCache).toHaveBeenCalledOnce();
   });
 });
 
@@ -267,6 +309,15 @@ describe('setAlertImage', () => {
     await setAlertImage(1, 'follow', null);
     expect(conn.commit).toHaveBeenCalledTimes(1);
     expect(conn.rollback).not.toHaveBeenCalled();
+  });
+
+  it('invalidates the alert config lookup cache after committing', async () => {
+    const conn = makeMockConnection({
+      execute: vi.fn().mockResolvedValue([[{ image_filename: null }], []]),
+    });
+    vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
+    await setAlertImage(1, 'follow', 'new.png');
+    expect(invalidateAlertConfigLookupCache).toHaveBeenCalledOnce();
   });
 });
 

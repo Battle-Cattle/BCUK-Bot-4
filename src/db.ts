@@ -185,6 +185,7 @@ export {
   getAlertConfigsForStreamer, getAlertConfig, getEnabledAlertEventTypesBatch, initAlertConfigs,
   saveAlertConfig, setAlertImage, setAlertSound,
 } from './db/alertConfig';
+export { findCachedAlertConfig } from './db/alertConfigCache';
 
 // ─── SFX ────────────────────────────────────────────────────────────────────
 

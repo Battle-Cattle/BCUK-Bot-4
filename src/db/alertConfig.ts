@@ -1,6 +1,11 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 import { fromBit } from './utils';
+// invalidateAlertConfigLookupCache lives in alertConfigCache.ts, which imports getAllAlertConfigs
+// from this file for its read-side load. Both calls happen inside function bodies (never at
+// module-eval time), so the cyclic import between the two files is safe — mirrors sfx.ts's own
+// import of invalidateSfxLookupCache from sfxCache.ts.
+import { invalidateAlertConfigLookupCache } from './alertConfigCache';
 
 /** Twitch event types the alerts overlay can react to. */
 export type AlertEventType = 'follow' | 'sub' | 'resub' | 'giftsub' | 'raid';
@@ -100,6 +105,19 @@ export async function getAlertConfig(streamerId: number, eventType: AlertEventTy
 }
 
 /**
+ * Fetches every alert config row across all streamers, for the lookup cache's bulk refresh —
+ * mirrors `getAllSfxTriggers`'s role for `sfxCache.ts`.
+ * @returns Every `alert_config` row in the table, in no particular order.
+ */
+export async function getAllAlertConfigs(): Promise<AlertConfig[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT id, streamer_id, event_type, enabled, message_template, image_filename, sound_filename, duration_ms
+     FROM alert_config`,
+  );
+  return rows.map(mapRow);
+}
+
+/**
  * Inserts default (disabled) alert config rows for all event types for a streamer, if they
  * don't already exist. Uses INSERT IGNORE so it is safe to call multiple times without
  * overwriting existing config — mirrors `initEventConfig` in `eventSub.ts`.
@@ -113,6 +131,7 @@ export async function initAlertConfigs(streamerId: number): Promise<void> {
      VALUES ${placeholders}`,
     params,
   );
+  invalidateAlertConfigLookupCache();
 }
 
 /**
@@ -135,6 +154,7 @@ export async function saveAlertConfig(
        enabled=new_row.enabled, message_template=new_row.message_template, duration_ms=new_row.duration_ms`,
     [streamerId, eventType, config.enabled ? 1 : 0, config.message_template, config.duration_ms],
   );
+  invalidateAlertConfigLookupCache();
 }
 
 /**
@@ -165,7 +185,7 @@ async function setAlertAssetColumn(
   eventType: AlertEventType,
   filename: string | null,
 ): Promise<string | null> {
-  return withTransaction(async (conn) => {
+  const previous = await withTransaction(async (conn) => {
     const [rows] = await conn.execute<mysql.RowDataPacket[]>(
       `SELECT ${column} FROM alert_config WHERE streamer_id = ? AND event_type = ? FOR UPDATE`,
       [streamerId, eventType],
@@ -185,6 +205,8 @@ async function setAlertAssetColumn(
     );
     return previous;
   });
+  invalidateAlertConfigLookupCache();
+  return previous;
 }
 
 /**

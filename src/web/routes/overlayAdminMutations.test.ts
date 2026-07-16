@@ -240,6 +240,14 @@ describe('POST /settings/videos/:id/delete', () => {
     expect(res.headers.location).toBe('/overlay/settings?success=video_deleted');
     expect(vi.mocked(fs.promises.rm)).not.toHaveBeenCalled();
   });
+
+  it('still reports success when removing the file fails (post-commit cleanup, not rolled back)', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(deleteVideo).mockResolvedValue('test-video.mp4');
+    vi.mocked(fs.promises.rm).mockRejectedValueOnce(new Error('EACCES'));
+    const res = await supertest(buildApp()).post('/settings/videos/1/delete');
+    expect(res.headers.location).toBe('/overlay/settings?success=video_deleted');
+  });
 });
 
 // --- detectVideoType unit tests ---

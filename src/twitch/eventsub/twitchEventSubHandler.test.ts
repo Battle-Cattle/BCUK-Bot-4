@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
-vi.mock('../../db', () => ({ getVideosForReward: vi.fn(), getStreamerById: vi.fn(), getAlertConfig: vi.fn() }));
+vi.mock('../../db', () => ({ getVideosForReward: vi.fn(), getStreamerById: vi.fn(), findCachedAlertConfig: vi.fn() }));
 vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../commands/shoutoutHandler', () => ({ buildShoutoutMessage: vi.fn() }));
 vi.mock('../../commands/commandMonitorStore', () => ({ recordCommandTestEntry: vi.fn() }));
@@ -15,7 +15,7 @@ import {
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
   registerEventSubAlertRuntime,
 } from './twitchEventSubHandler';
-import { getVideosForReward, getStreamerById, getAlertConfig } from '../../db';
+import { getVideosForReward, getStreamerById, findCachedAlertConfig } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
@@ -65,7 +65,7 @@ function makeConfig(overrides: Partial<{
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getAlertConfig).mockResolvedValue(null);
+  vi.mocked(findCachedAlertConfig).mockResolvedValue(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -331,8 +331,8 @@ describe('alerts overlay push', () => {
     } as any;
   }
 
-  it('handleFollow does not push an alert when getAlertConfig returns null', async () => {
-    vi.mocked(getAlertConfig).mockResolvedValue(null);
+  it('handleFollow does not push an alert when findCachedAlertConfig returns null', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(null);
     await handleFollow('streamer', {
       user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
     }, makeConfig({ follow_enabled: false }), STREAMER_ID);
@@ -340,7 +340,7 @@ describe('alerts overlay push', () => {
   });
 
   it('handleFollow does not push an alert when the alert config is disabled', async () => {
-    vi.mocked(getAlertConfig).mockResolvedValue(makeAlert({ enabled: false }));
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ enabled: false }));
     await handleFollow('streamer', {
       user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
     }, makeConfig({ follow_enabled: false }), STREAMER_ID);
@@ -348,7 +348,7 @@ describe('alerts overlay push', () => {
   });
 
   it('handleFollow pushes an alert even when follow_enabled (chat message) is false — independent flags', async () => {
-    vi.mocked(getAlertConfig).mockResolvedValue(makeAlert({
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({
       message_template: 'Welcome {username} aka {display_name}!',
       duration_ms: 4000,
     }));
@@ -357,7 +357,7 @@ describe('alerts overlay push', () => {
     }, makeConfig({ follow_enabled: false }), STREAMER_ID);
 
     expect(mockSend).not.toHaveBeenCalled();
-    expect(getAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'follow');
+    expect(findCachedAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'follow');
     expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', {
       type: 'follow',
       message: 'Welcome testuser aka TestUser!',
@@ -368,7 +368,7 @@ describe('alerts overlay push', () => {
   });
 
   it('builds asset URLs from image_filename/sound_filename when set', async () => {
-    vi.mocked(getAlertConfig).mockResolvedValue(makeAlert({
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({
       image_filename: 'follow.png',
       sound_filename: 'follow.mp3',
     }));
@@ -383,7 +383,7 @@ describe('alerts overlay push', () => {
   });
 
   it('handleSub does not push a "sub" alert for gift subs — handled by handleGiftSub instead', async () => {
-    vi.mocked(getAlertConfig).mockResolvedValue(makeAlert({ event_type: 'sub' }));
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'sub' }));
     await handleSub('streamer', {
       user_login: 'subuser', user_name: 'SubUser', broadcaster_user_login: 'streamer', tier: '1000', is_gift: true,
     }, makeConfig({ sub_enabled: true }), STREAMER_ID);
@@ -391,46 +391,46 @@ describe('alerts overlay push', () => {
   });
 
   it('handleSub pushes a "sub" alert independent of sub_enabled (chat message)', async () => {
-    vi.mocked(getAlertConfig).mockResolvedValue(makeAlert({ event_type: 'sub', message_template: 'tier={tier_name}' }));
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'sub', message_template: 'tier={tier_name}' }));
     await handleSub('streamer', {
       user_login: 'subuser', user_name: 'SubUser', broadcaster_user_login: 'streamer', tier: '1000', is_gift: false,
     }, makeConfig({ sub_enabled: false }), STREAMER_ID);
 
-    expect(getAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'sub');
+    expect(findCachedAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'sub');
     expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({ type: 'sub', message: 'tier=Tier 1' }));
   });
 
   it('handleResub pushes a "resub" alert with {months}/{streak} substituted', async () => {
-    vi.mocked(getAlertConfig).mockResolvedValue(makeAlert({ event_type: 'resub', message_template: 'months={months} streak={streak}' }));
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'resub', message_template: 'months={months} streak={streak}' }));
     await handleResub('streamer', {
       user_login: 'resubuser', user_name: 'ResubUser', broadcaster_user_login: 'streamer',
       tier: '1000', cumulative_months: 6, streak_months: 3,
     }, makeConfig({ sub_enabled: false }), STREAMER_ID);
 
-    expect(getAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'resub');
+    expect(findCachedAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'resub');
     expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({ type: 'resub', message: 'months=6 streak=3' }));
   });
 
   it('handleGiftSub pushes a "giftsub" alert with gifter vars substituted', async () => {
-    vi.mocked(getAlertConfig).mockResolvedValue(makeAlert({ event_type: 'giftsub', message_template: '{gifter_display} x{count}' }));
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'giftsub', message_template: '{gifter_display} x{count}' }));
     await handleGiftSub('streamer', {
       user_login: 'gifter', user_name: 'GifterDisplay', broadcaster_user_login: 'streamer',
       total: 5, tier: '1000', is_anonymous: false,
     }, makeConfig({ sub_enabled: false }), STREAMER_ID);
 
-    expect(getAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'giftsub');
+    expect(findCachedAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'giftsub');
     expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({ type: 'giftsub', message: 'GifterDisplay x5' }));
   });
 
   it('handleRaid pushes a "raid" alert independent of raid_enabled and raid_shoutout_enabled', async () => {
-    vi.mocked(getAlertConfig).mockResolvedValue(makeAlert({ event_type: 'raid', message_template: '{from_display} x{viewers}' }));
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'raid', message_template: '{from_display} x{viewers}' }));
     await handleRaid('streamer', {
       from_broadcaster_user_login: 'raider', from_broadcaster_user_name: 'RaiderDisplay',
       to_broadcaster_user_login: 'streamer', viewers: 42,
     }, makeConfig({ raid_enabled: false, raid_shoutout_enabled: false }), STREAMER_ID);
 
     expect(mockSend).not.toHaveBeenCalled();
-    expect(getAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'raid');
+    expect(findCachedAlertConfig).toHaveBeenCalledWith(STREAMER_ID, 'raid');
     expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({ type: 'raid', message: 'RaiderDisplay x42' }));
   });
 });
@@ -457,7 +457,7 @@ describe('chat-send failures are isolated from the alert push', () => {
   };
 
   beforeEach(() => {
-    vi.mocked(getAlertConfig).mockResolvedValue({
+    vi.mocked(findCachedAlertConfig).mockResolvedValue({
       id: 1, streamer_id: STREAMER_ID, event_type: 'follow', enabled: true,
       message_template: 'alert fired', image_filename: null, sound_filename: null, duration_ms: 6000,
     } as any);
@@ -516,8 +516,8 @@ describe('chat-send failures are isolated from the alert push', () => {
     expect(mockPushAlertEvent).toHaveBeenCalled();
   });
 
-  it('handleFollow does not reject when getAlertConfig rejects (chat message still already sent)', async () => {
-    vi.mocked(getAlertConfig).mockRejectedValueOnce(new Error('db unavailable'));
+  it('handleFollow does not reject when findCachedAlertConfig rejects (chat message still already sent)', async () => {
+    vi.mocked(findCachedAlertConfig).mockRejectedValueOnce(new Error('db unavailable'));
     await expect(
       handleFollow('streamer', followEvent, makeConfig({ follow_enabled: true }), STREAMER_ID),
     ).resolves.toBeUndefined();

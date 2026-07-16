@@ -91,13 +91,15 @@ interface SubscriptionGroup {
    */
   alertTypes: AlertEventType[];
   /**
-   * Returns true if this group's subscriptions should be created based on the streamer's
-   * chat-message configuration alone. Independent of `alertTypes` — `isGroupEnabled` ORs the
-   * alerts-overlay gating in generically, since a streamer can want the subscription created
-   * purely to drive a browser-source alert, with chat messages off.
+   * Returns true if this group's subscriptions should be created based on the streamer's config
+   * alone — either a genuine chat-message toggle, or (for a group with no `alertTypes`)
+   * {@link hasCompletedEventSubSetup} as a proxy for "this streamer is set up enough to want this
+   * subscription at all". Independent of `alertTypes` — `isGroupEnabled` ORs the alerts-overlay
+   * gating in generically, since a streamer can want the subscription created purely to drive a
+   * browser-source alert, with chat messages off.
    * @param config - The streamer's event response configuration, or null if unset.
    */
-  chatEnabled: (config: EventSubConfig | null) => boolean;
+  configGate: (config: EventSubConfig | null) => boolean;
   /**
    * Builds this group's subscription specs.
    * @param uid - The broadcaster's Twitch user ID.
@@ -107,8 +109,8 @@ interface SubscriptionGroup {
 }
 
 /**
- * Returns true if `group`'s subscriptions should be created: either its chat-message config
- * enables it, or any of its `alertTypes` has an enabled alerts-overlay config.
+ * Returns true if `group`'s subscriptions should be created: either its `configGate` passes, or
+ * any of its `alertTypes` has an enabled alerts-overlay config.
  * @param group - The subscription group to evaluate.
  * @param config - The streamer's event response configuration, or null if unset.
  * @param enabledAlerts - Event types with an enabled alerts-overlay config row for this streamer.
@@ -118,7 +120,20 @@ function isGroupEnabled(
   config: EventSubConfig | null,
   enabledAlerts: ReadonlySet<AlertEventType>,
 ): boolean {
-  return group.chatEnabled(config) || group.alertTypes.some((type) => enabledAlerts.has(type));
+  return group.configGate(config) || group.alertTypes.some((type) => enabledAlerts.has(type));
+}
+
+/**
+ * `configGate` for a group with no `alertTypes` — unlike the alert-driven groups, there's no
+ * alert-only path that needs the subscription without a real config row, so a row's mere
+ * existence is used as a proxy for "this streamer completed the full EventSub/chat-message
+ * setup". (`dispatchNotification` itself no longer early-exits without config — it falls back to
+ * `DEFAULT_EVENT_CONFIG` for alert-only streamers — but that's moot for these groups since they
+ * never subscribe for one.)
+ * @param config - The streamer's event response configuration, or null if unset.
+ */
+function hasCompletedEventSubSetup(config: EventSubConfig | null): boolean {
+  return Boolean(config);
 }
 
 // Every group also requires a broadcaster token (WebSocket transport only works with a user
@@ -126,12 +141,12 @@ function isGroupEnabled(
 const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
   {
     alertTypes: ['follow'],
-    chatEnabled: (config) => Boolean(config?.follow_enabled),
+    configGate: (config) => Boolean(config?.follow_enabled),
     specs: (uid) => [{ type: 'channel.follow', version: '2', condition: { broadcaster_user_id: uid, moderator_user_id: uid } }],
   },
   {
     alertTypes: ['sub', 'resub', 'giftsub'],
-    chatEnabled: (config) => Boolean(config?.sub_enabled),
+    configGate: (config) => Boolean(config?.sub_enabled),
     specs: (uid) => [
       { type: 'channel.subscribe', version: '1', condition: { broadcaster_user_id: uid } },
       { type: 'channel.subscription.message', version: '1', condition: { broadcaster_user_id: uid } },
@@ -143,28 +158,20 @@ const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
     // handleRaid gates its three behaviours independently, but the subscription itself must
     // exist for any of them to fire.
     alertTypes: ['raid'],
-    chatEnabled: (config) => Boolean(config?.raid_enabled || config?.raid_shoutout_enabled),
+    configGate: (config) => Boolean(config?.raid_enabled || config?.raid_shoutout_enabled),
     specs: (uid) => [{ type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }],
   },
   {
-    // Gated on config (not just token): this group carries no alertTypes, so — unlike the
-    // alert-driven groups above — there's no alert-only path that needs the subscription without
-    // a real config row. Requiring one is a proxy for "this streamer completed the full
-    // EventSub/chat-message setup" (dispatchNotification itself no longer early-exits without
-    // config — it falls back to DEFAULT_EVENT_CONFIG for alert-only streamers — but that's moot
-    // here since this group never subscribes for one).
     alertTypes: [],
-    chatEnabled: (config) => Boolean(config),
+    configGate: hasCompletedEventSubSetup,
     specs: (uid) => [{ type: 'channel.channel_points_custom_reward_redemption.add', version: '1', condition: { broadcaster_user_id: uid } }],
   },
   {
-    // stream.online/offline and channel.update require no scope beyond a valid token — but,
-    // like the redemption group above, still gated on config as a proxy for "fully set up"
-    // (see that group's comment; dispatchNotification no longer early-exits without config).
-    // This drives an immediate live-check that supplements (not replaces) the 60s poller.
-    // Not tied to any alert type.
+    // stream.online/offline and channel.update require no scope beyond a valid token. This
+    // drives an immediate live-check that supplements (not replaces) the 60s poller. Not tied to
+    // any alert type.
     alertTypes: [],
-    chatEnabled: (config) => Boolean(config),
+    configGate: hasCompletedEventSubSetup,
     specs: (uid) => [
       { type: 'stream.online', version: '1', condition: { broadcaster_user_id: uid } },
       { type: 'stream.offline', version: '1', condition: { broadcaster_user_id: uid } },

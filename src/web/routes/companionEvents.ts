@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
 import { COMPANION_MAX_SSE_PER_TOKEN } from '../../shared/config';
-import { attachSseConnection } from './sseChannel';
+import { attachSseConnection, broadcastToChannel } from './sseChannel';
 
 const log = createLogger('CompanionEvents');
 const router = Router();
@@ -25,20 +25,8 @@ export const MAX_SSE_CONNECTIONS_PER_TOKEN = COMPANION_MAX_SSE_PER_TOKEN;
 
 /** Push a companion event to all of a Discord user's connected companion app instances. */
 export function pushCompanionEvent(discordId: string, event: CompanionEvent): void {
-  const clients = connections.get(discordId);
-  if (!clients || clients.size === 0) return;
-  const payload = JSON.stringify(event);
-  const dead: import('express').Response[] = [];
-  for (const res of clients) {
-    try {
-      res.write(`data: ${payload}\n\n`);
-    } catch {
-      dead.push(res);
-    }
-  }
-  for (const res of dead) clients.delete(res);
-  if (clients.size === 0) connections.delete(discordId);
-  log.info(`Pushed companion event to ${clients.size} client(s) for discord ${discordId}`);
+  const remaining = broadcastToChannel(connections, discordId, event);
+  if (remaining !== null) log.info(`Pushed companion event to ${remaining} client(s) for discord ${discordId}`);
 }
 
 /**

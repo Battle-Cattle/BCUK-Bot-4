@@ -267,6 +267,18 @@ describe('GET /assets/:streamerId/:filename', () => {
     expect(res.headers['content-type']).toContain('image/png');
   });
 
+  it('replies 404 instead of a raw 500 when sendFile errors after the access() check passed (TOCTOU race)', async () => {
+    vi.mocked(fs.promises.access).mockResolvedValueOnce(undefined);
+    const app = express();
+    app.use((req, res, next) => {
+      (res as any).sendFile = (_filePath: string, cb: (err: Error) => void) => cb(new Error('ENOENT'));
+      next();
+    });
+    app.use(router);
+    const res = await supertest(app).get('/assets/123/clip.png');
+    expect(res.status).toBe(404);
+  });
+
   it('sends an mp3 sound with the correct content type', async () => {
     vi.mocked(fs.promises.access).mockResolvedValueOnce(undefined);
     const sendFileSpy = vi.fn();

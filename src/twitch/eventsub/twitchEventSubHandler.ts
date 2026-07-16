@@ -1,5 +1,5 @@
 import type { EventSubConfig, AlertEventType } from '../../db';
-import { getVideosForReward, getStreamerById, getAlertConfig } from '../../db';
+import { getVideosForReward, getStreamerById, findCachedAlertConfig } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
@@ -205,6 +205,22 @@ async function sendChatMessage(login: string, message: string): Promise<boolean>
 }
 
 /**
+ * If `enabled`, fills `template` with `vars` and sends the result as a chat message. Shared by
+ * each handler below's chat-message gate, which differ only in which `EventSubConfig` flag and
+ * message template they read.
+ * @param login - Broadcaster login name (chat channel to send to).
+ * @param enabled - The relevant config flag (e.g. `config.follow_enabled`).
+ * @param template - The relevant message template (e.g. `config.follow_message`).
+ * @param vars - Template variables to fill.
+ * @returns Resolves once the (possibly skipped) send completes.
+ */
+async function maybeSendChatMessage(login: string, enabled: boolean, template: string, vars: Record<string, string>): Promise<void> {
+  if (!enabled) return;
+  const msg = fillTemplate(template, vars);
+  await sendChatMessage(login, msg);
+}
+
+/**
  * Looks up a streamer's alerts-overlay config for one event type and, if enabled, pushes a
  * filled {@link AlertPayload} via the injected alert runtime. Independent of the chat-message
  * `*_enabled` flags on `EventSubConfig` — a streamer may enable the browser-source alert for an
@@ -212,7 +228,9 @@ async function sendChatMessage(login: string, message: string): Promise<boolean>
  * exists, the alert is disabled, or no alert runtime has been registered. A failed config lookup
  * or push is logged and swallowed rather than rejecting, so a transient DB/alert problem can't
  * surface as a failure of the EventSub handler that called this (which has already, independently,
- * sent its own chat message if enabled).
+ * sent its own chat message if enabled). The config lookup goes through `findCachedAlertConfig`
+ * (a TTL cache invalidated on every alert-config/asset save), not a live query, since this runs
+ * on every single follow/sub/resub/giftsub/raid notification.
  *
  * @param login - Broadcaster login name (alerts-overlay channel to push to).
  * @param streamerId - DB row ID of the streamer, used to look up alert config and build asset URLs.
@@ -228,7 +246,7 @@ async function maybePushAlert(
   const runtime = alertRuntimeRegistry.get();
   if (!runtime) return;
   try {
-    const alert = await getAlertConfig(streamerId, eventType);
+    const alert = await findCachedAlertConfig(streamerId, eventType);
     if (!alert || !alert.enabled) return;
     runtime.pushAlertEvent(login, {
       type: eventType,
@@ -255,10 +273,7 @@ async function maybePushAlert(
  */
 export async function handleFollow(login: string, event: FollowEvent, config: EventSubConfig, streamerId: number): Promise<void> {
   const vars = { username: event.user_login, display_name: event.user_name };
-  if (config.follow_enabled) {
-    const msg = fillTemplate(config.follow_message, vars);
-    await sendChatMessage(login, msg);
-  }
+  await maybeSendChatMessage(login, config.follow_enabled, config.follow_message, vars);
   await maybePushAlert(login, streamerId, 'follow', vars);
 }
 
@@ -281,10 +296,7 @@ export async function handleSub(login: string, event: SubEvent, config: EventSub
     tier: event.tier,
     tier_name: tierName(event.tier),
   };
-  if (config.sub_enabled) {
-    const msg = fillTemplate(config.sub_message, vars);
-    await sendChatMessage(login, msg);
-  }
+  await maybeSendChatMessage(login, config.sub_enabled, config.sub_message, vars);
   await maybePushAlert(login, streamerId, 'sub', vars);
 }
 
@@ -307,10 +319,7 @@ export async function handleResub(login: string, event: ResubEvent, config: Even
     months: String(event.cumulative_months),
     streak: event.streak_months != null ? String(event.streak_months) : '0',
   };
-  if (config.sub_enabled) {
-    const msg = fillTemplate(config.resub_message, vars);
-    await sendChatMessage(login, msg);
-  }
+  await maybeSendChatMessage(login, config.sub_enabled, config.resub_message, vars);
   await maybePushAlert(login, streamerId, 'resub', vars);
 }
 
@@ -335,10 +344,7 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
     tier: event.tier,
     tier_name: tierName(event.tier),
   };
-  if (config.sub_enabled) {
-    const msg = fillTemplate(config.giftsub_message, vars);
-    await sendChatMessage(login, msg);
-  }
+  await maybeSendChatMessage(login, config.sub_enabled, config.giftsub_message, vars);
   await maybePushAlert(login, streamerId, 'giftsub', vars);
 }
 
@@ -367,10 +373,7 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
     viewers: String(event.viewers),
   };
 
-  if (config.raid_enabled) {
-    const msg = fillTemplate(config.raid_message, vars);
-    await sendChatMessage(login, msg);
-  }
+  await maybeSendChatMessage(login, config.raid_enabled, config.raid_message, vars);
 
   if (config.raid_shoutout_enabled) {
     try {
