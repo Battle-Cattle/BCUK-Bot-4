@@ -60,6 +60,30 @@ export async function getAlertConfigsForStreamer(streamerId: number): Promise<Al
 }
 
 /**
+ * Fetches the set of enabled alert event types for each of the given streamers in a single
+ * query, avoiding one round-trip per streamer — used by `loadStreamersForEventSub` to build
+ * subscription-gating state for every streamer in one batch, the same way `getAllEventSubStreamers`
+ * already bulk-fetches `streamer_event_config` via a JOIN.
+ * @param streamerIds DB row IDs of the streamers to look up.
+ * @returns Map of streamerId to the Set of its enabled alert event types. A streamer with no
+ *   enabled alerts is omitted — callers should treat a missing key as an empty Set.
+ */
+export async function getEnabledAlertEventTypesBatch(streamerIds: number[]): Promise<Map<number, Set<AlertEventType>>> {
+  const result = new Map<number, Set<AlertEventType>>();
+  if (streamerIds.length === 0) return result;
+  const placeholders = streamerIds.map(() => '?').join(', ');
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT streamer_id, event_type FROM alert_config WHERE enabled = 1 AND streamer_id IN (${placeholders})`,
+    streamerIds,
+  );
+  for (const row of rows) {
+    if (!result.has(row.streamer_id)) result.set(row.streamer_id, new Set());
+    result.get(row.streamer_id)!.add(row.event_type);
+  }
+  return result;
+}
+
+/**
  * Fetches a single event type's alert configuration for a streamer, used at event-fire time.
  * @param streamerId DB row ID of the owning streamer.
  * @param eventType The alert event type to look up.
@@ -116,14 +140,18 @@ export async function saveAlertConfig(
 /**
  * Sets (or clears, when `filename` is null) one asset column of a streamer's alert config row,
  * returning the previous filename so the caller can remove the now-orphaned file on disk.
- * A no-op (returns null) if no matching row exists — the row is expected to already exist via
- * {@link initAlertConfigs}. Shared by {@link setAlertImage} and {@link setAlertSound}, which
- * differ only in which fixed, trusted column name they target — never derived from user input.
+ * If no matching row exists yet — e.g. a streamer who hasn't (re-)completed the Twitch OAuth
+ * flow that calls {@link initAlertConfigs} since this feature shipped — inserts a new row with
+ * the default (disabled) settings for that event type rather than silently discarding the
+ * asset, so an upload is never accepted without actually being persisted. Shared by
+ * {@link setAlertImage} and {@link setAlertSound}, which differ only in which fixed, trusted
+ * column name they target — never derived from user input.
  * @param column The asset column to update (`image_filename` or `sound_filename`).
  * @param streamerId DB row ID of the streamer.
  * @param eventType The alert event type being configured.
  * @param filename The new stored filename, or null to clear the asset.
- * @returns The previous filename, or null if there was none (or no matching row existed).
+ * @returns The previous filename, or null if there was none (including when a new row had to
+ *   be created).
  */
 async function setAlertAssetColumn(
   column: 'image_filename' | 'sound_filename',
@@ -136,7 +164,14 @@ async function setAlertAssetColumn(
       `SELECT ${column} FROM alert_config WHERE streamer_id = ? AND event_type = ?`,
       [streamerId, eventType],
     );
-    if (rows.length === 0) return null;
+    if (rows.length === 0) {
+      await conn.execute(
+        `INSERT INTO alert_config (streamer_id, event_type, enabled, message_template, ${column})
+         VALUES (?, ?, 0, ?, ?)`,
+        [streamerId, eventType, DEFAULT_MESSAGE_TEMPLATES[eventType], filename],
+      );
+      return null;
+    }
     const previous: string | null = rows[0][column] ?? null;
     await conn.execute(
       `UPDATE alert_config SET ${column} = ? WHERE streamer_id = ? AND event_type = ?`,

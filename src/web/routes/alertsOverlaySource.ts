@@ -5,7 +5,7 @@ import type { AlertPayload } from '../../twitch/eventsub/twitchEventSubHandler';
 import { ALERT_ASSETS_FOLDER, ALERT_MAX_SSE_PER_CHANNEL } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
 import { renderView } from './shared';
-import { createSseEventsHandler } from './sseChannel';
+import { createSseEventsHandler, createLoginValidator } from './sseChannel';
 
 const log = createLogger('AlertsOverlaySource');
 const router = Router();
@@ -14,6 +14,9 @@ const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
 const FILENAME_RE = /^[\w-]+\.(png|gif|jpe?g|webp|mp3|ogg|wav)$/i;
 // Words reserved for admin/asset routes — must not be treated as channel logins.
 const RESERVED_LOGINS = new Set(['settings', 'assets']);
+// Shared by the plain browser-source route below and the /events SSE route, so both apply the
+// identical login-validity rule from one place.
+const isValidLogin = createLoginValidator(LOGIN_RE, RESERVED_LOGINS);
 
 /** Maps a detected asset file extension to its `Content-Type` — never derived from client input. */
 const CONTENT_TYPES: Record<string, string> = {
@@ -59,9 +62,9 @@ export function pushAlertEvent(login: string, alert: AlertPayload): void {
  *   to fall through to later routes if `login` is malformed or reserved (`settings`, `assets`).
  */
 router.get('/:login', (req, res, next) => {
-  const { login } = req.params;
-  if (!LOGIN_RE.test(login) || RESERVED_LOGINS.has(login.toLowerCase())) { next(); return; }
-  renderView(res, 'alertsOverlaySource', { login: login.toLowerCase() });
+  const login = isValidLogin(req.params.login);
+  if (login === null) { next(); return; }
+  renderView(res, 'alertsOverlaySource', { login });
 });
 
 /**
@@ -77,8 +80,7 @@ router.get('/:login', (req, res, next) => {
  */
 router.get('/:login/events', createSseEventsHandler({
   connections,
-  loginRe: LOGIN_RE,
-  reservedLogins: RESERVED_LOGINS,
+  isValidLogin,
   maxPerChannel: MAX_SSE_CONNECTIONS_PER_CHANNEL,
 }));
 

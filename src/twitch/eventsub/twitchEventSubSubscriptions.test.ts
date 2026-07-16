@@ -7,7 +7,8 @@ vi.mock('../../shared/logger', () => ({ createLogger: () => logMock }));
 vi.mock('../../db', () => ({
   getAllEventSubStreamers: vi.fn(),
   clearStreamerToken: vi.fn().mockResolvedValue(undefined),
-  getAlertConfigsForStreamer: vi.fn().mockResolvedValue([]),
+  getEnabledAlertEventTypesBatch: vi.fn().mockResolvedValue(new Map()),
+  ALERT_EVENT_TYPES: ['follow', 'sub', 'resub', 'giftsub', 'raid'],
 }));
 vi.mock('../twitchApi', () => ({ getUsers: vi.fn() }));
 vi.mock('../twitchChannelMembership', () => ({ getActiveChannels: vi.fn().mockReturnValue(new Set<string>()) }));
@@ -39,8 +40,9 @@ import {
   dispatchNotification,
   removeStreamerFromMap,
   handleRevocation,
+  getAlertTypesCoveredBySubscriptionGroups,
 } from './twitchEventSubSubscriptions';
-import { getAllEventSubStreamers, clearStreamerToken, getAlertConfigsForStreamer } from '../../db';
+import { getAllEventSubStreamers, clearStreamerToken, getEnabledAlertEventTypesBatch, ALERT_EVENT_TYPES } from '../../db';
 import { getValidToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
@@ -191,7 +193,7 @@ describe('loadStreamersForEventSub', () => {
     expect(result[0].uid).toBe('uid-shoutout');
   });
 
-  it('builds enabledAlerts from the streamer\'s enabled alert_config rows', async () => {
+  it('builds enabledAlerts from the batched enabled-alert-types lookup', async () => {
     const fakeStreamer = {
       id: 14,
       twitch_name: 'alertOnly',
@@ -200,16 +202,37 @@ describe('loadStreamersForEventSub', () => {
     };
     vi.mocked(getAllEventSubStreamers).mockResolvedValue([fakeStreamer] as any);
     vi.mocked(getValidToken).mockResolvedValue('tok-14');
-    vi.mocked(getAlertConfigsForStreamer).mockResolvedValue([
-      { event_type: 'follow', enabled: false },
-      { event_type: 'raid', enabled: true },
-      { event_type: 'giftsub', enabled: true },
-    ] as any);
+    vi.mocked(getEnabledAlertEventTypesBatch).mockResolvedValue(new Map([
+      [14, new Set(['raid', 'giftsub'])],
+    ]) as any);
 
     const result = await loadStreamersForEventSub();
 
-    expect(getAlertConfigsForStreamer).toHaveBeenCalledWith(14);
+    expect(getEnabledAlertEventTypesBatch).toHaveBeenCalledWith([14]);
     expect(result[0].enabledAlerts).toEqual(new Set(['raid', 'giftsub']));
+  });
+
+  it('fetches enabled alert types for all streamers in a single batched call, not one per streamer', async () => {
+    const streamerA = { id: 20, twitch_name: 'streamerA', twitch_user_id: 'uid-20', config: { follow_enabled: true } };
+    const streamerB = { id: 21, twitch_name: 'streamerB', twitch_user_id: 'uid-21', config: { follow_enabled: true } };
+    vi.mocked(getAllEventSubStreamers).mockResolvedValue([streamerA, streamerB] as any);
+    vi.mocked(getValidToken).mockResolvedValue('tok');
+
+    await loadStreamersForEventSub();
+
+    expect(getEnabledAlertEventTypesBatch).toHaveBeenCalledTimes(1);
+    expect(getEnabledAlertEventTypesBatch).toHaveBeenCalledWith([20, 21]);
+  });
+
+  it('defaults enabledAlerts to an empty Set for a streamer missing from the batch result', async () => {
+    const fakeStreamer = { id: 15, twitch_name: 'noAlerts', twitch_user_id: 'uid-15', config: { follow_enabled: true } };
+    vi.mocked(getAllEventSubStreamers).mockResolvedValue([fakeStreamer] as any);
+    vi.mocked(getValidToken).mockResolvedValue('tok-15');
+    vi.mocked(getEnabledAlertEventTypesBatch).mockResolvedValue(new Map());
+
+    const result = await loadStreamersForEventSub();
+
+    expect(result[0].enabledAlerts).toEqual(new Set());
   });
 });
 
@@ -735,5 +758,29 @@ describe('handleRevocation', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(logMock.error).toHaveBeenCalledWith('Clear token error:', expect.any(Error));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Subscription-group alert-type coverage (exhaustiveness)
+//
+// Guards against a new AlertEventType being added (to ALERT_EVENT_TYPES / the DB schema) without
+// also wiring it into a SUBSCRIPTION_GROUPS entry's `alertTypes` — a gap that would otherwise
+// compile fine and only surface at runtime as "the EventSub subscription is never created, so
+// the alert silently never fires."
+// ---------------------------------------------------------------------------
+describe('subscription-group alert-type coverage', () => {
+  it('covers every ALERT_EVENT_TYPES member in some subscription group', () => {
+    const covered = getAlertTypesCoveredBySubscriptionGroups();
+    for (const type of ALERT_EVENT_TYPES) {
+      expect(covered.has(type)).toBe(true);
+    }
+  });
+
+  it('does not cover any type outside ALERT_EVENT_TYPES (catches stale/typo\'d entries)', () => {
+    const covered = getAlertTypesCoveredBySubscriptionGroups();
+    for (const type of covered) {
+      expect(ALERT_EVENT_TYPES).toContain(type);
+    }
   });
 });

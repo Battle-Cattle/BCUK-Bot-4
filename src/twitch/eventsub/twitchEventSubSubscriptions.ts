@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { getAllEventSubStreamers, clearStreamerToken, getAlertConfigsForStreamer } from '../../db';
+import { getAllEventSubStreamers, clearStreamerToken, getEnabledAlertEventTypesBatch } from '../../db';
 import type { DbStreamerEventSub, EventSubConfig, AlertEventType } from '../../db';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
@@ -80,16 +80,24 @@ async function resolveBroadcasterId(streamer: DbStreamerEventSub, config: EventS
   }
 }
 
-/** One gated group of EventSub subscriptions: created together whenever `enabled` passes. */
+/** One gated group of EventSub subscriptions: created together whenever `isGroupEnabled` passes. */
 interface SubscriptionGroup {
   /**
-   * Returns true if this group's subscriptions should be created for the streamer.
-   * @param config - The streamer's event response configuration, or null if unset.
-   * @param enabledAlerts - Event types with an enabled alerts-overlay config row for this
-   *   streamer. Independent of `config`'s chat-message flags — a streamer can want the
-   *   subscription created purely to drive a browser-source alert, with chat messages off.
+   * Alert event types that share this group's subscription(s) — declaring these as data (rather
+   * than each group hand-writing its own `enabledAlerts.has('literal')` checks) lets
+   * `getAlertTypesCoveredBySubscriptionGroups` verify every {@link AlertEventType} is wired to a
+   * group; a test in `twitchEventSubSubscriptions.test.ts` fails if a new alert type is added
+   * without adding it here, instead of the gap silently compiling.
    */
-  enabled: (config: EventSubConfig | null, enabledAlerts: ReadonlySet<AlertEventType>) => boolean;
+  alertTypes: AlertEventType[];
+  /**
+   * Returns true if this group's subscriptions should be created based on the streamer's
+   * chat-message configuration alone. Independent of `alertTypes` — `isGroupEnabled` ORs the
+   * alerts-overlay gating in generically, since a streamer can want the subscription created
+   * purely to drive a browser-source alert, with chat messages off.
+   * @param config - The streamer's event response configuration, or null if unset.
+   */
+  chatEnabled: (config: EventSubConfig | null) => boolean;
   /**
    * Builds this group's subscription specs.
    * @param uid - The broadcaster's Twitch user ID.
@@ -98,16 +106,32 @@ interface SubscriptionGroup {
   specs: (uid: string) => SubSpec[];
 }
 
+/**
+ * Returns true if `group`'s subscriptions should be created: either its chat-message config
+ * enables it, or any of its `alertTypes` has an enabled alerts-overlay config.
+ * @param group - The subscription group to evaluate.
+ * @param config - The streamer's event response configuration, or null if unset.
+ * @param enabledAlerts - Event types with an enabled alerts-overlay config row for this streamer.
+ */
+function isGroupEnabled(
+  group: SubscriptionGroup,
+  config: EventSubConfig | null,
+  enabledAlerts: ReadonlySet<AlertEventType>,
+): boolean {
+  return group.chatEnabled(config) || group.alertTypes.some((type) => enabledAlerts.has(type));
+}
+
 // Every group also requires a broadcaster token (WebSocket transport only works with a user
 // token, not an app token — see createSubscriptionsForStreamer's upfront `!token` check).
 const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
   {
-    enabled: (config, enabledAlerts) => Boolean(config?.follow_enabled) || enabledAlerts.has('follow'),
+    alertTypes: ['follow'],
+    chatEnabled: (config) => Boolean(config?.follow_enabled),
     specs: (uid) => [{ type: 'channel.follow', version: '2', condition: { broadcaster_user_id: uid, moderator_user_id: uid } }],
   },
   {
-    enabled: (config, enabledAlerts) => Boolean(config?.sub_enabled)
-      || enabledAlerts.has('sub') || enabledAlerts.has('resub') || enabledAlerts.has('giftsub'),
+    alertTypes: ['sub', 'resub', 'giftsub'],
+    chatEnabled: (config) => Boolean(config?.sub_enabled),
     specs: (uid) => [
       { type: 'channel.subscribe', version: '1', condition: { broadcaster_user_id: uid } },
       { type: 'channel.subscription.message', version: '1', condition: { broadcaster_user_id: uid } },
@@ -118,13 +142,15 @@ const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
     // Subscribe when the welcome message, the auto-shoutout toggle, or the raid alert is on —
     // handleRaid gates its three behaviours independently, but the subscription itself must
     // exist for any of them to fire.
-    enabled: (config, enabledAlerts) => Boolean(config?.raid_enabled || config?.raid_shoutout_enabled) || enabledAlerts.has('raid'),
+    alertTypes: ['raid'],
+    chatEnabled: (config) => Boolean(config?.raid_enabled || config?.raid_shoutout_enabled),
     specs: (uid) => [{ type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }],
   },
   {
     // Gated on config (not just token) to keep subscription and dispatch aligned —
-    // dispatchNotification early-exits without config.
-    enabled: (config) => Boolean(config),
+    // dispatchNotification early-exits without config. Not tied to any alert type.
+    alertTypes: [],
+    chatEnabled: (config) => Boolean(config),
     specs: (uid) => [{ type: 'channel.channel_points_custom_reward_redemption.add', version: '1', condition: { broadcaster_user_id: uid } }],
   },
   {
@@ -132,7 +158,9 @@ const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
     // like the redemption group above, still gated on config (not just token) to keep
     // subscription and dispatch aligned, since dispatchNotification early-exits without
     // config. This drives an immediate live-check that supplements (not replaces) the 60s poller.
-    enabled: (config) => Boolean(config),
+    // Not tied to any alert type.
+    alertTypes: [],
+    chatEnabled: (config) => Boolean(config),
     specs: (uid) => [
       { type: 'stream.online', version: '1', condition: { broadcaster_user_id: uid } },
       { type: 'stream.offline', version: '1', condition: { broadcaster_user_id: uid } },
@@ -140,6 +168,17 @@ const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
     ],
   },
 ];
+
+/**
+ * Returns the set of alert event types covered by at least one subscription group. Exported for
+ * the exhaustiveness test in `twitchEventSubSubscriptions.test.ts`, which asserts this covers
+ * every member of `ALERT_EVENT_TYPES` — catching a new alert type being added without also being
+ * wired into a subscription group's `alertTypes` (which would otherwise compile fine and only
+ * surface as "the subscription is never created" at runtime).
+ */
+export function getAlertTypesCoveredBySubscriptionGroups(): Set<AlertEventType> {
+  return new Set(SUBSCRIPTION_GROUPS.flatMap((group) => group.alertTypes));
+}
 
 /** Data bundle passed to a StreamerConnection for setting up EventSub subscriptions. */
 export interface StreamerEventSubData {
@@ -168,7 +207,7 @@ async function createSubscriptionsForStreamer(
   if (!token) return desired;
 
   for (const group of SUBSCRIPTION_GROUPS) {
-    if (!group.enabled(config, enabledAlerts)) continue;
+    if (!isGroupEnabled(group, config, enabledAlerts)) continue;
     for (const spec of group.specs(uid)) {
       desired.add(spec.type);
       await subscribe(sessionId, spec, token, name);
@@ -178,17 +217,22 @@ async function createSubscriptionsForStreamer(
   return desired;
 }
 
-/** Fetches all streamers from the DB, resolves their broadcaster IDs and valid tokens. */
+/**
+ * Fetches all streamers from the DB, resolves their broadcaster IDs and valid tokens. Alert-gating
+ * state for every streamer is fetched in a single batched query (`getEnabledAlertEventTypesBatch`)
+ * up front, rather than one query per streamer, mirroring `getAllEventSubStreamers`'s own
+ * bulk-JOIN fetch of `streamer_event_config`.
+ */
 export async function loadStreamersForEventSub(): Promise<StreamerEventSubData[]> {
   const streamers = await getAllEventSubStreamers();
+  const alertsByStreamer = await getEnabledAlertEventTypesBatch(streamers.map((s) => s.id));
   const result: StreamerEventSubData[] = [];
   for (const streamer of streamers) {
     const token = await getValidToken(streamer);
     const config = streamer.config;
     const uid = await resolveBroadcasterId(streamer, config);
     if (!uid) continue;
-    const alertConfigs = await getAlertConfigsForStreamer(streamer.id);
-    const enabledAlerts = new Set(alertConfigs.filter((a) => a.enabled).map((a) => a.event_type));
+    const enabledAlerts = alertsByStreamer.get(streamer.id) ?? new Set<AlertEventType>();
     result.push({ uid, token, name: streamer.twitch_name ?? '', config, streamerId: streamer.id, enabledAlerts });
   }
   return result;

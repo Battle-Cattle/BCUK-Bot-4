@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createSseEventsHandler } from './sseChannel';
+import { createSseEventsHandler, createLoginValidator, attachSseConnection } from './sseChannel';
 
 const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
 const RESERVED_LOGINS = new Set(['settings']);
@@ -34,9 +34,26 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+const isValidLogin = createLoginValidator(LOGIN_RE, RESERVED_LOGINS);
+
 function buildHandler(maxPerChannel = 10) {
-  return createSseEventsHandler({ connections, loginRe: LOGIN_RE, reservedLogins: RESERVED_LOGINS, maxPerChannel });
+  return createSseEventsHandler({ connections, isValidLogin, maxPerChannel });
 }
+
+describe('createLoginValidator', () => {
+  it('returns null for a malformed login', () => {
+    expect(isValidLogin('not-valid!')).toBeNull();
+  });
+
+  it('returns null for a reserved login', () => {
+    expect(isValidLogin('settings')).toBeNull();
+    expect(isValidLogin('SETTINGS')).toBeNull();
+  });
+
+  it('returns the lowercased login for a valid one', () => {
+    expect(isValidLogin('SomeChannel')).toBe('somechannel');
+  });
+});
 
 describe('createSseEventsHandler', () => {
   it('calls next() for a malformed login', () => {
@@ -155,5 +172,43 @@ describe('createSseEventsHandler', () => {
     closeReq1();
     expect(connections.get('sharedchannel')?.has(res1 as any)).toBe(false);
     expect(connections.get('sharedchannel')?.has(res2 as any)).toBe(true);
+  });
+});
+
+describe('attachSseConnection', () => {
+  it('registers the connection under an arbitrary key type (e.g. a numeric streamer ID)', () => {
+    const numericConnections = new Map<number, Set<any>>();
+    const res = makeRes();
+    const { req, triggerClose } = makeReq('unused');
+
+    const attached = attachSseConnection(req as any, res as any, { connections: numericConnections, key: 42, maxPerChannel: 5 });
+
+    expect(attached).toBe(true);
+    expect(numericConnections.get(42)?.has(res as any)).toBe(true);
+    expect(res.write).toHaveBeenCalledWith(': connected\n\n');
+    triggerClose();
+  });
+
+  it('returns false and replies 429 when the key is already at its connection limit', () => {
+    const res = makeRes();
+    const { req } = makeReq('unused');
+    connections.set('full', new Set([{}, {}] as any));
+
+    const attached = attachSseConnection(req as any, res as any, { connections, key: 'full', maxPerChannel: 2 });
+
+    expect(attached).toBe(false);
+    expect(res.status).toHaveBeenCalledWith(429);
+    expect(connections.get('full')?.has(res as any)).toBe(false);
+  });
+
+  it('cleans up on request close', () => {
+    const res = makeRes();
+    const { req, triggerClose } = makeReq('unused');
+
+    attachSseConnection(req as any, res as any, { connections, key: 'somekey', maxPerChannel: 5 });
+    expect(connections.get('somekey')?.has(res as any)).toBe(true);
+
+    triggerClose();
+    expect(connections.get('somekey')).toBeUndefined();
   });
 });

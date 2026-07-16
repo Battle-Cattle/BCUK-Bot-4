@@ -6,6 +6,12 @@
   const queue = [];
   let playing = false;
 
+  /**
+   * Renders the next queued alert card (image + message, with sound if configured), animating
+   * it in and out and advancing the queue once its display duration elapses. No-ops if a card
+   * is already showing or the queue is empty.
+   * @returns {void}
+   */
   function playNext() {
     if (playing || queue.length === 0) return;
     const alert = queue.shift();
@@ -51,30 +57,10 @@
     }, durationMs);
   }
 
-  function connect() {
-    const es = new EventSource('/alerts/' + login + '/events');
-
-    es.onmessage = function (e) {
-      try {
-        const data = JSON.parse(e.data);
-        if (data && data.message) {
-          queue.push(data);
-          playNext();
-        }
-      } catch (_) {}
-    };
-
-    es.onerror = function () {
-      es.close();
-      // Reconnect with exponential backoff (2s → 4s → 8s → cap 30s)
-      const delay = Math.min(30000, (connect.retryMs = (connect.retryMs || 1000) * 2));
-      setTimeout(connect, delay);
-    };
-
-    es.onopen = function () {
-      connect.retryMs = 1000;
-    };
-  }
-
-  connect();
+  connectSse('/alerts/' + login + '/events', function (data) {
+    if (data && data.message) {
+      queue.push(data);
+      playNext();
+    }
+  });
 })();

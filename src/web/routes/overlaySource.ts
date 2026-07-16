@@ -4,7 +4,7 @@ import fs from 'fs';
 import { OVERLAY_FOLDER, OVERLAY_MAX_SSE_PER_CHANNEL } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
 import { renderView } from './shared';
-import { createSseEventsHandler } from './sseChannel';
+import { createSseEventsHandler, createLoginValidator } from './sseChannel';
 
 const log = createLogger('OverlaySource');
 const router = Router();
@@ -13,6 +13,9 @@ const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
 const FILENAME_RE = /^[\w-]+\.(webm|mp4)$/i;
 // Words reserved for admin routes — must not be treated as channel logins.
 const RESERVED_LOGINS = new Set(['settings', 'videos', 'controller']);
+// Shared by the plain browser-source route below and the /events SSE route, so both apply the
+// identical login-validity rule from one place.
+const isValidLogin = createLoginValidator(LOGIN_RE, RESERVED_LOGINS);
 
 // In-memory map of active SSE connections keyed by Twitch channel login (lowercase).
 export const connections = new Map<string, Set<import('express').Response>>();
@@ -57,9 +60,9 @@ router.get('/controller', (_req, res) => {
  *   reserved (e.g. `settings`, `videos`, `controller`).
  */
 router.get('/:login', (req, res, next) => {
-  const { login } = req.params;
-  if (!LOGIN_RE.test(login) || RESERVED_LOGINS.has(login.toLowerCase())) { next(); return; }
-  renderView(res, 'overlaySource', { login: login.toLowerCase() });
+  const login = isValidLogin(req.params.login);
+  if (login === null) { next(); return; }
+  renderView(res, 'overlaySource', { login });
 });
 
 /**
@@ -77,8 +80,7 @@ router.get('/:login', (req, res, next) => {
  */
 router.get('/:login/events', createSseEventsHandler({
   connections,
-  loginRe: LOGIN_RE,
-  reservedLogins: RESERVED_LOGINS,
+  isValidLogin,
   maxPerChannel: MAX_SSE_CONNECTIONS_PER_CHANNEL,
 }));
 

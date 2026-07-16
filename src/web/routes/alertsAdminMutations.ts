@@ -6,13 +6,17 @@ import { saveAlertConfig } from '../../db';
 import { logAndRedirectError, requireStreamer, parseCheckboxField } from './shared';
 import { pushAlertEvent } from './alertsOverlaySource';
 import { NOT_A_STREAMER_REDIRECT, parseEventType } from './alertsShared';
+import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 
 const log = createLogger('AlertsAdmin');
 export const router = Router();
 
 /**
  * POST /alerts/settings/:eventType — saves the non-file fields (enable flag, message template,
- * display duration) of one of the requesting streamer's alert configs.
+ * display duration) of one of the requesting streamer's alert configs, then reloads EventSub
+ * subscriptions so an alert-only `enabled` flip (with no chat-message flag on) takes effect
+ * immediately rather than waiting for some unrelated reload trigger — mirrors the same call
+ * after `saveEventConfig` in `userSettings.ts`.
  * @param req - Express request; reads the `eventType` route param and `enabled`,
  *   `message_template`, `duration_ms` fields from `req.body`.
  * @param res - Express response; redirects to `/alerts/settings?success=config_saved` on
@@ -39,6 +43,7 @@ router.post('/settings/:eventType', requireAuth, csrfProtection, async (req, res
       message_template: messageTemplate,
       duration_ms: durationMs,
     });
+    reloadEventSubSubscriptions();
 
     res.redirect('/alerts/settings?success=config_saved');
   } catch (err) {

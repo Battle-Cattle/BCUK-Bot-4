@@ -31,6 +31,7 @@ import {
   ALERT_EVENT_TYPES,
   getAlertConfigsForStreamer,
   getAlertConfig,
+  getEnabledAlertEventTypesBatch,
   initAlertConfigs,
   saveAlertConfig,
   setAlertImage,
@@ -134,6 +135,48 @@ describe('getAlertConfig', () => {
   });
 });
 
+// ─── getEnabledAlertEventTypesBatch ────────────────────────────────────────────
+
+describe('getEnabledAlertEventTypesBatch', () => {
+  it('returns an empty Map without querying when streamerIds is empty', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await getEnabledAlertEventTypesBatch([]);
+    expect(result).toEqual(new Map());
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+
+  it('groups enabled event types by streamer_id from a single query', async () => {
+    const rows = [
+      { streamer_id: 1, event_type: 'follow' },
+      { streamer_id: 1, event_type: 'raid' },
+      { streamer_id: 2, event_type: 'sub' },
+    ];
+    vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
+    const result = await getEnabledAlertEventTypesBatch([1, 2, 3]);
+    expect(result.get(1)).toEqual(new Set(['follow', 'raid']));
+    expect(result.get(2)).toEqual(new Set(['sub']));
+    expect(result.has(3)).toBe(false);
+  });
+
+  it('queries with an IN (...) placeholder list and only the given streamerIds', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getEnabledAlertEventTypesBatch([5, 6, 7]);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('IN (?, ?, ?)');
+    expect(sql).toContain('enabled = 1');
+    expect(params).toEqual([5, 6, 7]);
+  });
+
+  it('makes exactly one query regardless of how many streamerIds are given', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getEnabledAlertEventTypesBatch([1, 2, 3, 4, 5]);
+    expect(pool.execute).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ─── initAlertConfigs ──────────────────────────────────────────────────────────
 
 describe('initAlertConfigs', () => {
@@ -189,12 +232,15 @@ describe('saveAlertConfig', () => {
 // ─── setAlertImage / setAlertSound ─────────────────────────────────────────────
 
 describe('setAlertImage', () => {
-  it('returns null and does not update when no matching row exists', async () => {
+  it('inserts a default row with the asset set when no matching row exists, returning null', async () => {
     const conn = makeMockConnection({ execute: vi.fn().mockResolvedValue([[], []]) });
     vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
     const result = await setAlertImage(1, 'follow', 'new.png');
     expect(result).toBeNull();
-    expect(conn.execute).toHaveBeenCalledTimes(1);
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+    const [insertSql, insertParams] = conn.execute.mock.calls[1];
+    expect(insertSql.toUpperCase()).toContain('INSERT');
+    expect(insertParams).toEqual([1, 'follow', 'Thanks {display_name} for the follow!', 'new.png']);
   });
 
   it('returns the previous filename and updates to the new one', async () => {
@@ -223,10 +269,15 @@ describe('setAlertImage', () => {
 });
 
 describe('setAlertSound', () => {
-  it('returns null when no matching row exists', async () => {
+  it('inserts a default row with the asset set when no matching row exists, returning null', async () => {
     const conn = makeMockConnection({ execute: vi.fn().mockResolvedValue([[], []]) });
     vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
-    expect(await setAlertSound(1, 'raid', 'air.mp3')).toBeNull();
+    const result = await setAlertSound(1, 'raid', 'air.mp3');
+    expect(result).toBeNull();
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+    const [insertSql, insertParams] = conn.execute.mock.calls[1];
+    expect(insertSql.toUpperCase()).toContain('INSERT');
+    expect(insertParams).toEqual([1, 'raid', 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!', 'air.mp3']);
   });
 
   it('returns the previous filename and updates to the new one', async () => {

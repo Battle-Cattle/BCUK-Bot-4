@@ -25,6 +25,10 @@ vi.mock('./alertsOverlaySource', () => ({
   pushAlertEvent: vi.fn(),
 }));
 
+vi.mock('../../twitch/eventsub/twitchEventSub', () => ({
+  reloadEventSubSubscriptions: vi.fn(),
+}));
+
 // Pulled in transitively via '../../db/users' (for AccessLevel below) importing '../pool',
 // which reads real env vars at module load time — an empty mock keeps that side effect out.
 vi.mock('../../shared/config', () => ({}));
@@ -34,6 +38,7 @@ import { router } from './alertsAdminMutations';
 import { getStreamerByDiscordId, saveAlertConfig } from '../../db';
 import { AccessLevel } from '../../db/users';
 import { pushAlertEvent } from './alertsOverlaySource';
+import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
@@ -88,6 +93,18 @@ describe('POST /settings/:eventType', () => {
       message_template: 'Welcome {display_name}!',
       duration_ms: 4500,
     });
+  });
+
+  it('reloads EventSub subscriptions after a successful save, so an alert-only enable takes effect', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    await supertest(buildApp()).post('/settings/follow').send('enabled=on&message_template=hi');
+    expect(vi.mocked(reloadEventSubSubscriptions)).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reload EventSub subscriptions when the save is rejected (invalid message)', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    await supertest(buildApp()).post('/settings/follow').send('message_template=   ');
+    expect(vi.mocked(reloadEventSubSubscriptions)).not.toHaveBeenCalled();
   });
 
   it('saves enabled=false when the checkbox is absent', async () => {

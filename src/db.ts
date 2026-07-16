@@ -181,7 +181,7 @@ export type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 export type { AlertConfig, AlertEventType } from './db/alertConfig';
 export { ALERT_EVENT_TYPES } from './db/alertConfig';
 export {
-  getAlertConfigsForStreamer, getAlertConfig, initAlertConfigs,
+  getAlertConfigsForStreamer, getAlertConfig, getEnabledAlertEventTypesBatch, initAlertConfigs,
   saveAlertConfig, setAlertImage, setAlertSound,
 } from './db/alertConfig';
 
