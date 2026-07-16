@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { saveAlertConfig } from '../../db';
+import { saveAlertConfig, getAlertConfig } from '../../db';
 import { logAndRedirectError, requireStreamer, parseCheckboxField } from './shared';
 import { pushAlertEvent } from './alertsOverlaySource';
 import { NOT_A_STREAMER_REDIRECT, parseEventType } from './alertsShared';
@@ -52,9 +52,10 @@ router.post('/settings/:eventType', requireAuth, csrfProtection, async (req, res
 });
 
 /**
- * POST /alerts/settings/:eventType/test — pushes a synthetic alert for one of the requesting
- * streamer's event types through their alerts-overlay SSE stream, so they can preview it live
- * in OBS without waiting for a real Twitch event.
+ * POST /alerts/settings/:eventType/test — pushes the requesting streamer's actual saved
+ * configuration (message template, image, sound, duration) for one event type through their
+ * alerts-overlay SSE stream, so they can preview their real setup live in OBS without waiting
+ * for a real Twitch event. Falls back to a generic message if no config row exists yet.
  * @param req - Express request; reads the `eventType` route param.
  * @param res - Express response; redirects to `/alerts/settings?success=test_sent` on success,
  *   or to `/alerts/settings?error=<code>` if the requester isn't a streamer
@@ -70,12 +71,14 @@ router.post('/settings/:eventType/test', requireAuth, csrfProtection, async (req
     if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
     if (!streamer.twitch_name) return res.redirect(NOT_A_STREAMER_REDIRECT);
 
+    const config = await getAlertConfig(streamer.id, eventType);
+
     pushAlertEvent(streamer.twitch_name.toLowerCase(), {
       type: eventType,
-      message: `Test alert — ${eventType}`,
-      imageUrl: null,
-      soundUrl: null,
-      durationMs: 6000,
+      message: config ? `[Test] ${config.message_template}` : `Test alert — ${eventType}`,
+      imageUrl: config?.image_filename ? `/alerts/assets/${streamer.id}/${config.image_filename}` : null,
+      soundUrl: config?.sound_filename ? `/alerts/assets/${streamer.id}/${config.sound_filename}` : null,
+      durationMs: config?.duration_ms ?? 6000,
     });
 
     res.redirect('/alerts/settings?success=test_sent');

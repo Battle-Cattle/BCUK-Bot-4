@@ -22,17 +22,19 @@ function sendSseHandshake(res: Response): void {
 
 /**
  * Starts the periodic keepalive ping for one connection. If a ping write fails (e.g. the client
- * disconnected without the request's 'close' event firing first), evicts the client and clears
- * the interval so nothing is left running for a dead connection.
- * @returns The interval handle, so the caller can clear it on a normal 'close' event too.
+ * disconnected without any close/error event firing first), runs `cleanup` so nothing is left
+ * running for a dead connection.
+ * @param res - The SSE response to ping.
+ * @param cleanup - Idempotent teardown (clears this interval and evicts the client) to run on a
+ *   failed ping write.
+ * @returns The interval handle, so the caller can also clear it on a normal close/error event.
  */
-function startKeepalive<K>(connections: Map<K, Set<Response>>, key: K, res: Response): NodeJS.Timeout {
+function startKeepalive(res: Response, cleanup: () => void): NodeJS.Timeout {
   const keepalive = setInterval(() => {
     try {
       res.write(': ping\n\n');
     } catch {
-      clearInterval(keepalive);
-      removeClient(connections, key, res);
+      cleanup();
     }
   }, KEEPALIVE_INTERVAL_MS);
   return keepalive;
@@ -57,8 +59,9 @@ export interface AttachSseConnectionOptions<K> {
  * Shared by every SSE endpoint in the app (reward-video overlay, alerts overlay, companion app
  * events, channel-points price updates) so the connection lifecycle only needs to be
  * gotten right in one place.
- * @param req - Express request; used only to listen for the 'close' event.
- * @param res - Express response to register and stream to.
+ * @param req - Express request; listened to for the 'close' event (the normal disconnect path).
+ * @param res - Express response to register and stream to; also listened to for 'close'/'error'
+ *   (an abrupt socket failure can fire these without `req` ever emitting 'close').
  * @param options - See {@link AttachSseConnectionOptions}.
  * @returns false if the key was already at `maxPerChannel` (a 429 has already been sent to `res`
  *   and the caller should stop handling the request); true once the connection is attached.
@@ -79,12 +82,21 @@ export function attachSseConnection<K>(
   }
 
   sendSseHandshake(res);
-  const keepalive = startKeepalive(connections, key, res);
 
-  req.on('close', () => {
+  let cleaned = false;
+  // Idempotent: 'close' and 'error' can both fire for the same dead connection, and the keepalive
+  // ping's own write failure also routes here — must only clear/evict once.
+  const cleanup = (): void => {
+    if (cleaned) return;
+    cleaned = true;
     clearInterval(keepalive);
     removeClient(connections, key, res);
-  });
+  };
+  const keepalive = startKeepalive(res, cleanup);
+
+  req.on('close', cleanup);
+  res.on('close', cleanup);
+  res.on('error', cleanup);
   return true;
 }
 

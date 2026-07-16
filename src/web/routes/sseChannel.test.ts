@@ -5,12 +5,16 @@ const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
 const RESERVED_LOGINS = new Set(['settings']);
 
 function makeRes() {
+  const handlers: Record<string, () => void> = {};
   return {
     setHeader: vi.fn(),
     flushHeaders: vi.fn(),
     write: vi.fn(),
     status: vi.fn().mockReturnThis(),
     end: vi.fn(),
+    on: vi.fn((event: string, cb: () => void) => { handlers[event] = cb; }),
+    triggerResClose: () => handlers['close']?.(),
+    triggerResError: () => handlers['error']?.(),
   };
 }
 
@@ -210,5 +214,50 @@ describe('attachSseConnection', () => {
 
     triggerClose();
     expect(connections.get('somekey')).toBeUndefined();
+  });
+
+  it('cleans up on a response close event, even if the request never closes', () => {
+    const res = makeRes();
+    const { req } = makeReq('unused');
+
+    attachSseConnection(req as any, res as any, { connections, key: 'somekey', maxPerChannel: 5 });
+    expect(connections.get('somekey')?.has(res as any)).toBe(true);
+
+    res.triggerResClose();
+    expect(connections.get('somekey')).toBeUndefined();
+  });
+
+  it('cleans up on a response error event, even if the request never closes', () => {
+    const res = makeRes();
+    const { req } = makeReq('unused');
+
+    attachSseConnection(req as any, res as any, { connections, key: 'somekey', maxPerChannel: 5 });
+    expect(connections.get('somekey')?.has(res as any)).toBe(true);
+
+    res.triggerResError();
+    expect(connections.get('somekey')).toBeUndefined();
+  });
+
+  it('only cleans up once when close and error both fire for the same connection', () => {
+    vi.useFakeTimers();
+    try {
+      const res = makeRes();
+      const { req, triggerClose } = makeReq('unused');
+
+      attachSseConnection(req as any, res as any, { connections, key: 'somekey', maxPerChannel: 5 });
+
+      res.triggerResError();
+      triggerClose();
+      res.triggerResClose();
+
+      // Idempotent cleanup means the keepalive interval was cleared once — advancing time
+      // shouldn't produce a further ping write attempt on the already-evicted response.
+      res.write.mockClear();
+      vi.advanceTimersByTime(25_000);
+      expect(res.write).not.toHaveBeenCalled();
+      expect(connections.get('somekey')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

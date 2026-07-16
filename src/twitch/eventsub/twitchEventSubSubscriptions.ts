@@ -147,17 +147,21 @@ const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
     specs: (uid) => [{ type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }],
   },
   {
-    // Gated on config (not just token) to keep subscription and dispatch aligned —
-    // dispatchNotification early-exits without config. Not tied to any alert type.
+    // Gated on config (not just token): this group carries no alertTypes, so — unlike the
+    // alert-driven groups above — there's no alert-only path that needs the subscription without
+    // a real config row. Requiring one is a proxy for "this streamer completed the full
+    // EventSub/chat-message setup" (dispatchNotification itself no longer early-exits without
+    // config — it falls back to DEFAULT_EVENT_CONFIG for alert-only streamers — but that's moot
+    // here since this group never subscribes for one).
     alertTypes: [],
     chatEnabled: (config) => Boolean(config),
     specs: (uid) => [{ type: 'channel.channel_points_custom_reward_redemption.add', version: '1', condition: { broadcaster_user_id: uid } }],
   },
   {
     // stream.online/offline and channel.update require no scope beyond a valid token — but,
-    // like the redemption group above, still gated on config (not just token) to keep
-    // subscription and dispatch aligned, since dispatchNotification early-exits without
-    // config. This drives an immediate live-check that supplements (not replaces) the 60s poller.
+    // like the redemption group above, still gated on config as a proxy for "fully set up"
+    // (see that group's comment; dispatchNotification no longer early-exits without config).
+    // This drives an immediate live-check that supplements (not replaces) the 60s poller.
     // Not tied to any alert type.
     alertTypes: [],
     chatEnabled: (config) => Boolean(config),

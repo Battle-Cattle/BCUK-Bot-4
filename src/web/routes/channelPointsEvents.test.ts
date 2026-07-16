@@ -31,6 +31,7 @@ function makeSseRes() {
     write: vi.fn(),
     status: vi.fn().mockReturnThis(),
     end: vi.fn(),
+    on: vi.fn(),
   };
 }
 

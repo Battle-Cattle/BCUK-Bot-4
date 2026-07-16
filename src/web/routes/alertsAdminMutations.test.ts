@@ -8,6 +8,7 @@ vi.mock('../../db', () => ({
   ALERT_EVENT_TYPES: ['follow', 'sub', 'resub', 'giftsub', 'raid'],
   getStreamerByDiscordId: vi.fn(),
   saveAlertConfig: vi.fn(),
+  getAlertConfig: vi.fn(),
 }));
 
 vi.mock('../csrf', () => ({
@@ -35,7 +36,7 @@ vi.mock('../../shared/config', () => ({}));
 
 import supertest from 'supertest';
 import { router } from './alertsAdminMutations';
-import { getStreamerByDiscordId, saveAlertConfig } from '../../db';
+import { getStreamerByDiscordId, saveAlertConfig, getAlertConfig } from '../../db';
 import { AccessLevel } from '../../db/users';
 import { pushAlertEvent } from './alertsOverlaySource';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
@@ -60,6 +61,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
   vi.mocked(saveAlertConfig).mockResolvedValue(undefined);
+  vi.mocked(getAlertConfig).mockResolvedValue(null);
 });
 
 // --- POST /settings/:eventType (save non-file fields) ---
@@ -150,10 +152,42 @@ describe('POST /settings/:eventType/test', () => {
     expect(vi.mocked(pushAlertEvent)).not.toHaveBeenCalled();
   });
 
-  it('pushes a synthetic test alert to the streamer\'s lowercased login', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+  it('pushes a fallback test alert to the streamer\'s lowercased login when no config row exists', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ ...MOCK_STREAMER, twitch_name: 'TestStreamer' } as any);
     const res = await supertest(buildApp()).post('/settings/follow/test');
     expect(res.headers.location).toBe('/alerts/settings?success=test_sent');
-    expect(vi.mocked(pushAlertEvent)).toHaveBeenCalledWith('teststreamer', expect.objectContaining({ type: 'follow' }));
+    expect(vi.mocked(pushAlertEvent)).toHaveBeenCalledWith('teststreamer', {
+      type: 'follow',
+      message: 'Test alert — follow',
+      imageUrl: null,
+      soundUrl: null,
+      durationMs: 6000,
+    });
+  });
+
+  it('pushes the streamer\'s actual saved config (message/image/sound/duration) when one exists', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(getAlertConfig).mockResolvedValue({
+      id: 1,
+      streamer_id: MOCK_STREAMER.id,
+      event_type: 'follow',
+      enabled: true,
+      message_template: 'Welcome {display_name}!',
+      image_filename: 'follow.png',
+      sound_filename: 'follow.mp3',
+      duration_ms: 4000,
+    } as any);
+
+    const res = await supertest(buildApp()).post('/settings/follow/test');
+
+    expect(res.headers.location).toBe('/alerts/settings?success=test_sent');
+    expect(vi.mocked(getAlertConfig)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'follow');
+    expect(vi.mocked(pushAlertEvent)).toHaveBeenCalledWith('teststreamer', {
+      type: 'follow',
+      message: '[Test] Welcome {display_name}!',
+      imageUrl: `/alerts/assets/${MOCK_STREAMER.id}/follow.png`,
+      soundUrl: `/alerts/assets/${MOCK_STREAMER.id}/follow.mp3`,
+      durationMs: 4000,
+    });
   });
 });
