@@ -30,6 +30,11 @@ vi.mock('../../shared/logger', () => ({
 
 vi.mock('./alertsAdminMutations', async () => {
   const { Router } = await import('express');
+  return { router: Router() };
+});
+
+vi.mock('./alertsAssetMutations', async () => {
+  const { Router } = await import('express');
   return { router: Router(), MAX_IMAGE_MB: 10, MAX_SOUND_MB: 5 };
 });
 
