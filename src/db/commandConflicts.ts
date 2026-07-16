@@ -410,6 +410,12 @@ export async function assignUserToCommandWithinTransaction(
     commandId,
     'assignUserToCommand',
     'assignUserToCommandWithinTransaction',
+    /**
+     * Per-attempt body: checks the user's Twitch-channel trigger conflict (if eligible) and
+     * inserts the assignment row.
+     * @param normalizedTriggerString The command's normalized trigger string, looked up fresh each attempt.
+     * @returns Resolves once the conflict check (if any) and insert both succeed.
+     */
     async (normalizedTriggerString) => {
       const userEligibility = await getUserTwitchEligibility(connection, discordId);
 
@@ -529,6 +535,12 @@ export async function assignUsersToCommandWithinTransaction(
     commandId,
     'assignUsersToCommand',
     'assignUsersToCommandWithinTransaction',
+    /**
+     * Per-attempt body: batch-checks every user's Twitch-channel trigger conflict and inserts
+     * all assignment rows in one upsert.
+     * @param normalizedTriggerString The command's normalized trigger string, looked up fresh each attempt.
+     * @returns Resolves once all conflict checks and the batch insert succeed.
+     */
     async (normalizedTriggerString) => {
       const eligibilityByDiscordId = await getUserTwitchEligibilityBatch(connection, discordIds);
       await assertAllUsersAssignable(connection, commandId, discordIds, normalizedTriggerString, eligibilityByDiscordId);
