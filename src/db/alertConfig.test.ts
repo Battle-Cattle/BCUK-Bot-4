@@ -30,6 +30,7 @@ vi.mock('./alertConfigCache', () => ({ invalidateAlertConfigLookupCache: vi.fn()
 import { getPool } from './pool';
 import {
   ALERT_EVENT_TYPES,
+  ALERT_TEXT_ANIMATIONS,
   getAlertConfigsForStreamer,
   getAlertConfig,
   getAllAlertConfigs,
@@ -58,6 +59,7 @@ function makeRow(overrides: object = {}): Record<string, unknown> {
     image_filename: null,
     sound_filename: null,
     duration_ms: 6000,
+    text_animation: 'none',
     ...overrides,
   };
 }
@@ -71,6 +73,16 @@ beforeEach(() => {
 describe('ALERT_EVENT_TYPES', () => {
   it('lists all five event types', () => {
     expect(ALERT_EVENT_TYPES).toEqual(['follow', 'sub', 'resub', 'giftsub', 'raid']);
+  });
+});
+
+// ─── ALERT_TEXT_ANIMATIONS ────────────────────────────────────────────────────
+
+describe('ALERT_TEXT_ANIMATIONS', () => {
+  it('lists all ten text animation styles', () => {
+    expect(ALERT_TEXT_ANIMATIONS).toEqual([
+      'none', 'wave', 'pulse', 'glitch', 'shake', 'rainbow', 'flicker', 'tilt', 'bounce-in', 'typewriter',
+    ]);
   });
 });
 
@@ -104,6 +116,12 @@ describe('getAlertConfigsForStreamer', () => {
     const [config] = await getAlertConfigsForStreamer(1);
     expect(config.image_filename).toBeNull();
     expect(config.sound_filename).toBeNull();
+  });
+
+  it('maps the text_animation column', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([makeRow({ text_animation: 'wave' })]) as any);
+    const [config] = await getAlertConfigsForStreamer(1);
+    expect(config.text_animation).toBe('wave');
   });
 
   it('queries with the given streamerId', async () => {
@@ -241,7 +259,7 @@ describe('saveAlertConfig', () => {
   it('uses ON DUPLICATE KEY UPDATE in the SQL', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await saveAlertConfig(1, 'follow', { enabled: true, message_template: 'hi {display_name}', duration_ms: 5000 });
+    await saveAlertConfig(1, 'follow', { enabled: true, message_template: 'hi {display_name}', duration_ms: 5000, text_animation: 'none' });
     const sql: string = pool.execute.mock.calls[0][0];
     expect(sql.toUpperCase()).toContain('ON DUPLICATE KEY UPDATE');
   });
@@ -249,24 +267,32 @@ describe('saveAlertConfig', () => {
   it('does not touch image_filename/sound_filename columns', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await saveAlertConfig(1, 'follow', { enabled: true, message_template: 'hi', duration_ms: 5000 });
+    await saveAlertConfig(1, 'follow', { enabled: true, message_template: 'hi', duration_ms: 5000, text_animation: 'none' });
     const sql: string = pool.execute.mock.calls[0][0];
     expect(sql).not.toContain('image_filename=');
     expect(sql).not.toContain('sound_filename=');
   });
 
+  it('includes text_animation in the inserted columns and UPDATE clause', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await saveAlertConfig(1, 'follow', { enabled: true, message_template: 'hi', duration_ms: 5000, text_animation: 'pulse' });
+    const sql: string = pool.execute.mock.calls[0][0];
+    expect(sql).toContain('text_animation');
+  });
+
   it('converts enabled boolean to 1/0 in params', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await saveAlertConfig(1, 'sub', { enabled: false, message_template: 'msg', duration_ms: 4000 });
+    await saveAlertConfig(1, 'sub', { enabled: false, message_template: 'msg', duration_ms: 4000, text_animation: 'glitch' });
     const params: unknown[] = pool.execute.mock.calls[0][1];
-    expect(params).toEqual([1, 'sub', 0, 'msg', 4000]);
+    expect(params).toEqual([1, 'sub', 0, 'msg', 4000, 'glitch']);
   });
 
   it('invalidates the alert config lookup cache after saving', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await saveAlertConfig(1, 'follow', { enabled: true, message_template: 'hi', duration_ms: 5000 });
+    await saveAlertConfig(1, 'follow', { enabled: true, message_template: 'hi', duration_ms: 5000, text_animation: 'none' });
     expect(invalidateAlertConfigLookupCache).toHaveBeenCalledOnce();
   });
 });

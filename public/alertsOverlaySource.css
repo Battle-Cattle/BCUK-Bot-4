@@ -31,3 +31,125 @@ body { background: transparent; overflow: hidden; width: 1920px; height: 1080px;
   font-weight: 700;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.8);
 }
+
+/* text_animation: 'pulse' — the whole message loops a gentle scale pulse. */
+.alert-card .alert-message.anim-pulse {
+  display: inline-block;
+  animation: alert-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes alert-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+/* text_animation: 'glitch' — the whole message loops a stepped RGB-split/jitter glitch. */
+.alert-card .alert-message.anim-glitch {
+  display: inline-block;
+  animation: alert-glitch 1.6s steps(1, end) infinite;
+}
+
+@keyframes alert-glitch {
+  0%, 100% {
+    transform: translate(0, 0);
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.8);
+  }
+  20% { transform: translate(-2px, 1px); text-shadow: -2px 0 #ff3b3b, 2px 0 #3bd6ff; }
+  40% { transform: translate(2px, -1px); text-shadow: 2px 0 #ff3b3b, -2px 0 #3bd6ff; }
+  60% { transform: translate(-1px, 0); text-shadow: -1px 0 #ff3b3b, 1px 0 #3bd6ff; }
+  80% { transform: translate(1px, 1px); text-shadow: 1px 0 #ff3b3b, -1px 0 #3bd6ff; }
+}
+
+/* text_animation: 'wave' — each `.letter` span (one per character, see alerts-overlay.js)
+   bobs up and down with a per-letter animation-delay so the motion ripples across the text. */
+.alert-card .alert-message.anim-wave .letter {
+  display: inline-block;
+  animation: alert-wave 1.2s ease-in-out infinite;
+}
+
+@keyframes alert-wave {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+/* text_animation: 'shake' — the whole message loops a rapid horizontal jitter. */
+.alert-card .alert-message.anim-shake {
+  display: inline-block;
+  animation: alert-shake 0.5s ease-in-out infinite;
+}
+
+@keyframes alert-shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30% { transform: translateX(-6px); }
+  20%, 40% { transform: translateX(6px); }
+  50% { transform: translateX(-4px); }
+  60% { transform: translateX(4px); }
+  70% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+  90% { transform: translateX(0); }
+}
+
+/* text_animation: 'rainbow' — the whole message loops through a cycle of colors. */
+.alert-card .alert-message.anim-rainbow {
+  display: inline-block;
+  animation: alert-rainbow 3s linear infinite;
+}
+
+@keyframes alert-rainbow {
+  0%   { color: #ff3b3b; }
+  16%  { color: #ff9d3b; }
+  33%  { color: #f4ff3b; }
+  50%  { color: #3bff5e; }
+  66%  { color: #3bcfff; }
+  83%  { color: #a13bff; }
+  100% { color: #ff3b3b; }
+}
+
+/* text_animation: 'flicker' — the whole message loops an irregular neon-sign-style flicker. */
+.alert-card .alert-message.anim-flicker {
+  display: inline-block;
+  animation: alert-flicker 1.6s linear infinite;
+}
+
+@keyframes alert-flicker {
+  0%, 19%, 21%, 23%, 54%, 56%, 100% { opacity: 1; }
+  20%, 22%, 55% { opacity: 0.3; }
+}
+
+/* text_animation: 'tilt' — the whole message loops a gentle rotational wobble. */
+.alert-card .alert-message.anim-tilt {
+  display: inline-block;
+  animation: alert-tilt 1.6s ease-in-out infinite;
+}
+
+@keyframes alert-tilt {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-4deg); }
+  75% { transform: rotate(4deg); }
+}
+
+/* text_animation: 'bounce-in' — each `.letter` span drops in and bounces to rest once
+   (animation-delay staggered per letter in alerts-overlay.js), instead of looping forever. */
+.alert-card .alert-message.anim-bounce-in .letter {
+  display: inline-block;
+  animation: alert-bounce-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes alert-bounce-in {
+  0%   { transform: translateY(-60px); opacity: 0; }
+  60%  { transform: translateY(8px); opacity: 1; }
+  80%  { transform: translateY(-4px); }
+  100% { transform: translateY(0); }
+}
+
+/* text_animation: 'typewriter' — each `.letter` span pops in in sequence, once, instead of
+   looping forever (animation-delay staggered per letter in alerts-overlay.js). */
+.alert-card .alert-message.anim-typewriter .letter {
+  display: inline-block;
+  animation: alert-typewriter 0.15s ease-out both;
+}
+
+@keyframes alert-typewriter {
+  0%   { opacity: 0; transform: translateX(-4px); }
+  100% { opacity: 1; transform: translateX(0); }
+}

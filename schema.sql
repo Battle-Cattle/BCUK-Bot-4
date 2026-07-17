@@ -275,6 +275,8 @@ CREATE TABLE IF NOT EXISTS alert_config (
   image_filename   VARCHAR(255)                                    NULL,
   sound_filename   VARCHAR(255)                                    NULL,
   duration_ms      INT                                             NOT NULL DEFAULT 6000,
+  text_animation   ENUM('none','wave','pulse','glitch','shake','rainbow','flicker','tilt','bounce-in','typewriter')
+                                                                    NOT NULL DEFAULT 'none',
   PRIMARY KEY (id),
   UNIQUE KEY uq_alert_config (streamer_id, event_type),
   FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE

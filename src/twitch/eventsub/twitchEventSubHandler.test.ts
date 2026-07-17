@@ -21,6 +21,7 @@ import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 import { applyRedemptionPricing } from '../pricing/rewardPricingService';
+import { TEST_ALERT_VARS } from '../../web/routes/testAlertVars';
 
 const mockSend = vi.fn<(channel: string, message: string) => Promise<void>>();
 registerEventSubTwitchRuntime({ send: mockSend });
@@ -327,6 +328,7 @@ describe('alerts overlay push', () => {
       image_filename: null,
       sound_filename: null,
       duration_ms: 6000,
+      text_animation: 'none',
       ...overrides,
     } as any;
   }
@@ -364,6 +366,7 @@ describe('alerts overlay push', () => {
       imageUrl: null,
       soundUrl: null,
       durationMs: 4000,
+      textAnimation: 'none',
     });
   });
 
@@ -379,6 +382,28 @@ describe('alerts overlay push', () => {
     expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({
       imageUrl: `/alerts/assets/${STREAMER_ID}/follow.png`,
       soundUrl: `/alerts/assets/${STREAMER_ID}/follow.mp3`,
+    }));
+  });
+
+  it('passes through the alert config\'s text_animation as textAnimation', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ text_animation: 'wave' }));
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig(), STREAMER_ID);
+
+    expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({
+      textAnimation: 'wave',
+    }));
+  });
+
+  it('leaves an unrecognised placeholder in place (keep fallback) instead of blanking it, matching the test-alert preview', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ message_template: 'Hi {diplay_name}!' }));
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig(), STREAMER_ID);
+
+    expect(mockPushAlertEvent).toHaveBeenCalledWith('streamer', expect.objectContaining({
+      message: 'Hi {diplay_name}!',
     }));
   });
 
@@ -436,6 +461,85 @@ describe('alerts overlay push', () => {
 });
 
 // ---------------------------------------------------------------------------
+// TEST_ALERT_VARS (alertsAdminMutations.ts's "Send Test Alert" preview) must stay in sync with
+// the real vars each handler below actually builds — otherwise a renamed/removed real variable
+// silently leaves a stale `{placeholder}` in the live preview while the real handler works fine.
+// Probes every TEST_ALERT_VARS key through the real handler and asserts none come back as an
+// unfilled `{placeholder}` (which 'keep' fallback would leave literally in place if the real
+// handler didn't actually provide that key).
+// ---------------------------------------------------------------------------
+describe('TEST_ALERT_VARS stays in sync with the real handlers\' template vars', () => {
+  /** Builds a fake alert_config row, pass `overrides` to customize. */
+  function makeAlert(overrides: object = {}) {
+    return {
+      id: 1,
+      streamer_id: STREAMER_ID,
+      event_type: 'follow',
+      enabled: true,
+      message_template: 'template',
+      image_filename: null,
+      sound_filename: null,
+      duration_ms: 6000,
+      text_animation: 'none',
+      ...overrides,
+    } as any;
+  }
+
+  /** Builds a message_template consisting of every key in `vars`, each wrapped as `{key}`. */
+  function probeAllKeys(vars: Record<string, string>): string {
+    return Object.keys(vars).map((k) => `{${k}}`).join(' ');
+  }
+
+  it('handleFollow provides every key TEST_ALERT_VARS.follow expects', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'follow', message_template: probeAllKeys(TEST_ALERT_VARS.follow) }));
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig(), STREAMER_ID);
+    const payload = mockPushAlertEvent.mock.calls.at(-1)?.[1];
+    expect(payload.message).not.toMatch(/\{[\w-]+\}/);
+  });
+
+  it('handleSub provides every key TEST_ALERT_VARS.sub expects', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'sub', message_template: probeAllKeys(TEST_ALERT_VARS.sub) }));
+    await handleSub('streamer', {
+      user_login: 'subuser', user_name: 'SubUser', broadcaster_user_login: 'streamer', tier: '1000', is_gift: false,
+    }, makeConfig(), STREAMER_ID);
+    const payload = mockPushAlertEvent.mock.calls.at(-1)?.[1];
+    expect(payload.message).not.toMatch(/\{[\w-]+\}/);
+  });
+
+  it('handleResub provides every key TEST_ALERT_VARS.resub expects', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'resub', message_template: probeAllKeys(TEST_ALERT_VARS.resub) }));
+    await handleResub('streamer', {
+      user_login: 'resubuser', user_name: 'ResubUser', broadcaster_user_login: 'streamer',
+      tier: '1000', cumulative_months: 6, streak_months: 3,
+    }, makeConfig(), STREAMER_ID);
+    const payload = mockPushAlertEvent.mock.calls.at(-1)?.[1];
+    expect(payload.message).not.toMatch(/\{[\w-]+\}/);
+  });
+
+  it('handleGiftSub provides every key TEST_ALERT_VARS.giftsub expects', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'giftsub', message_template: probeAllKeys(TEST_ALERT_VARS.giftsub) }));
+    await handleGiftSub('streamer', {
+      user_login: 'gifter', user_name: 'GifterDisplay', broadcaster_user_login: 'streamer',
+      total: 5, tier: '1000', is_anonymous: false,
+    }, makeConfig(), STREAMER_ID);
+    const payload = mockPushAlertEvent.mock.calls.at(-1)?.[1];
+    expect(payload.message).not.toMatch(/\{[\w-]+\}/);
+  });
+
+  it('handleRaid provides every key TEST_ALERT_VARS.raid expects', async () => {
+    vi.mocked(findCachedAlertConfig).mockResolvedValue(makeAlert({ event_type: 'raid', message_template: probeAllKeys(TEST_ALERT_VARS.raid) }));
+    await handleRaid('streamer', {
+      from_broadcaster_user_login: 'raider', from_broadcaster_user_name: 'RaiderDisplay',
+      to_broadcaster_user_login: 'streamer', viewers: 42,
+    }, makeConfig(), STREAMER_ID);
+    const payload = mockPushAlertEvent.mock.calls.at(-1)?.[1];
+    expect(payload.message).not.toMatch(/\{[\w-]+\}/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Chat-send failures must not block the independent alert push
 // ---------------------------------------------------------------------------
 describe('chat-send failures are isolated from the alert push', () => {
@@ -460,6 +564,7 @@ describe('chat-send failures are isolated from the alert push', () => {
     vi.mocked(findCachedAlertConfig).mockResolvedValue({
       id: 1, streamer_id: STREAMER_ID, event_type: 'follow', enabled: true,
       message_template: 'alert fired', image_filename: null, sound_filename: null, duration_ms: 6000,
+      text_animation: 'none',
     } as any);
   });
 

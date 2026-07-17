@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
-import { getStreamerByDiscordId, getAlertConfigsForStreamer, ALERT_EVENT_TYPES } from '../../db';
+import { getStreamerByDiscordId, getAlertConfigsForStreamer, ALERT_EVENT_TYPES, ALERT_TEXT_ANIMATIONS } from '../../db';
 import { PUBLIC_URL } from '../../shared/config';
 import { filterQueryParam, renderError, renderView } from './shared';
 import { router as mutationsRouter } from './alertsAdminMutations';
@@ -39,6 +39,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       csrfToken: req.csrfToken(),
       streamer: streamer ?? null,
       eventTypes: ALERT_EVENT_TYPES,
+      textAnimations: ALERT_TEXT_ANIMATIONS,
       configByType,
       baseUrl: PUBLIC_URL,
       maxImageMb: MAX_IMAGE_MB,

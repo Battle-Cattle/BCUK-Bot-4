@@ -75,9 +75,13 @@
          giftsub: '{gifter}, {gifter_display}, {count}, {tier}, {tier_name}',
          raid:    '{from_channel}, {from_display}, {viewers}',
        };
+       const animationLabels = {
+         none: 'None', wave: 'Wave', pulse: 'Pulse', glitch: 'Glitch', shake: 'Shake',
+         rainbow: 'Rainbow', flicker: 'Flicker', tilt: 'Tilt', 'bounce-in': 'Bounce In', typewriter: 'Typewriter',
+       };
     %>
     <% for (const eventType of eventTypes) { %>
-    <% const cfg = configByType[eventType] ?? { enabled: false, message_template: '', image_filename: null, sound_filename: null, duration_ms: 6000 }; %>
+    <% const cfg = configByType[eventType] ?? { enabled: false, message_template: '', image_filename: null, sound_filename: null, duration_ms: 6000, text_animation: 'none' }; %>
     <section class="section">
       <h2 class="section-title"><%= labels[eventType] ?? eventType %> Alert</h2>
       <div class="card">
@@ -94,8 +98,23 @@
             <textarea id="message-<%= eventType %>" class="input" name="message_template" maxlength="500" rows="2"><%= cfg.message_template %></textarea>
             <p class="hint mt-025">Placeholders: <%= placeholders[eventType] %></p>
 
-            <label class="hint hint-compact mt-075" for="duration-<%= eventType %>">Display duration (ms)</label>
-            <input id="duration-<%= eventType %>" class="input w-8rem" type="number" name="duration_ms" min="1000" max="60000" step="500" value="<%= cfg.duration_ms %>">
+            <div class="form-row-wrap mt-075">
+              <div>
+                <label class="hint hint-compact" for="duration-<%= eventType %>">Display duration (seconds)</label>
+                <input id="duration-<%= eventType %>" class="input w-8rem" type="number"
+                       name="duration_seconds" min="1" max="60" step="0.01"
+                       value="<%= (cfg.duration_ms / 1000).toFixed(2) %>">
+              </div>
+
+              <div>
+                <label class="hint hint-compact" for="animation-<%= eventType %>">Text animation</label>
+                <select id="animation-<%= eventType %>" class="input" name="text_animation">
+                  <% for (const anim of textAnimations) { %>
+                  <option value="<%= anim %>" <%= cfg.text_animation === anim ? 'selected' : '' %>><%= animationLabels[anim] %></option>
+                  <% } %>
+                </select>
+              </div>
+            </div>
 
             <div class="button-row-wrap mt-075">
               <button type="submit" class="btn">Save</button>
