@@ -121,8 +121,8 @@ describe('CounterNotFoundError', () => {
 
 describe('getCounterCount', () => {
   it('delegates to getRowCount for the counter table', async () => {
-    vi.mocked(getRowCount).mockResolvedValue('4');
-    expect(await getCounterCount()).toBe('4');
+    vi.mocked(getRowCount).mockResolvedValue(4);
+    expect(await getCounterCount()).toBe(4);
     expect(getRowCount).toHaveBeenCalledWith('counter');
   });
 });

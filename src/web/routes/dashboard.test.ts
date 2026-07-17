@@ -54,9 +54,9 @@ function buildApp(sessionUser: unknown = undefined) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getStatus).mockReturnValue(STATUS as any);
-  vi.mocked(getSfxTriggerCount).mockResolvedValue('3');
-  vi.mocked(getCustomCommandCount).mockResolvedValue('5');
-  vi.mocked(getCounterCount).mockResolvedValue('2');
+  vi.mocked(getSfxTriggerCount).mockResolvedValue(3);
+  vi.mocked(getCustomCommandCount).mockResolvedValue(5);
+  vi.mocked(getCounterCount).mockResolvedValue(2);
   vi.mocked(getRecentStreamerEvents).mockResolvedValue([]);
 });
 
@@ -76,7 +76,7 @@ describe('GET /', () => {
 
   it('includes usage-stat counts from the db layer', async () => {
     const res = await supertest(buildApp()).get('/');
-    expect(res.body.usageStats).toEqual({ sfxCount: '3', commandCount: '5', counterCount: '2' });
+    expect(res.body.usageStats).toEqual({ sfxCount: 3, commandCount: 5, counterCount: 2 });
   });
 
   it('scopes status to the session\'s current guild', async () => {

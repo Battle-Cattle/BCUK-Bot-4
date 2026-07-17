@@ -104,16 +104,16 @@ describe('rowExists', () => {
 });
 
 describe('getRowCount', () => {
-  it('returns the BIGINT-string COUNT(*) result as-is, never coerced to a number', async () => {
+  it('parses the BIGINT-string COUNT(*) result back to a number', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([[{ count: '3' }], []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    expect(await getRowCount('counter')).toBe('3');
+    expect(await getRowCount('counter')).toBe(3);
   });
 
-  it('stringifies a non-string result defensively', async () => {
+  it('handles a real number result unchanged', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([[{ count: 0 }], []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    expect(await getRowCount('sfxtrigger')).toBe('0');
+    expect(await getRowCount('sfxtrigger')).toBe(0);
   });
 
   it('builds SQL from the given table name', async () => {

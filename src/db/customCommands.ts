@@ -52,8 +52,8 @@ function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
-/** Return the total number of custom commands (as a string — see {@link getRowCount}), for the dashboard's usage-stats summary. */
-export async function getCustomCommandCount(): Promise<string> {
+/** Return the total number of custom commands, for the dashboard's usage-stats summary. */
+export async function getCustomCommandCount(): Promise<number> {
   return getRowCount('custom_command');
 }
 
