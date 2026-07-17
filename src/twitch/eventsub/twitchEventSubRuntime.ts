@@ -21,7 +21,7 @@ interface EventSubOverlayRuntime {
 export const overlayRuntimeRegistry = createRuntimeRegistry<EventSubOverlayRuntime>();
 
 /**
- * Register the overlay push function. Called from index.ts after startWebPanel().
+ * Register the overlay push function. Called from index.ts before startWebPanel().
  * @param runtime - The {@link EventSubOverlayRuntime} to store.
  * @returns void
  */
