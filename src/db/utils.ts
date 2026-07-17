@@ -8,13 +8,17 @@ export function fromBit(value: unknown): boolean {
   return value == 1;
 }
 
+const IDENTIFIER_PATTERN = /^[a-zA-Z0-9_]+$/;
+
 /**
  * Checks whether a row exists in `table` where `column` equals `value`.
  * @param executor Pool or transaction connection to query with.
  * @param table Table name — must be a fixed, trusted identifier, never derived from user input.
- * @param column Column name — same trust requirement as `table`.
+ *   Validated against an allowlist pattern as defence-in-depth before being interpolated into SQL.
+ * @param column Column name — same trust requirement and validation as `table`.
  * @param value Value to match against `column`.
  * @returns True if a matching row exists.
+ * @throws If `table` or `column` isn't a plain alphanumeric/underscore identifier.
  */
 export async function rowExists(
   executor: SqlExecutor,
@@ -22,6 +26,9 @@ export async function rowExists(
   column: string,
   value: string | number,
 ): Promise<boolean> {
+  if (!IDENTIFIER_PATTERN.test(table) || !IDENTIFIER_PATTERN.test(column)) {
+    throw new Error('Invalid input');
+  }
   const [rows] = await executor.execute<mysql.RowDataPacket[]>(
     `SELECT 1 FROM ${table} WHERE ${column} = ? LIMIT 1`,
     [value],

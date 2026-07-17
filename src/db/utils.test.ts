@@ -80,6 +80,23 @@ describe('rowExists', () => {
     expect(result).toBe(true);
     expect(executor.execute.mock.calls[0][1]).toEqual(['123456789012345']);
   });
+
+  it('rejects a table name containing non-identifier characters without querying', async () => {
+    const executor = { execute: vi.fn() };
+    await expect(rowExists(executor as any, 'counter; DROP TABLE user', 'id', 5)).rejects.toThrow('Invalid input');
+    expect(executor.execute).not.toHaveBeenCalled();
+  });
+
+  it('rejects a column name containing non-identifier characters without querying', async () => {
+    const executor = { execute: vi.fn() };
+    await expect(rowExists(executor as any, 'counter', 'id = 1 OR 1=1 -- ', 5)).rejects.toThrow('Invalid input');
+    expect(executor.execute).not.toHaveBeenCalled();
+  });
+
+  it('accepts a table/column made only of letters, digits, and underscores', async () => {
+    const executor = { execute: vi.fn().mockResolvedValue([[], []]) };
+    await expect(rowExists(executor as any, 'custom_command_2', 'command_id_2', 1)).resolves.toBe(false);
+  });
 });
 
 describe('hashesMatch', () => {
