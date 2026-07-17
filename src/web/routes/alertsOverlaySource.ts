@@ -1,7 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import fs from 'fs';
-import type { AlertPayload } from '../../twitch/eventsub/twitchEventSubHandler';
+import type { AlertPayload } from '../../twitch/eventsub/twitchEventSubRuntime';
 import { ALERT_ASSETS_FOLDER, ALERT_MAX_SSE_PER_CHANNEL } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
 import { renderView } from './shared';

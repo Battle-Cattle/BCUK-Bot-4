@@ -51,7 +51,7 @@ vi.mock('./commands/counterHandler', () => ({ registerCounterTwitchRuntime: vi.f
 vi.mock('./commands/multiCommandHandler', () => ({ registerMultiTwitchRuntime: vi.fn() }));
 vi.mock('./commands/shoutoutHandler', () => ({ registerShoutoutRuntime: vi.fn() }));
 vi.mock('./commands/countdownHandler', () => ({ registerCountdownTwitchRuntime: vi.fn() }));
-vi.mock('./twitch/eventsub/twitchEventSubHandler', () => ({
+vi.mock('./twitch/eventsub/twitchEventSubRuntime', () => ({
   registerEventSubOverlayRuntime: vi.fn(),
   registerEventSubTwitchRuntime: vi.fn(),
   registerEventSubCompanionRuntime: vi.fn(),
@@ -129,7 +129,7 @@ describe('startup — guild registry preload', () => {
   });
 
   it('registers the companion event runtime with pushCompanionEvent on a clean startup', async () => {
-    const { registerEventSubCompanionRuntime } = await import('./twitch/eventsub/twitchEventSubHandler.js');
+    const { registerEventSubCompanionRuntime } = await import('./twitch/eventsub/twitchEventSubRuntime.js');
     const { pushCompanionEvent } = await import('./web/routes/companionEvents.js');
 
     await runMain();
@@ -138,7 +138,7 @@ describe('startup — guild registry preload', () => {
   });
 
   it('registers the alerts overlay runtime with pushAlertEvent on a clean startup', async () => {
-    const { registerEventSubAlertRuntime } = await import('./twitch/eventsub/twitchEventSubHandler.js');
+    const { registerEventSubAlertRuntime } = await import('./twitch/eventsub/twitchEventSubRuntime.js');
     const { pushAlertEvent } = await import('./web/routes/alertsOverlaySource.js');
 
     await runMain();
@@ -156,7 +156,7 @@ describe('startup — guild registry preload', () => {
   });
 
   it('registers the dashboard events runtime with pushDashboardEvent on a clean startup', async () => {
-    const { registerEventSubDashboardRuntime } = await import('./twitch/eventsub/twitchEventSubHandler.js');
+    const { registerEventSubDashboardRuntime } = await import('./twitch/eventsub/twitchEventSubRuntime.js');
     const { pushDashboardEvent } = await import('./web/routes/dashboardEvents.js');
 
     await runMain();

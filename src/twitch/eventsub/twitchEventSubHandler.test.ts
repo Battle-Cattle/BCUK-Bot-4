@@ -14,9 +14,11 @@ vi.mock('../pricing/rewardPricingService', () => ({ applyRedemptionPricing: vi.f
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
   handleStreamOnline, handleStreamOffline, handleChannelUpdate,
+} from './twitchEventSubHandler';
+import {
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
   registerEventSubAlertRuntime, registerEventSubDashboardRuntime,
-} from './twitchEventSubHandler';
+} from './twitchEventSubRuntime';
 import { getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
