@@ -23,6 +23,7 @@ function extractBraceBlock(source: string, marker: string): string {
   const markerIdx = source.indexOf(marker);
   if (markerIdx === -1) throw new Error(`marker not found: ${marker}`);
   const start = source.indexOf('{', markerIdx);
+  if (start === -1) throw new Error(`'{' not found after marker: ${marker}`);
   let depth = 0;
   for (let i = start; i < source.length; i++) {
     if (source[i] === '{') depth++;
@@ -39,6 +40,7 @@ function extractBracketBlock(source: string, marker: string): string {
   const markerIdx = source.indexOf(marker);
   if (markerIdx === -1) throw new Error(`marker not found: ${marker}`);
   const start = source.indexOf('[', markerIdx);
+  if (start === -1) throw new Error(`'[' not found after marker: ${marker}`);
   let depth = 0;
   for (let i = start; i < source.length; i++) {
     if (source[i] === '[') depth++;
