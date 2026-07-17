@@ -53,8 +53,8 @@ describe('getThumbnailUrl', () => {
 
   it('appends a different cache-busting value on each call', () => {
     const stream = makeStream({ thumbnail_url: 'https://thumb.tv/{width}x{height}.jpg' });
-    const first = getThumbnailUrl(stream);
     vi.useFakeTimers();
+    const first = getThumbnailUrl(stream);
     vi.advanceTimersByTime(1000);
     const second = getThumbnailUrl(stream);
     vi.useRealTimers();
