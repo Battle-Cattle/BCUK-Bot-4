@@ -101,6 +101,14 @@ describe('GET /settings — query param filtering', () => {
   });
 });
 
+describe('GET /controller/settings', () => {
+  it('renders the controller admin view with the base URL', async () => {
+    const res = await supertest(buildApp()).get('/controller/settings');
+    expect(res.status).toBe(200);
+    expect(res.body.baseUrl).toBe('http://localhost:3000');
+  });
+});
+
 // fetchTwitchRewards isn't exported, so it's exercised indirectly through GET /settings —
 // twitchRewards in the rendered locals is its return value.
 describe('GET /settings — fetchTwitchRewards', () => {

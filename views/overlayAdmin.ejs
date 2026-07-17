@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — Overlay</title>
+  <title>BCUK Bot — Video Overlay</title>
   <link rel="stylesheet" href="/style.css">
   <%- include('partials/pwa-head') %>
 </head>
@@ -60,18 +60,6 @@
           <% const login = streamer.twitch_name ? streamer.twitch_name.toLowerCase() : ''; %>
           <code class="mono overlay-url-display"><%= baseUrl %>/overlay/<%= login %></code>
           <p class="hint mt-05">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the URL above.</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── Controller Overlay ────────────────────────────────────── -->
-    <section class="section">
-      <h2 class="section-title">Controller Overlay</h2>
-      <div class="card">
-        <div class="card-body">
-          <p class="hint hint-compact">Add this URL as a Browser Source in OBS to display a gamepad input visualiser (throttle, brake, steering, handbrake):</p>
-          <code class="mono overlay-url-display"><%= baseUrl %>/overlay/controller</code>
-          <p class="hint mt-05">Works with any Xbox / PlayStation / generic controller. Transparent background — native size is <strong>332&times;212px</strong> (set the OBS browser source to these dimensions, then scale to taste).</p>
         </div>
       </div>
     </section>
