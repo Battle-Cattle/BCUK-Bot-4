@@ -239,14 +239,22 @@ describe('onStatusChanged', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it('a newly registered listener replaces the previous one', () => {
+  it('notifies every registered listener, not just the most recently registered one', () => {
     const first = vi.fn();
     const second = vi.fn();
     mod.onStatusChanged(first);
     mod.onStatusChanged(second);
     mod.setDiscordReady('Bot#1234', 'MyGuild');
-    expect(first).not.toHaveBeenCalled();
+    expect(first).toHaveBeenCalledWith(null);
     expect(second).toHaveBeenCalledWith(null);
+  });
+
+  it('does not register the same listener function twice', () => {
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+    mod.onStatusChanged(listener);
+    mod.setDiscordReady('Bot#1234', 'MyGuild');
+    expect(listener).toHaveBeenCalledOnce();
   });
 });
 

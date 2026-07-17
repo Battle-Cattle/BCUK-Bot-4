@@ -27,6 +27,10 @@ vi.mock('../csrf', () => ({
   },
 }));
 
+vi.mock('./dashboardEvents', () => ({
+  RECENT_EVENTS_LIMIT: 20,
+}));
+
 import supertest from 'supertest';
 import router from './dashboard';
 import { getStatus } from '../../shared/statusStore';

@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
-import { fromBit } from './utils';
+import { fromBit, getRowCount } from './utils';
 import { AccessLevel } from './users';
 import type { AccessLevelValue } from './users';
 import { assertNotReservedCommand } from './reservedCommands';
@@ -54,8 +54,7 @@ function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
 
 /** Return the total number of custom commands, for the dashboard's usage-stats summary. */
 export async function getCustomCommandCount(): Promise<number> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT COUNT(*) AS count FROM custom_command`);
-  return rows[0].count;
+  return getRowCount('custom_command');
 }
 
 /** Return all custom commands, each with its full list of assigned users. */

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fromBit, affectedOrExists, rowExists, hashesMatch } from './utils';
+
+vi.mock('./pool', () => ({ getPool: vi.fn() }));
+
+import { fromBit, affectedOrExists, rowExists, hashesMatch, getRowCount } from './utils';
+import { getPool } from './pool';
 
 describe('fromBit', () => {
   it('returns true for Buffer with first byte 1', () => {
@@ -96,6 +100,34 @@ describe('rowExists', () => {
   it('accepts a table/column made only of letters, digits, and underscores', async () => {
     const executor = { execute: vi.fn().mockResolvedValue([[], []]) };
     await expect(rowExists(executor as any, 'custom_command_2', 'command_id_2', 1)).resolves.toBe(false);
+  });
+});
+
+describe('getRowCount', () => {
+  it('converts the BIGINT-string COUNT(*) result to a number', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[{ count: '3' }], []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await getRowCount('counter')).toBe(3);
+  });
+
+  it('passes through a real number result unchanged', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[{ count: 0 }], []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await getRowCount('sfxtrigger')).toBe(0);
+  });
+
+  it('builds SQL from the given table name', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[{ count: '0' }], []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getRowCount('custom_command');
+    expect(pool.execute.mock.calls[0][0]).toBe('SELECT COUNT(*) AS count FROM custom_command');
+  });
+
+  it('rejects a table name containing non-identifier characters without querying', async () => {
+    const pool = { execute: vi.fn() };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(getRowCount('counter; DROP TABLE user')).rejects.toThrow('Invalid input');
+    expect(pool.execute).not.toHaveBeenCalled();
   });
 });
 

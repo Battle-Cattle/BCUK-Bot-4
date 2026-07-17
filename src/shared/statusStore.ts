@@ -2,23 +2,27 @@ import { getOrCreate } from './mapUtils';
 
 // Registered by the web layer (via onStatusChanged) so every mutator below can push a live
 // SSE update without this module importing anything from web/ — same rationale as the
-// runtime-injection registries used for EventSub's overlay/companion/alert pushes.
-let statusChangeListener: ((guildId: string | null) => void) | null = null;
+// runtime-injection registries used for EventSub's overlay/companion/alert pushes. A Set of
+// listeners (not a single slot like those single-consumer registries) since this module is
+// mutated from many unrelated call sites across the bot — an accidental second registration
+// here should gain a subscriber, not silently drop the first one.
+const statusChangeListeners = new Set<(guildId: string | null) => void>();
 
 /**
  * Registers a callback invoked after every status mutation below, so the web layer can push
- * live dashboard updates without this module depending on it. Replaces any previously
- * registered listener.
+ * live dashboard updates without this module depending on it. Adds to the set of registered
+ * listeners — every registered listener is notified on each change; none are dropped by a
+ * later registration.
  * @param listener - Called with the guild whose voice status changed, or null for a change
  *   that isn't scoped to one guild (Discord bot state, Twitch/TikTok channel state).
  */
 export function onStatusChanged(listener: (guildId: string | null) => void): void {
-  statusChangeListener = listener;
+  statusChangeListeners.add(listener);
 }
 
-/** Invokes the registered status-change listener, if any, with `guildId`. */
+/** Invokes every registered status-change listener (see {@link onStatusChanged}) with `guildId`. */
 function notifyStatusChanged(guildId: string | null): void {
-  statusChangeListener?.(guildId);
+  for (const listener of statusChangeListeners) listener(guildId);
 }
 
 /** Live connection and stream status for a single Twitch or TikTok channel. */

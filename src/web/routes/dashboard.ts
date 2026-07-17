@@ -2,18 +2,13 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { getStatus } from '../../shared/statusStore';
 import { csrfProtection } from '../csrf';
-import {
-  getStreamerByDiscordId, getSfxTriggerCount, getCustomCommandCount, getCounterCount, getRecentStreamerEvents,
-} from '../../db';
+import { getStreamerByDiscordId, getSfxTriggerCount, getCustomCommandCount, getCounterCount, getRecentStreamerEvents } from '../../db';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 import { renderError, renderView } from './shared';
+import { RECENT_EVENTS_LIMIT, type DashboardEvent } from './dashboardEvents';
 
 const log = createLogger('Web');
 const router = Router();
-
-// Matches the payload shape pushed live over the /dashboard/events SSE stream, so the
-// client can render the initial-load list and live updates with the same code path.
-const RECENT_EVENTS_LIMIT = 20;
 
 /**
  * GET / — renders the main dashboard page. Includes overall bot status, usage-stat
@@ -27,23 +22,21 @@ const RECENT_EVENTS_LIMIT = 20;
 router.get('/', csrfProtection, async (req, res) => {
   try {
     const status = getStatus(req.session.user?.currentGuildId ?? null);
-    const [sfxCount, commandCount, counterCount] = await Promise.all([
+    const [sfxCount, commandCount, counterCount, streamer] = await Promise.all([
       getSfxTriggerCount(), getCustomCommandCount(), getCounterCount(),
+      req.session.user ? getStreamerByDiscordId(req.session.user.discordId) : Promise.resolve(null),
     ]);
-    let needsReconnect = false;
-    let hasStreamer = false;
-    let recentEvents: Array<{ eventType: string; displayName: string; detail: string | null; occurredAt: string }> = [];
-    if (req.session.user) {
-      const streamer = await getStreamerByDiscordId(req.session.user.discordId);
-      needsReconnect = !!(streamer?.eventsub_access_token && streamer.twitch_name && hasAuthFailedSubs(streamer.twitch_name));
-      hasStreamer = !!streamer;
-      if (streamer) {
-        const events = await getRecentStreamerEvents(streamer.id, RECENT_EVENTS_LIMIT);
-        recentEvents = events.map((e) => ({
-          eventType: e.eventType, displayName: e.displayName, detail: e.detail, occurredAt: e.occurredAt.toISOString(),
-        }));
-      }
+
+    const needsReconnect = !!(streamer?.eventsub_access_token && streamer.twitch_name && hasAuthFailedSubs(streamer.twitch_name));
+    const hasStreamer = !!streamer;
+    let recentEvents: DashboardEvent[] = [];
+    if (streamer) {
+      const events = await getRecentStreamerEvents(streamer.id, RECENT_EVENTS_LIMIT);
+      recentEvents = events.map((e) => ({
+        eventType: e.eventType, displayName: e.displayName, detail: e.detail, occurredAt: e.occurredAt.toISOString(),
+      }));
     }
+
     renderView(res, 'dashboard', {
       user: req.session.user,
       status,

@@ -76,9 +76,25 @@ const hasStreamer = document.body?.dataset?.hasStreamer === 'true';
 
 if (recentEventsList && initialEventsRaw) {
   try {
-    renderEvents(recentEventsList, JSON.parse(initialEventsRaw));
+    // An empty array leaves the server-rendered placeholder in place — it already picks
+    // the right message ("Sign in...", "Connect your Twitch account...", or "No recent
+    // activity yet.") for the viewer's actual state, which this JSON payload can't tell apart.
+    const initialEvents = JSON.parse(initialEventsRaw);
+    if (initialEvents.length > 0) renderEvents(recentEventsList, initialEvents);
   } catch {
     // Leave the server-rendered placeholder in place.
+  }
+}
+
+/** Re-fetches and re-renders the full recent-events list, used to resync after a reconnect. */
+async function resyncRecentEvents() {
+  try {
+    const res = await fetch('/dashboard/events/recent');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.ok) renderEvents(recentEventsList, data.events);
+  } catch {
+    // EventSource itself keeps retrying the stream; ignore fetch failures here.
   }
 }
 
@@ -91,4 +107,8 @@ if (recentEventsList && hasStreamer) {
       // Ignore malformed payloads.
     }
   };
+  // The SSE handshake sends no state, only a live push on the next new event, so a dropped
+  // connection (network blip, server restart) would otherwise leave this feed stale after
+  // the browser's built-in auto-reconnect until the next real event happens to occur.
+  eventsSource.onerror = () => { resyncRecentEvents(); };
 }

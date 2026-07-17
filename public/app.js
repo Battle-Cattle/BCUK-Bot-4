@@ -7,7 +7,7 @@ if (initialStatusRaw) {
   try {
     applyStatus(JSON.parse(initialStatusRaw));
   } catch {
-    // Fallback to fetchStatus below.
+    fetchStatus(); // Malformed initial payload — fall back to a fresh fetch.
   }
 }
 
@@ -28,3 +28,9 @@ statusSource.onerror = () => {
   // one-off fallback fetch also fails; EventSource itself keeps retrying the stream.
   fetchStatus();
 };
+
+// Safety-net poll, far less frequent than the 5s poll this replaced: a connection can
+// stay technically open while the server-side push silently stops (e.g. no status change
+// occurs for a long time), which never fires `onerror` and would otherwise leave the
+// dashboard frozen with no self-healing. SSE remains the primary, low-latency update path.
+setInterval(fetchStatus, 60_000);

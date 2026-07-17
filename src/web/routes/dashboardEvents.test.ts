@@ -3,6 +3,7 @@ import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
+  getRecentStreamerEvents: vi.fn(),
 }));
 
 vi.mock('../../shared/config', () => ({
@@ -14,8 +15,8 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import express from 'express';
 import supertest from 'supertest';
-import router, { MAX_SSE_CONNECTIONS_PER_STREAMER, connections, pushDashboardEvent } from './dashboardEvents';
-import { getStreamerByDiscordId } from '../../db';
+import router, { MAX_SSE_CONNECTIONS_PER_STREAMER, RECENT_EVENTS_LIMIT, connections, pushDashboardEvent } from './dashboardEvents';
+import { getStreamerByDiscordId, getRecentStreamerEvents } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely — needed to control fake timers and the request's 'close' event deterministically. */
@@ -153,6 +154,44 @@ describe('GET /events — connection lifecycle (direct handler invocation)', () 
 
     triggerClose();
     expect(connections.get(123)).toBeUndefined();
+  });
+});
+
+describe('GET /events/recent', () => {
+  it('returns 403 when the session user has no streamer row', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+    const res = await supertest(buildApp()).get('/events/recent');
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ ok: false });
+  });
+
+  it('returns 500 (and logs) when getStreamerByDiscordId rejects', async () => {
+    vi.mocked(getStreamerByDiscordId).mockRejectedValue(new Error('db down'));
+    const res = await supertest(buildApp()).get('/events/recent');
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ ok: false });
+  });
+
+  it('returns the mapped recent events for the resolved streamer', async () => {
+    const occurredAt = new Date('2026-07-17T12:00:00Z');
+    vi.mocked(getRecentStreamerEvents).mockResolvedValue([
+      { eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt },
+    ]);
+
+    const res = await supertest(buildApp()).get('/events/recent');
+
+    expect(res.status).toBe(200);
+    expect(getRecentStreamerEvents).toHaveBeenCalledWith(123, RECENT_EVENTS_LIMIT);
+    expect(res.body).toEqual({
+      ok: true,
+      events: [{ eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt: occurredAt.toISOString() }],
+    });
+  });
+
+  it('returns an empty events array when the streamer has no recent activity', async () => {
+    vi.mocked(getRecentStreamerEvents).mockResolvedValue([]);
+    const res = await supertest(buildApp()).get('/events/recent');
+    expect(res.body).toEqual({ ok: true, events: [] });
   });
 });
 

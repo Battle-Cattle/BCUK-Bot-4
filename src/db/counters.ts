@@ -3,7 +3,7 @@ import { getPool, withTransaction } from './pool';
 import { requireTrimmedString, normalizeCommand, type SqlExecutor } from './commandStringUtils';
 import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
-import { fromBit, rowExists, affectedOrExists } from './utils';
+import { fromBit, rowExists, affectedOrExists, getRowCount } from './utils';
 import { invalidateCounterLookupCache } from './counterCache';
 import {
   createManagedLookupCache,
@@ -127,8 +127,7 @@ export async function getAllCounters(): Promise<DbCounter[]> {
 
 /** Return the total number of counters, for the dashboard's usage-stats summary. */
 export async function getCounterCount(): Promise<number> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT COUNT(*) AS count FROM counter`);
-  return rows[0].count;
+  return getRowCount('counter');
 }
 
 /**
