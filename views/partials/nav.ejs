@@ -35,8 +35,14 @@
       </div>
       <% } %>
       <% if (user) { %>
-      <a href="/overlay/settings" class="nav-item">Overlay</a>
-      <a href="/alerts/settings" class="nav-item">Alerts</a>
+      <div class="nav-group">
+        <button class="nav-group-label" aria-haspopup="true" aria-expanded="false">Overlays <span class="nav-caret">▾</span></button>
+        <div class="nav-group-items">
+          <a href="/overlay/settings" class="nav-item">Video</a>
+          <a href="/alerts/settings" class="nav-item">Alerts</a>
+          <a href="/overlay/controller/settings" class="nav-item">Controller</a>
+        </div>
+      </div>
       <a href="/channel-points" class="nav-item">Channel Points</a>
       <a href="/user/settings" class="nav-item">Settings</a>
       <% } %>

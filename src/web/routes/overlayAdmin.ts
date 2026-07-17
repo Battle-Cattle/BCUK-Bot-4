@@ -75,6 +75,20 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
   }
 });
 
+/**
+ * GET /overlay/controller/settings — renders the controller overlay info page
+ * (the OBS browser-source URL and setup notes for the gamepad overlay).
+ * @param req - Express request; reads `req.session.user`.
+ * @param res - Express response; renders the `controllerAdmin` view.
+ */
+router.get('/controller/settings', requireAuth, csrfProtection, (req, res) => {
+  renderView(res, 'controllerAdmin', {
+    user: req.session.user,
+    csrfToken: req.csrfToken(),
+    baseUrl: PUBLIC_URL,
+  });
+});
+
 router.use(mutationsRouter);
 router.use(rewardMutationsRouter);
 
