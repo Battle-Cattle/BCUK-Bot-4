@@ -17,7 +17,7 @@ import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
 import {
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
   registerEventSubAlertRuntime, registerEventSubDashboardRuntime,
-} from './twitch/eventsub/twitchEventSubHandler';
+} from './twitch/eventsub/twitchEventSubRuntime';
 import { pushOverlayEvent } from './web/routes/overlaySource';
 import { pushCompanionEvent } from './web/routes/companionEvents';
 import { pushAlertEvent } from './web/routes/alertsOverlaySource';
