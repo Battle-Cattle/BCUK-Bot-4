@@ -48,7 +48,17 @@ describe('getStreamUrl', () => {
 describe('getThumbnailUrl', () => {
   it('replaces {width} and {height} placeholders', () => {
     const stream = makeStream({ thumbnail_url: 'https://thumb.tv/{width}x{height}.jpg' });
-    expect(getThumbnailUrl(stream)).toBe('https://thumb.tv/640x360.jpg');
+    expect(getThumbnailUrl(stream)).toMatch(/^https:\/\/thumb\.tv\/640x360\.jpg\?cb=\d+$/);
+  });
+
+  it('appends a different cache-busting value on each call', () => {
+    const stream = makeStream({ thumbnail_url: 'https://thumb.tv/{width}x{height}.jpg' });
+    const first = getThumbnailUrl(stream);
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(1000);
+    const second = getThumbnailUrl(stream);
+    vi.useRealTimers();
+    expect(second).not.toBe(first);
   });
 });
 
@@ -86,7 +96,7 @@ describe('buildEmbedPreview', () => {
     expect(preview.title).toBe('Playing Minecraft');
     expect(preview.url).toBe('https://www.twitch.tv/streamer1');
     expect(preview.color).toBe('#9146FF');
-    expect(preview.imageUrl).toBe('https://thumb.tv/640x360.jpg');
+    expect(preview.imageUrl).toMatch(/^https:\/\/thumb\.tv\/640x360\.jpg\?cb=\d+$/);
   });
 
   it('includes a Game field', () => {

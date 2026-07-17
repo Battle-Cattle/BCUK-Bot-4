@@ -30,14 +30,19 @@ export function getStreamUrl(login: string): string {
 }
 
 /**
- * Resolves `stream`'s thumbnail template URL to a concrete 640x360 image URL.
+ * Resolves `stream`'s thumbnail template URL to a concrete 640x360 image URL, with a
+ * cache-busting query param appended. Twitch's thumbnail URL is stable for a given login
+ * (no timestamp of its own), so without a cache-buster Discord's media proxy — which caches
+ * images by URL — keeps serving whatever snapshot it first fetched for that login, even
+ * across unrelated stream sessions weeks apart.
  * @param stream - Twitch stream whose thumbnail URL should be resolved.
- * @returns The thumbnail URL with `{width}`/`{height}` placeholders filled in.
+ * @returns The thumbnail URL with `{width}`/`{height}` placeholders filled in and a fresh `cb` param.
  */
 export function getThumbnailUrl(stream: TwitchStream): string {
-  return stream.thumbnail_url
+  const resolved = stream.thumbnail_url
     .replace('{width}', '640')
     .replace('{height}', '360');
+  return `${resolved}?cb=${Date.now()}`;
 }
 
 /**
