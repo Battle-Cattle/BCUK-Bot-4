@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
-vi.mock('../../db', () => ({ getVideosForReward: vi.fn(), getStreamerById: vi.fn(), findCachedAlertConfig: vi.fn() }));
+vi.mock('../../db', () => ({
+  getVideosForReward: vi.fn(), getStreamerById: vi.fn(), findCachedAlertConfig: vi.fn(), recordStreamerEvent: vi.fn(),
+}));
 vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../commands/shoutoutHandler', () => ({ buildShoutoutMessage: vi.fn() }));
 vi.mock('../../commands/commandMonitorStore', () => ({ recordCommandTestEntry: vi.fn() }));
@@ -13,9 +15,9 @@ import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
   handleStreamOnline, handleStreamOffline, handleChannelUpdate,
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
-  registerEventSubAlertRuntime,
+  registerEventSubAlertRuntime, registerEventSubDashboardRuntime,
 } from './twitchEventSubHandler';
-import { getVideosForReward, getStreamerById, findCachedAlertConfig } from '../../db';
+import { getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
@@ -33,6 +35,9 @@ registerEventSubCompanionRuntime({ pushCompanionEvent: mockPushCompanionEvent })
 
 const mockPushAlertEvent = vi.fn();
 registerEventSubAlertRuntime({ pushAlertEvent: mockPushAlertEvent });
+
+const mockPushDashboardEvent = vi.fn();
+registerEventSubDashboardRuntime({ pushDashboardEvent: mockPushDashboardEvent });
 
 // Fixed streamerId used by tests that don't care about alert-config lookup specifics.
 const STREAMER_ID = 7;
@@ -66,6 +71,7 @@ function makeConfig(overrides: Partial<{
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(findCachedAlertConfig).mockResolvedValue(null);
+  vi.mocked(recordStreamerEvent).mockResolvedValue(undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -436,6 +442,68 @@ describe('alerts overlay push', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Dashboard "Recent Events" push — unconditional, independent of alert/chat config
+// ---------------------------------------------------------------------------
+describe('dashboard events push', () => {
+  it('handleFollow records and pushes a follow event unconditionally', async () => {
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig({ follow_enabled: false }), STREAMER_ID);
+
+    expect(recordStreamerEvent).toHaveBeenCalledWith(STREAMER_ID, 'follow', 'TestUser', null);
+    expect(mockPushDashboardEvent).toHaveBeenCalledWith(STREAMER_ID, {
+      eventType: 'follow', displayName: 'TestUser', detail: null, occurredAt: expect.any(String),
+    });
+  });
+
+  it('handleSub does not record a dashboard event for gift subs — handled by handleGiftSub instead', async () => {
+    await handleSub('streamer', {
+      user_login: 'subuser', user_name: 'SubUser', broadcaster_user_login: 'streamer', tier: '1000', is_gift: true,
+    }, makeConfig({ sub_enabled: true }), STREAMER_ID);
+    expect(recordStreamerEvent).not.toHaveBeenCalled();
+  });
+
+  it('handleSub records a sub event with the tier name as detail', async () => {
+    await handleSub('streamer', {
+      user_login: 'subuser', user_name: 'SubUser', broadcaster_user_login: 'streamer', tier: '2000', is_gift: false,
+    }, makeConfig({ sub_enabled: false }), STREAMER_ID);
+    expect(recordStreamerEvent).toHaveBeenCalledWith(STREAMER_ID, 'sub', 'SubUser', 'Tier 2');
+  });
+
+  it('handleResub records a resub event with tier and months as detail', async () => {
+    await handleResub('streamer', {
+      user_login: 'resubuser', user_name: 'ResubUser', broadcaster_user_login: 'streamer',
+      tier: '1000', cumulative_months: 6, streak_months: 3,
+    }, makeConfig({ sub_enabled: false }), STREAMER_ID);
+    expect(recordStreamerEvent).toHaveBeenCalledWith(STREAMER_ID, 'resub', 'ResubUser', 'Tier 1 · 6 months');
+  });
+
+  it('handleGiftSub records a giftsub event using the gifter display name and count/tier as detail', async () => {
+    await handleGiftSub('streamer', {
+      user_login: 'gifter', user_name: 'GifterDisplay', broadcaster_user_login: 'streamer',
+      total: 5, tier: '1000', is_anonymous: false,
+    }, makeConfig({ sub_enabled: false }), STREAMER_ID);
+    expect(recordStreamerEvent).toHaveBeenCalledWith(STREAMER_ID, 'giftsub', 'GifterDisplay', '5 x Tier 1');
+  });
+
+  it('handleGiftSub records "Anonymous" as the display name for anonymous gifters', async () => {
+    await handleGiftSub('streamer', {
+      user_login: 'gifter', user_name: 'GifterDisplay', broadcaster_user_login: 'streamer',
+      total: 5, tier: '1000', is_anonymous: true,
+    }, makeConfig({ sub_enabled: false }), STREAMER_ID);
+    expect(recordStreamerEvent).toHaveBeenCalledWith(STREAMER_ID, 'giftsub', 'Anonymous', '5 x Tier 1');
+  });
+
+  it('handleRaid records a raid event with viewer count as detail, independent of raid_enabled/raid_shoutout_enabled', async () => {
+    await handleRaid('streamer', {
+      from_broadcaster_user_login: 'raider', from_broadcaster_user_name: 'RaiderDisplay',
+      to_broadcaster_user_login: 'streamer', viewers: 42,
+    }, makeConfig({ raid_enabled: false, raid_shoutout_enabled: false }), STREAMER_ID);
+    expect(recordStreamerEvent).toHaveBeenCalledWith(STREAMER_ID, 'raid', 'RaiderDisplay', '42 viewers');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Chat-send failures must not block the independent alert push
 // ---------------------------------------------------------------------------
 describe('chat-send failures are isolated from the alert push', () => {
@@ -532,6 +600,28 @@ describe('chat-send failures are isolated from the alert push', () => {
     ).resolves.toBeUndefined();
     expect(mockPushAlertEvent).toHaveBeenCalledOnce();
   });
+
+  it('handleFollow still records the dashboard event when the chat send rejects', async () => {
+    mockSend.mockRejectedValueOnce(new Error('chat send failed'));
+    await handleFollow('streamer', followEvent, makeConfig({ follow_enabled: true }), STREAMER_ID);
+    expect(mockPushDashboardEvent).toHaveBeenCalled();
+  });
+
+  it('handleFollow does not reject when recordStreamerEvent rejects', async () => {
+    vi.mocked(recordStreamerEvent).mockRejectedValueOnce(new Error('db unavailable'));
+    await expect(
+      handleFollow('streamer', followEvent, makeConfig({ follow_enabled: false }), STREAMER_ID),
+    ).resolves.toBeUndefined();
+    expect(mockPushDashboardEvent).not.toHaveBeenCalled();
+  });
+
+  it('handleFollow does not reject when pushDashboardEvent throws', async () => {
+    mockPushDashboardEvent.mockImplementationOnce(() => { throw new Error('sse push failed'); });
+    await expect(
+      handleFollow('streamer', followEvent, makeConfig({ follow_enabled: false }), STREAMER_ID),
+    ).resolves.toBeUndefined();
+    expect(mockPushDashboardEvent).toHaveBeenCalledOnce();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -625,6 +715,25 @@ describe('handleRedemption', () => {
     await handleRedemption('streamer', event, makeConfig(), streamerId);
 
     expect(applyRedemptionPricing).toHaveBeenCalledWith(streamerId, 'reward-abc');
+  });
+
+  it('records a dashboard event using the reward title as detail when there is no user input', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await handleRedemption('streamer', event, makeConfig(), streamerId);
+
+    expect(recordStreamerEvent).toHaveBeenCalledWith(streamerId, 'redemption', 'Redeemer', 'Cool Reward');
+    expect(mockPushDashboardEvent).toHaveBeenCalledWith(streamerId, expect.objectContaining({
+      eventType: 'redemption', displayName: 'Redeemer', detail: 'Cool Reward',
+    }));
+  });
+
+  it('records a dashboard event including the viewer-entered text as detail when present', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await handleRedemption('streamer', { ...event, user_input: 'drink water!' }, makeConfig(), streamerId);
+
+    expect(recordStreamerEvent).toHaveBeenCalledWith(streamerId, 'redemption', 'Redeemer', 'Cool Reward: drink water!');
   });
 
   it('still triggers the overlay lookup when applyRedemptionPricing throws', async () => {

@@ -202,6 +202,16 @@ describe('config — parsePositiveIntEnv-backed values', () => {
     const config = await loadConfig({ SSE_MAX_TOTAL_CONNECTIONS: undefined });
     expect(config.SSE_MAX_TOTAL_CONNECTIONS).toBe(500);
   });
+
+  it('defaults DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER to 5 when unset', async () => {
+    const config = await loadConfig({ DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER: undefined });
+    expect(config.DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER).toBe(5);
+  });
+
+  it('defaults DASHBOARD_STATUS_MAX_SSE_PER_GUILD to 10 when unset', async () => {
+    const config = await loadConfig({ DASHBOARD_STATUS_MAX_SSE_PER_GUILD: undefined });
+    expect(config.DASHBOARD_STATUS_MAX_SSE_PER_GUILD).toBe(10);
+  });
 });
 
 describe('config — GLOBAL_COOLDOWN_MS', () => {

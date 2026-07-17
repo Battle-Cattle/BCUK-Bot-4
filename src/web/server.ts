@@ -16,6 +16,8 @@ import guildRouter from './routes/guild';
 import eventsubCallbackRouter from './routes/eventsubCallback';
 import eventsubAdminRouter from './routes/eventsubAdmin';
 import dashboardRouter from './routes/dashboard';
+import dashboardEventsRouter from './routes/dashboardEvents';
+import dashboardStatusEventsRouter from './routes/dashboardStatusEvents';
 import adminRouter from './routes/admin';
 import apiRouter from './routes/api';
 import sfxRouter from './routes/sfx';
@@ -216,6 +218,8 @@ app.use('/user/settings', requireAuth, userSettingsRouter);
 app.use('/overlay', requireAuth, overlayAdminRouter);
 app.use('/alerts', requireAuth, alertsAdminRouter);
 app.use('/channel-points', requireAuth, channelPointsAdminRouter);
+app.use('/dashboard', requireAuth, dashboardEventsRouter);
+app.use('/dashboard', requireAuth, dashboardStatusEventsRouter);
 
 /**
  * Renders the `error` view with the given status and message, including a real CSRF

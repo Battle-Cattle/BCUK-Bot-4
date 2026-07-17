@@ -1,5 +1,5 @@
-import type { EventSubConfig, AlertEventType } from '../../db';
-import { getVideosForReward, getStreamerById, findCachedAlertConfig } from '../../db';
+import type { EventSubConfig, AlertEventType, StreamerEventType } from '../../db';
+import { getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
@@ -107,6 +107,34 @@ const alertRuntimeRegistry = createRuntimeRegistry<EventSubAlertRuntime>();
  */
 export function registerEventSubAlertRuntime(runtime: EventSubAlertRuntime): void {
   alertRuntimeRegistry.register(runtime);
+}
+
+// Runtime injection for the dashboard "Recent Events" push function — same rationale as
+// EventSubOverlayRuntime above. Registered from index.ts before startWebPanel(), since
+// pushDashboardEvent is just a function reference and doesn't require the HTTP server to
+// be running yet.
+/**
+ * Public contract for the dashboard events runtime injection.
+ * Passed to {@link registerEventSubDashboardRuntime} from index.ts.
+ */
+interface EventSubDashboardRuntime {
+  /**
+   * Push a streamer activity event to the dashboard's "Recent Events" SSE stream.
+   * @param streamerId - DB row ID of the streamer whose dashboard to push to.
+   * @param event - The dashboard event payload to display.
+   */
+  pushDashboardEvent: (streamerId: number, event: import('../../web/routes/dashboardEvents').DashboardEvent) => void;
+}
+
+const dashboardEventRuntimeRegistry = createRuntimeRegistry<EventSubDashboardRuntime>();
+
+/**
+ * Register the dashboard events push function. Called from index.ts before startWebPanel().
+ * @param runtime - The {@link EventSubDashboardRuntime} to store.
+ * @returns void
+ */
+export function registerEventSubDashboardRuntime(runtime: EventSubDashboardRuntime): void {
+  dashboardEventRuntimeRegistry.register(runtime);
 }
 
 // Runtime injection for the Twitch chat send function — avoids a direct import
@@ -261,10 +289,41 @@ async function maybePushAlert(
 }
 
 /**
+ * Records a streamer activity event to `streamer_event_log` and pushes it live to the
+ * dashboard's "Recent Events" feed via the injected dashboard runtime. Unlike
+ * {@link maybePushAlert}, this is unconditional — it doesn't gate on any per-streamer
+ * enabled flag, since the dashboard feed always reflects what actually happened. A failed
+ * DB write or push is logged and swallowed rather than rejecting, so it can't surface as a
+ * failure of the EventSub handler that called it.
+ *
+ * @param streamerId - DB row ID of the streamer, used to scope the log entry and dashboard SSE channel.
+ * @param eventType - Kind of activity that occurred.
+ * @param displayName - The acting Twitch viewer's display name (follower, raider, redeemer, etc.).
+ * @param detail - Short additional context (e.g. raid viewer count, redeemed reward name and any
+ *   text the viewer entered), or null if there's none.
+ */
+async function recordAndPushDashboardEvent(
+  streamerId: number,
+  eventType: StreamerEventType,
+  displayName: string,
+  detail: string | null,
+): Promise<void> {
+  try {
+    await recordStreamerEvent(streamerId, eventType, displayName, detail);
+    dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, {
+      eventType, displayName, detail, occurredAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    log.error(`Failed to record ${eventType} dashboard event for streamer ${streamerId}:`, err);
+  }
+}
+
+/**
  * Handle a channel.follow EventSub notification.
  * Sends a chat message to the broadcaster's channel using the injected Twitch runtime when
- * `config.follow_enabled` is true, and independently pushes a browser-source alert via
- * {@link maybePushAlert} when the streamer's follow alert is enabled.
+ * `config.follow_enabled` is true, independently pushes a browser-source alert via
+ * {@link maybePushAlert} when the streamer's follow alert is enabled, and unconditionally
+ * records the follow to the dashboard's "Recent Events" feed via {@link recordAndPushDashboardEvent}.
  *
  * @param login - Broadcaster login name (chat channel to send to).
  * @param event - Follow event payload from Twitch EventSub.
@@ -275,13 +334,15 @@ export async function handleFollow(login: string, event: FollowEvent, config: Ev
   const vars = { username: event.user_login, display_name: event.user_name };
   await maybeSendChatMessage(login, config.follow_enabled, config.follow_message, vars);
   await maybePushAlert(login, streamerId, 'follow', vars);
+  await recordAndPushDashboardEvent(streamerId, 'follow', event.user_name, null);
 }
 
 /**
  * Handle a channel.subscribe EventSub notification. Gift subs are silently skipped entirely
- * (handled by handleGiftSub) for both the chat message and the alert. Otherwise sends a chat
- * message when `config.sub_enabled` is true, and independently pushes a browser-source alert
- * via {@link maybePushAlert} when the streamer's sub alert is enabled.
+ * (handled by handleGiftSub) for the chat message, the alert, and the dashboard feed. Otherwise
+ * sends a chat message when `config.sub_enabled` is true, independently pushes a browser-source
+ * alert via {@link maybePushAlert} when the streamer's sub alert is enabled, and unconditionally
+ * records the sub to the dashboard's "Recent Events" feed via {@link recordAndPushDashboardEvent}.
  *
  * @param login - Broadcaster login name.
  * @param event - Subscribe event payload; gift subs are silently skipped (handled by handleGiftSub).
@@ -298,12 +359,15 @@ export async function handleSub(login: string, event: SubEvent, config: EventSub
   };
   await maybeSendChatMessage(login, config.sub_enabled, config.sub_message, vars);
   await maybePushAlert(login, streamerId, 'sub', vars);
+  await recordAndPushDashboardEvent(streamerId, 'sub', event.user_name, tierName(event.tier));
 }
 
 /**
  * Handle a channel.subscription.message (resub) EventSub notification.
- * Sends a chat message when `config.sub_enabled` is true, and independently pushes a
- * browser-source alert via {@link maybePushAlert} when the streamer's resub alert is enabled.
+ * Sends a chat message when `config.sub_enabled` is true, independently pushes a
+ * browser-source alert via {@link maybePushAlert} when the streamer's resub alert is enabled,
+ * and unconditionally records the resub to the dashboard's "Recent Events" feed via
+ * {@link recordAndPushDashboardEvent}.
  *
  * @param login - Broadcaster login name.
  * @param event - Resub event payload including cumulative and streak month counts.
@@ -321,13 +385,16 @@ export async function handleResub(login: string, event: ResubEvent, config: Even
   };
   await maybeSendChatMessage(login, config.sub_enabled, config.resub_message, vars);
   await maybePushAlert(login, streamerId, 'resub', vars);
+  await recordAndPushDashboardEvent(streamerId, 'resub', event.user_name, `${tierName(event.tier)} · ${event.cumulative_months} months`);
 }
 
 /**
  * Handle a channel.subscription.gift EventSub notification.
- * Anonymous gifters are reported as "anonymous" / "Anonymous". Sends a chat message when
- * `config.sub_enabled` is true, and independently pushes a browser-source alert via
- * {@link maybePushAlert} when the streamer's gift-sub alert is enabled.
+ * Anonymous gifters are reported as "anonymous" / "Anonymous" everywhere, including the
+ * dashboard feed. Sends a chat message when `config.sub_enabled` is true, independently pushes
+ * a browser-source alert via {@link maybePushAlert} when the streamer's gift-sub alert is
+ * enabled, and unconditionally records the gift sub to the dashboard's "Recent Events" feed via
+ * {@link recordAndPushDashboardEvent}.
  *
  * @param login - Broadcaster login name.
  * @param event - Gift-sub event payload; `is_anonymous` controls gifter display name.
@@ -346,6 +413,7 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
   };
   await maybeSendChatMessage(login, config.sub_enabled, config.giftsub_message, vars);
   await maybePushAlert(login, streamerId, 'giftsub', vars);
+  await recordAndPushDashboardEvent(streamerId, 'giftsub', gifterDisplay, `${event.total} x ${tierName(event.tier)}`);
 }
 
 /**
@@ -359,6 +427,8 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
  *    resolved on Twitch.
  *  - The streamer's raid alert config (via {@link maybePushAlert}) — pushes a browser-source
  *    alert independently of both of the above.
+ *  - The dashboard's "Recent Events" feed (via {@link recordAndPushDashboardEvent}) — recorded
+ *    unconditionally, independently of all of the above.
  * The chat-message branches no-op when no Twitch runtime has been registered.
  *
  * @param login - Broadcaster login name (the raid target's channel).
@@ -394,19 +464,22 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
   }
 
   await maybePushAlert(login, streamerId, 'raid', vars);
+  await recordAndPushDashboardEvent(streamerId, 'raid', event.from_broadcaster_user_name, `${event.viewers} viewers`);
 }
 
 /**
  * Handle a channel.channel_points_custom_reward_redemption.add EventSub notification.
  * Unconditionally forwards the redemption to the streamer's companion app (if any device
- * is connected), fires off dynamic pricing for the redeemed reward (a no-op if the reward
- * doesn't have dynamic pricing enabled), then separately looks up videos configured for
- * the redeemed reward and triggers an overlay event if found. The overlay push still
- * no-ops when no videos are configured for the reward or no overlay runtime is registered.
- * The companion push is isolated in its own try/catch, and the pricing update is
- * intentionally not awaited (its errors are caught via `.catch` instead), so a failure or
- * network latency in either (e.g. a DB error, or a slow/failed Twitch price push) cannot
- * delay or prevent the independent overlay-video logic below from running.
+ * is connected) and to the dashboard's "Recent Events" feed (via
+ * {@link recordAndPushDashboardEvent}), fires off dynamic pricing for the redeemed reward
+ * (a no-op if the reward doesn't have dynamic pricing enabled), then separately looks up
+ * videos configured for the redeemed reward and triggers an overlay event if found. The
+ * overlay push still no-ops when no videos are configured for the reward or no overlay
+ * runtime is registered. The companion push and dashboard-event recording are each isolated
+ * in their own try/catch, and the pricing update is intentionally not awaited (its errors are
+ * caught via `.catch` instead), so a failure or network latency in any of them (e.g. a DB
+ * error, or a slow/failed Twitch price push) cannot delay or prevent the independent
+ * overlay-video logic below from running.
  *
  * @param login - Broadcaster login name.
  * @param event - Redemption event payload including reward ID and user details.
@@ -435,6 +508,9 @@ export async function handleRedemption(
   } catch (err) {
     log.error('Failed to push companion event for redemption:', err);
   }
+
+  const detail = event.user_input ? `${event.reward.title}: ${event.user_input}` : event.reward.title;
+  await recordAndPushDashboardEvent(streamerId, 'redemption', event.user_name, detail);
 
   // Not awaited: applyRedemptionPricing drives a queued Twitch Helix call, and there's no
   // correctness reason to make the overlay-trigger path below wait on that network latency.

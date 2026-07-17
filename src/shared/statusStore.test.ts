@@ -161,6 +161,95 @@ describe('TikTok channel status', () => {
   });
 });
 
+describe('onStatusChanged', () => {
+  it('is not called before any mutator runs', () => {
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('setDiscordReady notifies with null (not scoped to one guild)', () => {
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+    mod.setDiscordReady('Bot#1234', 'MyGuild');
+    expect(listener).toHaveBeenCalledWith(null);
+  });
+
+  it('setVoiceConnected notifies with the guildId', () => {
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+    mod.setVoiceConnected('guild-A', 'General');
+    expect(listener).toHaveBeenCalledWith('guild-A');
+  });
+
+  it('setVoiceDisconnected notifies with the guildId', () => {
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+    mod.setVoiceDisconnected('guild-A');
+    expect(listener).toHaveBeenCalledWith('guild-A');
+  });
+
+  it('setVoicePlaying notifies with the guildId', () => {
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', 'discord');
+    expect(listener).toHaveBeenCalledWith('guild-A');
+  });
+
+  it('setVoiceIdle notifies with the guildId', () => {
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+    mod.setVoiceIdle('guild-A');
+    expect(listener).toHaveBeenCalledWith('guild-A');
+  });
+
+  it('clearVoiceStatus notifies with the guildId', () => {
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+    mod.clearVoiceStatus('guild-A');
+    expect(listener).toHaveBeenCalledWith('guild-A');
+  });
+
+  it('setTwitchChannel notifies with null (not scoped to one guild)', () => {
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+    mod.setTwitchChannel('mychan', true);
+    expect(listener).toHaveBeenCalledWith(null);
+  });
+
+  it('setTikTokChannel notifies with null (not scoped to one guild)', () => {
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+    mod.setTikTokChannel('creator1', true);
+    expect(listener).toHaveBeenCalledWith(null);
+  });
+
+  it('setTwitchChannelLive notifies with null when the channel is tracked', () => {
+    mod.setTwitchChannel('mychan', true);
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+    mod.setTwitchChannelLive('mychan', true);
+    expect(listener).toHaveBeenCalledWith(null);
+  });
+
+  it('setTwitchChannelLive does not notify for an unknown channel', () => {
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+    mod.setTwitchChannelLive('unknown', true);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('a newly registered listener replaces the previous one', () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    mod.onStatusChanged(first);
+    mod.onStatusChanged(second);
+    mod.setDiscordReady('Bot#1234', 'MyGuild');
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledWith(null);
+  });
+});
+
 describe('getStatus returns shallow copies', () => {
   it('mutating returned discord object does not affect internal state', () => {
     mod.setDiscordReady('Bot#1234', 'MyGuild');

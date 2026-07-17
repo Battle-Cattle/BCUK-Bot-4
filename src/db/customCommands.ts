@@ -52,6 +52,12 @@ function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
+/** Return the total number of custom commands, for the dashboard's usage-stats summary. */
+export async function getCustomCommandCount(): Promise<number> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT COUNT(*) AS count FROM custom_command`);
+  return rows[0].count;
+}
+
 /** Return all custom commands, each with its full list of assigned users. */
 export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCommandWithAssignments[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(

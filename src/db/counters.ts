@@ -125,6 +125,12 @@ export async function getAllCounters(): Promise<DbCounter[]> {
   return rows.map(mapCounter);
 }
 
+/** Return the total number of counters, for the dashboard's usage-stats summary. */
+export async function getCounterCount(): Promise<number> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT COUNT(*) AS count FROM counter`);
+  return rows[0].count;
+}
+
 /**
  * Fetches a counter along with its archived yearly-reset history (the
  * `value2020`..`value2100` columns populated by `archiveAndResetYearlyCounters`).

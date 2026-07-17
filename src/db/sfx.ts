@@ -100,6 +100,12 @@ export async function getPublicSfxTriggers(): Promise<PublicSfxTrigger[]> {
   }));
 }
 
+/** Return the total number of SFX triggers, for the dashboard's usage-stats summary. */
+export async function getSfxTriggerCount(): Promise<number> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT COUNT(*) AS count FROM sfxtrigger`);
+  return rows[0].count;
+}
+
 export interface SfxCategory {
   id: number;
   name: string;

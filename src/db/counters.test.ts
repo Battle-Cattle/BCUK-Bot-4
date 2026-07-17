@@ -68,6 +68,7 @@ const mockConnection = makeMockConnection();
 import { getPool } from './pool';
 import {
   getAllCounters,
+  getCounterCount,
   getCounterHistory,
   addCounter,
   updateCounter,
@@ -111,6 +112,15 @@ describe('CounterNotFoundError', () => {
 
   it('is an instance of Error', () => {
     expect(new CounterNotFoundError(1)).toBeInstanceOf(Error);
+  });
+});
+
+// ─── getCounterCount ────────────────────────────────────────────────────────
+
+describe('getCounterCount', () => {
+  it('returns the count from the query result', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ count: 4 }]) as any);
+    expect(await getCounterCount()).toBe(4);
   });
 });
 

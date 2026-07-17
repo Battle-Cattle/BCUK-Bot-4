@@ -56,11 +56,13 @@ vi.mock('./twitch/eventsub/twitchEventSubHandler', () => ({
   registerEventSubTwitchRuntime: vi.fn(),
   registerEventSubCompanionRuntime: vi.fn(),
   registerEventSubAlertRuntime: vi.fn(),
+  registerEventSubDashboardRuntime: vi.fn(),
 }));
 vi.mock('./web/routes/overlaySource', () => ({ pushOverlayEvent: vi.fn() }));
 vi.mock('./web/routes/companionEvents', () => ({ pushCompanionEvent: vi.fn() }));
 vi.mock('./web/routes/alertsOverlaySource', () => ({ pushAlertEvent: vi.fn() }));
 vi.mock('./web/routes/channelPointsEvents', () => ({ pushPricingUpdate: vi.fn() }));
+vi.mock('./web/routes/dashboardEvents', () => ({ pushDashboardEvent: vi.fn() }));
 vi.mock('./commands/counterScheduler', () => ({
   startCounterScheduler: vi.fn(),
   stopCounterScheduler: vi.fn(),
@@ -151,6 +153,15 @@ describe('startup — guild registry preload', () => {
     await runMain();
 
     expect(vi.mocked(registerRewardPricingRuntime)).toHaveBeenCalledWith({ pushPricingUpdate });
+  });
+
+  it('registers the dashboard events runtime with pushDashboardEvent on a clean startup', async () => {
+    const { registerEventSubDashboardRuntime } = await import('./twitch/eventsub/twitchEventSubHandler.js');
+    const { pushDashboardEvent } = await import('./web/routes/dashboardEvents.js');
+
+    await runMain();
+
+    expect(vi.mocked(registerEventSubDashboardRuntime)).toHaveBeenCalledWith({ pushDashboardEvent });
   });
 
   it('calls process.exit(1) and does not start the bot when reloadGuildRegistry rejects', async () => {

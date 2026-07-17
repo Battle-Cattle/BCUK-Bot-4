@@ -126,7 +126,7 @@ export async function removeUser(discordId: string): Promise<void> {
 
 import { invalidateCustomCommandLookupCache } from './db/customCommandCache';
 export {
-  getAllCustomCommandsWithAssignments,
+  getAllCustomCommandsWithAssignments, getCustomCommandCount,
   addCustomCommand, updateCustomCommand, removeCustomCommand,
   assignUserToCommand, assignUsersToCommand, unassignUserFromCommand,
 } from './db/customCommands';
@@ -148,7 +148,7 @@ export type { SqlExecutor } from './db/commandLocks';
 
 export {
   CounterNotFoundError,
-  getAllCounters, addCounter, updateCounter, removeCounter,
+  getAllCounters, getCounterCount, addCounter, updateCounter, removeCounter,
   resetCounterCurrentValue, incrementCounter, archiveAndResetYearlyCounters,
   getCounterHistory,
 } from './db/counters';
@@ -187,11 +187,16 @@ export {
 } from './db/alertConfig';
 export { findCachedAlertConfig } from './db/alertConfigCache';
 
+// ─── Streamer event log ──────────────────────────────────────────────────────
+
+export type { StreamerEventType, StreamerEvent } from './db/eventLog';
+export { recordStreamerEvent, getRecentStreamerEvents } from './db/eventLog';
+
 // ─── SFX ────────────────────────────────────────────────────────────────────
 
 export type { SfxTrigger, SfxFile, SfxTriggerRow, PublicSfxTrigger, SfxCategory } from './db/sfx';
 export {
-  findTrigger, findSoundFiles, getAllSfxTriggers, getPublicSfxTriggers,
+  findTrigger, findSoundFiles, getAllSfxTriggers, getSfxTriggerCount, getPublicSfxTriggers,
   getAllCategories, createCategory, renameCategory, deleteCategory,
   createSfxTrigger, updateSfxTrigger, deleteSfxTrigger,
   addSfxFile, updateSfxFile, deleteSfxFile,

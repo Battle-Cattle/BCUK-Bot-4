@@ -43,6 +43,11 @@
           <p>We do not record or transcribe voice channel audio, and we do not store the content of Discord
             messages or chat logs. A short list of the most recent bot command executions is kept in memory
             for moderators to review, but it is not written to a database and is lost on restart.</p>
+          <p>If a connected Twitch channel receives a follow, subscription, raid, or channel-point redemption,
+            we store the event type, the acting viewer's Twitch display name, and a short detail string (for
+            example a raid's viewer count, or a redeemed reward's name and any text the viewer entered) so it
+            can be shown on the dashboard's live "Recent Events" feed. This is the only place we store data
+            about Twitch viewers who aren't themselves signed-in users of this site.</p>
         </div>
       </div>
 
@@ -63,6 +68,10 @@
             any encrypted Twitch tokens and your companion app token — is deleted along with it. Any Streamdeck
             API key you generated is not automatically deleted; contact a server administrator to have it
             revoked. You can revoke your own companion app token at any time from the dashboard.</p>
+          <p>Recent-events activity (follows, subs, raids, redemptions) is capped automatically at the 200
+            most recent events per connected Twitch channel — older events are deleted as new ones come in, so
+            this data is never kept indefinitely. It's deleted immediately, in full, if the channel is
+            disconnected from this site.</p>
           <p>To request deletion of your data, contact a server administrator.</p>
         </div>
       </div>
