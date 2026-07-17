@@ -172,6 +172,13 @@ describe('GET /events/recent', () => {
     expect(res.body).toEqual({ ok: false });
   });
 
+  it('returns 500 with the same JSON error contract (and logs) when getRecentStreamerEvents rejects', async () => {
+    vi.mocked(getRecentStreamerEvents).mockRejectedValue(new Error('db down'));
+    const res = await supertest(buildApp()).get('/events/recent');
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ ok: false });
+  });
+
   it('returns the mapped recent events for the resolved streamer', async () => {
     const occurredAt = new Date('2026-07-17T12:00:00Z');
     vi.mocked(getRecentStreamerEvents).mockResolvedValue([

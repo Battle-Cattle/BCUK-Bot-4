@@ -87,11 +87,11 @@ beforeEach(() => {
 // ─── getCustomCommandCount ─────────────────────────────────────────────────────
 
 describe('getCustomCommandCount', () => {
-  it('returns the count from the query result', async () => {
+  it('returns the count from the query result as a string', async () => {
     const pool = makePool();
     pool.execute.mockResolvedValue([[{ count: 12 }], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    expect(await getCustomCommandCount()).toBe(12);
+    expect(await getCustomCommandCount()).toBe('12');
   });
 });
 

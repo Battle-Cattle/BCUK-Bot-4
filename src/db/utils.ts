@@ -41,15 +41,14 @@ export async function rowExists(
  * Returns the total row count for `table`, for simple usage-stat summaries.
  * @param table Table name — must be a fixed, trusted identifier, never derived from user input.
  *   Validated against an allowlist pattern as defence-in-depth before being interpolated into SQL.
- * @returns The row count. `COUNT(*)` is a MySQL BIGINT, so this explicitly converts the
- *   `bigNumberStrings`-stringified result back to a number — every table this is used for is
- *   small enough that the count stays well within `Number`'s safe integer range.
+ * @returns The row count as a string. `COUNT(*)` is a MySQL BIGINT — never coerce it to
+ *   `Number` (the pool is configured with `bigNumberStrings: true`).
  * @throws If `table` isn't a plain alphanumeric/underscore identifier.
  */
-export async function getRowCount(table: string): Promise<number> {
+export async function getRowCount(table: string): Promise<string> {
   if (!IDENTIFIER_PATTERN.test(table)) throw new Error('Invalid input');
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT COUNT(*) AS count FROM ${table}`);
-  return Number(rows[0].count);
+  return String(rows[0].count);
 }
 
 /**

@@ -100,8 +100,8 @@ export async function getPublicSfxTriggers(): Promise<PublicSfxTrigger[]> {
   }));
 }
 
-/** Return the total number of SFX triggers, for the dashboard's usage-stats summary. */
-export async function getSfxTriggerCount(): Promise<number> {
+/** Return the total number of SFX triggers (as a string — see {@link getRowCount}), for the dashboard's usage-stats summary. */
+export async function getSfxTriggerCount(): Promise<string> {
   return getRowCount('sfxtrigger');
 }
 

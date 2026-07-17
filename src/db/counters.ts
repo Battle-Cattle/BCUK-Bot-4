@@ -125,8 +125,8 @@ export async function getAllCounters(): Promise<DbCounter[]> {
   return rows.map(mapCounter);
 }
 
-/** Return the total number of counters, for the dashboard's usage-stats summary. */
-export async function getCounterCount(): Promise<number> {
+/** Return the total number of counters (as a string — see {@link getRowCount}), for the dashboard's usage-stats summary. */
+export async function getCounterCount(): Promise<string> {
   return getRowCount('counter');
 }
 

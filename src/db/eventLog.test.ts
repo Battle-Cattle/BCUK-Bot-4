@@ -43,6 +43,31 @@ describe('recordStreamerEvent', () => {
     const [, insertParams] = pool.execute.mock.calls[0];
     expect(insertParams).toEqual([5, 'redemption', 'someviewer', 'Redeemed Hydrate: drink water!']);
   });
+
+  it('does not run the prune DELETE until the INSERT has resolved', async () => {
+    let resolveInsert: (() => void) | undefined;
+    const insertPromise = new Promise<[unknown, unknown]>((resolve) => {
+      resolveInsert = () => resolve([{ affectedRows: 1 }, []]);
+    });
+    const pool = {
+      execute: vi.fn()
+        .mockImplementationOnce(() => insertPromise)
+        .mockImplementationOnce(async () => [{ affectedRows: 0 }, []]),
+    };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    const recordPromise = recordStreamerEvent(5, 'follow', 'someviewer', null);
+
+    // The DELETE must not have been issued while the INSERT is still pending.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pool.execute).toHaveBeenCalledTimes(1);
+
+    resolveInsert!();
+    await recordPromise;
+
+    expect(pool.execute).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('getRecentStreamerEvents', () => {

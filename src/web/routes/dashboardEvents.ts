@@ -50,7 +50,8 @@ router.get('/events', createStreamerSseEventsHandler({
  * the parent router's `requireAuth`, so a session user is always present.
  * @param req - Express request; reads `req.session.user`.
  * @param res - Express response; JSON `{ ok: true, events }` on success, 403 if the session
- *   user isn't a monitored streamer, or 500 (logged) on an unexpected lookup failure.
+ *   user isn't a monitored streamer, or 500 (logged) if the streamer lookup or the recent-events
+ *   query fails.
  */
 router.get('/events/recent', async (req, res) => {
   let streamer;
@@ -66,11 +67,16 @@ router.get('/events/recent', async (req, res) => {
     return;
   }
 
-  const events = await getRecentStreamerEvents(streamer.id, RECENT_EVENTS_LIMIT);
-  const dashboardEvents: DashboardEvent[] = events.map((e) => ({
-    eventType: e.eventType, displayName: e.displayName, detail: e.detail, occurredAt: e.occurredAt.toISOString(),
-  }));
-  res.json({ ok: true, events: dashboardEvents });
+  try {
+    const events = await getRecentStreamerEvents(streamer.id, RECENT_EVENTS_LIMIT);
+    const dashboardEvents: DashboardEvent[] = events.map((e) => ({
+      eventType: e.eventType, displayName: e.displayName, detail: e.detail, occurredAt: e.occurredAt.toISOString(),
+    }));
+    res.json({ ok: true, events: dashboardEvents });
+  } catch (err) {
+    log.error('Failed to load recent events:', err);
+    res.status(500).json({ ok: false });
+  }
 });
 
 export default router;

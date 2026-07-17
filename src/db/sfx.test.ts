@@ -61,9 +61,9 @@ beforeEach(() => {
 // ─── getSfxTriggerCount ──────────────────────────────────────────────────────
 
 describe('getSfxTriggerCount', () => {
-  it('returns the count from the query result', async () => {
+  it('returns the count from the query result as a string', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([{ count: 7 }]) as any);
-    expect(await getSfxTriggerCount()).toBe(7);
+    expect(await getSfxTriggerCount()).toBe('7');
   });
 });
 
