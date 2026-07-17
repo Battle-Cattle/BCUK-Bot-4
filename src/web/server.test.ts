@@ -111,6 +111,7 @@ vi.mock('./routes/companionAuth', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionEvents', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionRewards', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionKeys', () => ({ default: emptyRouter() }));
+vi.mock('./routes/serviceWorker', () => ({ default: emptyRouter() }));
 
 import { app } from './server';
 import { requireAuth, requireGuildContext } from './middleware';

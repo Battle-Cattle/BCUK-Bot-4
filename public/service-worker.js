@@ -1,11 +1,19 @@
 const APP_CACHE_PREFIX = 'bcuk-panel-';
-const CACHE_VERSION = 'bcuk-panel-v9';
+// Substituted server-side (see src/web/routes/serviceWorker.ts) with a hash of every file
+// under public/, so any static-asset change automatically busts old caches — no manual
+// version bump to remember. If this file is ever served as-is (bypassing that route), the
+// literal placeholder below is still a valid, if non-rotating, cache name.
+const CACHE_VERSION = 'bcuk-panel-__CACHE_VERSION__';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const RUNTIME_CACHE_MAX_ENTRIES = 50;
 
 const STATIC_EXTENSIONS = ['.css', '.js', '.json', '.png', '.svg', '.woff2'];
-const BYPASS_PATH_PREFIXES = ['/api', '/auth', '/admin', '/streams'];
+// '/streams' was dead (the actual route has always been '/admin/streams', already covered by
+// '/admin') — dropped. '/dashboard' and '/channel-points' added: both now carry live SSE
+// endpoints (dashboard status/events, channel-points pricing) that must always hit the
+// network directly, never the static-asset or runtime-cache paths below.
+const BYPASS_PATH_PREFIXES = ['/api', '/auth', '/admin', '/dashboard', '/channel-points'];
 
 const STATIC_ASSETS = [
   '/offline.html',
@@ -13,6 +21,7 @@ const STATIC_ASSETS = [
   '/dashboard-utils.js',
   '/dashboard-status.js',
   '/dashboard-voice.js',
+  '/dashboard-events.js',
   '/app.js',
   '/sfx.js',
   '/navbar.js',

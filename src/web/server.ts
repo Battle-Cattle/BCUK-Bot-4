@@ -42,6 +42,7 @@ import alertsAdminRouter from './routes/alertsAdmin';
 import channelPointsAdminRouter from './routes/channelPointsAdmin';
 import privacyRouter from './routes/privacy';
 import tosRouter from './routes/tos';
+import serviceWorkerRouter from './routes/serviceWorker';
 import { requireAuth, requireGuildContext } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
 import { renderView } from './routes/shared';
@@ -86,6 +87,10 @@ app.use(
 // View engine
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, '../../views'));
+
+// Served ahead of the static middleware below so its cache-version substitution (see
+// serviceWorker.ts) takes effect instead of the raw, unsubstituted file on disk.
+app.use(serviceWorkerRouter);
 
 // Static assets
 app.use(express.static(path.join(__dirname, '../../public')));
