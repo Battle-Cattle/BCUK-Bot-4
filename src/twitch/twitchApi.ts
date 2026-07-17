@@ -58,6 +58,22 @@ function invalidateAppTokenIfUnauthorized(res: Response): void {
   if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
 }
 
+/**
+ * Throws a generic `[TwitchAPI] ${label} failed: ${status}` error for a non-OK app-token-authed
+ * Helix response, first clearing the cached app token if the failure was a 401. Shared by
+ * {@link fetchHelixPaged} and {@link getSharedChatSession} — the two callers that authenticate
+ * with the app token (rather than a broadcaster user token) and so can hit an invalidated-token 401.
+ * No-ops if `res.ok`.
+ * @param res Helix response to check.
+ * @param label Human-readable label used in the thrown error message.
+ * @throws If `res` is not OK.
+ */
+function throwOnHelixError(res: Response, label: string): void {
+  if (res.ok) return;
+  invalidateAppTokenIfUnauthorized(res);
+  throw new Error(`[TwitchAPI] ${label} failed: ${res.status}`);
+}
+
 function chunks<T>(arr: T[], size: number): T[][] {
   if (size <= 0) throw new Error(`chunks: size must be > 0, got ${size}`);
   const result: T[][] = [];
@@ -122,10 +138,7 @@ async function fetchHelixPaged<T>(
   for (const batch of chunks(ids, 100)) {
     const params = batch.map((id) => `${paramName}=${encodeURIComponent(id)}`).join('&');
     const res = await fetchHelixWithRetry(`https://api.twitch.tv/helix/${path}?${params}${extraQuery}`, authHeaders(token));
-    if (!res.ok) {
-      invalidateAppTokenIfUnauthorized(res);
-      throw new Error(`[TwitchAPI] ${label} failed: ${res.status}`);
-    }
+    throwOnHelixError(res, label);
     const data = await res.json() as { data: T[] };
     results.push(...data.data);
   }
@@ -220,11 +233,22 @@ export interface TwitchCustomReward {
   global_cooldown_setting: TwitchGlobalCooldownSetting;
 }
 
+/**
+ * Builds the Helix custom-rewards endpoint URL for a broadcaster, optionally scoped to one
+ * reward id. Shared by every custom-reward call (`getCustomRewards`, `createCustomReward`,
+ * `updateCustomReward`, `deleteCustomReward`) so the endpoint path and query-param names live
+ * in exactly one place.
+ * @param broadcasterId Twitch user ID whose custom rewards to target.
+ * @param rewardId Optional reward UUID to scope the URL to a single reward.
+ * @returns The full Helix custom-rewards URL.
+ */
+function customRewardUrl(broadcasterId: string, rewardId?: string): string {
+  const base = `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(broadcasterId)}`;
+  return rewardId ? `${base}&id=${encodeURIComponent(rewardId)}` : base;
+}
+
 export async function getCustomRewards(broadcasterId: string, userToken: string): Promise<TwitchCustomReward[]> {
-  const res = await twitchFetch(
-    `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(broadcasterId)}`,
-    { headers: authHeaders(userToken) },
-  );
+  const res = await twitchFetch(customRewardUrl(broadcasterId), { headers: authHeaders(userToken) });
   if (res.status === 403) return [];
   if (!res.ok) throw new Error(`[TwitchAPI] getCustomRewards failed: ${res.status}`);
   const data = await res.json() as { data: TwitchCustomReward[] };
@@ -298,14 +322,11 @@ function throwForRewardManagementFailure(res: Response, label: string, rewardId?
  *   channel:manage:redemptions scope).
  */
 export async function createCustomReward(broadcasterId: string, userToken: string, input: CustomRewardInput): Promise<TwitchCustomReward> {
-  const res = await twitchFetch(
-    `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(broadcasterId)}`,
-    {
-      method: 'POST',
-      headers: { ...authHeaders(userToken), 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    },
-  );
+  const res = await twitchFetch(customRewardUrl(broadcasterId), {
+    method: 'POST',
+    headers: { ...authHeaders(userToken), 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
   throwForRewardManagementFailure(res, 'createCustomReward');
   const data = await res.json() as { data: TwitchCustomReward[] };
   return data.data[0];
@@ -329,14 +350,11 @@ export async function createCustomReward(broadcasterId: string, userToken: strin
 export async function updateCustomReward(
   broadcasterId: string, rewardId: string, userToken: string, input: Partial<CustomRewardInput>,
 ): Promise<TwitchCustomReward> {
-  const res = await twitchFetch(
-    `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(broadcasterId)}&id=${encodeURIComponent(rewardId)}`,
-    {
-      method: 'PATCH',
-      headers: { ...authHeaders(userToken), 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    },
-  );
+  const res = await twitchFetch(customRewardUrl(broadcasterId, rewardId), {
+    method: 'PATCH',
+    headers: { ...authHeaders(userToken), 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
   throwForRewardManagementFailure(res, 'updateCustomReward', rewardId);
   const data = await res.json() as { data: TwitchCustomReward[] };
   return data.data[0];
@@ -356,10 +374,7 @@ export async function updateCustomReward(
  *   channel:manage:redemptions scope).
  */
 export async function deleteCustomReward(broadcasterId: string, rewardId: string, userToken: string): Promise<void> {
-  const res = await twitchFetch(
-    `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${encodeURIComponent(broadcasterId)}&id=${encodeURIComponent(rewardId)}`,
-    { method: 'DELETE', headers: authHeaders(userToken) },
-  );
+  const res = await twitchFetch(customRewardUrl(broadcasterId, rewardId), { method: 'DELETE', headers: authHeaders(userToken) });
   throwForRewardManagementFailure(res, 'deleteCustomReward', rewardId);
 }
 
@@ -410,10 +425,7 @@ export async function getSharedChatSession(broadcasterId: string): Promise<Share
     { headers: authHeaders(token) },
   );
   if (res.status === 404 || res.status === 403) return null;
-  if (!res.ok) {
-    invalidateAppTokenIfUnauthorized(res);
-    throw new Error(`[TwitchAPI] getSharedChatSession failed: ${res.status}`);
-  }
+  throwOnHelixError(res, 'getSharedChatSession');
   const data = await res.json() as { data: SharedChatSession[] };
   return data.data[0] ?? null;
 }
