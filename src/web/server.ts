@@ -92,8 +92,18 @@ app.set('views', path.join(__dirname, '../../views'));
 // serviceWorker.ts) takes effect instead of the raw, unsubstituted file on disk.
 app.use(serviceWorkerRouter);
 
-// Static assets
-app.use(express.static(path.join(__dirname, '../../public')));
+// Static assets. `Cache-Control: no-cache` forces revalidation (via the ETag express.static
+// already sends) on every request rather than letting browsers serve a stale copy from
+// heuristic HTTP caching — without it, a deploy's new CSS/JS can be masked both for plain
+// page loads and for the service worker's own cache-busting fetches in install (see
+// serviceWorker.ts), since those fetches would otherwise also read from the stale HTTP cache.
+app.use(
+  express.static(path.join(__dirname, '../../public'), {
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-cache');
+    },
+  }),
+);
 
 // Rate limiting — applied after static assets so file downloads aren't counted
 const generalLimiter = rateLimit({

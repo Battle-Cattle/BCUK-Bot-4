@@ -177,6 +177,14 @@ describe('server route wiring', () => {
   });
 });
 
+describe('static assets', () => {
+  it('sends Cache-Control: no-cache so browsers always revalidate against the server', async () => {
+    const res = await request(app).get('/style.css');
+    expect(res.status).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-cache');
+  });
+});
+
 describe('CSP header', () => {
   it('restricts font-src to self, without falling back to helmet defaults', async () => {
     const res = await request(app).get('/__marker_dashboard');
