@@ -19,7 +19,8 @@
 
 /* ── Reset ─────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.5; min-height: 100vh; }
+html { overflow-x: hidden; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.5; min-height: 100vh; overflow-x: hidden; }
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
@@ -370,6 +371,21 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
   /* Section header: stack title + search vertically */
   .section-header { flex-wrap: wrap; gap: .5rem; }
   .search-input { width: 100%; }
+
+  /* Container: claw back horizontal space on narrow phones */
+  .container { padding: 1.5rem 1rem; }
+
+  /* Status grid: lower the column floor so a single card fits ~320px phones */
+  .status-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+
+  /* Rows that otherwise refuse to wrap and push content off-screen */
+  .twitch-bot-controls { flex-wrap: wrap; }
+  .hint-inline-row { white-space: normal; flex-wrap: wrap; }
+  .js-alert-upload { flex-wrap: wrap; }
+  .js-alert-upload input[type="file"] { max-width: 100%; }
+
+  /* Streamdeck-keys instruction table: wrap labels instead of forcing table width */
+  .kv-table td.kv-label { white-space: normal; }
 }
 
 /* ── Price history chart (pricing admin) ──────────────── */
