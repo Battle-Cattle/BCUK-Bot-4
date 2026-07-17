@@ -351,6 +351,26 @@ CREATE TABLE IF NOT EXISTS reward_pricing_history (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- streamer_event_log
+-- Live activity log for the dashboard's "Recent Events" feed: follows, subs,
+-- raids, and channel-point redemptions on a connected Twitch channel. Bounded
+-- to roughly the largest range the dashboard displays — recordStreamerEvent()
+-- prunes each streamer down to their most recent 200 rows on every insert, so
+-- this never grows unbounded regardless of how bursty redemptions get.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS streamer_event_log (
+  id           INT          NOT NULL AUTO_INCREMENT,
+  streamer_id  INT          NOT NULL,
+  event_type   ENUM('follow','sub','resub','giftsub','raid','redemption') NOT NULL,
+  display_name VARCHAR(255) NOT NULL,
+  detail       VARCHAR(500) NULL,
+  occurred_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_streamer_event_log_recent (streamer_id, occurred_at),
+  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
 -- streamdeck_api_keys
 -- One key/hash per user, shared across every guild they have access to — a
 -- single Streamdeck credential can act on multiple guilds. Per-guild approval

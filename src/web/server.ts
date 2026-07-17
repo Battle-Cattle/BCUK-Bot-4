@@ -16,6 +16,8 @@ import guildRouter from './routes/guild';
 import eventsubCallbackRouter from './routes/eventsubCallback';
 import eventsubAdminRouter from './routes/eventsubAdmin';
 import dashboardRouter from './routes/dashboard';
+import dashboardEventsRouter from './routes/dashboardEvents';
+import dashboardStatusEventsRouter from './routes/dashboardStatusEvents';
 import adminRouter from './routes/admin';
 import apiRouter from './routes/api';
 import sfxRouter from './routes/sfx';
@@ -40,6 +42,7 @@ import alertsAdminRouter from './routes/alertsAdmin';
 import channelPointsAdminRouter from './routes/channelPointsAdmin';
 import privacyRouter from './routes/privacy';
 import tosRouter from './routes/tos';
+import serviceWorkerRouter from './routes/serviceWorker';
 import { requireAuth, requireGuildContext } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
 import { renderView } from './routes/shared';
@@ -84,6 +87,10 @@ app.use(
 // View engine
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, '../../views'));
+
+// Served ahead of the static middleware below so its cache-version substitution (see
+// serviceWorker.ts) takes effect instead of the raw, unsubstituted file on disk.
+app.use(serviceWorkerRouter);
 
 // Static assets
 app.use(express.static(path.join(__dirname, '../../public')));
@@ -216,6 +223,8 @@ app.use('/user/settings', requireAuth, userSettingsRouter);
 app.use('/overlay', requireAuth, overlayAdminRouter);
 app.use('/alerts', requireAuth, alertsAdminRouter);
 app.use('/channel-points', requireAuth, channelPointsAdminRouter);
+app.use('/dashboard', requireAuth, dashboardEventsRouter);
+app.use('/dashboard', requireAuth, dashboardStatusEventsRouter);
 
 /**
  * Renders the `error` view with the given status and message, including a real CSRF

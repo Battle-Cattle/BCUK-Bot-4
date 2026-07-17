@@ -13,7 +13,7 @@ function htmlAttrJson(value) {
 }
 %>
 </head>
-<body data-initial-status="<%- htmlAttrJson(status) %>" data-csrf-token="<%= csrfToken %>">
+<body data-initial-status="<%- htmlAttrJson(status) %>" data-initial-events="<%- htmlAttrJson(recentEvents) %>" data-has-streamer="<%= hasStreamer %>" data-csrf-token="<%= csrfToken %>">
   <%- include('partials/nav') %>
 
   <main class="container">
@@ -73,6 +73,33 @@ function htmlAttrJson(value) {
       </div>
     </section>
 
+    <!-- ── Usage ── -->
+    <section class="section">
+      <h2 class="section-title">Usage</h2>
+      <div class="status-grid">
+        <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.sfxCount %></span><span class="stat-big-label">SFX Triggers</span></div></div>
+        <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.commandCount %></span><span class="stat-big-label">Custom Commands</span></div></div>
+        <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.counterCount %></span><span class="stat-big-label">Counters</span></div></div>
+        <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= Object.keys(status.twitch).length %></span><span class="stat-big-label">Twitch Channels</span></div></div>
+        <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= Object.keys(status.tiktok).length %></span><span class="stat-big-label">TikTok Channels</span></div></div>
+      </div>
+    </section>
+
+    <!-- ── Quick Links ── -->
+    <section class="section">
+      <h2 class="section-title">Quick Links</h2>
+      <div class="quick-links-grid">
+        <a href="/sfx" class="quick-link-card"><span class="quick-link-icon">🎧</span><span class="quick-link-label">SFX</span></a>
+        <% if (user && user.accessLevel >= 2) { %>
+        <a href="/commands" class="quick-link-card"><span class="quick-link-icon">💻</span><span class="quick-link-label">Commands</span></a>
+        <a href="/counters" class="quick-link-card"><span class="quick-link-icon">🔢</span><span class="quick-link-label">Counters</span></a>
+        <a href="/command-monitor" class="quick-link-card"><span class="quick-link-icon">📡</span><span class="quick-link-label">Command Monitor</span></a>
+        <% } %>
+        <a href="/channel-points" class="quick-link-card"><span class="quick-link-icon">🪙</span><span class="quick-link-label">Channel Points</span></a>
+        <a href="/alerts/settings" class="quick-link-card"><span class="quick-link-icon">🔔</span><span class="quick-link-label">Alerts</span></a>
+      </div>
+    </section>
+
     <!-- ── Channels ── -->
     <section class="section">
       <h2 class="section-title">Channels</h2>
@@ -88,6 +115,22 @@ function htmlAttrJson(value) {
       </div>
     </section>
 
+    <!-- ── Recent Events ── -->
+    <section class="section">
+      <h2 class="section-title">Recent Events</h2>
+      <div class="card">
+        <div class="card-body" id="recent-events-list">
+          <% if (!user) { %>
+          <p class="empty-msg">Sign in to see recent activity.</p>
+          <% } else if (!hasStreamer) { %>
+          <p class="empty-msg">Connect your Twitch account to see recent activity.</p>
+          <% } else { %>
+          <p class="empty-msg">No recent activity yet.</p>
+          <% } %>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <%- include('partials/pwa-register') %>
@@ -95,6 +138,7 @@ function htmlAttrJson(value) {
   <script src="/dashboard-utils.js"></script>
   <script src="/dashboard-status.js"></script>
   <script src="/dashboard-voice.js"></script>
+  <script src="/dashboard-events.js"></script>
   <script src="/app.js"></script>
 
   <% if (needsReconnect) { %>

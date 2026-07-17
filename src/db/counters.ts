@@ -3,7 +3,7 @@ import { getPool, withTransaction } from './pool';
 import { requireTrimmedString, normalizeCommand, type SqlExecutor } from './commandStringUtils';
 import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
-import { fromBit, rowExists, affectedOrExists } from './utils';
+import { fromBit, rowExists, affectedOrExists, getRowCount } from './utils';
 import { invalidateCounterLookupCache } from './counterCache';
 import {
   createManagedLookupCache,
@@ -123,6 +123,11 @@ export async function getAllCounters(): Promise<DbCounter[]> {
      ORDER BY trigger_command`,
   );
   return rows.map(mapCounter);
+}
+
+/** Return the total number of counters, for the dashboard's usage-stats summary. */
+export async function getCounterCount(): Promise<number> {
+  return getRowCount('counter');
 }
 
 /**

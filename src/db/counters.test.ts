@@ -55,6 +55,7 @@ vi.mock('./utils', () => ({
     if (affectedRows > 0) return true;
     return existsCheck();
   }),
+  getRowCount: vi.fn(),
 }));
 vi.mock('./counterCache', () => ({
   invalidateCounterLookupCache: vi.fn(),
@@ -68,6 +69,7 @@ const mockConnection = makeMockConnection();
 import { getPool } from './pool';
 import {
   getAllCounters,
+  getCounterCount,
   getCounterHistory,
   addCounter,
   updateCounter,
@@ -81,6 +83,7 @@ import {
 import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
 import { invalidateCounterLookupCache } from './counterCache';
+import { getRowCount } from './utils';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 /** Builds a fake pool via the shared helper, matching this file's historical `(rows, meta)` call shape. */
@@ -111,6 +114,16 @@ describe('CounterNotFoundError', () => {
 
   it('is an instance of Error', () => {
     expect(new CounterNotFoundError(1)).toBeInstanceOf(Error);
+  });
+});
+
+// ─── getCounterCount ────────────────────────────────────────────────────────
+
+describe('getCounterCount', () => {
+  it('delegates to getRowCount for the counter table', async () => {
+    vi.mocked(getRowCount).mockResolvedValue(4);
+    expect(await getCounterCount()).toBe(4);
+    expect(getRowCount).toHaveBeenCalledWith('counter');
   });
 });
 

@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
-import { fromBit, affectedOrExists, rowExists } from './utils';
+import { fromBit, affectedOrExists, rowExists, getRowCount } from './utils';
 // sfxCache imports getAllSfxTriggers from this module; this module imports
 // invalidateSfxLookupCache from sfxCache. Both calls happen inside function
 // bodies, so CommonJS resolves the cycle correctly.
@@ -98,6 +98,11 @@ export async function getPublicSfxTriggers(): Promise<PublicSfxTrigger[]> {
     categoryName: r.categoryName ?? null,
     description: r.description ?? null,
   }));
+}
+
+/** Return the total number of SFX triggers, for the dashboard's usage-stats summary. */
+export async function getSfxTriggerCount(): Promise<number> {
+  return getRowCount('sfxtrigger');
 }
 
 export interface SfxCategory {

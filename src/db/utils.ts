@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import { timingSafeEqual } from 'node:crypto';
 import type { SqlExecutor } from './commandStringUtils';
+import { getPool } from './pool';
 
 /** Converts a MySQL BIT(1) column value (Buffer, number, or boolean) to a boolean. */
 export function fromBit(value: unknown): boolean {
@@ -34,6 +35,24 @@ export async function rowExists(
     [value],
   );
   return rows.length > 0;
+}
+
+/**
+ * Returns the total row count for `table`, for simple usage-stat summaries.
+ * @param table Table name — must be a fixed, trusted identifier, never derived from user input.
+ *   Validated against an allowlist pattern as defence-in-depth before being interpolated into SQL.
+ * @returns The row count. `COUNT(*)` is protocol-typed BIGINT, so `bigNumberStrings` stringifies
+ *   it like any other BIGINT column — but unlike a Discord snowflake (the case the "never coerce
+ *   BIGINT to Number" rule exists for), this value is bounded by how many rows a human configures
+ *   in an admin table (SFX triggers, commands, counters). It will never approach
+ *   `Number.MAX_SAFE_INTEGER`, so parsing it back to a number here is safe and deliberate, not the
+ *   blind coercion that rule warns against.
+ * @throws If `table` isn't a plain alphanumeric/underscore identifier.
+ */
+export async function getRowCount(table: string): Promise<number> {
+  if (!IDENTIFIER_PATTERN.test(table)) throw new Error('Invalid input');
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT COUNT(*) AS count FROM ${table}`);
+  return Number.parseInt(rows[0].count, 10);
 }
 
 /**

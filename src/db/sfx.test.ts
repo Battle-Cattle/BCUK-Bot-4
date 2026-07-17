@@ -31,7 +31,7 @@ vi.mock('./sfxCache', () => ({
 
 import { getPool } from './pool';
 import {
-  findTrigger, findSoundFiles, getPublicSfxTriggers, getAllSfxTriggers,
+  findTrigger, findSoundFiles, getPublicSfxTriggers, getAllSfxTriggers, getSfxTriggerCount,
   getAllCategories, createCategory, renameCategory, deleteCategory,
   createSfxTrigger, updateSfxTrigger, deleteSfxTrigger,
   addSfxFile, updateSfxFile, deleteSfxFile,
@@ -56,6 +56,15 @@ function makeTxPool() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+// ─── getSfxTriggerCount ──────────────────────────────────────────────────────
+
+describe('getSfxTriggerCount', () => {
+  it('returns the count from the query result', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ count: 7 }]) as any);
+    expect(await getSfxTriggerCount()).toBe(7);
+  });
 });
 
 // ─── findTrigger ─────────────────────────────────────────────────────────────

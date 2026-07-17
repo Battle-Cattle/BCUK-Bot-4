@@ -105,10 +105,13 @@ vi.mock('./routes/overlayAdmin', () => ({ default: emptyRouter() }));
 vi.mock('./routes/alertsOverlaySource', () => ({ default: emptyRouter() }));
 vi.mock('./routes/alertsAdmin', () => ({ default: emptyRouter() }));
 vi.mock('./routes/channelPointsAdmin', () => ({ default: emptyRouter() }));
+vi.mock('./routes/dashboardEvents', () => ({ default: emptyRouter() }));
+vi.mock('./routes/dashboardStatusEvents', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionAuth', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionEvents', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionRewards', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionKeys', () => ({ default: emptyRouter() }));
+vi.mock('./routes/serviceWorker', () => ({ default: emptyRouter() }));
 
 import { app } from './server';
 import { requireAuth, requireGuildContext } from './middleware';

@@ -35,6 +35,7 @@ vi.mock('./commandStringUtils', () => ({
 import { getPool } from './pool';
 import {
   getAllCustomCommandsWithAssignments,
+  getCustomCommandCount,
   addCustomCommand,
   updateCustomCommand,
   removeCustomCommand,
@@ -81,6 +82,17 @@ function makeWriteConn(executeResults: unknown[] = []) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+// ─── getCustomCommandCount ─────────────────────────────────────────────────────
+
+describe('getCustomCommandCount', () => {
+  it('returns the count from the query result', async () => {
+    const pool = makePool();
+    pool.execute.mockResolvedValue([[{ count: 12 }], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await getCustomCommandCount()).toBe(12);
+  });
 });
 
 // ─── getAllCustomCommandsWithAssignments ──────────────────────────────────────
