@@ -1,10 +1,8 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getStreamerByDiscordId } from '../../db';
 import type { StreamerEventType } from '../../db';
 import { DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER } from '../../shared/config';
-import { getSessionUser } from '../session';
-import { attachSseConnection, broadcastToChannel } from './sseChannel';
+import { createStreamerSseEventsHandler, broadcastToChannel } from './sseChannel';
 
 const log = createLogger('DashboardEvents');
 const router = Router();
@@ -31,29 +29,12 @@ export function pushDashboardEvent(streamerId: number, event: DashboardEvent): v
  * GET /dashboard/events — SSE endpoint streaming live `pushDashboardEvent` activity (follows,
  * subs, raids, redemptions) for the logged-in streamer's own channel, so the dashboard's
  * "Recent Events" feed can update without a manual refresh. Mounted behind the parent router's
- * `requireAuth`, so a session user is always present; still resolves the streamer row here
- * (rather than trusting a cached id) so a revoked streamer record takes effect immediately.
- * @param req - Express request; reads `req.session.user`.
- * @param res - Express response; upgrades to a `text/event-stream` connection kept alive with
- *   periodic pings and torn down on client disconnect; replies 403 if the session user isn't a
- *   monitored streamer, 429 if the streamer's connection limit is exceeded, or 500 on an
- *   unexpected lookup failure (also logged, unlike a plain unhandled rejection).
+ * `requireAuth`, so a session user is always present. Built via
+ * {@link createStreamerSseEventsHandler} — see there for the shared resolve/403/500/429
+ * lifecycle.
  */
-router.get('/events', async (req, res) => {
-  let streamer;
-  try {
-    streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
-  } catch (err) {
-    log.error('Failed to resolve streamer for SSE events:', err);
-    res.status(500).end();
-    return;
-  }
-  if (!streamer) {
-    res.status(403).end();
-    return;
-  }
-
-  attachSseConnection(req, res, { connections, key: streamer.id, maxPerChannel: MAX_SSE_CONNECTIONS_PER_STREAMER });
-});
+router.get('/events', createStreamerSseEventsHandler({
+  connections, maxPerChannel: MAX_SSE_CONNECTIONS_PER_STREAMER, resolveKey: (streamer) => streamer.id, log,
+}));
 
 export default router;

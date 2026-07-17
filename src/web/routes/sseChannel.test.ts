@@ -1,8 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../shared/config', () => ({ SSE_MAX_TOTAL_CONNECTIONS: 10 }));
+vi.mock('../../db', () => ({ getStreamerByDiscordId: vi.fn() }));
+vi.mock('../session', () => ({ getSessionUser: vi.fn() }));
 
-import { createSseEventsHandler, createLoginValidator, attachSseConnection, broadcastToChannel } from './sseChannel';
+import {
+  createSseEventsHandler, createLoginValidator, attachSseConnection, broadcastToChannel,
+  createStreamerSseEventsHandler,
+} from './sseChannel';
+import { getStreamerByDiscordId } from '../../db';
+import { getSessionUser } from '../session';
+
+const log = mockLogger() as any;
 
 const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
 const RESERVED_LOGINS = new Set(['settings']);
@@ -276,6 +286,73 @@ describe('attachSseConnection', () => {
 
     // Cleanup ran even though close/error never fired — the connection isn't left registered.
     expect(connections.get('somekey')).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createStreamerSseEventsHandler
+// ---------------------------------------------------------------------------
+describe('createStreamerSseEventsHandler', () => {
+  const numericConnections = new Map<number, Set<any>>();
+
+  beforeEach(() => {
+    numericConnections.clear();
+    vi.mocked(getSessionUser).mockReturnValue({ discordId: 'discord1' } as any);
+  });
+
+  function buildStreamerHandler(maxPerChannel = 10) {
+    return createStreamerSseEventsHandler({
+      connections: numericConnections, maxPerChannel, resolveKey: (streamer) => streamer.id, log,
+    });
+  }
+
+  it('returns 403 when the session user has no streamer row', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+    const handler = buildStreamerHandler();
+    const res = makeRes();
+    const { req } = makeReq('unused');
+
+    await handler(req as any, res as any);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(numericConnections.size).toBe(0);
+  });
+
+  it('returns 500 and logs when the streamer lookup rejects', async () => {
+    vi.mocked(getStreamerByDiscordId).mockRejectedValue(new Error('db down'));
+    const handler = buildStreamerHandler();
+    const res = makeRes();
+    const { req } = makeReq('unused');
+
+    await handler(req as any, res as any);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(log.error).toHaveBeenCalled();
+  });
+
+  it('attaches the connection under the key derived by resolveKey', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 42 } as any);
+    const handler = buildStreamerHandler();
+    const res = makeRes();
+    const { req, triggerClose } = makeReq('unused');
+
+    await handler(req as any, res as any);
+
+    expect(numericConnections.get(42)?.has(res as any)).toBe(true);
+    expect(res.write).toHaveBeenCalledWith(': connected\n\n');
+    triggerClose();
+  });
+
+  it('returns 429 when the resolved streamer is already at its connection limit', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 42 } as any);
+    numericConnections.set(42, new Set([{}, {}] as any));
+    const handler = buildStreamerHandler(2);
+    const res = makeRes();
+    const { req } = makeReq('unused');
+
+    await handler(req as any, res as any);
+
+    expect(res.status).toHaveBeenCalledWith(429);
   });
 });
 

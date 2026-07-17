@@ -1,5 +1,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import { SSE_MAX_TOTAL_CONNECTIONS } from '../../shared/config';
+import { getStreamerByDiscordId, type DbStreamerEventSub } from '../../db';
+import { getSessionUser } from '../session';
+import type { createLogger } from '../../shared/logger';
 
 const KEEPALIVE_INTERVAL_MS = 25_000;
 
@@ -217,5 +220,52 @@ export function createSseEventsHandler(
     const key = isValidLogin(req.params.login);
     if (key === null) { next(); return; }
     attachSseConnection(req, res, { connections, key, maxPerChannel });
+  };
+}
+
+/** Options for {@link createStreamerSseEventsHandler}. */
+export interface StreamerSseEventsHandlerOptions<K> {
+  /** In-memory map of active SSE connections keyed by `K` (a streamer ID, Twitch login, etc). */
+  connections: Map<K, Set<Response>>;
+  /** Maximum concurrent SSE connections permitted per key. */
+  maxPerChannel: number;
+  /** Derives the connection key from the resolved streamer row (e.g. `streamer.id`). */
+  resolveKey: (streamer: DbStreamerEventSub) => K;
+  /** Logger used to report an unexpected streamer lookup failure. */
+  log: ReturnType<typeof createLogger>;
+}
+
+/**
+ * Builds a `/events`-style SSE route handler for the logged-in session user's own streamer
+ * row: resolves it via `getStreamerByDiscordId`, replies 403 if they aren't a monitored
+ * streamer, 500 (logged) if the lookup itself fails, otherwise delegates to
+ * {@link attachSseConnection}. Shared by every per-streamer SSE endpoint (channel-points
+ * pricing, dashboard events/status) — each keeps its own `connections` map and payload shape,
+ * since those differ, but the "resolve the session's streamer" lifecycle around them is
+ * identical. The streamer is re-resolved on every connection attempt (rather than trusting a
+ * cached id) so a revoked streamer record takes effect immediately.
+ * @param options - See {@link StreamerSseEventsHandlerOptions}.
+ * @returns An Express route handler for the logged-in user's own streamer SSE stream.
+ */
+export function createStreamerSseEventsHandler<K>(
+  options: StreamerSseEventsHandlerOptions<K>,
+): (req: Request, res: Response) => Promise<void> {
+  const { connections, maxPerChannel, resolveKey, log } = options;
+
+  return async (req, res) => {
+    let streamer: DbStreamerEventSub | null;
+    try {
+      streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
+    } catch (err) {
+      log.error('Failed to resolve streamer for SSE events:', err);
+      res.status(500).end();
+      return;
+    }
+    if (!streamer) {
+      res.status(403).end();
+      return;
+    }
+
+    attachSseConnection(req, res, { connections, key: resolveKey(streamer), maxPerChannel });
   };
 }
