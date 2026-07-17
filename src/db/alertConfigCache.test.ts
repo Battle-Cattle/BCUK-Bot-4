@@ -35,6 +35,7 @@ function makeAlertConfig(overrides: Partial<AlertConfig> = {}): AlertConfig {
     image_filename: null,
     sound_filename: null,
     duration_ms: 6000,
+    text_animation: 'none',
     ...overrides,
   };
 }

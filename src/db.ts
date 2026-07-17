@@ -179,8 +179,8 @@ export type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 
 // ─── Alerts overlay ─────────────────────────────────────────────────────────
 
-export type { AlertConfig, AlertEventType } from './db/alertConfig';
-export { ALERT_EVENT_TYPES } from './db/alertConfig';
+export type { AlertConfig, AlertEventType, TextAnimation } from './db/alertConfig';
+export { ALERT_EVENT_TYPES, ALERT_TEXT_ANIMATIONS } from './db/alertConfig';
 export {
   getAlertConfigsForStreamer, getAlertConfig, getEnabledAlertEventTypesBatch, initAlertConfigs,
   saveAlertConfig, setAlertImage, setAlertSound,

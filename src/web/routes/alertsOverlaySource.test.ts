@@ -179,6 +179,7 @@ describe('pushAlertEvent', () => {
     imageUrl: '/alerts/assets/1/follow.png',
     soundUrl: null,
     durationMs: 6000,
+    textAnimation: 'none' as const,
   };
 
   it('does nothing when there are no connections for the channel', () => {
