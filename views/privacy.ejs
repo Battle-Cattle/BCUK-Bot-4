@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — Privacy &amp; Cookies</title>
+  <title>BCUK Bot: Privacy &amp; Cookies</title>
   <link rel="stylesheet" href="/style.css">
   <%- include('partials/pwa-head') %>
 </head>
@@ -13,65 +13,77 @@
     <section class="section">
       <h2 class="section-title">Privacy &amp; Cookies</h2>
 
+      <p>In short: we only store what's needed to run the bot and dashboard. We don't use analytics,
+        advertising, or tracking cookies, and we don't record or store your Discord messages or voice
+        audio.</p>
+
       <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">🍪</span><span class="card-label">Cookies</span></div>
         <div class="card-body">
-          <p>This site sets a single cookie, <code>connect.sid</code>, which keeps you signed in between
-            page loads. It does not track you across other sites, and we don't use it for analytics or
+          <p>This site sets a single cookie, <code>connect.sid</code>. It keeps you signed in between page
+            loads. It does not track you across other sites, and we don't use it for analytics or
             advertising.</p>
-          <p>This cookie is <strong>strictly necessary</strong> — it only exists to keep your login session
-            and protect against cross-site request forgery (CSRF) once you sign in. Strictly necessary
-            cookies are exempt from cookie consent requirements under UK PECR/GDPR, so you won't see a
-            cookie consent banner here. The cookie expires automatically after 24 hours, is marked
-            <code>HttpOnly</code> (inaccessible to page scripts) and is sent over HTTPS only in production.</p>
-          <p>We don't use any analytics, advertising, or third-party tracking cookies anywhere on this site.</p>
+          <p>This cookie is <strong>strictly necessary</strong>: it only exists to keep your login session
+            and protect against cross-site request forgery (CSRF) once you sign in. That's why you won't
+            see a cookie consent banner here.</p>
+          <ul>
+            <li>Expires automatically after 24 hours</li>
+            <li>Marked <code>HttpOnly</code>, so page scripts can't access it</li>
+            <li>Sent over HTTPS only</li>
+          </ul>
+          <p>We don't use any analytics, advertising, or third-party tracking cookies anywhere on this
+            site.</p>
         </div>
       </div>
 
       <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">📋</span><span class="card-label">What we collect</span></div>
         <div class="card-body">
-          <p>When you sign in with Discord, we receive and store your Discord ID, display name, and avatar
-            so you can use the control panel. We also store the access level assigned to you in each Discord
-            server the bot is added to.</p>
-          <p>If you connect a Twitch account for stream notifications, we store your Twitch user ID and the
-            OAuth access/refresh tokens needed to receive that data. Those tokens are encrypted at rest and
-            are never stored in plain text.</p>
-          <p>If you generate a Streamdeck API key, we store only a one-way hash of it — never the key itself.</p>
-          <p>If you request a companion app token (for the desktop companion app's login), we store only a
-            one-way hash of it — never the token itself.</p>
+          <ul>
+            <li>When you sign in with Discord: your Discord ID, display name, and avatar, plus the access
+              level assigned to you in each Discord server the bot is added to.</li>
+            <li>If you connect Twitch for stream notifications: your Twitch user ID and the OAuth
+              access/refresh tokens needed to receive that data. These tokens are encrypted at rest and are
+              never stored in plain text.</li>
+            <li>If you generate a Streamdeck API key: only a one-way hash of it, never the key itself.</li>
+            <li>If you request a companion app token: only a one-way hash of it, never the token itself.</li>
+            <li>If a connected Twitch channel gets a follow, subscription, raid, or channel-point
+              redemption: the event type, the viewer's Twitch display name, and a short detail (for
+              example a raid's viewer count, or a redeemed reward's name). This is shown on the dashboard's
+              live "Recent Events" feed and is the only data we store about Twitch viewers who aren't
+              signed-in users of this site.</li>
+          </ul>
           <p>We do not record or transcribe voice channel audio, and we do not store the content of Discord
-            messages or chat logs. A short list of the most recent bot command executions is kept in memory
-            for moderators to review, but it is not written to a database and is lost on restart.</p>
-          <p>If a connected Twitch channel receives a follow, subscription, raid, or channel-point redemption,
-            we store the event type, the acting viewer's Twitch display name, and a short detail string (for
-            example a raid's viewer count, or a redeemed reward's name and any text the viewer entered) so it
-            can be shown on the dashboard's live "Recent Events" feed. This is the only place we store data
-            about Twitch viewers who aren't themselves signed-in users of this site.</p>
+            messages or chat logs. A short list of the most recent bot command executions is kept in
+            memory for moderators to review, but it isn't written to a database and is lost on restart.</p>
         </div>
       </div>
 
       <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">🔗</span><span class="card-label">Third parties</span></div>
         <div class="card-body">
-          <p>To provide the service we exchange data with Discord (for login and avatars) and Twitch (for
-            stream notifications you opt into). We don't share your data with any analytics, advertising, or
-            marketing services — we don't use any.</p>
+          <p>To provide the service we exchange data with Discord, for login and avatars, and Twitch, for
+            stream notifications you opt into. We don't share your data with any analytics, advertising, or
+            marketing services. We don't use any.</p>
         </div>
       </div>
 
       <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">🗑️</span><span class="card-label">Retention &amp; deletion</span></div>
         <div class="card-body">
-          <p>Login sessions expire after 24 hours of being issued. Server logs are kept for 14 days and then
-            deleted. If your account is removed from the system, your stored Discord/Twitch data — including
-            any encrypted Twitch tokens and your companion app token — is deleted along with it. Any Streamdeck
-            API key you generated is not automatically deleted; contact a server administrator to have it
-            revoked. You can revoke your own companion app token at any time from the dashboard.</p>
-          <p>Recent-events activity (follows, subs, raids, redemptions) is capped automatically at the 200
-            most recent events per connected Twitch channel — older events are deleted as new ones come in, so
-            this data is never kept indefinitely. It's deleted immediately, in full, if the channel is
-            disconnected from this site.</p>
+          <ul>
+            <li>Login sessions expire 24 hours after being issued.</li>
+            <li>Server logs are kept for 14 days, then deleted.</li>
+            <li>If your account is removed from the system, your stored Discord/Twitch data is deleted
+              with it, including any encrypted Twitch tokens and your companion app token.</li>
+            <li>Streamdeck API keys aren't deleted automatically. Contact a server administrator to have
+              one revoked.</li>
+            <li>You can revoke your own companion app token at any time from the dashboard.</li>
+            <li>Recent-events activity (follows, subs, raids, redemptions) is capped at the 200 most recent
+              events per connected Twitch channel. Older events are deleted automatically as new ones come
+              in, so this data is never kept indefinitely. It's deleted immediately, in full, if the
+              channel is disconnected from this site.</li>
+          </ul>
           <p>To request deletion of your data, contact a server administrator.</p>
         </div>
       </div>
