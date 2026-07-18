@@ -58,8 +58,9 @@ npm audit --audit-level=high
 echo "==> Building and running tests in parallel..."
 # Tests import directly from src/*.ts (vitest transforms on the fly), not from
 # dist/, so the build and test suite have no dependency on each other.
-# Tests take longer, so their output streams live; the build finishes first
-# and is captured to a log that gets dumped once it's done.
+# Tests take longer, so their output streams live; the build's output is
+# captured and dumped only after both finish, so it can't interleave with
+# (and garble) vitest's live ANSI progress output.
 BUILD_LOG=$(mktemp)
 trap 'rm -f "$BUILD_LOG"' EXIT
 
@@ -71,11 +72,10 @@ TEST_PID=$!
 BUILD_STATUS=0
 TEST_STATUS=0
 wait "$BUILD_PID" || BUILD_STATUS=$?
+wait "$TEST_PID" || TEST_STATUS=$?
 
 echo "--- Build output ---"
 cat "$BUILD_LOG"
-
-wait "$TEST_PID" || TEST_STATUS=$?
 
 if [ "$BUILD_STATUS" -ne 0 ] || [ "$TEST_STATUS" -ne 0 ]; then
     rollback
