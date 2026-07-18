@@ -55,11 +55,22 @@ retry npm ci
 echo "==> Checking for vulnerabilities..."
 npm audit --audit-level=high
 
-echo "==> Building..."
-npm run build
+echo "==> Building and running tests in parallel..."
+# Tests import directly from src/*.ts (vitest transforms on the fly), not from
+# dist/, so the build and test suite have no dependency on each other.
+npm run build &
+BUILD_PID=$!
+npm test &
+TEST_PID=$!
 
-echo "==> Running tests..."
-npm test
+BUILD_STATUS=0
+TEST_STATUS=0
+wait "$BUILD_PID" || BUILD_STATUS=$?
+wait "$TEST_PID" || TEST_STATUS=$?
+
+if [ "$BUILD_STATUS" -ne 0 ] || [ "$TEST_STATUS" -ne 0 ]; then
+    rollback
+fi
 
 echo "==> Pruning dev dependencies..."
 npm prune --omit=dev
