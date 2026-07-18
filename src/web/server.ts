@@ -99,6 +99,7 @@ app.use(serviceWorkerRouter);
 // serviceWorker.ts), since those fetches would otherwise also read from the stale HTTP cache.
 app.use(
   express.static(path.join(__dirname, '../../public'), {
+    /** Forces revalidation on every static asset response instead of allowing heuristic HTTP caching. */
     setHeaders: (res) => {
       res.setHeader('Cache-Control', 'no-cache');
     },
