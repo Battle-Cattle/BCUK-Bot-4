@@ -55,11 +55,31 @@ retry npm ci
 echo "==> Checking for vulnerabilities..."
 npm audit --audit-level=high
 
-echo "==> Building..."
-npm run build
+echo "==> Building and running tests in parallel..."
+# Tests import directly from src/*.ts (vitest transforms on the fly), not from
+# dist/, so the build and test suite have no dependency on each other.
+BUILD_LOG=$(mktemp)
+TEST_LOG=$(mktemp)
+trap 'rm -f "$BUILD_LOG" "$TEST_LOG"' EXIT
 
-echo "==> Running tests..."
-npm test
+npm run build > "$BUILD_LOG" 2>&1 &
+BUILD_PID=$!
+npm test > "$TEST_LOG" 2>&1 &
+TEST_PID=$!
+
+BUILD_STATUS=0
+TEST_STATUS=0
+wait "$BUILD_PID" || BUILD_STATUS=$?
+wait "$TEST_PID" || TEST_STATUS=$?
+
+echo "--- Build output ---"
+cat "$BUILD_LOG"
+echo "--- Test output ---"
+cat "$TEST_LOG"
+
+if [ "$BUILD_STATUS" -ne 0 ] || [ "$TEST_STATUS" -ne 0 ]; then
+    rollback
+fi
 
 echo "==> Pruning dev dependencies..."
 npm prune --omit=dev

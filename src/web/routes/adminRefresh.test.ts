@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../db', () => ({
@@ -39,18 +39,27 @@ function buildApp(currentGuildId: string = GUILD_ID) {
   return supertest(app);
 }
 
-/** Wait for a guild's refresh state to leave 'running'. */
+/**
+ * Wait for a guild's refresh state to leave 'running', advancing fake timers
+ * so the background job's real (rate-limiting) setTimeout delays resolve
+ * instantly instead of costing real wall-clock time.
+ */
 async function waitForRefreshComplete(guildId: string = GUILD_ID, timeoutMs = 2000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (getRefreshState(guildId).outcome === 'running') {
     if (Date.now() > deadline) throw new Error('Timed out waiting for refresh to complete');
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.advanceTimersByTimeAsync(10);
   }
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   refreshStates.clear();
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ─── getRefreshState defaults ────────────────────────────────────────────────
