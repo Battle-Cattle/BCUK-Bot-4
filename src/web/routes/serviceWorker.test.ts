@@ -166,4 +166,22 @@ describe('path traversal containment', () => {
     const hash = computeStaticAssetsVersion(tempDir);
     expect(hash).toMatch(/^[0-9a-f]{16}$/);
   });
+
+  it('correctly discovers files when the root directory itself is a symlink', () => {
+    const actualDir = path.join(outsideDir, 'actual-root');
+    fs.mkdirSync(actualDir);
+    fs.writeFileSync(path.join(actualDir, 'app.js'), 'console.log(1);');
+
+    const symlinkRoot = path.join(tempDir, 'symlink-root');
+    fs.symlinkSync(actualDir, symlinkRoot);
+
+    const hash = computeStaticAssetsVersion(symlinkRoot);
+
+    fs.writeFileSync(path.join(actualDir, 'app.js'), 'console.log(2);');
+    const newHash = computeStaticAssetsVersion(symlinkRoot);
+
+    expect(hash).toMatch(/^[0-9a-f]{16}$/);
+    expect(newHash).toMatch(/^[0-9a-f]{16}$/);
+    expect(hash).not.toBe(newHash);
+  });
 });

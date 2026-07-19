@@ -40,7 +40,7 @@ function listFilesRecursive(
   const files: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const absolutePath = path.resolve(dir, entry.name);
-    const relativePath = path.relative(realRoot, absolutePath);
+    const relativePath = path.relative(rootDir, absolutePath);
     if (relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
       continue;
     }
