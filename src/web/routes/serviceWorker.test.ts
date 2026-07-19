@@ -114,3 +114,74 @@ describe('GET /service-worker.js', () => {
     expect(first.text).toBe(second.text);
   });
 });
+
+describe('path traversal containment', () => {
+  let tempDir: string;
+  let outsideDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-security-test-'));
+    outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-security-outside-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  });
+
+  /** Writes `content` to `relativePath` under `tempDir`, creating parent directories as needed. */
+  function writeFile(relativePath: string, content: string): void {
+    const fullPath = path.join(tempDir, relativePath);
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+    fs.writeFileSync(fullPath, content);
+  }
+
+  it('excludes a symlink that points outside the root directory from the hash', () => {
+    const outsideFile = path.join(outsideDir, 'secret.txt');
+    fs.writeFileSync(outsideFile, 'original content');
+    writeFile('app.js', 'console.log(1);');
+    fs.symlinkSync(outsideFile, path.join(tempDir, 'escape-link.txt'));
+
+    const before = computeStaticAssetsVersion(tempDir);
+    fs.writeFileSync(outsideFile, 'changed content');
+
+    // If the symlink were followed and hashed, changing the target's content would change the
+    // version. It doesn't, proving the escaping entry was skipped rather than traversed.
+    expect(computeStaticAssetsVersion(tempDir)).toBe(before);
+  });
+
+  it('does not misflag a legitimate filename that starts with ".."', () => {
+    writeFile('..config.js', 'console.log(1);');
+
+    expect(() => computeStaticAssetsVersion(tempDir)).not.toThrow();
+    expect(computeStaticAssetsVersion(tempDir)).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('allows normal nested directories within the root', () => {
+    writeFile('app.js', 'console.log(1);');
+    writeFile('nested/deep/file.js', 'console.log(2);');
+    writeFile('icons/icon.png', 'data');
+
+    expect(() => computeStaticAssetsVersion(tempDir)).not.toThrow();
+    const hash = computeStaticAssetsVersion(tempDir);
+    expect(hash).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('correctly discovers files when the root directory itself is a symlink', () => {
+    const actualDir = path.join(outsideDir, 'actual-root');
+    fs.mkdirSync(actualDir);
+    fs.writeFileSync(path.join(actualDir, 'app.js'), 'console.log(1);');
+
+    const symlinkRoot = path.join(tempDir, 'symlink-root');
+    fs.symlinkSync(actualDir, symlinkRoot);
+
+    const hash = computeStaticAssetsVersion(symlinkRoot);
+
+    fs.writeFileSync(path.join(actualDir, 'app.js'), 'console.log(2);');
+    const newHash = computeStaticAssetsVersion(symlinkRoot);
+
+    expect(hash).toMatch(/^[0-9a-f]{16}$/);
+    expect(newHash).toMatch(/^[0-9a-f]{16}$/);
+    expect(hash).not.toBe(newHash);
+  });
+});
