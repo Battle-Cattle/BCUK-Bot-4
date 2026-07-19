@@ -28,8 +28,13 @@ const HASH_EXCLUDED_TOP_LEVEL_ENTRIES = new Set(['downloads', 'service-worker.js
 function listFilesRecursive(rootDir: string, dir: string = rootDir): string[] {
   const files: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const absolutePath = path.join(dir, entry.name);
-    const relativePath = path.relative(rootDir, absolutePath);
+    const resolvedBase = path.resolve(rootDir);
+    const resolvedTarget = path.resolve(dir, entry.name);
+    const relativePath = path.relative(resolvedBase, resolvedTarget);
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+      throw new Error('Invalid path');
+    }
+    const absolutePath = resolvedTarget;
     const topLevelSegment = relativePath.split(path.sep)[0];
     if (HASH_EXCLUDED_TOP_LEVEL_ENTRIES.has(topLevelSegment)) continue;
     if (entry.isDirectory()) files.push(...listFilesRecursive(rootDir, absolutePath));
