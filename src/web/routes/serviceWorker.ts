@@ -19,25 +19,43 @@ const HASH_EXCLUDED_TOP_LEVEL_ENTRIES = new Set(['downloads', 'service-worker.js
 /**
  * Recursively lists every file under `dir`, as paths relative to `rootDir`, skipping any
  * entry whose top-level (relative to `rootDir`) path segment is in
- * {@link HASH_EXCLUDED_TOP_LEVEL_ENTRIES}.
- * @param rootDir - The directory relative paths (and the exclusion check) are computed against.
+ * {@link HASH_EXCLUDED_TOP_LEVEL_ENTRIES}. Also skips any entry whose real (symlink-resolved)
+ * path escapes `rootDir` — a containment check against `fs.realpathSync`, not just the literal
+ * path string, since a symlink inside `rootDir` can point anywhere on disk and a naive
+ * `path.relative`/`path.resolve` check never follows it. This guards against a future caller
+ * passing untrusted `rootDir`/`dir` values, which could otherwise read outside the intended tree.
+ * @param rootDir - The directory relative paths (and the exclusion/containment checks) are
+ *   computed against. Resolved once per top-level call.
  * @param dir - Directory to walk on this call (absolute path); defaults to `rootDir` for the
  *   initial call, and is the current subdirectory on recursive calls.
+ * @param realRoot - The symlink-resolved form of `rootDir`, threaded through recursive calls so
+ *   it's only computed once; callers should omit this.
  * @returns Relative file paths, in directory-listing order (not yet sorted).
  */
-function listFilesRecursive(rootDir: string, dir: string = rootDir): string[] {
+function listFilesRecursive(
+  rootDir: string,
+  dir: string = rootDir,
+  realRoot: string = fs.realpathSync(rootDir),
+): string[] {
   const files: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const resolvedBase = path.resolve(rootDir);
-    const resolvedTarget = path.resolve(dir, entry.name);
-    const relativePath = path.relative(resolvedBase, resolvedTarget);
-    if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-      throw new Error('Invalid path');
+    const absolutePath = path.resolve(dir, entry.name);
+    const relativePath = path.relative(realRoot, absolutePath);
+    if (relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+      continue;
     }
-    const absolutePath = resolvedTarget;
+    const realPath = fs.realpathSync(absolutePath);
+    const realRelativePath = path.relative(realRoot, realPath);
+    if (
+      realRelativePath === '..' ||
+      realRelativePath.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(realRelativePath)
+    ) {
+      continue;
+    }
     const topLevelSegment = relativePath.split(path.sep)[0];
     if (HASH_EXCLUDED_TOP_LEVEL_ENTRIES.has(topLevelSegment)) continue;
-    if (entry.isDirectory()) files.push(...listFilesRecursive(rootDir, absolutePath));
+    if (entry.isDirectory()) files.push(...listFilesRecursive(rootDir, absolutePath, realRoot));
     else files.push(relativePath);
   }
   return files;

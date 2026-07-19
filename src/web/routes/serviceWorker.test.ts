@@ -10,9 +10,6 @@ import express from 'express';
 import supertest from 'supertest';
 import router, { computeStaticAssetsVersion, renderServiceWorker } from './serviceWorker';
 
-// Mock fs.readdirSync for path traversal security tests
-const originalReaddirSync = fs.readdirSync;
-
 describe('computeStaticAssetsVersion', () => {
   let tempDir: string;
 
@@ -118,15 +115,18 @@ describe('GET /service-worker.js', () => {
   });
 });
 
-describe('Path Traversal Security', () => {
+describe('path traversal containment', () => {
   let tempDir: string;
+  let outsideDir: string;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-security-test-'));
+    outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-security-outside-'));
   });
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
   });
 
   /** Writes `content` to `relativePath` under `tempDir`, creating parent directories as needed. */
@@ -136,68 +136,34 @@ describe('Path Traversal Security', () => {
     fs.writeFileSync(fullPath, content);
   }
 
-  it('rejects path traversal attempts with .. in directory names', () => {
+  it('excludes a symlink that points outside the root directory from the hash', () => {
+    const outsideFile = path.join(outsideDir, 'secret.txt');
+    fs.writeFileSync(outsideFile, 'original content');
     writeFile('app.js', 'console.log(1);');
-    
-    // Create a malicious directory structure that would traverse outside tempDir
-    const maliciousDir = path.join(tempDir, 'subdir');
-    fs.mkdirSync(maliciousDir);
-    
-    // Mock readdirSync to simulate a directory entry with .. in the name
-    const spy = vi.spyOn(fs, 'readdirSync').mockImplementationOnce((dir, options) => {
-      return [
-        { name: '..', isDirectory: () => true, isFile: () => false } as fs.Dirent,
-      ] as any;
-    });
+    fs.symlinkSync(outsideFile, path.join(tempDir, 'escape-link.txt'));
 
-    expect(() => computeStaticAssetsVersion(tempDir)).toThrow('Invalid path');
-    spy.mockRestore();
+    const before = computeStaticAssetsVersion(tempDir);
+    fs.writeFileSync(outsideFile, 'changed content');
+
+    // If the symlink were followed and hashed, changing the target's content would change the
+    // version. It doesn't, proving the escaping entry was skipped rather than traversed.
+    expect(computeStaticAssetsVersion(tempDir)).toBe(before);
   });
 
-  it('rejects symlinks that point outside the root directory', () => {
-    // This test verifies that symlinks pointing outside are caught
-    // However, the current implementation uses path.resolve which doesn't follow symlinks
-    // So a symlink file inside tempDir won't be rejected unless we read through it
-    // The real protection is against directory traversal via .. or absolute paths
-    
-    // Instead, let's test a more realistic scenario: a crafted entry name
-    writeFile('app.js', 'console.log(1);');
-    
-    // Mock readdirSync to simulate an entry that would create a path outside tempDir
-    const spy = vi.spyOn(fs, 'readdirSync').mockImplementationOnce((dir, options) => {
-      // Simulate an entry that when resolved would point outside
-      const outsidePath = path.join(path.dirname(tempDir), 'outside-file.txt');
-      return [
-        { name: path.relative(dir as string, outsidePath), isDirectory: () => false, isFile: () => true } as fs.Dirent,
-      ] as any;
-    });
+  it('does not misflag a legitimate filename that starts with ".."', () => {
+    writeFile('..config.js', 'console.log(1);');
 
-    expect(() => computeStaticAssetsVersion(tempDir)).toThrow('Invalid path');
-    spy.mockRestore();
+    expect(() => computeStaticAssetsVersion(tempDir)).not.toThrow();
+    expect(computeStaticAssetsVersion(tempDir)).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it('allows normal nested directories within the root', () => {
     writeFile('app.js', 'console.log(1);');
     writeFile('nested/deep/file.js', 'console.log(2);');
     writeFile('icons/icon.png', 'data');
-    
-    // Should not throw - these are all valid paths within tempDir
+
     expect(() => computeStaticAssetsVersion(tempDir)).not.toThrow();
     const hash = computeStaticAssetsVersion(tempDir);
     expect(hash).toMatch(/^[0-9a-f]{16}$/);
-  });
-
-  it('rejects absolute paths that escape the root directory', () => {
-    writeFile('app.js', 'console.log(1);');
-    
-    // Mock readdirSync to return an entry that would resolve to an absolute path outside tempDir
-    const spy = vi.spyOn(fs, 'readdirSync').mockImplementationOnce((dir, options) => {
-      return [
-        { name: path.resolve('/etc/passwd'), isDirectory: () => false, isFile: () => true } as fs.Dirent,
-      ] as any;
-    });
-
-    expect(() => computeStaticAssetsVersion(tempDir)).toThrow('Invalid path');
-    spy.mockRestore();
   });
 });
