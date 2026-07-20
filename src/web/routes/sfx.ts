@@ -1,9 +1,8 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getAllSfxTriggers, getAllCategories } from '../../db';
+import { getAllSfxTriggers, getAllCategories, AccessLevel } from '../../db';
 import { csrfProtection } from '../csrf';
 import { SFX_MAX_FILE_MB } from '../../shared/config';
-import { AccessLevel } from '../../db/users';
 import { filterQueryParam, renderError, renderView } from './shared';
 
 const log = createLogger('Web');

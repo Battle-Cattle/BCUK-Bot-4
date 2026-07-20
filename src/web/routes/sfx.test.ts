@@ -6,9 +6,11 @@ const { mockLogger, ACCESS_LEVEL_MOCK } = vi.hoisted(() => ({
   ACCESS_LEVEL_MOCK: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
+/** Mocks the `db` facade so `AccessLevel` resolves to the shared hoisted mock instead of hitting the real module. */
 vi.mock('../../db', () => ({
   getAllSfxTriggers: vi.fn().mockResolvedValue([]),
   getAllCategories: vi.fn().mockResolvedValue([]),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
@@ -19,15 +21,10 @@ vi.mock('../csrf', () => ({
     next();
   },
 }));
-/** Mocks `db/users` so `AccessLevel` resolves to the shared hoisted mock instead of hitting the real module. */
-vi.mock('../../db/users', () => ({
-  AccessLevel: ACCESS_LEVEL_MOCK,
-}));
 
 import supertest from 'supertest';
 import router from './sfx';
-import { getAllSfxTriggers, getAllCategories } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { getAllSfxTriggers, getAllCategories, AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /**
