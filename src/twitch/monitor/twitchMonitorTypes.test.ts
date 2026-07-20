@@ -153,29 +153,37 @@ describe('LiveStateMap', () => {
     expect(map.has('10')).toBe(false);
   });
 
-  it('set() evicts a stale entry under a different key when the same login moves without delete()', () => {
-    // A login moving from key "10" to key "11" (a streamer re-registering under a new DB
-    // row id) without an intervening delete("10") must not leave two Map entries for the
-    // same login.
+  it('set() for the same login under two different keys leaves both entries coexisting', () => {
+    // The same Twitch login can be registered as a streamer in more than one Discord stream
+    // group at once, so each group's DB row id (map key) must keep its own independent
+    // LiveState — a second set() for the same login must NOT evict the first key's entry.
     const map = new LiveStateMap();
     const first = makeState({ login: 'alice' });
     const second = makeState({ login: 'alice' });
     map.set('10', first);
     map.set('11', second);
 
+    expect(map.has('10')).toBe(true);
+    expect(map.has('11')).toBe(true);
+    expect(map.get('10')).toBe(first);
+    expect(map.get('11')).toBe(second);
+    expect(map.size).toBe(2);
+
+    const byLogin = map.getByLogin('alice');
+    expect([first, second]).toContain(byLogin);
+  });
+
+  it('delete on one key of a shared login leaves the other key untouched', () => {
+    const map = new LiveStateMap();
+    const first = makeState({ login: 'alice' });
+    const second = makeState({ login: 'alice' });
+    map.set('10', first);
+    map.set('11', second);
+    map.delete('10');
+
     expect(map.has('10')).toBe(false);
     expect(map.get('11')).toBe(second);
     expect(map.getByLogin('alice')).toBe(second);
-    expect(map.size).toBe(1);
-  });
-
-  it('delete on a key already evicted by a later set() is a harmless no-op', () => {
-    const map = new LiveStateMap();
-    map.set('10', makeState({ login: 'alice' }));
-    map.set('11', makeState({ login: 'alice' })); // evicts key "10" already
-    map.delete('10');
-
-    expect(map.getByLogin('alice')).toBe(map.get('11'));
     expect(map.size).toBe(1);
   });
 
@@ -186,5 +194,21 @@ describe('LiveStateMap', () => {
 
     expect(map.size).toBe(0);
     expect(map.getByLogin('alice')).toBeUndefined();
+  });
+
+  it('regression: a streamer going live in two Discord groups in the same poll tick keeps both group entries independently', () => {
+    // Simulates dispatchStreamerPolls() processing two group-rows for the same Twitch login
+    // within one poll tick: the first group's set() must not be evicted when the second
+    // group's set() runs, and vice versa.
+    const map = new LiveStateMap();
+    const groupOneState = makeState({ login: 'alice', streamerId: 10, groupId: 1 });
+    const groupTwoState = makeState({ login: 'alice', streamerId: 11, groupId: 2 });
+
+    map.set('10', groupOneState);
+    map.set('11', groupTwoState);
+
+    expect(map.get('10')).toBe(groupOneState);
+    expect(map.get('11')).toBe(groupTwoState);
+    expect(map.size).toBe(2);
   });
 });
