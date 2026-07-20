@@ -8,7 +8,7 @@ import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
 import { SFX_FOLDER, SFX_MAX_FILE_MB } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
-import { parsePositiveIntId, createMulterErrorRedirectHandler, makeUploadMiddleware, parseCheckboxField } from './shared';
+import { parsePositiveIntId, parsePositiveBigIntId, createMulterErrorRedirectHandler, makeUploadMiddleware, parseCheckboxField } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -156,20 +156,20 @@ async function storeUploadedSound(
  * Persist an already-stored sound file's DB row. On failure, rolls back the
  * on-disk file (guarding the cleanup itself so a failed `rm()` can't escape
  * this function and turn the caller's intended redirect into a 500).
- * @param triggerId Owning trigger id.
+ * @param triggerId Owning trigger id (bigint — `sfxtrigger.id` is a BIGINT column).
  * @param storedName Relative filename already written under SFX_FOLDER.
  * @param weight Weighted-random selection weight.
  * @param hidden Whether the file is hidden from the public listing.
  * @returns true on success, false if the DB insert failed (and was rolled back).
  */
 async function persistUploadedSound(
-  triggerId: number,
+  triggerId: bigint,
   storedName: string,
   weight: number,
   hidden: boolean,
 ): Promise<boolean> {
   try {
-    await addSfxFile(BigInt(triggerId), storedName, weight, hidden);
+    await addSfxFile(triggerId, storedName, weight, hidden);
     return true;
   } catch (err) {
     const fullPath = safeResolve(SFX_FOLDER, storedName);
@@ -211,7 +211,7 @@ const uploadSound = makeUploadMiddleware(upload, 'sound', handleUploadError);
  * @param res Express response; always issues a redirect.
  */
 router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (req, res) => {
-  const triggerId = parsePositiveIntId(req.body.trigger_id);
+  const triggerId = parsePositiveBigIntId(req.body.trigger_id);
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
   if (!req.file) return res.redirect('/sfx?error=invalid_file');
 
