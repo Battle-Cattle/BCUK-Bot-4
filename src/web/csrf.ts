@@ -24,8 +24,6 @@ export function ensureSessionCsrfToken(req: Parameters<RequestHandler>[0]): stri
 }
 
 function getSubmittedCsrfToken(req: Parameters<RequestHandler>[0]): string | null {
-  // Query param checked first — available before multipart body parsing (Multer).
-  if (typeof req.query?._csrf === 'string') return req.query._csrf;
   if (typeof req.body?._csrf === 'string') return req.body._csrf;
   const xcsrf = req.headers['x-csrf-token'];
   const header = (typeof xcsrf === 'string' && xcsrf.trim() !== '') ? xcsrf : req.headers['x-xsrf-token'];
@@ -38,10 +36,13 @@ function getSubmittedCsrfToken(req: Parameters<RequestHandler>[0]): string | nul
  * Safe methods (GET, HEAD, OPTIONS) pass through unconditionally.
  *
  * For unsafe methods the submitted token is resolved in this priority order:
- * 1. Query parameter `_csrf`
- * 2. Form/JSON body field `_csrf`
- * 3. `X-CSRF-Token` header (ignored when empty)
- * 4. `X-XSRF-Token` header
+ * 1. Form/JSON body field `_csrf`
+ * 2. `X-CSRF-Token` header (ignored when empty)
+ * 3. `X-XSRF-Token` header
+ *
+ * The query string is deliberately not checked — a CSRF token placed in a URL
+ * can leak via server access logs, browser history, and the `Referer` header
+ * sent to third-party resources the page subsequently loads.
  *
  * The submitted token must match the session's `csrfToken` via constant-time
  * comparison. Mismatches call `next` with an error bearing `code: 'EBADCSRFTOKEN'`.

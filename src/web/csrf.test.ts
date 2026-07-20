@@ -109,13 +109,19 @@ describe('csrfProtection — X-CSRF-Token falls back to X-XSRF-Token when empty'
   });
 });
 
-describe('csrfProtection — query takes priority over body and header', () => {
-  it('uses query token when query, body, and header tokens are all present', async () => {
+describe('csrfProtection — query string token is ignored', () => {
+  it('uses body token and ignores a wrong query token when both are present', async () => {
     const res = await supertest(buildApp())
-      .post(`/test?_csrf=${SESSION_TOKEN}`)
-      .send('_csrf=wrong-body-token')
-      .set('Content-Type', 'application/x-www-form-urlencoded')
-      .set('X-CSRF-Token', 'wrong-header-token');
+      .post('/test?_csrf=wrong-query-token')
+      .send(`_csrf=${SESSION_TOKEN}`)
+      .set('Content-Type', 'application/x-www-form-urlencoded');
     expect(res.status).toBe(200);
+  });
+
+  it('rejects a request with only a (even correct) query token and no body/header token', async () => {
+    const res = await supertest(buildApp())
+      .post(`/test?_csrf=${SESSION_TOKEN}`);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('EBADCSRFTOKEN');
   });
 });
