@@ -242,7 +242,7 @@ describe('POST /twitch-disconnect', () => {
 
   it('clears the token, reloads EventSub subscriptions, and redirects on success', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 7, twitch_name: 'streamer' } as any);
-    vi.mocked(clearStreamerToken).mockResolvedValue(undefined);
+    vi.mocked(clearStreamerToken).mockResolvedValue(true);
 
     const res = await supertest(buildApp()).post('/twitch-disconnect');
     expect(res.status).toBe(302);
