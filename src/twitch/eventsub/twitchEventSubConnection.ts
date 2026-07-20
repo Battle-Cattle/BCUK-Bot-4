@@ -224,15 +224,16 @@ export class StreamerConnection {
       if (this.reloadPendingAfterMigration) {
         this.reloadPendingAfterMigration = false;
         log.info(`[${this.name}] Applying reload deferred during session migration`);
-        this.subscribeAndHandleEmpty(session.id, 'No subscriptions after reload — disconnecting')
-          .catch((err) => log.error(`[${this.name}] Deferred reload error:`, err));
+        this.reloadChain = this.reloadChain
+          .then(() => this.subscribeAndHandleEmpty(session.id, 'No subscriptions after reload — disconnecting'))
+          .catch((err) => { log.error(`[${this.name}] Deferred reload error:`, err); });
       }
       return;
     }
     log.info(`[${this.name}] Session established: ${this.sessionId}`);
-    subscribeForStreamer(this.sessionId, this.currentData)
-      .then((count) => { if (count === 0) { log.info(`[${this.name}] No subscriptions — disconnecting`); this.stop(); this.onSelfStop?.(this.uid); } })
-      .catch((err) => log.error(`[${this.name}] Subscribe error:`, err));
+    this.reloadChain = this.reloadChain
+      .then(() => this.subscribeAndHandleEmpty(session.id, 'No subscriptions — disconnecting'))
+      .catch((err) => { log.error(`[${this.name}] Subscribe error:`, err); });
   }
 
   private handleSessionReconnect(reconnectUrl: string): void {

@@ -403,9 +403,12 @@ describe('StreamerConnection lifecycle', () => {
     // The new session's welcome now arrives, completing the migration.
     await (conn as any).handleMessage(makeWelcomeMsg('sess-new'));
 
-    // The deferred reload is applied against the new, correct session id.
-    expect(subscribeForStreamer).toHaveBeenCalledWith('sess-new', expect.objectContaining({ uid: 'uid-123' }));
-    expect(subscribeForStreamer).not.toHaveBeenCalledWith('sess-old', expect.anything());
+    // The deferred reload is applied against the new, correct session id, via reloadChain —
+    // so the subscribe call happens asynchronously and must be awaited.
+    await vi.waitFor(() => {
+      expect(subscribeForStreamer).toHaveBeenCalledWith('sess-new', expect.objectContaining({ uid: 'uid-123' }));
+      expect(subscribeForStreamer).not.toHaveBeenCalledWith('sess-old', expect.anything());
+    });
     expect((conn as any).reloadPendingAfterMigration).toBe(false);
   });
 
@@ -413,6 +416,10 @@ describe('StreamerConnection lifecycle', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-live'));
+    // The welcome handshake's own subscribe now also runs through reloadChain, so wait
+    // for it to land before measuring the reload() calls in isolation.
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(1));
+    vi.mocked(subscribeForStreamer).mockClear();
 
     // First reload's subscribeForStreamer call stays pending until resolveFirst() fires,
     // so we can prove the second reload's call doesn't start until the first one settles.
@@ -425,15 +432,16 @@ describe('StreamerConnection lifecycle', () => {
     conn.reload(makeStreamerData());
     conn.reload(makeStreamerData());
 
-    // Flush pending microtasks so the first reload's doReload() has had a chance to run.
+    // The first reload's call fires once its turn in reloadChain comes up.
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(1));
+    // The second reload is chained behind the first's still-unresolved promise, so it
+    // structurally cannot fire until resolveFirst() settles it — flushing extra
+    // microtasks here proves it's stuck, not just slow to start.
     await Promise.resolve();
     await Promise.resolve();
-    // Only the welcome handshake + first reload have fired — the second reload is still
-    // chained behind the first's unresolved promise. If reloadChain didn't serialise the
-    // calls, the second reload would have fired immediately too, making this 3.
-    expect(subscribeForStreamer).toHaveBeenCalledTimes(2);
+    expect(subscribeForStreamer).toHaveBeenCalledTimes(1);
 
     resolveFirst(1);
-    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(2));
   });
 });
