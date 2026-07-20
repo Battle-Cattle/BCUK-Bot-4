@@ -132,10 +132,16 @@ export class StreamerConnection {
   /**
    * Subscribes for the current streamer data on the given session id and stops the
    * connection (notifying onSelfStop) if zero subscriptions result. Shared by doReload()
-   * and the deferred reload applied after a session migration completes.
+   * and the deferred reload applied after a session migration completes. No-ops (both
+   * before and after the subscribe call) if the connection was stopped while this was
+   * in flight — e.g. `stop()` called from `twitchEventSub.ts` on shutdown or when a
+   * streamer is removed — so a zombie API call can't resurrect an already-closed
+   * connection or double-fire `onSelfStop`.
    */
   private async subscribeAndHandleEmpty(sessionId: string, emptyLogMessage: string): Promise<void> {
+    if (this.stopped) return;
     const count = await subscribeForStreamer(sessionId, this.currentData);
+    if (this.stopped) return;
     if (count === 0) {
       log.info(`[${this.name}] ${emptyLogMessage}`);
       this.stop();

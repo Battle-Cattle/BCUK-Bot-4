@@ -192,6 +192,35 @@ describe('StreamerConnection.handleMessage', () => {
     await vi.waitFor(() => expect(onSelfStop).toHaveBeenCalledWith('uid-123'));
   });
 
+  it('ignores a pending subscribeAndHandleEmpty result once the connection has been stopped', async () => {
+    let resolveSubscribe!: (value: number) => void;
+    vi.mocked(subscribeForStreamer).mockReturnValue(new Promise((resolve) => { resolveSubscribe = resolve; }));
+
+    const conn = new StreamerConnection(makeStreamerData());
+    const onSelfStop = vi.fn();
+    conn.setSelfStopCallback(onSelfStop);
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-abc'));
+
+    // The welcome's subscribeForStreamer call is now in flight (pending). Stop the
+    // connection externally — e.g. twitchEventSub.ts removing this streamer — while it's
+    // still awaiting Twitch's response.
+    expect(subscribeForStreamer).toHaveBeenCalledTimes(1);
+    conn.stop();
+    vi.mocked(removeStreamerFromMap).mockClear();
+
+    // The pending subscribe now resolves with zero subscriptions — without the `stopped`
+    // guard, this would call stop() a second time and fire onSelfStop for an already-closed
+    // connection.
+    resolveSubscribe(0);
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(1));
+    // Flush a few more microtask ticks to give a missing guard a chance to fire.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onSelfStop).not.toHaveBeenCalled();
+    expect(removeStreamerFromMap).not.toHaveBeenCalled();
+  });
+
   it('session_welcome when isReconnecting: does NOT call subscribeForStreamer', async () => {
     const conn = new StreamerConnection(makeStreamerData());
     // Transition to reconnecting state via a session_reconnect message (public API)
