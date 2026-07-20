@@ -66,6 +66,10 @@ export class StreamerConnection {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private isReconnecting = false;
+  // Set when reload() runs while isReconnecting is true — at that point this.sessionId is
+  // still the OLD session's id (the new session's welcome hasn't arrived yet), so subscribing
+  // now would hit a doomed session. Consumed once onSessionWelcome() lands the new session id.
+  private reloadPendingAfterMigration = false;
   private stopped = false;
   private reloadChain: Promise<void> = Promise.resolve();
 
@@ -90,6 +94,7 @@ export class StreamerConnection {
   stop(): void {
     this.stopped = true;
     this.isReconnecting = false;
+    this.reloadPendingAfterMigration = false;
     this.sessionId = null;
     this.clearKeepaliveTimer();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
@@ -106,14 +111,33 @@ export class StreamerConnection {
       .catch((err) => { log.error(`[${this.name}] EventSub reload error:`, err); });
   }
 
+  /**
+   * Re-subscribes on the live session using the latest streamer data. If a session migration
+   * is in flight, this.sessionId still refers to the old, soon-to-be-invalidated session —
+   * subscribing now would silently fail against Twitch, so the reload is deferred and picked
+   * up by onSessionWelcome() once the new session's id is known.
+   */
   private async doReload(): Promise<void> {
+    if (this.isReconnecting) {
+      this.reloadPendingAfterMigration = true;
+      return;
+    }
     if (!this.ws || !this.sessionId) {
       if (!this.stopped && !this.reconnectTimer) { this.connect(); }
       return;
     }
-    const count = await subscribeForStreamer(this.sessionId, this.currentData);
+    await this.subscribeAndHandleEmpty(this.sessionId, 'No subscriptions after reload — disconnecting');
+  }
+
+  /**
+   * Subscribes for the current streamer data on the given session id and stops the
+   * connection (notifying onSelfStop) if zero subscriptions result. Shared by doReload()
+   * and the deferred reload applied after a session migration completes.
+   */
+  private async subscribeAndHandleEmpty(sessionId: string, emptyLogMessage: string): Promise<void> {
+    const count = await subscribeForStreamer(sessionId, this.currentData);
     if (count === 0) {
-      log.info(`[${this.name}] No subscriptions after reload — disconnecting`);
+      log.info(`[${this.name}] ${emptyLogMessage}`);
       this.stop();
       this.onSelfStop?.(this.uid);
     }
@@ -152,7 +176,11 @@ export class StreamerConnection {
     this.ws = null;
     this.sessionId = null;
     if (!this.stopped) {
+      // If this socket died mid-migration before its welcome landed, drop any reload that
+      // was deferred for it — the eventual reconnect's own session_welcome will subscribe
+      // with the latest currentData anyway (see onSessionWelcome's non-reconnecting branch).
       this.isReconnecting = false;
+      this.reloadPendingAfterMigration = false;
       this.scheduleReconnect();
     }
   }
@@ -179,6 +207,12 @@ export class StreamerConnection {
     // session_keepalive: timer already reset above
   }
 
+  /**
+   * Handles the session_welcome message: records the new session id and, on first connect,
+   * subscribes for the current streamer data. On a reconnect (session migration), existing
+   * subscriptions carry over automatically — but if a reload() was deferred because it ran
+   * while the old session id was still stale, it's applied now against the new session id.
+   */
   private onSessionWelcome(msg: EventSubMessage): void {
     const session = msg.payload.session!;
     this.sessionId = session.id;
@@ -187,6 +221,12 @@ export class StreamerConnection {
     if (this.isReconnecting) {
       this.isReconnecting = false;
       log.info(`[${this.name}] Reconnected — session ${this.sessionId}`);
+      if (this.reloadPendingAfterMigration) {
+        this.reloadPendingAfterMigration = false;
+        log.info(`[${this.name}] Applying reload deferred during session migration`);
+        this.subscribeAndHandleEmpty(session.id, 'No subscriptions after reload — disconnecting')
+          .catch((err) => log.error(`[${this.name}] Deferred reload error:`, err));
+      }
       return;
     }
     log.info(`[${this.name}] Session established: ${this.sessionId}`);

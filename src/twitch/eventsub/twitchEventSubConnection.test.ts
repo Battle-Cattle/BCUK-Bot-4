@@ -376,6 +376,39 @@ describe('StreamerConnection lifecycle', () => {
     expect(subscribeForStreamer).toHaveBeenCalledWith('sess-live', expect.objectContaining({ uid: 'uid-123' }));
   });
 
+  it('defers a reload() issued mid-session-migration and applies it once the new session welcomes', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-old'));
+
+    // Enter the migration window: session_reconnect swaps in a new socket, but sessionId
+    // is still 'sess-old' until the new session's welcome arrives.
+    const reconnectMsg = makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-old', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=new' } },
+    });
+    (conn as any).handleMessage(reconnectMsg);
+    expect((conn as any).isReconnecting).toBe(true);
+    expect((conn as any).sessionId).toBe('sess-old');
+
+    vi.mocked(subscribeForStreamer).mockClear();
+
+    // A config reload comes in during the migration window.
+    conn.reload(makeStreamerData());
+    await vi.waitFor(() => expect((conn as any).reloadPendingAfterMigration).toBe(true));
+
+    // The stale old session id must NOT be subscribed against.
+    expect(subscribeForStreamer).not.toHaveBeenCalled();
+
+    // The new session's welcome now arrives, completing the migration.
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-new'));
+
+    // The deferred reload is applied against the new, correct session id.
+    expect(subscribeForStreamer).toHaveBeenCalledWith('sess-new', expect.objectContaining({ uid: 'uid-123' }));
+    expect(subscribeForStreamer).not.toHaveBeenCalledWith('sess-old', expect.anything());
+    expect((conn as any).reloadPendingAfterMigration).toBe(false);
+  });
+
   it('serialises overlapping reload() calls through the reload chain', async () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
