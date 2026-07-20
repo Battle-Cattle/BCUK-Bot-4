@@ -87,6 +87,28 @@ describe('counterScheduler', () => {
     expect(archiveAndResetYearlyCounters).toHaveBeenNthCalledWith(2, 2024);
   });
 
+  it('does not leak a duplicate tick chain when started twice without stopping', async () => {
+    vi.setSystemTime(new Date(2025, 0, 1)); // Jan 1, 2025
+    startCounterScheduler();
+    startCounterScheduler(); // second call should no-op, not kick off a second tick() chain
+    await flushAsync();
+
+    // If the second call had leaked a duplicate chain, this would be 2.
+    expect(archiveAndResetYearlyCounters).toHaveBeenCalledTimes(1);
+
+    // Advance an hour; only one timer chain should be pending, so only one more poll fires.
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    await flushAsync();
+
+    // Still Jan 1, lastArchivedYear already set — no additional archive call either way,
+    // but a leaked second chain would have logged/scheduled independently. Confirm the
+    // scheduler can still be fully stopped with a single stopCounterScheduler() call.
+    stopCounterScheduler();
+    await vi.advanceTimersByTimeAsync(7_200_000);
+    await flushAsync();
+    expect(archiveAndResetYearlyCounters).toHaveBeenCalledTimes(1);
+  });
+
   it('stopCounterScheduler prevents further ticks', async () => {
     vi.setSystemTime(new Date(2025, 5, 15)); // June 15 — no archive expected
     startCounterScheduler();
