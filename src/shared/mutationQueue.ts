@@ -20,21 +20,21 @@ export function createMutationQueue<K = string>(): {
       const current = new Promise<void>((resolve) => {
         release = resolve;
       });
+      // `previous` can never reject: it's either `Promise.resolve()` (first
+      // call for this key) or a prior call's `queued` value, which is always
+      // wrapped in `.catch(() => {})` below before being stored. So both the
+      // externally-visible chain and this call's own execution gate can await
+      // it directly — no try/catch needed to swallow a failure that can't
+      // structurally occur, and no shared derived promise is introduced
+      // (which would add a microtask tick relative to awaiting `previous`
+      // itself, shifting when downstream operations observably start).
       const queued = (async () => {
-        try {
-          await previous;
-        } catch {
-          // Ignore earlier failures so later operations still run.
-        }
+        await previous;
         await current;
       })().catch(() => {});
       queues.set(key, queued);
 
-      try {
-        await previous;
-      } catch {
-        // Ignore earlier failures so later operations still run.
-      }
+      await previous;
 
       try {
         return await operation();

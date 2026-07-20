@@ -70,6 +70,25 @@ describe('createMutationQueue', () => {
     expect(order).toEqual(['second']);
   });
 
+  // ─── Timing: first call on a key starts promptly ──────────────────────────
+
+  it('starts operation() for a fresh key within a single microtask tick', async () => {
+    const queue = createMutationQueue();
+    let started = false;
+
+    // A fresh key has no `previous` to wait on (it defaults to an
+    // already-resolved promise), so operation() must begin executing after
+    // exactly one microtask tick. Any extra internal indirection between the
+    // gate and `previous` (e.g. deriving a shared "settled" promise via
+    // .then/.catch instead of awaiting `previous` directly) adds a tick here
+    // and is an observable regression — real callers key their own timing
+    // off exactly this.
+    void queue.run('k', async () => { started = true; });
+
+    await Promise.resolve();
+    expect(started).toBe(true);
+  });
+
   // ─── Queue-map cleanup ────────────────────────────────────────────────────
 
   it('removes the key from the internal map after the last operation completes', async () => {
