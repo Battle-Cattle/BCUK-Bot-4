@@ -10,7 +10,6 @@ vi.mock('./db/pool', () => ({ getPool: vi.fn(), closePool: vi.fn() }));
 vi.mock('./db/users', () => ({
   upsertUserRecord: vi.fn(),
   setTwitchBotEnabledRecord: vi.fn(),
-  removeUserRecord: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
   ACCESS_LEVEL_LABELS: {},
   findUser: vi.fn(),
@@ -138,16 +137,15 @@ vi.mock('./db/lookupCache', () => ({
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60_000,
 }));
 
-import { upsertUserRecord, setTwitchBotEnabledRecord, removeUserRecord } from './db/users';
+import { upsertUserRecord, setTwitchBotEnabledRecord } from './db/users';
 import { invalidateCustomCommandLookupCache } from './db/customCommandCache';
 import { upsertOverride as upsertOverrideRecord, removeOverride as removeOverrideRecord } from './db/guildCommandOverrides';
-import { upsertUser, updateTwitchBotEnabled, removeUser, upsertOverride, removeOverride } from './db';
+import { upsertUser, updateTwitchBotEnabled, upsertOverride, removeOverride } from './db';
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(upsertUserRecord).mockResolvedValue(false);
   vi.mocked(setTwitchBotEnabledRecord).mockResolvedValue(undefined);
-  vi.mocked(removeUserRecord).mockResolvedValue(undefined);
   vi.mocked(upsertOverrideRecord).mockResolvedValue(undefined);
   vi.mocked(removeOverrideRecord).mockResolvedValue(undefined);
 });
@@ -196,21 +194,6 @@ describe('updateTwitchBotEnabled', () => {
   it('propagates errors from setTwitchBotEnabledRecord', async () => {
     vi.mocked(setTwitchBotEnabledRecord).mockRejectedValue(new Error('DB error'));
     await expect(updateTwitchBotEnabled('1', true)).rejects.toThrow('DB error');
-    expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
-  });
-});
-
-// ─── removeUser ───────────────────────────────────────────────────────────────
-
-describe('removeUser', () => {
-  it('always calls invalidateCustomCommandLookupCache on success', async () => {
-    await removeUser('1');
-    expect(invalidateCustomCommandLookupCache).toHaveBeenCalledOnce();
-  });
-
-  it('propagates errors from removeUserRecord', async () => {
-    vi.mocked(removeUserRecord).mockRejectedValue(new Error('DB error'));
-    await expect(removeUser('1')).rejects.toThrow('DB error');
     expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
   });
 });

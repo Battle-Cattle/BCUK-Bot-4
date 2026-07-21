@@ -14,10 +14,6 @@ import { rowExists } from './utils';
 
 export type { SqlExecutor } from './commandStringUtils';
 export {
-  requireTrimmedString,
-  normalizeCommandList,
-  normalizeCommandInputs,
-  buildInClausePlaceholders,
   CommandNotFoundError,
   CommandConflictError,
   isMysqlDuplicateEntryError,

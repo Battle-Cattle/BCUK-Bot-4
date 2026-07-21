@@ -12,11 +12,6 @@ import {
 } from '../db';
 import { renderView } from './routes/shared';
 
-// Re-exported so existing `import { ..., getSessionUser } from '../middleware'` call sites
-// work; defined in ./session (not here) because ./routes/shared imports from this file, and
-// routes/shared.ts itself needs getSessionUser — defining it here would be circular.
-export { getSessionUser } from './session';
-
 /**
  * Ensures the request has a logged-in session user, redirecting to login otherwise.
  * @param req - Express request; checked for `req.session.user`.

@@ -22,7 +22,6 @@ import {
   getAllTwitchLinkedUsers,
   setTwitchBotEnabledRecord,
   updateAccessLevel,
-  removeUserRecord,
   AccessLevel,
 } from './users';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
@@ -435,20 +434,6 @@ describe('setTwitchBotEnabledRecord', () => {
     await setTwitchBotEnabledRecord('1', false);
     const params = pool._conn.execute.mock.calls[1][1] as unknown[];
     expect(params[0]).toBe(0);
-  });
-});
-
-// ─── removeUserRecord ─────────────────────────────────────────────────────────
-
-describe('removeUserRecord', () => {
-  it('executes a DELETE with the discord_id', async () => {
-    const pool = makePool();
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await removeUserRecord('42');
-    const sql: string = pool._conn.execute.mock.calls[1][0] as string;
-    expect(sql).toContain('DELETE FROM');
-    const params = pool._conn.execute.mock.calls[1][1] as unknown[];
-    expect(params).toContain('42');
   });
 });
 
