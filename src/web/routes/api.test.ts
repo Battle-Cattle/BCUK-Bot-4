@@ -76,6 +76,12 @@ describe('GET /status', () => {
     expect(res.body).toEqual({ ok: false, error: 'No guild selected' });
     expect(vi.mocked(getGuildScopedStatus)).not.toHaveBeenCalled();
   });
+
+  it('returns 500 when the status lookup fails', async () => {
+    vi.mocked(getGuildScopedStatus).mockRejectedValue(new Error('DB down'));
+    const res = await supertest(buildApp()).get('/status').expect(500);
+    expect(res.body).toEqual({ ok: false, error: 'Failed to fetch status' });
+  });
 });
 
 describe('GET /voice/channels', () => {

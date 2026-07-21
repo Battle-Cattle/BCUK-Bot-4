@@ -193,4 +193,66 @@ describe('status-change push (registered via onStatusChanged)', () => {
     expect(resA.write).not.toHaveBeenCalled();
     expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
   });
+
+  it('serializes same-guild pushes so a slow first lookup cannot resolve after (and clobber) a later one', async () => {
+    const resA = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+
+    let resolveFirstLookup!: () => void;
+    const firstLookupGate = new Promise<void>((resolve) => { resolveFirstLookup = resolve; });
+    let lookupsStarted = 0;
+    vi.mocked(getGuildScopedStatus).mockImplementation(async () => {
+      lookupsStarted += 1;
+      if (lookupsStarted === 1) {
+        await firstLookupGate;
+        return { value: 'first' } as any;
+      }
+      return { value: 'second' } as any;
+    });
+
+    const firstPush = registeredListener('guild-A');
+    const secondPush = registeredListener('guild-A');
+
+    // The second push's lookup must not start until the first one (still gated) finishes —
+    // otherwise a faster second DB round-trip could broadcast before the first, leaving the
+    // client stuck on stale data.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(lookupsStarted).toBe(1);
+
+    resolveFirstLookup();
+    await Promise.all([firstPush, secondPush]);
+
+    expect(resA.write).toHaveBeenNthCalledWith(1, `data: ${JSON.stringify({ value: 'first' })}\n\n`);
+    expect(resA.write).toHaveBeenNthCalledWith(2, `data: ${JSON.stringify({ value: 'second' })}\n\n`);
+  });
+
+  it('does not serialize pushes for different guilds against each other', async () => {
+    const resA = { write: vi.fn() };
+    const resB = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    connections.set('guild-B', new Set([resB] as any));
+
+    let resolveGuildALookup!: () => void;
+    const guildALookupGate = new Promise<void>((resolve) => { resolveGuildALookup = resolve; });
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => {
+      if (guildId === 'guild-A') {
+        await guildALookupGate;
+        return { guildId } as any;
+      }
+      return { guildId } as any;
+    });
+
+    const guildAPush = registeredListener('guild-A');
+    const guildBPush = registeredListener('guild-B');
+
+    // guild-B's push must complete even while guild-A's is still gated — they don't share a queue.
+    await guildBPush;
+    expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
+    expect(resA.write).not.toHaveBeenCalled();
+
+    resolveGuildALookup();
+    await guildAPush;
+    expect(resA.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
+  });
 });

@@ -37,13 +37,18 @@ function getSessionGuildId(req: Request, res: Response): string | null {
  * channels; TikTok channels are always omitted since they have no guild
  * association in the data model.
  * @param req - Express request; guild is taken from the session.
- * @param res - Express response; returns `getGuildScopedStatus(guildId)`, or
- *   400 if no guild is selected.
+ * @param res - Express response; returns `getGuildScopedStatus(guildId)`, 400
+ *   if no guild is selected, or 500 if the lookup fails.
  */
 router.get('/status', requireAuth, async (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
-  res.json(await getGuildScopedStatus(guildId));
+  try {
+    res.json(await getGuildScopedStatus(guildId));
+  } catch (err) {
+    log.error('Failed to fetch status:', err);
+    res.status(500).json({ ok: false, error: 'Failed to fetch status' });
+  }
 });
 
 /**
