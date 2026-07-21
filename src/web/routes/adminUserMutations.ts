@@ -4,7 +4,6 @@ import {
   findUser,
   findUserByTwitchName,
   upsertUser,
-  removeUser,
   updateTwitchBotEnabled,
   AccessLevelValue,
 } from '../../db';
@@ -161,42 +160,6 @@ export async function addOrUpdateUserMutation({
   }
 
   await handleChangeTwitchChannel({ discordId, discordName, level, previousChannel, committedChannel, wasBotEnabled: existingUser?.is_twitch_bot_enabled ?? false });
-}
-
-export async function removeUserMutation(discordId: string): Promise<void> {
-  const existingUser = await findUser(discordId);
-  await removeUser(discordId);
-
-  if (!existingUser?.is_twitch_bot_enabled || !existingUser.twitch_name) {
-    return;
-  }
-
-  const normalizedChannel = normalizeTwitchChannelName(existingUser.twitch_name);
-  if (!normalizedChannel) {
-    throw new Error('Removed user has an invalid Twitch channel');
-  }
-
-  const enabledChannels = await getTwitchEnabledChannels();
-  if (enabledChannels.includes(normalizedChannel)) {
-    return;
-  }
-
-  try {
-    await partTwitchChannel(normalizedChannel);
-  } catch (partErr) {
-    try {
-      await upsertUser(
-        existingUser.discord_id,
-        existingUser.discord_name?.trim() ?? '',
-        existingUser.access_level as AccessLevelValue,
-        existingUser.twitch_name ?? null,
-      );
-      await updateTwitchBotEnabled(existingUser.discord_id, existingUser.is_twitch_bot_enabled);
-    } catch (rollbackErr) {
-      log.error(`Failed to restore user after Twitch part failed during removal: ${discordId}`, rollbackErr);
-    }
-    throw partErr;
-  }
 }
 
 export async function toggleTwitchMutation(discordId: string, nextEnabled: boolean): Promise<void> {

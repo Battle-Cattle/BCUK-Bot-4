@@ -52,7 +52,6 @@ vi.mock('./adminUserMutations', () => {
     isDuplicateTwitchNameDbError: vi.fn().mockReturnValue(false),
     isLockWaitTimeoutDbError: vi.fn().mockReturnValue(false),
     addOrUpdateUserMutation: vi.fn().mockResolvedValue(undefined),
-    removeUserMutation: vi.fn().mockResolvedValue(undefined),
     toggleTwitchMutation: vi.fn().mockResolvedValue(undefined),
   };
 });

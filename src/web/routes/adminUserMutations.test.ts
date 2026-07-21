@@ -5,7 +5,6 @@ vi.mock('../../db', () => ({
   findUser: vi.fn(),
   findUserByTwitchName: vi.fn(),
   upsertUser: vi.fn(),
-  removeUser: vi.fn(),
   updateTwitchBotEnabled: vi.fn(),
   getTwitchEnabledChannels: vi.fn(),
 }));
@@ -23,7 +22,6 @@ vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 
 import {
   addOrUpdateUserMutation,
-  removeUserMutation,
   toggleTwitchMutation,
   DuplicateTwitchNameError,
   isLockWaitTimeoutDbError,
@@ -33,7 +31,6 @@ import {
   findUser,
   findUserByTwitchName,
   upsertUser,
-  removeUser,
   updateTwitchBotEnabled,
   getTwitchEnabledChannels,
 } from '../../db';
@@ -61,7 +58,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(upsertUser).mockResolvedValue(undefined);
   vi.mocked(updateTwitchBotEnabled).mockResolvedValue(undefined);
-  vi.mocked(removeUser).mockResolvedValue(undefined);
   vi.mocked(joinTwitchChannel).mockResolvedValue(undefined);
   vi.mocked(partTwitchChannel).mockResolvedValue(undefined);
   vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
@@ -152,103 +148,6 @@ describe('addOrUpdateUserMutation — handleChangeTwitchChannel rollback', () =>
     const rollbackCall = upsertCalls[upsertCalls.length - 1];
     // previousChannel was null — rollback must use null, not ''
     expect(rollbackCall[3]).toBeNull();
-  });
-});
-
-describe('removeUserMutation — rollback on partTwitchChannel failure', () => {
-  it('re-inserts the user when partTwitchChannel throws during removal', async () => {
-    const existingUser: MockDbUser = {
-      ...BASE_USER,
-      twitch_name: 'streamerchan',
-      is_twitch_bot_enabled: true,
-    };
-
-    vi.mocked(findUser).mockResolvedValue(existingUser as any);
-    vi.mocked(partTwitchChannel).mockRejectedValue(new Error('Part failed'));
-
-    await expect(removeUserMutation('111')).rejects.toThrow('Part failed');
-
-    expect(vi.mocked(upsertUser)).toHaveBeenCalledWith(
-      existingUser.discord_id,
-      existingUser.discord_name,
-      existingUser.access_level,
-      existingUser.twitch_name,
-    );
-    expect(vi.mocked(updateTwitchBotEnabled)).toHaveBeenCalledWith(
-      existingUser.discord_id,
-      existingUser.is_twitch_bot_enabled,
-    );
-  });
-});
-
-describe('removeUserMutation — early exits', () => {
-  it('returns after removeUser when the user had the Twitch bot disabled', async () => {
-    const existingUser: MockDbUser = {
-      ...BASE_USER,
-      twitch_name: 'streamerchan',
-      is_twitch_bot_enabled: false,
-    };
-    vi.mocked(findUser).mockResolvedValue(existingUser as any);
-
-    await expect(removeUserMutation('111')).resolves.toBeUndefined();
-
-    expect(vi.mocked(removeUser)).toHaveBeenCalledWith('111');
-    expect(vi.mocked(getTwitchEnabledChannels)).not.toHaveBeenCalled();
-    expect(vi.mocked(partTwitchChannel)).not.toHaveBeenCalled();
-  });
-
-  it('returns after removeUser when the user has no Twitch name', async () => {
-    vi.mocked(findUser).mockResolvedValue({ ...BASE_USER, twitch_name: null, is_twitch_bot_enabled: true } as any);
-
-    await expect(removeUserMutation('111')).resolves.toBeUndefined();
-
-    expect(vi.mocked(partTwitchChannel)).not.toHaveBeenCalled();
-  });
-
-  it('throws when the stored Twitch channel normalizes to an invalid value', async () => {
-    const existingUser: MockDbUser = {
-      ...BASE_USER,
-      twitch_name: 'bad chan!!',
-      is_twitch_bot_enabled: true,
-    };
-    vi.mocked(findUser).mockResolvedValue(existingUser as any);
-    vi.mocked(normalizeTwitchChannelName).mockReturnValueOnce(null);
-
-    await expect(removeUserMutation('111')).rejects.toThrow('Removed user has an invalid Twitch channel');
-
-    expect(vi.mocked(partTwitchChannel)).not.toHaveBeenCalled();
-  });
-
-  it('returns without parting when the channel is still enabled for another user', async () => {
-    const existingUser: MockDbUser = {
-      ...BASE_USER,
-      twitch_name: 'streamerchan',
-      is_twitch_bot_enabled: true,
-    };
-    vi.mocked(findUser).mockResolvedValue(existingUser as any);
-    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamerchan']);
-
-    await expect(removeUserMutation('111')).resolves.toBeUndefined();
-
-    expect(vi.mocked(partTwitchChannel)).not.toHaveBeenCalled();
-  });
-});
-
-describe('removeUserMutation — rollback itself fails', () => {
-  it('logs when the rollback upsertUser call also fails, and still rethrows the original error', async () => {
-    const existingUser: MockDbUser = {
-      ...BASE_USER,
-      twitch_name: 'streamerchan',
-      is_twitch_bot_enabled: true,
-    };
-
-    vi.mocked(findUser).mockResolvedValue(existingUser as any);
-    vi.mocked(partTwitchChannel).mockRejectedValue(new Error('Part failed'));
-    vi.mocked(upsertUser).mockRejectedValue(new Error('Rollback upsert failed'));
-
-    await expect(removeUserMutation('111')).rejects.toThrow('Part failed');
-
-    expect(vi.mocked(upsertUser)).toHaveBeenCalled();
   });
 });
 

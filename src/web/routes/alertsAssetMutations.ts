@@ -252,5 +252,3 @@ router.post('/settings/:eventType/image/delete', requireAuth, csrfProtection, ma
  *   delete route above.
  */
 router.post('/settings/:eventType/sound/delete', requireAuth, csrfProtection, makeDeleteHandler(setAlertSound, 'sound'));
-
-export default router;

@@ -77,7 +77,7 @@ export {
 } from './db/users';
 export type { AccessLevelValue, DbUser, TwitchLinkedUser } from './db/users';
 
-import { upsertUserRecord, setTwitchBotEnabledRecord, removeUserRecord } from './db/users';
+import { upsertUserRecord, setTwitchBotEnabledRecord } from './db/users';
 
 // Wrappers add cache invalidation — users.ts is a pure DB layer with no cache knowledge.
 
@@ -111,15 +111,6 @@ export async function upsertUser(
  */
 export async function updateTwitchBotEnabled(discordId: string, enabled: boolean): Promise<void> {
   await withInvalidation(() => setTwitchBotEnabledRecord(discordId, enabled));
-}
-
-/**
- * Deletes a user record and invalidates the custom-command lookup cache.
- * @param discordId - Discord snowflake as a string.
- * @returns Resolves once the deletion (and cache invalidation) completes.
- */
-export async function removeUser(discordId: string): Promise<void> {
-  await withInvalidation(() => removeUserRecord(discordId));
 }
 
 // ─── Custom commands ────────────────────────────────────────────────────────

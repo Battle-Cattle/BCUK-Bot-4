@@ -105,5 +105,3 @@ router.post('/settings/:eventType/test', requireAuth, csrfProtection, async (req
     logAndRedirectError({ res, log, logLabel: 'Alert test-send error:', err, basePath: '/alerts/settings', errorCode: 'save_failed' });
   }
 });
-
-export default router;

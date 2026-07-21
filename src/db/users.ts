@@ -301,15 +301,3 @@ export async function updateAccessLevel(discordId: string, accessLevel: number):
     [accessLevel, discordId],
   ));
 }
-
-/**
- * Deletes a user record.
- * @param discordId - Discord snowflake as a string.
- * @returns Resolves once the deletion completes.
- */
-export async function removeUserRecord(discordId: string): Promise<void> {
-  await withShortLockTimeout((conn) => conn.execute(
-    'DELETE FROM `user` WHERE discord_id = ?',
-    [discordId],
-  ));
-}
