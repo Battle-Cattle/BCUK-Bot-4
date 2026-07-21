@@ -192,6 +192,35 @@ describe('StreamerConnection.handleMessage', () => {
     await vi.waitFor(() => expect(onSelfStop).toHaveBeenCalledWith('uid-123'));
   });
 
+  it('ignores a pending subscribeAndHandleEmpty result once the connection has been stopped', async () => {
+    let resolveSubscribe!: (value: number) => void;
+    vi.mocked(subscribeForStreamer).mockReturnValue(new Promise((resolve) => { resolveSubscribe = resolve; }));
+
+    const conn = new StreamerConnection(makeStreamerData());
+    const onSelfStop = vi.fn();
+    conn.setSelfStopCallback(onSelfStop);
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-abc'));
+
+    // The welcome's subscribeForStreamer call is now in flight (pending). Stop the
+    // connection externally — e.g. twitchEventSub.ts removing this streamer — while it's
+    // still awaiting Twitch's response.
+    expect(subscribeForStreamer).toHaveBeenCalledTimes(1);
+    conn.stop();
+    vi.mocked(removeStreamerFromMap).mockClear();
+
+    // The pending subscribe now resolves with zero subscriptions — without the `stopped`
+    // guard, this would call stop() a second time and fire onSelfStop for an already-closed
+    // connection.
+    resolveSubscribe(0);
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(1));
+    // Flush a few more microtask ticks to give a missing guard a chance to fire.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onSelfStop).not.toHaveBeenCalled();
+    expect(removeStreamerFromMap).not.toHaveBeenCalled();
+  });
+
   it('session_welcome when isReconnecting: does NOT call subscribeForStreamer', async () => {
     const conn = new StreamerConnection(makeStreamerData());
     // Transition to reconnecting state via a session_reconnect message (public API)
@@ -376,10 +405,50 @@ describe('StreamerConnection lifecycle', () => {
     expect(subscribeForStreamer).toHaveBeenCalledWith('sess-live', expect.objectContaining({ uid: 'uid-123' }));
   });
 
+  it('defers a reload() issued mid-session-migration and applies it once the new session welcomes', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-old'));
+
+    // Enter the migration window: session_reconnect swaps in a new socket, but sessionId
+    // is still 'sess-old' until the new session's welcome arrives.
+    const reconnectMsg = makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-old', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=new' } },
+    });
+    (conn as any).handleMessage(reconnectMsg);
+    expect((conn as any).isReconnecting).toBe(true);
+    expect((conn as any).sessionId).toBe('sess-old');
+
+    vi.mocked(subscribeForStreamer).mockClear();
+
+    // A config reload comes in during the migration window.
+    conn.reload(makeStreamerData());
+    await vi.waitFor(() => expect((conn as any).reloadPendingAfterMigration).toBe(true));
+
+    // The stale old session id must NOT be subscribed against.
+    expect(subscribeForStreamer).not.toHaveBeenCalled();
+
+    // The new session's welcome now arrives, completing the migration.
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-new'));
+
+    // The deferred reload is applied against the new, correct session id, via reloadChain —
+    // so the subscribe call happens asynchronously and must be awaited.
+    await vi.waitFor(() => {
+      expect(subscribeForStreamer).toHaveBeenCalledWith('sess-new', expect.objectContaining({ uid: 'uid-123' }));
+      expect(subscribeForStreamer).not.toHaveBeenCalledWith('sess-old', expect.anything());
+    });
+    expect((conn as any).reloadPendingAfterMigration).toBe(false);
+  });
+
   it('serialises overlapping reload() calls through the reload chain', async () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-live'));
+    // The welcome handshake's own subscribe now also runs through reloadChain, so wait
+    // for it to land before measuring the reload() calls in isolation.
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(1));
+    vi.mocked(subscribeForStreamer).mockClear();
 
     // First reload's subscribeForStreamer call stays pending until resolveFirst() fires,
     // so we can prove the second reload's call doesn't start until the first one settles.
@@ -392,15 +461,16 @@ describe('StreamerConnection lifecycle', () => {
     conn.reload(makeStreamerData());
     conn.reload(makeStreamerData());
 
-    // Flush pending microtasks so the first reload's doReload() has had a chance to run.
+    // The first reload's call fires once its turn in reloadChain comes up.
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(1));
+    // The second reload is chained behind the first's still-unresolved promise, so it
+    // structurally cannot fire until resolveFirst() settles it — flushing extra
+    // microtasks here proves it's stuck, not just slow to start.
     await Promise.resolve();
     await Promise.resolve();
-    // Only the welcome handshake + first reload have fired — the second reload is still
-    // chained behind the first's unresolved promise. If reloadChain didn't serialise the
-    // calls, the second reload would have fired immediately too, making this 3.
-    expect(subscribeForStreamer).toHaveBeenCalledTimes(2);
+    expect(subscribeForStreamer).toHaveBeenCalledTimes(1);
 
     resolveFirst(1);
-    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(2));
   });
 });
