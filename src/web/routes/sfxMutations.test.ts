@@ -525,7 +525,15 @@ describe('access control', () => {
   });
 
   it('uploads run csrfProtection before Multer buffers the file', async () => {
-    vi.mocked(csrfProtection).mockImplementationOnce((_req: any, res: any) => res.status(403).send('bad csrf'));
+    vi.mocked(csrfProtection).mockImplementationOnce((req: any, res: any) => {
+      // Drain the still-arriving upload body before responding. csrfProtection short-circuits
+      // ahead of Multer, so nothing else reads this request — if the 403 lands (and the socket
+      // closes) while the client is still writing the multipart body, the client sees a
+      // connection reset instead of the response. That race is timing-dependent and was flaky
+      // on Windows CI (ECONNRESET); consuming the body first lets the write finish cleanly.
+      req.resume();
+      req.on('end', () => res.status(403).send('bad csrf'));
+    });
     // Oversized so the assertion actually distinguishes ordering: if Multer ran first,
     // it would reject with LIMIT_FILE_SIZE (a different status) instead of csrfProtection's 403.
     const oversized = Buffer.alloc(1024 * 1024 + 1024, 1);
