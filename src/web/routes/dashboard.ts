@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getStatus } from '../../shared/statusStore';
+import { getGuildScopedStatus } from '../guildScopedStatus';
 import { csrfProtection } from '../csrf';
 import { getStreamerByDiscordId, getSfxTriggerCount, getCustomCommandCount, getCounterCount, getRecentStreamerEvents } from '../../db';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
@@ -21,7 +21,7 @@ const router = Router();
  */
 router.get('/', csrfProtection, async (req, res) => {
   try {
-    const status = getStatus(req.session.user?.currentGuildId ?? null);
+    const status = await getGuildScopedStatus(req.session.user?.currentGuildId ?? null);
     const [sfxCount, commandCount, counterCount, streamer] = await Promise.all([
       getSfxTriggerCount(), getCustomCommandCount(), getCounterCount(),
       req.session.user ? getStreamerByDiscordId(req.session.user.discordId) : Promise.resolve(null),

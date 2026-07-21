@@ -8,7 +8,7 @@ import { setDiscordReady, clearVoiceStatus } from '../shared/statusStore';
 import { forgetGuild as forgetGuildVoiceState } from '../audio/audioPlayer';
 import { forgetGuildRefreshState } from '../web/routes/adminRefresh';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
-import { upsertGuild, getAllGuilds, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
+import { upsertGuild, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('Discord');
@@ -175,13 +175,7 @@ export function startDiscordBot(): void {
     bootingClient = null;
     client = c;
     log.info(`Logged in as ${c.user.tag}`);
-    try {
-      const registeredGuilds = await getAllGuilds();
-      const names = registeredGuilds.map((g) => g.name).join(', ') || 'Unknown';
-      setDiscordReady(c.user.tag, names);
-    } catch (err) {
-      log.error('Failed to initialise:', err);
-    }
+    setDiscordReady(c.user.tag);
   });
 
   localClient.on('error', (err) => {

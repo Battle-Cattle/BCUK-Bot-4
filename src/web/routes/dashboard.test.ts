@@ -4,8 +4,8 @@ import { mockLogger } from '../../test-utils/loggerMock';
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-vi.mock('../../shared/statusStore', () => ({
-  getStatus: vi.fn(),
+vi.mock('../guildScopedStatus', () => ({
+  getGuildScopedStatus: vi.fn(),
 }));
 
 vi.mock('../../db', () => ({
@@ -33,7 +33,7 @@ vi.mock('./dashboardEvents', () => ({
 
 import supertest from 'supertest';
 import router from './dashboard';
-import { getStatus } from '../../shared/statusStore';
+import { getGuildScopedStatus } from '../guildScopedStatus';
 import {
   getStreamerByDiscordId, getSfxTriggerCount, getCustomCommandCount, getCounterCount, getRecentStreamerEvents,
 } from '../../db';
@@ -53,7 +53,7 @@ function buildApp(sessionUser: unknown = undefined) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getStatus).mockReturnValue(STATUS as any);
+  vi.mocked(getGuildScopedStatus).mockResolvedValue(STATUS as any);
   vi.mocked(getSfxTriggerCount).mockResolvedValue(3);
   vi.mocked(getCustomCommandCount).mockResolvedValue(5);
   vi.mocked(getCounterCount).mockResolvedValue(2);
@@ -71,7 +71,7 @@ describe('GET /', () => {
     expect(res.body.recentEvents).toEqual([]);
     expect(getStreamerByDiscordId).not.toHaveBeenCalled();
     expect(getRecentStreamerEvents).not.toHaveBeenCalled();
-    expect(getStatus).toHaveBeenCalledWith(null);
+    expect(getGuildScopedStatus).toHaveBeenCalledWith(null);
   });
 
   it('includes usage-stat counts from the db layer', async () => {
@@ -81,7 +81,7 @@ describe('GET /', () => {
 
   it('scopes status to the session\'s current guild', async () => {
     await supertest(buildApp({ discordId: '100', currentGuildId: 'guild-A' })).get('/');
-    expect(getStatus).toHaveBeenCalledWith('guild-A');
+    expect(getGuildScopedStatus).toHaveBeenCalledWith('guild-A');
   });
 
   it('sets needsReconnect true when the streamer has auth-failed subs', async () => {

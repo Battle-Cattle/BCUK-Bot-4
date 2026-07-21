@@ -10,8 +10,8 @@ vi.mock('../csrf', () => ({
   csrfProtection: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../shared/statusStore', () => ({
-  getStatus: vi.fn(),
+vi.mock('../guildScopedStatus', () => ({
+  getGuildScopedStatus: vi.fn(),
 }));
 
 vi.mock('../../audio/audioPlayer', () => ({
@@ -40,7 +40,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import supertest from 'supertest';
 import router from './api';
-import { getStatus } from '../../shared/statusStore';
+import { getGuildScopedStatus } from '../guildScopedStatus';
 import { connect, disconnect, getCurrentChannelId } from '../../audio/audioPlayer';
 import { getDiscordClient } from '../../discord/discordBot';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
@@ -56,7 +56,7 @@ function buildApp(currentGuildId: string | null = GUILD_ID) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getStatus).mockReturnValue({ discord: {}, voice: {}, twitch: {}, tiktok: {} } as never);
+  vi.mocked(getGuildScopedStatus).mockResolvedValue({ discord: {}, voice: {}, twitch: {}, tiktok: {} } as never);
   vi.mocked(getDiscordClient).mockReturnValue({} as never);
   vi.mocked(connect).mockResolvedValue(undefined);
   vi.mocked(getCurrentChannelId).mockReturnValue('current-vc');
@@ -68,13 +68,19 @@ describe('GET /status', () => {
   it('returns the status snapshot for the session guild', async () => {
     const res = await supertest(buildApp()).get('/status').expect(200);
     expect(res.body).toEqual({ discord: {}, voice: {}, twitch: {}, tiktok: {} });
-    expect(vi.mocked(getStatus)).toHaveBeenCalledWith(GUILD_ID);
+    expect(vi.mocked(getGuildScopedStatus)).toHaveBeenCalledWith(GUILD_ID);
   });
 
   it('returns 400 when no guild is selected', async () => {
     const res = await supertest(buildApp(null)).get('/status').expect(400);
     expect(res.body).toEqual({ ok: false, error: 'No guild selected' });
-    expect(vi.mocked(getStatus)).not.toHaveBeenCalled();
+    expect(vi.mocked(getGuildScopedStatus)).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when the status lookup fails', async () => {
+    vi.mocked(getGuildScopedStatus).mockRejectedValue(new Error('DB down'));
+    const res = await supertest(buildApp()).get('/status').expect(500);
+    expect(res.body).toEqual({ ok: false, error: 'Failed to fetch status' });
   });
 });
 
