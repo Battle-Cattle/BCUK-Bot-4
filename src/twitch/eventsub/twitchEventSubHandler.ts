@@ -2,7 +2,6 @@ import type { EventSubConfig, AlertEventType, StreamerEventType } from '../../db
 import { getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
-import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
 import { createLogger } from '../../shared/logger';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 import { fillTemplate } from '../../shared/textTemplate';
@@ -289,9 +288,8 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
  *  - `config.raid_enabled` — sends the configured welcome message.
  *  - `config.raid_shoutout_enabled` — looks up the raiding channel via
  *    {@link buildShoutoutMessage} (the same Helix lookup path as the `!so` command)
- *    and sends the resulting shoutout, recording the match via `recordCommandTestEntry`
- *    for monitor-panel visibility. No-ops silently if the raiding channel can't be
- *    resolved on Twitch.
+ *    and sends the resulting shoutout. No-ops silently if the raiding channel can't
+ *    be resolved on Twitch.
  *  - The streamer's raid alert config (via {@link maybePushAlert}) — pushes a browser-source
  *    alert independently of both of the above.
  *  - The dashboard's "Recent Events" feed (via {@link recordAndPushDashboardEvent}) — recorded
@@ -316,14 +314,7 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
     try {
       const shoutoutMsg = await buildShoutoutMessage(event.from_broadcaster_user_login);
       if (shoutoutMsg) {
-        const sent = await sendChatMessage(login, shoutoutMsg);
-        if (sent) recordCommandTestEntry({
-          source: 'twitch',
-          command: '!so (raid)',
-          response: shoutoutMsg,
-          channel: login,
-          user: event.from_broadcaster_user_login,
-        });
+        await sendChatMessage(login, shoutoutMsg);
       }
     } catch (err) {
       log.error(`Failed to build raid shoutout for ${login}:`, err);

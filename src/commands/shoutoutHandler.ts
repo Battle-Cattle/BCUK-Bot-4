@@ -2,7 +2,6 @@ import { createLogger } from '../shared/logger';
 import { getUsers, getChannelInfo, getStreams, TwitchChannelInfo, TwitchStream } from '../twitch/twitchApi';
 
 const log = createLogger('Shoutout');
-import { recordCommandTestEntry } from './commandMonitorStore';
 import { extractCommand } from './commandUtils';
 import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
 
@@ -100,16 +99,15 @@ export async function buildShoutoutMessage(target: string): Promise<string | nul
 
 /**
  * Handle a `!so <target>` moderator command in Twitch chat: look up the target via
- * {@link buildShoutoutMessage}, send the resulting message to the channel (or an
- * "unknown user" note if the target wasn't found), and record the outcome for the
- * monitor panel via `recordCommandTestEntry`. No-ops for non-`!so` messages or
+ * {@link buildShoutoutMessage} and send the resulting message to the channel (or
+ * silently no-op if the target wasn't found). No-ops for non-`!so` messages or
  * non-moderator callers.
  *
  * @param channel - Twitch channel the command was sent in (also the send target).
  * @param rawMessage - Raw chat message text, e.g. `!so @someuser`.
- * @param username - Twitch login of the command invoker, for monitor-panel logging.
+ * @param username - Twitch login of the command invoker (unused).
  * @param isModerator - Whether the invoker has moderator privileges; required to run.
- * @returns Resolves once the shoutout (or failure) has been recorded.
+ * @returns Resolves once the shoutout (or no-op) has completed.
  */
 export async function executeShoutoutForTwitch(
   channel: string,
@@ -124,18 +122,7 @@ export async function executeShoutoutForTwitch(
   if (!target) return;
 
   const response = await buildShoutoutMessage(target);
+  if (!response) return;
 
-  if (response) {
-    const sent = await dispatchShoutout(channel, response);
-    recordCommandTestEntry({
-      source: 'twitch',
-      command: SO_COMMAND,
-      response: sent ? response : `[SEND FAILED] ${response}`,
-      channel,
-      user: username,
-    });
-  } else {
-    const unknown = `(unknown user: ${target})`;
-    recordCommandTestEntry({ source: 'twitch', command: SO_COMMAND, response: unknown, channel, user: username });
-  }
+  await dispatchShoutout(channel, response);
 }

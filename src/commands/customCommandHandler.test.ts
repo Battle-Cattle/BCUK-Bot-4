@@ -8,10 +8,6 @@ vi.mock('../db', () => ({
   getCustomCommandForTwitchChannel: vi.fn(),
 }));
 
-vi.mock('./commandMonitorStore', () => ({
-  recordCommandTestEntry: vi.fn(),
-}));
-
 vi.mock('../twitch/twitchApi', () => ({
   getSharedChatSession: vi.fn().mockResolvedValue(null),
 }));
@@ -33,7 +29,6 @@ import {
   sessionCache,
 } from './customCommandHandler';
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from '../db';
-import { recordCommandTestEntry } from './commandMonitorStore';
 import { isDiscordNotFoundError } from '../discord/discordUtils';
 import { getMultiTwitchDataForChannel } from '../twitch/monitor/twitchMonitor';
 import { getSharedChatSession } from '../twitch/twitchApi';
@@ -77,7 +72,7 @@ describe('executeCustomCommandForDiscord', () => {
     expect(msg.reply).not.toHaveBeenCalled();
   });
 
-  it('replies with the command output and records the entry', async () => {
+  it('replies with the command output', async () => {
     vi.mocked(getCustomCommandForDiscord).mockResolvedValue({
       output: 'Hello Discord!',
       is_multi_twitch: false,
@@ -87,9 +82,6 @@ describe('executeCustomCommandForDiscord', () => {
     await executeCustomCommandForDiscord(msg as any, 'viewer1');
 
     expect(msg.reply).toHaveBeenCalledWith('Hello Discord!');
-    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalledWith(
-      expect.objectContaining({ source: 'discord', command: '!hello', user: 'viewer1' }),
-    );
   });
 
   it('swallows Discord not-found errors on reply failure', async () => {
@@ -131,7 +123,7 @@ describe('executeCustomCommandForDiscord', () => {
     expect(msg.reply).not.toHaveBeenCalled();
   });
 
-  it('substitutes {user}, {args}, and {arg} in the response before replying and recording', async () => {
+  it('substitutes {user}, {args}, and {arg} in the response before replying', async () => {
     vi.mocked(getCustomCommandForDiscord).mockResolvedValue({
       output: '{user} said {args} (first: {arg})',
       is_multi_twitch: false,
@@ -142,9 +134,6 @@ describe('executeCustomCommandForDiscord', () => {
 
     const expected = 'viewer1 said foo bar (first: foo)';
     expect(msg.reply).toHaveBeenCalledWith(expected);
-    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalledWith(
-      expect.objectContaining({ response: expected }),
-    );
   });
 
   it('substitutes an unknown placeholder with an empty string', async () => {
@@ -195,9 +184,6 @@ describe('executeCustomCommandForTwitch', () => {
     await executeCustomCommandForTwitch('#chan', '!hey', 'viewer1');
 
     expect(mockRuntime.send).toHaveBeenCalledWith('#chan', 'Hey Twitch!');
-    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalledWith(
-      expect.objectContaining({ source: 'twitch', channel: '#chan', user: 'viewer1' }),
-    );
   });
 
   it('broadcasts to all active registered channels for a multi-twitch command', async () => {
@@ -233,7 +219,7 @@ describe('executeCustomCommandForTwitch', () => {
     expect(mockRuntime.send).toHaveBeenCalledWith('#a', 'Hi!');
   });
 
-  it('substitutes {user}, {args}, and {arg} in the response before sending and recording', async () => {
+  it('substitutes {user}, {args}, and {arg} in the response before sending', async () => {
     vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({
       output: '{user} said {args} (first: {arg})',
       is_multi_twitch: false,
@@ -243,9 +229,6 @@ describe('executeCustomCommandForTwitch', () => {
 
     const expected = 'viewer1 said foo bar (first: foo)';
     expect(mockRuntime.send).toHaveBeenCalledWith('#chan', expected);
-    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalledWith(
-      expect.objectContaining({ response: expected }),
-    );
   });
 
   it('substitutes an unknown placeholder with an empty string', async () => {

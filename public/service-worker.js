@@ -29,7 +29,6 @@ const STATIC_ASSETS = [
   '/commands.js',
   '/counters.js',
   '/streams.js',
-  '/command-monitor.js',
   '/pwa-register.js',
   '/manifest.json',
   '/icons/BCUK-192.svg',

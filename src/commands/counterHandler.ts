@@ -3,7 +3,6 @@ import type { Message } from 'discord.js';
 import { findCounterByCommand, incrementCounter } from '../db';
 
 const log = createLogger('Counter');
-import { recordCommandTestEntry } from './commandMonitorStore';
 import { extractCommand } from './commandUtils';
 import { isDiscordNotFoundError } from '../discord/discordUtils';
 import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
@@ -80,11 +79,11 @@ async function _buildCounterResponse(
 
 /**
  * Handles a Discord message that may be a counter command or check: extracts the
- * command, builds the counter response, records it for the monitor panel, and
- * replies in-channel if the counter was safely resolved.
+ * command, builds the counter response, and replies in-channel if the counter
+ * was safely resolved.
  *
  * @param message - The Discord message to check for a counter command.
- * @param username - Display name of the sender, for monitor-panel logging.
+ * @param username - Display name of the sender (unused; kept for call-site symmetry with the Twitch handler).
  * @returns Resolves once the reply (or a no-op) has completed.
  */
 export async function executeCounterCommandForDiscord(
@@ -97,19 +96,11 @@ export async function executeCounterCommandForDiscord(
   const result = await _buildCounterResponse(command, '[Discord]');
   if (!result) return;
 
-  recordCommandTestEntry({
-    source: 'discord',
-    command,
-    response: result.response,
-    channel: null,
-    user: username ?? null,
-  });
-
   if (!result.canReply) return;
 
   try {
     await message.reply(result.response);
-    log.info(`[Discord] Sent ${result.label} '${command}' (recorded for monitoring).`);
+    log.info(`[Discord] Sent ${result.label} '${command}'.`);
   } catch (err) {
     if (!isDiscordNotFoundError(err)) {
       log.error(`[Discord] Failed to reply to message ${message.id} for ${result.label} '${command}':`, err);
@@ -119,12 +110,12 @@ export async function executeCounterCommandForDiscord(
 
 /**
  * Handles a Twitch chat message that may be a counter command or check: extracts
- * the command, builds the counter response, records it for the monitor panel, and
- * sends it to the channel via the registered Twitch runtime if safely resolved.
+ * the command, builds the counter response, and sends it to the channel via the
+ * registered Twitch runtime if safely resolved.
  *
  * @param channel - Twitch channel the message was sent in (also the send target).
  * @param rawMessage - Raw chat message text.
- * @param username - Twitch login of the sender, for monitor-panel logging.
+ * @param username - Twitch login of the sender (unused; kept for call-site symmetry with the Discord handler).
  * @returns Resolves once the send (or a no-op) has completed.
  */
 export async function executeCounterCommandForTwitch(
@@ -138,21 +129,13 @@ export async function executeCounterCommandForTwitch(
   const result = await _buildCounterResponse(command, `[Twitch:${channel}]`);
   if (!result) return;
 
-  recordCommandTestEntry({
-    source: 'twitch',
-    command,
-    response: result.response,
-    channel,
-    user: username ?? null,
-  });
-
   if (!result.canReply) return;
 
   const runtime = counterRuntime.get();
   if (runtime) {
     try {
       await runtime.send(channel, result.response);
-      log.info(`[Twitch] Sent ${result.label} '${command}' in ${channel} (recorded for monitoring).`);
+      log.info(`[Twitch] Sent ${result.label} '${command}' in ${channel}.`);
     } catch (err) {
       log.error(`[Twitch] Failed to send ${result.label} '${command}' in ${channel}:`, err);
     }

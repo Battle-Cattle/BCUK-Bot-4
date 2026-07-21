@@ -3,7 +3,6 @@ import type { Message } from 'discord.js';
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from '../db';
 
 const log = createLogger('CustomCmd');
-import { recordCommandTestEntry } from './commandMonitorStore';
 import { getSharedChatSession } from '../twitch/twitchApi';
 import { extractCommand, extractArgs } from './commandUtils';
 import { isDiscordNotFoundError } from '../discord/discordUtils';
@@ -172,12 +171,10 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
  * Before sending, the matched response is run through {@link fillTemplate} with
  * `{user}` (the invoking username), `{args}` (the raw text after the command token),
  * and `{arg}` (the first whitespace-delimited word of `{args}`) substituted in —
- * unknown placeholders resolve to an empty string. The filled text is what's both
- * sent and recorded via `recordCommandTestEntry`, so the monitor panel shows the
- * resolved response rather than the raw template.
+ * unknown placeholders resolve to an empty string.
  *
  * @param message - The Discord message to inspect and, if matched, reply to.
- * @param username - Display name for the monitoring entry and `{user}` substitution; null or omitted if unknown.
+ * @param username - Display name for `{user}` substitution; null or omitted if unknown.
  * @param guildId - Explicit guild ID for override-aware lookup; falls back to message.guildId.
  * @returns Resolves when the command is handled (or skipped).
  */
@@ -199,17 +196,9 @@ export async function executeCustomCommandForDiscord(
 
   const filledResponse = buildFilledResponse(result.response, message.content, username);
 
-  recordCommandTestEntry({
-    source: 'discord',
-    command,
-    response: filledResponse,
-    channel: null,
-    user: username ?? null,
-  });
-
   try {
     await message.reply(filledResponse);
-    log.info(`[Discord] Sent custom command '${command}' (recorded for monitoring).`);
+    log.info(`[Discord] Sent custom command '${command}'.`);
   } catch (err) {
     if (!isDiscordNotFoundError(err)) {
       log.error(`[Discord] Failed to reply to message ${message.id} for command '${command}':`, err);
@@ -225,13 +214,12 @@ export async function executeCustomCommandForDiscord(
  * Before sending, the matched response is run through {@link fillTemplate} with
  * `{user}` (the invoking username), `{args}` (the raw text after the command token),
  * and `{arg}` (the first whitespace-delimited word of `{args}`) substituted in —
- * unknown placeholders resolve to an empty string. The filled text is what's
- * recorded via `recordCommandTestEntry` and what's sent; for multi-twitch broadcasts
- * the same filled string is reused for every target channel (no per-channel re-fill).
+ * unknown placeholders resolve to an empty string; for multi-twitch broadcasts the
+ * same filled string is reused for every target channel (no per-channel re-fill).
  *
  * @param channel - Twitch channel login the message was received on.
  * @param rawMessage - Raw chat message text.
- * @param username - Display name for the monitoring entry and `{user}` substitution; null or omitted if unknown.
+ * @param username - Display name for `{user}` substitution; null or omitted if unknown.
  * @returns Resolves when the command is handled (or skipped).
  */
 export async function executeCustomCommandForTwitch(
@@ -247,23 +235,15 @@ export async function executeCustomCommandForTwitch(
 
   const filledResponse = buildFilledResponse(result.response, rawMessage, username);
 
-  recordCommandTestEntry({
-    source: 'twitch',
-    command,
-    response: filledResponse,
-    channel,
-    user: username ?? null,
-  });
-
   const runtime = twitchChatRuntime.get();
   if (runtime) {
     if (result.isMultiTwitch) {
       try {
         const sent = await broadcastToActiveChannels(channel, command, filledResponse);
         if (sent) {
-          log.info(`[Twitch] Sent custom command '${command}' in ${channel} (recorded for monitoring).`);
+          log.info(`[Twitch] Sent custom command '${command}' in ${channel}.`);
         } else {
-          log.info(`[Twitch] Broadcast custom command '${command}' in ${channel} reached no channels (recorded for monitoring).`);
+          log.info(`[Twitch] Broadcast custom command '${command}' in ${channel} reached no channels.`);
         }
       } catch (err) {
         log.error(`[Twitch] Failed to broadcast custom command '${command}' in ${channel}:`, err);
@@ -271,7 +251,7 @@ export async function executeCustomCommandForTwitch(
     } else {
       try {
         await runtime.send(channel, filledResponse);
-        log.info(`[Twitch] Sent custom command '${command}' in ${channel} (recorded for monitoring).`);
+        log.info(`[Twitch] Sent custom command '${command}' in ${channel}.`);
       } catch (err) {
         log.error(`[Twitch] Failed to send custom command '${command}' in ${channel}:`, err);
       }

@@ -2,7 +2,6 @@ import { createLogger } from '../shared/logger';
 import { getMultiTwitchDataForChannel } from '../twitch/monitor/twitchMonitor';
 
 const log = createLogger('MultiCmd');
-import { recordCommandTestEntry } from './commandMonitorStore';
 import { resolveSharedChatSessionId } from './customCommandHandler';
 import { extractCommand } from './commandUtils';
 import { sendDedupedBySession } from './twitchBroadcast';
@@ -54,13 +53,12 @@ async function broadcastToGroupChannels(
 
 /**
  * Handles a Twitch chat `!multi` command: looks up the multitwitch group for
- * `channel`, records the outcome for the monitor panel, and — if the channel is
- * part of an active group — broadcasts the multitwitch URL to the group via
- * {@link broadcastToGroupChannels}.
+ * `channel` and — if the channel is part of an active group — broadcasts the
+ * multitwitch URL to the group via {@link broadcastToGroupChannels}.
  *
  * @param channel - Twitch channel the command was sent in.
  * @param rawMessage - Raw chat message text.
- * @param username - Twitch login of the sender, for monitor-panel logging.
+ * @param username - Twitch login of the sender (unused).
  * @returns Resolves once the broadcast (or a no-op) has completed.
  */
 export async function executeMultiCommandForTwitch(
@@ -72,14 +70,6 @@ export async function executeMultiCommandForTwitch(
   if (command !== MULTI_COMMAND) return;
 
   const groupInfo = getMultiTwitchDataForChannel(channel);
-
-  recordCommandTestEntry({
-    source: 'twitch',
-    command: MULTI_COMMAND,
-    response: groupInfo?.url ?? '(not in an active multitwitch group)',
-    channel,
-    user: username ?? null,
-  });
 
   if (!groupInfo) return;
 
