@@ -12,12 +12,11 @@ describe('Discord status', () => {
     expect(mod.getStatus(null).discord.ready).toBe(false);
   });
 
-  it('setDiscordReady marks ready with tag and guildName', () => {
-    mod.setDiscordReady('Bot#1234', 'MyGuild');
+  it('setDiscordReady marks ready with tag', () => {
+    mod.setDiscordReady('Bot#1234');
     const { discord } = mod.getStatus(null);
     expect(discord.ready).toBe(true);
     expect(discord.tag).toBe('Bot#1234');
-    expect(discord.guildName).toBe('MyGuild');
   });
 });
 
@@ -171,7 +170,7 @@ describe('onStatusChanged', () => {
   it('setDiscordReady notifies with null (not scoped to one guild)', () => {
     const listener = vi.fn();
     mod.onStatusChanged(listener);
-    mod.setDiscordReady('Bot#1234', 'MyGuild');
+    mod.setDiscordReady('Bot#1234');
     expect(listener).toHaveBeenCalledWith(null);
   });
 
@@ -244,7 +243,7 @@ describe('onStatusChanged', () => {
     const second = vi.fn();
     mod.onStatusChanged(first);
     mod.onStatusChanged(second);
-    mod.setDiscordReady('Bot#1234', 'MyGuild');
+    mod.setDiscordReady('Bot#1234');
     expect(first).toHaveBeenCalledWith(null);
     expect(second).toHaveBeenCalledWith(null);
   });
@@ -253,14 +252,14 @@ describe('onStatusChanged', () => {
     const listener = vi.fn();
     mod.onStatusChanged(listener);
     mod.onStatusChanged(listener);
-    mod.setDiscordReady('Bot#1234', 'MyGuild');
+    mod.setDiscordReady('Bot#1234');
     expect(listener).toHaveBeenCalledOnce();
   });
 });
 
 describe('getStatus returns shallow copies', () => {
   it('mutating returned discord object does not affect internal state', () => {
-    mod.setDiscordReady('Bot#1234', 'MyGuild');
+    mod.setDiscordReady('Bot#1234');
     const snapshot = mod.getStatus(null);
     (snapshot.discord as Record<string, unknown>).tag = 'mutated';
     expect(mod.getStatus(null).discord.tag).toBe('Bot#1234');

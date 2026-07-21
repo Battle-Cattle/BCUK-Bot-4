@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Request, type Response } from 'express';
-import { getStatus } from '../../shared/statusStore';
+import { getGuildScopedStatus } from '../guildScopedStatus';
 import { requireAuth, requireMod } from '../middleware';
 import { connect, disconnect, getCurrentChannelId } from '../../audio/audioPlayer';
 import { csrfProtection } from '../csrf';
@@ -31,16 +31,19 @@ function getSessionGuildId(req: Request, res: Response): string | null {
 
 /**
  * GET /status — live bot status JSON, polled by the dashboard frontend every
- * few seconds. Voice status is scoped to the viewer's current guild so a
- * Manager on guild B's dashboard never sees guild A's now-playing info.
+ * few seconds. Voice status, the Discord "Server" name, and Twitch channels
+ * are all scoped to the viewer's current guild so a Manager on guild B's
+ * dashboard never sees guild A's now-playing info, server name, or Twitch
+ * channels; TikTok channels are always omitted since they have no guild
+ * association in the data model.
  * @param req - Express request; guild is taken from the session.
- * @param res - Express response; returns `getStatus(guildId)`, or 400 if no
- *   guild is selected.
+ * @param res - Express response; returns `getGuildScopedStatus(guildId)`, or
+ *   400 if no guild is selected.
  */
-router.get('/status', requireAuth, (req, res) => {
+router.get('/status', requireAuth, async (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
-  res.json(getStatus(guildId));
+  res.json(await getGuildScopedStatus(guildId));
 });
 
 /**

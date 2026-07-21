@@ -61,7 +61,6 @@ const state = {
   discord: {
     ready: false,
     tag: null as string | null,
-    guildName: null as string | null,
   },
   voice: new Map<string, VoiceStatus>(),
   twitch: new Map<string, ChannelStatus>(),
@@ -84,14 +83,12 @@ export function clearVoiceStatus(guildId: string): void {
 }
 
 /**
- * Marks the Discord bot as ready with its tag and guild name. Notifies the registered
- * status-change listener (see {@link onStatusChanged}) with `null` since this isn't scoped
- * to one guild.
+ * Marks the Discord bot as ready with its tag. Notifies the registered status-change
+ * listener (see {@link onStatusChanged}) with `null` since this isn't scoped to one guild.
  */
-export function setDiscordReady(tag: string, guildName: string): void {
+export function setDiscordReady(tag: string): void {
   state.discord.ready = true;
   state.discord.tag = tag;
-  state.discord.guildName = guildName;
   notifyStatusChanged(null);
 }
 
@@ -208,11 +205,13 @@ export function setTwitchChannelLive(login: string, isLive: boolean): void {
 }
 
 /**
- * Returns a snapshot of the current bot status (Discord, voice for the given
- * guild, Twitch channels, TikTok channels). Voice status is scoped to a
- * single guild so a viewer of one guild's dashboard never sees another
- * guild's now-playing info; a null guildId (no guild selected yet) reports a
- * default disconnected/idle voice status.
+ * Returns a raw, unscoped snapshot of the current bot status (Discord ready/tag, voice for
+ * the given guild, every tracked Twitch channel, every tracked TikTok channel). Voice status
+ * is the only field scoped here — to a single guild, so a viewer of one guild's dashboard
+ * never sees another guild's now-playing info; a null guildId (no guild selected yet) reports
+ * a default disconnected/idle voice status. The Discord server name and per-guild Twitch
+ * channel filtering happen one layer up, in `src/web/guildScopedStatus.ts`, since that needs
+ * DB lookups this in-memory store deliberately stays free of.
  *
  * @param guildId - Guild to read voice status for, or null if none is selected.
  */

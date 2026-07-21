@@ -26,7 +26,6 @@ vi.mock('./guildRegistry', () => ({
 }));
 vi.mock('../db', () => ({
   upsertGuild: vi.fn().mockResolvedValue(undefined),
-  getAllGuilds: vi.fn().mockResolvedValue([{ guild_id: 'guild-id', name: 'TestGuild', voice_channel_id: null }]),
   getGuildById: vi.fn().mockResolvedValue(null),
   findUser: vi.fn().mockResolvedValue(null),
   upsertUser: vi.fn().mockResolvedValue(undefined),
@@ -308,23 +307,15 @@ describe('startDiscordBot — guildDelete handler', () => {
   });
 });
 
-// ─── startDiscordBot — clientReady error path ─────────────────────────────────
+// ─── startDiscordBot — clientReady ready state ─────────────────────────────────
 
-describe('startDiscordBot — clientReady error path', () => {
-  it('catches getAllGuilds errors without crashing', async () => {
-    const db = await import('../db.js');
-    vi.mocked(db.getAllGuilds).mockRejectedValueOnce(new Error('guild unavailable'));
-    mod.startDiscordBot();
-    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await expect(readyCb(mockInstance)).resolves.toBeUndefined();
-  });
-
-  it('sets ready state with DB guild names on clientReady success', async () => {
+describe('startDiscordBot — clientReady ready state', () => {
+  it('sets ready state with the bot tag on clientReady success', async () => {
     const status = await import('../shared/statusStore.js');
     mod.startDiscordBot();
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await readyCb(mockInstance);
-    expect(vi.mocked(status.setDiscordReady)).toHaveBeenCalledWith('Bot#1234', 'TestGuild');
+    expect(vi.mocked(status.setDiscordReady)).toHaveBeenCalledWith('Bot#1234');
   });
 });
 

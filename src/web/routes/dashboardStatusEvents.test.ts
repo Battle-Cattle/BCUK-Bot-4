@@ -6,19 +6,25 @@ vi.mock('../../shared/config', () => ({
 }));
 
 vi.mock('../../shared/statusStore', () => ({
-  getStatus: vi.fn(),
   onStatusChanged: vi.fn(),
 }));
 
+vi.mock('../guildScopedStatus', () => ({
+  getGuildScopedStatus: vi.fn(),
+}));
+
+vi.mock('../../shared/logger', () => ({ createLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }) }));
+
 import supertest from 'supertest';
 import router, { MAX_SSE_CONNECTIONS_PER_GUILD, connections } from './dashboardStatusEvents';
-import { getStatus, onStatusChanged } from '../../shared/statusStore';
+import { onStatusChanged } from '../../shared/statusStore';
+import { getGuildScopedStatus } from '../guildScopedStatus';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 // Captured immediately after import, before any beforeEach's clearAllMocks() erases the
 // one-time module-load call — dashboardStatusEvents.ts registers this listener as a
 // top-level side effect, not per-request, so it's only ever recorded once.
-const registeredListener = vi.mocked(onStatusChanged).mock.calls[0]?.[0] as (guildId: string | null) => void;
+const registeredListener = vi.mocked(onStatusChanged).mock.calls[0]?.[0] as (guildId: string | null) => Promise<void>;
 
 /** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely — needed to control the request's 'close' event deterministically. */
 function getRouteHandler(routePath: string): (req: any, res: any, next: any) => void {
@@ -137,38 +143,54 @@ describe('status-change push (registered via onStatusChanged)', () => {
     expect(typeof registeredListener).toBe('function');
   });
 
-  it('pushes a guild-scoped snapshot to only that guild when guildId is given', () => {
+  it('pushes a guild-scoped snapshot to only that guild when guildId is given', async () => {
     const resA = { write: vi.fn() };
     const resB = { write: vi.fn() };
     connections.set('guild-A', new Set([resA] as any));
     connections.set('guild-B', new Set([resB] as any));
-    vi.mocked(getStatus).mockImplementation((guildId) => ({ guildId }) as any);
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => ({ guildId }) as any);
 
-    registeredListener('guild-A');
+    await registeredListener('guild-A');
 
-    expect(getStatus).toHaveBeenCalledWith('guild-A');
-    expect(getStatus).not.toHaveBeenCalledWith('guild-B');
+    expect(getGuildScopedStatus).toHaveBeenCalledWith('guild-A');
+    expect(getGuildScopedStatus).not.toHaveBeenCalledWith('guild-B');
     expect(resA.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
     expect(resB.write).not.toHaveBeenCalled();
   });
 
-  it('pushes an individually-scoped snapshot to every connected guild when guildId is null', () => {
+  it('pushes an individually-scoped snapshot to every connected guild when guildId is null', async () => {
     const resA = { write: vi.fn() };
     const resB = { write: vi.fn() };
     connections.set('guild-A', new Set([resA] as any));
     connections.set('guild-B', new Set([resB] as any));
-    vi.mocked(getStatus).mockImplementation((guildId) => ({ guildId }) as any);
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => ({ guildId }) as any);
 
-    registeredListener(null);
+    await registeredListener(null);
 
-    expect(getStatus).toHaveBeenCalledWith('guild-A');
-    expect(getStatus).toHaveBeenCalledWith('guild-B');
+    expect(getGuildScopedStatus).toHaveBeenCalledWith('guild-A');
+    expect(getGuildScopedStatus).toHaveBeenCalledWith('guild-B');
     expect(resA.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
     expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
   });
 
-  it('does nothing when guildId is null and there are no connected guilds', () => {
-    registeredListener(null);
-    expect(getStatus).not.toHaveBeenCalled();
+  it('does nothing when guildId is null and there are no connected guilds', async () => {
+    await registeredListener(null);
+    expect(getGuildScopedStatus).not.toHaveBeenCalled();
+  });
+
+  it('a rejected lookup for one guild does not stop the broadcast to other connected guilds', async () => {
+    const resA = { write: vi.fn() };
+    const resB = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    connections.set('guild-B', new Set([resB] as any));
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => {
+      if (guildId === 'guild-A') throw new Error('DB down');
+      return { guildId } as any;
+    });
+
+    await registeredListener(null);
+
+    expect(resA.write).not.toHaveBeenCalled();
+    expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
   });
 });
