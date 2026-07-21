@@ -238,13 +238,34 @@ describe('saveStreamerToken', () => {
 // ─── clearStreamerToken ───────────────────────────────────────────────────────
 
 describe('clearStreamerToken', () => {
-  it('executes UPDATE NULLing token fields for the given streamerId', async () => {
-    const pool = makePool();
+  it('executes an unscoped UPDATE NULLing token fields when guildId is omitted', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await clearStreamerToken(5);
+    const result = await clearStreamerToken(5);
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
     expect(sql.toLowerCase()).toContain('update');
-    expect(params).toContain(5);
+    expect(sql).not.toContain('g.guild_id');
+    expect(params).toEqual([5]);
+    expect(result).toBe(true);
+  });
+
+  it('scopes the update via the joined stream_group when guildId is given, returning true when a row was updated', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await clearStreamerToken(5, 'guild-1');
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('g.guild_id = ?');
+    expect(params).toEqual([5, 'guild-1']);
+    expect(result).toBe(true);
+  });
+
+  it('returns false without updating when the streamer\'s group belongs to a different guild', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await clearStreamerToken(5, 'other-guild');
+    const [, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(params).toEqual([5, 'other-guild']);
+    expect(result).toBe(false);
   });
 });
 

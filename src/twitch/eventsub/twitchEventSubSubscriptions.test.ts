@@ -761,7 +761,7 @@ describe('handleRevocation', () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['revokedstreamer']));
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
-    vi.mocked(clearStreamerToken).mockResolvedValue(undefined);
+    vi.mocked(clearStreamerToken).mockResolvedValue(true);
     await subscribeForStreamer('sess-revoke', {
       uid: 'uid-revoke',
       token: 'tok-revoke',

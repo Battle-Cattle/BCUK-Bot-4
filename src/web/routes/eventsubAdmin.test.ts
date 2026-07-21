@@ -35,15 +35,16 @@ import { buildTestApp } from '../../test-utils/expressTestApp';
 /**
  * Builds a minimal Express app with the eventsub admin router mounted, a stubbed session, and res.render captured as JSON.
  * @param accessLevel - The access level to assign to the session user (defaults to Admin).
+ * @param currentGuildId - The session user's currently-selected guild (defaults to `'guild-1'`).
  * @returns The configured Express app, ready to be driven with supertest.
  */
-function buildApp(accessLevel = 3) {
-  return buildTestApp({ router, sessionUser: { discordId: '1', accessLevel }, mockRender: 'spread' });
+function buildApp(accessLevel = 3, currentGuildId = 'guild-1') {
+  return buildTestApp({ router, sessionUser: { discordId: '1', accessLevel, currentGuildId }, mockRender: 'spread' });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(clearStreamerToken).mockResolvedValue(undefined);
+  vi.mocked(clearStreamerToken).mockResolvedValue(true);
 });
 
 describe('POST /streams/twitch-disconnect/:streamerId', () => {
@@ -66,12 +67,21 @@ describe('POST /streams/twitch-disconnect/:streamerId', () => {
     expect(res.headers.location).toBe('/admin/streams?error=invalid_id');
   });
 
-  it('clears the token and triggers a reload on success', async () => {
+  it('clears the token, scoped to the caller\'s current guild, and triggers a reload on success', async () => {
     const res = await supertest(buildApp()).post('/streams/twitch-disconnect/42');
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/admin/streams');
-    expect(clearStreamerToken).toHaveBeenCalledWith(42);
+    expect(clearStreamerToken).toHaveBeenCalledWith(42, 'guild-1');
     expect(reloadEventSubSubscriptions).toHaveBeenCalledTimes(1);
+  });
+
+  it('redirects with invalid_id and does not reload when the streamer belongs to a different guild', async () => {
+    vi.mocked(clearStreamerToken).mockResolvedValue(false);
+    const res = await supertest(buildApp()).post('/streams/twitch-disconnect/42');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/admin/streams?error=invalid_id');
+    expect(clearStreamerToken).toHaveBeenCalledWith(42, 'guild-1');
+    expect(reloadEventSubSubscriptions).not.toHaveBeenCalled();
   });
 
   it('redirects with eventsub_disconnect_failed when clearStreamerToken throws', async () => {

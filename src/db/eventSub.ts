@@ -156,17 +156,40 @@ export async function saveStreamerToken(
 }
 
 /**
- * Null out all OAuth token fields for a streamer (used on logout or token revocation).
+ * Null out all OAuth token fields for a streamer (used on logout, token revocation, or an
+ * admin-forced disconnect).
  *
  * @param streamerId - DB row ID of the streamer whose tokens should be cleared.
+ * @param guildId - Optional guild to scope the update to, joining through the streamer's
+ *   `stream_group` the same way {@link removeStreamer} in `streamMonitor.ts` scopes deletes.
+ *   A no-op if the streamer's group doesn't belong to `guildId`, preventing one guild's
+ *   admin from clearing another guild's streamer token. Pass this whenever `streamerId`
+ *   comes from a cross-guild-untrusted caller (e.g. an admin HTTP route). Omit it for
+ *   internal/system callers that already own the record by construction (a user clearing
+ *   their own token via their session, or Twitch-initiated revocation/refresh-failure
+ *   handling keyed off a broadcaster ID we resolved ourselves) — for those the update
+ *   remains unscoped, matching the pre-existing behavior.
+ * @returns True if a row was actually updated; false if `guildId` was given and the
+ *   streamer's group didn't belong to it (or `streamerId` doesn't exist).
  */
-export async function clearStreamerToken(streamerId: number): Promise<void> {
-  await getPool().execute(
+export async function clearStreamerToken(streamerId: number, guildId?: string): Promise<boolean> {
+  if (guildId !== undefined) {
+    const [result] = await getPool().execute<mysql.ResultSetHeader>(
+      `UPDATE streamer s
+       JOIN stream_group g ON s.group_id = g.id
+       SET s.twitch_user_id=NULL, s.eventsub_access_token=NULL, s.eventsub_refresh_token=NULL, s.eventsub_token_expiry=NULL
+       WHERE s.id = ? AND g.guild_id = ?`,
+      [streamerId, guildId],
+    );
+    return result.affectedRows > 0;
+  }
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `UPDATE streamer
      SET twitch_user_id=NULL, eventsub_access_token=NULL, eventsub_refresh_token=NULL, eventsub_token_expiry=NULL
      WHERE id=?`,
     [streamerId],
   );
+  return result.affectedRows > 0;
 }
 
 /** Extracts the 9 event-config column values (everything but `streamer_id`) from a config, in SQL parameter order, coercing booleans to 0/1 for BIT(1) columns. */
