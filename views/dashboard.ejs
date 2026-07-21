@@ -81,7 +81,6 @@ function htmlAttrJson(value) {
         <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.commandCount %></span><span class="stat-big-label">Custom Commands</span></div></div>
         <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.counterCount %></span><span class="stat-big-label">Counters</span></div></div>
         <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= Object.keys(status.twitch).length %></span><span class="stat-big-label">Twitch Channels</span></div></div>
-        <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= Object.keys(status.tiktok).length %></span><span class="stat-big-label">TikTok Channels</span></div></div>
       </div>
     </section>
 
@@ -106,10 +105,6 @@ function htmlAttrJson(value) {
         <div class="card">
           <div class="card-header"><span class="card-icon">🟣</span><span class="card-label">Twitch</span></div>
           <div class="card-body" id="twitch-channels"><p class="empty-msg">No Twitch channels configured.</p></div>
-        </div>
-        <div class="card">
-          <div class="card-header"><span class="card-icon">🎵</span><span class="card-label">TikTok</span></div>
-          <div class="card-body" id="tiktok-channels"><p class="empty-msg">No TikTok channels configured.</p></div>
         </div>
       </div>
     </section>

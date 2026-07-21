@@ -24,9 +24,6 @@ const BASE_STATUS = {
     ourstreamer: { connected: true, lastConnectedAt: null, lastDisconnectedAt: null, isLive: false },
     otherguildstreamer: { connected: true, lastConnectedAt: null, lastDisconnectedAt: null, isLive: true },
   },
-  tiktok: {
-    someone: { connected: true, lastConnectedAt: null, lastDisconnectedAt: null, isLive: false },
-  },
 };
 
 beforeEach(() => {
@@ -43,7 +40,6 @@ describe('getGuildScopedStatus — null guildId', () => {
     const result = await getGuildScopedStatus(null);
     expect(result.discord.guildName).toBeNull();
     expect(result.twitch).toEqual({});
-    expect(result.tiktok).toEqual({});
     expect(getGuildById).not.toHaveBeenCalled();
     expect(getGuildMemberUsers).not.toHaveBeenCalled();
   });
@@ -95,13 +91,6 @@ describe('getGuildScopedStatus — twitch scoping', () => {
     vi.mocked(getGuildMemberUsers).mockResolvedValue([]);
     const result = await getGuildScopedStatus('guild-A');
     expect(result.twitch).toEqual({});
-  });
-});
-
-describe('getGuildScopedStatus — tiktok', () => {
-  it('is always empty, regardless of what the global store tracks', async () => {
-    const result = await getGuildScopedStatus('guild-A');
-    expect(result.tiktok).toEqual({});
   });
 });
 

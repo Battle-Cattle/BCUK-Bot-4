@@ -34,8 +34,7 @@ function getSessionGuildId(req: Request, res: Response): string | null {
  * few seconds. Voice status, the Discord "Server" name, and Twitch channels
  * are all scoped to the viewer's current guild so a Manager on guild B's
  * dashboard never sees guild A's now-playing info, server name, or Twitch
- * channels; TikTok channels are always omitted since they have no guild
- * association in the data model.
+ * channels.
  * @param req - Express request; guild is taken from the session.
  * @param res - Express response; returns `getGuildScopedStatus(guildId)`, 400
  *   if no guild is selected, or 500 if the lookup fails.

@@ -97,8 +97,6 @@ function applyStatus(status) {
   // Channels
   const twitchEl = document.getElementById('twitch-channels');
   if (twitchEl) renderChannels(twitchEl, status.twitch);
-  const tiktokEl = document.getElementById('tiktok-channels');
-  if (tiktokEl) renderChannels(tiktokEl, status.tiktok);
 }
 
 let consecutiveFailures = 0;

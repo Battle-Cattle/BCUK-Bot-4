@@ -31,10 +31,6 @@ vi.mock('./twitch/twitchChannelMembership', () => ({
   getActiveChannelUserIds: vi.fn(),
   setChannelJoinedHook: vi.fn(),
 }));
-vi.mock('./tiktok/tiktokBot', () => ({
-  startTikTokBot: vi.fn().mockResolvedValue(undefined),
-  stopTikTokBot: vi.fn(),
-}));
 vi.mock('./twitch/monitor/twitchMonitor', () => ({
   startTwitchMonitor: vi.fn().mockResolvedValue(undefined),
   stopTwitchMonitor: vi.fn().mockResolvedValue(undefined),

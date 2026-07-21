@@ -46,7 +46,7 @@ export function forgetGuildCommandState(guildId: string): void {
  */
 async function lookupAndPlay(
   command: string,
-  source: 'twitch' | 'discord' | 'tiktok',
+  source: 'twitch' | 'discord',
   guildId: string,
   state: GuildCommandState,
 ): Promise<void> {
@@ -95,7 +95,7 @@ async function lookupAndPlay(
  */
 function tryClaimGuildSlot(
   guildId: string,
-  source: 'twitch' | 'discord' | 'tiktok',
+  source: 'twitch' | 'discord',
   command: string,
   state: GuildCommandState,
 ): boolean {
@@ -116,20 +116,20 @@ function tryClaimGuildSlot(
 }
 
 /**
- * Handle a raw chat message from Twitch, Discord, or TikTok.
+ * Handle a raw chat message from Twitch or Discord.
  * Performs all checks (prefix, cooldown, playing state, DB lookup) before playing.
  * Cooldown and in-flight state are tracked per guild so a trigger in one guild
  * never blocks or cools down a trigger in another.
  *
  * @param rawMessage The full message string as received from chat.
- * @param source     Label used for console logging ('twitch' | 'discord' | 'tiktok').
+ * @param source     Label used for console logging ('twitch' | 'discord').
  * @param guildId    The guild to target; null when no active guild could be
- *   resolved (e.g. a Twitch/TikTok command fired while the streamer isn't
+ *   resolved (e.g. a Twitch command fired while the streamer isn't
  *   connected to voice anywhere) — the command is skipped with a warning.
  */
 export async function handleCommand(
   rawMessage: string,
-  source: 'twitch' | 'discord' | 'tiktok',
+  source: 'twitch' | 'discord',
   guildId: string | null,
 ): Promise<void> {
   // Extract the first word of the message — this is matched directly against

@@ -23,7 +23,7 @@ const statusPushQueue = createMutationQueue<string>();
 /**
  * Pushes a fresh status snapshot to every dashboard connected for `guildId`, or — when
  * `guildId` is null (a change not scoped to one guild, e.g. Discord ready state or a
- * Twitch/TikTok channel connecting) — to every currently connected guild, each with its own
+ * Twitch channel connecting) — to every currently connected guild, each with its own
  * guild-scoped snapshot. Registered once as the {@link onStatusChanged} listener below, so it
  * fires after every `statusStore` mutation. Each guild's snapshot is resolved and broadcast
  * independently — one guild's lookup failing doesn't stop the others from receiving theirs —

@@ -4,7 +4,6 @@ import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot'
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startDiscordBot, stopDiscordBot } from './discord/discordBot';
 import { reloadGuildRegistry } from './discord/guildRegistry';
-import { startTikTokBot, stopTikTokBot } from './tiktok/tiktokBot';
 import { startTwitchMonitor, stopTwitchMonitor } from './twitch/monitor/twitchMonitor';
 import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitch/eventsub/twitchEventSub';
 import { startWebPanel } from './web/server';
@@ -40,7 +39,6 @@ async function shutdown(signal: string): Promise<void> {
   await stopRewardPricingScheduler();
   stopEventSub();
   await stopTwitchMonitor();
-  stopTikTokBot();
   await stopTwitchBot();
   stopDiscordBot();
   disconnect();
@@ -95,7 +93,7 @@ async function main(): Promise<void> {
 
   setChannelJoinedHook(() => reloadEventSubSubscriptions());
   startDiscordBot();
-  await Promise.all([startTwitchBot(), startTikTokBot()]);
+  await startTwitchBot();
   startWebPanel();
   startCounterScheduler();
   startRewardPricingScheduler();
