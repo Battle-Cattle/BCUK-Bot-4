@@ -9,17 +9,12 @@ vi.mock('../twitch/twitchApi', () => ({
   getStreams: vi.fn(),
 }));
 
-vi.mock('./commandMonitorStore', () => ({
-  recordCommandTestEntry: vi.fn(),
-}));
-
 import {
   executeShoutoutForTwitch,
   buildShoutoutMessage,
   registerShoutoutRuntime,
 } from './shoutoutHandler';
 import { getUsers, getChannelInfo, getStreams } from '../twitch/twitchApi';
-import { recordCommandTestEntry } from './commandMonitorStore';
 
 const mockRuntime = { send: vi.fn().mockResolvedValue(undefined) };
 
@@ -44,15 +39,12 @@ describe('executeShoutoutForTwitch', () => {
     expect(vi.mocked(getUsers)).not.toHaveBeenCalled();
   });
 
-  it('records unknown-user response when target is not found on Twitch', async () => {
+  it('does nothing when target is not found on Twitch', async () => {
     vi.mocked(getUsers).mockResolvedValue([]);
 
     await executeShoutoutForTwitch('#chan', '!so @ghost', 'mod', true);
 
     expect(mockRuntime.send).not.toHaveBeenCalled();
-    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalledWith(
-      expect.objectContaining({ response: expect.stringContaining('unknown user') }),
-    );
   });
 
   it('sends a live shoutout when the target is currently streaming', async () => {
@@ -104,17 +96,13 @@ describe('executeShoutoutForTwitch', () => {
     expect(vi.mocked(getUsers)).toHaveBeenCalledWith(['myfriend']);
   });
 
-  it('records a SEND FAILED response when runtime.send throws', async () => {
+  it('does not throw when runtime.send fails', async () => {
     vi.mocked(getUsers).mockResolvedValue([{ id: 'u1', login: 'streamer' } as any]);
     vi.mocked(getChannelInfo).mockResolvedValue([]);
     vi.mocked(getStreams).mockResolvedValue([]);
     mockRuntime.send.mockRejectedValueOnce(new Error('Network error'));
 
-    await executeShoutoutForTwitch('#chan', '!so streamer', 'mod', true);
-
-    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalledWith(
-      expect.objectContaining({ response: expect.stringContaining('[SEND FAILED]') }),
-    );
+    await expect(executeShoutoutForTwitch('#chan', '!so streamer', 'mod', true)).resolves.toBeUndefined();
   });
 
   it('still resolves when getStreams rejects (independent failure)', async () => {
@@ -159,15 +147,5 @@ describe('buildShoutoutMessage', () => {
     const result = await buildShoutoutMessage('streamer');
 
     expect(result).toContain('last seen playing Minecraft');
-  });
-
-  it('does not call recordCommandTestEntry directly (caller is responsible for logging)', async () => {
-    vi.mocked(getUsers).mockResolvedValue([{ id: 'u1', login: 'streamer' } as any]);
-    vi.mocked(getChannelInfo).mockResolvedValue([]);
-    vi.mocked(getStreams).mockResolvedValue([]);
-
-    await buildShoutoutMessage('streamer');
-
-    expect(vi.mocked(recordCommandTestEntry)).not.toHaveBeenCalled();
   });
 });

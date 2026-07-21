@@ -6,7 +6,6 @@ vi.mock('../../db', () => ({
 }));
 vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../commands/shoutoutHandler', () => ({ buildShoutoutMessage: vi.fn() }));
-vi.mock('../../commands/commandMonitorStore', () => ({ recordCommandTestEntry: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../monitor/twitchMonitor', () => ({ triggerImmediateLiveCheck: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../pricing/rewardPricingService', () => ({ applyRedemptionPricing: vi.fn().mockResolvedValue(undefined) }));
@@ -22,7 +21,6 @@ import {
 import { getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
-import { recordCommandTestEntry } from '../../commands/commandMonitorStore';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 import { applyRedemptionPricing } from '../pricing/rewardPricingService';
 import { TEST_ALERT_VARS } from '../../web/routes/testAlertVars';
@@ -277,20 +275,6 @@ describe('handleRaid', () => {
     expect(mockSend).toHaveBeenCalledWith('streamer', 'Go check out @raider!');
   });
 
-  it('records the auto-shoutout via recordCommandTestEntry for monitor-panel visibility', async () => {
-    vi.mocked(buildShoutoutMessage).mockResolvedValue('Go check out @raider!');
-
-    await handleRaid('streamer', event, makeConfig({ raid_shoutout_enabled: true }), STREAMER_ID);
-
-    expect(recordCommandTestEntry).toHaveBeenCalledWith(expect.objectContaining({
-      source: 'twitch',
-      command: '!so (raid)',
-      response: 'Go check out @raider!',
-      channel: 'streamer',
-      user: 'raider',
-    }));
-  });
-
   it('sends both the welcome message and the shoutout when both toggles are on (independent)', async () => {
     vi.mocked(buildShoutoutMessage).mockResolvedValue('Go check out @raider!');
 
@@ -311,7 +295,6 @@ describe('handleRaid', () => {
     await handleRaid('streamer', event, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }), STREAMER_ID);
 
     expect(mockSend).not.toHaveBeenCalled();
-    expect(recordCommandTestEntry).not.toHaveBeenCalled();
   });
 
   it('does not look up a shoutout when raid_shoutout_enabled is false', async () => {
@@ -677,17 +660,15 @@ describe('chat-send failures are isolated from the alert push', () => {
 
     await handleRaid('streamer', raidEvent, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }), STREAMER_ID);
 
-    expect(recordCommandTestEntry).not.toHaveBeenCalled();
     expect(mockPushAlertEvent).toHaveBeenCalled();
   });
 
-  it('does not record the raid shoutout via recordCommandTestEntry when the shoutout send fails', async () => {
+  it('handleRaid still pushes the alert when the shoutout send fails', async () => {
     vi.mocked(buildShoutoutMessage).mockResolvedValue('Go check out @raider!');
     mockSend.mockRejectedValueOnce(new Error('chat send failed'));
 
     await handleRaid('streamer', raidEvent, makeConfig({ raid_enabled: false, raid_shoutout_enabled: true }), STREAMER_ID);
 
-    expect(recordCommandTestEntry).not.toHaveBeenCalled();
     expect(mockPushAlertEvent).toHaveBeenCalled();
   });
 

@@ -65,7 +65,7 @@ npm test      # Vitest
 
 ## New Command Handler Pattern
 
-Export `registerXRuntime(runtime)` from the handler file to store the platform client — avoids circular imports with `src/index.ts`. Call it from `index.ts` after the client is ready. Record matches via `commandMonitorStore`.
+Export `registerXRuntime(runtime)` from the handler file to store the platform client — avoids circular imports with `src/index.ts`. Call it from `index.ts` after the client is ready.
 
 ---
 

@@ -7,10 +7,6 @@ vi.mock('../twitch/monitor/twitchMonitor', () => ({
   getMultiTwitchDataForChannel: vi.fn(),
 }));
 
-vi.mock('./commandMonitorStore', () => ({
-  recordCommandTestEntry: vi.fn(),
-}));
-
 vi.mock('./customCommandHandler', () => ({
   resolveSharedChatSessionId: vi.fn().mockResolvedValue(null),
 }));
@@ -20,7 +16,6 @@ import {
   registerMultiTwitchRuntime,
 } from './multiCommandHandler';
 import { getMultiTwitchDataForChannel } from '../twitch/monitor/twitchMonitor';
-import { recordCommandTestEntry } from './commandMonitorStore';
 
 const mockRuntime = {
   send: vi.fn().mockResolvedValue(undefined),
@@ -42,14 +37,11 @@ describe('executeMultiCommandForTwitch', () => {
     expect(vi.mocked(getMultiTwitchDataForChannel)).not.toHaveBeenCalled();
   });
 
-  it('records the entry but does not broadcast when channel is not in an active group', async () => {
+  it('does not broadcast when channel is not in an active group', async () => {
     vi.mocked(getMultiTwitchDataForChannel).mockReturnValue(null);
 
     await executeMultiCommandForTwitch('#chan', '!multi', 'user1');
 
-    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalledWith(
-      expect.objectContaining({ response: '(not in an active multitwitch group)' }),
-    );
     expect(mockRuntime.send).not.toHaveBeenCalled();
   });
 
@@ -124,23 +116,5 @@ describe('executeMultiCommandForTwitch', () => {
 
     await expect(executeMultiCommandForTwitch('#a', '!multi', 'user1')).resolves.toBeUndefined();
     expect(mockRuntime.send).not.toHaveBeenCalled();
-  });
-
-  it('records the multitwitch URL in the command monitor entry', async () => {
-    vi.mocked(getMultiTwitchDataForChannel).mockReturnValue({
-      url: 'multitwitch.tv/a/b',
-      participants: ['#a'],
-    } as any);
-
-    await executeMultiCommandForTwitch('#a', '!multi', 'user1');
-
-    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        command: '!multi',
-        response: 'multitwitch.tv/a/b',
-        channel: '#a',
-        user: 'user1',
-      }),
-    );
   });
 });

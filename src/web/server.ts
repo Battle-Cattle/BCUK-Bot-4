@@ -27,7 +27,6 @@ import streamsRouter from './routes/streams';
 import commandsRouter from './routes/commands';
 import countersRouter from './routes/counters';
 import counterHistoryRouter from './routes/counterHistory';
-import commandMonitorRouter from './routes/commandMonitor';
 import streamdeckRouter from './routes/streamdeck';
 import streamdeckKeysRouter from './routes/streamdeckKeys';
 import companionAuthRouter from './routes/companionAuth';
@@ -126,8 +125,8 @@ const streamdeckLimiter = rateLimit({
   message: 'Too many requests, please try again shortly.',
 });
 // Per-account limit for session-authenticated panel users. Dashboard polling alone
-// can reach ~420 req/15 min (status + command-monitor + streams-live), so 600 gives
-// headroom while still capping a compromised or runaway session. Skips unauthenticated
+// can reach a few hundred req/15 min (status + streams-live), so 600 gives headroom
+// while still capping a compromised or runaway session. Skips unauthenticated
 // requests (covered by generalLimiter) and the Streamdeck API (its own limiter).
 const sessionLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -218,7 +217,6 @@ rootAuthedRouter.use(sfxRouter);
 rootAuthedRouter.use(commandsRouter);
 rootAuthedRouter.use(countersRouter);
 rootAuthedRouter.use(counterHistoryRouter);
-rootAuthedRouter.use(commandMonitorRouter);
 rootAuthedRouter.use(rootGuildRouter);
 app.use('/', rootAuthedRouter);
 

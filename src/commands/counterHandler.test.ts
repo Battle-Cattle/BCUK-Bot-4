@@ -8,10 +8,6 @@ vi.mock('../db', () => ({
   incrementCounter: vi.fn(),
 }));
 
-vi.mock('./commandMonitorStore', () => ({
-  recordCommandTestEntry: vi.fn(),
-}));
-
 vi.mock('../discord/discordUtils', () => ({
   isDiscordNotFoundError: vi.fn().mockReturnValue(false),
 }));
@@ -22,7 +18,6 @@ import {
   registerCounterTwitchRuntime,
 } from './counterHandler';
 import { findCounterByCommand, incrementCounter } from '../db';
-import { recordCommandTestEntry } from './commandMonitorStore';
 
 type MockCounter = {
   id: number;
@@ -77,7 +72,7 @@ describe('executeCounterCommandForDiscord', () => {
     expect(msg.reply).not.toHaveBeenCalled();
   });
 
-  it('replies with formatted increment message and records entry for a trigger counter', async () => {
+  it('replies with formatted increment message for a trigger counter', async () => {
     vi.mocked(findCounterByCommand).mockResolvedValue(TRIGGER_COUNTER as any);
     vi.mocked(incrementCounter).mockResolvedValue(5);
     const msg = makeMockMessage('!hits');
@@ -85,9 +80,6 @@ describe('executeCounterCommandForDiscord', () => {
     await executeCounterCommandForDiscord(msg as any, 'viewer1');
 
     expect(msg.reply).toHaveBeenCalledWith('Count is now 5!');
-    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalledWith(
-      expect.objectContaining({ source: 'discord', command: '!hits', user: 'viewer1' }),
-    );
   });
 
   it('replies with check message (no increment) for a check counter', async () => {
@@ -100,14 +92,13 @@ describe('executeCounterCommandForDiscord', () => {
     expect(msg.reply).toHaveBeenCalledWith('Current count: 7');
   });
 
-  it('records the entry but does NOT reply when incrementCounter fails', async () => {
+  it('does NOT reply when incrementCounter fails', async () => {
     vi.mocked(findCounterByCommand).mockResolvedValue(TRIGGER_COUNTER as any);
     vi.mocked(incrementCounter).mockRejectedValue(new Error('DB down'));
     const msg = makeMockMessage('!hits');
 
     await executeCounterCommandForDiscord(msg as any);
 
-    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalled();
     expect(msg.reply).not.toHaveBeenCalled();
   });
 
@@ -141,9 +132,6 @@ describe('executeCounterCommandForTwitch', () => {
     await executeCounterCommandForTwitch('#mychan', '!hits', 'viewer1');
 
     expect(mockTwitchRuntime.send).toHaveBeenCalledWith('#mychan', 'Count is now 10!');
-    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalledWith(
-      expect.objectContaining({ source: 'twitch', channel: '#mychan', user: 'viewer1' }),
-    );
   });
 
   it('does not send when incrementCounter fails (canReply=false)', async () => {
@@ -153,6 +141,5 @@ describe('executeCounterCommandForTwitch', () => {
     await executeCounterCommandForTwitch('#chan', '!hits', null);
 
     expect(mockTwitchRuntime.send).not.toHaveBeenCalled();
-    expect(vi.mocked(recordCommandTestEntry)).toHaveBeenCalled();
   });
 });

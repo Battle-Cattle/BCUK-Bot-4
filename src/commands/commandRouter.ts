@@ -6,7 +6,6 @@ import { playFile, VoiceNotConnectedError } from '../audio/sfxPlayer';
 import { SFX_FOLDER, GLOBAL_COOLDOWN_MS } from '../shared/config';
 import { setVoicePlaying } from '../shared/statusStore';
 import { safeResolve } from '../shared/pathUtils';
-import { recordCommandTestEntry } from './commandMonitorStore';
 import { getOrCreate } from '../shared/mapUtils';
 import { extractCommand } from './commandUtils';
 
@@ -38,8 +37,7 @@ export function forgetGuildCommandState(guildId: string): void {
 
 /**
  * Looks up a trigger command's sound files, picks one, and plays it into the
- * given guild, recording the play time on that guild's cooldown state and a
- * command-monitor entry on success.
+ * given guild, recording the play time on that guild's cooldown state on success.
  *
  * @param command - Lowercased trigger command to look up.
  * @param source - Where the command came from, used for logging/status.
@@ -73,7 +71,6 @@ async function lookupAndPlay(
     await playFile(fullPath, guildId);
     state.lastPlayedAt = Date.now();
     setVoicePlaying(guildId, filename, command, source);
-    recordCommandTestEntry({ source, command, response: filename, channel: null, user: null });
   } catch (err) {
     if (err instanceof VoiceNotConnectedError) {
       log.info(`[${source}] Skipping '${command}' — not connected to voice channel`);
