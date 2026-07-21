@@ -7,18 +7,15 @@ export interface GuildScopedStatus {
   discord: { ready: boolean; tag: string | null; guildName: string | null };
   voice: ReturnType<typeof getStatus>['voice'];
   twitch: Record<string, ChannelStatus>;
-  tiktok: Record<string, ChannelStatus>;
 }
 
 /**
  * Returns the bot status for `guildId`'s dashboard: the guild's own name (never another
  * guild's), voice status for the guild (already scoped by `statusStore.getStatus`), and
- * Twitch channels filtered to just this guild's members. TikTok channels come only from a
- * global env-configured list with no guild association anywhere in the schema, so they're
- * always omitted here rather than guessed or leaked to every guild.
+ * Twitch channels filtered to just this guild's members.
  *
  * @param guildId - Guild to scope the snapshot to, or null if no guild is selected (e.g. an
- *   anonymous dashboard visitor) — returns a snapshot with no guild name and no Twitch/TikTok
+ *   anonymous dashboard visitor) — returns a snapshot with no guild name and no Twitch
  *   channels, without any DB lookup.
  */
 export async function getGuildScopedStatus(guildId: string | null): Promise<GuildScopedStatus> {
@@ -29,7 +26,6 @@ export async function getGuildScopedStatus(guildId: string | null): Promise<Guil
       discord: { ...status.discord, guildName: null },
       voice: status.voice,
       twitch: {},
-      tiktok: {},
     };
   }
 
@@ -51,6 +47,5 @@ export async function getGuildScopedStatus(guildId: string | null): Promise<Guil
     twitch: Object.fromEntries(
       Object.entries(status.twitch).filter(([channel]) => allowedTwitchChannels.has(channel)),
     ),
-    tiktok: {},
   };
 }

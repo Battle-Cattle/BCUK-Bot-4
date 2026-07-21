@@ -80,35 +80,6 @@ describe('config — required env vars', () => {
   });
 });
 
-describe('config — TIKTOK_CHANNELS', () => {
-  it('defaults to an empty array when unset', async () => {
-    const config = await loadConfig({ TIKTOK_CHANNELS: undefined });
-    expect(config.TIKTOK_CHANNELS).toEqual([]);
-  });
-
-  it('splits, trims, and strips a leading @ from each entry', async () => {
-    const config = await loadConfig({ TIKTOK_CHANNELS: ' @alice , bob ,@carol' });
-    expect(config.TIKTOK_CHANNELS).toEqual(['alice', 'bob', 'carol']);
-  });
-
-  it('filters out empty entries from doubled commas', async () => {
-    const config = await loadConfig({ TIKTOK_CHANNELS: 'alice,,bob' });
-    expect(config.TIKTOK_CHANNELS).toEqual(['alice', 'bob']);
-  });
-});
-
-describe('config — TIKTOK_SIGN_API_KEY', () => {
-  it('is undefined when unset', async () => {
-    const config = await loadConfig({ TIKTOK_SIGN_API_KEY: undefined });
-    expect(config.TIKTOK_SIGN_API_KEY).toBeUndefined();
-  });
-
-  it('is passed through when set', async () => {
-    const config = await loadConfig({ TIKTOK_SIGN_API_KEY: 'sign-key' });
-    expect(config.TIKTOK_SIGN_API_KEY).toBe('sign-key');
-  });
-});
-
 describe('config — DB_HOST / DB_PORT', () => {
   it('defaults DB_HOST to localhost when unset', async () => {
     const config = await loadConfig({ DB_HOST: undefined });

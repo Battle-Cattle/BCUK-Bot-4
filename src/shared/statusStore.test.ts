@@ -148,18 +148,6 @@ describe('Twitch channel status', () => {
   });
 });
 
-describe('TikTok channel status', () => {
-  it('starts with no channels', () => {
-    expect(mod.getStatus(null).tiktok).toEqual({});
-  });
-
-  it('setTikTokChannel connected records state', () => {
-    mod.setTikTokChannel('creator1', true);
-    expect(mod.getStatus(null).tiktok['creator1'].connected).toBe(true);
-    expect(mod.getStatus(null).tiktok['creator1'].lastConnectedAt).toBeInstanceOf(Date);
-  });
-});
-
 describe('onStatusChanged', () => {
   it('is not called before any mutator runs', () => {
     const listener = vi.fn();
@@ -213,13 +201,6 @@ describe('onStatusChanged', () => {
     const listener = vi.fn();
     mod.onStatusChanged(listener);
     mod.setTwitchChannel('mychan', true);
-    expect(listener).toHaveBeenCalledWith(null);
-  });
-
-  it('setTikTokChannel notifies with null (not scoped to one guild)', () => {
-    const listener = vi.fn();
-    mod.onStatusChanged(listener);
-    mod.setTikTokChannel('creator1', true);
     expect(listener).toHaveBeenCalledWith(null);
   });
 

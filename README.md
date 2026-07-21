@@ -4,7 +4,7 @@
 [![Maintainability](https://qlty.sh/gh/Battle-Cattle/projects/BCUK-Bot-4/maintainability.svg)](https://qlty.sh/gh/Battle-Cattle/projects/BCUK-Bot-4)
 [![Code Coverage](https://qlty.sh/gh/Battle-Cattle/projects/BCUK-Bot-4/coverage.svg)](https://qlty.sh/gh/Battle-Cattle/projects/BCUK-Bot-4)
 
-A multi-platform community bot connecting Twitch, Discord, and TikTok Live. Features custom commands, soundboard effects, counters, and a web control panel.
+A multi-platform community bot connecting Twitch and Discord. Features custom commands, soundboard effects, counters, and a web control panel.
 
 ## Requirements
 

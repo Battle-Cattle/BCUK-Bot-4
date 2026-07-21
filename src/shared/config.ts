@@ -17,15 +17,6 @@ export const TWITCH_OAUTH_TOKEN = require_env('TWITCH_OAUTH_TOKEN');
 export const TWITCH_CLIENT_ID     = require_env('TWITCH_CLIENT_ID');
 export const TWITCH_CLIENT_SECRET = require_env('TWITCH_CLIENT_SECRET');
 
-// TikTok LIVE monitoring
-// Comma-separated list of TikTok usernames whose LIVE streams to monitor
-export const TIKTOK_CHANNELS: string[] = (process.env.TIKTOK_CHANNELS ?? '')
-  .split(',')
-  .map((c) => c.trim().replace(/^@/, ''))
-  .filter(Boolean);
-// Optional sign API key from https://www.eulerstream.com (improves connection reliability)
-export const TIKTOK_SIGN_API_KEY: string | undefined = process.env.TIKTOK_SIGN_API_KEY || undefined;
-
 export const DB_HOST = process.env.DB_HOST ?? 'localhost';
 const _DB_PORT = parseInt(process.env.DB_PORT ?? '3306', 10);
 if (Number.isNaN(_DB_PORT)) throw new Error('Invalid DB_PORT: must be a number');

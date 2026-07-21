@@ -40,7 +40,7 @@ import {
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-const STATUS = { discord: { ready: true }, voice: {}, twitch: {}, tiktok: {} };
+const STATUS = { discord: { ready: true }, voice: {}, twitch: {} };
 
 /**
  * Builds a minimal Express app with the dashboard router mounted, a stubbed session, and res.render captured as JSON.

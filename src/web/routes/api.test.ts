@@ -56,7 +56,7 @@ function buildApp(currentGuildId: string | null = GUILD_ID) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getGuildScopedStatus).mockResolvedValue({ discord: {}, voice: {}, twitch: {}, tiktok: {} } as never);
+  vi.mocked(getGuildScopedStatus).mockResolvedValue({ discord: {}, voice: {}, twitch: {} } as never);
   vi.mocked(getDiscordClient).mockReturnValue({} as never);
   vi.mocked(connect).mockResolvedValue(undefined);
   vi.mocked(getCurrentChannelId).mockReturnValue('current-vc');
@@ -67,7 +67,7 @@ beforeEach(() => {
 describe('GET /status', () => {
   it('returns the status snapshot for the session guild', async () => {
     const res = await supertest(buildApp()).get('/status').expect(200);
-    expect(res.body).toEqual({ discord: {}, voice: {}, twitch: {}, tiktok: {} });
+    expect(res.body).toEqual({ discord: {}, voice: {}, twitch: {} });
     expect(vi.mocked(getGuildScopedStatus)).toHaveBeenCalledWith(GUILD_ID);
   });
 

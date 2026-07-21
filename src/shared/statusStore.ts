@@ -14,7 +14,7 @@ const statusChangeListeners = new Set<(guildId: string | null) => void>();
  * listeners — every registered listener is notified on each change; none are dropped by a
  * later registration.
  * @param listener - Called with the guild whose voice status changed, or null for a change
- *   that isn't scoped to one guild (Discord bot state, Twitch/TikTok channel state).
+ *   that isn't scoped to one guild (Discord bot state, Twitch channel state).
  */
 export function onStatusChanged(listener: (guildId: string | null) => void): void {
   statusChangeListeners.add(listener);
@@ -25,7 +25,7 @@ function notifyStatusChanged(guildId: string | null): void {
   for (const listener of statusChangeListeners) listener(guildId);
 }
 
-/** Live connection and stream status for a single Twitch or TikTok channel. */
+/** Live connection and stream status for a single Twitch channel. */
 export interface ChannelStatus {
   connected: boolean;
   lastConnectedAt: Date | null;
@@ -64,7 +64,6 @@ const state = {
   },
   voice: new Map<string, VoiceStatus>(),
   twitch: new Map<string, ChannelStatus>(),
-  tiktok: new Map<string, ChannelStatus>(),
 };
 
 /** Returns a guild's voice status, creating a default (disconnected/idle) record on first use. */
@@ -159,7 +158,7 @@ function defaultChannelStatus(): ChannelStatus {
  * record on first use and stamping `lastConnectedAt`/`lastDisconnectedAt`
  * whenever the connected state actually transitions.
  *
- * @param map - The Twitch or TikTok channel-status map to update.
+ * @param map - The Twitch channel-status map to update.
  * @param key - Channel key to update.
  * @param connected - New connected state for the channel.
  */
@@ -181,16 +180,6 @@ export function setTwitchChannel(channel: string, connected: boolean): void {
 }
 
 /**
- * Updates the connected state for a TikTok channel. Notifies the registered status-change
- * listener (see {@link onStatusChanged}) with `null`, since channel state isn't scoped to
- * one guild.
- */
-export function setTikTokChannel(username: string, connected: boolean): void {
-  updateChannel(state.tiktok, username, connected);
-  notifyStatusChanged(null);
-}
-
-/**
  * Updates the isLive flag for a Twitch channel. No-ops (including no notification) if the
  * channel isn't tracked yet; otherwise notifies the registered status-change listener (see
  * {@link onStatusChanged}) with `null`, since channel state isn't scoped to one guild.
@@ -206,7 +195,7 @@ export function setTwitchChannelLive(login: string, isLive: boolean): void {
 
 /**
  * Returns a raw, unscoped snapshot of the current bot status (Discord ready/tag, voice for
- * the given guild, every tracked Twitch channel, every tracked TikTok channel). Voice status
+ * the given guild, every tracked Twitch channel). Voice status
  * is the only field scoped here — to a single guild, so a viewer of one guild's dashboard
  * never sees another guild's now-playing info; a null guildId (no guild selected yet) reports
  * a default disconnected/idle voice status. The Discord server name and per-guild Twitch
@@ -220,6 +209,5 @@ export function getStatus(guildId: string | null) {
     discord: { ...state.discord },
     voice: { ...((guildId ? state.voice.get(guildId) : undefined) ?? defaultVoiceStatus()) },
     twitch: Object.fromEntries(state.twitch) as Record<string, ChannelStatus>,
-    tiktok: Object.fromEntries(state.tiktok) as Record<string, ChannelStatus>,
   };
 }
