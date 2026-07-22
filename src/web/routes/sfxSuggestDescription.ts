@@ -149,7 +149,7 @@ export async function requestDescriptionSuggestion(
   // though the actual words are usually the most useful description for a soundboard.
   const instruction = totalFileCount > clips.length
     ? `This Discord soundboard trigger${context} has ${totalFileCount} different sound files; you're hearing a sample of ${clips.length} of them. If any clip has recognizable spoken words, include a representative quote verbatim (in quotes) rather than paraphrasing it. Otherwise describe the general theme or variety of the sounds. Write one concise public-facing description, under 12 words, and don't just restate the trigger name.`
-    : `This is a Discord soundboard sound${context}. If someone is speaking, transcribe the actual words verbatim (in quotes) rather than paraphrasing — that's usually the most useful description for a soundboard entry. Otherwise describe what's audible. Write one concise public-facing description, under 12 words, and don't just restate the trigger name.`;
+    : `This is a Discord soundboard sound${context}. If it has recognizable spoken words, transcribe them verbatim (in quotes) rather than paraphrasing — that's usually the most useful description for a soundboard entry. Otherwise describe what's audible. Write one concise public-facing description, under 12 words, and don't just restate the trigger name.`;
 
   const completion = await getOpenAiClient().chat.completions.create({
     model: SUGGESTION_MODEL,

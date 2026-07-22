@@ -196,6 +196,24 @@ describe('requestDescriptionSuggestion', () => {
     expect(mockCreate.mock.calls[0][0].messages[0].content[0].text).not.toMatch(/sample of/);
   });
 
+  it('single-clip prompt asks for a verbatim quote gated on recognizability, with a no-speech fallback', async () => {
+    mockCreate.mockResolvedValue({ choices: [{ message: { content: 'desc' } }] });
+    await requestDescriptionSuggestion([{ buffer: Buffer.from('a'), format: 'mp3' }], '!clap', 1);
+    const text = mockCreate.mock.calls[0][0].messages[0].content[0].text;
+    expect(text).toMatch(/recognizable spoken words/);
+    expect(text).toMatch(/transcribe them verbatim/);
+    expect(text).toMatch(/Otherwise describe what's audible/);
+  });
+
+  it('sampled prompt asks for a verbatim quote gated on recognizability, with a general-theme fallback', async () => {
+    mockCreate.mockResolvedValue({ choices: [{ message: { content: 'desc' } }] });
+    await requestDescriptionSuggestion([{ buffer: Buffer.from('a'), format: 'mp3' }], '!meme', 8);
+    const text = mockCreate.mock.calls[0][0].messages[0].content[0].text;
+    expect(text).toMatch(/recognizable spoken words/);
+    expect(text).toMatch(/include a representative quote verbatim/);
+    expect(text).toMatch(/Otherwise describe the general theme or variety/);
+  });
+
   it('truncates a description longer than the VARCHAR(255) column', async () => {
     mockCreate.mockResolvedValue({ choices: [{ message: { content: 'x'.repeat(300) } }] });
     const result = await requestDescriptionSuggestion([{ buffer: Buffer.from('a'), format: 'mp3' }], '!clap', 1);
