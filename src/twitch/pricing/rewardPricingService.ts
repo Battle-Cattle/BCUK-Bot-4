@@ -160,6 +160,7 @@ async function syncRewardPrice(
 
   const settings = settingsHint ?? await getPricingSettingsForStreamer(streamerId);
   const now = Date.now();
+  // demand_updated_at is BIGINT epoch ms — safe to coerce, won't exceed MAX_SAFE_INTEGER until year 275760.
   const elapsedSeconds = Math.max(0, (now - Number(row.demand_updated_at)) / 1000);
   const newDemand = applyIncrement
     ? applyRedemption(

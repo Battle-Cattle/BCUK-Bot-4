@@ -150,6 +150,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
 
     function buildHistoryChart(config: RewardPricingRow): string {
       const points = historyByRewardId.get(config.id) ?? [];
+      // recorded_at is BIGINT epoch ms — safe to coerce, won't exceed MAX_SAFE_INTEGER until year 275760.
       return renderPriceHistoryChart(points.map((p) => ({ t: Number(p.recorded_at), cost: p.cost })), rangeStartMs, rangeEndMs);
     }
 
