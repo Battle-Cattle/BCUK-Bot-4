@@ -137,6 +137,7 @@ describe('GET /sfx', () => {
 });
 
 describe('GET /sfx/file/:id/audio', () => {
+  /** Builds a supertest-ready app for the audio route, with a stubbed level-0 user session. */
   function buildAudioApp() {
     return buildTestApp({ router, sessionUser: { discordId: '1', accessLevel: AccessLevel.USER } });
   }
