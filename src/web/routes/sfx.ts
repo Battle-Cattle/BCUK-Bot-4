@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { getAllSfxTriggers, getAllCategories, AccessLevel } from '../../db';
 import { csrfProtection } from '../csrf';
-import { SFX_MAX_FILE_MB } from '../../shared/config';
+import { SFX_MAX_FILE_MB, OPENAI_API_KEY } from '../../shared/config';
 import { filterQueryParam, renderError, renderView } from './shared';
 
 const log = createLogger('Web');
@@ -37,17 +37,22 @@ const KNOWN_SUCCESS = new Set([
 /**
  * Render the SFX page with all triggers and categories. Visible to any logged-in
  * user; management controls are only rendered for Mod+ (canManage), matching the
- * server-side requireMod guard on every mutation route.
+ * server-side requireMod guard on every mutation route. The "Suggest description"
+ * button (canSuggestDescriptions) is further restricted to the bot owner while that
+ * feature is being trialled, and hidden entirely when OPENAI_API_KEY isn't set,
+ * matching the server-side requireOwner guard on its route.
  */
 router.get('/sfx', csrfProtection, async (req, res) => {
   try {
     const [triggers, categories] = await Promise.all([getAllSfxTriggers(), getAllCategories()]);
     const canManage = (req.session.user?.accessLevel ?? 0) >= AccessLevel.MOD;
+    const canSuggestDescriptions = !!req.session.user?.isOwner && OPENAI_API_KEY !== '';
     renderView(res, 'sfx', {
       user: req.session.user,
       triggers,
       categories,
       canManage,
+      canSuggestDescriptions,
       maxUploadMb: SFX_MAX_FILE_MB,
       csrfToken: req.csrfToken(),
       error: filterQueryParam(req.query.error, KNOWN_ERRORS),

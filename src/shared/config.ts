@@ -74,3 +74,7 @@ export const TWITCH_EVENTSUB_REDIRECT_URI = process.env.TWITCH_EVENTSUB_REDIRECT
 // Must be exactly 64 hex characters (32 bytes). Generate with: openssl rand -hex 32
 // Required to use the Twitch OAuth connect flow for follow/sub notifications.
 export const EVENTSUB_TOKEN_SECRET = process.env.EVENTSUB_TOKEN_SECRET ?? '';
+
+// OpenAI API key, used only for the owner-only "Suggest description" SFX feature.
+// Leave unset to keep that feature disabled — everything else works without it.
+export const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? '';

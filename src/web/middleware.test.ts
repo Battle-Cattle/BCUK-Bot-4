@@ -15,7 +15,7 @@ vi.mock('./csrf', () => ({
 }));
 
 import { createHash } from 'crypto';
-import { requireAuth, requireManager, requireMod, requireAdmin, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
+import { requireAuth, requireManager, requireMod, requireAdmin, requireOwner, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
 import { findKeyByHash, findDiscordIdByTokenHash, getEffectiveAccessLevelForUser, findUser, getAllGuilds, getGuildsForMember, AccessLevel } from '../db';
 
 function makeReq(overrides: object = {}): any {
@@ -172,6 +172,46 @@ describe('requireAdmin', () => {
     requireAdmin(req, res, next);
     const [, data] = res.render.mock.calls[0];
     expect(data.message).toContain('Admin');
+  });
+});
+
+// ─── requireOwner ─────────────────────────────────────────────────────────────
+
+describe('requireOwner', () => {
+  it('calls next() when isOwner is true, regardless of accessLevel', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER, isOwner: true } } });
+    requireOwner(req, makeRes(), next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('returns 403 for an Admin who is not the owner', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN, isOwner: false } } });
+    const res = makeRes();
+    requireOwner(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when isOwner is absent', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN } } });
+    const res = makeRes();
+    requireOwner(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  it('returns 403 when no session user', () => {
+    const req = makeReq({ session: {} });
+    const res = makeRes();
+    requireOwner(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  it('renders error template with an Owner-required message', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN, isOwner: false } } });
+    const res = makeRes();
+    requireOwner(req, res, next);
+    const [, data] = res.render.mock.calls[0];
+    expect(data.message).toContain('Owner');
   });
 });
 

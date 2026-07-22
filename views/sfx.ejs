@@ -236,7 +236,15 @@
                     </div>
                     <div class="form-section-gap">
                       <label for="description_<%= t.triggerId %>" class="form-label">Description <span class="muted">(optional)</span></label>
-                      <input id="description_<%= t.triggerId %>" class="input full-width" type="text" name="description" value="<%= t.description || '' %>">
+                      <div class="form-row-wrap items-end gap-05">
+                        <input id="description_<%= t.triggerId %>" class="input full-width" type="text" name="description" value="<%= t.description || '' %>">
+                        <% if (canSuggestDescriptions) { %>
+                        <button type="button" class="btn btn-sm btn-ghost js-suggest-description" data-trigger-id="<%= t.triggerId %>">✨ Suggest</button>
+                        <% } %>
+                      </div>
+                      <% if (canSuggestDescriptions) { %>
+                      <span class="hint hint-compact js-suggest-status" data-status-for="<%= t.triggerId %>"></span>
+                      <% } %>
                     </div>
                     <div class="button-row-wrap">
                       <button type="submit" class="btn">Save Changes</button>
