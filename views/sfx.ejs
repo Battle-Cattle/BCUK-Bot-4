@@ -243,7 +243,7 @@
                         <% } %>
                       </div>
                       <% if (canSuggestDescriptions) { %>
-                      <span class="hint hint-compact js-suggest-status" data-status-for="<%= t.triggerId %>"></span>
+                      <span class="hint hint-compact js-suggest-status" role="status" aria-live="polite" data-status-for="<%= t.triggerId %>"></span>
                       <% } %>
                     </div>
                     <div class="button-row-wrap">

@@ -72,10 +72,14 @@ function formatFromFilename(filename: string): 'wav' | 'mp3' | 'ogg' | null {
   return ext === 'wav' || ext === 'mp3' || ext === 'ogg' ? ext : null;
 }
 
+/** Kills the ffmpeg process and rejects if a transcode hasn't finished within this long. */
+const TRANSCODE_TIMEOUT_MS = 10_000;
+
 /**
  * Transcodes an in-memory audio buffer to MP3 via `ffmpeg-static`, entirely in memory
  * (stdin/stdout pipes) — used for `ogg` clips, since OpenAI's audio-input models only
- * accept `wav`/`mp3`.
+ * accept `wav`/`mp3`. Kills the process and rejects if it hasn't finished within
+ * `TRANSCODE_TIMEOUT_MS`, so a hung/corrupt input can't block the request indefinitely.
  * @param buffer Raw bytes of the source audio file.
  * @returns The transcoded MP3 bytes.
  */
@@ -88,10 +92,24 @@ export function transcodeToMp3(buffer: Buffer): Promise<Buffer> {
     const proc = spawn(ffmpegPath, ['-i', 'pipe:0', '-f', 'mp3', 'pipe:1']);
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    const timeout = setTimeout(() => {
+      proc.kill('SIGKILL');
+      reject(new Error(`ffmpeg transcode timed out after ${TRANSCODE_TIMEOUT_MS}ms`));
+    }, TRANSCODE_TIMEOUT_MS);
     proc.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
     proc.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
-    proc.on('error', reject);
+    proc.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+    // If ffmpeg exits before consuming all of stdin (e.g. a corrupt/truncated
+    // file), writing/ending the pipe emits an 'error' (EPIPE) on the stdin stream
+    // itself. Without a listener here, Node treats that as an unhandled 'error'
+    // event and throws — crashing the whole process, not just this request. The
+    // actual failure is already surfaced via the 'close' handler below.
+    proc.stdin.on('error', () => {});
     proc.on('close', (code) => {
+      clearTimeout(timeout);
       if (code === 0) {
         resolve(Buffer.concat(stdout));
       } else {

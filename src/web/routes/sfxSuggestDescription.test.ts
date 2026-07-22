@@ -42,7 +42,11 @@ function makeFakeProcess() {
   const proc = new EventEmitter() as any;
   proc.stdout = new EventEmitter();
   proc.stderr = new EventEmitter();
-  proc.stdin = { write: vi.fn(), end: vi.fn() };
+  const stdin = new EventEmitter() as any;
+  stdin.write = vi.fn();
+  stdin.end = vi.fn();
+  proc.stdin = stdin;
+  proc.kill = vi.fn();
   return proc;
 }
 
@@ -133,6 +137,32 @@ describe('transcodeToMp3', () => {
     const promise = transcodeToMp3(Buffer.from('input'));
     proc.emit('error', new Error('spawn failed'));
     await expect(promise).rejects.toThrow('spawn failed');
+  });
+
+  it('does not crash on an EPIPE from stdin when ffmpeg exits early', async () => {
+    const proc = makeFakeProcess();
+    vi.mocked(spawn).mockReturnValue(proc);
+    const promise = transcodeToMp3(Buffer.from('input'));
+    // Simulate ffmpeg exiting before consuming all of stdin: emitting 'error' on
+    // the stdin stream must not throw an unhandled error and crash the process.
+    expect(() => proc.stdin.emit('error', new Error('EPIPE'))).not.toThrow();
+    proc.emit('close', 1);
+    await expect(promise).rejects.toThrow(/ffmpeg exited with code 1/);
+  });
+
+  it('kills the process and rejects if it does not close within the timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const proc = makeFakeProcess();
+      vi.mocked(spawn).mockReturnValue(proc);
+      const promise = transcodeToMp3(Buffer.from('input'));
+      const assertion = expect(promise).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await assertion;
+      expect(proc.kill).toHaveBeenCalledWith('SIGKILL');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

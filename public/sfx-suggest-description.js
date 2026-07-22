@@ -54,15 +54,34 @@ document.addEventListener('click', (event) => {
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token },
     body: JSON.stringify({ trigger_id: triggerId, trigger_command: triggerCommand }),
   })
+    /**
+     * Pairs the response's ok flag with its parsed JSON body, since `res.ok` isn't
+     * available anymore once `.json()`'s promise resolves.
+     * @param {Response} res The fetch response.
+     * @returns {Promise<{ok: boolean, data: unknown}>} The paired ok flag and parsed body.
+     */
     .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+    /**
+     * Applies the suggestion on success, or shows a generic failure message.
+     * @param {{ok: boolean, data: unknown}} result The paired ok flag and parsed body.
+     * @returns {void}
+     */
     .then(({ ok, data }) => {
       if (!ok || !applySuggestedDescription(descriptionInput, statusEl, data)) {
         if (statusEl) statusEl.textContent = 'Could not generate a suggestion. Try again.';
       }
     })
+    /**
+     * Shows a generic failure message on a network error or unparseable response.
+     * @returns {void}
+     */
     .catch(() => {
       if (statusEl) statusEl.textContent = 'Could not generate a suggestion. Try again.';
     })
+    /**
+     * Re-enables the button regardless of outcome.
+     * @returns {void}
+     */
     .finally(() => {
       delete button.dataset.submitting;
       button.disabled = false;

@@ -177,6 +177,10 @@ export const requireAdmin = requireAccessLevel(AccessLevel.ADMIN, 'Admin');
  * manually in the DB (see `user.is_owner` in schema.sql), not a per-guild `AccessLevel`
  * — an Admin in a given guild is not necessarily the owner. Used to gate features
  * still being trialled to the single most-trusted account before a wider rollout.
+ * @param req - Express request; checked for `req.session.user?.isOwner`.
+ * @param res - Express response; used to render a 403 error page when denied.
+ * @param next - Called when the session user is the owner.
+ * @returns Nothing; either calls `next()` or renders the error view with a 403 status.
  */
 export function requireOwner(req: Request, res: Response, next: NextFunction): void {
   if (req.session.user?.isOwner) {
