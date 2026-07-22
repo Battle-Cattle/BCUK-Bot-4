@@ -9,6 +9,7 @@ const TOKEN_BUFFER_MS = 5 * 60 * 1000;
 
 export async function getValidToken(streamer: DbStreamerEventSub): Promise<string | null> {
   if (!streamer.eventsub_access_token) return null;
+  // eventsub_token_expiry is BIGINT epoch ms — safe to coerce, won't exceed MAX_SAFE_INTEGER until year 275760.
   const needsRefresh = streamer.eventsub_token_expiry != null
     && Date.now() > Number(streamer.eventsub_token_expiry) - TOKEN_BUFFER_MS;
   if (!needsRefresh) return streamer.eventsub_access_token;
