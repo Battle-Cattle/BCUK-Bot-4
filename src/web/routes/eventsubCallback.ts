@@ -5,6 +5,7 @@ import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiE
 import { TWITCH_EVENTSUB_REDIRECT_URI } from '../../shared/config';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { clearAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
+import { logAndRedirectError } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -89,8 +90,9 @@ router.get('/twitch/eventsub/callback', async (req, res) => {
     log.info(`EventSub OAuth connected for ${streamer.twitch_name}`);
     res.redirect('/user/settings?success=twitch_connected');
   } catch (err) {
-    log.error('EventSub OAuth callback error:', err);
-    res.redirect('/user/settings?error=eventsub_config_failed');
+    logAndRedirectError({
+      res, log, logLabel: 'EventSub OAuth callback error:', err, basePath: '/user/settings', errorCode: 'eventsub_config_failed',
+    });
   }
 });
 

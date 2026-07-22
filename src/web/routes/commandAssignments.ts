@@ -9,7 +9,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
-import { parsePositiveIntId, normalizeDiscordId } from './shared';
+import { parsePositiveIntId, normalizeDiscordId, logAndRedirectError } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -48,8 +48,9 @@ router.post('/commands/assign', requireMod, csrfProtection, async (req, res) => 
       return res.redirect('/commands?error=command_taken');
     }
 
-    log.error('Assign user to command error:', err);
-    return res.redirect('/commands?error=assign_failed');
+    return logAndRedirectError({
+      res, log, logLabel: 'Assign user to command error:', err, basePath: '/commands', errorCode: 'assign_failed',
+    });
   }
 
   res.redirect('/commands');
@@ -78,8 +79,9 @@ router.post('/commands/unassign', requireMod, csrfProtection, async (req, res) =
   try {
     await unassignUserFromCommand(parsedCommandId, normalizedDiscordId);
   } catch (err) {
-    log.error('Unassign user from command error:', err);
-    return res.redirect('/commands?error=unassign_failed');
+    return logAndRedirectError({
+      res, log, logLabel: 'Unassign user from command error:', err, basePath: '/commands', errorCode: 'unassign_failed',
+    });
   }
 
   res.redirect('/commands');
