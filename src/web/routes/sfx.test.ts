@@ -1,20 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 /** Hoisted so the `vi.mock` factories below can safely reference these — `vi.mock` factories are hoisted above imports, so plain imported bindings could throw `ReferenceError` depending on import order. */
-const { mockLogger, ACCESS_LEVEL_MOCK } = vi.hoisted(() => ({
+const { mockLogger, ACCESS_LEVEL_MOCK, SFX_FOLDER_MOCK } = vi.hoisted(() => ({
   mockLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
   ACCESS_LEVEL_MOCK: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
+  SFX_FOLDER_MOCK: require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'sfx-test-')) as string,
 }));
 
 /** Mocks the `db` facade so `AccessLevel` resolves to the shared hoisted mock instead of hitting the real module. */
 vi.mock('../../db', () => ({
   getAllSfxTriggers: vi.fn().mockResolvedValue([]),
   getAllCategories: vi.fn().mockResolvedValue([]),
+  getSfxFileById: vi.fn().mockResolvedValue(null),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
-vi.mock('../../shared/config', () => ({ SFX_MAX_FILE_MB: 10, OPENAI_API_KEY: 'test-openai-key' }));
+vi.mock('../../shared/config', () => ({ SFX_MAX_FILE_MB: 10, OPENAI_API_KEY: 'test-openai-key', SFX_FOLDER: SFX_FOLDER_MOCK }));
 vi.mock('../csrf', () => ({
   csrfProtection: (req: any, _res: any, next: any) => {
     req.csrfToken = () => 'test-csrf-token';
@@ -24,7 +29,7 @@ vi.mock('../csrf', () => ({
 
 import supertest from 'supertest';
 import router from './sfx';
-import { getAllSfxTriggers, getAllCategories, AccessLevel } from '../../db';
+import { getAllSfxTriggers, getAllCategories, getSfxFileById, AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /**
@@ -43,6 +48,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getAllSfxTriggers).mockResolvedValue([]);
   vi.mocked(getAllCategories).mockResolvedValue([]);
+  vi.mocked(getSfxFileById).mockResolvedValue(null);
 });
 
 describe('GET /sfx', () => {
@@ -126,5 +132,49 @@ describe('GET /sfx', () => {
 
     const res = await supertest(app).get('/sfx');
     expect((res.body as any).locals.canSuggestDescriptions).toBe(false);
+  });
+});
+
+describe('GET /sfx/file/:id/audio', () => {
+  function buildAudioApp() {
+    return buildTestApp({ router, sessionUser: { discordId: '1', accessLevel: AccessLevel.USER } });
+  }
+
+  it('streams the file when the id resolves to a real file under SFX_FOLDER', async () => {
+    fs.writeFileSync(path.join(SFX_FOLDER_MOCK, 'clap.mp3'), 'fake-audio-bytes');
+    vi.mocked(getSfxFileById).mockResolvedValue({ file: 'clap.mp3' });
+
+    const res = await supertest(buildAudioApp()).get('/sfx/file/1/audio');
+    expect(res.status).toBe(200);
+    expect(Buffer.isBuffer(res.body) ? res.body.toString() : res.text).toBe('fake-audio-bytes');
+  });
+
+  it('returns 400 for a non-numeric id', async () => {
+    const res = await supertest(buildAudioApp()).get('/sfx/file/not-a-number/audio');
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 404 when no sfx row matches the id', async () => {
+    vi.mocked(getSfxFileById).mockResolvedValue(null);
+    const res = await supertest(buildAudioApp()).get('/sfx/file/999/audio');
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 404 when the stored path escapes SFX_FOLDER', async () => {
+    vi.mocked(getSfxFileById).mockResolvedValue({ file: '../../etc/passwd' });
+    const res = await supertest(buildAudioApp()).get('/sfx/file/1/audio');
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 404 when the DB row points at a file that no longer exists on disk', async () => {
+    vi.mocked(getSfxFileById).mockResolvedValue({ file: 'missing.mp3' });
+    const res = await supertest(buildAudioApp()).get('/sfx/file/1/audio');
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 500 when the DB lookup throws', async () => {
+    vi.mocked(getSfxFileById).mockRejectedValue(new Error('DB down'));
+    const res = await supertest(buildAudioApp()).get('/sfx/file/1/audio');
+    expect(res.status).toBe(500);
   });
 });

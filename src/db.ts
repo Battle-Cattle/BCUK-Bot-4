@@ -190,7 +190,7 @@ export {
   findTrigger, findSoundFiles, getAllSfxTriggers, getSfxTriggerCount, getPublicSfxTriggers,
   getAllCategories, createCategory, renameCategory, deleteCategory,
   createSfxTrigger, updateSfxTrigger, deleteSfxTrigger,
-  addSfxFile, updateSfxFile, deleteSfxFile,
+  addSfxFile, updateSfxFile, deleteSfxFile, getSfxFileById,
 } from './db/sfx';
 export type { SfxLookupResult } from './db/sfxCache';
 export { findCachedSfxTrigger } from './db/sfxCache';
