@@ -89,7 +89,7 @@ export async function getVideoById(videoId: number, streamerId: number): Promise
  * @returns The deleted row's filename (for filesystem cleanup), or null if no matching row existed.
  */
 export async function deleteVideo(videoId: number, streamerId: number): Promise<string | null> {
-  class VideoNotFound extends Error {}
+  class VideoNotFoundError extends Error {}
   try {
     return await withTransaction(async (conn) => {
       const [rows] = await conn.execute<mysql.RowDataPacket[]>(
@@ -97,19 +97,19 @@ export async function deleteVideo(videoId: number, streamerId: number): Promise<
         [videoId, streamerId],
       );
       if (rows.length === 0) {
-        throw new VideoNotFound();
+        throw new VideoNotFoundError();
       }
       const filename: string = rows[0].filename;
       const [del] = await conn.execute<mysql.ResultSetHeader>(
         `DELETE FROM overlay_video WHERE id = ? AND streamer_id = ?`, [videoId, streamerId],
       );
       if (del.affectedRows === 0) {
-        throw new VideoNotFound();
+        throw new VideoNotFoundError();
       }
       return filename;
     });
   } catch (err) {
-    if (err instanceof VideoNotFound) return null;
+    if (err instanceof VideoNotFoundError) return null;
     throw err;
   }
 }
@@ -182,7 +182,7 @@ export async function setRewardVideos(
   streamerId: number,
   videos: Array<{ videoId: number; weight: number }>,
 ): Promise<void> {
-  class RewardNotFound extends Error {}
+  class RewardNotFoundError extends Error {}
   try {
     await withTransaction(async (conn) => {
       // Verify reward belongs to this streamer
@@ -191,7 +191,7 @@ export async function setRewardVideos(
         [rewardId, streamerId],
       );
       if (check.length === 0) {
-        throw new RewardNotFound();
+        throw new RewardNotFoundError();
       }
       await conn.execute(`DELETE FROM overlay_reward_video WHERE reward_id = ?`, [rewardId]);
       if (videos.length === 0) return;
@@ -214,7 +214,7 @@ export async function setRewardVideos(
       );
     });
   } catch (err) {
-    if (err instanceof RewardNotFound) return;
+    if (err instanceof RewardNotFoundError) return;
     throw err;
   }
 }

@@ -78,7 +78,7 @@ export async function consumeCode(code: string): Promise<string | null> {
  */
 export async function exchangeCodeForToken(code: string): Promise<string | null> {
   const hash = createHash('sha256').update(code).digest('hex');
-  class CodeNotFound extends Error {}
+  class CodeNotFoundError extends Error {}
   try {
     return await withTransaction(async (conn) => {
       const discordId = await consumeCodeOnConnection(conn, hash);
@@ -86,11 +86,11 @@ export async function exchangeCodeForToken(code: string): Promise<string | null>
       // consumeCodeOnConnection above, so an invalid/expired/already-used code — or the
       // edge case where the row vanishes between the UPDATE and the follow-up SELECT —
       // doesn't permanently burn the code with no token to show for it.
-      if (!discordId) throw new CodeNotFound();
+      if (!discordId) throw new CodeNotFoundError();
       return issueTokenOnConnection(conn, discordId);
     });
   } catch (err) {
-    if (err instanceof CodeNotFound) return null;
+    if (err instanceof CodeNotFoundError) return null;
     throw err;
   }
 }

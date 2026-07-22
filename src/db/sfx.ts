@@ -228,7 +228,7 @@ export async function updateSfxTrigger(
  * @param id Trigger id.
  */
 export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } | null> {
-  class TriggerNotFound extends Error {}
+  class TriggerNotFoundError extends Error {}
   try {
     const result = await withTransaction(async (conn) => {
       const [triggerRows] = await conn.execute<mysql.RowDataPacket[]>(
@@ -236,7 +236,7 @@ export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } 
         [id.toString()],
       );
       if (triggerRows.length === 0) {
-        throw new TriggerNotFound();
+        throw new TriggerNotFoundError();
       }
       const [rows] = await conn.execute<mysql.RowDataPacket[]>(
         `SELECT file FROM sfx WHERE trigger_id = ? FOR UPDATE`,
@@ -250,7 +250,7 @@ export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } 
     invalidateSfxLookupCache();
     return result;
   } catch (err) {
-    if (err instanceof TriggerNotFound) return null;
+    if (err instanceof TriggerNotFoundError) return null;
     throw err;
   }
 }
@@ -308,7 +308,7 @@ export async function updateSfxFile(id: number, weight: number, hidden: boolean)
  * @param id sfx row id.
  */
 export async function deleteSfxFile(id: number): Promise<string | null> {
-  class FileNotFound extends Error {}
+  class FileNotFoundError extends Error {}
   try {
     const file = await withTransaction(async (conn) => {
       const [rows] = await conn.execute<mysql.RowDataPacket[]>(
@@ -316,19 +316,19 @@ export async function deleteSfxFile(id: number): Promise<string | null> {
         [id],
       );
       if (rows.length === 0) {
-        throw new FileNotFound();
+        throw new FileNotFoundError();
       }
       const file: string = rows[0].file;
       const [result] = await conn.execute<mysql.ResultSetHeader>(`DELETE FROM sfx WHERE id = ?`, [id]);
       if (result.affectedRows === 0) {
-        throw new FileNotFound();
+        throw new FileNotFoundError();
       }
       return file;
     });
     invalidateSfxLookupCache();
     return file;
   } catch (err) {
-    if (err instanceof FileNotFound) return null;
+    if (err instanceof FileNotFoundError) return null;
     throw err;
   }
 }
