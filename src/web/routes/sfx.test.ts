@@ -14,7 +14,7 @@ vi.mock('../../db', () => ({
 }));
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
-vi.mock('../../shared/config', () => ({ SFX_MAX_FILE_MB: 10 }));
+vi.mock('../../shared/config', () => ({ SFX_MAX_FILE_MB: 10, OPENAI_API_KEY: 'test-openai-key' }));
 vi.mock('../csrf', () => ({
   csrfProtection: (req: any, _res: any, next: any) => {
     req.csrfToken = () => 'test-csrf-token';
@@ -65,6 +65,22 @@ describe('GET /sfx', () => {
     expect((res.body as any).locals.canManage).toBe(true);
   });
 
+  it('sets canSuggestDescriptions=true for the owner when OPENAI_API_KEY is set', async () => {
+    const res = await buildApp({ discordId: '1', accessLevel: AccessLevel.USER, isOwner: true });
+    expect((res.body as any).locals.canSuggestDescriptions).toBe(true);
+  });
+
+  it('sets canSuggestDescriptions=false for a non-owner Admin, even though canManage is true', async () => {
+    const res = await buildApp({ discordId: '1', accessLevel: AccessLevel.ADMIN, isOwner: false });
+    expect((res.body as any).locals.canManage).toBe(true);
+    expect((res.body as any).locals.canSuggestDescriptions).toBe(false);
+  });
+
+  it('sets canSuggestDescriptions=false when isOwner is absent from the session', async () => {
+    const res = await buildApp({ discordId: '1', accessLevel: AccessLevel.USER });
+    expect((res.body as any).locals.canSuggestDescriptions).toBe(false);
+  });
+
   it('passes through a known error query param and ignores unknown ones', async () => {
     const known = await buildApp({ discordId: '1', accessLevel: AccessLevel.MOD }, '?error=command_taken');
     expect((known.body as any).locals.error).toBe('command_taken');
@@ -82,5 +98,33 @@ describe('GET /sfx', () => {
     const res = await buildApp();
     expect(res.status).toBe(500);
     expect((res.body as any).view).toBe('error');
+  });
+
+  it('sets canSuggestDescriptions=false for the owner when OPENAI_API_KEY is unset', async () => {
+    vi.resetModules();
+    vi.doMock('../../db', () => ({
+      getAllSfxTriggers: vi.fn().mockResolvedValue([]),
+      getAllCategories: vi.fn().mockResolvedValue([]),
+      AccessLevel: ACCESS_LEVEL_MOCK,
+    }));
+    vi.doMock('../../shared/logger', () => ({ createLogger: mockLogger }));
+    vi.doMock('../../shared/config', () => ({ SFX_MAX_FILE_MB: 10, OPENAI_API_KEY: '' }));
+    vi.doMock('../csrf', () => ({
+      csrfProtection: (req: any, _res: any, next: any) => {
+        req.csrfToken = () => 'test-csrf-token';
+        next();
+      },
+    }));
+
+    const freshRouter: any = (await import('./sfx.js')).default;
+    const freshBuildTestApp = (await import('../../test-utils/expressTestApp.js')).buildTestApp;
+    const app = freshBuildTestApp({
+      router: freshRouter,
+      sessionUser: { discordId: '1', accessLevel: AccessLevel.USER, isOwner: true },
+      mockRender: 'nested',
+    });
+
+    const res = await supertest(app).get('/sfx');
+    expect((res.body as any).locals.canSuggestDescriptions).toBe(false);
   });
 });

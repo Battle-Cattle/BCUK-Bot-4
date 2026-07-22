@@ -170,3 +170,27 @@ export const requireCompanionKey = authenticateBearerToken(
 
 /** Ensures the current-guild access level is Admin, otherwise renders a 403. */
 export const requireAdmin = requireAccessLevel(AccessLevel.ADMIN, 'Admin');
+
+/**
+ * Ensures the session user is the bot owner (`user.is_owner`), otherwise renders a
+ * 403. Distinct from {@link requireAdmin}: `isOwner` is a global super-admin flag set
+ * manually in the DB (see `user.is_owner` in schema.sql), not a per-guild `AccessLevel`
+ * — an Admin in a given guild is not necessarily the owner. Used to gate features
+ * still being trialled to the single most-trusted account before a wider rollout.
+ * @param req - Express request; checked for `req.session.user?.isOwner`.
+ * @param res - Express response; used to render a 403 error page when denied.
+ * @param next - Called when the session user is the owner.
+ * @returns Nothing; either calls `next()` or renders the error view with a 403 status.
+ */
+export function requireOwner(req: Request, res: Response, next: NextFunction): void {
+  if (req.session.user?.isOwner) {
+    next();
+  } else {
+    res.status(403);
+    renderView(res, 'error', {
+      message: 'Access denied — Owner required.',
+      user: req.session.user ?? null,
+      csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
+    });
+  }
+}

@@ -14,6 +14,10 @@ vi.mock('../../db', () => ({
   createCategory: vi.fn(),
   renameCategory: vi.fn(),
   deleteCategory: vi.fn(),
+  // Unused by any test in this file (no test hits POST /sfx/trigger/suggest-description
+  // here — see sfxSuggestDescription.test.ts) but required so the aggregator router
+  // can be constructed: sfxSuggestDescription.ts imports it at module load.
+  findSoundFiles: vi.fn(),
   isMysqlDuplicateEntryError: (err: unknown) =>
     !!err && typeof err === 'object' && (err as { code?: string }).code === 'ER_DUP_ENTRY',
 }));
@@ -27,6 +31,9 @@ vi.mock('../csrf', () => ({
 
 vi.mock('../middleware', () => ({
   requireMod: vi.fn((_req: any, _res: any, next: any) => next()),
+  // Unused here for the same reason as findSoundFiles above — required only so
+  // the suggest-description sub-router can be mounted.
+  requireOwner: vi.fn((_req: any, _res: any, next: any) => next()),
 }));
 
 vi.mock('../../shared/config', () => ({
@@ -34,6 +41,8 @@ vi.mock('../../shared/config', () => ({
   // 1 MB so the oversized-upload test can trigger Multer's LIMIT_FILE_SIZE with a
   // just-over-1 MB buffer. Every other upload test uses a few-byte buffer.
   SFX_MAX_FILE_MB: 1,
+  // Unused here — suggest-description isn't exercised by this file's tests.
+  OPENAI_API_KEY: '',
 }));
 
 vi.mock('fs', () => ({
