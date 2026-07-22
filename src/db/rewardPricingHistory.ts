@@ -16,6 +16,15 @@ export interface RewardPricingHistoryPoint {
 const RETENTION_MS = 25 * 60 * 60 * 1000;
 
 /**
+ * Maps a `reward_pricing_history` row to a {@link RewardPricingHistoryPoint}.
+ * @param r - Row containing `recorded_at`, `cost`, and `demand` columns.
+ * @returns The point, with `recorded_at` coerced to a string and `demand` to a number.
+ */
+function mapRow(r: mysql.RowDataPacket): RewardPricingHistoryPoint {
+  return { recorded_at: String(r.recorded_at), cost: r.cost, demand: Number(r.demand) };
+}
+
+/**
  * Records a price/demand point for a reward, then prunes points older than the
  * retention window for that same reward so the table stays bounded to roughly the
  * largest selectable history range. The insert and prune are independent of each
@@ -57,11 +66,7 @@ export async function getPricingHistory(rewardPricingId: number, sinceMs: number
      ORDER BY recorded_at ASC`,
     [rewardPricingId, sinceMs],
   );
-  return rows.map((r) => ({
-    recorded_at: String(r.recorded_at),
-    cost: r.cost,
-    demand: Number(r.demand),
-  }));
+  return rows.map(mapRow);
 }
 
 /**
@@ -90,7 +95,7 @@ export async function getPricingHistoryForRewards(
 
   for (const r of rows) {
     const rewardPricingId = r.reward_pricing_id as number;
-    const point: RewardPricingHistoryPoint = { recorded_at: String(r.recorded_at), cost: r.cost, demand: Number(r.demand) };
+    const point = mapRow(r);
     const existing = byRewardId.get(rewardPricingId);
     if (existing) existing.push(point);
     else byRewardId.set(rewardPricingId, [point]);
