@@ -437,6 +437,8 @@ details[open] > .disclosure-toggle::before { transform: rotate(90deg); }
 .p-0    { padding: 0; }
 .pt-0   { padding-top: 0; }
 
+.sfx-preview { height: 2rem; max-width: 14rem; }
+
 .w-auto  { width: auto; }
 .w-5rem  { width: 5rem; }
 .w-6rem  { width: 6rem; }

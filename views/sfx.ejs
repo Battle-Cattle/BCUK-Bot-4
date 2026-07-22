@@ -139,16 +139,17 @@
               <td colspan="5">
                 <% if (t.files.length > 0) { %>
                 <table class="inner-table">
-                  <thead><tr><th scope="col">File</th><th scope="col">Weight</th><th scope="col">Status</th><% if (canManage) { %><th scope="col">Actions</th><% } %></tr></thead>
+                  <thead><tr><th scope="col">File</th><th scope="col">Listen</th><th scope="col">Weight</th><th scope="col">Status</th><% if (canManage) { %><th scope="col">Actions</th><% } %></tr></thead>
                   <tbody>
                     <% t.files.forEach(function(f) { %>
                     <tr>
                       <% if (canManage) { %>
-                      <td colspan="<%= canManage ? 4 : 3 %>">
+                      <td colspan="<%= canManage ? 5 : 4 %>">
                         <form method="POST" action="/sfx/file/update" class="form-row-wrap items-end gap-05">
                           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                           <input type="hidden" name="file_id" value="<%= f.id %>">
                           <span class="mono form-col-grow"><%= f.file %></span>
+                          <audio class="sfx-preview" controls preload="none" src="/sfx/file/<%= f.id %>/audio"></audio>
                           <label class="form-label">Weight
                             <input class="input w-6rem" type="number" name="weight" min="1" value="<%= f.weight %>">
                           </label>
@@ -160,13 +161,14 @@
                       </td>
                       <% } else { %>
                       <td class="mono"><%= f.file %></td>
+                      <td><audio class="sfx-preview" controls preload="none" src="/sfx/file/<%= f.id %>/audio"></audio></td>
                       <td><%= f.weight %></td>
                       <td><% if (f.hidden) { %><span class="badge badge-hidden">Hidden</span><% } else { %><span class="badge badge-active">Active</span><% } %></td>
                       <% } %>
                     </tr>
                     <% if (canManage) { %>
                     <tr>
-                      <td colspan="4" class="pt-0">
+                      <td colspan="5" class="pt-0">
                         <form method="POST" action="/sfx/file/remove" class="inline-form-sm js-confirm-remove-file" data-file-name="<%= f.file %>">
                           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                           <input type="hidden" name="file_id" value="<%= f.id %>">

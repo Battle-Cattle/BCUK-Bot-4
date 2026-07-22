@@ -34,7 +34,7 @@ import {
   findTrigger, findSoundFiles, getPublicSfxTriggers, getAllSfxTriggers, getSfxTriggerCount,
   getAllCategories, createCategory, renameCategory, deleteCategory,
   createSfxTrigger, updateSfxTrigger, deleteSfxTrigger,
-  addSfxFile, updateSfxFile, deleteSfxFile,
+  addSfxFile, updateSfxFile, deleteSfxFile, getSfxFileById,
 } from './sfx';
 import { invalidateSfxLookupCache } from './sfxCache';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
@@ -464,6 +464,21 @@ describe('updateSfxFile', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await updateSfxFile(11, 3, true);
     expect(invalidateSfxLookupCache).toHaveBeenCalledOnce();
+  });
+});
+
+describe('getSfxFileById', () => {
+  it('returns the stored file path when the row exists', async () => {
+    const pool = makePool([{ file: 'clap.mp3' }]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await getSfxFileById(11)).toEqual({ file: 'clap.mp3' });
+    expect(pool.execute.mock.calls[0][1]).toEqual([11]);
+  });
+
+  it('returns null when no row matches', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await getSfxFileById(999)).toBeNull();
   });
 });
 

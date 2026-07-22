@@ -1,9 +1,11 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getAllSfxTriggers, getAllCategories, AccessLevel } from '../../db';
+import fs from 'fs';
+import { getAllSfxTriggers, getAllCategories, getSfxFileById, AccessLevel } from '../../db';
 import { csrfProtection } from '../csrf';
-import { SFX_MAX_FILE_MB, OPENAI_API_KEY } from '../../shared/config';
-import { filterQueryParam, renderError, renderView } from './shared';
+import { SFX_FOLDER, SFX_MAX_FILE_MB, OPENAI_API_KEY } from '../../shared/config';
+import { safeResolve } from '../../shared/pathUtils';
+import { filterQueryParam, parsePositiveIntId, renderError, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
@@ -62,6 +64,48 @@ router.get('/sfx', csrfProtection, async (req, res) => {
     log.error('SFX error:', err);
     renderError(res, 500, 'Failed to load SFX data.', req.session.user);
   }
+});
+
+/**
+ * GET /sfx/file/:id/audio — streams a sound file's audio bytes for in-browser
+ * playback on the SFX management page. Reachable by any logged-in user (this
+ * router is mounted behind `requireAuth`, matching the read-only visibility of
+ * the sounds table on the page itself). Resolves the DB row's stored filename
+ * against `SFX_FOLDER` via `safeResolve` before touching the filesystem, so a
+ * crafted id can't be used to read files outside that folder.
+ * @param req - Express request; reads the `id` route param (an `sfx` row id).
+ * @param res - Express response; streams the file with `Content-Disposition:
+ *   inline` on success, or replies 400/404 if the id is invalid or unresolved.
+ */
+router.get('/sfx/file/:id/audio', async (req, res) => {
+  const id = parsePositiveIntId(req.params.id);
+  if (id === null) { res.status(400).end(); return; }
+
+  let row;
+  try {
+    row = await getSfxFileById(id);
+  } catch (err) {
+    log.error('SFX audio lookup error:', err);
+    res.status(500).end();
+    return;
+  }
+  if (!row) { res.status(404).end(); return; }
+
+  const resolved = safeResolve(SFX_FOLDER, row.file);
+  if (!resolved) { res.status(404).end(); return; }
+
+  try {
+    await fs.promises.access(resolved);
+  } catch {
+    res.status(404).end();
+    return;
+  }
+
+  res.sendFile(resolved, { headers: { 'Content-Disposition': 'inline' } }, (err) => {
+    if (err && !res.headersSent) {
+      res.status(404).end();
+    }
+  });
 });
 
 export default router;

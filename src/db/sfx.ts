@@ -277,6 +277,20 @@ export async function addSfxFile(
 }
 
 /**
+ * Look up a sound file's stored relative path by its `sfx` row id, for streaming
+ * playback. Returns null if no such row exists.
+ * @param id sfx row id.
+ */
+export async function getSfxFileById(id: number): Promise<{ file: string } | null> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT file FROM sfx WHERE id = ?`,
+    [id],
+  );
+  if (rows.length === 0) return null;
+  return { file: rows[0].file };
+}
+
+/**
  * Update a sound file's weight and hidden flag.
  * @param id sfx row id.
  * @param weight Weighted-random selection weight (>= 1).
