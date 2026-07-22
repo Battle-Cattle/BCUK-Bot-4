@@ -9,13 +9,13 @@ export { getPool, closePool } from './db/pool';
 // ─── Guilds ──────────────────────────────────────────────────────────────────
 
 export {
-  getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember, upsertGuild, setGuildVoiceChannel,
+  getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember, upsertGuild,
 } from './db/guilds';
 export type { DbGuild } from './db/guilds';
 
 export {
-  getGuildMembers, getMemberAccessLevel, setMemberAccessLevel,
-  removeGuildMember, getEffectiveAccessLevel, getEffectiveAccessLevelForUser,
+  getMemberAccessLevel, setMemberAccessLevel,
+  removeGuildMember, getEffectiveAccessLevelForUser,
 } from './db/guildMembers';
 export type { DbGuildMember } from './db/guildMembers';
 
@@ -72,7 +72,7 @@ export async function removeOverride(guildId: string, commandId: number): Promis
 
 export {
   AccessLevel, ACCESS_LEVEL_LABELS,
-  findUser, findUsersByIds, findUserByTwitchName, findOwnerUser, getAllUsers, getGuildMemberUsers,
+  findUser, findUsersByIds, findUserByTwitchName, getAllUsers, getGuildMemberUsers,
   updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers, updateAccessLevel,
 } from './db/users';
 export type { AccessLevelValue, DbUser, TwitchLinkedUser } from './db/users';
@@ -193,7 +193,7 @@ export {
   addSfxFile, updateSfxFile, deleteSfxFile,
 } from './db/sfx';
 export type { SfxLookupResult } from './db/sfxCache';
-export { findCachedSfxTrigger, invalidateSfxLookupCache } from './db/sfxCache';
+export { findCachedSfxTrigger } from './db/sfxCache';
 
 // ─── Overlay videos ─────────────────────────────────────────────────────────
 
@@ -208,14 +208,14 @@ export {
 
 export type { RewardPricingRow, RewardPricingInput, StreamerPricingSettings } from './db/rewardPricing';
 export {
-  getPricingForReward, getPricingConfigById, getPricingConfigsForStreamer, getAllEnabledPricingRows,
+  getPricingForReward, getPricingConfigsForStreamer, getAllEnabledPricingRows,
   upsertPricingConfig, recordPricingUpdate, deletePricingConfig, markPricingUnsupported,
   updatePricingCooldownForReward, getPricingSettingsForStreamer, savePricingSettingsForStreamer,
   DEFAULT_PRICING_COOLDOWN_SECONDS,
 } from './db/rewardPricing';
 
 export type { RewardPricingHistoryPoint } from './db/rewardPricingHistory';
-export { recordPricingHistory, getPricingHistory, getPricingHistoryForRewards } from './db/rewardPricingHistory';
+export { recordPricingHistory, getPricingHistoryForRewards } from './db/rewardPricingHistory';
 
 // ─── Streamdeck API keys ─────────────────────────────────────────────────────
 
@@ -245,4 +245,4 @@ export {
   getTokenStatus,
   revokeToken,
 } from './db/companionTokens';
-export { createCode, consumeCode, exchangeCodeForToken } from './db/companionOAuthCodes';
+export { createCode, exchangeCodeForToken } from './db/companionOAuthCodes';
