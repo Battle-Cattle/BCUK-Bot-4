@@ -15,7 +15,11 @@ export interface RewardPricingHistoryPoint {
 // window the last prune ran.
 const RETENTION_MS = 25 * 60 * 60 * 1000;
 
-/** Maps a `reward_pricing_history` row to a {@link RewardPricingHistoryPoint}. */
+/**
+ * Maps a `reward_pricing_history` row to a {@link RewardPricingHistoryPoint}.
+ * @param r - Row containing `recorded_at`, `cost`, and `demand` columns.
+ * @returns The point, with `recorded_at` coerced to a string and `demand` to a number.
+ */
 function mapRow(r: mysql.RowDataPacket): RewardPricingHistoryPoint {
   return { recorded_at: String(r.recorded_at), cost: r.cost, demand: Number(r.demand) };
 }
