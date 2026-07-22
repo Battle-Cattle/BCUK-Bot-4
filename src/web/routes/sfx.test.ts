@@ -1,13 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 
-/** Hoisted so the `vi.mock` factories below can safely reference these — `vi.mock` factories are hoisted above imports, so plain imported bindings could throw `ReferenceError` depending on import order. */
+/** Hoisted so the `vi.mock` factories below can safely reference these — `vi.mock` factories are hoisted above imports, so plain imported bindings could throw `ReferenceError` depending on import order. This is a plain string literal (no filesystem calls) precisely so it can be computed before any module import has run; the directory itself is created below, after the real `fs`/`os`/`path` imports are available. */
 const { mockLogger, ACCESS_LEVEL_MOCK, SFX_FOLDER_MOCK } = vi.hoisted(() => ({
   mockLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
   ACCESS_LEVEL_MOCK: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
-  SFX_FOLDER_MOCK: require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'sfx-test-')) as string,
+  SFX_FOLDER_MOCK: '/tmp/bcuk-sfx-route-test-fixture',
 }));
 
 /** Mocks the `db` facade so `AccessLevel` resolves to the shared hoisted mock instead of hitting the real module. */
@@ -31,6 +30,8 @@ import supertest from 'supertest';
 import router from './sfx';
 import { getAllSfxTriggers, getAllCategories, getSfxFileById, AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
+
+fs.mkdirSync(SFX_FOLDER_MOCK, { recursive: true });
 
 /**
  * Build a supertest GET request against the SFX view router with a stubbed session
