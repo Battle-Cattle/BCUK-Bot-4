@@ -38,6 +38,7 @@ import overlaySourceRouter from './routes/overlaySource';
 import overlayAdminRouter from './routes/overlayAdmin';
 import alertsOverlaySourceRouter from './routes/alertsOverlaySource';
 import alertsAdminRouter from './routes/alertsAdmin';
+import triviaOverlaySourceRouter from './routes/triviaOverlaySource';
 import channelPointsAdminRouter from './routes/channelPointsAdmin';
 import privacyRouter from './routes/privacy';
 import tosRouter from './routes/tos';
@@ -184,6 +185,7 @@ app.use('/', privacyRouter);
 app.use('/', tosRouter);
 app.use('/overlay', overlaySourceRouter);
 app.use('/alerts', alertsOverlaySourceRouter);
+app.use('/trivia', triviaOverlaySourceRouter);
 // authLimiter is applied per-route inside companionAuthRouter, not here — this
 // router is mounted at '/', so a blanket limiter here would rate-limit every
 // request on the site, not just the companion app's OAuth routes.

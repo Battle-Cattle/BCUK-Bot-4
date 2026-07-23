@@ -13,6 +13,9 @@ import { registerCounterTwitchRuntime } from './commands/counterHandler';
 import { registerMultiTwitchRuntime } from './commands/multiCommandHandler';
 import { registerShoutoutRuntime } from './commands/shoutoutHandler';
 import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
+import { registerTriviaTwitchRuntime } from './trivia/triviaTwitchHandler';
+import { registerTriviaPush } from './trivia/triviaGame';
+import { pushTriviaEvent } from './web/routes/triviaOverlaySource';
 import {
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
   registerEventSubAlertRuntime, registerEventSubDashboardRuntime,
@@ -75,6 +78,8 @@ async function main(): Promise<void> {
   registerMultiTwitchRuntime({ send: sayInChannel, getActiveChannels, getLoginUserIds: getActiveChannelUserIds });
   registerShoutoutRuntime({ send: sayInChannel });
   registerCountdownTwitchRuntime({ send: sayInChannel });
+  registerTriviaTwitchRuntime({ send: sayInChannel });
+  registerTriviaPush(pushTriviaEvent);
   registerEventSubOverlayRuntime({ pushOverlayEvent });
   registerEventSubCompanionRuntime({ pushCompanionEvent });
   registerEventSubAlertRuntime({ pushAlertEvent });

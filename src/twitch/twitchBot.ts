@@ -6,6 +6,7 @@ import { executeCounterCommandForTwitch } from '../commands/counterHandler';
 import { executeMultiCommandForTwitch } from '../commands/multiCommandHandler';
 import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
+import { executeTriviaAnswerForTwitch } from '../trivia/triviaTwitchHandler';
 import { fireAndForget } from '../commands/commandUtils';
 import { setTwitchChannel } from '../shared/statusStore';
 import { normalizeTwitchChannelName } from './twitchChannelName';
@@ -92,10 +93,10 @@ async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promis
 /**
  * tmi.js `message` event handler: dispatches an incoming Twitch chat message to
  * every command handler (custom commands, counters, `!multi`, `!so`, the shared
- * command router, countdowns) in parallel via {@link fireAndForget}. Ignores the
- * bot's own messages, messages from channels not in the active set, and messages
- * shared into this channel from a partner channel in a Twitch shared-chat session
- * (so each message is only handled once, in its source channel).
+ * command router, countdowns, trivia answers) in parallel via {@link fireAndForget}.
+ * Ignores the bot's own messages, messages from channels not in the active set, and
+ * messages shared into this channel from a partner channel in a Twitch shared-chat
+ * session (so each message is only handled once, in its source channel).
  * @param channel - Twitch channel the message was received in (as `#channel`).
  * @param tags - tmi.js chat user state (badges, mod status, display name, etc.) for the sender.
  * @param message - Raw chat message text.
@@ -132,6 +133,7 @@ function handleTwitchMessage(
       log,
     );
     fireAndForget(executeCountdownForTwitch(normalizedChannel, message), 'Countdown error', log);
+    fireAndForget(executeTriviaAnswerForTwitch(normalizedChannel, message, tags), 'Trivia answer error', log);
   } catch (err) {
     log.error('Unexpected error in message handler:', err);
   }

@@ -47,6 +47,9 @@ vi.mock('./commands/counterHandler', () => ({ registerCounterTwitchRuntime: vi.f
 vi.mock('./commands/multiCommandHandler', () => ({ registerMultiTwitchRuntime: vi.fn() }));
 vi.mock('./commands/shoutoutHandler', () => ({ registerShoutoutRuntime: vi.fn() }));
 vi.mock('./commands/countdownHandler', () => ({ registerCountdownTwitchRuntime: vi.fn() }));
+vi.mock('./trivia/triviaTwitchHandler', () => ({ registerTriviaTwitchRuntime: vi.fn() }));
+vi.mock('./trivia/triviaGame', () => ({ registerTriviaPush: vi.fn() }));
+vi.mock('./web/routes/triviaOverlaySource', () => ({ pushTriviaEvent: vi.fn() }));
 vi.mock('./twitch/eventsub/twitchEventSubRuntime', () => ({
   registerEventSubOverlayRuntime: vi.fn(),
   registerEventSubTwitchRuntime: vi.fn(),
@@ -158,6 +161,18 @@ describe('startup — guild registry preload', () => {
     await runMain();
 
     expect(vi.mocked(registerEventSubDashboardRuntime)).toHaveBeenCalledWith({ pushDashboardEvent });
+  });
+
+  it('registers the trivia Twitch runtime and push function on a clean startup', async () => {
+    const { registerTriviaTwitchRuntime } = await import('./trivia/triviaTwitchHandler.js');
+    const { registerTriviaPush } = await import('./trivia/triviaGame.js');
+    const { pushTriviaEvent } = await import('./web/routes/triviaOverlaySource.js');
+    const { sayInChannel } = await import('./twitch/twitchBot.js');
+
+    await runMain();
+
+    expect(vi.mocked(registerTriviaTwitchRuntime)).toHaveBeenCalledWith({ send: sayInChannel });
+    expect(vi.mocked(registerTriviaPush)).toHaveBeenCalledWith(pushTriviaEvent);
   });
 
   it('calls process.exit(1) and does not start the bot when reloadGuildRegistry rejects', async () => {

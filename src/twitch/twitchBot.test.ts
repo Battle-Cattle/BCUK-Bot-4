@@ -85,6 +85,10 @@ vi.mock('../commands/countdownHandler', () => ({
   executeCountdownForTwitch: vi.fn(),
 }));
 
+vi.mock('../trivia/triviaTwitchHandler', () => ({
+  executeTriviaAnswerForTwitch: vi.fn(),
+}));
+
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import {
@@ -110,6 +114,7 @@ import { executeMultiCommandForTwitch } from '../commands/multiCommandHandler';
 import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { handleCommand } from '../commands/commandRouter';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
+import { executeTriviaAnswerForTwitch } from '../trivia/triviaTwitchHandler';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -208,13 +213,14 @@ describe('handleTwitchMessage', () => {
     expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', 'hello', null);
   });
 
-  it('dispatches all six executors for a normal message', async () => {
+  it('dispatches all seven executors for a normal message', async () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeCounterCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeMultiCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeShoutoutForTwitch).mockResolvedValue(undefined);
     vi.mocked(handleCommand).mockResolvedValue(undefined);
     vi.mocked(executeCountdownForTwitch).mockResolvedValue(undefined);
+    vi.mocked(executeTriviaAnswerForTwitch).mockResolvedValue(undefined);
 
     sendMessage('#streamer', makeTags({ 'display-name': 'Alice' }), '!cmd');
 
@@ -227,6 +233,7 @@ describe('handleTwitchMessage', () => {
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', 'guild-A');
     expect(executeCountdownForTwitch).toHaveBeenCalledOnce();
+    expect(executeTriviaAnswerForTwitch).toHaveBeenCalledOnce();
   });
 
   it('resolves the target guild via the linked streamer\'s active voice presence', async () => {

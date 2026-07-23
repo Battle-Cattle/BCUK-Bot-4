@@ -46,6 +46,10 @@ export const CHANNEL_POINTS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.e
 export const DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER, 5);
 export const DASHBOARD_STATUS_MAX_SSE_PER_GUILD = parsePositiveIntEnv(process.env.DASHBOARD_STATUS_MAX_SSE_PER_GUILD, 10);
 export const SSE_MAX_TOTAL_CONNECTIONS = parsePositiveIntEnv(process.env.SSE_MAX_TOTAL_CONNECTIONS, 500);
+export const TRIVIA_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.TRIVIA_MAX_SSE_PER_CHANNEL, 10);
+export const TRIVIA_QUESTION_SECONDS = parsePositiveIntEnv(process.env.TRIVIA_QUESTION_SECONDS, 20);
+export const TRIVIA_REVEAL_SECONDS = parsePositiveIntEnv(process.env.TRIVIA_REVEAL_SECONDS, 8);
+export const TRIVIA_GAP_SECONDS = parsePositiveIntEnv(process.env.TRIVIA_GAP_SECONDS, 8);
 const _COOLDOWN = parseInt(process.env.GLOBAL_COOLDOWN_MS ?? '3000', 10);
 if (Number.isNaN(_COOLDOWN)) throw new Error('Invalid GLOBAL_COOLDOWN_MS: must be a number');
 export const GLOBAL_COOLDOWN_MS = _COOLDOWN;
