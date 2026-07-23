@@ -81,6 +81,11 @@ describe('GET /:login', () => {
     const res = await supertest(buildApp()).get('/not-valid!');
     expect(res.status).toBe(404);
   });
+
+  it('falls through (404) for the reserved "settings" login, so /trivia/settings reaches the admin page instead', async () => {
+    const res = await supertest(buildApp()).get('/settings');
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('MAX_SSE_CONNECTIONS_PER_CHANNEL', () => {

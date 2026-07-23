@@ -1,7 +1,7 @@
 /**
  * In-memory record of which trivia round group each connected channel's overlay currently
  * belongs to — the Discord guild ID a streamer explicitly appends to their OBS browser-source URL
- * (`?guild=...`, copied from their community's `/streams` dashboard), or the channel's own login
+ * (`?guild=...`, copied from their `/trivia/settings` page), or the channel's own login
  * when no guild was given (a solo group). Deliberately not inferred from any roster/membership
  * data in the DB: a streamer picks who they're playing a synchronized round with by pasting the
  * same guild-tagged URL, rather than the bot guessing a single "home" community for them.

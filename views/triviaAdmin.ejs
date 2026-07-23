@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Trivia</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body>
+  <%- include('partials/nav') %>
+
+  <main class="container">
+
+    <% if (!streamer) { %>
+    <section class="section">
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">You are not configured as a monitored streamer. Contact a Manager or Admin.</p>
+        </div>
+      </div>
+    </section>
+    <% } else { %>
+
+    <!-- ── Browser Source URL ──────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Trivia Overlay (Starting Soon Screen)</h2>
+      <div class="card">
+        <div class="card-body">
+          <p class="hint hint-compact">
+            Add this URL as a Browser Source in OBS on your starting-soon scene. Chat answers
+            automatically-cycling trivia questions with <code class="mono">!a</code>/<code class="mono">!b</code>/<code class="mono">!c</code>/<code class="mono">!d</code>
+            — the round runs for as long as this source stays open, no setup needed.
+          </p>
+          <% const login = streamer.twitch_name ? streamer.twitch_name.toLowerCase() : ''; %>
+          <code class="mono overlay-url-display"><%= baseUrl %>/trivia/<%= login %></code>
+          <p class="hint mt-05">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the URL above.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Synchronized play ────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Play a Synchronized Round with Other Streamers</h2>
+      <div class="card">
+        <div class="card-body">
+          <% if (guildId) { %>
+          <p class="hint hint-compact">
+            Use this URL instead if you want to play one shared round — same question, same timer,
+            same scoreboard — with every other streamer in this Discord server who also uses it.
+            This works regardless of whether a Twitch Shared Chat session is set up between you.
+          </p>
+          <code class="mono overlay-url-display"><%= baseUrl %>/trivia/<%= login %>?guild=<%= guildId %></code>
+          <p class="hint mt-05">Share this exact URL (including the <code class="mono">?guild=</code> part) with the other streamers you want to sync with.</p>
+          <% } else { %>
+          <p class="hint">
+            <a href="/guild/select">Select a server</a> to get a synchronized overlay URL you can
+            share with other streamers in that server.
+          </p>
+          <% } %>
+        </div>
+      </div>
+    </section>
+
+    <% } %>
+
+  </main>
+
+  <%- include('partials/pwa-register') %>
+  <%- include('partials/footer') %>
+  <script src="/utils.js"></script>
+</body>
+</html>

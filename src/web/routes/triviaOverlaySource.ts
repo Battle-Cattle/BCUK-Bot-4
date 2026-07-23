@@ -9,7 +9,10 @@ import { notifyConnectionCountChanged, type TriviaEvent } from '../../trivia/tri
 const router = Router();
 
 const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
-const isValidLogin = createLoginValidator(LOGIN_RE, new Set());
+// 'settings' is reserved for the /trivia/settings admin page (triviaAdmin.ts), mounted at the
+// same '/trivia' prefix — without this it would be swallowed here as if it were a channel login.
+const RESERVED_LOGINS = new Set(['settings']);
+const isValidLogin = createLoginValidator(LOGIN_RE, RESERVED_LOGINS);
 
 // In-memory map of active SSE connections keyed by Twitch channel login (lowercase) — each
 // streamer opens their own `/trivia/<their-login>` OBS browser source. Used only for the
@@ -53,8 +56,8 @@ router.get('/:login', (req, res, next) => {
  * documents this as the intended escape hatch for custom connection handling.
  *
  * An optional `?guild=<discord guild id>` query param opts this channel into a shared round with
- * every other currently-connected channel using the same guild id — copied from the guild's
- * `/streams` dashboard page, not inferred from any roster/membership data, so a streamer decides
+ * every other currently-connected channel using the same guild id — copied from the streamer's own
+ * `/trivia/settings` page, not inferred from any roster/membership data, so a streamer decides
  * for themselves who they're playing with. Without it, the channel plays its own solo round.
  * @param req - Express request; reads the `login` route param and the `guild` query param, and is
  *   listened to for `close` so the group's connection count (and, transitively, whether its round
