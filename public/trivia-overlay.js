@@ -138,7 +138,10 @@
 
   renderIdle();
 
-  connectSse('/trivia/' + login + '/events', function (data) {
+  // Forwards the page's own query string (e.g. `?guild=...`, pasted from the guild's dashboard
+  // to play a synchronized round with other streamers) onto the SSE connection, so the server
+  // sees the same opt-in without any extra markup needed on this script tag.
+  connectSse('/trivia/' + login + '/events' + location.search, function (data) {
     if (!data || typeof data.type !== 'string') return;
     if (data.type === 'question') renderQuestion(data);
     else if (data.type === 'reveal') renderReveal(data);

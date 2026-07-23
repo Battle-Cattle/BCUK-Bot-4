@@ -2,7 +2,7 @@ import tmi from 'tmi.js';
 import { createLogger } from '../shared/logger';
 import { extractCommand } from '../commands/commandUtils';
 import { createRuntimeRegistry, type TwitchSendRuntime } from '../commands/twitchRuntime';
-import { resolveTriviaGroupKey } from './triviaSessionGroup';
+import { resolveTriviaGroupKey } from './triviaChannelGroup';
 import { submitAnswer } from './triviaGame';
 
 const log = createLogger('TriviaTwitch');
@@ -23,10 +23,10 @@ export function registerTriviaTwitchRuntime(runtime: TwitchSendRuntime): void {
 
 /**
  * Handles a Twitch chat message that may be a trivia answer (`!a`–`!d`): resolves the sending
- * channel's current trivia group (shared with every other channel in the same live Twitch
- * shared-chat session, if any — see `triviaSessionGroup.ts`), submits the answer to
- * {@link submitAnswer}, and announces the win in chat via the registered runtime if it was the
- * first correct answer for the round.
+ * channel's current trivia group (whatever its overlay connection last recorded — see
+ * `triviaChannelGroup.ts` — shared with every other channel whose overlay was opted into the same
+ * guild-tagged URL), submits the answer to {@link submitAnswer}, and announces the win in chat via
+ * the registered runtime if it was the first correct answer for the round.
  * @param channel - Twitch channel the message was sent in (also the send target for the win announcement).
  * @param rawMessage - Raw chat message text.
  * @param tags - tmi.js chat user state for the sender — needs both the stable login and display name.
@@ -46,7 +46,7 @@ export async function executeTriviaAnswerForTwitch(
   if (!login) return;
   const displayName = tags['display-name'] ?? login;
 
-  const groupKey = await resolveTriviaGroupKey(channel);
+  const groupKey = resolveTriviaGroupKey(channel);
   const won = submitAnswer(groupKey, login, displayName, match[1]);
   if (!won) return;
 

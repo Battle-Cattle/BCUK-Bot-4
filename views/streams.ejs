@@ -244,6 +244,43 @@
       </div>
     </section>
 
+    <!-- ── Trivia Overlay ───────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Trivia Overlay (Starting Soon Screen)</h2>
+      <div class="card">
+        <p class="hint">
+          Add a streamer's URL below as an OBS browser source on their starting-soon scene to run
+          the automatic trivia game. Every URL already includes <code class="mono">?guild=<%= guildId %></code> —
+          streamers using these exact URLs at the same time all play one synchronized round with a
+          shared scoreboard, regardless of whether a Twitch Shared Chat session is set up.
+        </p>
+        <div class="table-scroll">
+        <table class="table" aria-label="Trivia overlay URLs">
+          <thead>
+            <tr>
+              <th scope="col">Streamer</th>
+              <th scope="col">OBS Browser Source URL</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% const triviaStreamers = streamers.filter(function(s) { return !!s.twitch_name; }); %>
+            <% triviaStreamers.forEach(function(s) { %>
+            <tr>
+              <td class="mono"><%= s.twitch_name %></td>
+              <td><code class="mono overlay-url-display"><%= baseUrl %>/trivia/<%= s.twitch_name.toLowerCase() %>?guild=<%= guildId %></code></td>
+            </tr>
+            <% }) %>
+            <% if (triviaStreamers.length === 0) { %>
+            <tr>
+              <td colspan="2" class="empty-msg">Add a streamer with a linked Twitch channel above to get their trivia overlay URL.</td>
+            </tr>
+            <% } %>
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <%- include('partials/pwa-register') %>

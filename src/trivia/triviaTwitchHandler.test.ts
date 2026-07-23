@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../test-utils/loggerMock';
 
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
-vi.mock('./triviaSessionGroup', () => ({ resolveTriviaGroupKey: vi.fn() }));
+vi.mock('./triviaChannelGroup', () => ({ resolveTriviaGroupKey: vi.fn() }));
 vi.mock('./triviaGame', () => ({ submitAnswer: vi.fn() }));
 
 import { executeTriviaAnswerForTwitch, registerTriviaTwitchRuntime } from './triviaTwitchHandler';
-import { resolveTriviaGroupKey } from './triviaSessionGroup';
+import { resolveTriviaGroupKey } from './triviaChannelGroup';
 import { submitAnswer } from './triviaGame';
 
 const mockRuntime = { send: vi.fn().mockResolvedValue(undefined) };
@@ -18,7 +18,7 @@ function makeTags(username: string, displayName?: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   registerTriviaTwitchRuntime(mockRuntime);
-  vi.mocked(resolveTriviaGroupKey).mockResolvedValue('group-1');
+  vi.mocked(resolveTriviaGroupKey).mockReturnValue('group-1');
 });
 
 describe('executeTriviaAnswerForTwitch', () => {

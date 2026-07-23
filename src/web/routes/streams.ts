@@ -6,6 +6,7 @@ import { requireManager } from '../middleware';
 import { getSessionUser } from '../session';
 import { getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db';
+import { PUBLIC_URL } from '../../shared/config';
 import { filterQueryParam, renderView, renderError } from './shared';
 import { STREAMS_ERROR_CODES, STREAMS_ERROR_MESSAGES, type StreamsErrorCode } from './streamsErrors';
 import groupsRouter from './streamGroups';
@@ -65,6 +66,8 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
       error:   filterQueryParam(req.query.error,   KNOWN_ERRORS),
       success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),
       getFriendlyError,
+      guildId,
+      baseUrl: PUBLIC_URL,
     });
   } catch (err) {
     log.error('Streams page error:', err);

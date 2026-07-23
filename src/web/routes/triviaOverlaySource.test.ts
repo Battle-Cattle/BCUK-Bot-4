@@ -1,9 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../shared/config', () => ({ TRIVIA_MAX_SSE_PER_CHANNEL: 10, SSE_MAX_TOTAL_CONNECTIONS: 1000 }));
-vi.mock('../../trivia/triviaSessionGroup', () => ({ resolveTriviaGroup: vi.fn() }));
 vi.mock('../../trivia/triviaGame', () => ({ notifyConnectionCountChanged: vi.fn() }));
 vi.mock('fs', () => ({
   default: { readdirSync: () => ['triviaOverlaySource.ejs'] },
@@ -12,8 +11,11 @@ vi.mock('fs', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router, { MAX_SSE_CONNECTIONS_PER_CHANNEL, connections, pushTriviaEvent } from './triviaOverlaySource';
-import { resolveTriviaGroup } from '../../trivia/triviaSessionGroup';
 import { notifyConnectionCountChanged } from '../../trivia/triviaGame';
+import { __resetTriviaChannelGroupForTests } from '../../trivia/triviaChannelGroup';
+
+const REAL_GUILD_ID = '123456789012345678';
+const OTHER_GUILD_ID = '876543210987654321';
 
 /** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely. */
 function getRouteHandler(routePath: string): (req: any, res: any, next: any) => void {
@@ -32,14 +34,15 @@ function makeSseRes() {
   };
 }
 
-function makeSseReq(login: string) {
+function makeSseReq(login: string, query: Record<string, unknown> = {}) {
   // attachSseConnection registers its own 'close' cleanup listener, and the route handler
-  // registers a second one afterwards (to reconcile the trivia group post-removal) — both must
-  // fire, in registration order, for triggerClose() to behave like a real EventEmitter.
+  // registers a second one afterwards (to refresh the group's connection count post-removal) —
+  // both must fire, in registration order, for triggerClose() to behave like a real EventEmitter.
   const closeCbs: (() => void)[] = [];
   return {
     req: {
       params: { login },
+      query,
       on: (event: string, cb: () => void) => {
         if (event === 'close') closeCbs.push(cb);
       },
@@ -59,18 +62,10 @@ function buildApp() {
   return app;
 }
 
-function soloGroup(login: string) {
-  return { groupKey: login, members: [login] };
-}
-
 beforeEach(() => {
   connections.clear();
   vi.clearAllMocks();
-  vi.mocked(resolveTriviaGroup).mockImplementation(async (login: string) => soloGroup(login));
-});
-
-afterEach(() => {
-  vi.useRealTimers();
+  __resetTriviaChannelGroupForTests();
 });
 
 describe('GET /:login', () => {
@@ -109,68 +104,71 @@ describe('GET /:login/events — connection limit and validation', () => {
 });
 
 describe('GET /:login/events — connection lifecycle', () => {
-  it('registers a new connection and resolves its trivia group on connect', async () => {
+  it('registers a new connection as a solo group when no guild param is given', () => {
     const handler = getRouteHandler('/:login/events');
     const res = makeSseRes();
     const { req } = makeSseReq('freshchannel');
 
     handler(req, res, vi.fn());
-    await vi.waitFor(() => expect(resolveTriviaGroup).toHaveBeenCalledWith('freshchannel'));
 
     expect(connections.get('freshchannel')?.has(res as any)).toBe(true);
     expect(notifyConnectionCountChanged).toHaveBeenCalledWith('freshchannel', 1);
   });
 
-  it('notifies the game engine with 0 once the client disconnects', async () => {
+  it('groups the connection by a valid guild query param instead of its own login', () => {
+    const handler = getRouteHandler('/:login/events');
+    const res = makeSseRes();
+    const { req } = makeSseReq('freshchannel', { guild: REAL_GUILD_ID });
+
+    handler(req, res, vi.fn());
+
+    expect(notifyConnectionCountChanged).toHaveBeenCalledWith(REAL_GUILD_ID, 1);
+  });
+
+  it('falls back to a solo group when the guild query param is not a valid snowflake', () => {
+    const handler = getRouteHandler('/:login/events');
+    const res = makeSseRes();
+    const { req } = makeSseReq('freshchannel', { guild: 'not-a-real-id' });
+
+    handler(req, res, vi.fn());
+
+    expect(notifyConnectionCountChanged).toHaveBeenCalledWith('freshchannel', 1);
+  });
+
+  it('falls back to a solo group when the guild query param is repeated (arrives as an array)', () => {
+    const handler = getRouteHandler('/:login/events');
+    const res = makeSseRes();
+    const { req } = makeSseReq('freshchannel', { guild: [REAL_GUILD_ID, OTHER_GUILD_ID] });
+
+    handler(req, res, vi.fn());
+
+    expect(notifyConnectionCountChanged).toHaveBeenCalledWith('freshchannel', 1);
+  });
+
+  it('notifies the game engine with 0 once the client disconnects', () => {
     const handler = getRouteHandler('/:login/events');
     const res = makeSseRes();
     const { req, triggerClose } = makeSseReq('closingchannel');
 
     handler(req, res, vi.fn());
-    await vi.waitFor(() => expect(resolveTriviaGroup).toHaveBeenCalledWith('closingchannel'));
     vi.mocked(notifyConnectionCountChanged).mockClear();
 
     triggerClose();
-    await vi.waitFor(() => expect(notifyConnectionCountChanged).toHaveBeenCalledWith('closingchannel', 0));
 
+    expect(notifyConnectionCountChanged).toHaveBeenCalledWith('closingchannel', 0);
     expect(connections.get('closingchannel')).toBeUndefined();
   });
 
-  it('sums connected clients across every channel in a shared-chat group', async () => {
-    vi.mocked(resolveTriviaGroup).mockImplementation(async () => ({
-      groupKey: 'session-1',
-      members: ['channela', 'channelb'],
-    }));
+  it('sums connected clients across every channel sharing the same guild param', () => {
+    const handler = getRouteHandler('/:login/events');
 
-    const handlerA = getRouteHandler('/:login/events');
     const resA = makeSseRes();
-    const { req: reqA } = makeSseReq('channela');
-    handlerA(reqA, resA, vi.fn());
-    await vi.waitFor(() => expect(notifyConnectionCountChanged).toHaveBeenCalledWith('session-1', 1));
+    handler(makeSseReq('channela', { guild: REAL_GUILD_ID }).req, resA, vi.fn());
+    expect(notifyConnectionCountChanged).toHaveBeenCalledWith(REAL_GUILD_ID, 1);
 
     const resB = makeSseRes();
-    const { req: reqB } = makeSseReq('channelb');
-    handlerA(reqB, resB, vi.fn());
-    await vi.waitFor(() => expect(notifyConnectionCountChanged).toHaveBeenCalledWith('session-1', 2));
-  });
-
-  it('notifies the previous group with its updated count when a channel moves to a new group', async () => {
-    const handler = getRouteHandler('/:login/events');
-    const res = makeSseRes();
-    const { req, triggerClose } = makeSseReq('movingchannel');
-
-    handler(req, res, vi.fn());
-    await vi.waitFor(() => expect(notifyConnectionCountChanged).toHaveBeenCalledWith('movingchannel', 1));
-
-    vi.mocked(resolveTriviaGroup).mockImplementation(async () => ({
-      groupKey: 'new-session',
-      members: ['movingchannel', 'partnerchannel'],
-    }));
-    vi.mocked(notifyConnectionCountChanged).mockClear();
-
-    triggerClose();
-    await vi.waitFor(() => expect(notifyConnectionCountChanged).toHaveBeenCalledWith('new-session', 0));
-    expect(notifyConnectionCountChanged).toHaveBeenCalledWith('movingchannel', 0);
+    handler(makeSseReq('channelb', { guild: REAL_GUILD_ID }).req, resB, vi.fn());
+    expect(notifyConnectionCountChanged).toHaveBeenCalledWith(REAL_GUILD_ID, 2);
   });
 });
 
@@ -181,27 +179,36 @@ describe('pushTriviaEvent', () => {
     expect(() => pushTriviaEvent('nobody', event)).not.toThrow();
   });
 
-  it('broadcasts to every login currently in the group', async () => {
-    vi.mocked(resolveTriviaGroup).mockImplementation(async () => ({
-      groupKey: 'session-1',
-      members: ['channela', 'channelb'],
-    }));
-
+  it('broadcasts to every login currently sharing the group', () => {
     const handler = getRouteHandler('/:login/events');
-    const resA = makeSseRes();
-    handler(makeSseReq('channela').req, resA, vi.fn());
-    await vi.waitFor(() => expect(notifyConnectionCountChanged).toHaveBeenCalledWith('session-1', 1));
 
+    const resA = makeSseRes();
+    handler(makeSseReq('channela', { guild: REAL_GUILD_ID }).req, resA, vi.fn());
     const resB = makeSseRes();
-    handler(makeSseReq('channelb').req, resB, vi.fn());
-    await vi.waitFor(() => expect(notifyConnectionCountChanged).toHaveBeenCalledWith('session-1', 2));
+    handler(makeSseReq('channelb', { guild: REAL_GUILD_ID }).req, resB, vi.fn());
 
     resA.write.mockClear();
     resB.write.mockClear();
-    pushTriviaEvent('session-1', event);
+    pushTriviaEvent(REAL_GUILD_ID, event);
 
     const expectedPayload = `data: ${JSON.stringify(event)}\n\n`;
     expect(resA.write).toHaveBeenCalledWith(expectedPayload);
     expect(resB.write).toHaveBeenCalledWith(expectedPayload);
+  });
+
+  it('does not broadcast to a channel that opted into a different guild', () => {
+    const handler = getRouteHandler('/:login/events');
+
+    const resA = makeSseRes();
+    handler(makeSseReq('channela', { guild: REAL_GUILD_ID }).req, resA, vi.fn());
+    const resC = makeSseRes();
+    handler(makeSseReq('channelc', { guild: OTHER_GUILD_ID }).req, resC, vi.fn());
+
+    resA.write.mockClear();
+    resC.write.mockClear();
+    pushTriviaEvent(REAL_GUILD_ID, event);
+
+    expect(resA.write).toHaveBeenCalled();
+    expect(resC.write).not.toHaveBeenCalled();
   });
 });

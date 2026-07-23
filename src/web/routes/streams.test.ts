@@ -33,6 +33,7 @@ vi.mock('../../twitch/monitor/twitchMonitor', () => ({
 }));
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+vi.mock('../../shared/config', () => ({ PUBLIC_URL: 'https://example.test' }));
 
 vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 
@@ -91,6 +92,12 @@ describe('GET /streams — query param filtering', () => {
     vi.mocked(getStreamGroupsForGuild).mockRejectedValue(new Error('DB down'));
     const res = await supertest(buildApp()).get('/streams');
     expect(res.status).toBe(500);
+  });
+
+  it('passes the session guildId and configured baseUrl for the trivia overlay URLs', async () => {
+    const res = await supertest(buildApp()).get('/streams');
+    expect(res.body.guildId).toBe(GUILD_ID);
+    expect(res.body.baseUrl).toBe('https://example.test');
   });
 });
 

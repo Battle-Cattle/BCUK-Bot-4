@@ -89,11 +89,12 @@ function topScores(scoreboard: Map<string, number>, displayNames: Map<string, st
 
 /**
  * Notifies the game engine of the current total number of connected OBS sources for `groupKey`
- * (summed across every channel sharing that group — see `triviaSessionGroup.ts`). A transition
+ * (summed across every channel sharing that group — see `triviaChannelGroup.ts`). A transition
  * from 0 to more than 0 starts a fresh session (clears the scoreboard, requests a new OpenTDB
  * session token, kicks off the round cycle); a transition down to 0 cancels all pending timers
  * and drops in-flight round state, so nothing keeps polling OpenTDB while unwatched.
- * @param groupKey - The shared-chat session ID, or a channel's own login if playing solo.
+ * @param groupKey - The Discord guild ID channels opted into via their overlay URL, or a
+ *   channel's own login if playing solo.
  * @param count - Total connected overlay clients across every channel in the group right now.
  */
 export function notifyConnectionCountChanged(groupKey: string, count: number): void {

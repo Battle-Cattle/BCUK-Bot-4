@@ -92,8 +92,8 @@ async function resetSessionToken(token: string): Promise<void> {
 }
 
 /**
- * Requests a fresh OpenTDB session token, used so a single playing session (one shared-chat
- * group, for the lifetime of its round cycle) doesn't see a repeat question.
+ * Requests a fresh OpenTDB session token, used so a single playing session (one trivia group,
+ * for the lifetime of its round cycle) doesn't see a repeat question.
  * @returns The new session token.
  */
 export function requestSessionToken(): Promise<string> {
