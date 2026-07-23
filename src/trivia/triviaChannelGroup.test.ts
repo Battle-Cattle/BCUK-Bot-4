@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   setChannelGroupKey,
-  getChannelsInGroup,
+  clearChannelGroupKey,
   resolveTriviaGroupKey,
   __resetTriviaChannelGroupForTests,
 } from './triviaChannelGroup';
@@ -27,25 +27,21 @@ describe('resolveTriviaGroupKey', () => {
   });
 });
 
-describe('getChannelsInGroup', () => {
-  it('returns an empty array for a group nothing has joined', () => {
-    expect(getChannelsInGroup('nobody-here')).toEqual([]);
+describe('clearChannelGroupKey', () => {
+  it("falls back to the channel's own login after its group key is cleared", () => {
+    setChannelGroupKey('channela', 'guild-1');
+    clearChannelGroupKey('channela');
+    expect(resolveTriviaGroupKey('channela')).toBe('channela');
   });
 
-  it('returns every channel recorded under the same group key', () => {
+  it('does nothing (no throw) for a channel with no recorded group key', () => {
+    expect(() => clearChannelGroupKey('neverconnected')).not.toThrow();
+  });
+
+  it('does not affect other channels', () => {
     setChannelGroupKey('channela', 'guild-1');
     setChannelGroupKey('channelb', 'guild-1');
-    setChannelGroupKey('channelc', 'guild-2');
-
-    expect(getChannelsInGroup('guild-1').sort()).toEqual(['channela', 'channelb']);
-    expect(getChannelsInGroup('guild-2')).toEqual(['channelc']);
-  });
-
-  it('excludes a channel after it moves to a different group', () => {
-    setChannelGroupKey('channela', 'guild-1');
-    setChannelGroupKey('channela', 'guild-2');
-
-    expect(getChannelsInGroup('guild-1')).toEqual([]);
-    expect(getChannelsInGroup('guild-2')).toEqual(['channela']);
+    clearChannelGroupKey('channela');
+    expect(resolveTriviaGroupKey('channelb')).toBe('guild-1');
   });
 });

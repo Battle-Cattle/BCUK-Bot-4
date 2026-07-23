@@ -10,9 +10,9 @@ vi.mock('fs', () => ({
 
 import express from 'express';
 import supertest from 'supertest';
-import router, { MAX_SSE_CONNECTIONS_PER_CHANNEL, connections, pushTriviaEvent } from './triviaOverlaySource';
+import router, { MAX_SSE_CONNECTIONS_PER_CHANNEL, connections, groupConnections, pushTriviaEvent } from './triviaOverlaySource';
 import { notifyConnectionCountChanged } from '../../trivia/triviaGame';
-import { __resetTriviaChannelGroupForTests } from '../../trivia/triviaChannelGroup';
+import { resolveTriviaGroupKey, __resetTriviaChannelGroupForTests } from '../../trivia/triviaChannelGroup';
 
 const REAL_GUILD_ID = '123456789012345678';
 const OTHER_GUILD_ID = '876543210987654321';
@@ -64,6 +64,7 @@ function buildApp() {
 
 beforeEach(() => {
   connections.clear();
+  groupConnections.clear();
   vi.clearAllMocks();
   __resetTriviaChannelGroupForTests();
 });
@@ -169,6 +170,56 @@ describe('GET /:login/events — connection lifecycle', () => {
     const resB = makeSseRes();
     handler(makeSseReq('channelb', { guild: REAL_GUILD_ID }).req, resB, vi.fn());
     expect(notifyConnectionCountChanged).toHaveBeenCalledWith(REAL_GUILD_ID, 2);
+  });
+
+  it("clears the channel's recorded group key once its last connection disconnects", () => {
+    const handler = getRouteHandler('/:login/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('closingchannel', { guild: REAL_GUILD_ID });
+
+    handler(req, res, vi.fn());
+    expect(resolveTriviaGroupKey('closingchannel')).toBe(REAL_GUILD_ID);
+
+    triggerClose();
+
+    expect(resolveTriviaGroupKey('closingchannel')).toBe('closingchannel');
+  });
+
+  it("keeps the channel's recorded group key while another of its connections is still open", () => {
+    const handler = getRouteHandler('/:login/events');
+    const resA = makeSseRes();
+    const { req: reqA } = makeSseReq('samechannel', { guild: REAL_GUILD_ID });
+    handler(reqA, resA, vi.fn());
+
+    const resB = makeSseRes();
+    const { req: reqB, triggerClose: closeB } = makeSseReq('samechannel', { guild: REAL_GUILD_ID });
+    handler(reqB, resB, vi.fn());
+
+    closeB();
+
+    expect(resolveTriviaGroupKey('samechannel')).toBe(REAL_GUILD_ID);
+  });
+
+  it('does not let one connection for a login affect another of that same login\'s connections in a different group', () => {
+    const handler = getRouteHandler('/:login/events');
+
+    const resSolo = makeSseRes();
+    const { req: reqSolo } = makeSseReq('samechannel');
+    handler(reqSolo, resSolo, vi.fn());
+    expect(notifyConnectionCountChanged).toHaveBeenCalledWith('samechannel', 1);
+    vi.mocked(notifyConnectionCountChanged).mockClear();
+
+    const resGuild = makeSseRes();
+    const { req: reqGuild, triggerClose: closeGuild } = makeSseReq('samechannel', { guild: REAL_GUILD_ID });
+    handler(reqGuild, resGuild, vi.fn());
+    expect(notifyConnectionCountChanged).toHaveBeenCalledWith(REAL_GUILD_ID, 1);
+    vi.mocked(notifyConnectionCountChanged).mockClear();
+
+    closeGuild();
+
+    // Only the guild group's count should have changed — the solo connection's own group is untouched.
+    expect(notifyConnectionCountChanged).toHaveBeenCalledWith(REAL_GUILD_ID, 0);
+    expect(notifyConnectionCountChanged).not.toHaveBeenCalledWith('samechannel', expect.anything());
   });
 });
 

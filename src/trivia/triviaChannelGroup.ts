@@ -6,9 +6,11 @@
  * data in the DB: a streamer picks who they're playing a synchronized round with by pasting the
  * same guild-tagged URL, rather than the bot guessing a single "home" community for them.
  *
- * Written by `triviaOverlaySource.ts` on every SSE connect; read by both
- * `triviaOverlaySource.ts` (to find which other connected logins share a group, for event
- * fan-out) and `triviaTwitchHandler.ts` (to resolve which round a chat answer counts toward).
+ * Written by `triviaOverlaySource.ts` on every SSE connect (and cleared once a channel's last
+ * connection closes, so this never grows unbounded); read by `triviaTwitchHandler.ts` to resolve
+ * which round a chat answer counts toward. Event fan-out to overlay connections is tracked
+ * separately in `triviaOverlaySource.ts`, keyed by the connection itself rather than by login —
+ * a chat message only ever has a login to key off, so this map stays login-keyed.
  */
 const groupKeyByLogin = new Map<string, string>();
 
@@ -17,18 +19,15 @@ export function setChannelGroupKey(login: string, groupKey: string): void {
   groupKeyByLogin.set(login, groupKey);
 }
 
-/** Returns every currently-tracked login whose recorded group key is `groupKey`. */
-export function getChannelsInGroup(groupKey: string): string[] {
-  const result: string[] = [];
-  for (const [login, key] of groupKeyByLogin) {
-    if (key === groupKey) result.push(login);
-  }
-  return result;
+/** Removes `login`'s recorded group key, e.g. once its last overlay connection has closed. */
+export function clearChannelGroupKey(login: string): void {
+  groupKeyByLogin.delete(login);
 }
 
 /**
  * Resolves a channel's current trivia group key: whatever was last recorded for it via
- * {@link setChannelGroupKey}, or its own login if its overlay has never connected.
+ * {@link setChannelGroupKey}, or its own login if its overlay has never connected (or has since
+ * fully disconnected).
  */
 export function resolveTriviaGroupKey(login: string): string {
   return groupKeyByLogin.get(login) ?? login;

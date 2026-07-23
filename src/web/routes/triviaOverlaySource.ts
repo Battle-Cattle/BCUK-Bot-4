@@ -3,7 +3,7 @@ import type { Response } from 'express';
 import { TRIVIA_MAX_SSE_PER_CHANNEL } from '../../shared/config';
 import { normalizeDiscordId, renderView } from './shared';
 import { attachSseConnection, broadcastToChannel, createLoginValidator } from './sseChannel';
-import { setChannelGroupKey, getChannelsInGroup } from '../../trivia/triviaChannelGroup';
+import { setChannelGroupKey, clearChannelGroupKey } from '../../trivia/triviaChannelGroup';
 import { notifyConnectionCountChanged, type TriviaEvent } from '../../trivia/triviaGame';
 
 const router = Router();
@@ -12,23 +12,23 @@ const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
 const isValidLogin = createLoginValidator(LOGIN_RE, new Set());
 
 // In-memory map of active SSE connections keyed by Twitch channel login (lowercase) — each
-// streamer opens their own `/trivia/<their-login>` OBS browser source.
+// streamer opens their own `/trivia/<their-login>` OBS browser source. Used only for the
+// per-channel connection cap; event fan-out is tracked separately (see `groupConnections` below).
 export const connections = new Map<string, Set<Response>>();
 
 export const MAX_SSE_CONNECTIONS_PER_CHANNEL = TRIVIA_MAX_SSE_PER_CHANNEL;
 
-/** Sums connected overlay clients across every login currently in `groupKey`'s trivia group. */
-function totalConnectedInGroup(groupKey: string): number {
-  let total = 0;
-  for (const login of getChannelsInGroup(groupKey)) total += connections.get(login)?.size ?? 0;
-  return total;
-}
+// Physical SSE connections grouped by trivia group key, tracked independently of `connections`
+// (which is keyed by login). Two simultaneous connections for the same login opened under
+// different `?guild=` params (e.g. a reconnect race, or the same URL opened twice) therefore never
+// cross-talk: each connection is added to exactly the group it was configured for at connect time,
+// and removed from that same group — never any other — on its own disconnect. Self-cleaning, like
+// `connections`: a group's entry is deleted once its Set empties.
+export const groupConnections = new Map<string, Set<Response>>();
 
-/** Pushes a trivia event to every login currently in `groupKey`'s trivia group with an active overlay connection. Registered with `triviaGame.registerTriviaPush`. */
+/** Pushes a trivia event to every physical connection currently in `groupKey`'s trivia group. Registered with `triviaGame.registerTriviaPush`. */
 export function pushTriviaEvent(groupKey: string, event: TriviaEvent): void {
-  for (const login of getChannelsInGroup(groupKey)) {
-    broadcastToChannel(connections, login, event);
-  }
+  broadcastToChannel(groupConnections, groupKey, event);
 }
 
 /**
@@ -75,13 +75,20 @@ router.get('/:login/events', (req, res, next) => {
 
   const requestedGuildId = typeof req.query.guild === 'string' ? normalizeDiscordId(req.query.guild) : null;
   const groupKey = requestedGuildId ?? key;
-  setChannelGroupKey(key, groupKey);
-  notifyConnectionCountChanged(groupKey, totalConnectedInGroup(groupKey));
 
-  // Registered after attachSseConnection's own 'close' cleanup listener, so this one reads the
-  // post-removal connection count.
+  setChannelGroupKey(key, groupKey);
+  if (!groupConnections.has(groupKey)) groupConnections.set(groupKey, new Set());
+  const groupSet = groupConnections.get(groupKey)!;
+  groupSet.add(res);
+  notifyConnectionCountChanged(groupKey, groupSet.size);
+
+  // Registered after attachSseConnection's own 'close' cleanup listener, so `connections.get(key)`
+  // below already reflects this connection's removal.
   req.on('close', () => {
-    notifyConnectionCountChanged(groupKey, totalConnectedInGroup(groupKey));
+    groupSet.delete(res);
+    if (groupSet.size === 0) groupConnections.delete(groupKey);
+    notifyConnectionCountChanged(groupKey, groupSet.size);
+    if (!connections.has(key)) clearChannelGroupKey(key);
   });
 });
 
