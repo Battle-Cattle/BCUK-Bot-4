@@ -39,6 +39,7 @@ import overlayAdminRouter from './routes/overlayAdmin';
 import alertsOverlaySourceRouter from './routes/alertsOverlaySource';
 import alertsAdminRouter from './routes/alertsAdmin';
 import channelPointsAdminRouter from './routes/channelPointsAdmin';
+import timersRouter from './routes/timers';
 import privacyRouter from './routes/privacy';
 import tosRouter from './routes/tos';
 import serviceWorkerRouter from './routes/serviceWorker';
@@ -232,6 +233,7 @@ app.use('/user/settings', requireAuth, userSettingsRouter);
 app.use('/overlay', requireAuth, overlayAdminRouter);
 app.use('/alerts', requireAuth, alertsAdminRouter);
 app.use('/channel-points', requireAuth, channelPointsAdminRouter);
+app.use('/timers', requireAuth, timersRouter);
 app.use('/dashboard', requireAuth, dashboardEventsRouter);
 app.use('/dashboard', requireAuth, dashboardStatusEventsRouter);
 

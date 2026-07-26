@@ -315,6 +315,23 @@ Expected constraints:
 - `UNIQUE KEY uq_alert_config (streamer_id, event_type)` — one row per streamer per event type.
 - Independent of `streamer_event_config` (Twitch chat messages) and `overlay_reward`/`overlay_video` (channel-point video overlay) — a streamer may enable an alert for an event type without enabling the corresponding chat message, or vice versa.
 
+## `timer_command`
+
+Per-streamer, Twitch-only auto-posted chat messages ("timer commands" — one message per row; a rotation is achieved by creating several timers). Config-only: the scheduler's live-status/chat-activity firing state lives in memory (`timerCommandScheduler.ts`), not in this table, so a restart just restarts each timer's countdown rather than replaying fires missed while the bot was down. Created by `migrations/timer_commands.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK, auto-increment | |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `name` | `VARCHAR(255)` | Admin-facing label only, never posted to chat |
+| `message` | `VARCHAR(500)` | The chat message posted on each fire |
+| `interval_seconds` | `INT` | Minimum time between fires; `CHECK (interval_seconds >= 60)` |
+| `min_messages` | `INT` | Minimum chat lines seen since the timer's last fire, in addition to the interval; `0` disables this gate; `CHECK (min_messages >= 0)` |
+| `require_live` | `TINYINT(1)` | When `1`, the timer only fires while the streamer's channel is live |
+| `enabled` | `TINYINT(1)` | Whether the scheduler considers this timer at all |
+
+Firing logic (see `timerCommandScheduler.ts`): on a 15s tick, a timer fires once its interval has elapsed **and** (if `require_live`) the channel is live **and** at least `min_messages` chat lines have been seen since its last fire. A newly-seen timer (first tick after creation or bot restart) seeds its clock and chat-line baseline without firing, so restarts don't cause a burst of immediate posts.
+
 ## `streamdeck_api_keys`
 
 Per-user Streamdeck API keys. Defined in `schema.sql`. For existing deployments where this table was created externally (before the multi-guild migration), `migrations/multi_guild.sql` conditionally adds the `guild_id` column.

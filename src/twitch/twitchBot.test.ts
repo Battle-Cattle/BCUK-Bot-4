@@ -85,6 +85,10 @@ vi.mock('../commands/countdownHandler', () => ({
   executeCountdownForTwitch: vi.fn(),
 }));
 
+vi.mock('./twitchChatActivity', () => ({
+  recordChatMessage: vi.fn(),
+}));
+
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import {
@@ -110,6 +114,7 @@ import { executeMultiCommandForTwitch } from '../commands/multiCommandHandler';
 import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { handleCommand } from '../commands/commandRouter';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
+import { recordChatMessage } from './twitchChatActivity';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -185,27 +190,37 @@ describe('handleTwitchMessage', () => {
   it('ignores self-messages', () => {
     sendMessage('#streamer', makeTags(), 'hello', true);
     expect(executeCustomCommandForTwitch).not.toHaveBeenCalled();
+    expect(recordChatMessage).not.toHaveBeenCalled();
   });
 
   it('ignores messages for an invalid channel name', () => {
     sendMessage('!!bad', makeTags(), 'hello');
     expect(executeCustomCommandForTwitch).not.toHaveBeenCalled();
+    expect(recordChatMessage).not.toHaveBeenCalled();
   });
 
   it('ignores messages for channels not in activeChannels', () => {
     sendMessage('#otherchan', makeTags(), 'hello');
     expect(executeCustomCommandForTwitch).not.toHaveBeenCalled();
+    expect(recordChatMessage).not.toHaveBeenCalled();
   });
 
   it('ignores shared-chat messages that originated in a different channel', () => {
     sendMessage('#streamer', makeTags({ 'room-id': '111', 'source-room-id': '999' }), 'hello');
     expect(executeCustomCommandForTwitch).not.toHaveBeenCalled();
+    expect(recordChatMessage).not.toHaveBeenCalled();
   });
 
   it('processes messages when source-room-id matches room-id', () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     sendMessage('#streamer', makeTags({ 'room-id': '111', 'source-room-id': '111' }), 'hello');
     expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', 'hello', null);
+    expect(recordChatMessage).toHaveBeenCalledWith('streamer');
+  });
+
+  it('records chat activity for a normal message', () => {
+    sendMessage('#streamer', makeTags(), 'hello');
+    expect(recordChatMessage).toHaveBeenCalledWith('streamer');
   });
 
   it('dispatches all six executors for a normal message', async () => {

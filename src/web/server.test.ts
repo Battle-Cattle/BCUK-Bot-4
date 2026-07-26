@@ -104,6 +104,7 @@ vi.mock('./routes/overlayAdmin', () => ({ default: emptyRouter() }));
 vi.mock('./routes/alertsOverlaySource', () => ({ default: emptyRouter() }));
 vi.mock('./routes/alertsAdmin', () => ({ default: emptyRouter() }));
 vi.mock('./routes/channelPointsAdmin', () => ({ default: emptyRouter() }));
+vi.mock('./routes/timers', () => ({ default: emptyRouter() }));
 vi.mock('./routes/dashboardEvents', () => ({ default: emptyRouter() }));
 vi.mock('./routes/dashboardStatusEvents', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionAuth', () => ({ default: emptyRouter() }));
