@@ -26,7 +26,7 @@ vi.mock('./twitchMonitorStartup', () => ({ performStartupLiveCheck: vi.fn().mock
 
 import {
   startTwitchMonitor, stopTwitchMonitor, triggerImmediateLiveCheck, getLiveStates,
-  shutdownTwitchMonitor, restartTwitchMonitor, getMultiTwitchDataForChannel,
+  shutdownTwitchMonitor, restartTwitchMonitor, getMultiTwitchDataForChannel, isChannelLive,
 } from './twitchMonitor';
 import { getAllStreamersWithGroups, clearStreamerLive } from '../../db';
 import { getUsers, getStreams } from '../twitchApi';
@@ -396,6 +396,25 @@ describe('shutdown, restart, multitwitch lookup, and live-state ordering', () =>
     expect(result).not.toBeNull();
     expect(result!.url).toBe('https://www.multitwitch.tv/alpha/zeta');
     expect(result!.participants).toEqual(['alpha', 'zeta']);
+  });
+
+  it('isChannelLive returns false for a login with no live state', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await startTwitchMonitor();
+
+    expect(isChannelLive('teststreamer')).toBe(false);
+  });
+
+  it('isChannelLive returns true once the streamer is tracked as live, case-insensitively', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await startTwitchMonitor();
+
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream()] as any);
+    await triggerImmediateLiveCheck('teststreamer');
+
+    expect(isChannelLive('TestStreamer')).toBe(true);
   });
 
   it('getLiveStates sorts by group name, then by login within a group', async () => {

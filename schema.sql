@@ -151,6 +151,28 @@ CREATE TABLE IF NOT EXISTS streamer_event_config (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- timer_command
+-- Per-streamer, Twitch-only auto-posted chat messages. Config-only — the
+-- scheduler's live/message-count firing state is kept in memory (see
+-- timerCommandScheduler.ts), not persisted here, so a restart simply
+-- restarts each timer's countdown rather than replaying missed fires.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS timer_command (
+  id               INT          NOT NULL AUTO_INCREMENT,
+  streamer_id      INT          NOT NULL,
+  name             VARCHAR(255) NOT NULL,
+  message          VARCHAR(500) NOT NULL,
+  interval_seconds INT          NOT NULL,
+  min_messages     INT          NOT NULL DEFAULT 0,
+  require_live     TINYINT(1)   NOT NULL DEFAULT 1,
+  enabled          TINYINT(1)   NOT NULL DEFAULT 1,
+  PRIMARY KEY (id),
+  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE,
+  CONSTRAINT chk_timer_command_interval CHECK (interval_seconds >= 60),
+  CONSTRAINT chk_timer_command_min_messages CHECK (min_messages >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
 -- custom_command
 -- trigger_string is NOT globally unique — the same trigger can exist on
 -- different Twitch channels. See DATABASE-SCHEMA.md for details.

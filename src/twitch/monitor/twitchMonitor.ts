@@ -180,6 +180,15 @@ export async function restartTwitchMonitor(): Promise<void> {
   await startTwitchMonitor();
 }
 
+/**
+ * Returns whether `login`'s stream is currently tracked as live by the monitor. Used by timer
+ * commands' `require_live` gate.
+ * @param login - Twitch login name to check.
+ */
+export function isChannelLive(login: string): boolean {
+  return liveStates.getByLogin(login.toLowerCase()) !== undefined;
+}
+
 // ─── Multi-twitch URL query (for !multi command) ─────────────────────────────
 
 /**

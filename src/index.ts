@@ -25,6 +25,7 @@ import { pushDashboardEvent } from './web/routes/dashboardEvents';
 import { startCounterScheduler, stopCounterScheduler } from './commands/counterScheduler';
 import { startRewardPricingScheduler, stopRewardPricingScheduler } from './twitch/pricing/rewardPricingScheduler';
 import { registerRewardPricingRuntime } from './twitch/pricing/rewardPricingService';
+import { startTimerCommandScheduler, stopTimerCommandScheduler, registerTimerCommandsRuntime } from './twitch/timers/timerCommandScheduler';
 import { createLogger } from './shared/logger';
 
 const log = createLogger('Bot');
@@ -37,6 +38,7 @@ async function shutdown(signal: string): Promise<void> {
   log.info(`${signal} received — disconnecting from voice and shutting down.`);
   stopCounterScheduler();
   await stopRewardPricingScheduler();
+  await stopTimerCommandScheduler();
   stopEventSub();
   await stopTwitchMonitor();
   await stopTwitchBot();
@@ -81,6 +83,7 @@ async function main(): Promise<void> {
   registerEventSubDashboardRuntime({ pushDashboardEvent });
   registerEventSubTwitchRuntime({ send: sayInChannel });
   registerRewardPricingRuntime({ pushPricingUpdate });
+  registerTimerCommandsRuntime({ send: sayInChannel });
 
   // Load the guild registry before the Discord client connects so the
   // messageCreate gate recognises registered guilds from the first message.
@@ -97,6 +100,7 @@ async function main(): Promise<void> {
   startWebPanel();
   startCounterScheduler();
   startRewardPricingScheduler();
+  startTimerCommandScheduler();
 
   startTwitchMonitor().catch((err) => log.error('TwitchMonitor startup error:', err));
   startEventSub();

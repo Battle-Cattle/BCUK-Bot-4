@@ -7,6 +7,7 @@ import { executeMultiCommandForTwitch } from '../commands/multiCommandHandler';
 import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { fireAndForget } from '../commands/commandUtils';
+import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
 import { normalizeTwitchChannelName } from './twitchChannelName';
 import { createLogger } from '../shared/logger';
@@ -90,12 +91,13 @@ async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promis
 }
 
 /**
- * tmi.js `message` event handler: dispatches an incoming Twitch chat message to
+ * tmi.js `message` event handler: records the message for timer commands'
+ * `min_messages` gate (see `twitchChatActivity.ts`), then dispatches it to
  * every command handler (custom commands, counters, `!multi`, `!so`, the shared
  * command router, countdowns) in parallel via {@link fireAndForget}. Ignores the
  * bot's own messages, messages from channels not in the active set, and messages
  * shared into this channel from a partner channel in a Twitch shared-chat session
- * (so each message is only handled once, in its source channel).
+ * (so each message is only recorded/handled once, in its source channel).
  * @param channel - Twitch channel the message was received in (as `#channel`).
  * @param tags - tmi.js chat user state (badges, mod status, display name, etc.) for the sender.
  * @param message - Raw chat message text.
@@ -118,6 +120,8 @@ function handleTwitchMessage(
     // (including SFX command handling) so each message is only processed once, in
     // its source channel.
     if (tags['source-room-id'] && tags['source-room-id'] !== tags['room-id']) return;
+
+    recordChatMessage(normalizedChannel);
 
     const displayName = tags['display-name'] ?? tags.username ?? null;
     const isMod = tags.mod === true || !!(tags.badges as Record<string, string> | null | undefined)?.broadcaster;

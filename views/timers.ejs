@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Timers</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body data-csrf-token="<%= csrfToken %>">
+  <%- include('partials/nav') %>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Timer Commands</h2>
+      <p class="hint mb-075">Auto-posts a message into your own Twitch chat on a repeating schedule.</p>
+
+      <% if (error) { %>
+      <% const errorMessages = {
+        not_a_streamer:      'You are not configured as a monitored streamer.',
+        missing_fields:      'Please provide a name, a message, and a valid interval/minimum-messages value.',
+        invalid_interval:    'Interval must be a whole number of at least 60 seconds.',
+        invalid_min_messages: 'Minimum messages must be zero or a positive whole number.',
+        invalid_id:          'Invalid timer ID.',
+        timer_not_found:     'That timer no longer exists.',
+        add_failed:          'Failed to add the timer.',
+        update_failed:       'Failed to update the timer.',
+        remove_failed:       'Failed to remove the timer.',
+        toggle_failed:       'Failed to update the timer.',
+      }; %>
+      <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
+        <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
+      </div>
+      <% } %>
+
+      <% if (success) { %>
+      <div class="card card-alert-success" role="status" aria-live="polite">
+        <% const successMessages = {
+          timer_added:   'Timer added.',
+          timer_updated: 'Timer updated.',
+          timer_removed: 'Timer removed.',
+        }; %>
+        <%= successMessages[success] ?? 'Done.' %>
+      </div>
+      <% } %>
+
+      <% if (!isStreamer) { %>
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">You are not configured as a monitored streamer. Contact a Manager or Admin.</p>
+        </div>
+      </div>
+      <% } else { %>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add Timer</span></div>
+        <div class="card-body">
+          <form method="POST" action="/timers/add">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="form-row-wrap form-section-gap">
+              <div class="form-col-grow">
+                <label for="name" class="form-label">Name</label>
+                <input id="name" class="input full-width" type="text" name="name" placeholder="e.g. Discord plug" required>
+              </div>
+              <div>
+                <label for="interval_seconds" class="form-label">Interval (seconds)</label>
+                <input id="interval_seconds" class="input" type="number" min="60" step="1" name="interval_seconds" value="600" required>
+              </div>
+              <div>
+                <label for="min_messages" class="form-label">Min. chat messages</label>
+                <input id="min_messages" class="input" type="number" min="0" step="1" name="min_messages" value="0" required>
+              </div>
+              <label class="input checkbox-input-label">
+                <input type="checkbox" name="require_live" checked> Only while live
+              </label>
+              <label class="input checkbox-input-label">
+                <input type="checkbox" name="enabled" checked> Enabled
+              </label>
+            </div>
+            <div class="form-section-gap">
+              <label for="message" class="form-label">Message</label>
+              <textarea id="message" class="input stream-textarea" name="message" rows="2" placeholder="Join our Discord at ..." required></textarea>
+            </div>
+            <button type="submit" class="btn">Add Timer</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="table-scroll">
+          <table class="table" aria-label="Timer commands">
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Message</th>
+                <th scope="col">Interval</th>
+                <th scope="col">Min. Messages</th>
+                <th scope="col">Live Only</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% timers.forEach(function(timer) { %>
+              <tr>
+                <td><strong><%= timer.name %></strong></td>
+                <td class="command-output-cell"><%= timer.message %></td>
+                <td><%= timer.interval_seconds %>s</td>
+                <td><%= timer.min_messages %></td>
+                <td><span class="badge <%= timer.require_live ? 'badge-active' : 'badge-offline' %>"><%= timer.require_live ? 'Yes' : 'No' %></span></td>
+                <td>
+                  <form method="POST" action="/timers/toggle" class="inline-form-sm">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" name="id" value="<%= timer.id %>">
+                    <input type="hidden" name="enabled" value="<%= timer.enabled ? 'false' : 'true' %>">
+                    <button type="submit" class="btn btn-sm <%= timer.enabled ? 'btn-ghost' : '' %>">
+                      <span class="badge <%= timer.enabled ? 'badge-active' : 'badge-offline' %>"><%= timer.enabled ? 'Enabled' : 'Off' %></span>
+                    </button>
+                  </form>
+                </td>
+                <td>
+                  <div class="actions">
+                    <button type="button" class="btn btn-sm btn-ghost btn-toggle-timer-edit" data-timer-id="<%= timer.id %>" aria-controls="timer-edit-<%= timer.id %>" aria-expanded="false">✏️ Edit</button>
+                    <form method="POST" action="/timers/remove" class="inline-form-sm js-confirm-remove-timer" data-timer-name="<%= timer.name %>">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <input type="hidden" name="id" value="<%= timer.id %>">
+                      <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+              <tr class="files-row is-hidden" id="timer-edit-<%= timer.id %>">
+                <td colspan="7">
+                  <div class="command-edit-panel">
+                    <form method="POST" action="/timers/update" class="stack-gap-md">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <input type="hidden" name="id" value="<%= timer.id %>">
+                      <div class="form-row-wrap form-section-gap">
+                        <div class="form-col-grow">
+                          <label for="name_<%= timer.id %>" class="form-label">Name</label>
+                          <input id="name_<%= timer.id %>" class="input full-width" type="text" name="name" value="<%= timer.name %>" required>
+                        </div>
+                        <div>
+                          <label for="interval_seconds_<%= timer.id %>" class="form-label">Interval (seconds)</label>
+                          <input id="interval_seconds_<%= timer.id %>" class="input" type="number" min="60" step="1" name="interval_seconds" value="<%= timer.interval_seconds %>" required>
+                        </div>
+                        <div>
+                          <label for="min_messages_<%= timer.id %>" class="form-label">Min. chat messages</label>
+                          <input id="min_messages_<%= timer.id %>" class="input" type="number" min="0" step="1" name="min_messages" value="<%= timer.min_messages %>" required>
+                        </div>
+                        <label class="input checkbox-input-label">
+                          <input type="checkbox" name="require_live" <%= timer.require_live ? 'checked' : '' %>> Only while live
+                        </label>
+                        <label class="input checkbox-input-label">
+                          <input type="checkbox" name="enabled" <%= timer.enabled ? 'checked' : '' %>> Enabled
+                        </label>
+                      </div>
+                      <div class="form-section-gap">
+                        <label for="message_<%= timer.id %>" class="form-label">Message</label>
+                        <textarea id="message_<%= timer.id %>" class="input stream-textarea" name="message" rows="2" required><%= timer.message %></textarea>
+                      </div>
+                      <div class="button-row-wrap">
+                        <button type="submit" class="btn">Save Changes</button>
+                        <button type="button" class="btn btn-ghost btn-toggle-timer-edit" data-timer-id="<%= timer.id %>">Cancel</button>
+                      </div>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+              <% }) %>
+              <% if (timers.length === 0) { %>
+              <tr>
+                <td colspan="7" class="empty-msg">No timers configured yet.</td>
+              </tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <% } %>
+    </section>
+  </main>
+
+  <%- include('partials/pwa-register') %>
+  <%- include('partials/footer') %>
+  <script src="/utils.js"></script>
+  <script src="/timers.js"></script>
+</body>
+</html>

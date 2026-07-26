@@ -217,6 +217,15 @@ export {
 export type { RewardPricingHistoryPoint } from './db/rewardPricingHistory';
 export { recordPricingHistory, getPricingHistoryForRewards } from './db/rewardPricingHistory';
 
+// ─── Timer commands ─────────────────────────────────────────────────────────
+
+export type { DbTimerCommand, TimerCommandInput, TimerCommandForScheduler } from './db/timerCommands';
+export {
+  TimerCommandNotFoundError,
+  getTimerCommandsForStreamer, addTimerCommand, updateTimerCommand, removeTimerCommand,
+  setTimerCommandEnabled, getAllEnabledTimerCommandsWithChannel,
+} from './db/timerCommands';
+
 // ─── Streamdeck API keys ─────────────────────────────────────────────────────
 
 export type { StreamdeckKeyGuildStatusRow } from './db/streamdeckKeys';
