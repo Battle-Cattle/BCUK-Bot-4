@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { getAllEnabledTimerCommandsWithChannel } from '../../db';
+import { getAllEnabledTimerCommandsWithChannel, type TimerCommandForScheduler } from '../../db';
 import { getMessageCount } from '../twitchChatActivity';
 import { isChannelLive } from '../monitor/twitchMonitor';
 import { createRuntimeRegistry, type TwitchSendRuntime } from '../../commands/twitchRuntime';
@@ -49,13 +49,46 @@ function shouldFire(
   return true;
 }
 
+/** Removes in-memory state for any timer id no longer present in the latest enabled-rows fetch. */
+function pruneStaleTimerState(currentIds: ReadonlySet<number>): void {
+  for (const id of timerState.keys()) {
+    if (!currentIds.has(id)) timerState.delete(id);
+  }
+}
+
+/**
+ * Seeds in-memory state for a newly-seen timer without firing it (a restart or brand-new timer
+ * waits one full interval before its first post), otherwise fires it via the registered runtime
+ * if its conditions are satisfied. Never throws — a send failure is logged and swallowed so it
+ * can't block other rows in the same tick.
+ * @param row - The timer's config, joined with its Twitch channel.
+ * @param now - Current time in epoch ms, shared across the whole tick.
+ */
+async function processTimerRow(row: TimerCommandForScheduler, now: number): Promise<void> {
+  const state = timerState.get(row.id);
+  if (!state) {
+    timerState.set(row.id, { lastFiredAt: now, messagesAtLastFire: getMessageCount(row.channel) });
+    return;
+  }
+  if (!shouldFire(row, state, now)) return;
+
+  const runtime = timerCommandsRuntime.get();
+  if (!runtime) return;
+
+  try {
+    await runtime.send(row.channel, row.message);
+    state.lastFiredAt = now;
+    state.messagesAtLastFire = getMessageCount(row.channel);
+  } catch (err) {
+    log.error(`Failed to post timer command ${row.id} to ${row.channel}:`, err);
+  }
+}
+
 /**
  * Runs one scheduler tick: fetches every enabled timer, prunes in-memory state for timers that
- * no longer exist/are disabled, seeds state for newly-seen timers (without firing them — a
- * restart or brand-new timer waits one full interval before its first post), and fires any
- * timer whose interval/live/min-messages conditions are all satisfied. Rows are processed
- * concurrently via `Promise.allSettled` so one channel's send failure can't block another's.
- * No-ops (re-uses the in-flight promise) if a tick is already running.
+ * no longer exist/are disabled, then processes each row (see {@link processTimerRow}) concurrently
+ * via `Promise.allSettled` so one channel's send failure can't block another's. No-ops (re-uses
+ * the in-flight promise) if a tick is already running.
  */
 export async function runTimerCommandTick(): Promise<void> {
   if (tickRunning) return currentTickPromise;
@@ -63,34 +96,10 @@ export async function runTimerCommandTick(): Promise<void> {
   currentTickPromise = (async () => {
     try {
       const rows = await getAllEnabledTimerCommandsWithChannel();
+      pruneStaleTimerState(new Set(rows.map((row) => row.id)));
+
       const now = Date.now();
-
-      const liveIds = new Set(rows.map((row) => row.id));
-      for (const id of timerState.keys()) {
-        if (!liveIds.has(id)) timerState.delete(id);
-      }
-
-      await Promise.allSettled(rows.map(async (row) => {
-        let state = timerState.get(row.id);
-        if (!state) {
-          state = { lastFiredAt: now, messagesAtLastFire: getMessageCount(row.channel) };
-          timerState.set(row.id, state);
-          return;
-        }
-
-        if (!shouldFire(row, state, now)) return;
-
-        const runtime = timerCommandsRuntime.get();
-        if (!runtime) return;
-
-        try {
-          await runtime.send(row.channel, row.message);
-          state.lastFiredAt = now;
-          state.messagesAtLastFire = getMessageCount(row.channel);
-        } catch (err) {
-          log.error(`Failed to post timer command ${row.id} to ${row.channel}:`, err);
-        }
-      }));
+      await Promise.allSettled(rows.map((row) => processTimerRow(row, now)));
     } catch (err) {
       log.error('Failed to load enabled timer commands:', err);
     } finally {
