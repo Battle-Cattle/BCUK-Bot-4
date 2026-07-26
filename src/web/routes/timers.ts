@@ -12,7 +12,7 @@ const log = createLogger('Timers');
 const router = Router();
 
 const KNOWN_ERRORS = new Set([
-  'missing_fields', 'invalid_interval', 'invalid_min_messages',
+  'not_a_streamer', 'missing_fields', 'invalid_interval', 'invalid_min_messages',
   'invalid_id', 'timer_not_found', 'add_failed', 'update_failed', 'remove_failed', 'toggle_failed',
 ]);
 const KNOWN_SUCCESSES = new Set(['timer_added', 'timer_updated', 'timer_removed']);

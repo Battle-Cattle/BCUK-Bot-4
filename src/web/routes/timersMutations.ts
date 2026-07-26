@@ -19,50 +19,61 @@ const router = Router();
 const NOT_A_STREAMER_REDIRECT = '/timers?error=not_a_streamer';
 
 const MIN_INTERVAL_SECONDS = 60;
+/** MySQL `INT` (4-byte signed) max — both `interval_seconds` and `min_messages` are stored in `INT` columns. */
+const MAX_INT_COLUMN_VALUE = 2147483647;
 
 /**
  * Parses a required interval-seconds form field: an integer of at least
- * {@link MIN_INTERVAL_SECONDS}, matching the DB's `chk_timer_command_interval` check —
- * validated here so a bad value redirects with a clear `invalid_interval` code instead of
- * surfacing as an opaque DB constraint failure.
+ * {@link MIN_INTERVAL_SECONDS} and at most the DB column's `INT` range, matching the DB's
+ * `chk_timer_command_interval` check — validated here so a bad value redirects with a clear
+ * `invalid_interval` code instead of surfacing as an opaque DB constraint/range failure.
  */
 function parseIntervalSecondsField(value: string | string[] | undefined): number | null {
   if (Array.isArray(value)) return null;
   if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= MIN_INTERVAL_SECONDS ? parsed : null;
+  return Number.isSafeInteger(parsed) && parsed >= MIN_INTERVAL_SECONDS && parsed <= MAX_INT_COLUMN_VALUE ? parsed : null;
 }
 
 /**
- * Parses a required min-messages form field: a non-negative integer, matching the DB's
- * `chk_timer_command_min_messages` check. `0` (the "no minimum" value) is valid.
+ * Parses a required min-messages form field: a non-negative integer within the DB column's
+ * `INT` range, matching the DB's `chk_timer_command_min_messages` check. `0` (the "no minimum"
+ * value) is valid.
  */
 function parseMinMessagesField(value: string | string[] | undefined): number | null {
   if (Array.isArray(value)) return null;
   if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= MAX_INT_COLUMN_VALUE ? parsed : null;
 }
 
-/** Parses and validates the timer fields shared by the add and update forms. Returns `null` if any field is invalid. */
-function parseTimerCommandFields(body: Record<string, string | string[] | undefined>): TimerCommandInput | null {
+/** Result of validating the timer fields shared by the add and update forms — either the parsed input, or the specific error code to redirect with. */
+type TimerFieldsResult =
+  | { ok: true; input: TimerCommandInput }
+  | { ok: false; errorCode: 'missing_fields' | 'invalid_interval' | 'invalid_min_messages' };
+
+/** Parses and validates the timer fields shared by the add and update forms, reporting which field failed. */
+function parseTimerCommandFields(body: Record<string, string | string[] | undefined>): TimerFieldsResult {
   const name = normalizeRequiredText(body.name as string | undefined);
   const message = normalizeRequiredText(body.message as string | undefined);
-  if (!name || !message) return null;
+  if (!name || !message) return { ok: false, errorCode: 'missing_fields' };
 
   const intervalSeconds = parseIntervalSecondsField(body.interval_seconds);
-  if (intervalSeconds === null) return null;
+  if (intervalSeconds === null) return { ok: false, errorCode: 'invalid_interval' };
 
   const minMessages = parseMinMessagesField(body.min_messages);
-  if (minMessages === null) return null;
+  if (minMessages === null) return { ok: false, errorCode: 'invalid_min_messages' };
 
   return {
-    name,
-    message,
-    intervalSeconds,
-    minMessages,
-    requireLive: parseCheckboxField(body.require_live),
-    enabled: parseCheckboxField(body.enabled),
+    ok: true,
+    input: {
+      name,
+      message,
+      intervalSeconds,
+      minMessages,
+      requireLive: parseCheckboxField(body.require_live),
+      enabled: parseCheckboxField(body.enabled),
+    },
   };
 }
 
@@ -81,10 +92,10 @@ router.post('/add', requireAuth, csrfProtection, async (req, res) => {
     if (!streamer) return;
 
     const body = req.body as Record<string, string | string[] | undefined>;
-    const input = parseTimerCommandFields(body);
-    if (!input) return res.redirect('/timers?error=missing_fields');
+    const result = parseTimerCommandFields(body);
+    if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
 
-    await addTimerCommand(streamer.id, input);
+    await addTimerCommand(streamer.id, result.input);
     res.redirect('/timers?success=timer_added');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Add timer command error:', err, basePath: '/timers', errorCode: 'add_failed' });
@@ -96,8 +107,9 @@ router.post('/add', requireAuth, csrfProtection, async (req, res) => {
  * @param req - Express request; reads `id`, plus the same fields as `/timers/add`, from `req.body`.
  * @param res - Express response; redirects to `/timers?success=timer_updated` on success, or to
  *   `/timers?error=<code>` if the requester isn't a streamer (`not_a_streamer`), `id` is
- *   malformed (`invalid_id`), a field is invalid (`missing_fields`), the timer doesn't exist or
- *   belongs to another streamer (`timer_not_found`), or the update fails (`update_failed`).
+ *   malformed (`invalid_id`), a field is invalid (`missing_fields`, `invalid_interval`,
+ *   `invalid_min_messages`), the timer doesn't exist or belongs to another streamer
+ *   (`timer_not_found`), or the update fails (`update_failed`).
  */
 router.post('/update', requireAuth, csrfProtection, async (req, res) => {
   try {
@@ -108,10 +120,10 @@ router.post('/update', requireAuth, csrfProtection, async (req, res) => {
     const id = parsePositiveIntId(body.id);
     if (id === null) return res.redirect('/timers?error=invalid_id');
 
-    const input = parseTimerCommandFields(body);
-    if (!input) return res.redirect('/timers?error=missing_fields');
+    const result = parseTimerCommandFields(body);
+    if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
 
-    await updateTimerCommand(id, streamer.id, input);
+    await updateTimerCommand(id, streamer.id, result.input);
     res.redirect('/timers?success=timer_updated');
   } catch (err) {
     if (err instanceof TimerCommandNotFoundError) {

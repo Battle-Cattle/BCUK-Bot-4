@@ -62,15 +62,17 @@ describe('POST /add', () => {
   });
 
   it.each([
-    ['missing name', { name: '' }],
-    ['missing message', { message: '' }],
-    ['interval below the 60s floor', { interval_seconds: '59' }],
-    ['non-numeric interval', { interval_seconds: 'abc' }],
-    ['negative min_messages', { min_messages: '-1' }],
-  ])('redirects with missing_fields when %s', async (_label, override) => {
+    ['missing name', { name: '' }, 'missing_fields'],
+    ['missing message', { message: '' }, 'missing_fields'],
+    ['interval below the 60s floor', { interval_seconds: '59' }, 'invalid_interval'],
+    ['non-numeric interval', { interval_seconds: 'abc' }, 'invalid_interval'],
+    ['interval beyond the INT column range', { interval_seconds: '99999999999' }, 'invalid_interval'],
+    ['negative min_messages', { min_messages: '-1' }, 'invalid_min_messages'],
+    ['min_messages beyond the INT column range', { min_messages: '99999999999' }, 'invalid_min_messages'],
+  ])('redirects with the specific error code when %s', async (_label, override, expectedErrorCode) => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const res = await supertest(buildApp()).post('/add').type('form').send({ ...VALID_TIMER_FORM, ...override });
-    expect(res.headers.location).toBe('/timers?error=missing_fields');
+    expect(res.headers.location).toBe(`/timers?error=${expectedErrorCode}`);
     expect(addTimerCommand).not.toHaveBeenCalled();
   });
 
