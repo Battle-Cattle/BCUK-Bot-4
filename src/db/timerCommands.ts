@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
-import { fromBit } from './utils';
+import { fromBit, affectedOrExists } from './utils';
 
 /** A per-streamer, Twitch-only auto-posted timer command. */
 export interface DbTimerCommand {
@@ -58,6 +58,15 @@ function mapRow(r: mysql.RowDataPacket): DbTimerCommand {
 const TIMER_COMMAND_SELECT = `
   id, streamer_id, name, message, interval_seconds, min_messages, require_live, enabled`;
 
+/** Whether a timer command exists for `id` scoped to `streamerId` — same ownership scope as the UPDATE statements below. */
+async function timerCommandExists(id: number, streamerId: number): Promise<boolean> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT 1 FROM timer_command WHERE id = ? AND streamer_id = ? LIMIT 1`,
+    [id, streamerId],
+  );
+  return rows.length > 0;
+}
+
 /**
  * Lists every timer command belonging to a streamer, for the self-service admin page.
  * @param streamerId - DB row ID of the streamer.
@@ -106,7 +115,12 @@ export async function updateTimerCommand(id: number, streamerId: number, input: 
       input.requireLive ? 1 : 0, input.enabled ? 1 : 0, id, streamerId,
     ],
   );
-  if (result.affectedRows === 0) throw new TimerCommandNotFoundError(id);
+  // affectedRows is 0 both when no row matched and when the row matched but every value was
+  // already equal (MySQL's default UPDATE semantics count only rows actually changed) — a
+  // resubmitted, unchanged edit must not be mistaken for a missing/foreign timer.
+  if (!(await affectedOrExists(result.affectedRows, () => timerCommandExists(id, streamerId)))) {
+    throw new TimerCommandNotFoundError(id);
+  }
 }
 
 /**
@@ -134,7 +148,12 @@ export async function setTimerCommandEnabled(id: number, streamerId: number, ena
     `UPDATE timer_command SET enabled = ? WHERE id = ? AND streamer_id = ?`,
     [enabled ? 1 : 0, id, streamerId],
   );
-  if (result.affectedRows === 0) throw new TimerCommandNotFoundError(id);
+  // See updateTimerCommand: affectedRows is 0 both for a missing row and a no-op toggle
+  // (already in the requested state), so a re-click of an already-toggled timer must not
+  // be mistaken for a missing/foreign one.
+  if (!(await affectedOrExists(result.affectedRows, () => timerCommandExists(id, streamerId)))) {
+    throw new TimerCommandNotFoundError(id);
+  }
 }
 
 /**

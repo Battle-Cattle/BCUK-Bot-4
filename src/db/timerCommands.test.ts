@@ -80,10 +80,24 @@ describe('updateTimerCommand', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(updateTimerCommand(1, 7, sampleInput)).resolves.toBeUndefined();
     expect(pool.execute.mock.calls[0][1]).toEqual(['Discord plug', 'Join our Discord!', 600, 5, 1, 1, 1, 7]);
+    // affectedRows > 0 already proves the row exists — no need for a follow-up existence check.
+    expect(pool.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not throw when affectedRows is 0 but the row exists unchanged (a resubmitted, identical edit)', async () => {
+    const pool = makeMockPool();
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }]) // the UPDATE itself: no-op, every value already equal
+      .mockResolvedValueOnce([[{ 1: 1 }]]); // the existence check: row is still there
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(updateTimerCommand(1, 7, sampleInput)).resolves.toBeUndefined();
   });
 
   it('throws TimerCommandNotFoundError when no row matched (wrong id or wrong streamer)', async () => {
-    const pool = makeMockPool({ executeResult: [{ affectedRows: 0 }] });
+    const pool = makeMockPool();
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }]) // the UPDATE itself: nothing matched
+      .mockResolvedValueOnce([[]]); // the existence check: confirms the row is genuinely absent
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(updateTimerCommand(1, 999, sampleInput)).rejects.toThrow(TimerCommandNotFoundError);
   });
@@ -112,8 +126,20 @@ describe('setTimerCommandEnabled', () => {
     expect(pool.execute.mock.calls[0][1]).toEqual([0, 1, 7]);
   });
 
+  it('does not throw when affectedRows is 0 but the row exists already in the requested state', async () => {
+    const pool = makeMockPool();
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }]) // the UPDATE itself: no-op, already in that state
+      .mockResolvedValueOnce([[{ 1: 1 }]]); // the existence check: row is still there
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(setTimerCommandEnabled(1, 7, true)).resolves.toBeUndefined();
+  });
+
   it('throws TimerCommandNotFoundError when no row matched', async () => {
-    const pool = makeMockPool({ executeResult: [{ affectedRows: 0 }] });
+    const pool = makeMockPool();
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }]) // the UPDATE itself: nothing matched
+      .mockResolvedValueOnce([[]]); // the existence check: confirms the row is genuinely absent
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(setTimerCommandEnabled(1, 999, true)).rejects.toThrow(TimerCommandNotFoundError);
   });

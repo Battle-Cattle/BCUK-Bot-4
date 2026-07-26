@@ -133,6 +133,14 @@ describe('POST /update', () => {
     const res = await supertest(buildApp()).post('/update').type('form').send({ ...VALID_TIMER_FORM, id: '5' });
     expect(res.headers.location).toBe('/timers?error=timer_not_found');
   });
+
+  it('redirects with update_failed when the update throws a non-NotFound error', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(updateTimerCommand).mockRejectedValue(new Error('db down'));
+
+    const res = await supertest(buildApp()).post('/update').type('form').send({ ...VALID_TIMER_FORM, id: '5' });
+    expect(res.headers.location).toBe('/timers?error=update_failed');
+  });
 });
 
 describe('POST /remove', () => {
@@ -148,6 +156,14 @@ describe('POST /remove', () => {
     const res = await supertest(buildApp()).post('/remove').type('form').send({ id: '5' });
     expect(res.headers.location).toBe('/timers?success=timer_removed');
     expect(removeTimerCommand).toHaveBeenCalledWith(5, 123);
+  });
+
+  it('redirects with remove_failed when the delete throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(removeTimerCommand).mockRejectedValue(new Error('db down'));
+
+    const res = await supertest(buildApp()).post('/remove').type('form').send({ id: '5' });
+    expect(res.headers.location).toBe('/timers?error=remove_failed');
   });
 });
 
@@ -171,5 +187,12 @@ describe('POST /toggle', () => {
     vi.mocked(setTimerCommandEnabled).mockRejectedValue(new TimerCommandNotFoundError(5));
     const res = await supertest(buildApp()).post('/toggle').type('form').send({ id: '5', enabled: 'true' });
     expect(res.headers.location).toBe('/timers?error=timer_not_found');
+  });
+
+  it('redirects with toggle_failed when the update throws a non-NotFound error', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(setTimerCommandEnabled).mockRejectedValue(new Error('db down'));
+    const res = await supertest(buildApp()).post('/toggle').type('form').send({ id: '5', enabled: 'true' });
+    expect(res.headers.location).toBe('/timers?error=toggle_failed');
   });
 });
