@@ -106,21 +106,25 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * interact). Calls are serialized on a single global queue, so they always run in the order
  * they were enqueued, regardless of which channel each one targets.
  * @param channel - Normalized Twitch channel name the send is targeting.
- * @param isPrivileged - Whether the bot currently has moderator/VIP/broadcaster status in `channel`.
+ * @param isPrivileged - Resolves whether the bot currently has moderator/VIP/broadcaster status
+ *   in `channel`. Called right before the window/floor checks (not at enqueue time), since this
+ *   call may have been waiting behind others — the same reason `send` rechecks the connection
+ *   itself rather than trusting a snapshot taken before it was queued.
  * @param send - Performs the actual send, bounded by {@link SEND_TIMEOUT_MS} so a stalled send
  *   can't wedge the queue forever. Rejecting (including via that timeout) doesn't affect the
  *   timing of later queued sends.
  * @returns Resolves once `send` has actually run and settled (successfully or not); rejects with
  *   whatever `send` rejected with, including a timeout error if it didn't settle in time.
  */
-export async function throttledTwitchSend(channel: string, isPrivileged: boolean, send: () => Promise<void>): Promise<void> {
+export async function throttledTwitchSend(channel: string, isPrivileged: () => boolean, send: () => Promise<void>): Promise<void> {
   await globalQueue.run('global', async () => {
-    await waitForWindowRoom(isPrivileged ? PRIVILEGED_LIMIT : NON_PRIVILEGED_LIMIT);
-    if (!isPrivileged) await waitForChannelFloor(channel);
+    const privileged = isPrivileged();
+    await waitForWindowRoom(privileged ? PRIVILEGED_LIMIT : NON_PRIVILEGED_LIMIT);
+    if (!privileged) await waitForChannelFloor(channel);
 
     const sentAt = Date.now();
     sentTimestamps.push(sentAt);
-    if (!isPrivileged) lastNonPrivilegedSendAtByChannel.set(channel, sentAt);
+    if (!privileged) lastNonPrivilegedSendAtByChannel.set(channel, sentAt);
 
     await withTimeout(send(), SEND_TIMEOUT_MS);
   });

@@ -256,8 +256,10 @@ function isPrivilegedInChannel(channel: string): boolean {
  * shared entry point — used by every auto-posting feature (custom commands, counters, timers,
  * shoutouts, EventSub, etc.) — can never burst past them, regardless of how many features fire
  * at once or which channels they target. Whether the bot is currently privileged
- * (moderator/VIP/broadcaster) in the target channel is checked live (see
- * {@link isPrivilegedInChannel}), so gaining or losing that status takes effect from the next send.
+ * (moderator/VIP/broadcaster) in the target channel is re-checked live (see
+ * {@link isPrivilegedInChannel}) right before the send actually runs, not when it's queued, since
+ * this call may sit behind others for a while — the same reason the connection itself is
+ * rechecked below rather than trusted from before queueing.
  * @param channel - Twitch channel to send to (normalized before sending).
  * @param message - Message text to send.
  * @returns Resolves once the message has actually been sent.
@@ -269,8 +271,7 @@ export async function sayInChannel(channel: string, message: string): Promise<vo
   const normalized = normalizeTwitchChannelName(channel);
   if (!normalized) throw new Error(`[Twitch] Invalid channel name: ${channel}`);
   if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
-  const isPrivileged = isPrivilegedInChannel(normalized);
-  await throttledTwitchSend(normalized, isPrivileged, async () => {
+  await throttledTwitchSend(normalized, () => isPrivilegedInChannel(normalized), async () => {
     if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
     await client.say(normalized, message);
   });

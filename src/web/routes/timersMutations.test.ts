@@ -103,6 +103,15 @@ describe('POST /add', () => {
     expect(res.headers.location).toBe('/timers?error=add_failed');
   });
 
+  it('redirects with add_failed when the count check throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(countTimerCommandsForStreamer).mockRejectedValue(new Error('db down'));
+
+    const res = await supertest(buildApp()).post('/add').type('form').send(VALID_TIMER_FORM);
+    expect(res.headers.location).toBe('/timers?error=add_failed');
+    expect(addTimerCommand).not.toHaveBeenCalled();
+  });
+
   it('redirects with timer_limit_reached and skips the insert when the streamer is already at the cap', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(countTimerCommandsForStreamer).mockResolvedValue(20);
