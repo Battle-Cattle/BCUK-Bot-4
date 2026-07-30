@@ -591,33 +591,29 @@ describe('sayInChannel', () => {
     expect(mockClient.isMod).toHaveBeenCalledWith('streamer', 'testbot');
   });
 
-  // Twitch's rate-limit buckets are exercised exhaustively in twitchSendQueue.test.ts — these
-  // two just confirm sayInChannel wires the live mod-status check into that shared limiter.
+  // Twitch's rate-limit window and per-channel floor are exercised exhaustively in
+  // twitchSendQueue.test.ts — these just confirm sayInChannel wires channel + the live
+  // mod-status check into that shared limiter.
 
-  it('lets sends past the non-privileged bucket capacity through without delay when the bot is privileged', async () => {
+  it('throttles a second non-privileged send to the same channel to at least 1s apart', async () => {
     await connectBot();
-    mockClient.isMod.mockReturnValue(true);
+    await sayInChannel('#streamer', 'first');
+    const second = sayInChannel('#streamer', 'second');
 
-    for (let i = 0; i < 25; i++) {
-      await sayInChannel('#streamer', `message ${i}`);
-    }
-    expect(mockClient.say).toHaveBeenCalledTimes(25);
-  });
-
-  it('throttles a non-privileged channel once the shared rate-limit bucket is exhausted', async () => {
-    await connectBot();
-    for (let i = 0; i < 20; i++) {
-      await sayInChannel('#streamer', `message ${i}`);
-    }
-    expect(mockClient.say).toHaveBeenCalledTimes(20);
-
-    const next = sayInChannel('#streamer', 'one too many');
-    await vi.advanceTimersByTimeAsync(29_999);
-    expect(mockClient.say).toHaveBeenCalledTimes(20);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(mockClient.say).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1);
-    await next;
-    expect(mockClient.say).toHaveBeenCalledTimes(21);
+    await second;
+    expect(mockClient.say).toHaveBeenCalledTimes(2);
+  });
+
+  it('exempts a privileged channel from the per-channel floor', async () => {
+    await connectBot();
+    mockClient.isMod.mockReturnValue(true);
+    await sayInChannel('#streamer', 'first');
+    await sayInChannel('#streamer', 'second');
+    expect(mockClient.say).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -244,7 +244,7 @@ export async function sayInChannel(channel: string, message: string): Promise<vo
   if (!normalized) throw new Error(`[Twitch] Invalid channel name: ${channel}`);
   if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
   const isPrivileged = client.isMod(normalized, client.getUsername());
-  await throttledTwitchSend(isPrivileged, async () => {
+  await throttledTwitchSend(normalized, isPrivileged, async () => {
     if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
     await client.say(normalized, message);
   });

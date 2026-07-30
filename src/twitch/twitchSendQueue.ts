@@ -1,31 +1,43 @@
 import { createMutationQueue } from '../shared/mutationQueue';
 
 /**
- * Twitch enforces its chat message rate limits as two token buckets *per bot account*, shared
- * across every channel the bot posts to — not one bucket per channel. Every outgoing message
- * draws from the moderator bucket, whether or not the bot is privileged (moderator/VIP/
- * broadcaster) in the target channel. A message to a channel where the bot is *not* privileged
- * also draws from the smaller user bucket. That means a burst of privileged sends can leave too
- * few moderator-bucket tokens for a following non-privileged send, even though the user bucket
- * itself still has room — a per-channel spacing limiter can't express that shared contention,
- * so this models both buckets as rolling 30s windows shared globally instead.
+ * Twitch's chat message rate limits (dev.twitch.tv/docs/irc/#rate-limits), per bot account,
+ * shared across every channel the bot posts to — not one allowance per channel:
+ *
+ * - A single rolling 30s window counts every outgoing message, whether the bot is privileged
+ *   (moderator/VIP/broadcaster) in the target channel or not — privileged sends still add to
+ *   the same count non-privileged sends do.
+ * - A non-privileged send is blocked once that count reaches 20 in the window.
+ * - A privileged send is *not* blocked by that 20 threshold — it still adds to the same count,
+ *   but keeps being allowed until the count reaches the higher ceiling of 100.
+ * - Separately, a non-privileged send is capped at 1 message per second *per channel*
+ *   (privileged sends are exempt), regardless of how much room the 30s window has left.
+ *
+ * One consequence: a burst of privileged sends can push the shared 30s count past 20, which
+ * then blocks a *non*-privileged send to a completely different channel even though that
+ * channel's own per-second floor is untouched — the count is shared account-wide, not scoped
+ * to either channel.
  */
-const BUCKET_WINDOW_MS = 30_000;
+const WINDOW_MS = 30_000;
 
-/** Consumed by every send, privileged or not — Twitch's 100-messages-per-30s moderator/VIP/broadcaster limit. */
-const MODERATOR_BUCKET_CAPACITY = 100;
+/** Blocks a non-privileged send once the shared 30s count reaches this. */
+const NON_PRIVILEGED_LIMIT = 20;
 
-/** Consumed only by sends to a channel where the bot isn't privileged there — Twitch's 20-messages-per-30s limit. */
-const USER_BUCKET_CAPACITY = 20;
+/** Blocks a privileged send once the shared 30s count reaches this — privileged sends aren't blocked by {@link NON_PRIVILEGED_LIMIT}. */
+const PRIVILEGED_LIMIT = 100;
 
-/** Timestamps (epoch ms) of sends counted in the moderator bucket's current rolling window. */
-let moderatorBucketTimestamps: number[] = [];
-/** Timestamps (epoch ms) of sends counted in the user bucket's current rolling window. */
-let userBucketTimestamps: number[] = [];
+/** Minimum spacing between two non-privileged sends to the same channel, independent of the shared 30s count. */
+const NON_PRIVILEGED_CHANNEL_FLOOR_MS = 1_000;
 
-// Twitch's buckets are per-account, not per-channel, so every send — regardless of target
-// channel — contends for the same tokens. A single global queue serializes them; this also
-// guarantees sends are never reordered relative to each other, including across channels.
+/** Timestamps (epoch ms) of every send — privileged or not — counted in the current rolling window. */
+let sentTimestamps: number[] = [];
+
+/** Per-channel timestamp of the most recent non-privileged send, for {@link NON_PRIVILEGED_CHANNEL_FLOOR_MS}. */
+const lastNonPrivilegedSendAtByChannel = new Map<string, number>();
+
+// Twitch's rate limit is per-account, not per-channel, so every send — regardless of target
+// channel — contends for the same shared count. A single global queue serializes them; this
+// also guarantees sends are never reordered relative to each other, including across channels.
 const globalQueue = createMutationQueue<'global'>();
 
 /** Resolves after `ms` milliseconds. */
@@ -33,51 +45,58 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => { setTimeout(resolve, ms); });
 }
 
-/** Drops entries older than the rolling window from `timestamps` (mutated in place). */
-function pruneExpired(timestamps: number[], now: number): void {
-  while (timestamps.length > 0 && now - timestamps[0] >= BUCKET_WINDOW_MS) {
-    timestamps.shift();
+/** Drops entries older than the rolling window from {@link sentTimestamps} (mutated in place). */
+function pruneExpired(now: number): void {
+  while (sentTimestamps.length > 0 && now - sentTimestamps[0] >= WINDOW_MS) {
+    sentTimestamps.shift();
   }
 }
 
 /**
- * Waits until `timestamps` has room for one more entry under `capacity`, pruning expired
- * entries first and re-checking after however long the oldest remaining entry takes to age out
- * of the rolling window.
+ * Waits until the shared 30s window has room for one more send under `limit`, pruning expired
+ * entries first and re-checking after however long the oldest remaining entry takes to age out.
  */
-async function waitForBucketRoom(timestamps: number[], capacity: number): Promise<void> {
+async function waitForWindowRoom(limit: number): Promise<void> {
   for (;;) {
     const now = Date.now();
-    pruneExpired(timestamps, now);
-    if (timestamps.length < capacity) return;
-    await delay(BUCKET_WINDOW_MS - (now - timestamps[0]));
+    pruneExpired(now);
+    if (sentTimestamps.length < limit) return;
+    await delay(WINDOW_MS - (now - sentTimestamps[0]));
   }
 }
 
+/** Waits, if needed, so a non-privileged send to `channel` respects {@link NON_PRIVILEGED_CHANNEL_FLOOR_MS}. */
+async function waitForChannelFloor(channel: string): Promise<void> {
+  const last = lastNonPrivilegedSendAtByChannel.get(channel);
+  if (last === undefined) return;
+  const elapsed = Date.now() - last;
+  if (elapsed < NON_PRIVILEGED_CHANNEL_FLOOR_MS) await delay(NON_PRIVILEGED_CHANNEL_FLOOR_MS - elapsed);
+}
+
 /**
- * Runs `send`, waiting as needed for Twitch's global per-account rate-limit buckets to have
- * room first (see the module doc for how the two buckets interact). Every call draws from the
- * moderator bucket; a call for a channel where the bot isn't privileged there also draws from
- * the user bucket. Calls are serialized on a single global queue, so they always run in the
- * order they were enqueued, regardless of which channel each one targets.
- * @param isPrivileged - Whether the bot currently has moderator/VIP/broadcaster status in the channel being sent to.
+ * Runs `send` for `channel`, waiting as needed for Twitch's global per-account rate limit to
+ * have room first (see the module doc for exactly how the shared window and per-channel floor
+ * interact). Calls are serialized on a single global queue, so they always run in the order
+ * they were enqueued, regardless of which channel each one targets.
+ * @param channel - Normalized Twitch channel name the send is targeting.
+ * @param isPrivileged - Whether the bot currently has moderator/VIP/broadcaster status in `channel`.
  * @param send - Performs the actual send. Rejecting doesn't affect the timing of later queued sends.
  */
-export async function throttledTwitchSend(isPrivileged: boolean, send: () => Promise<void>): Promise<void> {
+export async function throttledTwitchSend(channel: string, isPrivileged: boolean, send: () => Promise<void>): Promise<void> {
   await globalQueue.run('global', async () => {
-    await waitForBucketRoom(moderatorBucketTimestamps, MODERATOR_BUCKET_CAPACITY);
-    if (!isPrivileged) await waitForBucketRoom(userBucketTimestamps, USER_BUCKET_CAPACITY);
+    await waitForWindowRoom(isPrivileged ? PRIVILEGED_LIMIT : NON_PRIVILEGED_LIMIT);
+    if (!isPrivileged) await waitForChannelFloor(channel);
 
     const sentAt = Date.now();
-    moderatorBucketTimestamps.push(sentAt);
-    if (!isPrivileged) userBucketTimestamps.push(sentAt);
+    sentTimestamps.push(sentAt);
+    if (!isPrivileged) lastNonPrivilegedSendAtByChannel.set(channel, sentAt);
 
     await send();
   });
 }
 
-/** Test-only: clears both rate-limit buckets so each test starts from a clean slate. */
+/** Test-only: clears all rate-limit state so each test starts from a clean slate. */
 export function __resetTwitchSendQueueForTests(): void {
-  moderatorBucketTimestamps = [];
-  userBucketTimestamps = [];
+  sentTimestamps = [];
+  lastNonPrivilegedSendAtByChannel.clear();
 }
