@@ -123,6 +123,24 @@ describe('POST /add', () => {
     expect(res.headers.location).toBe('/timers?success=timer_added');
     expect(addTimerCommand).toHaveBeenCalled();
   });
+
+  it('serializes concurrent requests for the same streamer so a race cannot exceed the cap', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    // Simulates the real DB: the count reflects however many inserts have actually landed so far.
+    let insertedCount = 19;
+    vi.mocked(countTimerCommandsForStreamer).mockImplementation(async () => insertedCount);
+    vi.mocked(addTimerCommand).mockImplementation(async () => { insertedCount += 1; return 1; });
+
+    const app = buildApp();
+    const [res1, res2] = await Promise.all([
+      supertest(app).post('/add').type('form').send(VALID_TIMER_FORM),
+      supertest(app).post('/add').type('form').send(VALID_TIMER_FORM),
+    ]);
+
+    const locations = [res1.headers.location, res2.headers.location].sort();
+    expect(locations).toEqual(['/timers?error=timer_limit_reached', '/timers?success=timer_added']);
+    expect(addTimerCommand).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('POST /update', () => {

@@ -29,6 +29,14 @@ const PRIVILEGED_LIMIT = 100;
 /** Minimum spacing between two non-privileged sends to the same channel, independent of the shared 30s count. */
 const NON_PRIVILEGED_CHANNEL_FLOOR_MS = 1_000;
 
+/**
+ * Every send in this module runs behind a single global queue, so one stalled `send()` (tmi.js's
+ * `client.say()` has no built-in timeout and can hang indefinitely on a stalled socket) would
+ * otherwise wedge every later send, across every channel and feature, forever. Bounding it here
+ * guarantees the queue always frees up, even though the underlying send may still be stuck.
+ */
+const SEND_TIMEOUT_MS = 10_000;
+
 /** Timestamps (epoch ms) of every send — privileged or not — counted in the current rolling window. */
 let sentTimestamps: number[] = [];
 
@@ -74,13 +82,30 @@ async function waitForChannelFloor(channel: string): Promise<void> {
 }
 
 /**
+ * Races `promise` against a `ms`-millisecond timeout, rejecting with a timeout error if it
+ * doesn't settle in time. `promise` itself is left running — its eventual settlement is still
+ * observed (and silently ignored) so it can never surface as an unhandled rejection later.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Twitch send timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
+/**
  * Runs `send` for `channel`, waiting as needed for Twitch's global per-account rate limit to
  * have room first (see the module doc for exactly how the shared window and per-channel floor
  * interact). Calls are serialized on a single global queue, so they always run in the order
  * they were enqueued, regardless of which channel each one targets.
  * @param channel - Normalized Twitch channel name the send is targeting.
  * @param isPrivileged - Whether the bot currently has moderator/VIP/broadcaster status in `channel`.
- * @param send - Performs the actual send. Rejecting doesn't affect the timing of later queued sends.
+ * @param send - Performs the actual send, bounded by {@link SEND_TIMEOUT_MS} so a stalled send
+ *   can't wedge the queue forever. Rejecting (including via that timeout) doesn't affect the
+ *   timing of later queued sends.
  */
 export async function throttledTwitchSend(channel: string, isPrivileged: boolean, send: () => Promise<void>): Promise<void> {
   await globalQueue.run('global', async () => {
@@ -91,7 +116,7 @@ export async function throttledTwitchSend(channel: string, isPrivileged: boolean
     sentTimestamps.push(sentAt);
     if (!isPrivileged) lastNonPrivilegedSendAtByChannel.set(channel, sentAt);
 
-    await send();
+    await withTimeout(send(), SEND_TIMEOUT_MS);
   });
 }
 

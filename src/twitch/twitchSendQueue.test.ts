@@ -147,4 +147,32 @@ describe('throttledTwitchSend', () => {
     await blocked;
     expect(send).toHaveBeenCalledTimes(1);
   });
+
+  // ─── Send timeout ─────────────────────────────────────────────────────────
+
+  it('rejects and frees the queue when send() hangs past the timeout, instead of blocking later sends forever', async () => {
+    const hanging = vi.fn().mockImplementation(() => new Promise(() => {})); // never settles
+    // Attach the rejection assertion before advancing timers, so the promise has a handler
+    // already registered before it actually rejects (avoids a spurious unhandled-rejection
+    // warning from the gap between rejecting and a handler being attached).
+    const hungRejection = expect(throttledTwitchSend('streamer-a', false, hanging)).rejects.toThrow(/timed out/i);
+
+    const next = vi.fn().mockResolvedValue(undefined);
+    const nextCall = throttledTwitchSend('streamer-b', false, next);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await hungRejection;
+
+    await nextCall;
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not time out a send that resolves well within the timeout', async () => {
+    const send = vi.fn().mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+    });
+    const call = throttledTwitchSend('streamer', false, send);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(call).resolves.toBeUndefined();
+  });
 });

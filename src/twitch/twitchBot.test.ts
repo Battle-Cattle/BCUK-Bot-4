@@ -13,9 +13,8 @@ const { mockClient, registeredHandlers } = vi.hoisted(() => {
     join: vi.fn(),
     part: vi.fn(),
     say: vi.fn(),
-    isMod: vi.fn(),
-    getUsername: vi.fn(),
     channels: [] as string[],
+    userstate: {} as Record<string, { badges?: Record<string, string> | null }>,
   };
   return { mockClient: client, registeredHandlers: handlers };
 });
@@ -134,8 +133,7 @@ function resetMockClient(): void {
   mockClient.join.mockResolvedValue(undefined);
   mockClient.part.mockResolvedValue(undefined);
   mockClient.say.mockResolvedValue(undefined);
-  mockClient.isMod.mockReturnValue(false);
-  mockClient.getUsername.mockReturnValue('testbot');
+  mockClient.userstate = {};
 }
 
 /** Start the bot with an empty channel list and simulate a successful connection. */
@@ -585,17 +583,11 @@ describe('sayInChannel', () => {
     expect(mockClient.say).toHaveBeenCalledWith('streamer', 'hello!');
   });
 
-  it('checks mod status against the normalized channel and the bot\'s own username', async () => {
-    await connectBot();
-    await sayInChannel('#STREAMER', 'hi');
-    expect(mockClient.isMod).toHaveBeenCalledWith('streamer', 'testbot');
-  });
-
   // Twitch's rate-limit window and per-channel floor are exercised exhaustively in
   // twitchSendQueue.test.ts — these just confirm sayInChannel wires channel + the live
-  // mod-status check into that shared limiter.
+  // privilege check (read from tmi.js's internal per-channel userstate badges) into it.
 
-  it('throttles a second non-privileged send to the same channel to at least 1s apart', async () => {
+  it('treats the channel as non-privileged when there is no userstate entry for it yet', async () => {
     await connectBot();
     await sayInChannel('#streamer', 'first');
     const second = sayInChannel('#streamer', 'second');
@@ -608,11 +600,29 @@ describe('sayInChannel', () => {
     expect(mockClient.say).toHaveBeenCalledTimes(2);
   });
 
-  it('exempts a privileged channel from the per-channel floor', async () => {
+  it.each([
+    ['moderator', { moderator: '1' }],
+    ['vip', { vip: '1' }],
+    ['broadcaster', { broadcaster: '1' }],
+  ])('exempts a channel from the per-channel floor when the badges show %s status', async (_label, badges) => {
     await connectBot();
-    mockClient.isMod.mockReturnValue(true);
+    mockClient.userstate = { streamer: { badges } };
     await sayInChannel('#streamer', 'first');
     await sayInChannel('#streamer', 'second');
+    expect(mockClient.say).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not treat a channel as privileged from another channel\'s badges', async () => {
+    await connectBot();
+    mockClient.userstate = { 'other-channel': { badges: { moderator: '1' } } };
+    await sayInChannel('#streamer', 'first');
+    const second = sayInChannel('#streamer', 'second');
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(mockClient.say).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await second;
     expect(mockClient.say).toHaveBeenCalledTimes(2);
   });
 });

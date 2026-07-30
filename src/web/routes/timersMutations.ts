@@ -7,6 +7,7 @@ import {
 import type { TimerCommandInput } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
+import { createMutationQueue } from '../../shared/mutationQueue';
 import {
   logAndRedirectError, normalizeRequiredText, parseCheckboxField, parsePositiveIntId,
   requireStreamer,
@@ -14,6 +15,13 @@ import {
 
 const log = createLogger('Web');
 const router = Router();
+
+/**
+ * Serializes the per-streamer timer count check and insert in `POST /timers/add` (keyed by
+ * streamer id), so two concurrent requests for the same streamer can't both read a count under
+ * {@link MAX_TIMER_COMMANDS_PER_STREAMER} and each insert, letting the cap be exceeded.
+ */
+const timerAddQueue = createMutationQueue<number>();
 
 /** Redirect target used when the requester isn't a streamer, scoped to the timers admin page. */
 const NOT_A_STREAMER_REDIRECT = '/timers?error=not_a_streamer';
@@ -85,14 +93,16 @@ function parseTimerCommandFields(body: Record<string, string | string[] | undefi
 }
 
 /**
- * POST /timers/add — creates a new timer command for the requesting streamer.
+ * POST /timers/add — creates a new timer command for the requesting streamer. The count check
+ * and insert are serialized per streamer through {@link timerAddQueue} so two concurrent
+ * requests can't both observe a count under the cap and each insert, exceeding it.
  * @param req - Express request; reads `name`, `message`, `interval_seconds`, `min_messages`,
  *   `require_live`, `enabled` from `req.body`.
  * @param res - Express response; redirects to `/timers?success=timer_added` on success, or to
  *   `/timers?error=<code>` if the requester isn't a streamer (`not_a_streamer`), a field is
  *   invalid (`missing_fields`, `invalid_interval`, `invalid_min_messages`), the streamer has
  *   already reached {@link MAX_TIMER_COMMANDS_PER_STREAMER} timers (`timer_limit_reached`), or
- *   the insert fails (`add_failed`).
+ *   the count check or insert fails (`add_failed`).
  */
 router.post('/add', requireAuth, csrfProtection, async (req, res) => {
   try {
@@ -103,12 +113,13 @@ router.post('/add', requireAuth, csrfProtection, async (req, res) => {
     const result = parseTimerCommandFields(body);
     if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
 
-    const existingCount = await countTimerCommandsForStreamer(streamer.id);
-    if (existingCount >= MAX_TIMER_COMMANDS_PER_STREAMER) {
-      return res.redirect('/timers?error=timer_limit_reached');
-    }
-
-    await addTimerCommand(streamer.id, result.input);
+    const added = await timerAddQueue.run(streamer.id, async () => {
+      const existingCount = await countTimerCommandsForStreamer(streamer.id);
+      if (existingCount >= MAX_TIMER_COMMANDS_PER_STREAMER) return false;
+      await addTimerCommand(streamer.id, result.input);
+      return true;
+    });
+    if (!added) return res.redirect('/timers?error=timer_limit_reached');
     res.redirect('/timers?success=timer_added');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Add timer command error:', err, basePath: '/timers', errorCode: 'add_failed' });
