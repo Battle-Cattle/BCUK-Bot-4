@@ -222,8 +222,8 @@ export { recordPricingHistory, getPricingHistoryForRewards } from './db/rewardPr
 export type { DbTimerCommand, TimerCommandInput, TimerCommandForScheduler } from './db/timerCommands';
 export {
   TimerCommandNotFoundError,
-  getTimerCommandsForStreamer, addTimerCommand, updateTimerCommand, removeTimerCommand,
-  setTimerCommandEnabled, getAllEnabledTimerCommandsWithChannel,
+  getTimerCommandsForStreamer, countTimerCommandsForStreamer, addTimerCommand, updateTimerCommand,
+  removeTimerCommand, setTimerCommandEnabled, getAllEnabledTimerCommandsWithChannel,
 } from './db/timerCommands';
 
 // ─── Streamdeck API keys ─────────────────────────────────────────────────────

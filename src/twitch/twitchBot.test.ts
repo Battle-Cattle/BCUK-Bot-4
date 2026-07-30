@@ -97,6 +97,7 @@ import {
   sayInChannel,
   __resetTwitchChannelDiscordIdCacheForTests,
 } from './twitchBot';
+import { __resetTwitchSendQueueForTests } from './twitchSendQueue';
 import {
   joinTwitchChannel,
   partTwitchChannel,
@@ -155,6 +156,7 @@ beforeEach(() => {
   resetMockClient();
   for (const key of Object.keys(registeredHandlers)) delete registeredHandlers[key];
   vi.useFakeTimers();
+  __resetTwitchSendQueueForTests();
 });
 
 afterEach(async () => {
@@ -577,6 +579,29 @@ describe('sayInChannel', () => {
     await connectBot();
     await sayInChannel('#STREAMER', 'hello!');
     expect(mockClient.say).toHaveBeenCalledWith('streamer', 'hello!');
+  });
+
+  it('throttles back-to-back sends to the same channel', async () => {
+    await connectBot();
+    await sayInChannel('#streamer', 'first');
+    expect(mockClient.say).toHaveBeenCalledTimes(1);
+
+    const second = sayInChannel('#streamer', 'second');
+    await vi.advanceTimersByTimeAsync(0);
+    // Still queued — spacing hasn't elapsed yet.
+    expect(mockClient.say).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1_500);
+    await second;
+    expect(mockClient.say).toHaveBeenCalledTimes(2);
+    expect(mockClient.say).toHaveBeenLastCalledWith('streamer', 'second');
+  });
+
+  it('does not delay sends to different channels', async () => {
+    await connectBot();
+    await sayInChannel('#streamer', 'first');
+    await sayInChannel('#otherstreamer', 'second');
+    expect(mockClient.say).toHaveBeenCalledTimes(2);
   });
 });
 

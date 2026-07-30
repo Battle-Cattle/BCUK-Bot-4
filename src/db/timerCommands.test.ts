@@ -6,6 +6,7 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 import { getPool } from './pool';
 import {
   getTimerCommandsForStreamer,
+  countTimerCommandsForStreamer,
   addTimerCommand,
   updateTimerCommand,
   removeTimerCommand,
@@ -60,6 +61,21 @@ describe('getTimerCommandsForStreamer', () => {
     const pool = makeMockPool({ rows: [] });
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getTimerCommandsForStreamer(7);
+    expect(pool.execute.mock.calls[0][1]).toEqual([7]);
+  });
+});
+
+describe('countTimerCommandsForStreamer', () => {
+  it('parses the BIGINT-string COUNT(*) result back to a number', async () => {
+    const pool = makeMockPool({ executeResult: [[{ count: '3' }], []] });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await countTimerCommandsForStreamer(7)).toBe(3);
+  });
+
+  it('queries scoped to the streamer id', async () => {
+    const pool = makeMockPool({ executeResult: [[{ count: '0' }], []] });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await countTimerCommandsForStreamer(7);
     expect(pool.execute.mock.calls[0][1]).toEqual([7]);
   });
 });

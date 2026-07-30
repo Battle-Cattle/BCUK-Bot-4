@@ -1,8 +1,8 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import {
-  addTimerCommand, updateTimerCommand, removeTimerCommand, setTimerCommandEnabled,
-  TimerCommandNotFoundError,
+  addTimerCommand, countTimerCommandsForStreamer, updateTimerCommand, removeTimerCommand,
+  setTimerCommandEnabled, TimerCommandNotFoundError,
 } from '../../db';
 import type { TimerCommandInput } from '../../db';
 import { csrfProtection } from '../csrf';
@@ -21,6 +21,13 @@ const NOT_A_STREAMER_REDIRECT = '/timers?error=not_a_streamer';
 const MIN_INTERVAL_SECONDS = 60;
 /** MySQL `INT` (4-byte signed) max — both `interval_seconds` and `min_messages` are stored in `INT` columns. */
 const MAX_INT_COLUMN_VALUE = 2147483647;
+/**
+ * Per-streamer cap on the number of timer commands, enforced in `/timers/add`. Every enabled
+ * timer across every streamer is processed on every ~15s scheduler tick, so this bounds that
+ * per-tick work rather than letting one streamer's rows (accidental duplicates, or a scripted
+ * client) grow it unboundedly.
+ */
+const MAX_TIMER_COMMANDS_PER_STREAMER = 20;
 
 /**
  * Parses a required interval-seconds form field: an integer of at least
@@ -83,8 +90,9 @@ function parseTimerCommandFields(body: Record<string, string | string[] | undefi
  *   `require_live`, `enabled` from `req.body`.
  * @param res - Express response; redirects to `/timers?success=timer_added` on success, or to
  *   `/timers?error=<code>` if the requester isn't a streamer (`not_a_streamer`), a field is
- *   invalid (`missing_fields`, `invalid_interval`, `invalid_min_messages`), or the insert fails
- *   (`add_failed`).
+ *   invalid (`missing_fields`, `invalid_interval`, `invalid_min_messages`), the streamer has
+ *   already reached {@link MAX_TIMER_COMMANDS_PER_STREAMER} timers (`timer_limit_reached`), or
+ *   the insert fails (`add_failed`).
  */
 router.post('/add', requireAuth, csrfProtection, async (req, res) => {
   try {
@@ -94,6 +102,11 @@ router.post('/add', requireAuth, csrfProtection, async (req, res) => {
     const body = req.body as Record<string, string | string[] | undefined>;
     const result = parseTimerCommandFields(body);
     if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
+
+    const existingCount = await countTimerCommandsForStreamer(streamer.id);
+    if (existingCount >= MAX_TIMER_COMMANDS_PER_STREAMER) {
+      return res.redirect('/timers?error=timer_limit_reached');
+    }
 
     await addTimerCommand(streamer.id, result.input);
     res.redirect('/timers?success=timer_added');
