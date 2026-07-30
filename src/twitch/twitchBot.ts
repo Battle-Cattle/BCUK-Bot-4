@@ -10,7 +10,7 @@ import { fireAndForget } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
 import { normalizeTwitchChannelName } from './twitchChannelName';
-import { throttledChannelSend } from './twitchSendQueue';
+import { throttledChannelSend, NON_MOD_MIN_SEND_INTERVAL_MS, MOD_MIN_SEND_INTERVAL_MS } from './twitchSendQueue';
 import { createLogger } from '../shared/logger';
 import {
   createManagedLookupCache,
@@ -227,7 +227,10 @@ export async function startTwitchBot(): Promise<void> {
  * Sends `message` to a Twitch channel via the connected tmi.js client, throttled per channel
  * (see {@link throttledChannelSend}) so this shared entry point — used by every auto-posting
  * feature (custom commands, counters, timers, shoutouts, EventSub, etc.) — can never burst a
- * channel past Twitch's chat rate limit, regardless of how many features fire at once.
+ * channel past Twitch's chat rate limit, regardless of how many features fire at once. Uses the
+ * higher moderator rate limit for channels where the bot currently holds mod (tmi.js tracks this
+ * per channel from the IRC USERSTATE tags sent on join and on every send), so being a mod in a
+ * channel isn't throttled down to the stricter non-mod rate.
  * @param channel - Twitch channel to send to (normalized before sending).
  * @param message - Message text to send.
  * @returns Resolves once the message has actually been sent.
@@ -239,10 +242,13 @@ export async function sayInChannel(channel: string, message: string): Promise<vo
   const normalized = normalizeTwitchChannelName(channel);
   if (!normalized) throw new Error(`[Twitch] Invalid channel name: ${channel}`);
   if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
+  const minIntervalMs = client.isMod(normalized, client.getUsername())
+    ? MOD_MIN_SEND_INTERVAL_MS
+    : NON_MOD_MIN_SEND_INTERVAL_MS;
   await throttledChannelSend(normalized, async () => {
     if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
     await client.say(normalized, message);
-  });
+  }, minIntervalMs);
 }
 
 /**

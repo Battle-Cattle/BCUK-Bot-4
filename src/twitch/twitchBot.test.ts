@@ -13,6 +13,8 @@ const { mockClient, registeredHandlers } = vi.hoisted(() => {
     join: vi.fn(),
     part: vi.fn(),
     say: vi.fn(),
+    isMod: vi.fn(),
+    getUsername: vi.fn(),
     channels: [] as string[],
   };
   return { mockClient: client, registeredHandlers: handlers };
@@ -132,6 +134,8 @@ function resetMockClient(): void {
   mockClient.join.mockResolvedValue(undefined);
   mockClient.part.mockResolvedValue(undefined);
   mockClient.say.mockResolvedValue(undefined);
+  mockClient.isMod.mockReturnValue(false);
+  mockClient.getUsername.mockReturnValue('testbot');
 }
 
 /** Start the bot with an empty channel list and simulate a successful connection. */
@@ -602,6 +606,27 @@ describe('sayInChannel', () => {
     await sayInChannel('#streamer', 'first');
     await sayInChannel('#otherstreamer', 'second');
     expect(mockClient.say).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the shorter moderator spacing when the bot is a mod in the channel', async () => {
+    await connectBot();
+    mockClient.isMod.mockReturnValue(true);
+
+    await sayInChannel('#streamer', 'first');
+    const second = sayInChannel('#streamer', 'second');
+
+    await vi.advanceTimersByTimeAsync(299);
+    expect(mockClient.say).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await second;
+    expect(mockClient.say).toHaveBeenCalledTimes(2);
+  });
+
+  it('checks mod status against the normalized channel and the bot\'s own username', async () => {
+    await connectBot();
+    await sayInChannel('#STREAMER', 'hi');
+    expect(mockClient.isMod).toHaveBeenCalledWith('streamer', 'testbot');
   });
 });
 
