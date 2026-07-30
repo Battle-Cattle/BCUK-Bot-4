@@ -38,28 +38,17 @@ const MAX_INT_COLUMN_VALUE = 2147483647;
 const MAX_TIMER_COMMANDS_PER_STREAMER = 20;
 
 /**
- * Parses a required interval-seconds form field: an integer of at least
- * {@link MIN_INTERVAL_SECONDS} and at most the DB column's `INT` range, matching the DB's
- * `chk_timer_command_interval` check — validated here so a bad value redirects with a clear
- * `invalid_interval` code instead of surfacing as an opaque DB constraint/range failure.
+ * Parses a required numeric form field: an integer within `[min, max]`. Shared by both
+ * `interval_seconds` (matching the DB's `chk_timer_command_interval` check, `min` =
+ * {@link MIN_INTERVAL_SECONDS}) and `min_messages` (matching `chk_timer_command_min_messages`,
+ * `min` = 0, since "no minimum" is valid) — validated here so a bad value redirects with a
+ * clear error code instead of surfacing as an opaque DB constraint/range failure.
  */
-function parseIntervalSecondsField(value: string | string[] | undefined): number | null {
+function parseIntFieldInRange(value: string | string[] | undefined, min: number, max: number): number | null {
   if (Array.isArray(value)) return null;
   if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= MIN_INTERVAL_SECONDS && parsed <= MAX_INT_COLUMN_VALUE ? parsed : null;
-}
-
-/**
- * Parses a required min-messages form field: a non-negative integer within the DB column's
- * `INT` range, matching the DB's `chk_timer_command_min_messages` check. `0` (the "no minimum"
- * value) is valid.
- */
-function parseMinMessagesField(value: string | string[] | undefined): number | null {
-  if (Array.isArray(value)) return null;
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= MAX_INT_COLUMN_VALUE ? parsed : null;
+  return Number.isSafeInteger(parsed) && parsed >= min && parsed <= max ? parsed : null;
 }
 
 /** Result of validating the timer fields shared by the add and update forms — either the parsed input, or the specific error code to redirect with. */
@@ -73,10 +62,10 @@ function parseTimerCommandFields(body: Record<string, string | string[] | undefi
   const message = normalizeRequiredText(body.message as string | undefined);
   if (!name || !message) return { ok: false, errorCode: 'missing_fields' };
 
-  const intervalSeconds = parseIntervalSecondsField(body.interval_seconds);
+  const intervalSeconds = parseIntFieldInRange(body.interval_seconds, MIN_INTERVAL_SECONDS, MAX_INT_COLUMN_VALUE);
   if (intervalSeconds === null) return { ok: false, errorCode: 'invalid_interval' };
 
-  const minMessages = parseMinMessagesField(body.min_messages);
+  const minMessages = parseIntFieldInRange(body.min_messages, 0, MAX_INT_COLUMN_VALUE);
   if (minMessages === null) return { ok: false, errorCode: 'invalid_min_messages' };
 
   return {
