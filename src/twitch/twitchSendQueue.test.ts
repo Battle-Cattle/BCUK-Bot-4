@@ -1,7 +1,18 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { throttledChannelSend, __resetTwitchSendQueueForTests } from './twitchSendQueue';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
+import { throttledTwitchSend, __resetTwitchSendQueueForTests } from './twitchSendQueue';
 
-const INTERVAL_MS = 1_500;
+const WINDOW_MS = 30_000;
+const MODERATOR_CAPACITY = 100;
+const USER_CAPACITY = 20;
+
+/** Runs `count` sends of the given privilege against a single shared mock, resolving once they've all run. */
+async function fillBucket(isPrivileged: boolean, count: number): Promise<Mock> {
+  const send = vi.fn().mockResolvedValue(undefined);
+  for (let i = 0; i < count; i++) {
+    await throttledTwitchSend(isPrivileged, send);
+  }
+  return send;
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -12,86 +23,85 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('throttledChannelSend', () => {
-  it('runs the first send for a channel immediately', async () => {
+describe('throttledTwitchSend', () => {
+  it('runs a send immediately when both buckets have room', async () => {
     const send = vi.fn().mockResolvedValue(undefined);
-    await throttledChannelSend('streamer', send, INTERVAL_MS);
+    await throttledTwitchSend(false, send);
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it('delays a second send to the same channel until the spacing interval elapses', async () => {
-    const send = vi.fn().mockResolvedValue(undefined);
-    await throttledChannelSend('streamer', send, INTERVAL_MS);
+  it('lets a non-privileged send run up to the user bucket capacity without delay', async () => {
+    const send = await fillBucket(false, USER_CAPACITY);
+    expect(send).toHaveBeenCalledTimes(USER_CAPACITY);
+  });
 
-    const second = throttledChannelSend('streamer', send, INTERVAL_MS);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(send).toHaveBeenCalledTimes(1);
+  it('delays a non-privileged send past the user bucket capacity until the window rolls', async () => {
+    const send = await fillBucket(false, USER_CAPACITY);
 
-    await vi.advanceTimersByTimeAsync(1_499);
-    expect(send).toHaveBeenCalledTimes(1);
+    const next = throttledTwitchSend(false, send);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS - 1);
+    expect(send).toHaveBeenCalledTimes(USER_CAPACITY);
 
     await vi.advanceTimersByTimeAsync(1);
-    await second;
-    expect(send).toHaveBeenCalledTimes(2);
+    await next;
+    expect(send).toHaveBeenCalledTimes(USER_CAPACITY + 1);
   });
 
-  it('does not delay sends to different channels', async () => {
+  it('lets a privileged send run well past the user bucket capacity, up to the moderator bucket capacity', async () => {
+    const send = await fillBucket(true, USER_CAPACITY + 5);
+    expect(send).toHaveBeenCalledTimes(USER_CAPACITY + 5);
+  });
+
+  it('delays a privileged send past the moderator bucket capacity until the window rolls', async () => {
+    const send = await fillBucket(true, MODERATOR_CAPACITY);
+
+    const next = throttledTwitchSend(true, send);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS - 1);
+    expect(send).toHaveBeenCalledTimes(MODERATOR_CAPACITY);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await next;
+    expect(send).toHaveBeenCalledTimes(MODERATOR_CAPACITY + 1);
+  });
+
+  it('blocks a non-privileged send when a privileged burst has exhausted the shared moderator bucket, even though the user bucket is untouched', async () => {
+    // Fill the moderator bucket entirely with privileged sends — none of these touch the user bucket.
+    await fillBucket(true, MODERATOR_CAPACITY);
+
+    // User bucket is still completely empty (0/20), but the moderator bucket both kinds of
+    // send draw from is full, so this non-privileged send must still wait for it to roll.
     const send = vi.fn().mockResolvedValue(undefined);
-    await throttledChannelSend('streamer-a', send, INTERVAL_MS);
-    await throttledChannelSend('streamer-b', send, INTERVAL_MS);
-    expect(send).toHaveBeenCalledTimes(2);
+    const blocked = throttledTwitchSend(false, send);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS - 1);
+    expect(send).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await blocked;
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps queued sends for a channel in enqueue order', async () => {
+  it('keeps queued sends in enqueue order across mixed privileged/non-privileged calls', async () => {
     const order: string[] = [];
     const makeSend = (label: string) => vi.fn().mockImplementation(async () => { order.push(label); });
 
-    const p1 = throttledChannelSend('streamer', makeSend('a'), INTERVAL_MS);
-    const p2 = throttledChannelSend('streamer', makeSend('b'), INTERVAL_MS);
-    const p3 = throttledChannelSend('streamer', makeSend('c'), INTERVAL_MS);
+    const p1 = throttledTwitchSend(true, makeSend('a'));
+    const p2 = throttledTwitchSend(false, makeSend('b'));
+    const p3 = throttledTwitchSend(true, makeSend('c'));
 
-    await vi.advanceTimersByTimeAsync(3_000);
     await Promise.all([p1, p2, p3]);
-
     expect(order).toEqual(['a', 'b', 'c']);
   });
 
-  it('does not shrink the spacing of queued sends when an earlier send fails', async () => {
-    const failing = vi.fn().mockRejectedValue(new Error('boom'));
-    const succeeding = vi.fn().mockResolvedValue(undefined);
+  it('still consumes a bucket token when the send itself fails, so a failure cannot be used to dodge the limit', async () => {
+    await fillBucket(false, USER_CAPACITY - 1);
+    await expect(throttledTwitchSend(false, vi.fn().mockRejectedValue(new Error('boom')))).rejects.toThrow('boom');
 
-    const first = throttledChannelSend('streamer', failing, INTERVAL_MS);
-    const second = throttledChannelSend('streamer', succeeding, INTERVAL_MS);
-
-    await expect(first).rejects.toThrow('boom');
-
-    await vi.advanceTimersByTimeAsync(1_499);
-    expect(succeeding).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(1);
-    await second;
-    expect(succeeding).toHaveBeenCalledTimes(1);
-  });
-
-  it('schedules the following send using the minIntervalMs passed to the current call, not a prior one', async () => {
     const send = vi.fn().mockResolvedValue(undefined);
-    // First call schedules the next slot 1.5s out — a later call can't retroactively shrink
-    // the wait it's already queued behind, so the second send still waits the full interval.
-    await throttledChannelSend('streamer', send, INTERVAL_MS);
-
-    const second = throttledChannelSend('streamer', send, 300);
-    await vi.advanceTimersByTimeAsync(1_499);
+    const blocked = throttledTwitchSend(false, send);
+    await vi.advanceTimersByTimeAsync(WINDOW_MS - 1);
+    expect(send).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await blocked;
     expect(send).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1);
-    await second;
-    expect(send).toHaveBeenCalledTimes(2);
-
-    // The second call's 300ms interval now governs the wait before the third send.
-    const third = throttledChannelSend('streamer', send, 300);
-    await vi.advanceTimersByTimeAsync(299);
-    expect(send).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(1);
-    await third;
-    expect(send).toHaveBeenCalledTimes(3);
   });
 });

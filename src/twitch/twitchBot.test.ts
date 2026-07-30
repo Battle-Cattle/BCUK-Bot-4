@@ -585,48 +585,39 @@ describe('sayInChannel', () => {
     expect(mockClient.say).toHaveBeenCalledWith('streamer', 'hello!');
   });
 
-  it('throttles back-to-back sends to the same channel', async () => {
-    await connectBot();
-    await sayInChannel('#streamer', 'first');
-    expect(mockClient.say).toHaveBeenCalledTimes(1);
-
-    const second = sayInChannel('#streamer', 'second');
-    await vi.advanceTimersByTimeAsync(0);
-    // Still queued — spacing hasn't elapsed yet.
-    expect(mockClient.say).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(1_500);
-    await second;
-    expect(mockClient.say).toHaveBeenCalledTimes(2);
-    expect(mockClient.say).toHaveBeenLastCalledWith('streamer', 'second');
-  });
-
-  it('does not delay sends to different channels', async () => {
-    await connectBot();
-    await sayInChannel('#streamer', 'first');
-    await sayInChannel('#otherstreamer', 'second');
-    expect(mockClient.say).toHaveBeenCalledTimes(2);
-  });
-
-  it('uses the shorter moderator spacing when the bot is a mod in the channel', async () => {
-    await connectBot();
-    mockClient.isMod.mockReturnValue(true);
-
-    await sayInChannel('#streamer', 'first');
-    const second = sayInChannel('#streamer', 'second');
-
-    await vi.advanceTimersByTimeAsync(299);
-    expect(mockClient.say).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(1);
-    await second;
-    expect(mockClient.say).toHaveBeenCalledTimes(2);
-  });
-
   it('checks mod status against the normalized channel and the bot\'s own username', async () => {
     await connectBot();
     await sayInChannel('#STREAMER', 'hi');
     expect(mockClient.isMod).toHaveBeenCalledWith('streamer', 'testbot');
+  });
+
+  // Twitch's rate-limit buckets are exercised exhaustively in twitchSendQueue.test.ts — these
+  // two just confirm sayInChannel wires the live mod-status check into that shared limiter.
+
+  it('lets sends past the non-privileged bucket capacity through without delay when the bot is privileged', async () => {
+    await connectBot();
+    mockClient.isMod.mockReturnValue(true);
+
+    for (let i = 0; i < 25; i++) {
+      await sayInChannel('#streamer', `message ${i}`);
+    }
+    expect(mockClient.say).toHaveBeenCalledTimes(25);
+  });
+
+  it('throttles a non-privileged channel once the shared rate-limit bucket is exhausted', async () => {
+    await connectBot();
+    for (let i = 0; i < 20; i++) {
+      await sayInChannel('#streamer', `message ${i}`);
+    }
+    expect(mockClient.say).toHaveBeenCalledTimes(20);
+
+    const next = sayInChannel('#streamer', 'one too many');
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(mockClient.say).toHaveBeenCalledTimes(20);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await next;
+    expect(mockClient.say).toHaveBeenCalledTimes(21);
   });
 });
 
