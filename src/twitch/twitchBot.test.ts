@@ -606,7 +606,10 @@ describe('sayInChannel', () => {
     ['broadcaster', { broadcaster: '1' }],
   ])('exempts a channel from the per-channel floor when the badges show %s status', async (_label, badges) => {
     await connectBot();
-    mockClient.userstate = { streamer: { badges } };
+    // tmi.js keys its internal userstate map by the IRC channel form ('#streamer'), not the
+    // bare normalized name — this must match that real shape, or a lookup-key regression
+    // (e.g. accidentally dropping the '#') would pass here despite never matching in production.
+    mockClient.userstate = { '#streamer': { badges } };
     await sayInChannel('#streamer', 'first');
     await sayInChannel('#streamer', 'second');
     expect(mockClient.say).toHaveBeenCalledTimes(2);
@@ -614,7 +617,7 @@ describe('sayInChannel', () => {
 
   it('does not treat a channel as privileged from another channel\'s badges', async () => {
     await connectBot();
-    mockClient.userstate = { 'other-channel': { badges: { moderator: '1' } } };
+    mockClient.userstate = { '#other-channel': { badges: { moderator: '1' } } };
     await sayInChannel('#streamer', 'first');
     const second = sayInChannel('#streamer', 'second');
 

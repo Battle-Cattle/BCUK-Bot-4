@@ -229,13 +229,15 @@ export async function startTwitchBot(): Promise<void> {
  * and on every send — the same source `client.isMod()` reads, but `isMod()` only reflects the
  * `user-type` tag, which is never set for VIP or broadcaster status). `userstate` isn't part of
  * tmi.js's public type surface, the same tradeoff as `channels` in {@link onDisconnected}, but is
- * real internal state. Under-detecting privilege here only makes a send unnecessarily conservative
+ * real internal state — keyed by the IRC channel form (`#channel`, via tmi.js's internal
+ * `_.channel()`), not the bare name {@link normalizeTwitchChannelName} returns, so the `#` has to
+ * be added back here. Under-detecting privilege here only makes a send unnecessarily conservative
  * (throttled at the stricter non-privileged rate) rather than unsafe, so a missing/malformed
  * userstate entry — e.g. before the bot has joined `channel` — safely resolves to false.
- * @param channel - Normalized Twitch channel name.
+ * @param channel - Normalized Twitch channel name (without a leading `#`).
  */
 function isPrivilegedInChannel(channel: string): boolean {
-  const badges = (client as any)?.userstate?.[channel]?.badges as Record<string, string> | null | undefined;
+  const badges = (client as any)?.userstate?.[`#${channel}`]?.badges as Record<string, string> | null | undefined;
   return !!badges?.moderator || !!badges?.vip || !!badges?.broadcaster;
 }
 
