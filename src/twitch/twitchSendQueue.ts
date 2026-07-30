@@ -85,6 +85,10 @@ async function waitForChannelFloor(channel: string): Promise<void> {
  * Races `promise` against a `ms`-millisecond timeout, rejecting with a timeout error if it
  * doesn't settle in time. `promise` itself is left running — its eventual settlement is still
  * observed (and silently ignored) so it can never surface as an unhandled rejection later.
+ * @param promise - The promise to bound.
+ * @param ms - Milliseconds to wait before rejecting with a timeout error.
+ * @returns `promise`'s resolved value if it settles first; otherwise rejects with `promise`'s
+ *   own rejection reason, or a timeout error if neither happens within `ms`.
  */
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -106,6 +110,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * @param send - Performs the actual send, bounded by {@link SEND_TIMEOUT_MS} so a stalled send
  *   can't wedge the queue forever. Rejecting (including via that timeout) doesn't affect the
  *   timing of later queued sends.
+ * @returns Resolves once `send` has actually run and settled (successfully or not); rejects with
+ *   whatever `send` rejected with, including a timeout error if it didn't settle in time.
  */
 export async function throttledTwitchSend(channel: string, isPrivileged: boolean, send: () => Promise<void>): Promise<void> {
   await globalQueue.run('global', async () => {

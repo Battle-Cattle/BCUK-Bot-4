@@ -224,20 +224,29 @@ export async function startTwitchBot(): Promise<void> {
 }
 
 /**
+ * Shape of the subset of tmi.js's internal client state this file reaches into — not part of
+ * its public type surface (same tradeoff as the `channels` cast in {@link onDisconnected}), but
+ * narrowed to just what's read here rather than casting through `any`.
+ */
+interface TmiClientInternal {
+  userstate?: Record<string, { badges?: Record<string, string> | null } | undefined>;
+}
+
+/**
  * Resolves whether the bot currently holds moderator/VIP/broadcaster status in `channel`, from
  * tmi.js's internal per-channel `userstate` (populated from the IRC USERSTATE tags sent on join
  * and on every send — the same source `client.isMod()` reads, but `isMod()` only reflects the
- * `user-type` tag, which is never set for VIP or broadcaster status). `userstate` isn't part of
- * tmi.js's public type surface, the same tradeoff as `channels` in {@link onDisconnected}, but is
- * real internal state — keyed by the IRC channel form (`#channel`, via tmi.js's internal
- * `_.channel()`), not the bare name {@link normalizeTwitchChannelName} returns, so the `#` has to
- * be added back here. Under-detecting privilege here only makes a send unnecessarily conservative
- * (throttled at the stricter non-privileged rate) rather than unsafe, so a missing/malformed
- * userstate entry — e.g. before the bot has joined `channel` — safely resolves to false.
+ * `user-type` tag, which is never set for VIP or broadcaster status). `userstate` is keyed by the
+ * IRC channel form (`#channel`, via tmi.js's internal `_.channel()`), not the bare name
+ * {@link normalizeTwitchChannelName} returns, so the `#` has to be added back here.
+ * Under-detecting privilege here only makes a send unnecessarily conservative (throttled at the
+ * stricter non-privileged rate) rather than unsafe, so a missing/malformed userstate entry — e.g.
+ * before the bot has joined `channel` — safely resolves to false.
  * @param channel - Normalized Twitch channel name (without a leading `#`).
+ * @returns True if `channel`'s userstate badges show moderator, VIP, or broadcaster status.
  */
 function isPrivilegedInChannel(channel: string): boolean {
-  const badges = (client as any)?.userstate?.[`#${channel}`]?.badges as Record<string, string> | null | undefined;
+  const badges = (client as TmiClientInternal | null)?.userstate?.[`#${channel}`]?.badges;
   return !!badges?.moderator || !!badges?.vip || !!badges?.broadcaster;
 }
 
