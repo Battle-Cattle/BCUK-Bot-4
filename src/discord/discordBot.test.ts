@@ -14,8 +14,14 @@ vi.mock('../commands/commandRouter', () => ({
   handleCommand: vi.fn().mockResolvedValue(undefined),
   forgetGuildCommandState: vi.fn(),
 }));
-vi.mock('../commands/customCommandHandler', () => ({ executeCustomCommandForDiscord: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('../commands/counterHandler', () => ({ executeCounterCommandForDiscord: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../commands/customCommandHandler', () => ({
+  executeCustomCommandForDiscord: vi.fn().mockResolvedValue(undefined),
+  forgetGuildCustomCommandCooldown: vi.fn(),
+}));
+vi.mock('../commands/counterHandler', () => ({
+  executeCounterCommandForDiscord: vi.fn().mockResolvedValue(undefined),
+  forgetGuildCounterCooldown: vi.fn(),
+}));
 vi.mock('../shared/statusStore', () => ({ setDiscordReady: vi.fn(), clearVoiceStatus: vi.fn() }));
 vi.mock('../audio/audioPlayer', () => ({ forgetGuild: vi.fn() }));
 vi.mock('../web/routes/adminRefresh', () => ({ forgetGuildRefreshState: vi.fn() }));
@@ -283,16 +289,19 @@ describe('startDiscordBot — guildDelete handler', () => {
     return mockInstance.on.mock.calls.find(([event]: string[]) => event === 'guildDelete')?.[1] as (...args: any[]) => unknown;
   }
 
-  it('forgets the departed guild\'s in-memory voice, command, status, and refresh state', async () => {
+  it('forgets the departed guild\'s in-memory voice, command, cooldown, status, and refresh state', async () => {
     const audioPlayer = await import('../audio/audioPlayer.js');
     const status = await import('../shared/statusStore.js');
     const adminRefresh = await import('../web/routes/adminRefresh.js');
+    const counterHandler = await import('../commands/counterHandler.js');
     const cb = getGuildDeleteCb();
 
     cb({ id: 'departed-guild', name: 'Departed Server' });
 
     expect(vi.mocked(audioPlayer.forgetGuild)).toHaveBeenCalledWith('departed-guild');
     expect(vi.mocked(commands.forgetGuildCommandState)).toHaveBeenCalledWith('departed-guild');
+    expect(vi.mocked(customCmds.forgetGuildCustomCommandCooldown)).toHaveBeenCalledWith('departed-guild');
+    expect(vi.mocked(counterHandler.forgetGuildCounterCooldown)).toHaveBeenCalledWith('departed-guild');
     expect(vi.mocked(status.clearVoiceStatus)).toHaveBeenCalledWith('departed-guild');
     expect(vi.mocked(adminRefresh.forgetGuildRefreshState)).toHaveBeenCalledWith('departed-guild');
   });

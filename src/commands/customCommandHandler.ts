@@ -10,6 +10,27 @@ import { getMultiTwitchDataForChannel } from '../twitch/monitor/twitchMonitor';
 import { fillTemplate } from '../shared/textTemplate';
 import { sendDedupedBySession } from './twitchBroadcast';
 import { createRuntimeRegistry, type TwitchBroadcastRuntime } from './twitchRuntime';
+import { createCooldownGate } from './cooldownGate';
+
+// ─── Cooldown ─────────────────────────────────────────────────────────────────
+//
+// Custom text-commands otherwise have no throttle: any chat member can spam a matching
+// message as fast as they can send it, flooding the channel (and, on Twitch, monopolizing
+// the shared send-queue budget across every connected channel). Gated per guild/channel,
+// mirroring the per-guild cooldown commandRouter.ts already applies to SFX triggers.
+
+const customCommandCooldown = createCooldownGate();
+
+/**
+ * Forgets a guild's custom-command cooldown so it stops occupying memory once the bot is no
+ * longer in that guild. Safe to call for a guild with no state (no-op). Called from the
+ * `guildDelete` handler; a guild the bot rejoins later starts fresh.
+ *
+ * @param guildId - Guild to forget.
+ */
+export function forgetGuildCustomCommandCooldown(guildId: string): void {
+  customCommandCooldown.forget(`discord:${guildId}`);
+}
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
@@ -168,6 +189,9 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
  * are skipped; output overrides replace the catalog text). Discord not-found errors
  * (e.g. message deleted before the reply lands) are silently swallowed.
  *
+ * A matched command is throttled per guild by `GLOBAL_COOLDOWN_MS` — a match found while
+ * that guild's cooldown is active is silently ignored, same as an unmatched command.
+ *
  * Before sending, the matched response is run through {@link fillTemplate} with
  * `{user}` (the invoking username), `{args}` (the raw text after the command token),
  * and `{arg}` (the first whitespace-delimited word of `{args}`) substituted in —
@@ -194,6 +218,11 @@ export async function executeCustomCommandForDiscord(
   const result = await lookupCommand(command, (cmd) => getCustomCommandForDiscord(cmd, resolvedGuildId));
   if (!result) return;
 
+  // No log here: a spammed matching command would otherwise emit one log line per rejected
+  // message for as long as the sender keeps sending, unbounded — same silent-skip treatment
+  // as an unmatched command above.
+  if (!customCommandCooldown.tryClaim(`discord:${resolvedGuildId}`)) return;
+
   const filledResponse = buildFilledResponse(result.response, message.content, username);
 
   try {
@@ -217,6 +246,9 @@ export async function executeCustomCommandForDiscord(
  * unknown placeholders resolve to an empty string; for multi-twitch broadcasts the
  * same filled string is reused for every target channel (no per-channel re-fill).
  *
+ * A matched command is throttled per channel by `GLOBAL_COOLDOWN_MS` — a match found while
+ * that channel's cooldown is active is silently ignored, same as an unmatched command.
+ *
  * @param channel - Twitch channel login the message was received on.
  * @param rawMessage - Raw chat message text.
  * @param username - Display name for `{user}` substitution; null or omitted if unknown.
@@ -232,6 +264,11 @@ export async function executeCustomCommandForTwitch(
 
   const result = await lookupCommand(command, (cmd) => getCustomCommandForTwitchChannel(channel, cmd));
   if (!result) return;
+
+  // No log here: a spammed matching command would otherwise emit one log line per rejected
+  // message for as long as the sender keeps sending, unbounded — same silent-skip treatment
+  // as an unmatched command above.
+  if (!customCommandCooldown.tryClaim(`twitch:${channel}`)) return;
 
   const filledResponse = buildFilledResponse(result.response, rawMessage, username);
 

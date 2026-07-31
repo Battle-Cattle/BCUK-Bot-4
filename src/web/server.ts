@@ -312,6 +312,12 @@ app.use((err: unknown, req: express.Request, res: express.Response, _next: expre
 // without spinning up a listening socket.
 export { app };
 
+// Exported so server.test.ts can exercise these exact instances directly — confirming both
+// that each got paired with the correct keyGenerator/skip function and that hitting the
+// threshold actually enforces a 429 — without looping enough real requests through the
+// entire app to reach the 100/600 thresholds via every other mounted route.
+export { generalLimiter, sessionLimiter };
+
 export function startWebPanel(): void {
   app.listen(WEB_PORT, () => {
     log.info(`Panel available at http://localhost:${WEB_PORT}`);

@@ -3,6 +3,8 @@ import { mockLogger } from '../test-utils/loggerMock';
 
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
+vi.mock('../shared/config', () => ({ GLOBAL_COOLDOWN_MS: 3_000 }));
+
 vi.mock('../db', () => ({
   getCustomCommandForDiscord: vi.fn(),
   getCustomCommandForTwitchChannel: vi.fn(),
@@ -27,6 +29,7 @@ import {
   purgeExpiredSessionCache,
   resolveSharedChatSessionId,
   sessionCache,
+  forgetGuildCustomCommandCooldown,
 } from './customCommandHandler';
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from '../db';
 import { isDiscordNotFoundError } from '../discord/discordUtils';
@@ -48,8 +51,16 @@ const mockRuntime = {
   getLoginUserIds: vi.fn<() => ReadonlyMap<string, string>>().mockReturnValue(new Map()),
 };
 
+// Base time far in the future so `Date.now() - 0` always exceeds GLOBAL_COOLDOWN_MS
+// at the start of each test. Each beforeEach adds enough to expire any previous claim,
+// matching the pattern in commandRouter.test.ts.
+const COOLDOWN_MS = 3_000;
+let mockNow = 1_000_000_000_000;
+
 beforeEach(() => {
+  mockNow += COOLDOWN_MS + 1_000;
   vi.clearAllMocks();
+  vi.spyOn(Date, 'now').mockReturnValue(mockNow);
   mockRuntime.send.mockResolvedValue(undefined);
   mockRuntime.getActiveChannels.mockReturnValue(new Set());
   mockRuntime.getLoginUserIds.mockReturnValue(new Map());
@@ -292,6 +303,73 @@ describe('executeCustomCommandForTwitch', () => {
     const expected = 'viewer1 said hello there';
     expect(mockRuntime.send).toHaveBeenCalledWith('#a', expected);
     expect(mockRuntime.send).toHaveBeenCalledWith('#b', expected);
+  });
+});
+
+// ─── Cooldown ─────────────────────────────────────────────────────────────────
+
+describe('custom-command cooldown', () => {
+  it('blocks a second Discord custom command in the same guild within the cooldown window', async () => {
+    vi.mocked(getCustomCommandForDiscord).mockResolvedValue({ output: 'Hi!', is_multi_twitch: false } as any);
+
+    const msg1 = mockMsg('!hello');
+    await executeCustomCommandForDiscord(msg1 as any, 'viewer1');
+    expect(msg1.reply).toHaveBeenCalledTimes(1);
+
+    // Same timestamp — cooldown has not elapsed
+    const msg2 = mockMsg('!hello');
+    await executeCustomCommandForDiscord(msg2 as any, 'viewer1');
+    expect(msg2.reply).not.toHaveBeenCalled();
+  });
+
+  it("does not apply one Discord guild's cooldown to another guild", async () => {
+    vi.mocked(getCustomCommandForDiscord).mockResolvedValue({ output: 'Hi!', is_multi_twitch: false } as any);
+
+    const msg1 = mockMsg('!hello');
+    await executeCustomCommandForDiscord(msg1 as any, 'viewer1');
+    expect(msg1.reply).toHaveBeenCalledTimes(1);
+
+    const msg2 = { ...mockMsg('!hello'), guildId: 'guild-2' };
+    await executeCustomCommandForDiscord(msg2 as any, 'viewer1');
+    expect(msg2.reply).toHaveBeenCalledTimes(1);
+  });
+
+  it("forgetGuildCustomCommandCooldown resets a guild's cooldown so a subsequent command fires immediately", async () => {
+    vi.mocked(getCustomCommandForDiscord).mockResolvedValue({ output: 'Hi!', is_multi_twitch: false } as any);
+
+    const msg1 = mockMsg('!hello');
+    await executeCustomCommandForDiscord(msg1 as any, 'viewer1');
+    expect(msg1.reply).toHaveBeenCalledTimes(1);
+
+    forgetGuildCustomCommandCooldown('guild-1');
+
+    const msg2 = mockMsg('!hello');
+    await executeCustomCommandForDiscord(msg2 as any, 'viewer1');
+    expect(msg2.reply).toHaveBeenCalledTimes(1);
+  });
+
+  it('forgetGuildCustomCommandCooldown is a no-op for a guild with no state', () => {
+    expect(() => forgetGuildCustomCommandCooldown('never-seen')).not.toThrow();
+  });
+
+  it('blocks a second Twitch custom command in the same channel within the cooldown window', async () => {
+    vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({ output: 'Hey!', is_multi_twitch: false } as any);
+
+    await executeCustomCommandForTwitch('#chan', '!hey', 'viewer1');
+    expect(mockRuntime.send).toHaveBeenCalledTimes(1);
+
+    await executeCustomCommandForTwitch('#chan', '!hey', 'viewer1');
+    expect(mockRuntime.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not apply one Twitch channel's cooldown to another channel", async () => {
+    vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({ output: 'Hey!', is_multi_twitch: false } as any);
+
+    await executeCustomCommandForTwitch('#chan-a', '!hey', 'viewer1');
+    expect(mockRuntime.send).toHaveBeenCalledTimes(1);
+
+    await executeCustomCommandForTwitch('#chan-b', '!hey', 'viewer1');
+    expect(mockRuntime.send).toHaveBeenCalledTimes(2);
   });
 });
 

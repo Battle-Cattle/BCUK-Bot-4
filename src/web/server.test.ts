@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Router } from 'express';
+import express, { Router } from 'express';
 import request from 'supertest';
 import { EventEmitter } from 'events';
 import { mockLogger } from '../test-utils/loggerMock';
@@ -113,7 +113,7 @@ vi.mock('./routes/companionRewards', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionKeys', () => ({ default: emptyRouter() }));
 vi.mock('./routes/serviceWorker', () => ({ default: emptyRouter() }));
 
-import { app } from './server';
+import { app, generalLimiter, sessionLimiter } from './server';
 import { requireAuth, requireGuildContext } from './middleware';
 
 describe('server route wiring', () => {
@@ -253,5 +253,86 @@ describe('csrfErrorHandler', () => {
     const res = await request(app).get('/__trigger_error');
     expect(res.status).toBe(500);
     expect(res.text).toContain('An unexpected error occurred.');
+  });
+});
+
+/**
+ * Mounts the real `generalLimiter`/`sessionLimiter` instances exported from server.ts behind
+ * a stub session middleware, so a request loop can drive them past their threshold directly —
+ * without needing hundreds of requests through the full mocked app to reach 100/600 hits.
+ * Because these are the exact singleton objects `server.ts` calls `app.use()` with, a
+ * copy/paste mistake swapping which keyGenerator/skip pair is attached to which limiter
+ * (see #477) shows up here as a limiter that fails to block, or blocks when it shouldn't.
+ *
+ * @param limiter - The `generalLimiter` or `sessionLimiter` instance under test.
+ * @param sessionUser - Value to stub as `req.session.user` on every request (undefined for unauthenticated).
+ * @returns A minimal Express app: session stub → `limiter` → a 200-returning probe route.
+ */
+function buildLimiterTestApp(limiter: express.RequestHandler, sessionUser: unknown): express.Express {
+  const testApp = express();
+  /** Stubs `req.session.user` to `sessionUser` so the limiter's keyGenerator/skip can be exercised without real login. */
+  testApp.use((req, _res, next) => {
+    (req as unknown as { session: { user: unknown } }).session = { user: sessionUser };
+    next();
+  });
+  testApp.use(limiter);
+  /** Probe route: returns 200 unless a limiter ahead of it in the chain has already rejected the request. */
+  testApp.get('/__limiter_probe', (_req, res) => res.json({ ok: true }));
+  return testApp;
+}
+
+/**
+ * Sends `limit` requests through `testApp` and asserts every one succeeds (200), then sends
+ * one more and asserts it's rejected (429) — pinning the exact threshold instead of merely
+ * observing that a 429 eventually appears somewhere in a longer, looser loop.
+ *
+ * @param testApp - App built by {@link buildLimiterTestApp}.
+ * @param limit - The limiter's configured request cap for the window.
+ * @returns Resolves once all `limit` + 1 requests have completed and been asserted.
+ */
+async function expectExactThreshold(testApp: express.Express, limit: number): Promise<void> {
+  for (let i = 0; i < limit; i++) {
+    const res = await request(testApp).get('/__limiter_probe');
+    expect(res.status).toBe(200);
+  }
+  const res = await request(testApp).get('/__limiter_probe');
+  expect(res.status).toBe(429);
+}
+
+describe('generalLimiter wiring (server.ts)', () => {
+  beforeEach(async () => {
+    // Reset the per-IP bucket so earlier tests' requests through the shared `app`
+    // (same singleton limiter) don't make this test's threshold non-deterministic.
+    await generalLimiter.resetKey('::ffff:127.0.0.1');
+    await generalLimiter.resetKey('127.0.0.1');
+    await generalLimiter.resetKey('::1');
+  });
+
+  it('allows exactly 100 requests then blocks the 101st for an unauthenticated caller', async () => {
+    const testApp = buildLimiterTestApp(generalLimiter, undefined);
+    await expectExactThreshold(testApp, 100);
+  });
+
+  it('skips an authenticated caller (per-account throttling is sessionLimiter’s job)', async () => {
+    const testApp = buildLimiterTestApp(generalLimiter, { discordId: 'general-limiter-skip-test' });
+    for (let i = 0; i < 105; i++) {
+      const res = await request(testApp).get('/__limiter_probe');
+      expect(res.status).toBe(200);
+    }
+  });
+});
+
+describe('sessionLimiter wiring (server.ts)', () => {
+  it('skips an unauthenticated caller (per-IP throttling is generalLimiter’s job)', async () => {
+    const testApp = buildLimiterTestApp(sessionLimiter, undefined);
+    for (let i = 0; i < 105; i++) {
+      const res = await request(testApp).get('/__limiter_probe');
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it('allows exactly 600 requests then blocks the 601st for an authenticated account', async () => {
+    const testApp = buildLimiterTestApp(sessionLimiter, { discordId: 'session-limiter-block-test' });
+    await expectExactThreshold(testApp, 600);
   });
 });
