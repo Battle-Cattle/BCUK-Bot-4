@@ -33,7 +33,7 @@ vi.mock('../middleware', () => ({
   requireMod: vi.fn((_req: any, _res: any, next: any) => next()),
   // Unused here for the same reason as findSoundFiles above — required only so
   // the suggest-description sub-router can be mounted.
-  requireOwner: vi.fn((_req: any, _res: any, next: any) => next()),
+  requireOwnerJson: vi.fn((_req: any, _res: any, next: any) => next()),
 }));
 
 vi.mock('../../shared/config', () => ({

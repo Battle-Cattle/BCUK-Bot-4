@@ -8,7 +8,7 @@ import OpenAI from 'openai';
 import type { SfxFile } from '../../db';
 import { findSoundFiles } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireOwner } from '../middleware';
+import { requireOwnerJson } from '../middleware';
 import { OPENAI_API_KEY, SFX_FOLDER } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
 import { parsePositiveBigIntId, normalizeRequiredText } from './shared';
@@ -195,11 +195,12 @@ async function loadClip(file: SfxFile): Promise<AudioClip> {
 /**
  * POST /sfx/trigger/suggest-description — analyses a sample of a trigger's sound
  * files with OpenAI and returns a suggested public description. Owner-only while
- * this feature is being trialled for cost/effectiveness (see `requireOwner`).
+ * this feature is being trialled for cost/effectiveness (see `requireOwnerJson`,
+ * which sends a JSON 403 on denial to match this route's all-JSON response contract).
  * @param req Express request; reads `trigger_id` and optional `trigger_command` (context only) from a JSON body.
  * @param res Express response; always responds with JSON.
  */
-router.post('/sfx/trigger/suggest-description', requireOwner, csrfProtection, async (req, res) => {
+router.post('/sfx/trigger/suggest-description', requireOwnerJson, csrfProtection, async (req, res) => {
   if (!OPENAI_API_KEY) {
     res.status(503).json({ error: 'not_configured' });
     return;

@@ -194,3 +194,24 @@ export function requireOwner(req: Request, res: Response, next: NextFunction): v
     });
   }
 }
+
+/**
+ * Same check as {@link requireOwner}, for JSON-only routes: responds
+ * `403 { error: 'forbidden' }` instead of rendering an HTML error page, so a
+ * denied `fetch` call gets a real error payload instead of falling back to a
+ * generic parse-failure message. See issue #451 — this is intentionally a
+ * one-off next to `requireOwner` rather than a generic render-vs-json option
+ * on `requireAccessLevel`; extract a shared factory once a second JSON-over-session
+ * guard is needed.
+ * @param req - Express request; checked for `req.session.user?.isOwner`.
+ * @param res - Express response; used to send a 403 JSON body when denied.
+ * @param next - Called when the session user is the owner.
+ * @returns Nothing; either calls `next()` or sends a 403 JSON response.
+ */
+export function requireOwnerJson(req: Request, res: Response, next: NextFunction): void {
+  if (req.session.user?.isOwner) {
+    next();
+  } else {
+    res.status(403).json({ error: 'forbidden' });
+  }
+}
