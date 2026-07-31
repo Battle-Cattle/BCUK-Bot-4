@@ -80,6 +80,23 @@ export async function getTimerCommandsForStreamer(streamerId: number): Promise<D
 }
 
 /**
+ * Counts how many timer commands a streamer currently has, so the `/timers/add` route can
+ * enforce a per-streamer cap before inserting a new row.
+ * @param streamerId - DB row ID of the streamer.
+ * @returns The row count. `COUNT(*)` is protocol-typed BIGINT, so `bigNumberStrings` stringifies
+ *   it — but this value is bounded by the cap enforced at insert time (see
+ *   `MAX_TIMER_COMMANDS_PER_STREAMER` in `timersMutations.ts`), never large enough to approach
+ *   `Number.MAX_SAFE_INTEGER`, so parsing it back to a number here is safe and deliberate.
+ */
+export async function countTimerCommandsForStreamer(streamerId: number): Promise<number> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT COUNT(*) AS count FROM timer_command WHERE streamer_id = ?`,
+    [streamerId],
+  );
+  return Number.parseInt(rows[0].count, 10);
+}
+
+/**
  * Creates a new timer command for a streamer.
  * @param streamerId - DB row ID of the owning streamer.
  * @param input - The timer's fields.

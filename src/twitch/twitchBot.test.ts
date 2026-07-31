@@ -14,6 +14,7 @@ const { mockClient, registeredHandlers } = vi.hoisted(() => {
     part: vi.fn(),
     say: vi.fn(),
     channels: [] as string[],
+    userstate: {} as Record<string, { badges?: Record<string, string> | null }>,
   };
   return { mockClient: client, registeredHandlers: handlers };
 });
@@ -97,6 +98,7 @@ import {
   sayInChannel,
   __resetTwitchChannelDiscordIdCacheForTests,
 } from './twitchBot';
+import { __resetTwitchSendQueueForTests } from './twitchSendQueue';
 import {
   joinTwitchChannel,
   partTwitchChannel,
@@ -131,6 +133,7 @@ function resetMockClient(): void {
   mockClient.join.mockResolvedValue(undefined);
   mockClient.part.mockResolvedValue(undefined);
   mockClient.say.mockResolvedValue(undefined);
+  mockClient.userstate = {};
 }
 
 /** Start the bot with an empty channel list and simulate a successful connection. */
@@ -155,6 +158,7 @@ beforeEach(() => {
   resetMockClient();
   for (const key of Object.keys(registeredHandlers)) delete registeredHandlers[key];
   vi.useFakeTimers();
+  __resetTwitchSendQueueForTests();
 });
 
 afterEach(async () => {
@@ -577,6 +581,52 @@ describe('sayInChannel', () => {
     await connectBot();
     await sayInChannel('#STREAMER', 'hello!');
     expect(mockClient.say).toHaveBeenCalledWith('streamer', 'hello!');
+  });
+
+  // Twitch's rate-limit window and per-channel floor are exercised exhaustively in
+  // twitchSendQueue.test.ts — these just confirm sayInChannel wires channel + the live
+  // privilege check (read from tmi.js's internal per-channel userstate badges) into it.
+
+  it('treats the channel as non-privileged when there is no userstate entry for it yet', async () => {
+    await connectBot();
+    await sayInChannel('#streamer', 'first');
+    const second = sayInChannel('#streamer', 'second');
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(mockClient.say).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await second;
+    expect(mockClient.say).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['moderator', { moderator: '1' }],
+    ['vip', { vip: '1' }],
+    ['broadcaster', { broadcaster: '1' }],
+  ])('exempts a channel from the per-channel floor when the badges show %s status', async (_label, badges) => {
+    await connectBot();
+    // tmi.js keys its internal userstate map by the IRC channel form ('#streamer'), not the
+    // bare normalized name — this must match that real shape, or a lookup-key regression
+    // (e.g. accidentally dropping the '#') would pass here despite never matching in production.
+    mockClient.userstate = { '#streamer': { badges } };
+    await sayInChannel('#streamer', 'first');
+    await sayInChannel('#streamer', 'second');
+    expect(mockClient.say).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not treat a channel as privileged from another channel\'s badges', async () => {
+    await connectBot();
+    mockClient.userstate = { '#other-channel': { badges: { moderator: '1' } } };
+    await sayInChannel('#streamer', 'first');
+    const second = sayInChannel('#streamer', 'second');
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(mockClient.say).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await second;
+    expect(mockClient.say).toHaveBeenCalledTimes(2);
   });
 });
 

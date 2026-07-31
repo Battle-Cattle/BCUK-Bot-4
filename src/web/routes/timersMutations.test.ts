@@ -6,6 +6,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   addTimerCommand: vi.fn(),
+  countTimerCommandsForStreamer: vi.fn(),
   updateTimerCommand: vi.fn(),
   removeTimerCommand: vi.fn(),
   setTimerCommandEnabled: vi.fn(),
@@ -26,8 +27,8 @@ vi.mock('../middleware', () => ({
 import supertest from 'supertest';
 import router from './timersMutations';
 import {
-  getStreamerByDiscordId, addTimerCommand, updateTimerCommand, removeTimerCommand,
-  setTimerCommandEnabled, TimerCommandNotFoundError,
+  getStreamerByDiscordId, addTimerCommand, countTimerCommandsForStreamer, updateTimerCommand,
+  removeTimerCommand, setTimerCommandEnabled, TimerCommandNotFoundError,
 } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
@@ -52,6 +53,7 @@ function buildApp(sessionUser: SessionUser = USER) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+  vi.mocked(countTimerCommandsForStreamer).mockResolvedValue(0);
 });
 
 describe('POST /add', () => {
@@ -99,6 +101,54 @@ describe('POST /add', () => {
 
     const res = await supertest(buildApp()).post('/add').type('form').send(VALID_TIMER_FORM);
     expect(res.headers.location).toBe('/timers?error=add_failed');
+  });
+
+  it('redirects with add_failed when the count check throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(countTimerCommandsForStreamer).mockRejectedValue(new Error('db down'));
+
+    const res = await supertest(buildApp()).post('/add').type('form').send(VALID_TIMER_FORM);
+    expect(res.headers.location).toBe('/timers?error=add_failed');
+    expect(addTimerCommand).not.toHaveBeenCalled();
+  });
+
+  it('redirects with timer_limit_reached and skips the insert when the streamer is already at the cap', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(countTimerCommandsForStreamer).mockResolvedValue(20);
+
+    const res = await supertest(buildApp()).post('/add').type('form').send(VALID_TIMER_FORM);
+
+    expect(res.headers.location).toBe('/timers?error=timer_limit_reached');
+    expect(addTimerCommand).not.toHaveBeenCalled();
+  });
+
+  it('allows the insert when the streamer is one below the cap', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(countTimerCommandsForStreamer).mockResolvedValue(19);
+    vi.mocked(addTimerCommand).mockResolvedValue(1);
+
+    const res = await supertest(buildApp()).post('/add').type('form').send(VALID_TIMER_FORM);
+
+    expect(res.headers.location).toBe('/timers?success=timer_added');
+    expect(addTimerCommand).toHaveBeenCalled();
+  });
+
+  it('serializes concurrent requests for the same streamer so a race cannot exceed the cap', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    // Simulates the real DB: the count reflects however many inserts have actually landed so far.
+    let insertedCount = 19;
+    vi.mocked(countTimerCommandsForStreamer).mockImplementation(async () => insertedCount);
+    vi.mocked(addTimerCommand).mockImplementation(async () => { insertedCount += 1; return 1; });
+
+    const app = buildApp();
+    const [res1, res2] = await Promise.all([
+      supertest(app).post('/add').type('form').send(VALID_TIMER_FORM),
+      supertest(app).post('/add').type('form').send(VALID_TIMER_FORM),
+    ]);
+
+    const locations = [res1.headers.location, res2.headers.location].sort();
+    expect(locations).toEqual(['/timers?error=timer_limit_reached', '/timers?success=timer_added']);
+    expect(addTimerCommand).toHaveBeenCalledTimes(1);
   });
 });
 

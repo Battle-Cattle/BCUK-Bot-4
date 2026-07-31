@@ -10,6 +10,7 @@ import { fireAndForget } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
 import { normalizeTwitchChannelName } from './twitchChannelName';
+import { throttledTwitchSend } from './twitchSendQueue';
 import { createLogger } from '../shared/logger';
 import {
   createManagedLookupCache,
@@ -223,17 +224,57 @@ export async function startTwitchBot(): Promise<void> {
 }
 
 /**
- * Sends `message` to a Twitch channel via the connected tmi.js client.
+ * Shape of the subset of tmi.js's internal client state this file reaches into — not part of
+ * its public type surface (same tradeoff as the `channels` cast in {@link onDisconnected}), but
+ * narrowed to just what's read here rather than casting through `any`.
+ */
+interface TmiClientInternal {
+  userstate?: Record<string, { badges?: Record<string, string> | null } | undefined>;
+}
+
+/**
+ * Resolves whether the bot currently holds moderator/VIP/broadcaster status in `channel`, from
+ * tmi.js's internal per-channel `userstate` (populated from the IRC USERSTATE tags sent on join
+ * and on every send — the same source `client.isMod()` reads, but `isMod()` only reflects the
+ * `user-type` tag, which is never set for VIP or broadcaster status). `userstate` is keyed by the
+ * IRC channel form (`#channel`, via tmi.js's internal `_.channel()`), not the bare name
+ * {@link normalizeTwitchChannelName} returns, so the `#` has to be added back here.
+ * Under-detecting privilege here only makes a send unnecessarily conservative (throttled at the
+ * stricter non-privileged rate) rather than unsafe, so a missing/malformed userstate entry — e.g.
+ * before the bot has joined `channel` — safely resolves to false.
+ * @param channel - Normalized Twitch channel name (without a leading `#`).
+ * @returns True if `channel`'s userstate badges show moderator, VIP, or broadcaster status.
+ */
+function isPrivilegedInChannel(channel: string): boolean {
+  const badges = (client as TmiClientInternal | null)?.userstate?.[`#${channel}`]?.badges;
+  return !!badges?.moderator || !!badges?.vip || !!badges?.broadcaster;
+}
+
+/**
+ * Sends `message` to a Twitch channel via the connected tmi.js client, throttled against
+ * Twitch's global per-account rate-limit buckets (see {@link throttledTwitchSend}) so this
+ * shared entry point — used by every auto-posting feature (custom commands, counters, timers,
+ * shoutouts, EventSub, etc.) — can never burst past them, regardless of how many features fire
+ * at once or which channels they target. Whether the bot is currently privileged
+ * (moderator/VIP/broadcaster) in the target channel is re-checked live (see
+ * {@link isPrivilegedInChannel}) right before the send actually runs, not when it's queued, since
+ * this call may sit behind others for a while — the same reason the connection itself is
+ * rechecked below rather than trusted from before queueing.
  * @param channel - Twitch channel to send to (normalized before sending).
  * @param message - Message text to send.
- * @returns Resolves once the message has been sent.
- * @throws If `channel` doesn't normalize to a valid channel name, or the client isn't connected.
+ * @returns Resolves once the message has actually been sent.
+ * @throws If `channel` doesn't normalize to a valid channel name, or the client isn't connected
+ *   (checked both before queueing and again when the send actually runs, since the connection
+ *   can drop while this send is waiting behind others in the global queue).
  */
 export async function sayInChannel(channel: string, message: string): Promise<void> {
   const normalized = normalizeTwitchChannelName(channel);
   if (!normalized) throw new Error(`[Twitch] Invalid channel name: ${channel}`);
   if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
-  await client.say(normalized, message);
+  await throttledTwitchSend(normalized, () => isPrivilegedInChannel(normalized), async () => {
+    if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
+    await client.say(normalized, message);
+  });
 }
 
 /**
