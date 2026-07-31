@@ -218,10 +218,10 @@ export async function executeCustomCommandForDiscord(
   const result = await lookupCommand(command, (cmd) => getCustomCommandForDiscord(cmd, resolvedGuildId));
   if (!result) return;
 
-  if (!customCommandCooldown.tryClaim(`discord:${resolvedGuildId}`)) {
-    log.info(`[Discord] Cooldown active for guild ${resolvedGuildId}, ignoring custom command '${command}'`);
-    return;
-  }
+  // No log here: a spammed matching command would otherwise emit one log line per rejected
+  // message for as long as the sender keeps sending, unbounded — same silent-skip treatment
+  // as an unmatched command above.
+  if (!customCommandCooldown.tryClaim(`discord:${resolvedGuildId}`)) return;
 
   const filledResponse = buildFilledResponse(result.response, message.content, username);
 
@@ -265,10 +265,10 @@ export async function executeCustomCommandForTwitch(
   const result = await lookupCommand(command, (cmd) => getCustomCommandForTwitchChannel(channel, cmd));
   if (!result) return;
 
-  if (!customCommandCooldown.tryClaim(`twitch:${channel}`)) {
-    log.info(`[Twitch] Cooldown active for channel ${channel}, ignoring custom command '${command}'`);
-    return;
-  }
+  // No log here: a spammed matching command would otherwise emit one log line per rejected
+  // message for as long as the sender keeps sending, unbounded — same silent-skip treatment
+  // as an unmatched command above.
+  if (!customCommandCooldown.tryClaim(`twitch:${channel}`)) return;
 
   const filledResponse = buildFilledResponse(result.response, rawMessage, username);
 

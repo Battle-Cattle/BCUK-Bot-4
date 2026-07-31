@@ -84,10 +84,10 @@ async function _buildCounterResponse(
   const counter = await findCounterByCommand(command);
   if (!counter) return null;
 
-  if (!counterCooldown.tryClaim(cooldownKey)) {
-    log.info(`[${errorPrefix}] Cooldown active, ignoring counter command '${command}'`);
-    return null;
-  }
+  // No log here: a spammed matching command would otherwise emit one log line per rejected
+  // message for as long as the sender keeps sending, unbounded — same silent-skip treatment
+  // as an unmatched command above.
+  if (!counterCooldown.tryClaim(cooldownKey)) return null;
 
   const isTrigger = counter.matchType === 'trigger';
   const label = isTrigger ? 'counter command' : 'counter check';

@@ -263,16 +263,40 @@ describe('csrfErrorHandler', () => {
  * Because these are the exact singleton objects `server.ts` calls `app.use()` with, a
  * copy/paste mistake swapping which keyGenerator/skip pair is attached to which limiter
  * (see #477) shows up here as a limiter that fails to block, or blocks when it shouldn't.
+ *
+ * @param limiter - The `generalLimiter` or `sessionLimiter` instance under test.
+ * @param sessionUser - Value to stub as `req.session.user` on every request (undefined for unauthenticated).
+ * @returns A minimal Express app: session stub → `limiter` → a 200-returning probe route.
  */
-function buildLimiterTestApp(limiter: express.RequestHandler, sessionUser: unknown) {
+function buildLimiterTestApp(limiter: express.RequestHandler, sessionUser: unknown): express.Express {
   const testApp = express();
+  /** Stubs `req.session.user` to `sessionUser` so the limiter's keyGenerator/skip can be exercised without real login. */
   testApp.use((req, _res, next) => {
     (req as unknown as { session: { user: unknown } }).session = { user: sessionUser };
     next();
   });
   testApp.use(limiter);
+  /** Probe route: returns 200 unless a limiter ahead of it in the chain has already rejected the request. */
   testApp.get('/__limiter_probe', (_req, res) => res.json({ ok: true }));
   return testApp;
+}
+
+/**
+ * Sends `limit` requests through `testApp` and asserts every one succeeds (200), then sends
+ * one more and asserts it's rejected (429) — pinning the exact threshold instead of merely
+ * observing that a 429 eventually appears somewhere in a longer, looser loop.
+ *
+ * @param testApp - App built by {@link buildLimiterTestApp}.
+ * @param limit - The limiter's configured request cap for the window.
+ * @returns Resolves once all `limit` + 1 requests have completed and been asserted.
+ */
+async function expectExactThreshold(testApp: express.Express, limit: number): Promise<void> {
+  for (let i = 0; i < limit; i++) {
+    const res = await request(testApp).get('/__limiter_probe');
+    expect(res.status).toBe(200);
+  }
+  const res = await request(testApp).get('/__limiter_probe');
+  expect(res.status).toBe(429);
 }
 
 describe('generalLimiter wiring (server.ts)', () => {
@@ -284,17 +308,9 @@ describe('generalLimiter wiring (server.ts)', () => {
     await generalLimiter.resetKey('::1');
   });
 
-  it('blocks an unauthenticated caller after exceeding the 100/15min per-IP limit', async () => {
+  it('allows exactly 100 requests then blocks the 101st for an unauthenticated caller', async () => {
     const testApp = buildLimiterTestApp(generalLimiter, undefined);
-    let sawRateLimited = false;
-    for (let i = 0; i < 105; i++) {
-      const res = await request(testApp).get('/__limiter_probe');
-      if (res.status === 429) {
-        sawRateLimited = true;
-        break;
-      }
-    }
-    expect(sawRateLimited).toBe(true);
+    await expectExactThreshold(testApp, 100);
   });
 
   it('skips an authenticated caller (per-account throttling is sessionLimiter’s job)', async () => {
@@ -315,16 +331,8 @@ describe('sessionLimiter wiring (server.ts)', () => {
     }
   });
 
-  it('blocks an authenticated account after exceeding the 600/15min per-account limit', async () => {
+  it('allows exactly 600 requests then blocks the 601st for an authenticated account', async () => {
     const testApp = buildLimiterTestApp(sessionLimiter, { discordId: 'session-limiter-block-test' });
-    let sawRateLimited = false;
-    for (let i = 0; i < 605; i++) {
-      const res = await request(testApp).get('/__limiter_probe');
-      if (res.status === 429) {
-        sawRateLimited = true;
-        break;
-      }
-    }
-    expect(sawRateLimited).toBe(true);
+    await expectExactThreshold(testApp, 600);
   });
 });
