@@ -269,6 +269,18 @@ describe('config — Twitch EventSub / encryption settings', () => {
     const config = await loadConfig({ EVENTSUB_TOKEN_SECRET: 'f'.repeat(64) });
     expect(config.EVENTSUB_TOKEN_SECRET).toBe('f'.repeat(64));
   });
+
+  it('throws at startup when EVENTSUB_TOKEN_SECRET is the wrong length', async () => {
+    await expect(loadConfig({ EVENTSUB_TOKEN_SECRET: 'f'.repeat(63) })).rejects.toThrow(
+      'EVENTSUB_TOKEN_SECRET must be exactly 64 hex characters (32 bytes)',
+    );
+  });
+
+  it('throws at startup when EVENTSUB_TOKEN_SECRET contains non-hex characters', async () => {
+    await expect(loadConfig({ EVENTSUB_TOKEN_SECRET: 'z'.repeat(64) })).rejects.toThrow(
+      'EVENTSUB_TOKEN_SECRET must be exactly 64 hex characters (32 bytes)',
+    );
+  });
 });
 
 describe('config — SFX/OVERLAY folder defaults', () => {

@@ -74,6 +74,12 @@ export const TWITCH_EVENTSUB_REDIRECT_URI = process.env.TWITCH_EVENTSUB_REDIRECT
 // Must be exactly 64 hex characters (32 bytes). Generate with: openssl rand -hex 32
 // Required to use the Twitch OAuth connect flow for follow/sub notifications.
 export const EVENTSUB_TOKEN_SECRET = process.env.EVENTSUB_TOKEN_SECRET ?? '';
+// Validated eagerly (like SESSION_SECRET above) instead of leaving it to the first
+// encryptToken/decryptToken call — otherwise a malformed value boots cleanly and only
+// surfaces as a generic error the first time a streamer connects EventSub.
+if (EVENTSUB_TOKEN_SECRET !== '' && !/^[0-9a-fA-F]{64}$/.test(EVENTSUB_TOKEN_SECRET)) {
+  throw new Error('EVENTSUB_TOKEN_SECRET must be exactly 64 hex characters (32 bytes)');
+}
 
 // OpenAI API key, used only for the owner-only "Suggest description" SFX feature.
 // Leave unset to keep that feature disabled — everything else works without it.

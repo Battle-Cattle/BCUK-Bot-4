@@ -2,8 +2,8 @@ import { Client, GatewayIntentBits, Guild } from 'discord.js';
 import { DISCORD_TOKEN } from '../shared/config';
 import { handleCommand, forgetGuildCommandState } from '../commands/commandRouter';
 import { fireAndForget } from '../commands/commandUtils';
-import { executeCustomCommandForDiscord } from '../commands/customCommandHandler';
-import { executeCounterCommandForDiscord } from '../commands/counterHandler';
+import { executeCustomCommandForDiscord, forgetGuildCustomCommandCooldown } from '../commands/customCommandHandler';
+import { executeCounterCommandForDiscord, forgetGuildCounterCooldown } from '../commands/counterHandler';
 import { setDiscordReady, clearVoiceStatus } from '../shared/statusStore';
 import { forgetGuild as forgetGuildVoiceState } from '../audio/audioPlayer';
 import { forgetGuildRefreshState } from '../web/routes/adminRefresh';
@@ -161,6 +161,8 @@ export function startDiscordBot(): void {
   localClient.on('guildDelete', (guild) => {
     forgetGuildVoiceState(guild.id);
     forgetGuildCommandState(guild.id);
+    forgetGuildCustomCommandCooldown(guild.id);
+    forgetGuildCounterCooldown(guild.id);
     clearVoiceStatus(guild.id);
     forgetGuildRefreshState(guild.id);
     log.info(`Forgot in-memory state for guild '${guild.name}' (${guild.id}) — bot removed.`);
