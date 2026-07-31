@@ -109,7 +109,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * @param isPrivileged - Resolves whether the bot currently has moderator/VIP/broadcaster status
  *   in `channel`. Called right before the window/floor checks (not at enqueue time), since this
  *   call may have been waiting behind others — the same reason `send` rechecks the connection
- *   itself rather than trusting a snapshot taken before it was queued.
+ *   itself rather than trusting a snapshot taken before it was queued. Re-checked again after
+ *   each wait and the checks re-run under the refreshed status if it changed, since the wait
+ *   itself (up to the full 30s window) is another window for status to change again.
  * @param send - Performs the actual send, bounded by {@link SEND_TIMEOUT_MS} so a stalled send
  *   can't wedge the queue forever. Rejecting (including via that timeout) doesn't affect the
  *   timing of later queued sends.
@@ -118,9 +120,18 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  */
 export async function throttledTwitchSend(channel: string, isPrivileged: () => boolean, send: () => Promise<void>): Promise<void> {
   await globalQueue.run('global', async () => {
-    const privileged = isPrivileged();
-    await waitForWindowRoom(privileged ? PRIVILEGED_LIMIT : NON_PRIVILEGED_LIMIT);
-    if (!privileged) await waitForChannelFloor(channel);
+    let privileged = isPrivileged();
+    for (;;) {
+      await waitForWindowRoom(privileged ? PRIVILEGED_LIMIT : NON_PRIVILEGED_LIMIT);
+      if (!privileged) await waitForChannelFloor(channel);
+
+      // The wait above can itself take a while (up to the full 30s window), so status may have
+      // changed again while waiting. Loop under the refreshed status until a pass finds it
+      // unchanged from what it started with — i.e. nothing to re-wait for.
+      const recheck = isPrivileged();
+      if (recheck === privileged) break;
+      privileged = recheck;
+    }
 
     const sentAt = Date.now();
     sentTimestamps.push(sentAt);

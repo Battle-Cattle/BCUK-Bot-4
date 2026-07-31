@@ -47,6 +47,32 @@ describe('throttledTwitchSend', () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
+  it('re-checks isPrivileged after a long wait, so a status change mid-wait is not left stale', async () => {
+    // Fill the moderator window entirely with privileged sends, then start a new privileged
+    // call that has to wait out the whole 30s window. Flip privileged to false while it waits.
+    await fillWindow('streamer', true, PRIVILEGED_LIMIT);
+    let privileged = true;
+    const first = vi.fn().mockResolvedValue(undefined);
+    const pending = throttledTwitchSend('streamer', () => privileged, first);
+    privileged = false;
+
+    await vi.advanceTimersByTimeAsync(WINDOW_MS);
+    await pending;
+    expect(first).toHaveBeenCalledTimes(1);
+
+    // If the send above had used the stale (privileged) classification instead of re-checking,
+    // it would never have recorded a non-privileged send for "streamer", and this next
+    // non-privileged send would go through immediately with no channel-floor wait at all.
+    const second = vi.fn().mockResolvedValue(undefined);
+    const blocked = throttledTwitchSend('streamer', () => false, second);
+    await vi.advanceTimersByTimeAsync(CHANNEL_FLOOR_MS - 1);
+    expect(second).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await blocked;
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
   // ─── Shared 30s window ──────────────────────────────────────────────────────
 
   it('lets a non-privileged send run up to the 20-message limit without delay (spread across channels to dodge the per-channel floor)', async () => {
