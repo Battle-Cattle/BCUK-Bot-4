@@ -42,7 +42,7 @@ const KNOWN_SUCCESS = new Set([
  * server-side requireMod guard on every mutation route. The "Suggest description"
  * button (canSuggestDescriptions) is further restricted to the bot owner while that
  * feature is being trialled, and hidden entirely when OPENAI_API_KEY isn't set,
- * matching the server-side requireOwner guard on its route.
+ * matching the server-side requireOwnerJson guard on its route.
  */
 router.get('/sfx', csrfProtection, async (req, res) => {
   try {

@@ -8,7 +8,7 @@ const mockCreate = vi.fn();
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../shared/config', () => ({ OPENAI_API_KEY: 'test-key', SFX_FOLDER: '/app/sfx' }));
 vi.mock('../csrf', () => ({ csrfProtection: (_req: any, _res: any, next: any) => next() }));
-vi.mock('../middleware', () => ({ requireOwner: (_req: any, _res: any, next: any) => next() }));
+vi.mock('../middleware', () => ({ requireOwnerJson: (_req: any, _res: any, next: any) => next() }));
 vi.mock('../../db', () => ({ findSoundFiles: vi.fn() }));
 vi.mock('fs', () => ({
   default: {
@@ -322,7 +322,7 @@ describe('POST /sfx/trigger/suggest-description (OPENAI_API_KEY unset)', () => {
     vi.doMock('../../shared/logger', () => ({ createLogger: mockLogger }));
     vi.doMock('../../shared/config', () => ({ OPENAI_API_KEY: '', SFX_FOLDER: '/app/sfx' }));
     vi.doMock('../csrf', () => ({ csrfProtection: (_req: any, _res: any, next: any) => next() }));
-    vi.doMock('../middleware', () => ({ requireOwner: (_req: any, _res: any, next: any) => next() }));
+    vi.doMock('../middleware', () => ({ requireOwnerJson: (_req: any, _res: any, next: any) => next() }));
     const findSoundFilesSpy = vi.fn();
     vi.doMock('../../db', () => ({ findSoundFiles: findSoundFilesSpy }));
 

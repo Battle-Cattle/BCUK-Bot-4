@@ -15,7 +15,7 @@ vi.mock('./csrf', () => ({
 }));
 
 import { createHash } from 'crypto';
-import { requireAuth, requireManager, requireMod, requireAdmin, requireOwner, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
+import { requireAuth, requireManager, requireMod, requireAdmin, requireOwner, requireOwnerJson, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
 import { findKeyByHash, findDiscordIdByTokenHash, getEffectiveAccessLevelForUser, findUser, getAllGuilds, getGuildsForMember, AccessLevel } from '../db';
 
 function makeReq(overrides: object = {}): any {
@@ -212,6 +212,43 @@ describe('requireOwner', () => {
     requireOwner(req, res, next);
     const [, data] = res.render.mock.calls[0];
     expect(data.message).toContain('Owner');
+  });
+});
+
+// ─── requireOwnerJson ─────────────────────────────────────────────────────────
+
+describe('requireOwnerJson', () => {
+  it('calls next() when isOwner is true, regardless of accessLevel', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER, isOwner: true } } });
+    requireOwnerJson(req, makeRes(), next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('returns a JSON 403 for an Admin who is not the owner', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN, isOwner: false } } });
+    const res = makeRes();
+    requireOwnerJson(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
+    expect(res.render).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns a JSON 403 when isOwner is absent', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN } } });
+    const res = makeRes();
+    requireOwnerJson(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
+  });
+
+  it('returns a JSON 403 when no session user', () => {
+    const req = makeReq({ session: {} });
+    const res = makeRes();
+    requireOwnerJson(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
+    expect(next).not.toHaveBeenCalled();
   });
 });
 
