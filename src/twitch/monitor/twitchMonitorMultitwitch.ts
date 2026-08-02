@@ -4,7 +4,9 @@ import { getDiscordClient } from '../../discord/discordBot';
 const log = createLogger('TwitchMonitor');
 import { tryEditDiscordMessage } from '../../discord/discordUtils';
 import { buildEmbed } from './twitchMonitorEmbed';
-import { LiveState } from './twitchMonitorTypes';
+import { LiveState, MultiTwitchGroupInfo } from './twitchMonitorTypes';
+
+export type { MultiTwitchGroupInfo };
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -13,11 +15,6 @@ export interface MultiTwitchPreview {
   applicable: boolean;
   participants: string[];
   url: string | null;
-}
-
-export interface MultiTwitchGroupInfo {
-  url: string;
-  participants: string[];
 }
 
 // ─── Internal types ───────────────────────────────────────────────────────────

@@ -24,7 +24,7 @@ vi.mock('../commands/counterHandler', () => ({
 }));
 vi.mock('../shared/statusStore', () => ({ setDiscordReady: vi.fn(), clearVoiceStatus: vi.fn() }));
 vi.mock('../audio/audioPlayer', () => ({ forgetGuild: vi.fn() }));
-vi.mock('../web/routes/adminRefresh', () => ({ forgetGuildRefreshState: vi.fn() }));
+vi.mock('./guildRefreshState', () => ({ forgetGuildRefreshState: vi.fn() }));
 vi.mock('./guildRegistry', () => ({
   // Only the legacy configured guild is registered in these tests.
   isRegisteredGuild: vi.fn((id: string) => id === 'guild-id'),
@@ -292,7 +292,7 @@ describe('startDiscordBot — guildDelete handler', () => {
   it('forgets the departed guild\'s in-memory voice, command, cooldown, status, and refresh state', async () => {
     const audioPlayer = await import('../audio/audioPlayer.js');
     const status = await import('../shared/statusStore.js');
-    const adminRefresh = await import('../web/routes/adminRefresh.js');
+    const guildRefreshState = await import('./guildRefreshState.js');
     const counterHandler = await import('../commands/counterHandler.js');
     const cb = getGuildDeleteCb();
 
@@ -303,7 +303,7 @@ describe('startDiscordBot — guildDelete handler', () => {
     expect(vi.mocked(customCmds.forgetGuildCustomCommandCooldown)).toHaveBeenCalledWith('departed-guild');
     expect(vi.mocked(counterHandler.forgetGuildCounterCooldown)).toHaveBeenCalledWith('departed-guild');
     expect(vi.mocked(status.clearVoiceStatus)).toHaveBeenCalledWith('departed-guild');
-    expect(vi.mocked(adminRefresh.forgetGuildRefreshState)).toHaveBeenCalledWith('departed-guild');
+    expect(vi.mocked(guildRefreshState.forgetGuildRefreshState)).toHaveBeenCalledWith('departed-guild');
   });
 
   it('does not touch the guild DB row', async () => {

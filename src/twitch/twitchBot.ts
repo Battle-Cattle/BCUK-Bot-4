@@ -10,7 +10,7 @@ import { fireAndForget } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
 import { normalizeTwitchChannelName } from './twitchChannelName';
-import { throttledTwitchSend } from './twitchSendQueue';
+import { throttledTwitchSend, withTimeout } from './twitchSendQueue';
 import { createLogger } from '../shared/logger';
 import {
   createManagedLookupCache,
@@ -35,6 +35,14 @@ const log = createLogger('Twitch');
 let client: tmi.Client | null = null;
 let connected = false;
 const TWITCH_CHAT_MESSAGE_PATTERN = /^\[#[^\]]+\] <[^>]+>: /;
+
+/**
+ * Upper bound on how long {@link stopTwitchBot} waits for `client.disconnect()`. tmi.js only
+ * resolves that promise once the underlying WebSocket fires a `close` event, which may never
+ * happen if the socket is already half-open at the network level — bounding it here guarantees
+ * shutdown always proceeds instead of hanging indefinitely.
+ */
+const DISCONNECT_TIMEOUT_MS = 5_000;
 
 // Bulk-loads every twitch_name → discord_id mapping in one query (like
 // getTwitchEnabledChannels()) instead of a lazy per-channel lookup, so a
@@ -279,8 +287,9 @@ export async function sayInChannel(channel: string, message: string): Promise<vo
 
 /**
  * Stops the Twitch bot: disconnects the tmi.js client (marking channels
- * disconnected if the disconnect itself fails), tears down the client
- * reference, and clears channel-membership state.
+ * disconnected if the disconnect itself fails or doesn't settle within
+ * {@link DISCONNECT_TIMEOUT_MS}), tears down the client reference, and
+ * clears channel-membership state.
  * @returns Resolves once shutdown is complete.
  */
 export async function stopTwitchBot(): Promise<void> {
@@ -288,7 +297,7 @@ export async function stopTwitchBot(): Promise<void> {
   setConnected(false);
   if (client) {
     try {
-      await client.disconnect();
+      await withTimeout(client.disconnect(), DISCONNECT_TIMEOUT_MS, 'Twitch disconnect');
     } catch (err) {
       log.warn('Error during disconnect:', err);
       getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });

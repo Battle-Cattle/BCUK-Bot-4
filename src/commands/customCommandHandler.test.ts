@@ -18,10 +18,6 @@ vi.mock('../discord/discordUtils', () => ({
   isDiscordNotFoundError: vi.fn().mockReturnValue(false),
 }));
 
-vi.mock('../twitch/monitor/twitchMonitor', () => ({
-  getMultiTwitchDataForChannel: vi.fn().mockReturnValue(null),
-}));
-
 import {
   executeCustomCommandForDiscord,
   executeCustomCommandForTwitch,
@@ -33,7 +29,6 @@ import {
 } from './customCommandHandler';
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from '../db';
 import { isDiscordNotFoundError } from '../discord/discordUtils';
-import { getMultiTwitchDataForChannel } from '../twitch/monitor/twitchMonitor';
 import { getSharedChatSession } from '../twitch/twitchApi';
 
 function mockMsg(content: string) {
@@ -49,6 +44,7 @@ const mockRuntime = {
   send: vi.fn().mockResolvedValue(undefined),
   getActiveChannels: vi.fn<() => ReadonlySet<string>>().mockReturnValue(new Set()),
   getLoginUserIds: vi.fn<() => ReadonlyMap<string, string>>().mockReturnValue(new Map()),
+  getMultiTwitchDataForChannel: vi.fn().mockReturnValue(null),
 };
 
 // Base time far in the future so `Date.now() - 0` always exceeds GLOBAL_COOLDOWN_MS
@@ -64,6 +60,7 @@ beforeEach(() => {
   mockRuntime.send.mockResolvedValue(undefined);
   mockRuntime.getActiveChannels.mockReturnValue(new Set());
   mockRuntime.getLoginUserIds.mockReturnValue(new Map());
+  mockRuntime.getMultiTwitchDataForChannel.mockReturnValue(null);
   registerTwitchChatRuntime(mockRuntime);
 });
 
@@ -203,7 +200,7 @@ describe('executeCustomCommandForTwitch', () => {
       output: 'Multi!',
       is_multi_twitch: true,
     } as any);
-    vi.mocked(getMultiTwitchDataForChannel).mockReturnValue({
+    mockRuntime.getMultiTwitchDataForChannel.mockReturnValue({
       url: 'multitwitch.tv/a/b',
       participants: ['#a', '#b'],
     } as any);
@@ -220,7 +217,7 @@ describe('executeCustomCommandForTwitch', () => {
       output: 'Hi!',
       is_multi_twitch: true,
     } as any);
-    vi.mocked(getMultiTwitchDataForChannel).mockReturnValue(null); // not in a group
+    mockRuntime.getMultiTwitchDataForChannel.mockReturnValue(null); // not in a group
     mockRuntime.getActiveChannels.mockReturnValue(new Set(['#a', '#b']));
 
     await executeCustomCommandForTwitch('#a', '!hi', null);
@@ -270,7 +267,7 @@ describe('executeCustomCommandForTwitch', () => {
       output: 'Multi!',
       is_multi_twitch: true,
     } as any);
-    vi.mocked(getMultiTwitchDataForChannel).mockReturnValue({
+    mockRuntime.getMultiTwitchDataForChannel.mockReturnValue({
       url: 'multitwitch.tv/a/b',
       participants: ['#a', '#b'],
     } as any);
@@ -292,7 +289,7 @@ describe('executeCustomCommandForTwitch', () => {
       output: '{user} said {args}',
       is_multi_twitch: true,
     } as any);
-    vi.mocked(getMultiTwitchDataForChannel).mockReturnValue({
+    mockRuntime.getMultiTwitchDataForChannel.mockReturnValue({
       url: 'multitwitch.tv/a/b',
       participants: ['#a', '#b'],
     } as any);

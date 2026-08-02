@@ -1,6 +1,17 @@
 import { DbStreamGroup, DbStreamerFull } from '../../db';
 import { TwitchStream } from '../twitchApi';
 
+/**
+ * A group's current MultiTwitch link: the URL and the participant logins it covers. Lives here
+ * (rather than in `twitchMonitorMultitwitch.ts`, which imports Discord bot internals) so it can
+ * be depended on — e.g. by `commands/customCommandHandler.ts`'s injected runtime — without
+ * pulling in that import chain.
+ */
+export interface MultiTwitchGroupInfo {
+  url: string;
+  participants: string[];
+}
+
 export interface LiveState {
   streamerId: number;
   groupId: number;

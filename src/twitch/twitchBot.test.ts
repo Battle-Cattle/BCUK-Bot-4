@@ -106,6 +106,7 @@ import {
   getActiveChannelUserIds,
   setChannelJoinedHook,
 } from './twitchChannelMembership';
+import * as twitchChannelMembership from './twitchChannelMembership';
 import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName } from '../db';
 import { resolveGuildIdForDiscordId } from '../discord/voicePresence';
 import { getUsers } from './twitchApi';
@@ -730,6 +731,31 @@ describe('stopTwitchBot', () => {
 
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
     expect(getActiveChannels().size).toBe(0);
+  });
+
+  it('does not hang forever when client.disconnect() never settles', async () => {
+    await connectBot();
+    vi.mocked(getUsers).mockResolvedValue([]);
+    await joinTwitchChannel('streamer');
+    mockClient.disconnect.mockImplementation(() => new Promise(() => {})); // never resolves/rejects
+    vi.mocked(setTwitchChannel).mockClear();
+    const setTmiClientSpy = vi.spyOn(twitchChannelMembership, 'setTmiClient');
+
+    const stopped = stopTwitchBot();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await stopped;
+
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
+    expect(getActiveChannels().size).toBe(0);
+    expect(setTmiClientSpy).toHaveBeenCalledWith(null);
+    setTmiClientSpy.mockRestore();
+
+    // Client reference was cleared despite the hang: a second stop is a no-op
+    // (mirrors the "no-op when never started" case) rather than awaiting the
+    // still-hanging disconnect() again.
+    mockClient.disconnect.mockClear();
+    await stopTwitchBot();
+    expect(mockClient.disconnect).not.toHaveBeenCalled();
   });
 });
 

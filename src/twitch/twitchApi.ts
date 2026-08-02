@@ -247,6 +247,16 @@ function customRewardUrl(broadcasterId: string, rewardId?: string): string {
   return rewardId ? `${base}&id=${encodeURIComponent(rewardId)}` : base;
 }
 
+/**
+ * Lists a broadcaster's custom rewards via Helix. Unlike its create/update/delete siblings, a
+ * 403 (the broadcaster is not a Twitch Partner or Affiliate, so channel points aren't available)
+ * is treated as "no rewards" rather than a typed error, since listing is read-only and callers
+ * generally just want to render whatever's available.
+ * @param broadcasterId - Twitch user ID whose custom rewards to list.
+ * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
+ * @returns The broadcaster's custom rewards, or `[]` on a 403.
+ * @throws If Twitch returns a non-OK, non-403 status.
+ */
 export async function getCustomRewards(broadcasterId: string, userToken: string): Promise<TwitchCustomReward[]> {
   const res = await twitchFetch(customRewardUrl(broadcasterId), { headers: authHeaders(userToken) });
   if (res.status === 403) return [];
