@@ -731,6 +731,21 @@ describe('stopTwitchBot', () => {
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
     expect(getActiveChannels().size).toBe(0);
   });
+
+  it('does not hang forever when client.disconnect() never settles', async () => {
+    await connectBot();
+    vi.mocked(getUsers).mockResolvedValue([]);
+    await joinTwitchChannel('streamer');
+    mockClient.disconnect.mockImplementation(() => new Promise(() => {})); // never resolves/rejects
+    vi.mocked(setTwitchChannel).mockClear();
+
+    const stopped = stopTwitchBot();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await stopped;
+
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
+    expect(getActiveChannels().size).toBe(0);
+  });
 });
 
 // ─── reconcileJoinedChannels (via onConnected) ────────────────────────────────

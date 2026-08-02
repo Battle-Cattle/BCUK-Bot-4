@@ -6,44 +6,12 @@ import { requireManager } from '../middleware';
 import { getSessionUser } from '../session';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
 import { userMutationQueue } from './adminUserMutationQueue';
+import {
+  type RefreshOutcome, type RefreshState, refreshStates, getRefreshState, forgetGuildRefreshState,
+} from '../../discord/guildRefreshState';
 
-/** Lifecycle state of a guild's Discord-name-refresh job. */
-export type RefreshOutcome = 'idle' | 'running' | 'success' | 'partial' | 'noop' | 'error';
-
-/** Progress/result of a guild's most recent (or in-progress) Discord-name-refresh job. */
-export interface RefreshState {
-  outcome: RefreshOutcome;
-  updatedCount: number;
-  failureCount: number;
-  startedAt: number | null;
-  finishedAt: number | null;
-}
-
-function idleRefreshState(): RefreshState {
-  return { outcome: 'idle', updatedCount: 0, failureCount: 0, startedAt: null, finishedAt: null };
-}
-
-// Per-guild progress state, intentionally in-process because the web panel runs as
-// a single bot instance today. If the panel is ever scaled horizontally, move this
-// state into shared storage before relying on /users/refresh-status.
-export const refreshStates = new Map<string, RefreshState>();
-
-/** Returns the Discord-name-refresh progress for a guild, defaulting to idle when no refresh has run yet. */
-export function getRefreshState(guildId: string): RefreshState {
-  return refreshStates.get(guildId) ?? idleRefreshState();
-}
-
-/**
- * Forgets a guild's Discord-name-refresh progress state so it stops occupying
- * memory once the bot is no longer in that guild. Safe to call for a guild
- * with no state (no-op). Called from the `guildDelete` handler; a guild the
- * bot rejoins later starts fresh via {@link getRefreshState}'s idle default.
- *
- * @param guildId - Guild to forget.
- */
-export function forgetGuildRefreshState(guildId: string): void {
-  refreshStates.delete(guildId);
-}
+export type { RefreshOutcome, RefreshState };
+export { refreshStates, getRefreshState, forgetGuildRefreshState };
 
 const log = createLogger('Web');
 

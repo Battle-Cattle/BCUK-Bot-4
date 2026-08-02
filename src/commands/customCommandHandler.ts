@@ -6,7 +6,7 @@ const log = createLogger('CustomCmd');
 import { getSharedChatSession } from '../twitch/twitchApi';
 import { extractCommand, extractArgs } from './commandUtils';
 import { isDiscordNotFoundError } from '../discord/discordUtils';
-import { getMultiTwitchDataForChannel } from '../twitch/monitor/twitchMonitor';
+import type { MultiTwitchGroupInfo } from '../twitch/monitor/twitchMonitorTypes';
 import { fillTemplate } from '../shared/textTemplate';
 import { sendDedupedBySession } from './twitchBroadcast';
 import { createRuntimeRegistry, type TwitchBroadcastRuntime } from './twitchRuntime';
@@ -34,10 +34,15 @@ export function forgetGuildCustomCommandCooldown(guildId: string): void {
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
-// Avoids a circular import: twitchBot.ts → customCommandHandler.ts → twitchBot.ts.
-// index.ts wires the concrete implementations once both modules are loaded.
+// Avoids two circular imports: twitchBot.ts → customCommandHandler.ts → twitchBot.ts, and
+// discordBot.ts → customCommandHandler.ts → twitch/monitor/twitchMonitor.ts → discordBot.ts (the
+// monitor modules import getDiscordClient). index.ts wires the concrete implementations once
+// every module involved is loaded.
 
-type TwitchChatRuntime = TwitchBroadcastRuntime;
+interface TwitchChatRuntime extends TwitchBroadcastRuntime {
+  /** Delegates to `twitchMonitor.ts`'s `getMultiTwitchDataForChannel`, injected to avoid importing that module directly. */
+  getMultiTwitchDataForChannel: (login: string) => MultiTwitchGroupInfo | null;
+}
 
 const twitchChatRuntime = createRuntimeRegistry<TwitchChatRuntime>();
 
@@ -154,7 +159,7 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
   const runtime = twitchChatRuntime.get();
   if (!runtime) return false;
 
-  const { send, getActiveChannels, getLoginUserIds } = runtime;
+  const { send, getActiveChannels, getLoginUserIds, getMultiTwitchDataForChannel } = runtime;
   const activeChannels = getActiveChannels();
   const loginUserIds = getLoginUserIds();
 

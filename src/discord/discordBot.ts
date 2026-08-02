@@ -6,7 +6,7 @@ import { executeCustomCommandForDiscord, forgetGuildCustomCommandCooldown } from
 import { executeCounterCommandForDiscord, forgetGuildCounterCooldown } from '../commands/counterHandler';
 import { setDiscordReady, clearVoiceStatus } from '../shared/statusStore';
 import { forgetGuild as forgetGuildVoiceState } from '../audio/audioPlayer';
-import { forgetGuildRefreshState } from '../web/routes/adminRefresh';
+import { forgetGuildRefreshState } from './guildRefreshState';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
 import { upsertGuild, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
 import { createLogger } from '../shared/logger';

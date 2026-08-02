@@ -4,7 +4,7 @@ import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot'
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startDiscordBot, stopDiscordBot } from './discord/discordBot';
 import { reloadGuildRegistry } from './discord/guildRegistry';
-import { startTwitchMonitor, stopTwitchMonitor } from './twitch/monitor/twitchMonitor';
+import { startTwitchMonitor, stopTwitchMonitor, getMultiTwitchDataForChannel } from './twitch/monitor/twitchMonitor';
 import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitch/eventsub/twitchEventSub';
 import { startWebPanel } from './web/server';
 import { disconnect } from './audio/audioPlayer';
@@ -51,6 +51,19 @@ async function shutdown(signal: string): Promise<void> {
 process.on('SIGINT',  () => { shutdown('SIGINT').catch((err)  => { log.error('Shutdown error:', err); process.exit(1); }); });
 process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err) => { log.error('Shutdown error:', err); process.exit(1); }); });
 
+// Without these, a rejection or throw originating from inside a third-party library's own
+// internals (discord.js, tmi.js, mysql2, ws) rather than the app's own promise chains would go
+// fully unhandled and silently kill the process — there's no supervisor (pm2/systemd) to restart
+// it, so we log loudly and exit deliberately instead, making the failure visible and diagnosable.
+process.on('unhandledRejection', (reason) => {
+  log.error('Unhandled promise rejection:', reason);
+  process.exit(1);
+});
+process.on('uncaughtException', (err) => {
+  log.error('Uncaught exception:', err);
+  process.exit(1);
+});
+
 async function main(): Promise<void> {
   log.info('Starting BCUK Bot 4...');
 
@@ -72,6 +85,7 @@ async function main(): Promise<void> {
     send: sayInChannel,
     getActiveChannels,
     getLoginUserIds: getActiveChannelUserIds,
+    getMultiTwitchDataForChannel,
   });
   registerCounterTwitchRuntime({ send: sayInChannel });
   registerMultiTwitchRuntime({ send: sayInChannel, getActiveChannels, getLoginUserIds: getActiveChannelUserIds });

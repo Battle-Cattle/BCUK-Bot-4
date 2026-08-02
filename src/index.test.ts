@@ -34,6 +34,7 @@ vi.mock('./twitch/twitchChannelMembership', () => ({
 vi.mock('./twitch/monitor/twitchMonitor', () => ({
   startTwitchMonitor: vi.fn().mockResolvedValue(undefined),
   stopTwitchMonitor: vi.fn().mockResolvedValue(undefined),
+  getMultiTwitchDataForChannel: vi.fn(),
 }));
 vi.mock('./twitch/eventsub/twitchEventSub', () => ({
   startEventSub: vi.fn(),
@@ -80,11 +81,14 @@ beforeEach(() => {
   // module cache but does not reset call counts. clearAllMocks() resets counts to 0
   // so failure-path assertions on mocks like startDiscordBot start from a clean slate.
   vi.clearAllMocks();
-  // Each import('./index.js') registers fresh SIGINT/SIGTERM listeners on the real
-  // process object; resetModules doesn't remove the old ones. Clear them so a test
-  // that emits a signal only triggers its own run's shutdown() closure.
+  // Each import('./index.js') registers fresh SIGINT/SIGTERM/unhandledRejection/
+  // uncaughtException listeners on the real process object; resetModules doesn't
+  // remove the old ones. Clear them so a test that emits a signal or error only
+  // triggers its own run's handler.
   process.removeAllListeners('SIGINT');
   process.removeAllListeners('SIGTERM');
+  process.removeAllListeners('unhandledRejection');
+  process.removeAllListeners('uncaughtException');
   // Throw on the first call so main() stops executing after a catch block calls
   // process.exit(1). Revert to a no-op on subsequent calls so the outer
   // main().catch() path — which also calls process.exit(1) after the inner throw
@@ -99,6 +103,8 @@ afterEach(() => {
   exitSpy.mockRestore();
   process.removeAllListeners('SIGINT');
   process.removeAllListeners('SIGTERM');
+  process.removeAllListeners('unhandledRejection');
+  process.removeAllListeners('uncaughtException');
 });
 
 /** Imports index.ts (which fires main() immediately) and waits for it to settle. */
@@ -209,5 +215,29 @@ describe('shutdown', () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(vi.mocked(stopRewardPricingScheduler)).toHaveBeenCalledOnce();
+  });
+});
+
+// ─── Global unhandled error handlers ──────────────────────────────────────────
+
+describe('global error handlers', () => {
+  it('exits the process on an unhandled promise rejection', async () => {
+    await runMain();
+
+    expect(() => {
+      process.emit('unhandledRejection', new Error('boom'), Promise.reject(new Error('boom')).catch(() => {}));
+    }).toThrow('process.exit');
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('exits the process on an uncaught exception', async () => {
+    await runMain();
+
+    expect(() => {
+      process.emit('uncaughtException', new Error('boom'));
+    }).toThrow('process.exit');
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
   });
 });

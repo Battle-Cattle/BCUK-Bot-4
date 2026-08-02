@@ -9,7 +9,7 @@ vi.mock('../shared/config', () => ({
 
 import {
   getUsers, getStreams, getChannelInfo, getSharedChatSession, getAppToken,
-  updateRewardCost, createCustomReward, updateCustomReward, deleteCustomReward,
+  getCustomRewards, updateRewardCost, createCustomReward, updateCustomReward, deleteCustomReward,
   TwitchRewardUnsupportedError, TwitchRewardAuthError,
 } from './twitchApi';
 
@@ -154,6 +154,35 @@ describe('getSharedChatSession', () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, TOKEN_RESPONSE));
     await getAppToken();
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('getCustomRewards', () => {
+  it('sends a GET with the broadcaster_id query param, returning the reward list', async () => {
+    const rewards = [{ id: 'rwd1', title: 'Cool Reward', cost: 500 }];
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: rewards }));
+
+    const result = await getCustomRewards('bc1', 'user-token');
+
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(String(url)).toContain('broadcaster_id=bc1');
+    expect(init?.method).toBeUndefined(); // defaults to GET
+    expect(result).toEqual(rewards);
+  });
+
+  it('throws with the response status on a 401 response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(401, {}));
+    await expect(getCustomRewards('bc1', 'user-token')).rejects.toThrow('getCustomRewards failed: 401');
+  });
+
+  it('returns an empty array on a 403 response, rather than throwing', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(403, {}));
+    expect(await getCustomRewards('bc1', 'user-token')).toEqual([]);
+  });
+
+  it('throws a generic error for other non-OK statuses', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
+    await expect(getCustomRewards('bc1', 'user-token')).rejects.toThrow('getCustomRewards failed: 500');
   });
 });
 
