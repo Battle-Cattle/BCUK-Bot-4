@@ -4,6 +4,7 @@ vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   getVideosForStreamer: vi.fn(),
   getRewardsForStreamer: vi.fn(),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
 vi.mock('../csrf', () => ({
@@ -46,7 +47,7 @@ import router from './overlayAdmin';
 import { getStreamerByDiscordId, getVideosForStreamer, getRewardsForStreamer } from '../../db';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { getCustomRewards } from '../../twitch/twitchApi';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 

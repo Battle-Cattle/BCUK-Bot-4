@@ -5,6 +5,7 @@ vi.mock('../../db', () => ({
   ALERT_TEXT_ANIMATIONS: ['none', 'wave', 'pulse', 'glitch', 'shake', 'rainbow', 'flicker', 'tilt', 'bounce-in', 'typewriter'],
   getStreamerByDiscordId: vi.fn(),
   getAlertConfigsForStreamer: vi.fn(),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
 vi.mock('../csrf', () => ({
@@ -42,7 +43,7 @@ vi.mock('./alertsAssetMutations', async () => {
 import supertest from 'supertest';
 import router from './alertsAdmin';
 import { getStreamerByDiscordId, getAlertConfigsForStreamer } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 

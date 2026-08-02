@@ -16,11 +16,9 @@ vi.mock('../../db', () => {
     CommandNotFoundError,
     ReservedCommandError,
     isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
+    AccessLevel: ACCESS_LEVEL_MOCK,
   };
 });
-vi.mock('../../db/users', () => ({
-  AccessLevel: ACCESS_LEVEL_MOCK,
-}));
 vi.mock('../csrf', () => ({ csrfProtection: (_req: any, _res: any, next: any) => next() }));
 vi.mock('../middleware', () => ({ requireMod: (_req: any, _res: any, next: any) => next() }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
@@ -33,7 +31,7 @@ import {
   CommandConflictError, CommandNotFoundError, ReservedCommandError,
   isMysqlDuplicateEntryError,
 } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a supertest-ready app: the command mutations router with a urlencoded body parser (no session or render stub needed). */

@@ -11,6 +11,7 @@ vi.mock('../../db', () => ({
   setAlertSound: vi.fn(),
   // Pulled in transitively via sfxFileUpload.ts (source of the shared detectAudioType).
   addSfxFile: vi.fn(),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
 vi.mock('../csrf', () => ({
@@ -49,7 +50,7 @@ vi.mock('fs', () => ({
 import supertest from 'supertest';
 import { router, detectImageType } from './alertsAssetMutations';
 import { getStreamerByDiscordId, setAlertImage, setAlertSound } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
 import { buildTestApp } from '../../test-utils/expressTestApp';

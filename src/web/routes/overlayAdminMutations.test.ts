@@ -11,6 +11,7 @@ vi.mock('../../db', () => ({
   upsertReward: vi.fn(),
   setRewardVideos: vi.fn(),
   deleteReward: vi.fn(),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
 vi.mock('../csrf', () => ({
@@ -44,7 +45,7 @@ import supertest from 'supertest';
 import multer from 'multer';
 import { router, detectVideoType, handleUploadError } from './overlayAdminMutations';
 import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
 import { buildTestApp } from '../../test-utils/expressTestApp';

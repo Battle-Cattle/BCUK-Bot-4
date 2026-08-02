@@ -7,8 +7,6 @@ vi.mock('../../db', () => ({
   getAllGuilds: vi.fn(),
   getGuildsForMember: vi.fn(),
   findUser: vi.fn(),
-}));
-vi.mock('../../db/users', () => ({
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('../csrf', () => ({
@@ -23,7 +21,7 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './guild';
 import { findUser, getAllGuilds, getEffectiveAccessLevelForUser, getGuildsForMember } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 
 const TWO_GUILDS = [
   { guildId: '100000000000000001', name: 'Alpha' },

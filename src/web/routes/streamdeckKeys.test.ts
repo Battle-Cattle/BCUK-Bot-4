@@ -12,6 +12,7 @@ vi.mock('../../db', () => ({
   denyApiKey: vi.fn().mockResolvedValue(undefined),
   getAllApiKeys: vi.fn().mockResolvedValue([]),
   getPendingRequests: vi.fn().mockResolvedValue([]),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 vi.mock('../csrf', () => ({
   csrfProtection: (req: any, _res: any, next: any) => {
@@ -33,7 +34,7 @@ import {
   getGuildStatusForKey, revokeApiKey,
   approveApiKey, denyApiKey, getAllApiKeys, getPendingRequests,
 } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';

@@ -16,6 +16,7 @@ vi.mock('../../db', () => {
     CounterNotFoundError,
     ReservedCommandError,
     isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
+    AccessLevel: ACCESS_LEVEL_MOCK,
   };
 });
 
@@ -36,8 +37,6 @@ vi.mock('../../logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
-vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
-
 import supertest from 'supertest';
 import router from './counters';
 import {
@@ -52,7 +51,7 @@ import {
   CounterNotFoundError,
   ReservedCommandError,
 } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a supertest-ready app: the counters router with a stubbed session and a render mock that sends `rendered:<view>` (locals ignored). */

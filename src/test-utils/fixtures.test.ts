@@ -1,12 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 
-// `fixtures.ts` imports `AccessLevel` from `../db/users` at runtime, which transitively pulls in
+// `fixtures.ts` imports `AccessLevel` from `../db` at runtime, which transitively pulls in
 // `../db/pool` (and its required env vars). Mock it out, matching the convention used across
-// `src/web/routes/*.test.ts` (e.g. `rateLimits.test.ts`, `shared.test.ts`).
-vi.mock('../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
+// `src/web/routes/*.test.ts` (e.g. `shared.test.ts`).
+vi.mock('../db', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
 
 import { makeSessionUser, makeDbGuild } from './fixtures';
-import { AccessLevel } from '../db/users';
+import { AccessLevel } from '../db';
 
 describe('makeSessionUser', () => {
   it('returns a default level-0 test user when called with no overrides', () => {

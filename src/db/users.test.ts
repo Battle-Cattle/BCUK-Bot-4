@@ -21,7 +21,6 @@ import {
   getTwitchEnabledChannels,
   getAllTwitchLinkedUsers,
   setTwitchBotEnabledRecord,
-  updateAccessLevel,
   AccessLevel,
 } from './users';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
@@ -398,22 +397,6 @@ describe('getAllTwitchLinkedUsers', () => {
     vi.mocked(getPool).mockReturnValue(makePool([rows]) as any);
     const result = await getAllTwitchLinkedUsers();
     expect(result).toEqual([{ twitchName: 'alice', discordId: '1' }]);
-  });
-});
-
-// ─── updateAccessLevel ────────────────────────────────────────────────────────
-
-describe('updateAccessLevel', () => {
-  it('throws for an invalid access level', async () => {
-    vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await expect(updateAccessLevel('1', 5)).rejects.toThrow('Invalid accessLevel: 5');
-  });
-
-  it('accepts all valid access levels', async () => {
-    for (const level of Object.values(AccessLevel)) {
-      vi.mocked(getPool).mockReturnValue(makePool() as any);
-      await expect(updateAccessLevel('1', level)).resolves.not.toThrow();
-    }
   });
 });
 

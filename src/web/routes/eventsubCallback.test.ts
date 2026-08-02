@@ -9,6 +9,7 @@ vi.mock('../../db', () => ({
   saveStreamerToken: vi.fn(),
   initEventConfig: vi.fn(),
   initAlertConfigs: vi.fn(),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
 vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
@@ -33,7 +34,7 @@ import supertest from 'supertest';
 import router from './eventsubCallback';
 import { getStreamerById, saveStreamerToken, initEventConfig, initAlertConfigs } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 

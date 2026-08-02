@@ -4,8 +4,6 @@ import type { Response } from 'express';
 import type { SessionUser } from '../../types/express';
 import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
-vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
-
 vi.mock('../../db', () => {
   class ReservedCommandError extends Error {}
   class CommandConflictError extends Error {}
@@ -14,10 +12,11 @@ vi.mock('../../db', () => {
     ReservedCommandError,
     CommandConflictError,
     isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
+    AccessLevel: ACCESS_LEVEL_MOCK,
   };
 });
 
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import {
   getStreamerByDiscordId,
   ReservedCommandError,

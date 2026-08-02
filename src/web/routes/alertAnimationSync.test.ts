@@ -2,14 +2,13 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
-// alertConfig.ts pulls in pool.ts (reads real DB env vars at module scope) and
-// alertConfigCache.ts (builds a managed lookup cache at module scope) — mock both so importing
-// the plain ALERT_TEXT_ANIMATIONS array here doesn't require a real DB connection, mirroring
-// src/db/alertConfig.test.ts's own mocks.
-vi.mock('../../db/pool', () => ({ getPool: vi.fn(), withTransaction: vi.fn() }));
-vi.mock('../../db/alertConfigCache', () => ({ invalidateAlertConfigLookupCache: vi.fn(), findCachedAlertConfig: vi.fn() }));
+// The '../../db' facade pulls in '../../shared/config' (which requires real env vars) at module
+// scope, so mock it here — the test only needs the plain ALERT_TEXT_ANIMATIONS array.
+vi.mock('../../db', () => ({
+  ALERT_TEXT_ANIMATIONS: ['none', 'wave', 'pulse', 'glitch', 'shake', 'rainbow', 'flicker', 'tilt', 'bounce-in', 'typewriter'],
+}));
 
-import { ALERT_TEXT_ANIMATIONS } from '../../db/alertConfig';
+import { ALERT_TEXT_ANIMATIONS } from '../../db';
 
 const REPO_ROOT = path.join(__dirname, '..', '..', '..');
 

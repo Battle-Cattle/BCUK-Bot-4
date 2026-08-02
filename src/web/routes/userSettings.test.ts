@@ -6,6 +6,7 @@ vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   saveEventConfig: vi.fn(),
   clearStreamerToken: vi.fn(),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
 vi.mock('../csrf', () => ({
@@ -40,7 +41,7 @@ import supertest from 'supertest';
 import router from './userSettings';
 import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken } from '../../db';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 

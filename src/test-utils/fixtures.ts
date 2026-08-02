@@ -1,4 +1,4 @@
-import { AccessLevel, type AccessLevelValue } from '../db/users';
+import { AccessLevel, type AccessLevelValue } from '../db';
 
 /** Shape of the `req.session.user` object used across `src/web/routes/*.test.ts` session stubs. */
 export interface SessionUserFixture {

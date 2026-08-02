@@ -10,6 +10,7 @@ vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   saveAlertConfig: vi.fn(),
   getAlertConfig: vi.fn(),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
 vi.mock('../csrf', () => ({
@@ -38,7 +39,7 @@ vi.mock('../../shared/config', () => ({}));
 import supertest from 'supertest';
 import { router } from './alertsAdminMutations';
 import { getStreamerByDiscordId, saveAlertConfig, getAlertConfig } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { pushAlertEvent } from './alertsOverlaySource';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { buildTestApp } from '../../test-utils/expressTestApp';

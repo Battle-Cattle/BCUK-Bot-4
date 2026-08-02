@@ -34,8 +34,6 @@ vi.mock('../../twitch/monitor/twitchMonitor', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
-
 import express from 'express';
 import supertest from 'supertest';
 import router from './streams';
@@ -44,7 +42,7 @@ import {
   addStreamGroup, addStreamer, findUser,
 } from '../../db';
 import { getLiveStates } from '../../twitch/monitor/twitchMonitor';
-import { AccessLevel, AccessLevelValue } from '../../db/users';
+import { AccessLevel, AccessLevelValue } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';

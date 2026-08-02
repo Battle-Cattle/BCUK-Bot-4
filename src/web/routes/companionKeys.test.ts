@@ -5,6 +5,7 @@ vi.mock('../../db', () => ({
   issueToken: vi.fn(),
   getTokenStatus: vi.fn(),
   revokeToken: vi.fn(),
+  AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 vi.mock('../csrf', () => ({
   csrfProtection: (req: any, _res: any, next: any) => {
@@ -19,7 +20,7 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './companionKeys';
 import { issueToken, getTokenStatus, revokeToken } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';
