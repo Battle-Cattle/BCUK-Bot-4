@@ -226,8 +226,9 @@ describe('withTimeout', () => {
   });
 
   it('rejects with the wrapped promise\'s own rejection reason when it settles before the timeout', async () => {
-    const result = withTimeout(Promise.reject(new Error('boom')), 1_000, 'test op');
-    await expect(result).rejects.toThrow('boom');
+    const reason = new Error('boom');
+    const result = withTimeout(Promise.reject(reason), 1_000, 'test op');
+    await expect(result).rejects.toBe(reason);
   });
 
   it('rejects with a labeled timeout error when the wrapped promise never settles', async () => {
