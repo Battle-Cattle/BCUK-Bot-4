@@ -71,7 +71,17 @@ vi.mock('./twitch/pricing/rewardPricingScheduler', () => ({
 vi.mock('./twitch/pricing/rewardPricingService', () => ({
   registerRewardPricingRuntime: vi.fn(),
 }));
-vi.mock('./shared/logger', () => ({ createLogger: mockLogger }));
+// Captures the 'Bot'-named logger instance each createLogger('Bot') call produces, so tests can
+// assert on log.error calls in addition to process.exit — mockLogger() returns a fresh vi.fn()
+// set per call, so the instance used inside index.ts isn't otherwise reachable from the test.
+let lastBotLogger: ReturnType<typeof mockLogger> | undefined;
+vi.mock('./shared/logger', () => ({
+  createLogger: (name: string) => {
+    const logger = mockLogger();
+    if (name === 'Bot') lastBotLogger = logger;
+    return logger;
+  },
+}));
 
 let exitSpy: ReturnType<typeof vi.spyOn>;
 
@@ -221,23 +231,27 @@ describe('shutdown', () => {
 // ─── Global unhandled error handlers ──────────────────────────────────────────
 
 describe('global error handlers', () => {
-  it('exits the process on an unhandled promise rejection', async () => {
+  it('logs and exits the process on an unhandled promise rejection', async () => {
     await runMain();
+    const reason = new Error('boom');
 
     expect(() => {
-      process.emit('unhandledRejection', new Error('boom'), Promise.reject(new Error('boom')).catch(() => {}));
+      process.emit('unhandledRejection', reason, Promise.reject(reason).catch(() => {}));
     }).toThrow('process.exit');
 
     expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(lastBotLogger?.error).toHaveBeenCalledWith('Unhandled promise rejection:', reason);
   });
 
-  it('exits the process on an uncaught exception', async () => {
+  it('logs and exits the process on an uncaught exception', async () => {
     await runMain();
+    const err = new Error('boom');
 
     expect(() => {
-      process.emit('uncaughtException', new Error('boom'));
+      process.emit('uncaughtException', err);
     }).toThrow('process.exit');
 
     expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(lastBotLogger?.error).toHaveBeenCalledWith('Uncaught exception:', err);
   });
 });

@@ -40,7 +40,13 @@ export function forgetGuildCustomCommandCooldown(guildId: string): void {
 // every module involved is loaded.
 
 interface TwitchChatRuntime extends TwitchBroadcastRuntime {
-  /** Delegates to `twitchMonitor.ts`'s `getMultiTwitchDataForChannel`, injected to avoid importing that module directly. */
+  /**
+   * Delegates to `twitchMonitor.ts`'s `getMultiTwitchDataForChannel`, injected to avoid
+   * importing that module directly.
+   * @param login - Twitch channel login to look up.
+   * @returns The channel's current MultiTwitch group info, or null if it isn't in an active
+   *   multi-twitch group.
+   */
   getMultiTwitchDataForChannel: (login: string) => MultiTwitchGroupInfo | null;
 }
 

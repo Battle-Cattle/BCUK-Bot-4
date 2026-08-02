@@ -745,6 +745,13 @@ describe('stopTwitchBot', () => {
 
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
     expect(getActiveChannels().size).toBe(0);
+
+    // Client reference was cleared despite the hang: a second stop is a no-op
+    // (mirrors the "no-op when never started" case) rather than awaiting the
+    // still-hanging disconnect() again.
+    mockClient.disconnect.mockClear();
+    await stopTwitchBot();
+    expect(mockClient.disconnect).not.toHaveBeenCalled();
   });
 });
 

@@ -249,7 +249,7 @@ function customRewardUrl(broadcasterId: string, rewardId?: string): string {
 
 /**
  * Lists a broadcaster's custom rewards via Helix. Unlike its create/update/delete siblings, a
- * 403 (channel points unavailable, or the app lacks visibility into this broadcaster's rewards)
+ * 403 (the broadcaster is not a Twitch Partner or Affiliate, so channel points aren't available)
  * is treated as "no rewards" rather than a typed error, since listing is read-only and callers
  * generally just want to render whatever's available.
  * @param broadcasterId - Twitch user ID whose custom rewards to list.

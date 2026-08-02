@@ -28,7 +28,11 @@ function idleRefreshState(): RefreshState {
 // state into shared storage before relying on /users/refresh-status.
 export const refreshStates = new Map<string, RefreshState>();
 
-/** Returns the Discord-name-refresh progress for a guild, defaulting to idle when no refresh has run yet. */
+/**
+ * Returns the Discord-name-refresh progress for a guild, defaulting to idle when no refresh has run yet.
+ * @param guildId - Guild to look up.
+ * @returns The guild's recorded `RefreshState`, or a fresh idle one if none has been recorded.
+ */
 export function getRefreshState(guildId: string): RefreshState {
   return refreshStates.get(guildId) ?? idleRefreshState();
 }
@@ -40,6 +44,7 @@ export function getRefreshState(guildId: string): RefreshState {
  * bot rejoins later starts fresh via {@link getRefreshState}'s idle default.
  *
  * @param guildId - Guild to forget.
+ * @returns Nothing.
  */
 export function forgetGuildRefreshState(guildId: string): void {
   refreshStates.delete(guildId);

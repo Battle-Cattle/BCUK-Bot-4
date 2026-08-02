@@ -55,10 +55,24 @@ process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err) => { log.error('Sh
 // internals (discord.js, tmi.js, mysql2, ws) rather than the app's own promise chains would go
 // fully unhandled and silently kill the process — there's no supervisor (pm2/systemd) to restart
 // it, so we log loudly and exit deliberately instead, making the failure visible and diagnosable.
+
+/**
+ * Logs an unhandled promise rejection and exits, rather than letting Node's default
+ * (process termination without a clean log line) or silently continuing.
+ * @param reason - The rejection reason (typically an `Error`, but not guaranteed to be).
+ * @returns Never returns — always calls `process.exit(1)`.
+ */
 process.on('unhandledRejection', (reason) => {
   log.error('Unhandled promise rejection:', reason);
   process.exit(1);
 });
+
+/**
+ * Logs an uncaught synchronous exception and exits — continuing after `uncaughtException` risks
+ * running with corrupted state, so this deliberately does not attempt to recover.
+ * @param err - The uncaught error.
+ * @returns Never returns — always calls `process.exit(1)`.
+ */
 process.on('uncaughtException', (err) => {
   log.error('Uncaught exception:', err);
   process.exit(1);
