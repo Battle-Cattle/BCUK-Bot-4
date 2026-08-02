@@ -24,7 +24,14 @@ let _onChannelJoined: ((channel: string) => void) | null = null;
 // could otherwise collectively exceed Twitch's IRC JOIN rate limit.
 let joinGate: Promise<void> = Promise.resolve();
 
-/** Calls `client.join(channel)`, globally throttled to JOIN_THROTTLE_MS between joins across all channels. */
+/**
+ * Calls `client.join(channel)`, globally throttled to JOIN_THROTTLE_MS between joins across all
+ * channels.
+ * @param client - The connected tmi.js client to join with.
+ * @param channel - The already-normalized channel name to join.
+ * @returns Resolves once the join call itself has completed (not once the throttle window has
+ *   elapsed — the throttle only delays the *next* queued join).
+ */
 async function throttledJoin(client: tmi.Client, channel: string): Promise<void> {
   const previousGate = joinGate;
   let releaseGate!: () => void;

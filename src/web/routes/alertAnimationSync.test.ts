@@ -2,11 +2,30 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
-// The '../../db' facade pulls in '../../shared/config' (which requires real env vars) at module
-// scope, so mock it here — the test only needs the plain ALERT_TEXT_ANIMATIONS array.
-vi.mock('../../db', () => ({
-  ALERT_TEXT_ANIMATIONS: ['none', 'wave', 'pulse', 'glitch', 'shake', 'rainbow', 'flicker', 'tilt', 'bounce-in', 'typewriter'],
+// The '../../db' facade transitively pulls in '../../shared/config' (which requires real env
+// vars) and '../../db/pool' / '../../db/alertConfigCache' (which need a live DB connection) at
+// module scope. Stub all three with safe dummy values so the *real* ALERT_TEXT_ANIMATIONS from
+// db/alertConfig.ts loads through the facade — keeping this test pinned to the authoritative
+// list instead of a hand-copied duplicate that could silently drift from it.
+vi.mock('../../shared/config', () => ({
+  DISCORD_TOKEN: 'mock-token',
+  TWITCH_USERNAME: 'mock-user',
+  TWITCH_OAUTH_TOKEN: 'oauth:mock',
+  TWITCH_CLIENT_ID: 'mock-client-id',
+  TWITCH_CLIENT_SECRET: 'mock-client-secret',
+  DB_HOST: 'localhost',
+  DB_PORT: 3306,
+  DB_USER: 'mock-user',
+  DB_PASSWORD: 'mock-password',
+  DB_NAME: 'mock-db',
+  SESSION_SECRET: 'mock-session-secret-that-is-long-enough',
+  DISCORD_CLIENT_ID: 'mock-discord-client-id',
+  DISCORD_CLIENT_SECRET: 'mock-discord-client-secret',
+  DISCORD_CALLBACK_URL: 'http://localhost:3000/auth/discord/callback',
+  PUBLIC_URL: 'http://localhost:3000',
 }));
+vi.mock('../../db/pool', () => ({ getPool: vi.fn(), withTransaction: vi.fn() }));
+vi.mock('../../db/alertConfigCache', () => ({ invalidateAlertConfigLookupCache: vi.fn(), findCachedAlertConfig: vi.fn() }));
 
 import { ALERT_TEXT_ANIMATIONS } from '../../db';
 

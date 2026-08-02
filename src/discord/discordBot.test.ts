@@ -294,9 +294,16 @@ describe('startDiscordBot — guildCreate handler', () => {
         return null;
       })
       .mockImplementationOnce(async () => {
+        // Guild A's owner row now exists, so guild B's provisioning skips upsertUser and only
+        // grants guild access — matching provisionGuildOwner's "don't overwrite an existing
+        // user" behavior.
         order.push('b-findUser');
-        return null;
+        return { discord_id: 'same-owner', discord_name: 'OwnerName', access_level: 0 } as any;
       });
+    vi.mocked(guilds.upsertUser).mockImplementation(async () => { order.push('a-upsertUser'); });
+    vi.mocked(guilds.setMemberAccessLevel).mockImplementation(async (guildId: string) => {
+      order.push(`${guildId === 'guild-a' ? 'a' : 'b'}-setMemberAccessLevel`);
+    });
 
     const guildA = { ...makeNewGuild('same-owner'), id: 'guild-a' };
     const guildB = { ...makeNewGuild('same-owner'), id: 'guild-b' };
@@ -307,15 +314,21 @@ describe('startDiscordBot — guildCreate handler', () => {
     cb(guildB);
     await flushMicrotasks();
 
-    // guild B's provisioning must not start until guild A's finishes, since they share an owner
-    // and are serialised through userMutationQueue.
+    // guild B's provisioning must not start — not even its findUser lookup — until guild A's
+    // entire queued sequence (upsertUser, then setMemberAccessLevel) has finished, since they
+    // share an owner and are serialised through userMutationQueue. If either write were moved
+    // outside the queue, it would show up here before 'a-findUser-end'.
     expect(order).toEqual(['a-findUser-start']);
 
     openGate();
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
-    expect(order).toEqual(['a-findUser-start', 'a-findUser-end', 'b-findUser']);
+    expect(order).toEqual([
+      'a-findUser-start', 'a-findUser-end', 'a-upsertUser', 'a-setMemberAccessLevel',
+      'b-findUser', 'b-setMemberAccessLevel',
+    ]);
   });
 });
 
