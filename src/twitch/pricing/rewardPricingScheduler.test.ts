@@ -213,7 +213,9 @@ describe('startRewardPricingScheduler / stopRewardPricingScheduler', () => {
     expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(2);
 
     vi.mocked(getAllEnabledPricingRows).mockResolvedValue([]);
-    await vi.advanceTimersByTimeAsync(60_000); // scheduler kept retrying instead of stalling
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(2); // not yet — confirms the retry is on a 60s cadence, not something shorter
+    await vi.advanceTimersByTimeAsync(1); // scheduler kept retrying instead of stalling
     expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(3);
 
     // Normal cadence resumes.
