@@ -255,7 +255,12 @@ describe('joinTwitchChannel global join throttle', () => {
     expect(client.join).toHaveBeenCalledTimes(1);
     expect(client.join).toHaveBeenCalledWith('alice');
 
-    await vi.runAllTimersAsync();
+    // Assert the throttle actually holds for the full window, not just "eventually" — advancing
+    // one tick short of JOIN_THROTTLE_MS must not release carol's join yet.
+    await vi.advanceTimersByTimeAsync(599);
+    expect(client.join).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
     await Promise.all([alicePromise, carolPromise]);
 
     expect(client.join).toHaveBeenNthCalledWith(1, 'alice');
