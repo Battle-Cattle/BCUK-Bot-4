@@ -163,6 +163,43 @@ describe('startRewardPricingScheduler / stopRewardPricingScheduler', () => {
     expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
   });
 
+  it('pauses polling when the DB server itself is shutting down, and resumes once it recovers', async () => {
+    const shutdownError = Object.assign(new Error('Server shutdown in progress'), { code: 'ER_SERVER_SHUTDOWN', errno: 1053 });
+    vi.mocked(getAllEnabledPricingRows).mockRejectedValueOnce(shutdownError);
+    startRewardPricingScheduler();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+
+    // Regular 30s cadence should not fire again — polling is paused.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+
+    // The DB recovers before the 60s probe fires.
+    vi.mocked(getAllEnabledPricingRows).mockResolvedValue([]);
+    await vi.advanceTimersByTimeAsync(30_000); // completes the 60s probe delay
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(2);
+
+    // Normal cadence resumes.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps retrying every 60s while the DB server stays down', async () => {
+    const shutdownError = Object.assign(new Error('Server shutdown in progress'), { code: 'ER_SERVER_SHUTDOWN', errno: 1053 });
+    vi.mocked(getAllEnabledPricingRows).mockRejectedValue(shutdownError);
+    startRewardPricingScheduler();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(3);
+  });
+
   it('a reentrancy guard prevents overlapping ticks', async () => {
     let resolveFirst!: () => void;
     const gate = new Promise<void>((resolve) => { resolveFirst = resolve; });
