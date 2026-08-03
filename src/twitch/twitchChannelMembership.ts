@@ -1,4 +1,4 @@
-import tmi from 'tmi.js';
+import type { ChatClient } from '@twurple/chat';
 import { setTwitchChannel } from '../shared/statusStore';
 import { getTwitchEnabledChannels } from '../db';
 import { normalizeTwitchChannelName } from './twitchChannelName';
@@ -8,7 +8,7 @@ import { createLogger } from '../shared/logger';
 
 const log = createLogger('Twitch');
 
-let _client: tmi.Client | null = null;
+let _client: ChatClient | null = null;
 let _connected = false;
 
 const activeChannels = new Set<string>();
@@ -27,12 +27,12 @@ let joinGate: Promise<void> = Promise.resolve();
 /**
  * Calls `client.join(channel)`, globally throttled to JOIN_THROTTLE_MS between joins across all
  * channels.
- * @param client - The connected tmi.js client to join with.
+ * @param client - The connected Twurple chat client to join with.
  * @param channel - The already-normalized channel name to join.
  * @returns Resolves once the join call itself has completed (not once the throttle window has
  *   elapsed — the throttle only delays the *next* queued join).
  */
-async function throttledJoin(client: tmi.Client, channel: string): Promise<void> {
+async function throttledJoin(client: ChatClient, channel: string): Promise<void> {
   const previousGate = joinGate;
   let releaseGate!: () => void;
   joinGate = new Promise((resolve) => { releaseGate = resolve; });
@@ -44,8 +44,8 @@ async function throttledJoin(client: tmi.Client, channel: string): Promise<void>
   }
 }
 
-/** Sets the active tmi.js client instance (called from twitchBot after connect). */
-export function setTmiClient(c: tmi.Client | null): void {
+/** Sets the active Twurple chat client instance (called from twitchBot after connect). */
+export function setTmiClient(c: ChatClient | null): void {
   _client = c;
 }
 
@@ -61,7 +61,7 @@ export function setChannelJoinedHook(fn: (channel: string) => void): void {
 
 function isChannelJoined(channel: string): boolean {
   if (!_client || !_connected) return false;
-  return _client.getChannels().some((ch) => normalizeTwitchChannelName(ch) === channel);
+  return _client.currentChannels.some((ch) => normalizeTwitchChannelName(ch) === channel);
 }
 
 function cacheChannelUserId(channel: string): void {
@@ -111,7 +111,7 @@ async function joinMissingChannel(channel: string): Promise<void> {
 export async function reconcileJoinedChannels(): Promise<void> {
   if (!_client || !_connected) return;
 
-  const joinedChannels = _client.getChannels()
+  const joinedChannels = _client.currentChannels
     .map((channel) => normalizeTwitchChannelName(channel))
     .filter((channel): channel is string => channel !== null);
   const joinedChannelSet = new Set(joinedChannels);
@@ -173,7 +173,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
     // and the actual client.join() call.
     if (isChannelJoined(normalized)) {
       // Already joined — sync local tracking so status store and activeChannels
-      // agree with the live tmi.js state.
+      // agree with the live Twurple client state.
       activeChannels.add(normalized);
       setTwitchChannel(normalized, true);
       cacheChannelUserId(normalized);
@@ -217,7 +217,7 @@ export async function partTwitchChannel(channel: string): Promise<void> {
 
     if (!_client || !_connected) {
       // We remove local state immediately and let reconcileJoinedChannels() part
-      // any stale tmi.js channel memberships on the next successful connect.
+      // any stale Twurple channel memberships on the next successful connect.
       activeChannels.delete(normalized);
       activeChannelUserIds.delete(normalized);
       setTwitchChannel(normalized, false);

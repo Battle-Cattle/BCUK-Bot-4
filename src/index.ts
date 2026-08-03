@@ -52,7 +52,7 @@ process.on('SIGINT',  () => { shutdown('SIGINT').catch((err)  => { log.error('Sh
 process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err) => { log.error('Shutdown error:', err); process.exit(1); }); });
 
 // Without these, a rejection or throw originating from inside a third-party library's own
-// internals (discord.js, tmi.js, mysql2, ws) rather than the app's own promise chains would go
+// internals (discord.js, @twurple/chat, mysql2, ws) rather than the app's own promise chains would go
 // fully unhandled and silently kill the process — there's no supervisor (pm2/systemd) to restart
 // it, so we log loudly and exit deliberately instead, making the failure visible and diagnosable.
 

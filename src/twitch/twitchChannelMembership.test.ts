@@ -27,12 +27,12 @@ import { getTwitchEnabledChannels } from '../db';
 import { getUsers } from './twitchApi';
 import { setTwitchChannel } from '../shared/statusStore';
 
-/** Builds a minimal fake tmi.js client, pre-seeded with the given already-joined channels. */
+/** Builds a minimal fake Twurple chat client, pre-seeded with the given already-joined channels. */
 function makeMockClient(channels: string[] = []) {
   return {
-    getChannels: vi.fn(() => channels),
+    currentChannels: channels,
     join: vi.fn().mockResolvedValue(undefined),
-    part: vi.fn().mockResolvedValue(undefined),
+    part: vi.fn(),
   };
 }
 
@@ -180,7 +180,7 @@ describe('partTwitchChannel', () => {
 
   it('keeps state removed and rethrows when client.part fails', async () => {
     const client = makeMockClient(['alice']);
-    client.part.mockRejectedValue(new Error('part failed'));
+    client.part.mockImplementation(() => { throw new Error('part failed'); });
     setTmiClient(client as any);
     setConnected(true);
     await joinTwitchChannel('alice');
@@ -203,7 +203,7 @@ describe('membershipMutationQueue serialization', () => {
     client.join.mockImplementation(async (channel: string) => {
       order.push('join-start');
       await gate;
-      client.getChannels.mockReturnValue([channel]); // simulate the join taking effect
+      client.currentChannels = [channel]; // simulate the join taking effect
       order.push('join-end');
     });
     client.part.mockImplementation(async () => { order.push('part'); });
@@ -287,7 +287,8 @@ describe('reconcileJoinedChannels', () => {
 
     await expect(reconcileJoinedChannels()).resolves.toBeUndefined();
 
-    expect(client.getChannels).not.toHaveBeenCalled();
+    expect(client.part).not.toHaveBeenCalled();
+    expect(client.join).not.toHaveBeenCalled();
     expect(vi.mocked(setTwitchChannel)).not.toHaveBeenCalled();
   });
 
@@ -322,7 +323,7 @@ describe('reconcileJoinedChannels', () => {
   });
 
   it('refreshes status to online for a joined channel that is still in activeChannels', async () => {
-    const client = makeMockClient(['#alice']); // real tmi.js channel names are #-prefixed
+    const client = makeMockClient(['#alice']); // real Twurple channel names are #-prefixed
     setTmiClient(client as any);
     setConnected(true);
     await joinTwitchChannel('alice'); // already-joined branch — adds to activeChannels
