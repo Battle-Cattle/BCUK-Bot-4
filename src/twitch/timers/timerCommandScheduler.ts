@@ -107,14 +107,22 @@ async function resolveSessionIdsByChannel(
   return sessionIdByChannel;
 }
 
+/** A row picked to fire this tick, paired with the Shared Chat session (if any) it was picked for. */
+interface PickedRow {
+  row: TimerCommandForScheduler;
+  sessionId: string | null;
+}
+
 /**
  * From the rows that already passed their own {@link shouldFire} check, decides which ones
  * actually get to fire this tick, applying the Shared Chat group cooldown: rows with no resolved
  * session always fire (unaffected — this is the fully-independent, outside-of-multitwitch case).
  * For rows sharing a session that's currently off cooldown, only the single row that has gone
- * longest without firing (oldest `lastFiredAt`) is picked, and the session is immediately reserved
+ * longest without firing (oldest `lastFiredAt`) is picked, and the session is tentatively reserved
  * — this rotates fairly among the timers sharing a session (instead of one perpetually winning) and
- * prevents two rows in the same session both firing in one tick. Rows in a session still on
+ * prevents two rows in the same session both firing in one tick. The reservation is only
+ * provisional: {@link sendTimerRow} releases it if the send doesn't actually succeed, so a failed
+ * send can't silence the whole group for the full cooldown window. Rows in a session still on
  * cooldown, and rows not picked from an eligible session, are left untouched so they're
  * reconsidered on a later tick.
  * @param eligibleRows - Rows that already passed their own per-timer `shouldFire` check.
@@ -125,14 +133,14 @@ function pickRowsToFire(
   eligibleRows: readonly TimerCommandForScheduler[],
   sessionIdByChannel: ReadonlyMap<string, string | null>,
   now: number,
-): TimerCommandForScheduler[] {
-  const toFire: TimerCommandForScheduler[] = [];
+): PickedRow[] {
+  const toFire: PickedRow[] = [];
   const bySession = new Map<string, TimerCommandForScheduler[]>();
 
   for (const row of eligibleRows) {
     const sessionId = sessionIdByChannel.get(row.channel) ?? null;
     if (!sessionId) {
-      toFire.push(row);
+      toFire.push({ row, sessionId: null });
       continue;
     }
     const group = bySession.get(sessionId);
@@ -148,23 +156,30 @@ function pickRowsToFire(
       const rowState = timerState.get(row.id)!;
       return rowState.lastFiredAt < oldestState.lastFiredAt ? row : oldest;
     });
-    sessionLastFiredAt.set(sessionId, now);
-    toFire.push(picked);
+    sessionLastFiredAt.set(sessionId, now); // provisional — released by sendTimerRow on failure
+    toFire.push({ row: picked, sessionId });
   }
 
   return toFire;
 }
 
 /**
- * Seeds in-memory state for a newly-seen timer without firing it (a restart or brand-new timer
- * waits one full interval before its first post). Never throws — a send failure is logged and
- * swallowed so it can't block other rows in the same tick.
+ * Posts one selected timer row to its channel and records the fire in the in-memory state.
+ * No-ops if no runtime is registered. Never throws — a send failure is logged and swallowed so it
+ * can't block other rows in the same tick. If `sessionId` is set and the send doesn't succeed (no
+ * runtime, or `runtime.send` throws), releases that session's cooldown reservation made by
+ * {@link pickRowsToFire} — guarded by a timestamp match so it can't clobber a newer reservation
+ * made by another row in the same session on a later tick.
  * @param row - The timer's config, joined with its Twitch channel.
  * @param now - Current time in epoch ms, shared across the whole tick.
+ * @param sessionId - The Shared Chat session this row was provisionally reserved for, or null.
  */
-async function sendTimerRow(row: TimerCommandForScheduler, now: number): Promise<void> {
+async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionId: string | null): Promise<void> {
   const runtime = timerCommandsRuntime.get();
-  if (!runtime) return;
+  if (!runtime) {
+    if (sessionId && sessionLastFiredAt.get(sessionId) === now) sessionLastFiredAt.delete(sessionId);
+    return;
+  }
 
   const state = timerState.get(row.id)!;
   try {
@@ -172,6 +187,7 @@ async function sendTimerRow(row: TimerCommandForScheduler, now: number): Promise
     state.lastFiredAt = now;
     state.messagesAtLastFire = getMessageCount(row.channel);
   } catch (err) {
+    if (sessionId && sessionLastFiredAt.get(sessionId) === now) sessionLastFiredAt.delete(sessionId);
     log.error(`Failed to post timer command ${row.id} to ${row.channel}:`, err);
   }
 }
@@ -210,7 +226,7 @@ export async function runTimerCommandTick(): Promise<void> {
       const sessionIdByChannel = await resolveSessionIdsByChannel(eligibleRows.map((row) => row.channel), loginUserIds);
       const toFire = pickRowsToFire(eligibleRows, sessionIdByChannel, now);
 
-      await Promise.allSettled(toFire.map((row) => sendTimerRow(row, now)));
+      await Promise.allSettled(toFire.map(({ row, sessionId }) => sendTimerRow(row, now, sessionId)));
     } catch (err) {
       log.error('Failed to load enabled timer commands:', err);
     } finally {

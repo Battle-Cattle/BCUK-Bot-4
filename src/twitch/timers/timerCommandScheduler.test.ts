@@ -242,6 +242,30 @@ describe('Shared Chat group cooldown', () => {
     expect(send).toHaveBeenCalledWith('streamer-b', 'msg-b');
   });
 
+  it('releases the group cooldown reservation when the picked row fails to send', async () => {
+    getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a'], ['streamer-b', 'uid-b']]));
+    stubSessions({ 'uid-a': 'session-1', 'uid-b': 'session-1' });
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+      timerRow({ id: 1, channel: 'streamer-a', message: 'msg-a', interval_seconds: 60 }),
+      timerRow({ id: 2, channel: 'streamer-b', message: 'msg-b', interval_seconds: 60 }),
+    ] as any);
+
+    await runTimerCommandTick(); // seed both
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    send.mockRejectedValueOnce(new Error('helix down')); // fails for whichever row is picked (streamer-a, being oldest)
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('streamer-a', 'msg-a');
+
+    // The failed send released the reservation, so the session can be retried on the very next
+    // tick instead of being blocked for the full 120s group cooldown.
+    send.mockClear();
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('streamer-a', 'msg-a');
+  });
+
   it('fires normally when the session lookup fails (treated as not in Shared Chat)', async () => {
     getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a']]));
     vi.mocked(resolveSharedChatSessionId).mockRejectedValue(new Error('helix down'));
