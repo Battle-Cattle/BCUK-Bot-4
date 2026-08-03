@@ -32,7 +32,18 @@ interface TimerRuntimeState {
   messagesAtLastFire: number;
 }
 
-const timerState = new Map<number, TimerRuntimeState>();
+/**
+ * Firing state is keyed by (timer id, channel) rather than timer id alone: a timer can now be
+ * assigned to several streamers' channels, and each assigned channel fires independently, on its
+ * own live/interval/message-count schedule — the same timer definition posting into two different
+ * channels must not share one countdown.
+ * @param row - The timer's config, joined with the channel this row is for.
+ */
+function rowKey(row: { id: number; channel: string }): string {
+  return `${row.id}::${row.channel}`;
+}
+
+const timerState = new Map<string, TimerRuntimeState>();
 
 // ─── Shared Chat group cooldown ──────────────────────────────────────────────
 //
@@ -76,10 +87,10 @@ function shouldFire(
   return true;
 }
 
-/** Removes in-memory state for any timer id no longer present in the latest enabled-rows fetch. */
-function pruneStaleTimerState(currentIds: ReadonlySet<number>): void {
-  for (const id of timerState.keys()) {
-    if (!currentIds.has(id)) timerState.delete(id);
+/** Removes in-memory state for any (timer id, channel) pair no longer present in the latest enabled-rows fetch. */
+function pruneStaleTimerState(currentKeys: ReadonlySet<string>): void {
+  for (const key of timerState.keys()) {
+    if (!currentKeys.has(key)) timerState.delete(key);
   }
 }
 
@@ -152,8 +163,8 @@ function pickRowsToFire(
     if (now - lastFired < SHARED_SESSION_COOLDOWN_MS) continue;
 
     const picked = rows.reduce((oldest, row) => {
-      const oldestState = timerState.get(oldest.id)!;
-      const rowState = timerState.get(row.id)!;
+      const oldestState = timerState.get(rowKey(oldest))!;
+      const rowState = timerState.get(rowKey(row))!;
       return rowState.lastFiredAt < oldestState.lastFiredAt ? row : oldest;
     });
     sessionLastFiredAt.set(sessionId, now); // provisional — released by sendTimerRow on failure
@@ -181,7 +192,7 @@ async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionI
     return;
   }
 
-  const state = timerState.get(row.id)!;
+  const state = timerState.get(rowKey(row))!;
   try {
     await runtime.send(row.channel, row.message);
     state.lastFiredAt = now;
@@ -207,16 +218,17 @@ export async function runTimerCommandTick(): Promise<void> {
   currentTickPromise = (async () => {
     try {
       const rows = await getAllEnabledTimerCommandsWithChannel();
-      pruneStaleTimerState(new Set(rows.map((row) => row.id)));
+      pruneStaleTimerState(new Set(rows.map(rowKey)));
 
       const now = Date.now();
       pruneStaleSessionCooldowns(now);
 
       const eligibleRows: TimerCommandForScheduler[] = [];
       for (const row of rows) {
-        const state = timerState.get(row.id);
+        const key = rowKey(row);
+        const state = timerState.get(key);
         if (!state) {
-          timerState.set(row.id, { lastFiredAt: now, messagesAtLastFire: getMessageCount(row.channel) });
+          timerState.set(key, { lastFiredAt: now, messagesAtLastFire: getMessageCount(row.channel) });
           continue;
         }
         if (shouldFire(row, state, now)) eligibleRows.push(row);

@@ -129,6 +129,24 @@ describe('runTimerCommandTick', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('fires independently per channel when the same timer is assigned to multiple streamers', async () => {
+    // A timer can now be assigned to several streamers' channels — each appears as its own row
+    // sharing the same timer id, and each must fire on its own live/interval schedule rather
+    // than sharing one countdown.
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+      timerRow({ id: 1, channel: 'streamer-a', interval_seconds: 600 }),
+      timerRow({ id: 1, channel: 'streamer-b', interval_seconds: 600 }),
+    ] as any);
+    await runTimerCommandTick(); // seed both channels independently
+
+    vi.mocked(isChannelLive).mockImplementation((channel: string) => channel === 'streamer-a');
+    await vi.advanceTimersByTimeAsync(600_000);
+    await runTimerCommandTick();
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('streamer-a', 'hello');
+  });
+
   it("one channel's send failure does not block another's", async () => {
     vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
       timerRow({ id: 1, channel: 'streamer-a' }),

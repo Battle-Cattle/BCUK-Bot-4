@@ -218,6 +218,7 @@ rootAuthedRouter.use(sfxRouter);
 rootAuthedRouter.use(commandsRouter);
 rootAuthedRouter.use(countersRouter);
 rootAuthedRouter.use(counterHistoryRouter);
+rootAuthedRouter.use(timersRouter);
 rootAuthedRouter.use(rootGuildRouter);
 app.use('/', rootAuthedRouter);
 
@@ -233,7 +234,6 @@ app.use('/user/settings', requireAuth, userSettingsRouter);
 app.use('/overlay', requireAuth, overlayAdminRouter);
 app.use('/alerts', requireAuth, alertsAdminRouter);
 app.use('/channel-points', requireAuth, channelPointsAdminRouter);
-app.use('/timers', requireAuth, timersRouter);
 app.use('/dashboard', requireAuth, dashboardEventsRouter);
 app.use('/dashboard', requireAuth, dashboardStatusEventsRouter);
 

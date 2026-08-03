@@ -8,10 +8,10 @@
         <button class="nav-group-label" aria-haspopup="true" aria-expanded="false">Bot Commands <span class="nav-caret">▾</span></button>
         <div class="nav-group-items">
           <a href="/sfx" class="nav-item">SFX</a>
-          <a href="/timers" class="nav-item">Timers</a>
           <% if (user && user.accessLevel >= 2) { %>
           <a href="/commands" class="nav-item">Commands</a>
           <a href="/counters" class="nav-item">Counters</a>
+          <a href="/timers" class="nav-item">Timers</a>
           <% } %>
         </div>
       </div>

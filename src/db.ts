@@ -219,11 +219,15 @@ export { recordPricingHistory, getPricingHistoryForRewards } from './db/rewardPr
 
 // ─── Timer commands ─────────────────────────────────────────────────────────
 
-export type { DbTimerCommand, TimerCommandInput, TimerCommandForScheduler } from './db/timerCommands';
+export type {
+  DbTimerCommand, DbTimerCommandAssignedUser, DbTimerCommandWithAssignments,
+  TimerCommandInput, TimerCommandForScheduler,
+} from './db/timerCommands';
 export {
   TimerCommandNotFoundError,
-  getTimerCommandsForStreamer, countTimerCommandsForStreamer, addTimerCommand, updateTimerCommand,
+  getAllTimerCommandsWithAssignments, addTimerCommand, updateTimerCommand,
   removeTimerCommand, setTimerCommandEnabled, getAllEnabledTimerCommandsWithChannel,
+  assignUserToTimer, assignUsersToTimer, unassignUserFromTimer,
 } from './db/timerCommands';
 
 // ─── Streamdeck API keys ─────────────────────────────────────────────────────

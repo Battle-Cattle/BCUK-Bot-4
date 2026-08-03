@@ -1,11 +1,12 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
-import { fromBit, affectedOrExists } from './utils';
+import { fromBit, affectedOrExists, rowExists } from './utils';
+import { AccessLevel } from './users';
+import type { AccessLevelValue } from './users';
 
-/** A per-streamer, Twitch-only auto-posted timer command. */
+/** A timer command row from the database. */
 export interface DbTimerCommand {
   id: number;
-  streamer_id: number;
   name: string;
   message: string;
   interval_seconds: number;
@@ -14,7 +15,21 @@ export interface DbTimerCommand {
   enabled: boolean;
 }
 
-/** Fields a streamer can edit for one timer via the admin UI. */
+/** A user assigned to a timer command (may be orphaned if their account no longer exists). */
+export interface DbTimerCommandAssignedUser {
+  discord_id: string;
+  discord_name: string | null;
+  twitch_name: string | null;
+  access_level: AccessLevelValue;
+  is_orphaned_user: boolean;
+}
+
+/** A timer command with its full list of assigned users. */
+export interface DbTimerCommandWithAssignments extends DbTimerCommand {
+  assigned_users: DbTimerCommandAssignedUser[];
+}
+
+/** Fields a manager can edit for one timer via the admin UI. */
 export interface TimerCommandInput {
   name: string;
   message: string;
@@ -24,7 +39,7 @@ export interface TimerCommandInput {
   enabled: boolean;
 }
 
-/** One enabled timer joined with its owning streamer's Twitch channel, for the scheduler's per-tick read. */
+/** One enabled timer joined with one of its assigned users' Twitch channel, for the scheduler's per-tick read. A timer assigned to several channels appears once per channel, each firing independently. */
 export interface TimerCommandForScheduler {
   id: number;
   channel: string;
@@ -34,7 +49,7 @@ export interface TimerCommandForScheduler {
   require_live: boolean;
 }
 
-/** Thrown when a timer lookup/mutation scoped to a streamer matches no row — either the id doesn't exist or belongs to a different streamer. */
+/** Thrown when a timer lookup/mutation matches no row. */
 export class TimerCommandNotFoundError extends Error {
   constructor(id: number) {
     super(`Timer command not found: ${id}`);
@@ -45,7 +60,6 @@ export class TimerCommandNotFoundError extends Error {
 function mapRow(r: mysql.RowDataPacket): DbTimerCommand {
   return {
     id: r.id,
-    streamer_id: r.streamer_id,
     name: r.name,
     message: r.message,
     interval_seconds: r.interval_seconds,
@@ -55,59 +69,59 @@ function mapRow(r: mysql.RowDataPacket): DbTimerCommand {
   };
 }
 
-const TIMER_COMMAND_SELECT = `
-  id, streamer_id, name, message, interval_seconds, min_messages, require_live, enabled`;
+/** Whether a timer command exists for `id`. */
+async function timerCommandExists(id: number): Promise<boolean> {
+  return rowExists(getPool(), 'timer_command', 'id', id);
+}
 
-/** Whether a timer command exists for `id` scoped to `streamerId` — same ownership scope as the UPDATE statements below. */
-async function timerCommandExists(id: number, streamerId: number): Promise<boolean> {
+/** Return all timer commands, each with its full list of assigned users, for the manager admin page. */
+export async function getAllTimerCommandsWithAssignments(): Promise<DbTimerCommandWithAssignments[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT 1 FROM timer_command WHERE id = ? AND streamer_id = ? LIMIT 1`,
-    [id, streamerId],
+    `SELECT tc.id, tc.name, tc.message, tc.interval_seconds, tc.min_messages, tc.require_live, tc.enabled,
+            tcs.discord_id AS assigned_discord_id,
+            u.discord_id AS user_discord_id,
+            u.discord_name, u.twitch_name, u.access_level
+     FROM timer_command tc
+     LEFT JOIN timer_command_streamer tcs ON tc.id = tcs.timer_id
+     LEFT JOIN \`user\` u ON tcs.discord_id = u.discord_id
+     ORDER BY tc.name, u.discord_name, tcs.discord_id`,
   );
-  return rows.length > 0;
+
+  const timerMap = new Map<number, DbTimerCommandWithAssignments>();
+
+  for (const row of rows) {
+    if (!timerMap.has(row.id)) {
+      timerMap.set(row.id, {
+        ...mapRow(row),
+        assigned_users: [],
+      });
+    }
+
+    if (row.assigned_discord_id !== null && row.assigned_discord_id !== undefined) {
+      timerMap.get(row.id)!.assigned_users.push({
+        discord_id: String(row.assigned_discord_id),
+        discord_name: row.discord_name ?? null,
+        twitch_name: row.twitch_name ?? null,
+        access_level: row.access_level ?? AccessLevel.USER,
+        is_orphaned_user: row.user_discord_id === null || row.user_discord_id === undefined,
+      });
+    }
+  }
+
+  return Array.from(timerMap.values());
 }
 
 /**
- * Lists every timer command belonging to a streamer, for the self-service admin page.
- * @param streamerId - DB row ID of the streamer.
- */
-export async function getTimerCommandsForStreamer(streamerId: number): Promise<DbTimerCommand[]> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT ${TIMER_COMMAND_SELECT} FROM timer_command WHERE streamer_id = ? ORDER BY id`,
-    [streamerId],
-  );
-  return rows.map(mapRow);
-}
-
-/**
- * Counts how many timer commands a streamer currently has, so the `/timers/add` route can
- * enforce a per-streamer cap before inserting a new row.
- * @param streamerId - DB row ID of the streamer.
- * @returns The row count. `COUNT(*)` is protocol-typed BIGINT, so `bigNumberStrings` stringifies
- *   it — but this value is bounded by the cap enforced at insert time (see
- *   `MAX_TIMER_COMMANDS_PER_STREAMER` in `timersMutations.ts`), never large enough to approach
- *   `Number.MAX_SAFE_INTEGER`, so parsing it back to a number here is safe and deliberate.
- */
-export async function countTimerCommandsForStreamer(streamerId: number): Promise<number> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT COUNT(*) AS count FROM timer_command WHERE streamer_id = ?`,
-    [streamerId],
-  );
-  return Number.parseInt(rows[0].count, 10);
-}
-
-/**
- * Creates a new timer command for a streamer.
- * @param streamerId - DB row ID of the owning streamer.
+ * Creates a new timer command.
  * @param input - The timer's fields.
  * @returns The new timer's primary key.
  */
-export async function addTimerCommand(streamerId: number, input: TimerCommandInput): Promise<number> {
+export async function addTimerCommand(input: TimerCommandInput): Promise<number> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
-    `INSERT INTO timer_command (streamer_id, name, message, interval_seconds, min_messages, require_live, enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO timer_command (name, message, interval_seconds, min_messages, require_live, enabled)
+     VALUES (?, ?, ?, ?, ?, ?)`,
     [
-      streamerId, input.name, input.message, input.intervalSeconds, input.minMessages,
+      input.name, input.message, input.intervalSeconds, input.minMessages,
       input.requireLive ? 1 : 0, input.enabled ? 1 : 0,
     ],
   );
@@ -115,78 +129,120 @@ export async function addTimerCommand(streamerId: number, input: TimerCommandInp
 }
 
 /**
- * Updates an existing timer command, scoped to the owning streamer so one streamer can never
- * edit another's timer by guessing an id.
+ * Updates an existing timer command's fields.
  * @param id - Primary key of the `timer_command` row.
- * @param streamerId - DB row ID of the owning streamer.
  * @param input - The timer's new fields.
- * @throws {TimerCommandNotFoundError} If no row matches both `id` and `streamerId`.
+ * @throws {TimerCommandNotFoundError} If no row matches `id`.
  */
-export async function updateTimerCommand(id: number, streamerId: number, input: TimerCommandInput): Promise<void> {
+export async function updateTimerCommand(id: number, input: TimerCommandInput): Promise<void> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `UPDATE timer_command
      SET name = ?, message = ?, interval_seconds = ?, min_messages = ?, require_live = ?, enabled = ?
-     WHERE id = ? AND streamer_id = ?`,
+     WHERE id = ?`,
     [
       input.name, input.message, input.intervalSeconds, input.minMessages,
-      input.requireLive ? 1 : 0, input.enabled ? 1 : 0, id, streamerId,
+      input.requireLive ? 1 : 0, input.enabled ? 1 : 0, id,
     ],
   );
   // affectedRows is 0 both when no row matched and when the row matched but every value was
   // already equal (MySQL's default UPDATE semantics count only rows actually changed) — a
-  // resubmitted, unchanged edit must not be mistaken for a missing/foreign timer.
-  if (!(await affectedOrExists(result.affectedRows, () => timerCommandExists(id, streamerId)))) {
+  // resubmitted, unchanged edit must not be mistaken for a missing timer.
+  if (!(await affectedOrExists(result.affectedRows, () => timerCommandExists(id)))) {
     throw new TimerCommandNotFoundError(id);
   }
 }
 
 /**
- * Deletes a timer command, scoped to the owning streamer. No-ops if the id doesn't exist or
- * belongs to a different streamer.
+ * Deletes a timer command and all its streamer assignments (cascaded by the FK).
  * @param id - Primary key of the `timer_command` row.
- * @param streamerId - DB row ID of the owning streamer.
  */
-export async function removeTimerCommand(id: number, streamerId: number): Promise<void> {
-  await getPool().execute(
-    `DELETE FROM timer_command WHERE id = ? AND streamer_id = ?`,
-    [id, streamerId],
-  );
+export async function removeTimerCommand(id: number): Promise<void> {
+  await getPool().execute(`DELETE FROM timer_command WHERE id = ?`, [id]);
 }
 
 /**
- * Toggles a timer command's `enabled` flag, scoped to the owning streamer.
+ * Toggles a timer command's `enabled` flag, for a one-click enable/disable control in the
+ * timer list without opening the full edit form.
  * @param id - Primary key of the `timer_command` row.
- * @param streamerId - DB row ID of the owning streamer.
  * @param enabled - The new enabled state.
- * @throws {TimerCommandNotFoundError} If no row matches both `id` and `streamerId`.
+ * @throws {TimerCommandNotFoundError} If no row matches `id`.
  */
-export async function setTimerCommandEnabled(id: number, streamerId: number, enabled: boolean): Promise<void> {
+export async function setTimerCommandEnabled(id: number, enabled: boolean): Promise<void> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
-    `UPDATE timer_command SET enabled = ? WHERE id = ? AND streamer_id = ?`,
-    [enabled ? 1 : 0, id, streamerId],
+    `UPDATE timer_command SET enabled = ? WHERE id = ?`,
+    [enabled ? 1 : 0, id],
   );
   // See updateTimerCommand: affectedRows is 0 both for a missing row and a no-op toggle
   // (already in the requested state), so a re-click of an already-toggled timer must not
-  // be mistaken for a missing/foreign one.
-  if (!(await affectedOrExists(result.affectedRows, () => timerCommandExists(id, streamerId)))) {
+  // be mistaken for a missing one.
+  if (!(await affectedOrExists(result.affectedRows, () => timerCommandExists(id)))) {
     throw new TimerCommandNotFoundError(id);
   }
 }
 
 /**
- * Lists every enabled timer command across all streamers, joined with its owning streamer's
- * linked Twitch channel name. Streamers with no linked Twitch name are excluded — there's no
- * channel to post to. Queried fresh every scheduler tick rather than cached, mirroring
- * `getAllEnabledPricingRows()`.
+ * Assigns a Twitch-linked Discord user to a timer command's channel list.
+ * @param timerId - ID of the timer to assign the user to.
+ * @param discordId - Discord snowflake of the user to assign.
+ */
+export async function assignUserToTimer(timerId: number, discordId: string): Promise<void> {
+  await getPool().execute(
+    `INSERT INTO timer_command_streamer (timer_id, discord_id)
+     VALUES (?, ?) AS new_row
+     ON DUPLICATE KEY UPDATE
+       timer_id = new_row.timer_id`,
+    [timerId, discordId],
+  );
+}
+
+/**
+ * Assigns multiple Discord users to a timer command's channel list in one statement.
+ * A no-op (no query issued) when `discordIds` is empty.
+ * @param timerId - ID of the timer to assign the users to.
+ * @param discordIds - Discord snowflakes of the users to assign.
+ */
+export async function assignUsersToTimer(timerId: number, discordIds: string[]): Promise<void> {
+  if (discordIds.length === 0) return;
+
+  const placeholders = discordIds.map(() => '(?, ?)').join(', ');
+  const params = discordIds.flatMap((discordId) => [timerId, discordId]);
+
+  await getPool().execute(
+    `INSERT INTO timer_command_streamer (timer_id, discord_id)
+     VALUES ${placeholders} AS new_row
+     ON DUPLICATE KEY UPDATE
+       timer_id = new_row.timer_id`,
+    params,
+  );
+}
+
+/**
+ * Removes a Discord user's assignment from a timer command.
+ * @param timerId - ID of the timer to remove the assignment from.
+ * @param discordId - Discord snowflake of the user to unassign.
+ */
+export async function unassignUserFromTimer(timerId: number, discordId: string): Promise<void> {
+  await getPool().execute(
+    `DELETE FROM timer_command_streamer WHERE timer_id = ? AND discord_id = ?`,
+    [timerId, discordId],
+  );
+}
+
+/**
+ * Lists every enabled timer command joined with each of its assigned users' linked Twitch
+ * channel, for the scheduler's per-tick read. A timer assigned to several streamers appears
+ * once per assigned channel, each firing independently — assignees with no linked Twitch name
+ * are excluded, since there's no channel to post to. Queried fresh every scheduler tick rather
+ * than cached, mirroring `getAllEnabledPricingRows()`.
  */
 export async function getAllEnabledTimerCommandsWithChannel(): Promise<TimerCommandForScheduler[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT tc.id, u.twitch_name AS channel, tc.message, tc.interval_seconds, tc.min_messages, tc.require_live
      FROM timer_command tc
-     JOIN streamer s ON s.id = tc.streamer_id
-     JOIN \`user\` u ON u.discord_id = s.discord_id
+     JOIN timer_command_streamer tcs ON tcs.timer_id = tc.id
+     JOIN \`user\` u ON u.discord_id = tcs.discord_id
      WHERE tc.enabled = 1 AND u.twitch_name IS NOT NULL
-     ORDER BY tc.streamer_id`,
+     ORDER BY tc.id, u.discord_id`,
   );
   return rows.map((r) => ({
     id: r.id,

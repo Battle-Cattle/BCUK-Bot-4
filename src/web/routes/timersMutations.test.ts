@@ -1,248 +1,219 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
+vi.mock('../../db', () => {
+  class TimerCommandNotFoundError extends Error {}
+  return {
+    addTimerCommand: vi.fn().mockResolvedValue(1),
+    updateTimerCommand: vi.fn().mockResolvedValue(undefined),
+    removeTimerCommand: vi.fn().mockResolvedValue(undefined),
+    setTimerCommandEnabled: vi.fn().mockResolvedValue(undefined),
+    assignUsersToTimer: vi.fn().mockResolvedValue(undefined),
+    findUsersByIds: vi.fn().mockResolvedValue(new Map()),
+    TimerCommandNotFoundError,
+    AccessLevel: ACCESS_LEVEL_MOCK,
+  };
+});
+vi.mock('../csrf', () => ({ csrfProtection: (_req: any, _res: any, next: any) => next() }));
+vi.mock('../middleware', () => ({ requireMod: (_req: any, _res: any, next: any) => next() }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
-
-vi.mock('../../db', () => ({
-  getStreamerByDiscordId: vi.fn(),
-  addTimerCommand: vi.fn(),
-  countTimerCommandsForStreamer: vi.fn(),
-  updateTimerCommand: vi.fn(),
-  removeTimerCommand: vi.fn(),
-  setTimerCommandEnabled: vi.fn(),
-  TimerCommandNotFoundError: class TimerCommandNotFoundError extends Error {},
-}));
-
-vi.mock('../csrf', () => ({
-  csrfProtection: (req: any, _res: any, next: any) => {
-    req.csrfToken = () => 'test-csrf-token';
-    next();
-  },
-}));
-
-vi.mock('../middleware', () => ({
-  requireAuth: (_req: any, _res: any, next: any) => next(),
-}));
 
 import supertest from 'supertest';
 import router from './timersMutations';
 import {
-  getStreamerByDiscordId, addTimerCommand, countTimerCommandsForStreamer, updateTimerCommand,
-  removeTimerCommand, setTimerCommandEnabled, TimerCommandNotFoundError,
+  addTimerCommand, updateTimerCommand, removeTimerCommand, setTimerCommandEnabled,
+  assignUsersToTimer, findUsersByIds, TimerCommandNotFoundError,
 } from '../../db';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3; isOwner: boolean };
-const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: 0, isOwner: false };
-
-const MOCK_STREAMER = { id: 123, discord_id: USER.discordId };
-
-const VALID_TIMER_FORM = {
-  name: 'Discord plug',
-  message: 'Join our Discord!',
-  interval_seconds: '600',
-  min_messages: '0',
-  require_live: 'on',
-  enabled: 'on',
-};
-
-function buildApp(sessionUser: SessionUser = USER) {
-  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
+/** Builds a supertest-ready app: the timer mutations router with a urlencoded body parser (no session or render stub needed). */
+function buildApp() {
+  return buildTestApp({ router, bodyParser: 'urlencoded' });
 }
+
+const VALID_DISCORD_ID = '123456789012345678';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
-  vi.mocked(countTimerCommandsForStreamer).mockResolvedValue(0);
+  vi.mocked(addTimerCommand).mockResolvedValue(1);
+  vi.mocked(updateTimerCommand).mockResolvedValue(undefined);
+  vi.mocked(removeTimerCommand).mockResolvedValue(undefined);
+  vi.mocked(setTimerCommandEnabled).mockResolvedValue(undefined);
+  vi.mocked(assignUsersToTimer).mockResolvedValue(undefined);
+  vi.mocked(findUsersByIds).mockResolvedValue(new Map());
 });
 
-describe('POST /add', () => {
-  it('redirects with error when user is not a streamer', async () => {
-    const res = await supertest(buildApp()).post('/add').type('form').send(VALID_TIMER_FORM);
-    expect(res.headers.location).toBe('/timers?error=not_a_streamer');
-    expect(addTimerCommand).not.toHaveBeenCalled();
+const VALID_FIELDS = 'name=Discord+plug&message=Join+our+Discord&interval_seconds=600&min_messages=0';
+
+// ─── POST /timers/add ─────────────────────────────────────────────────────────
+
+describe('POST /timers/add', () => {
+  it('redirects to /timers on success', async () => {
+    const res = await supertest(buildApp()).post('/timers/add').send(VALID_FIELDS);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/timers');
   });
 
-  it.each([
-    ['missing name', { name: '' }, 'missing_fields'],
-    ['missing message', { message: '' }, 'missing_fields'],
-    ['interval below the 60s floor', { interval_seconds: '59' }, 'invalid_interval'],
-    ['non-numeric interval', { interval_seconds: 'abc' }, 'invalid_interval'],
-    ['interval beyond the INT column range', { interval_seconds: '99999999999' }, 'invalid_interval'],
-    ['negative min_messages', { min_messages: '-1' }, 'invalid_min_messages'],
-    ['min_messages beyond the INT column range', { min_messages: '99999999999' }, 'invalid_min_messages'],
-  ])('redirects with the specific error code when %s', async (_label, override, expectedErrorCode) => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp()).post('/add').type('form').send({ ...VALID_TIMER_FORM, ...override });
-    expect(res.headers.location).toBe(`/timers?error=${expectedErrorCode}`);
-    expect(addTimerCommand).not.toHaveBeenCalled();
+  it('redirects to ?error=missing_fields when name is absent', async () => {
+    const res = await supertest(buildApp()).post('/timers/add').send('message=hi&interval_seconds=600&min_messages=0');
+    expect(res.headers.location).toBe('/timers?error=missing_fields');
   });
 
-  it('creates the timer and redirects to success', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(addTimerCommand).mockResolvedValue(1);
-
-    const res = await supertest(buildApp()).post('/add').type('form').send(VALID_TIMER_FORM);
-
-    expect(res.headers.location).toBe('/timers?success=timer_added');
-    expect(addTimerCommand).toHaveBeenCalledWith(123, {
-      name: 'Discord plug',
-      message: 'Join our Discord!',
-      intervalSeconds: 600,
-      minMessages: 0,
-      requireLive: true,
-      enabled: true,
-    });
+  it('redirects to ?error=missing_fields when message is absent', async () => {
+    const res = await supertest(buildApp()).post('/timers/add').send('name=Plug&interval_seconds=600&min_messages=0');
+    expect(res.headers.location).toBe('/timers?error=missing_fields');
   });
 
-  it('redirects with add_failed when the insert throws', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(addTimerCommand).mockRejectedValue(new Error('db down'));
+  it('redirects to ?error=invalid_interval when interval_seconds is below the minimum', async () => {
+    const res = await supertest(buildApp()).post('/timers/add').send('name=Plug&message=hi&interval_seconds=10&min_messages=0');
+    expect(res.headers.location).toBe('/timers?error=invalid_interval');
+  });
 
-    const res = await supertest(buildApp()).post('/add').type('form').send(VALID_TIMER_FORM);
+  it('redirects to ?error=invalid_interval when interval_seconds is non-numeric', async () => {
+    const res = await supertest(buildApp()).post('/timers/add').send('name=Plug&message=hi&interval_seconds=abc&min_messages=0');
+    expect(res.headers.location).toBe('/timers?error=invalid_interval');
+  });
+
+  it('redirects to ?error=invalid_min_messages when min_messages is non-numeric', async () => {
+    const res = await supertest(buildApp()).post('/timers/add').send('name=Plug&message=hi&interval_seconds=600&min_messages=abc');
+    expect(res.headers.location).toBe('/timers?error=invalid_min_messages');
+  });
+
+  it('redirects to ?error=add_failed on unexpected error', async () => {
+    vi.mocked(addTimerCommand).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp()).post('/timers/add').send(VALID_FIELDS);
     expect(res.headers.location).toBe('/timers?error=add_failed');
   });
 
-  it('redirects with add_failed when the count check throws', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(countTimerCommandsForStreamer).mockRejectedValue(new Error('db down'));
-
-    const res = await supertest(buildApp()).post('/add').type('form').send(VALID_TIMER_FORM);
-    expect(res.headers.location).toBe('/timers?error=add_failed');
-    expect(addTimerCommand).not.toHaveBeenCalled();
+  it('assigns users when discord_ids are provided and user has twitch_name', async () => {
+    vi.mocked(findUsersByIds).mockResolvedValue(new Map([
+      [VALID_DISCORD_ID, { discord_id: VALID_DISCORD_ID, discord_name: 'Alice', twitch_name: 'alice', access_level: AccessLevel.USER } as any],
+    ]));
+    const res = await supertest(buildApp()).post('/timers/add').send(`${VALID_FIELDS}&discord_ids=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/timers');
+    expect(assignUsersToTimer).toHaveBeenCalledWith(1, [VALID_DISCORD_ID]);
   });
 
-  it('redirects with timer_limit_reached and skips the insert when the streamer is already at the cap', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(countTimerCommandsForStreamer).mockResolvedValue(20);
-
-    const res = await supertest(buildApp()).post('/add').type('form').send(VALID_TIMER_FORM);
-
-    expect(res.headers.location).toBe('/timers?error=timer_limit_reached');
-    expect(addTimerCommand).not.toHaveBeenCalled();
+  it('skips assigning user when findUsersByIds does not return a matching entry', async () => {
+    vi.mocked(findUsersByIds).mockResolvedValue(new Map());
+    const res = await supertest(buildApp()).post('/timers/add').send(`${VALID_FIELDS}&discord_ids=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/timers');
+    expect(assignUsersToTimer).toHaveBeenCalledWith(1, []);
   });
 
-  it('allows the insert when the streamer is one below the cap', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(countTimerCommandsForStreamer).mockResolvedValue(19);
-    vi.mocked(addTimerCommand).mockResolvedValue(1);
-
-    const res = await supertest(buildApp()).post('/add').type('form').send(VALID_TIMER_FORM);
-
-    expect(res.headers.location).toBe('/timers?success=timer_added');
-    expect(addTimerCommand).toHaveBeenCalled();
+  it('redirects to ?error=assign_failed on unexpected assign error, and cleans up the created timer', async () => {
+    vi.mocked(findUsersByIds).mockResolvedValue(new Map([
+      [VALID_DISCORD_ID, { discord_id: VALID_DISCORD_ID, twitch_name: 'alice', discord_name: null, access_level: AccessLevel.USER } as any],
+    ]));
+    vi.mocked(assignUsersToTimer).mockRejectedValueOnce(new Error('DB error'));
+    const res = await supertest(buildApp()).post('/timers/add').send(`${VALID_FIELDS}&discord_ids=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/timers?error=assign_failed');
+    expect(removeTimerCommand).toHaveBeenCalledWith(1);
   });
 
-  it('serializes concurrent requests for the same streamer so a race cannot exceed the cap', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    // Simulates the real DB: the count reflects however many inserts have actually landed so far.
-    let insertedCount = 19;
-    vi.mocked(countTimerCommandsForStreamer).mockImplementation(async () => insertedCount);
-    vi.mocked(addTimerCommand).mockImplementation(async () => { insertedCount += 1; return 1; });
+  it('redirects to ?error=assign_failed when findUsersByIds itself throws, and cleans up the created timer', async () => {
+    vi.mocked(findUsersByIds).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp()).post('/timers/add').send(`${VALID_FIELDS}&discord_ids=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/timers?error=assign_failed');
+    expect(removeTimerCommand).toHaveBeenCalledWith(1);
+  });
 
-    const app = buildApp();
-    const [res1, res2] = await Promise.all([
-      supertest(app).post('/add').type('form').send(VALID_TIMER_FORM),
-      supertest(app).post('/add').type('form').send(VALID_TIMER_FORM),
-    ]);
-
-    const locations = [res1.headers.location, res2.headers.location].sort();
-    expect(locations).toEqual(['/timers?error=timer_limit_reached', '/timers?success=timer_added']);
-    expect(addTimerCommand).toHaveBeenCalledTimes(1);
+  it('still redirects to ?error=assign_failed when the cleanup delete itself also fails', async () => {
+    vi.mocked(findUsersByIds).mockRejectedValueOnce(new Error('DB down'));
+    vi.mocked(removeTimerCommand).mockRejectedValueOnce(new Error('cleanup also failed'));
+    const res = await supertest(buildApp()).post('/timers/add').send(`${VALID_FIELDS}&discord_ids=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/timers?error=assign_failed');
+    expect(removeTimerCommand).toHaveBeenCalledWith(1);
   });
 });
 
-describe('POST /update', () => {
-  it('redirects with invalid_id when id is malformed', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp()).post('/update').type('form').send({ ...VALID_TIMER_FORM, id: 'abc' });
+// ─── POST /timers/update ──────────────────────────────────────────────────────
+
+describe('POST /timers/update', () => {
+  it('redirects to /timers on success', async () => {
+    const res = await supertest(buildApp()).post('/timers/update').send(`id=1&${VALID_FIELDS}`);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/timers');
+  });
+
+  it('redirects to ?error=invalid_id when id is non-numeric', async () => {
+    const res = await supertest(buildApp()).post('/timers/update').send(`id=abc&${VALID_FIELDS}`);
     expect(res.headers.location).toBe('/timers?error=invalid_id');
-    expect(updateTimerCommand).not.toHaveBeenCalled();
   });
 
-  it('updates and redirects to success, scoped to the requesting streamer', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-
-    const res = await supertest(buildApp()).post('/update').type('form').send({ ...VALID_TIMER_FORM, id: '5' });
-
-    expect(res.headers.location).toBe('/timers?success=timer_updated');
-    expect(updateTimerCommand).toHaveBeenCalledWith(5, 123, {
-      name: 'Discord plug',
-      message: 'Join our Discord!',
-      intervalSeconds: 600,
-      minMessages: 0,
-      requireLive: true,
-      enabled: true,
-    });
+  it('redirects to ?error=missing_fields when name is absent', async () => {
+    const res = await supertest(buildApp()).post('/timers/update').send('id=1&message=hi&interval_seconds=600&min_messages=0');
+    expect(res.headers.location).toBe('/timers?error=missing_fields');
   });
 
-  it('redirects with timer_not_found when the id belongs to another streamer', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(updateTimerCommand).mockRejectedValue(new TimerCommandNotFoundError(5));
-
-    const res = await supertest(buildApp()).post('/update').type('form').send({ ...VALID_TIMER_FORM, id: '5' });
+  it('redirects to ?error=timer_not_found when TimerCommandNotFoundError is thrown', async () => {
+    vi.mocked(updateTimerCommand).mockRejectedValueOnce(new (TimerCommandNotFoundError as any)(1));
+    const res = await supertest(buildApp()).post('/timers/update').send(`id=1&${VALID_FIELDS}`);
     expect(res.headers.location).toBe('/timers?error=timer_not_found');
   });
 
-  it('redirects with update_failed when the update throws a non-NotFound error', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(updateTimerCommand).mockRejectedValue(new Error('db down'));
-
-    const res = await supertest(buildApp()).post('/update').type('form').send({ ...VALID_TIMER_FORM, id: '5' });
+  it('redirects to ?error=update_failed on unexpected error', async () => {
+    vi.mocked(updateTimerCommand).mockRejectedValueOnce(new Error('DB error'));
+    const res = await supertest(buildApp()).post('/timers/update').send(`id=1&${VALID_FIELDS}`);
     expect(res.headers.location).toBe('/timers?error=update_failed');
+  });
+
+  it('passes require_live=true and enabled=true when checkboxes are "on"', async () => {
+    await supertest(buildApp()).post('/timers/update').send(`id=1&${VALID_FIELDS}&require_live=on&enabled=on`);
+    expect(updateTimerCommand).toHaveBeenCalledWith(1, {
+      name: 'Discord plug', message: 'Join our Discord', intervalSeconds: 600, minMessages: 0,
+      requireLive: true, enabled: true,
+    });
   });
 });
 
-describe('POST /remove', () => {
-  it('redirects with invalid_id when id is malformed', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp()).post('/remove').type('form').send({ id: 'abc' });
+// ─── POST /timers/remove ──────────────────────────────────────────────────────
+
+describe('POST /timers/remove', () => {
+  it('redirects to /timers on success', async () => {
+    const res = await supertest(buildApp()).post('/timers/remove').send('id=5');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/timers');
+  });
+
+  it('redirects to ?error=invalid_id when id is non-numeric', async () => {
+    const res = await supertest(buildApp()).post('/timers/remove').send('id=abc');
     expect(res.headers.location).toBe('/timers?error=invalid_id');
-    expect(removeTimerCommand).not.toHaveBeenCalled();
   });
 
-  it('removes and redirects to success, scoped to the requesting streamer', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp()).post('/remove').type('form').send({ id: '5' });
-    expect(res.headers.location).toBe('/timers?success=timer_removed');
-    expect(removeTimerCommand).toHaveBeenCalledWith(5, 123);
-  });
-
-  it('redirects with remove_failed when the delete throws', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(removeTimerCommand).mockRejectedValue(new Error('db down'));
-
-    const res = await supertest(buildApp()).post('/remove').type('form').send({ id: '5' });
+  it('redirects to ?error=remove_failed on unexpected error', async () => {
+    vi.mocked(removeTimerCommand).mockRejectedValueOnce(new Error('DB error'));
+    const res = await supertest(buildApp()).post('/timers/remove').send('id=5');
     expect(res.headers.location).toBe('/timers?error=remove_failed');
   });
 });
 
-describe('POST /toggle', () => {
-  it('redirects with invalid_id when id is malformed', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp()).post('/toggle').type('form').send({ id: 'abc', enabled: 'true' });
-    expect(res.headers.location).toBe('/timers?error=invalid_id');
-    expect(setTimerCommandEnabled).not.toHaveBeenCalled();
-  });
+// ─── POST /timers/toggle ──────────────────────────────────────────────────────
 
-  it('toggles and redirects, scoped to the requesting streamer', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp()).post('/toggle').type('form').send({ id: '5', enabled: 'false' });
+describe('POST /timers/toggle', () => {
+  it('redirects to /timers on success', async () => {
+    const res = await supertest(buildApp()).post('/timers/toggle').send('id=1&enabled=true');
+    expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/timers');
-    expect(setTimerCommandEnabled).toHaveBeenCalledWith(5, 123, false);
+    expect(setTimerCommandEnabled).toHaveBeenCalledWith(1, true);
   });
 
-  it('redirects with timer_not_found when the id belongs to another streamer', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(setTimerCommandEnabled).mockRejectedValue(new TimerCommandNotFoundError(5));
-    const res = await supertest(buildApp()).post('/toggle').type('form').send({ id: '5', enabled: 'true' });
+  it('redirects to ?error=invalid_id when id is non-numeric', async () => {
+    const res = await supertest(buildApp()).post('/timers/toggle').send('id=abc&enabled=true');
+    expect(res.headers.location).toBe('/timers?error=invalid_id');
+  });
+
+  it('redirects to ?error=timer_not_found when TimerCommandNotFoundError is thrown', async () => {
+    vi.mocked(setTimerCommandEnabled).mockRejectedValueOnce(new (TimerCommandNotFoundError as any)(1));
+    const res = await supertest(buildApp()).post('/timers/toggle').send('id=1&enabled=true');
     expect(res.headers.location).toBe('/timers?error=timer_not_found');
   });
 
-  it('redirects with toggle_failed when the update throws a non-NotFound error', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(setTimerCommandEnabled).mockRejectedValue(new Error('db down'));
-    const res = await supertest(buildApp()).post('/toggle').type('form').send({ id: '5', enabled: 'true' });
+  it('redirects to ?error=toggle_failed on unexpected error', async () => {
+    vi.mocked(setTimerCommandEnabled).mockRejectedValueOnce(new Error('DB error'));
+    const res = await supertest(buildApp()).post('/timers/toggle').send('id=1&enabled=true');
     expect(res.headers.location).toBe('/timers?error=toggle_failed');
   });
 });
