@@ -163,6 +163,79 @@ describe('startRewardPricingScheduler / stopRewardPricingScheduler', () => {
     expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
   });
 
+  it('pauses polling when the DB server itself is shutting down, and resumes once it recovers', async () => {
+    const shutdownError = Object.assign(new Error('Server shutdown in progress'), { code: 'ER_SERVER_SHUTDOWN', errno: 1053 });
+    vi.mocked(getAllEnabledPricingRows).mockRejectedValueOnce(shutdownError);
+    startRewardPricingScheduler();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+
+    // Regular 30s cadence should not fire again — polling is paused.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+
+    // The DB recovers before the 60s probe fires.
+    vi.mocked(getAllEnabledPricingRows).mockResolvedValue([]);
+    await vi.advanceTimersByTimeAsync(30_000); // completes the 60s probe delay
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(2);
+
+    // Normal cadence resumes.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps retrying every 60s while the DB server stays down', async () => {
+    const shutdownError = Object.assign(new Error('Server shutdown in progress'), { code: 'ER_SERVER_SHUTDOWN', errno: 1053 });
+    vi.mocked(getAllEnabledPricingRows).mockRejectedValue(shutdownError);
+    startRewardPricingScheduler();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps retrying every 60s after a probe fails with something other than the shutdown error', async () => {
+    const shutdownError = Object.assign(new Error('Server shutdown in progress'), { code: 'ER_SERVER_SHUTDOWN', errno: 1053 });
+    vi.mocked(getAllEnabledPricingRows).mockRejectedValueOnce(shutdownError);
+    startRewardPricingScheduler();
+
+    await vi.advanceTimersByTimeAsync(30_000); // initial shutdown error pauses polling
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+
+    vi.mocked(getAllEnabledPricingRows).mockRejectedValueOnce(new Error('connection reset'));
+    await vi.advanceTimersByTimeAsync(60_000); // probe hits a different transient error
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(2);
+
+    vi.mocked(getAllEnabledPricingRows).mockResolvedValue([]);
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(2); // not yet — confirms the retry is on a 60s cadence, not something shorter
+    await vi.advanceTimersByTimeAsync(1); // scheduler kept retrying instead of stalling
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(3);
+
+    // Normal cadence resumes.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(4);
+  });
+
+  it('cancels the pending recovery probe on stop, so it never fires', async () => {
+    const shutdownError = Object.assign(new Error('Server shutdown in progress'), { code: 'ER_SERVER_SHUTDOWN', errno: 1053 });
+    vi.mocked(getAllEnabledPricingRows).mockRejectedValueOnce(shutdownError);
+    startRewardPricingScheduler();
+
+    await vi.advanceTimersByTimeAsync(30_000); // shutdown error pauses polling and schedules a 60s probe
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+
+    await stopRewardPricingScheduler();
+    await vi.advanceTimersByTimeAsync(60_000); // probe would have fired here if not cancelled
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+  });
+
   it('a reentrancy guard prevents overlapping ticks', async () => {
     let resolveFirst!: () => void;
     const gate = new Promise<void>((resolve) => { resolveFirst = resolve; });
