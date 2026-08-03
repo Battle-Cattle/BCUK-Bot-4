@@ -4,7 +4,7 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { upsertReward, setRewardVideos, deleteReward } from '../../db';
 import {
-  logAndRedirectError, parsePositiveIntId, requireStreamer, parseWeight, parseRewardIdParam,
+  logAndRedirectError, parsePositiveIntId, requireStreamer, parseWeight, parseRewardIdParam, trimField,
 } from './shared';
 import { toStringArray } from './overlayAdminShared';
 
@@ -31,7 +31,7 @@ router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) =
     if (!streamer) return;
 
     const body = req.body as Record<string, string | string[] | undefined>;
-    const rawTwitchRewardId = (typeof body.twitch_reward_id === 'string' ? body.twitch_reward_id : '').trim();
+    const rawTwitchRewardId = trimField(body.twitch_reward_id);
     const twitchRewardId = parseRewardIdParam(rawTwitchRewardId);
 
     if (twitchRewardId === null) {
