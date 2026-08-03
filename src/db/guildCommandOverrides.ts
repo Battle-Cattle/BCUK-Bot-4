@@ -58,6 +58,10 @@ export async function getAllOverrides(): Promise<DbGuildCommandOverride[]> {
 }
 
 // ─── Mutations ─────────────────────────────────────────────────────────────────
+//
+// This module is a pure DB layer with no cache knowledge — db.ts's upsertOverride/
+// removeOverride facades wrap these two functions with a cache invalidation call. A new write
+// function added here that affects custom-command resolution needs the same treatment in db.ts.
 
 /**
  * Inserts or updates a guild's override for a catalog command.
