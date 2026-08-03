@@ -317,20 +317,32 @@ Expected constraints:
 
 ## `timer_command`
 
-Per-streamer, Twitch-only auto-posted chat messages ("timer commands" — one message per row; a rotation is achieved by creating several timers). Config-only: the scheduler's live-status/chat-activity firing state lives in memory (`timerCommandScheduler.ts`), not in this table, so a restart just restarts each timer's countdown rather than replaying fires missed while the bot was down. Created by `migrations/timer_commands.sql`.
+Twitch-only auto-posted chat messages ("timer commands" — one message per row; a rotation is achieved by creating several timers), managed like `custom_command`: a global catalog assigned to Twitch-linked Discord users via `timer_command_streamer`, rather than owned by a single streamer. Config-only: the scheduler's live-status/chat-activity firing state lives in memory, keyed per (timer, assigned channel) pair (`timerCommandScheduler.ts`), not in this table, so a restart just restarts each one's countdown rather than replaying fires missed while the bot was down. Created by `migrations/timer_commands.sql`; moved to the assignment model by `migrations/timer_command_streamer_assignment.sql`.
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | `INT` PK, auto-increment | |
-| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
 | `name` | `VARCHAR(255)` | Admin-facing label only, never posted to chat |
 | `message` | `VARCHAR(500)` | The chat message posted on each fire |
 | `interval_seconds` | `INT` | Minimum time between fires; `CHECK (interval_seconds >= 60)` |
 | `min_messages` | `INT` | Minimum chat lines seen since the timer's last fire, in addition to the interval; `0` disables this gate; `CHECK (min_messages >= 0)` |
-| `require_live` | `TINYINT(1)` | When `1`, the timer only fires while the streamer's channel is live |
+| `require_live` | `TINYINT(1)` | When `1`, the timer only fires while the assigned channel is live |
 | `enabled` | `TINYINT(1)` | Whether the scheduler considers this timer at all |
 
-Firing logic (see `timerCommandScheduler.ts`): on a 15s tick, a timer fires once its interval has elapsed **and** (if `require_live`) the channel is live **and** at least `min_messages` chat lines have been seen since its last fire. A newly-seen timer (first tick after creation or bot restart) seeds its clock and chat-line baseline without firing, so restarts don't cause a burst of immediate posts.
+Firing logic (see `timerCommandScheduler.ts`): on a 15s tick, each of a timer's assigned channels is evaluated independently — it fires once its own interval has elapsed **and** (if `require_live`) that channel is live **and** at least `min_messages` chat lines have been seen on that channel since its last fire. A newly-seen (timer, channel) pair (first tick after creation/assignment or bot restart) seeds its clock and chat-line baseline without firing, so restarts don't cause a burst of immediate posts. When several assigned channels are merged into one Twitch Shared Chat session, a shared cooldown across that session's timers prevents flooding the merged chat — see the "Shared Chat group cooldown" section of `timerCommandScheduler.ts`.
+
+## `timer_command_streamer`
+
+Join table mapping timer commands to the Discord users (Twitch streamers) they're assigned to. Mirrors `twitch_user_commands`. Added by `migrations/timer_command_streamer_assignment.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `timer_id` | `INT` | FK to `timer_command.id` ON DELETE CASCADE |
+| `discord_id` | `BIGINT` | FK to `user.discord_id` ON DELETE CASCADE |
+
+Expected constraints:
+
+- `PRIMARY KEY (timer_id, discord_id)` — a user can only be assigned to a given timer once.
 
 ## `streamdeck_api_keys`
 

@@ -1,43 +1,52 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
+import { DbTimerCommandWithAssignments, DbUser, getAllTimerCommandsWithAssignments, getAllUsers } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireAuth } from '../middleware';
-import { getSessionUser } from '../session';
-import { getStreamerByDiscordId, getTimerCommandsForStreamer } from '../../db';
-import type { DbTimerCommand } from '../../db';
-import { renderError, renderView, filterQueryParam } from './shared';
+import { requireManager } from '../middleware';
+import { renderError, filterQueryParam, renderView } from './shared';
 import timersMutationsRouter from './timersMutations';
+import timerAssignmentsRouter from './timerAssignments';
 
-const log = createLogger('Timers');
+const log = createLogger('Web');
 const router = Router();
 
 const KNOWN_ERRORS = new Set([
-  'not_a_streamer', 'missing_fields', 'invalid_interval', 'invalid_min_messages',
-  'invalid_id', 'timer_not_found', 'add_failed', 'update_failed', 'remove_failed', 'toggle_failed',
+  'missing_fields', 'invalid_interval', 'invalid_min_messages', 'invalid_id',
+  'timer_not_found', 'add_failed', 'update_failed', 'remove_failed', 'toggle_failed',
+  'assign_failed', 'unassign_failed', 'invalid_assignment_user',
 ]);
-const KNOWN_SUCCESSES = new Set(['timer_added', 'timer_updated', 'timer_removed']);
+
+interface TimerViewModel extends DbTimerCommandWithAssignments {
+  unassigned_users: DbUser[];
+}
 
 /**
- * GET /timers — renders the self-service timer-commands page for the logged-in streamer:
- * their own timers (name, message, interval, min-messages, live requirement, enabled state)
- * plus an add form. Shows a "link your Twitch account" prompt instead of the timer list when
- * the session user has no linked `streamer` record, mirroring `/channel-points`'s handling of
- * the same case — no redirect loop, since a non-streamer viewing this page isn't an error.
- * @param req - Express request; reads `req.session.user`, `error`, and `success` query params.
- * @param res - Express response; renders the `timers` view, or a 500 error page on failure.
+ * GET /timers — renders the Timers admin page: the global timer-command catalog, each with
+ * its list of assigned Twitch-linked streamers, plus an add form. Gated at Manager — the page
+ * lists every Twitch-linked user's discord_id/discord_name/twitch_name plus every timer's
+ * assignments, so authentication alone isn't enough (mutations additionally require Mod+).
  */
-router.get('/', requireAuth, csrfProtection, async (req, res) => {
+router.get('/timers', requireManager, csrfProtection, async (req, res) => {
   try {
-    const streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
-    const timers: DbTimerCommand[] = streamer ? await getTimerCommandsForStreamer(streamer.id) : [];
+    const [timers, users] = await Promise.all([
+      getAllTimerCommandsWithAssignments(),
+      getAllUsers(),
+    ]);
+    const assignableUsers = users.filter((entry) => entry.twitch_name);
+    const timersForView: TimerViewModel[] = timers.map((timer) => {
+      const assignedDiscordIds = new Set(timer.assigned_users.map((entry) => entry.discord_id));
+      return {
+        ...timer,
+        unassigned_users: assignableUsers.filter((entry) => !assignedDiscordIds.has(entry.discord_id)),
+      };
+    });
 
     renderView(res, 'timers', {
       user: req.session.user,
-      isStreamer: !!streamer,
-      timers,
+      timers: timersForView,
+      assignableUsers,
       csrfToken: req.csrfToken(),
       error: filterQueryParam(req.query.error, KNOWN_ERRORS),
-      success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),
     });
   } catch (err) {
     log.error('Timers page error:', err);
@@ -46,5 +55,6 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
 });
 
 router.use(timersMutationsRouter);
+router.use(timerAssignmentsRouter);
 
 export default router;

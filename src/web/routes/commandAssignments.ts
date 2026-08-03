@@ -1,90 +1,28 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
 import {
   assignUserToCommand,
   CommandConflictError,
   isMysqlDuplicateEntryError,
-  findUser,
   unassignUserFromCommand,
 } from '../../db';
-import { csrfProtection } from '../csrf';
-import { requireMod } from '../middleware';
-import { parsePositiveIntId, normalizeDiscordId, logAndRedirectError } from './shared';
-
-const log = createLogger('Web');
-const router = Router();
+import { parsePositiveIntId } from './shared';
+import { createAssignmentRouter } from './assignmentRoutes';
 
 /**
- * POST /commands/assign — assigns a Twitch-linked Discord user to a custom command.
- * @param req - Express request; reads `command_id` and `discord_id` from `req.body`.
- * @param res - Express response; redirects to `/commands` on success, or to
- *   `/commands?error=<code>` if fields are missing (`missing_fields`), IDs are
- *   malformed (`invalid_id`), the user doesn't exist or has no linked Twitch name
- *   (`invalid_assignment_user`), the command is already assigned (`command_taken`),
- *   or the assignment write fails (`assign_failed`).
+ * `POST /commands/assign` / `POST /commands/unassign` — assigns or removes a Twitch-linked
+ * Discord user's association with a custom command. See {@link createAssignmentRouter} for the
+ * shared route shape; a command assignment conflict (`CommandConflictError` or a raw MySQL
+ * duplicate-entry error) redirects to `?error=command_taken` instead of the generic
+ * `assign_failed`.
  */
-router.post('/commands/assign', requireMod, csrfProtection, async (req, res) => {
-  const { command_id, discord_id } = req.body as { command_id?: string; discord_id?: string };
-  if (!command_id || !discord_id) {
-    return res.redirect('/commands?error=missing_fields');
-  }
-
-  const parsedCommandId = parsePositiveIntId(command_id);
-  const normalizedDiscordId = normalizeDiscordId(discord_id);
-
-  if (parsedCommandId === null || normalizedDiscordId === null) {
-    return res.redirect('/commands?error=invalid_id');
-  }
-
-  try {
-    const user = await findUser(normalizedDiscordId);
-    if (!user || !user.twitch_name) {
-      return res.redirect('/commands?error=invalid_assignment_user');
-    }
-
-    await assignUserToCommand(parsedCommandId, normalizedDiscordId);
-  } catch (err) {
-    if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-      return res.redirect('/commands?error=command_taken');
-    }
-
-    return logAndRedirectError({
-      res, log, logLabel: 'Assign user to command error:', err, basePath: '/commands', errorCode: 'assign_failed',
-    });
-  }
-
-  res.redirect('/commands');
+export default createAssignmentRouter({
+  basePath: '/commands',
+  idField: 'command_id',
+  parseId: parsePositiveIntId,
+  assign: assignUserToCommand,
+  unassign: unassignUserFromCommand,
+  mapAssignError: (err) => (
+    err instanceof CommandConflictError || isMysqlDuplicateEntryError(err) ? 'command_taken' : null
+  ),
+  log: createLogger('Web'),
 });
-
-/**
- * POST /commands/unassign — removes a user's assignment from a custom command.
- * @param req - Express request; reads `command_id` and `discord_id` from `req.body`.
- * @param res - Express response; redirects to `/commands` on success, or to
- *   `/commands?error=<code>` if fields are missing (`missing_fields`), IDs are
- *   malformed (`invalid_id`), or the unassign write fails (`unassign_failed`).
- */
-router.post('/commands/unassign', requireMod, csrfProtection, async (req, res) => {
-  const { command_id, discord_id } = req.body as { command_id?: string; discord_id?: string };
-  if (!command_id || !discord_id) {
-    return res.redirect('/commands?error=missing_fields');
-  }
-
-  const parsedCommandId = parsePositiveIntId(command_id);
-  const normalizedDiscordId = normalizeDiscordId(discord_id);
-
-  if (parsedCommandId === null || normalizedDiscordId === null) {
-    return res.redirect('/commands?error=invalid_id');
-  }
-
-  try {
-    await unassignUserFromCommand(parsedCommandId, normalizedDiscordId);
-  } catch (err) {
-    return logAndRedirectError({
-      res, log, logLabel: 'Unassign user from command error:', err, basePath: '/commands', errorCode: 'unassign_failed',
-    });
-  }
-
-  res.redirect('/commands');
-});
-
-export default router;

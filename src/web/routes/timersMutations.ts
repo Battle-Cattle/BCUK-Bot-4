@@ -1,41 +1,22 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import {
-  addTimerCommand, countTimerCommandsForStreamer, updateTimerCommand, removeTimerCommand,
+  addTimerCommand, assignUsersToTimer, findUsersByIds, removeTimerCommand, updateTimerCommand,
   setTimerCommandEnabled, TimerCommandNotFoundError,
 } from '../../db';
 import type { TimerCommandInput } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireAuth } from '../middleware';
-import { createMutationQueue } from '../../shared/mutationQueue';
+import { requireMod } from '../middleware';
 import {
-  logAndRedirectError, normalizeRequiredText, parseCheckboxField, parsePositiveIntId,
-  requireStreamer,
+  logAndRedirectError, normalizeDiscordId, normalizeRequiredText, parseCheckboxField, parsePositiveIntId,
 } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
 
-/**
- * Serializes the per-streamer timer count check and insert in `POST /timers/add` (keyed by
- * streamer id), so two concurrent requests for the same streamer can't both read a count under
- * {@link MAX_TIMER_COMMANDS_PER_STREAMER} and each insert, letting the cap be exceeded.
- */
-const timerAddQueue = createMutationQueue<number>();
-
-/** Redirect target used when the requester isn't a streamer, scoped to the timers admin page. */
-const NOT_A_STREAMER_REDIRECT = '/timers?error=not_a_streamer';
-
 const MIN_INTERVAL_SECONDS = 60;
 /** MySQL `INT` (4-byte signed) max — both `interval_seconds` and `min_messages` are stored in `INT` columns. */
 const MAX_INT_COLUMN_VALUE = 2147483647;
-/**
- * Per-streamer cap on the number of timer commands, enforced in `/timers/add`. Every enabled
- * timer across every streamer is processed on every ~15s scheduler tick, so this bounds that
- * per-tick work rather than letting one streamer's rows (accidental duplicates, or a scripted
- * client) grow it unboundedly.
- */
-const MAX_TIMER_COMMANDS_PER_STREAMER = 20;
 
 /**
  * Parses a required numeric form field: an integer within `[min, max]`. Shared by both
@@ -82,91 +63,111 @@ function parseTimerCommandFields(body: Record<string, string | string[] | undefi
 }
 
 /**
- * POST /timers/add — creates a new timer command for the requesting streamer. The count check
- * and insert are serialized per streamer through {@link timerAddQueue} so two concurrent
- * requests can't both observe a count under the cap and each insert, exceeding it.
- * @param req - Express request; reads `name`, `message`, `interval_seconds`, `min_messages`,
- *   `require_live`, `enabled` from `req.body`.
- * @param res - Express response; redirects to `/timers?success=timer_added` on success, or to
- *   `/timers?error=<code>` if the requester isn't a streamer (`not_a_streamer`), a field is
- *   invalid (`missing_fields`, `invalid_interval`, `invalid_min_messages`), the streamer has
- *   already reached {@link MAX_TIMER_COMMANDS_PER_STREAMER} timers (`timer_limit_reached`), or
- *   the count check or insert fails (`add_failed`).
+ * Assigns Twitch-linked users to a newly created timer, filtering out any id with no
+ * linked Twitch name. On any failure, deletes the timer to avoid leaving it in a
+ * partially-assigned state. Returns an error code, or null on success.
  */
-router.post('/add', requireAuth, csrfProtection, async (req, res) => {
+async function assignUsersToNewTimer(timerId: number, discordIds: string[]): Promise<string | null> {
   try {
-    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-    if (!streamer) return;
-
-    const body = req.body as Record<string, string | string[] | undefined>;
-    const result = parseTimerCommandFields(body);
-    if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
-
-    const added = await timerAddQueue.run(streamer.id, async () => {
-      const existingCount = await countTimerCommandsForStreamer(streamer.id);
-      if (existingCount >= MAX_TIMER_COMMANDS_PER_STREAMER) return false;
-      await addTimerCommand(streamer.id, result.input);
-      return true;
+    const users = await findUsersByIds(discordIds);
+    const eligibleDiscordIds = discordIds.filter((discordId) => {
+      const user = users.get(discordId);
+      return !!user && !!user.twitch_name;
     });
-    if (!added) return res.redirect('/timers?error=timer_limit_reached');
-    res.redirect('/timers?success=timer_added');
+    await assignUsersToTimer(timerId, eligibleDiscordIds);
   } catch (err) {
-    logAndRedirectError({ res, log, logLabel: 'Add timer command error:', err, basePath: '/timers', errorCode: 'add_failed' });
+    try {
+      await removeTimerCommand(timerId);
+    } catch (cleanupErr) {
+      log.error('Cleanup after failed timer assign error:', cleanupErr);
+    }
+    log.error('Assign user during timer creation error:', err);
+    return 'assign_failed';
   }
+  return null;
+}
+
+/**
+ * POST /timers/add — creates a new timer command and optionally assigns it to one or more
+ * Twitch-linked Discord users. If any assignment fails, the just-created timer is deleted
+ * to avoid a partially-assigned state.
+ * @param req - Express request; reads `name`, `message`, `interval_seconds`, `min_messages`,
+ *   `require_live`, `enabled`, and `discord_ids` from `req.body`.
+ * @param res - Express response; redirects to `/timers` on success, or to
+ *   `/timers?error=<code>` if a field is invalid (`missing_fields`, `invalid_interval`,
+ *   `invalid_min_messages`), the insert fails (`add_failed`), or an assignment fails
+ *   (`assign_failed`).
+ */
+router.post('/timers/add', requireMod, csrfProtection, async (req, res) => {
+  const body = req.body as Record<string, string | string[] | undefined>;
+  const result = parseTimerCommandFields(body);
+  if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
+
+  let timerId: number;
+  try {
+    timerId = await addTimerCommand(result.input);
+  } catch (err) {
+    return logAndRedirectError({ res, log, logLabel: 'Add timer command error:', err, basePath: '/timers', errorCode: 'add_failed' });
+  }
+
+  const rawDiscordIds = body.discord_ids;
+  const discordIds: string[] = (Array.isArray(rawDiscordIds) ? rawDiscordIds : rawDiscordIds ? [rawDiscordIds] : [])
+    .map((id) => normalizeDiscordId(id))
+    .filter((id): id is string => id !== null);
+
+  const assignError = await assignUsersToNewTimer(timerId, discordIds);
+  if (assignError) return res.redirect(`/timers?error=${assignError}`);
+
+  res.redirect('/timers');
 });
 
 /**
- * POST /timers/update — updates an existing timer command belonging to the requesting streamer.
+ * POST /timers/update — updates an existing timer command's fields.
  * @param req - Express request; reads `id`, plus the same fields as `/timers/add`, from `req.body`.
- * @param res - Express response; redirects to `/timers?success=timer_updated` on success, or to
- *   `/timers?error=<code>` if the requester isn't a streamer (`not_a_streamer`), `id` is
- *   malformed (`invalid_id`), a field is invalid (`missing_fields`, `invalid_interval`,
- *   `invalid_min_messages`), the timer doesn't exist or belongs to another streamer
+ * @param res - Express response; redirects to `/timers` on success, or to
+ *   `/timers?error=<code>` if `id` is malformed (`invalid_id`), a field is invalid
+ *   (`missing_fields`, `invalid_interval`, `invalid_min_messages`), the timer doesn't exist
  *   (`timer_not_found`), or the update fails (`update_failed`).
  */
-router.post('/update', requireAuth, csrfProtection, async (req, res) => {
+router.post('/timers/update', requireMod, csrfProtection, async (req, res) => {
+  const body = req.body as Record<string, string | string[] | undefined>;
+  const id = parsePositiveIntId(body.id);
+  if (id === null) return res.redirect('/timers?error=invalid_id');
+
+  const result = parseTimerCommandFields(body);
+  if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
+
   try {
-    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-    if (!streamer) return;
-
-    const body = req.body as Record<string, string | string[] | undefined>;
-    const id = parsePositiveIntId(body.id);
-    if (id === null) return res.redirect('/timers?error=invalid_id');
-
-    const result = parseTimerCommandFields(body);
-    if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
-
-    await updateTimerCommand(id, streamer.id, result.input);
-    res.redirect('/timers?success=timer_updated');
+    await updateTimerCommand(id, result.input);
   } catch (err) {
     if (err instanceof TimerCommandNotFoundError) {
       return res.redirect('/timers?error=timer_not_found');
     }
-    logAndRedirectError({ res, log, logLabel: 'Update timer command error:', err, basePath: '/timers', errorCode: 'update_failed' });
+    return logAndRedirectError({ res, log, logLabel: 'Update timer command error:', err, basePath: '/timers', errorCode: 'update_failed' });
   }
+
+  res.redirect('/timers');
 });
 
 /**
- * POST /timers/remove — deletes a timer command belonging to the requesting streamer.
- * No-ops (still redirects to success) if the id doesn't exist or belongs to another streamer.
+ * POST /timers/remove — deletes a timer command and all its streamer assignments.
+ * No-ops (still redirects to success) if the id doesn't exist.
  * @param req - Express request; reads `id` from `req.body`.
- * @param res - Express response; redirects to `/timers?success=timer_removed` on success, or to
- *   `/timers?error=<code>` if the requester isn't a streamer (`not_a_streamer`), `id` is
- *   malformed (`invalid_id`), or the delete fails (`remove_failed`).
+ * @param res - Express response; redirects to `/timers` on success, or to
+ *   `/timers?error=<code>` if `id` is malformed (`invalid_id`) or the delete fails
+ *   (`remove_failed`).
  */
-router.post('/remove', requireAuth, csrfProtection, async (req, res) => {
+router.post('/timers/remove', requireMod, csrfProtection, async (req, res) => {
+  const id = parsePositiveIntId((req.body as Record<string, string | string[] | undefined>).id);
+  if (id === null) return res.redirect('/timers?error=invalid_id');
+
   try {
-    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-    if (!streamer) return;
-
-    const id = parsePositiveIntId((req.body as Record<string, string | string[] | undefined>).id);
-    if (id === null) return res.redirect('/timers?error=invalid_id');
-
-    await removeTimerCommand(id, streamer.id);
-    res.redirect('/timers?success=timer_removed');
+    await removeTimerCommand(id);
   } catch (err) {
-    logAndRedirectError({ res, log, logLabel: 'Remove timer command error:', err, basePath: '/timers', errorCode: 'remove_failed' });
+    return logAndRedirectError({ res, log, logLabel: 'Remove timer command error:', err, basePath: '/timers', errorCode: 'remove_failed' });
   }
+
+  res.redirect('/timers');
 });
 
 /**
@@ -174,27 +175,24 @@ router.post('/remove', requireAuth, csrfProtection, async (req, res) => {
  * enable/disable control in the timer list without opening the full edit form.
  * @param req - Express request; reads `id` and `enabled` (`'true'`/`'false'`) from `req.body`.
  * @param res - Express response; redirects to `/timers` on success, or to `/timers?error=<code>`
- *   if the requester isn't a streamer (`not_a_streamer`), `id` is malformed (`invalid_id`), the
- *   timer doesn't exist or belongs to another streamer (`timer_not_found`), or the update fails
- *   (`toggle_failed`).
+ *   if `id` is malformed (`invalid_id`), the timer doesn't exist (`timer_not_found`), or the
+ *   update fails (`toggle_failed`).
  */
-router.post('/toggle', requireAuth, csrfProtection, async (req, res) => {
+router.post('/timers/toggle', requireMod, csrfProtection, async (req, res) => {
+  const body = req.body as Record<string, string | string[] | undefined>;
+  const id = parsePositiveIntId(body.id);
+  if (id === null) return res.redirect('/timers?error=invalid_id');
+
   try {
-    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-    if (!streamer) return;
-
-    const body = req.body as Record<string, string | string[] | undefined>;
-    const id = parsePositiveIntId(body.id);
-    if (id === null) return res.redirect('/timers?error=invalid_id');
-
-    await setTimerCommandEnabled(id, streamer.id, body.enabled === 'true');
-    res.redirect('/timers');
+    await setTimerCommandEnabled(id, body.enabled === 'true');
   } catch (err) {
     if (err instanceof TimerCommandNotFoundError) {
       return res.redirect('/timers?error=timer_not_found');
     }
-    logAndRedirectError({ res, log, logLabel: 'Toggle timer command error:', err, basePath: '/timers', errorCode: 'toggle_failed' });
+    return logAndRedirectError({ res, log, logLabel: 'Toggle timer command error:', err, basePath: '/timers', errorCode: 'toggle_failed' });
   }
+
+  res.redirect('/timers');
 });
 
 export default router;

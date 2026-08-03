@@ -152,14 +152,15 @@ CREATE TABLE IF NOT EXISTS streamer_event_config (
 
 -- ---------------------------------------------------------------------------
 -- timer_command
--- Per-streamer, Twitch-only auto-posted chat messages. Config-only — the
--- scheduler's live/message-count firing state is kept in memory (see
--- timerCommandScheduler.ts), not persisted here, so a restart simply
--- restarts each timer's countdown rather than replaying missed fires.
+-- Twitch-only auto-posted chat messages, managed like custom_command: a global
+-- catalog assigned to Twitch-linked Discord users via timer_command_streamer.
+-- Each assigned channel fires independently (the scheduler's live/message-count
+-- firing state is kept in memory per (timer, channel) pair — see
+-- timerCommandScheduler.ts — not persisted here, so a restart simply restarts
+-- each one's countdown rather than replaying missed fires).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS timer_command (
   id               INT          NOT NULL AUTO_INCREMENT,
-  streamer_id      INT          NOT NULL,
   name             VARCHAR(255) NOT NULL,
   message          VARCHAR(500) NOT NULL,
   interval_seconds INT          NOT NULL,
@@ -167,9 +168,21 @@ CREATE TABLE IF NOT EXISTS timer_command (
   require_live     TINYINT(1)   NOT NULL DEFAULT 1,
   enabled          TINYINT(1)   NOT NULL DEFAULT 1,
   PRIMARY KEY (id),
-  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE,
   CONSTRAINT chk_timer_command_interval CHECK (interval_seconds >= 60),
   CONSTRAINT chk_timer_command_min_messages CHECK (min_messages >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- timer_command_streamer
+-- Maps timer commands to the Discord users (Twitch streamers) they belong to.
+-- Mirrors twitch_user_commands.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS timer_command_streamer (
+  timer_id   INT    NOT NULL,
+  discord_id BIGINT NOT NULL,
+  PRIMARY KEY (timer_id, discord_id),
+  FOREIGN KEY (timer_id)   REFERENCES timer_command(id) ON DELETE CASCADE,
+  FOREIGN KEY (discord_id) REFERENCES `user`(discord_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------

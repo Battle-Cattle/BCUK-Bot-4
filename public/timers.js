@@ -1,4 +1,5 @@
 registerToggleEditHandler('btn-toggle-timer-edit', 'data-timer-id', 'timer-edit-');
+registerUserHueBadges();
 
 document.addEventListener('submit', function (event) {
   var target = event.target;
