@@ -103,6 +103,13 @@ describe('POST /timers/add', () => {
     expect(assignUsersToTimer).toHaveBeenCalledWith(1, []);
   });
 
+  it('drops a malformed discord_id before looking up eligibility', async () => {
+    const res = await supertest(buildApp()).post('/timers/add').send(`${VALID_FIELDS}&discord_ids=not-a-snowflake`);
+    expect(res.headers.location).toBe('/timers');
+    expect(findUsersByIds).toHaveBeenCalledWith([]);
+    expect(assignUsersToTimer).toHaveBeenCalledWith(1, []);
+  });
+
   it('redirects to ?error=assign_failed on unexpected assign error, and cleans up the created timer', async () => {
     vi.mocked(findUsersByIds).mockResolvedValue(new Map([
       [VALID_DISCORD_ID, { discord_id: VALID_DISCORD_ID, twitch_name: 'alice', discord_name: null, access_level: AccessLevel.USER } as any],

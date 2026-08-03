@@ -38,6 +38,7 @@ interface TimerRuntimeState {
  * own live/interval/message-count schedule — the same timer definition posting into two different
  * channels must not share one countdown.
  * @param row - The timer's config, joined with the channel this row is for.
+ * @returns The composite `"{id}::{channel}"` key used as this row's `timerState` map key.
  */
 function rowKey(row: { id: number; channel: string }): string {
   return `${row.id}::${row.channel}`;
@@ -87,7 +88,12 @@ function shouldFire(
   return true;
 }
 
-/** Removes in-memory state for any (timer id, channel) pair no longer present in the latest enabled-rows fetch. */
+/**
+ * Removes in-memory state for any (timer id, channel) pair no longer present in the latest
+ * enabled-rows fetch.
+ * @param currentKeys - {@link rowKey} values for every row in the latest enabled-rows fetch.
+ * @returns Nothing — mutates the module-level `timerState` map in place.
+ */
 function pruneStaleTimerState(currentKeys: ReadonlySet<string>): void {
   for (const key of timerState.keys()) {
     if (!currentKeys.has(key)) timerState.delete(key);

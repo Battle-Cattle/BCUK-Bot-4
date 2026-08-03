@@ -241,7 +241,7 @@ export async function getAllEnabledTimerCommandsWithChannel(): Promise<TimerComm
      FROM timer_command tc
      JOIN timer_command_streamer tcs ON tcs.timer_id = tc.id
      JOIN \`user\` u ON u.discord_id = tcs.discord_id
-     WHERE tc.enabled = 1 AND u.twitch_name IS NOT NULL
+     WHERE tc.enabled = 1 AND u.twitch_name IS NOT NULL AND u.twitch_name <> ''
      ORDER BY tc.id, u.discord_id`,
   );
   return rows.map((r) => ({

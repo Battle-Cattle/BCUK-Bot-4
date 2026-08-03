@@ -17,6 +17,7 @@ import {
   TimerCommandNotFoundError,
   type TimerCommandInput,
 } from './timerCommands';
+import { AccessLevel } from './users';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 beforeEach(() => {
@@ -97,16 +98,17 @@ describe('getAllTimerCommandsWithAssignments', () => {
     expect(result[1].enabled).toBe(false);
   });
 
-  it('marks user as orphaned when user_discord_id is null', async () => {
+  it('marks user as orphaned when user_discord_id is null, falling back access_level to USER', async () => {
     const row = {
       id: 1, name: 'Plug', message: 'Join!', interval_seconds: 600, min_messages: 0,
       require_live: 1, enabled: 1, assigned_discord_id: 'orphan1', user_discord_id: null,
-      discord_name: null, twitch_name: null, access_level: 0,
+      discord_name: null, twitch_name: null, access_level: null,
     };
     const pool = makeMockPool({ rows: [row] });
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllTimerCommandsWithAssignments();
     expect(result[0].assigned_users[0].is_orphaned_user).toBe(true);
+    expect(result[0].assigned_users[0].access_level).toBe(AccessLevel.USER);
   });
 
   it('marks user as not orphaned when user_discord_id matches', async () => {
@@ -224,6 +226,8 @@ describe('assignUsersToTimer', () => {
     const pool = makeMockPool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await assignUsersToTimer(1, ['u1', 'u2']);
+    expect(pool.execute).toHaveBeenCalledTimes(1);
+    expect(pool.execute.mock.calls[0][0]).toContain('VALUES (?, ?), (?, ?) AS new_row');
     expect(pool.execute.mock.calls[0][1]).toEqual([1, 'u1', 1, 'u2']);
   });
 });

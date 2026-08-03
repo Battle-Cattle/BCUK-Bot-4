@@ -147,6 +147,24 @@ describe('runTimerCommandTick', () => {
     expect(send).toHaveBeenCalledWith('streamer-a', 'hello');
   });
 
+  it("keeps firing state independent for the same timer id on different channels (a shared, id-only-keyed state would let one channel's fire reset the other's clock)", async () => {
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+      timerRow({ id: 2, channel: 'streamer-a', interval_seconds: 600 }),
+      timerRow({ id: 2, channel: 'streamer-b', interval_seconds: 300 }),
+    ] as any);
+    await runTimerCommandTick(); // seed both channels (both live by default per beforeEach)
+
+    await vi.advanceTimersByTimeAsync(300_000);
+    await runTimerCommandTick(); // only streamer-b's shorter interval has elapsed
+    expect(send).toHaveBeenCalledWith('streamer-b', 'hello');
+    expect(send).not.toHaveBeenCalledWith('streamer-a', 'hello');
+
+    send.mockClear();
+    await vi.advanceTimersByTimeAsync(300_000);
+    await runTimerCommandTick(); // streamer-a's own 600s interval has now elapsed since its seed
+    expect(send).toHaveBeenCalledWith('streamer-a', 'hello');
+  });
+
   it("one channel's send failure does not block another's", async () => {
     vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
       timerRow({ id: 1, channel: 'streamer-a' }),

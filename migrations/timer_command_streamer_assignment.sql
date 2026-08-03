@@ -22,11 +22,16 @@ SET @streamer_id_exists = (
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'timer_command' AND COLUMN_NAME = 'streamer_id'
 );
 
--- Backfill: each existing timer's sole owner becomes its first assignment.
+-- Backfill: each existing timer's sole owner becomes its first assignment. The NOT EXISTS guard
+-- (rather than INSERT IGNORE) makes a re-run idempotent without downgrading unrelated errors
+-- (a foreign-key violation, a truncated value) to a silently-ignored warning.
 SET @sql = IF(@streamer_id_exists = 0,
   'SELECT ''nothing to backfill''',
-  'INSERT IGNORE INTO timer_command_streamer (timer_id, discord_id)
-   SELECT tc.id, s.discord_id FROM timer_command tc JOIN streamer s ON s.id = tc.streamer_id');
+  'INSERT INTO timer_command_streamer (timer_id, discord_id)
+   SELECT tc.id, s.discord_id FROM timer_command tc JOIN streamer s ON s.id = tc.streamer_id
+   WHERE NOT EXISTS (
+     SELECT 1 FROM timer_command_streamer tcs WHERE tcs.timer_id = tc.id AND tcs.discord_id = s.discord_id
+   )');
 PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
 
 -- Drop the old single-owner column and its FK. It was never given an explicit

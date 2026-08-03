@@ -18,7 +18,7 @@ vi.mock('../csrf', () => ({
 }));
 
 vi.mock('../middleware', () => ({
-  requireAuth: (_req: any, _res: any, next: any) => next(),
+  requireManager: (_req: any, _res: any, next: any) => next(),
 }));
 
 // This module composes timersMutations's and timerAssignments's routers too; stub them out so

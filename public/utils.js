@@ -77,22 +77,29 @@ function registerUploadFormHandler(formClassName, fallbackPath) {
 }
 
 /**
- * Colors every `.badge-user-hue[data-user-hue]` element on the page by hashing its Discord ID
- * into a hue, applied via the CSSOM (`element.style`) rather than an inline `style=""` attribute
- * so it works under CSP `style-src` without `'unsafe-inline'`. Shared by every page that lists
- * per-user assignment badges (Commands, Timers).
+ * Applies a deterministic hue (derived by hashing the element's Discord ID) to one user badge,
+ * via the CSSOM (`element.style`) rather than an inline `style=""` attribute so it works under
+ * CSP `style-src` without `'unsafe-inline'`.
+ * @param {HTMLElement} el - Badge element carrying a `data-user-hue` Discord ID.
+ * @returns {void}
+ */
+function applyUserHueBadge(el) {
+  var discordId = el.dataset.userHue;
+  var h = 5381;
+  for (var i = 0; i < discordId.length; i++) {
+    h = ((h << 5) + h) ^ discordId.charCodeAt(i);
+    h >>>= 0;
+  }
+  el.style.setProperty('--hue', h % 360);
+}
+
+/**
+ * Colors every `.badge-user-hue[data-user-hue]` element on the page — see {@link applyUserHueBadge}.
+ * Shared by every page that lists per-user assignment badges (Commands, Timers).
  * @returns {void}
  */
 function registerUserHueBadges() {
-  document.querySelectorAll('.badge-user-hue[data-user-hue]').forEach(function (el) {
-    var discordId = el.dataset.userHue;
-    var h = 5381;
-    for (var i = 0; i < discordId.length; i++) {
-      h = ((h << 5) + h) ^ discordId.charCodeAt(i);
-      h >>>= 0;
-    }
-    el.style.setProperty('--hue', h % 360);
-  });
+  document.querySelectorAll('.badge-user-hue[data-user-hue]').forEach(applyUserHueBadge);
 }
 
 function registerToggleEditHandler(buttonClass, idAttr, rowPrefix) {
