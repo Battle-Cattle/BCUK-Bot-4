@@ -111,7 +111,7 @@ async function main(): Promise<void> {
   registerEventSubDashboardRuntime({ pushDashboardEvent });
   registerEventSubTwitchRuntime({ send: sayInChannel });
   registerRewardPricingRuntime({ pushPricingUpdate });
-  registerTimerCommandsRuntime({ send: sayInChannel });
+  registerTimerCommandsRuntime({ send: sayInChannel, getLoginUserIds: getActiveChannelUserIds });
 
   // Load the guild registry before the Discord client connects so the
   // messageCreate gate recognises registered guilds from the first message.
