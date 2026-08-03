@@ -26,6 +26,7 @@ function isServerShutdownError(error: unknown): boolean {
  */
 function startTickTimer(): void {
   if (tickTimer) return;
+  /** Interval callback: fires a decay tick and logs (rather than throws) if the returned promise ever rejects. */
   tickTimer = setInterval(() => {
     runDecayTick().catch((err) => log.error('Decay tick error:', err));
   }, DECAY_POLL_INTERVAL_MS);
@@ -43,6 +44,7 @@ function pauseForDbShutdown(): void {
   awaitingDbRecovery = true;
   if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
   if (dbShutdownRetryTimer) return;
+  /** Probe callback: retries the tick once; `runDecayTick` reschedules another probe itself if it's still failing while `awaitingDbRecovery` is true. */
   dbShutdownRetryTimer = setTimeout(() => {
     dbShutdownRetryTimer = null;
     runDecayTick().catch((err) => log.error('Decay tick error while probing DB availability:', err));
@@ -106,6 +108,13 @@ export async function runDecayTick(): Promise<void> {
         pauseForDbShutdown();
       } else {
         log.error('Failed to load enabled pricing rows:', err);
+        // A recovery probe can fail with something other than the shutdown error it was
+        // triggered by (e.g. a transient network blip) — without this, that probe's own
+        // cleanup would already have cleared dbShutdownRetryTimer, leaving the scheduler
+        // paused forever since nothing else would ever schedule another probe.
+        if (awaitingDbRecovery) {
+          pauseForDbShutdown();
+        }
       }
     } finally {
       tickRunning = false;
