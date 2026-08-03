@@ -73,7 +73,7 @@ export async function removeOverride(guildId: string, commandId: number): Promis
 export {
   AccessLevel, ACCESS_LEVEL_LABELS,
   findUser, findUsersByIds, findUserByTwitchName, getAllUsers, getGuildMemberUsers,
-  updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers, updateAccessLevel,
+  updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers,
 } from './db/users';
 export type { AccessLevelValue, DbUser, TwitchLinkedUser } from './db/users';
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
@@ -9,6 +10,7 @@ vi.mock('../../db', () => ({
   saveStreamerToken: vi.fn(),
   initEventConfig: vi.fn(),
   initAlertConfigs: vi.fn(),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
@@ -33,7 +35,7 @@ import supertest from 'supertest';
 import router from './eventsubCallback';
 import { getStreamerById, saveStreamerToken, initEventConfig, initAlertConfigs } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 

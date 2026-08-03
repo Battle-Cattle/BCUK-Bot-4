@@ -284,20 +284,3 @@ export async function setTwitchBotEnabledRecord(discordId: string, enabled: bool
     [enabled ? 1 : 0, discordId],
   ));
 }
-
-/**
- * Updates a user's legacy global access level.
- * @param discordId - Discord snowflake as a string.
- * @param accessLevel - New access level; must be one of `AccessLevel`'s values.
- * @returns Resolves once the update completes.
- * @throws If `accessLevel` is not a valid `AccessLevel` value.
- */
-export async function updateAccessLevel(discordId: string, accessLevel: number): Promise<void> {
-  if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
-    throw new Error(`Invalid accessLevel: ${accessLevel}`);
-  }
-  await withShortLockTimeout((conn) => conn.execute(
-    'UPDATE `user` SET access_level = ? WHERE discord_id = ?',
-    [accessLevel, discordId],
-  ));
-}

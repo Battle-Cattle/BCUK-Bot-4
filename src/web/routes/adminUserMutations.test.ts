@@ -7,6 +7,7 @@ vi.mock('../../db', () => ({
   upsertUser: vi.fn(),
   updateTwitchBotEnabled: vi.fn(),
   getTwitchEnabledChannels: vi.fn(),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../../twitch/twitchChannelMembership', () => ({
@@ -17,8 +18,6 @@ vi.mock('../../twitch/twitchChannelMembership', () => ({
 vi.mock('../../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn((name: string | null) => name?.toLowerCase() ?? null),
 }));
-
-vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 
 import {
   addOrUpdateUserMutation,
@@ -36,7 +35,7 @@ import {
 } from '../../db';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchChannelMembership';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 
 type MockDbUser = {
   discord_id: string;

@@ -2,9 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
-vi.mock('../../db/users', () => ({
-  AccessLevel: ACCESS_LEVEL_MOCK,
-}));
 vi.mock('../../db', () => ({
   findUser: vi.fn(),
   getMemberAccessLevel: vi.fn(),
@@ -23,7 +20,7 @@ vi.mock('./adminUserMutations', () => ({
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import { findUser, getMemberAccessLevel } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { isLockWaitTimeoutDbError } from './adminUserMutations';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 import {

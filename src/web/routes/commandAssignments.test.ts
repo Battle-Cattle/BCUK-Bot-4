@@ -10,6 +10,7 @@ vi.mock('../../db', () => {
     findUser: vi.fn().mockResolvedValue(null),
     CommandConflictError,
     isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
+    AccessLevel: ACCESS_LEVEL_MOCK,
   };
 });
 vi.mock('../csrf', () => ({
@@ -19,14 +20,11 @@ vi.mock('../middleware', () => ({
   requireMod: (_req: any, _res: any, next: any) => next(),
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
-vi.mock('../../db/users', () => ({
-  AccessLevel: ACCESS_LEVEL_MOCK,
-}));
 
 import supertest from 'supertest';
 import router from './commandAssignments';
 import { assignUserToCommand, unassignUserFromCommand, findUser, CommandConflictError, isMysqlDuplicateEntryError } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a supertest-ready app: the command assignments router with a urlencoded body parser (no session or render stub needed). */

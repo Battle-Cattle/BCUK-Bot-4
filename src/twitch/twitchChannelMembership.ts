@@ -18,6 +18,32 @@ const membershipMutationQueue = createMutationQueue();
 const JOIN_THROTTLE_MS = 600;
 let _onChannelJoined: ((channel: string) => void) | null = null;
 
+// A chain of promises gating client.join() calls so they're spaced JOIN_THROTTLE_MS apart
+// globally — across both the reconnect-reconciliation path and ad-hoc single joins (e.g. from
+// the admin panel) — since those are only serialised per-channel by membershipMutationQueue and
+// could otherwise collectively exceed Twitch's IRC JOIN rate limit.
+let joinGate: Promise<void> = Promise.resolve();
+
+/**
+ * Calls `client.join(channel)`, globally throttled to JOIN_THROTTLE_MS between joins across all
+ * channels.
+ * @param client - The connected tmi.js client to join with.
+ * @param channel - The already-normalized channel name to join.
+ * @returns Resolves once the join call itself has completed (not once the throttle window has
+ *   elapsed — the throttle only delays the *next* queued join).
+ */
+async function throttledJoin(client: tmi.Client, channel: string): Promise<void> {
+  const previousGate = joinGate;
+  let releaseGate!: () => void;
+  joinGate = new Promise((resolve) => { releaseGate = resolve; });
+  await previousGate;
+  try {
+    await client.join(channel);
+  } finally {
+    setTimeout(releaseGate, JOIN_THROTTLE_MS);
+  }
+}
+
 /** Sets the active tmi.js client instance (called from twitchBot after connect). */
 export function setTmiClient(c: tmi.Client | null): void {
   _client = c;
@@ -74,8 +100,7 @@ async function joinMissingChannel(channel: string): Promise<void> {
     cacheChannelUserId(channel);
     return;
   }
-  await _client.join(channel);
-  await new Promise<void>((resolve) => { setTimeout(resolve, JOIN_THROTTLE_MS); });
+  await throttledJoin(_client, channel);
   setTwitchChannel(channel, true);
   cacheChannelUserId(channel);
   fireChannelJoinedHook(channel);
@@ -168,7 +193,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
     activeChannels.add(normalized);
     setTwitchChannel(normalized, false);
     try {
-      await _client.join(normalized);
+      await throttledJoin(_client, normalized);
       setTwitchChannel(normalized, true);
       cacheChannelUserId(normalized);
     } catch (err) {
@@ -225,8 +250,9 @@ export function getActiveChannelUserIds(): ReadonlyMap<string, string> {
   return activeChannelUserIds;
 }
 
-/** Clears all active channel and user ID state (used in tests). */
+/** Clears all active channel and user ID state, and resets the join throttle gate (used in tests). */
 export function clearMembershipState(): void {
   activeChannels.clear();
   activeChannelUserIds.clear();
+  joinGate = Promise.resolve();
 }

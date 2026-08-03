@@ -6,6 +6,7 @@ vi.mock('../../db', () => ({
   addStreamer: vi.fn(),
   removeStreamer: vi.fn(),
   findUser: vi.fn(),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../csrf', () => ({
@@ -25,13 +26,11 @@ vi.mock('../../twitch/monitor/twitchMonitor', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
-
 import supertest from 'supertest';
 import router from './streamStreamers';
 import { addStreamer, removeStreamer, findUser } from '../../db';
 import { restartTwitchMonitor } from '../../twitch/monitor/twitchMonitor';
-import { AccessLevel, AccessLevelValue } from '../../db/users';
+import { AccessLevel, AccessLevelValue } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';

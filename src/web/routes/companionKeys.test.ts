@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   issueToken: vi.fn(),
   getTokenStatus: vi.fn(),
   revokeToken: vi.fn(),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('../csrf', () => ({
   csrfProtection: (req: any, _res: any, next: any) => {
@@ -19,7 +21,7 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './companionKeys';
 import { issueToken, getTokenStatus, revokeToken } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';

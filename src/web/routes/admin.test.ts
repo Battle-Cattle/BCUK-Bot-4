@@ -64,13 +64,11 @@ vi.mock('../../shared/logger', () => ({
   createLogger: () => mockLog,
 }));
 
-vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
-
 import supertest from 'supertest';
 import router from './admin';
 import { findUser, getMemberAccessLevel, getGuildMemberUsers, setMemberAccessLevel, removeGuildMember } from '../../db';
 import { reloadGuildRegistry } from '../../discord/guildRegistry';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 import {
   DuplicateTwitchNameError,

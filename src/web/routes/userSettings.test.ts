@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   findUser: vi.fn(),
   getStreamerByDiscordId: vi.fn(),
   saveEventConfig: vi.fn(),
   clearStreamerToken: vi.fn(),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../csrf', () => ({
@@ -40,7 +42,7 @@ import supertest from 'supertest';
 import router from './userSettings';
 import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken } from '../../db';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 

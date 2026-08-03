@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   hasApiKey: vi.fn().mockResolvedValue(false),
@@ -12,6 +13,7 @@ vi.mock('../../db', () => ({
   denyApiKey: vi.fn().mockResolvedValue(undefined),
   getAllApiKeys: vi.fn().mockResolvedValue([]),
   getPendingRequests: vi.fn().mockResolvedValue([]),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('../csrf', () => ({
   csrfProtection: (req: any, _res: any, next: any) => {
@@ -33,7 +35,7 @@ import {
   getGuildStatusForKey, revokeApiKey,
   approveApiKey, denyApiKey, getAllApiKeys, getPendingRequests,
 } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';

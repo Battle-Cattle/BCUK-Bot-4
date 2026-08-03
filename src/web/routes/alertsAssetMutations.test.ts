@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
@@ -11,6 +12,7 @@ vi.mock('../../db', () => ({
   setAlertSound: vi.fn(),
   // Pulled in transitively via sfxFileUpload.ts (source of the shared detectAudioType).
   addSfxFile: vi.fn(),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../csrf', () => ({
@@ -49,7 +51,7 @@ vi.mock('fs', () => ({
 import supertest from 'supertest';
 import { router, detectImageType } from './alertsAssetMutations';
 import { getStreamerByDiscordId, setAlertImage, setAlertSound } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
 import { buildTestApp } from '../../test-utils/expressTestApp';

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../test-utils/loggerMock';
 import { ACCESS_LEVEL_MOCK } from '../test-utils/accessLevelMock';
 import { flushMicrotasks } from '../test-utils/flushMicrotasks';
+import { deferred } from '../test-utils/deferredPromise';
 
 vi.mock('../shared/config', () => ({
   DISCORD_TOKEN: 'mock-token',
@@ -278,6 +279,56 @@ describe('startDiscordBot — guildCreate handler', () => {
 
     expect(vi.mocked(guilds.setMemberAccessLevel)).not.toHaveBeenCalled();
     expect(vi.mocked(registry.reloadGuildRegistry)).not.toHaveBeenCalled();
+  });
+
+  it('serializes provisioning across concurrent guildCreate events for the same owner via userMutationQueue', async () => {
+    const guilds = await import('../db.js');
+    const order: string[] = [];
+    const { promise: gate, resolve: openGate } = deferred();
+
+    vi.mocked(guilds.findUser)
+      .mockImplementationOnce(async () => {
+        order.push('a-findUser-start');
+        await gate;
+        order.push('a-findUser-end');
+        return null;
+      })
+      .mockImplementationOnce(async () => {
+        // Guild A's owner row now exists, so guild B's provisioning skips upsertUser and only
+        // grants guild access — matching provisionGuildOwner's "don't overwrite an existing
+        // user" behavior.
+        order.push('b-findUser');
+        return { discord_id: 'same-owner', discord_name: 'OwnerName', access_level: 0 } as any;
+      });
+    vi.mocked(guilds.upsertUser).mockImplementation(async () => { order.push('a-upsertUser'); });
+    vi.mocked(guilds.setMemberAccessLevel).mockImplementation(async (guildId: string) => {
+      order.push(`${guildId === 'guild-a' ? 'a' : 'b'}-setMemberAccessLevel`);
+    });
+
+    const guildA = { ...makeNewGuild('same-owner'), id: 'guild-a' };
+    const guildB = { ...makeNewGuild('same-owner'), id: 'guild-b' };
+    const cb = getGuildCreateCb();
+
+    cb(guildA);
+    await flushMicrotasks();
+    cb(guildB);
+    await flushMicrotasks();
+
+    // guild B's provisioning must not start — not even its findUser lookup — until guild A's
+    // entire queued sequence (upsertUser, then setMemberAccessLevel) has finished, since they
+    // share an owner and are serialised through userMutationQueue. If either write were moved
+    // outside the queue, it would show up here before 'a-findUser-end'.
+    expect(order).toEqual(['a-findUser-start']);
+
+    openGate();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(order).toEqual([
+      'a-findUser-start', 'a-findUser-end', 'a-upsertUser', 'a-setMemberAccessLevel',
+      'b-findUser', 'b-setMemberAccessLevel',
+    ]);
   });
 });
 

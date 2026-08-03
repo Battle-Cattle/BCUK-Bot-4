@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-/** Hoisted so the `vi.mock('../../db/users', ...)` factory below can safely reference it — `vi.mock` factories are hoisted above imports, so a plain imported binding could throw `ReferenceError` depending on import order. */
+/** Hoisted so the `vi.mock('../../db', ...)` factory below can safely reference it — `vi.mock` factories are hoisted above imports, so a plain imported binding could throw `ReferenceError` depending on import order. */
 const { ACCESS_LEVEL_MOCK } = vi.hoisted(() => ({
   ACCESS_LEVEL_MOCK: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
@@ -27,6 +27,7 @@ vi.mock('../../db', () => {
     CommandNotFoundError,
     ReservedCommandError,
     isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
+    AccessLevel: ACCESS_LEVEL_MOCK,
   };
 });
 
@@ -48,9 +49,6 @@ vi.mock('../../logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 
-/** Mocks `db/users` so `AccessLevel` resolves to the shared hoisted mock instead of hitting the real module. */
-vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
-
 import express from 'express';
 import supertest from 'supertest';
 import router from './commands';
@@ -71,7 +69,7 @@ import {
   CommandNotFoundError,
   ReservedCommandError,
 } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a supertest-ready app: the commands router with a stubbed session and a render mock that sends `rendered:<view>` (locals ignored). */

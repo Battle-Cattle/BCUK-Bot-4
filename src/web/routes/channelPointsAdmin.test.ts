@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   getPricingConfigsForStreamer: vi.fn(),
   getPricingSettingsForStreamer: vi.fn(),
   getPricingHistoryForRewards: vi.fn(),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../csrf', () => ({
@@ -18,11 +20,6 @@ vi.mock('../csrf', () => ({
 vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
-
-// `makeSessionUser` (from `test-utils/fixtures`) imports `AccessLevel` from `../../db/users` at
-// runtime, which transitively pulls in `../../db/pool` and its required env vars. Mock it out,
-// matching the convention used elsewhere (e.g. `streamGroups.test.ts`).
-vi.mock('../../db/users', () => ({ AccessLevel: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 } }));
 
 vi.mock('../../twitch/twitchApi', () => ({
   getCustomRewards: vi.fn(),

@@ -6,6 +6,7 @@ vi.mock('../../db', () => ({
   addStreamGroup: vi.fn(),
   updateStreamGroup: vi.fn(),
   removeStreamGroupAndStreamers: vi.fn(),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../csrf', () => ({
@@ -25,13 +26,11 @@ vi.mock('../../twitch/monitor/twitchMonitor', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
-
 import supertest from 'supertest';
 import router from './streamGroups';
 import { addStreamGroup, updateStreamGroup, removeStreamGroupAndStreamers } from '../../db';
 import { restartTwitchMonitor } from '../../twitch/monitor/twitchMonitor';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 

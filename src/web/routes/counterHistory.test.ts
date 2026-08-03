@@ -8,6 +8,7 @@ const { mockLogger, ACCESS_LEVEL_MOCK } = vi.hoisted(() => ({
 
 vi.mock('../../db', () => ({
   getCounterHistory: vi.fn().mockResolvedValue(null),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../csrf', () => ({
@@ -24,13 +25,10 @@ vi.mock('../middleware', () => ({
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-/** Mocks `db/users` so `AccessLevel` resolves to the shared hoisted mock instead of hitting the real module. */
-vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
-
 import supertest from 'supertest';
 import router from './counterHistory';
 import { getCounterHistory } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a supertest-ready app: the counter history router with a stubbed session and a render mock that sends `rendered:<view>` (locals ignored). */

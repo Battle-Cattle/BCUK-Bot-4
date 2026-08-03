@@ -18,7 +18,6 @@ vi.mock('./db/users', () => ({
   updateDiscordName: vi.fn(),
   getTwitchEnabledChannels: vi.fn(),
   getAllTwitchLinkedUsers: vi.fn(),
-  updateAccessLevel: vi.fn(),
 }));
 
 vi.mock('./db/customCommandCache', () => ({

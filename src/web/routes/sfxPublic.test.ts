@@ -4,18 +4,15 @@ import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   getPublicSfxTriggers: vi.fn().mockResolvedValue([]),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
-vi.mock('../../db/users', () => ({
-  AccessLevel: ACCESS_LEVEL_MOCK,
-}));
-
 import supertest from 'supertest';
 import { getPublicSfxTriggers } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 let router: any;

@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   ALERT_EVENT_TYPES: ['follow', 'sub', 'resub', 'giftsub', 'raid'],
   ALERT_TEXT_ANIMATIONS: ['none', 'wave', 'pulse', 'glitch', 'shake', 'rainbow', 'flicker', 'tilt', 'bounce-in', 'typewriter'],
   getStreamerByDiscordId: vi.fn(),
   getAlertConfigsForStreamer: vi.fn(),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../csrf', () => ({
@@ -42,7 +44,7 @@ vi.mock('./alertsAssetMutations', async () => {
 import supertest from 'supertest';
 import router from './alertsAdmin';
 import { getStreamerByDiscordId, getAlertConfigsForStreamer } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 

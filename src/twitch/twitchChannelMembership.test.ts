@@ -217,24 +217,54 @@ describe('membershipMutationQueue serialization', () => {
     expect(order).toEqual(['join-start', 'join-end', 'part']);
   });
 
-  it('runs operations on different channels independently', async () => {
-    const client = makeMockClient();
+  it('runs non-join operations on different channels independently', async () => {
+    // client.join() calls are globally throttled (see the throttledJoin describe block below),
+    // so this exercises the queue's per-channel independence using part instead.
+    const client = makeMockClient(['#alice', '#carol']);
     setTmiClient(client as any);
     setConnected(true);
     const order: string[] = [];
     const { promise: gate, resolve: openGate } = deferred();
-    client.join.mockImplementation(async (channel: string) => {
+    client.part.mockImplementation(async (channel: string) => {
       if (channel === 'alice') await gate;
       order.push(channel);
     });
 
-    const alicePromise = joinTwitchChannel('alice'); // blocks on gate
-    await joinTwitchChannel('carol'); // must resolve without waiting for alice's gate
+    const alicePromise = partTwitchChannel('alice'); // blocks on gate
+    await partTwitchChannel('carol'); // must resolve without waiting for alice's gate
     expect(order).toEqual(['carol']);
 
     openGate();
     await alicePromise;
     expect(order).toEqual(['carol', 'alice']);
+  });
+});
+
+// ─── joinTwitchChannel global JOIN throttle ────────────────────────────────
+
+describe('joinTwitchChannel global join throttle', () => {
+  it('spaces client.join() calls across different channels by JOIN_THROTTLE_MS, not just per-channel', async () => {
+    const client = makeMockClient();
+    setTmiClient(client as any);
+    setConnected(true);
+
+    const alicePromise = joinTwitchChannel('alice');
+    const carolPromise = joinTwitchChannel('carol'); // must not call client.join before alice's throttle window elapses
+
+    await flushMicrotasks();
+    expect(client.join).toHaveBeenCalledTimes(1);
+    expect(client.join).toHaveBeenCalledWith('alice');
+
+    // Assert the throttle actually holds for the full window, not just "eventually" — advancing
+    // one tick short of JOIN_THROTTLE_MS must not release carol's join yet.
+    await vi.advanceTimersByTimeAsync(599);
+    expect(client.join).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.all([alicePromise, carolPromise]);
+
+    expect(client.join).toHaveBeenNthCalledWith(1, 'alice');
+    expect(client.join).toHaveBeenNthCalledWith(2, 'carol');
   });
 });
 

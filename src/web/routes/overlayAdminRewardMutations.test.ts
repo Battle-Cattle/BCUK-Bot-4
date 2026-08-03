@@ -10,6 +10,7 @@ vi.mock('../../db', () => ({
   upsertReward: vi.fn(),
   setRewardVideos: vi.fn(),
   deleteReward: vi.fn(),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../csrf', () => ({
@@ -28,12 +29,10 @@ vi.mock('../../config', () => ({
   PUBLIC_URL: 'https://example.com',
 }));
 
-vi.mock('../../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
-
 import supertest from 'supertest';
 import { router } from './overlayAdminRewardMutations';
 import { getStreamerByDiscordId, upsertReward, setRewardVideos, deleteReward } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };

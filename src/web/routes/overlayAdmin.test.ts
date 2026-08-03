@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   getVideosForStreamer: vi.fn(),
   getRewardsForStreamer: vi.fn(),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../csrf', () => ({
@@ -46,7 +48,7 @@ import router from './overlayAdmin';
 import { getStreamerByDiscordId, getVideosForStreamer, getRewardsForStreamer } from '../../db';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { getCustomRewards } from '../../twitch/twitchApi';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
@@ -10,6 +11,7 @@ vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   saveAlertConfig: vi.fn(),
   getAlertConfig: vi.fn(),
+  AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
 vi.mock('../csrf', () => ({
@@ -38,7 +40,7 @@ vi.mock('../../shared/config', () => ({}));
 import supertest from 'supertest';
 import { router } from './alertsAdminMutations';
 import { getStreamerByDiscordId, saveAlertConfig, getAlertConfig } from '../../db';
-import { AccessLevel } from '../../db/users';
+import { AccessLevel } from '../../db';
 import { pushAlertEvent } from './alertsOverlaySource';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { buildTestApp } from '../../test-utils/expressTestApp';
