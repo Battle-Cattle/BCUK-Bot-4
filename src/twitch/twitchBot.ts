@@ -1,6 +1,6 @@
-import { ChatClient, type ChatMessage } from '@twurple/chat';
+import { ChatClient, type ChatMessage, UserState } from '@twurple/chat';
 import { StaticAuthProvider } from '@twurple/auth';
-import { TWITCH_USERNAME, TWITCH_OAUTH_TOKEN, TWITCH_CLIENT_ID } from '../shared/config';
+import { TWITCH_OAUTH_TOKEN, TWITCH_CLIENT_ID } from '../shared/config';
 import { handleCommand } from '../commands/commandRouter';
 import { executeCustomCommandForTwitch } from '../commands/customCommandHandler';
 import { executeCounterCommandForTwitch } from '../commands/counterHandler';
@@ -45,10 +45,11 @@ const DISCONNECT_TIMEOUT_MS = 5_000;
 
 /**
  * Per-channel badge status (moderator/VIP/broadcaster) for the bot's own account, refreshed from
- * `userInfo` each time the bot's own message is observed in {@link handleTwitchMessage} — Twurple's
- * `ChatClient` has no live "am I currently privileged here" query outside of a received message,
- * unlike tmi.js's internal `userstate`. Missing until the bot has been seen chatting in a channel,
- * which safely defaults {@link isPrivilegedInChannel} to the more conservative non-privileged rate.
+ * the raw IRC `USERSTATE` message Twitch sends after joining a channel and after every send in it
+ * (see {@link onOwnUserState}) — Twurple's `ChatClient` has no higher-level "am I currently
+ * privileged here" query. Missing until the bot has received a `USERSTATE` for a channel — e.g.
+ * right after joining — which safely defaults {@link isPrivilegedInChannel} to the more
+ * conservative non-privileged rate.
  */
 const privilegedChannels = new Set<string>();
 
@@ -112,19 +113,37 @@ async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promis
   return resolveGuildIdForDiscordId(discordId);
 }
 
+/** Parses a raw IRC `badges` tag value (e.g. `"moderator/1,subscriber/12"`) into a set of badge names. */
+function parseBadgeNames(rawBadges: string | undefined): Set<string> {
+  if (!rawBadges) return new Set();
+  return new Set(rawBadges.split(',').map((entry) => entry.split('/')[0]));
+}
+
 /**
- * Records `userInfo`'s moderator/VIP/broadcaster status for `channel` in {@link privilegedChannels},
- * so {@link isPrivilegedInChannel} can answer live without a per-send API call. Twitch echoes the
- * bot's own chat messages back to itself over IRC, so this is refreshed from every self-echoed
- * message's `userInfo` — the same source tmi.js's internal `userstate` was populated from, but
- * reached via `ChatMessage.userInfo`'s public getters instead of an undocumented internal field.
- * @param channel - Normalized Twitch channel name the message was observed in.
- * @param userInfo - The chat user info attached to a self-echoed message in that channel.
+ * Records the bot's own moderator/VIP/broadcaster badge status for `channel` in
+ * {@link privilegedChannels}, so {@link isPrivilegedInChannel} can answer live without a per-send
+ * API call.
+ * @param channel - Normalized Twitch channel name the badges were observed in.
+ * @param badgeNames - Badge names parsed from the `USERSTATE`'s `badges` tag (see {@link parseBadgeNames}).
  */
-function updateOwnPrivilegeStatus(channel: string, userInfo: ChatMessage['userInfo']): void {
-  const privileged = userInfo.isMod || userInfo.isVip || userInfo.isBroadcaster;
+function updateOwnPrivilegeStatus(channel: string, badgeNames: Set<string>): void {
+  const privileged = badgeNames.has('moderator') || badgeNames.has('vip') || badgeNames.has('broadcaster');
   if (privileged) privilegedChannels.add(channel);
   else privilegedChannels.delete(channel);
+}
+
+/**
+ * Raw IRC `USERSTATE` handler, registered directly on the underlying `ircv3` client (see
+ * {@link startTwitchBot}) since Twurple's `ChatClient` doesn't expose this event itself. Twitch
+ * sends `USERSTATE` after the bot joins a channel and after every message it sends there, carrying
+ * the bot's own current badges in that channel — the only reliable live source for this, since
+ * Twitch does not echo the bot's own `PRIVMSG`s back through `onMessage`.
+ * @param msg - The raw `USERSTATE` message, including the channel (`#channel`) and IRC tags.
+ */
+function onOwnUserState(msg: UserState): void {
+  const normalizedChannel = normalizeTwitchChannelName(msg.channel);
+  if (!normalizedChannel) return;
+  updateOwnPrivilegeStatus(normalizedChannel, parseBadgeNames(msg.tags.get('badges')));
 }
 
 /**
@@ -147,10 +166,10 @@ function isPrivilegedInChannel(channel: string): boolean {
  * command router, countdowns) in parallel via {@link fireAndForget}. Ignores
  * messages from channels not in the active set, and messages shared into this
  * channel from a partner channel in a Twitch shared-chat session (so each
- * message is only recorded/handled once, in its source channel). Self-echoed
- * messages from the bot's own account are used only to refresh
- * {@link privilegedChannels} via {@link updateOwnPrivilegeStatus}, not dispatched
- * to command handlers.
+ * message is only recorded/handled once, in its source channel). Never fires
+ * for the bot's own sent messages — Twitch doesn't echo them back over IRC —
+ * so there's no self-message case to filter here (see {@link onOwnUserState}
+ * for how the bot's own privilege status is tracked instead).
  * @param channel - Twitch channel the message was received in (as `#channel`).
  * @param user - Login name of the message's sender.
  * @param message - Raw chat message text.
@@ -160,12 +179,6 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
   try {
     const normalizedChannel = normalizeTwitchChannelName(channel);
     if (!normalizedChannel) return;
-
-    const isSelf = user.toLowerCase() === TWITCH_USERNAME.toLowerCase();
-    if (isSelf) {
-      updateOwnPrivilegeStatus(normalizedChannel, msg.userInfo);
-      return;
-    }
 
     if (!getActiveChannels().has(normalizedChannel)) return;
 
@@ -196,10 +209,11 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
 }
 
 /**
- * Twurple `onConnect` event handler: marks the bot connected, logs the active
- * channel list, pessimistically resets every active channel's status to
- * disconnected, then kicks off an async reconciliation of actually-joined
- * channels via {@link reconcileJoinedChannels}.
+ * Twurple `onAuthenticationSuccess` event handler: marks the bot connected, logs the active
+ * channel list, pessimistically resets every active channel's status to disconnected, then kicks
+ * off an async reconciliation of actually-joined channels via {@link reconcileJoinedChannels}. Bound
+ * to authentication succeeding rather than the raw `onConnect` (IRC socket connected, but not yet
+ * authenticated) — joining channels or sending before authentication completes would fail.
  */
 function onConnected(): void {
   connected = true;
@@ -230,28 +244,35 @@ function onDisconnected(manually: boolean, reason?: Error): void {
   getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
 }
 
-/** Strips tmi.js-style `oauth:` prefixes from an access token — Twurple's auth providers expect the raw token. */
+/**
+ * Strips tmi.js-style `oauth:` prefixes from an access token — Twurple's auth providers expect the
+ * raw token.
+ * @param token - The configured access token, with or without an `oauth:` prefix.
+ * @returns The token without a leading `oauth:` prefix.
+ */
 function stripOauthPrefix(token: string): string {
   return token.startsWith('oauth:') ? token.slice('oauth:'.length) : token;
 }
 
 /**
  * Wraps `ChatClient#connect()` — which itself returns `void` and reports outcome only via events —
- * in a promise that resolves once `onConnect` fires, or rejects on an authentication or token
- * fetch failure.
+ * in a promise that resolves once `onAuthenticationSuccess` fires, or rejects on an authentication
+ * or token fetch failure. Resolves on authentication rather than the earlier `onConnect` (raw IRC
+ * socket connected, before the account is registered) — joining channels or sending messages
+ * before authentication completes would fail.
  * @param c - The Twurple chat client to connect.
- * @returns Resolves once connected; rejects with an error describing the failure otherwise.
+ * @returns Resolves once authenticated; rejects with an error describing the failure otherwise.
  */
 function connectAndWait(c: ChatClient): Promise<void> {
   return new Promise((resolve, reject) => {
-    const connectListener = c.onConnect(() => { cleanup(); resolve(); });
+    const authSuccessListener = c.onAuthenticationSuccess(() => { cleanup(); resolve(); });
     const authFailureListener = c.onAuthenticationFailure((text) => {
       cleanup();
       reject(new Error(`Twitch chat authentication failed: ${text}`));
     });
     const tokenFailureListener = c.onTokenFetchFailure((err) => { cleanup(); reject(err); });
     function cleanup(): void {
-      connectListener.unbind();
+      authSuccessListener.unbind();
       authFailureListener.unbind();
       tokenFailureListener.unbind();
     }
@@ -264,7 +285,7 @@ function connectAndWait(c: ChatClient): Promise<void> {
  * configures the Twurple chat client (static auth from the bot's own OAuth
  * token, auto-reconnect), wires up message/connect/disconnect handlers, and
  * connects.
- * @returns Resolves once the client has connected; rejects if the connection attempt fails.
+ * @returns Resolves once the client has authenticated; rejects if the connection attempt fails.
  */
 export async function startTwitchBot(): Promise<void> {
   await initializeActiveChannels();
@@ -277,8 +298,10 @@ export async function startTwitchBot(): Promise<void> {
   setTmiClient(client);
 
   client.onMessage(handleTwitchMessage);
-  client.onConnect(onConnected);
+  client.onAuthenticationSuccess(onConnected);
   client.onDisconnect(onDisconnected);
+  // USERSTATE isn't exposed by ChatClient itself — only via the underlying ircv3 client.
+  client.irc.onTypedMessage(UserState, onOwnUserState);
 
   try {
     await connectAndWait(client);

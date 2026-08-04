@@ -14,14 +14,15 @@ const { mockClient, handlers } = vi.hoisted(() => {
   }
 
   const messageHandlers: Handler[] = [];
-  const connectHandlers: Handler[] = [];
+  const authSuccessHandlers: Handler[] = [];
   const disconnectHandlers: Handler[] = [];
   const authenticationFailureHandlers: Handler[] = [];
   const tokenFetchFailureHandlers: Handler[] = [];
+  const userStateHandlers: Handler[] = [];
 
   const client = {
     onMessage: makeBinder(messageHandlers),
-    onConnect: makeBinder(connectHandlers),
+    onAuthenticationSuccess: makeBinder(authSuccessHandlers),
     onDisconnect: makeBinder(disconnectHandlers),
     onAuthenticationFailure: makeBinder(authenticationFailureHandlers),
     onTokenFetchFailure: makeBinder(tokenFetchFailureHandlers),
@@ -31,16 +32,23 @@ const { mockClient, handlers } = vi.hoisted(() => {
     part: vi.fn(),
     say: vi.fn(),
     currentChannels: [] as string[],
+    irc: {
+      onTypedMessage: vi.fn((_type: unknown, handler: Handler) => {
+        userStateHandlers.push(handler);
+        return 'mock-handler-id';
+      }),
+    },
   };
 
   return {
     mockClient: client,
     handlers: {
       messageHandlers,
-      connectHandlers,
+      authSuccessHandlers,
       disconnectHandlers,
       authenticationFailureHandlers,
       tokenFetchFailureHandlers,
+      userStateHandlers,
     },
   };
 });
@@ -50,6 +58,7 @@ const { mockClient, handlers } = vi.hoisted(() => {
 // Must use a regular function (not an arrow) so `new ChatClient()` works.
 vi.mock('@twurple/chat', () => ({
   ChatClient: vi.fn(function MockChatClient() { return mockClient; }),
+  UserState: class MockUserState {},
 }));
 
 vi.mock('@twurple/auth', () => ({
@@ -59,7 +68,6 @@ vi.mock('@twurple/auth', () => ({
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../shared/config', () => ({
-  TWITCH_USERNAME: 'testbot',
   TWITCH_OAUTH_TOKEN: 'oauth:test',
   TWITCH_CLIENT_ID: 'test-client-id',
 }));
@@ -156,7 +164,7 @@ function resetMockClient(): void {
   // but preserves implementations — some tests override join/part/etc., so we
   // explicitly restore defaults here each time.
   mockClient.connect.mockImplementation(() => {
-    queueMicrotask(() => fireConnect());
+    queueMicrotask(() => fireAuthSuccess());
   });
   mockClient.quit.mockImplementation(() => {
     queueMicrotask(() => fireDisconnect(true));
@@ -170,19 +178,20 @@ function resetMockClient(): void {
 /**
  * Clears every registered event handler. Only safe to call before a client is (re-)started in
  * the current test — calling it after `startTwitchBot()` would also drop the real, persistent
- * `handleTwitchMessage`/`onConnected`/`onDisconnected` listeners it registered.
+ * `handleTwitchMessage`/`onConnected`/`onDisconnected`/`onOwnUserState` listeners it registered.
  */
 function clearHandlerArrays(): void {
   handlers.messageHandlers.length = 0;
-  handlers.connectHandlers.length = 0;
+  handlers.authSuccessHandlers.length = 0;
   handlers.disconnectHandlers.length = 0;
   handlers.authenticationFailureHandlers.length = 0;
   handlers.tokenFetchFailureHandlers.length = 0;
+  handlers.userStateHandlers.length = 0;
 }
 
-/** Fires every currently-registered `onConnect` handler, simulating the chat server connecting. */
-function fireConnect(): void {
-  handlers.connectHandlers.slice().forEach((h) => h());
+/** Fires every currently-registered `onAuthenticationSuccess` handler, simulating a successful chat login. */
+function fireAuthSuccess(): void {
+  handlers.authSuccessHandlers.slice().forEach((h) => h());
 }
 
 /** Fires every currently-registered `onDisconnect` handler, simulating the chat server disconnecting. */
@@ -228,6 +237,17 @@ function sendMessage(
   handlers.messageHandlers.slice().forEach((h) => h(channel, user, message, makeChatMessage(msgOverrides)));
 }
 
+/**
+ * Dispatches a raw `USERSTATE` message to every registered handler, as the underlying ircv3 client
+ * would after the bot joins `channel` or sends a message there.
+ * @param channel - Channel the USERSTATE was received for (as `#channel`).
+ * @param rawBadges - Raw IRC `badges` tag value (e.g. `"moderator/1"`), or omitted for no badges.
+ */
+function fireUserState(channel: string, rawBadges?: string): void {
+  const msg = { channel, tags: new Map(rawBadges ? [['badges', rawBadges]] : []) };
+  handlers.userStateHandlers.slice().forEach((h) => h(msg));
+}
+
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -263,12 +283,6 @@ describe('handleTwitchMessage', () => {
     vi.mocked(findUserByTwitchName).mockResolvedValue(null);
     vi.mocked(resolveGuildIdForDiscordId).mockReturnValue('guild-A');
     __resetTwitchChannelDiscordIdCacheForTests();
-  });
-
-  it('ignores self-messages and does not dispatch to command handlers', () => {
-    sendMessage('#streamer', 'testbot', 'hello');
-    expect(executeCustomCommandForTwitch).not.toHaveBeenCalled();
-    expect(recordChatMessage).not.toHaveBeenCalled();
   });
 
   it('ignores messages for an invalid channel name', () => {
@@ -651,10 +665,9 @@ describe('sayInChannel', () => {
 
   // Twitch's rate-limit window and per-channel floor are exercised exhaustively in
   // twitchSendQueue.test.ts — these just confirm sayInChannel wires channel + the live
-  // privilege check (populated from self-echoed messages' userInfo, see handleTwitchMessage)
-  // into it.
+  // privilege check (populated from raw USERSTATE messages, see onOwnUserState) into it.
 
-  it('treats the channel as non-privileged when no self-echoed message has been seen for it yet', async () => {
+  it('treats the channel as non-privileged when no USERSTATE has been seen for it yet', async () => {
     await connectBot();
     await sayInChannel('#streamer', 'first');
     const second = sayInChannel('#streamer', 'second');
@@ -668,22 +681,22 @@ describe('sayInChannel', () => {
   });
 
   it.each([
-    ['moderator', { isMod: true }],
-    ['vip', { isVip: true }],
-    ['broadcaster', { isBroadcaster: true }],
-  ])('exempts a channel from the per-channel floor once a self-echoed message shows %s status', async (_label, badgeOverrides) => {
+    ['moderator', 'moderator/1'],
+    ['vip', 'vip/1'],
+    ['broadcaster', 'broadcaster/1'],
+  ])('exempts a channel from the per-channel floor once a USERSTATE shows %s status', async (_label, rawBadges) => {
     await connectBot();
     // The privilege map is keyed by the normalized channel name — this must match that shape,
     // or a lookup-key regression would pass here despite never matching in production.
-    sendMessage('#streamer', 'testbot', 'hello', badgeOverrides);
+    fireUserState('#streamer', rawBadges);
     await sayInChannel('#streamer', 'first');
     await sayInChannel('#streamer', 'second');
     expect(mockClient.say).toHaveBeenCalledTimes(2);
   });
 
-  it('does not treat a channel as privileged from another channel\'s self-echoed status', async () => {
+  it('does not treat a channel as privileged from another channel\'s USERSTATE', async () => {
     await connectBot();
-    sendMessage('#other-channel', 'testbot', 'hello', { isMod: true });
+    fireUserState('#other-channel', 'moderator/1');
     await sayInChannel('#streamer', 'first');
     const second = sayInChannel('#streamer', 'second');
 
@@ -837,8 +850,8 @@ describe('stopTwitchBot', () => {
 
 // ─── reconcileJoinedChannels (via onConnected) ────────────────────────────────
 //
-// startTwitchBot() itself only resolves once its onConnect fires (see connectAndWait), and that
-// same event triggers onConnected's fire-and-forget reconcileJoinedChannels() call — so by the
+// startTwitchBot() itself only resolves once onAuthenticationSuccess fires (see connectAndWait),
+// and that same event triggers onConnected's fire-and-forget reconcileJoinedChannels() call — so by the
 // time `await startTwitchBot()` returns, the initial reconciliation has already been *kicked off*
 // against whatever mockClient.currentChannels was at that moment. These tests set currentChannels
 // up front, before starting the bot, rather than firing a separate synthetic reconnect afterward.
