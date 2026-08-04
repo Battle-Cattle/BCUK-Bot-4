@@ -41,7 +41,7 @@ let connected = false;
  * calling `client.quit()`. `quit()` itself doesn't return a promise — bounding the wait here
  * guarantees shutdown always proceeds instead of hanging indefinitely if the event never arrives.
  */
-const DISCONNECT_TIMEOUT_MS = 5_000;
+export const DISCONNECT_TIMEOUT_MS = 5_000;
 
 /**
  * Upper bound on how long {@link startTwitchBot} waits for authentication to complete after
@@ -49,7 +49,7 @@ const DISCONNECT_TIMEOUT_MS = 5_000;
  * none of `connectAndWait`'s events would otherwise fire — bounding the wait here guarantees
  * startup always settles (successfully or with an error) instead of hanging indefinitely.
  */
-const CONNECT_TIMEOUT_MS = 30_000;
+export const CONNECT_TIMEOUT_MS = 30_000;
 
 /**
  * Per-channel badge status (moderator/VIP/broadcaster) for the bot's own account, refreshed from

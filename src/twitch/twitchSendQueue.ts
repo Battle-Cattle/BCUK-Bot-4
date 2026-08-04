@@ -30,9 +30,10 @@ const PRIVILEGED_LIMIT = 100;
 const NON_PRIVILEGED_CHANNEL_FLOOR_MS = 1_000;
 
 /**
- * Every send in this module runs behind a single global queue, so one stalled `send()` (Twurple's
- * `ChatClient.say()` has no built-in timeout and can hang indefinitely on a stalled socket) would
- * otherwise wedge every later send, across every channel and feature, forever. Bounding it here
+ * Every send in this module runs behind a single global queue, so one stalled `send()` (the raw
+ * Twurple IRC send used by `sendRawChatMessage()` has no built-in timeout and can hang
+ * indefinitely on a stalled socket) would otherwise wedge every later send, across every channel
+ * and feature, forever. Bounding it here
  * guarantees the queue always frees up, even though the underlying send may still be stuck.
  */
 const SEND_TIMEOUT_MS = 10_000;

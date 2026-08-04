@@ -139,6 +139,8 @@ import {
   sayInChannel,
   __resetTwitchChannelDiscordIdCacheForTests,
   __resetTwitchPrivilegedChannelsForTests,
+  CONNECT_TIMEOUT_MS,
+  DISCONNECT_TIMEOUT_MS,
 } from './twitchBot';
 import { __resetTwitchSendQueueForTests } from './twitchSendQueue';
 import {
@@ -469,7 +471,7 @@ describe('joinTwitchChannel', () => {
 
   it('syncs state without calling client.join when already joined', async () => {
     await connectBot();
-    mockClient.currentChannels = ['#streamer'];
+    mockClient.currentChannels = ['streamer'];
 
     await joinTwitchChannel('streamer');
 
@@ -532,7 +534,7 @@ describe('joinTwitchChannel', () => {
     await connectBot();
     const hook = vi.fn();
     setChannelJoinedHook(hook);
-    mockClient.currentChannels = ['#streamer'];
+    mockClient.currentChannels = ['streamer'];
 
     await joinTwitchChannel('streamer');
 
@@ -542,7 +544,7 @@ describe('joinTwitchChannel', () => {
   it('caches the user ID when already joined', async () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([{ login: 'streamer', id: 'uid99' } as any]);
-    mockClient.currentChannels = ['#streamer'];
+    mockClient.currentChannels = ['streamer'];
 
     await joinTwitchChannel('streamer');
     await Promise.resolve(); // flush cacheChannelUserId
@@ -593,7 +595,7 @@ describe('partTwitchChannel', () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([]);
     await joinTwitchChannel('streamer');
-    mockClient.currentChannels = ['#streamer'];
+    mockClient.currentChannels = ['streamer'];
 
     await partTwitchChannel('streamer');
 
@@ -618,7 +620,7 @@ describe('partTwitchChannel', () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([]);
     await joinTwitchChannel('streamer');
-    mockClient.currentChannels = ['#streamer'];
+    mockClient.currentChannels = ['streamer'];
     mockClient.part.mockImplementation(() => { throw new Error('part failed'); });
 
     await expect(partTwitchChannel('streamer')).rejects.toThrow('part failed');
@@ -630,7 +632,7 @@ describe('partTwitchChannel', () => {
     vi.mocked(getUsers).mockResolvedValue([{ login: 'streamer', id: 'uid42' } as any]);
     await joinTwitchChannel('streamer');
     await Promise.resolve(); // flush cacheChannelUserId
-    mockClient.currentChannels = ['#streamer'];
+    mockClient.currentChannels = ['streamer'];
 
     await partTwitchChannel('streamer');
 
@@ -644,7 +646,7 @@ describe('partTwitchChannel', () => {
       () => new Promise((resolve) => { resolveGetUsers = resolve; }),
     );
     await joinTwitchChannel('streamer'); // cacheChannelUserId fires but getUsers is pending
-    mockClient.currentChannels = ['#streamer'];
+    mockClient.currentChannels = ['streamer'];
     await partTwitchChannel('streamer'); // removes from activeChannels before getUsers resolves
 
     resolveGetUsers([{ login: 'streamer', id: 'uid-stale' }]);
@@ -813,7 +815,7 @@ describe('startTwitchBot', () => {
     // Attached immediately so Node doesn't flag `started`'s rejection as unhandled during the gap
     // between it settling (when the fake timer below fires) and the `await expect(...)` below.
     started.catch(() => {});
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
     await expect(started).rejects.toThrow('Twitch connect timed out');
 
     // A late authentication success arrives after startup already reported failure — the
@@ -848,7 +850,7 @@ describe('stopTwitchBot', () => {
     // fake timers nothing advances, masking the real failure behind a hook-timeout error instead.
     try {
       const stopped = stopTwitchBot();
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(DISCONNECT_TIMEOUT_MS);
       await stopped;
 
       // Restart and reconnect without a fresh USERSTATE — privilege must not carry over.
@@ -918,7 +920,7 @@ describe('stopTwitchBot', () => {
     const setTmiClientSpy = vi.spyOn(twitchChannelMembership, 'setTmiClient');
 
     const stopped = stopTwitchBot();
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(DISCONNECT_TIMEOUT_MS);
     await stopped;
 
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
@@ -947,7 +949,7 @@ describe('reconcileJoinedChannels', () => {
   it('parts a joined channel that is not in activeChannels', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     vi.mocked(getUsers).mockResolvedValue([]);
-    mockClient.currentChannels = ['#stale'];
+    mockClient.currentChannels = ['stale'];
 
     await startTwitchBot();
     await vi.runAllTimersAsync();
@@ -971,7 +973,7 @@ describe('reconcileJoinedChannels', () => {
   it('marks a channel online when it is in both activeChannels and the client', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
     vi.mocked(getUsers).mockResolvedValue([]);
-    mockClient.currentChannels = ['#streamer'];
+    mockClient.currentChannels = ['streamer'];
 
     await startTwitchBot();
     await vi.runAllTimersAsync();
@@ -986,7 +988,7 @@ describe('reconcileJoinedChannels', () => {
     vi.mocked(getUsers)
       .mockResolvedValueOnce([]) // initializeActiveChannels — simulate failed startup cache
       .mockResolvedValue([{ login: 'streamer', id: 'uid-reconcile' } as any]);
-    mockClient.currentChannels = ['#streamer']; // already joined
+    mockClient.currentChannels = ['streamer']; // already joined
 
     await startTwitchBot();
     await vi.runAllTimersAsync();

@@ -220,7 +220,7 @@ describe('membershipMutationQueue serialization', () => {
   it('runs non-join operations on different channels independently', async () => {
     // client.join() calls are globally throttled (see the throttledJoin describe block below),
     // so this exercises the queue's per-channel independence using part instead.
-    const client = makeMockClient(['#alice', '#carol']);
+    const client = makeMockClient(['alice', 'carol']);
     setTmiClient(client as any);
     setConnected(true);
     const order: string[] = [];
@@ -281,7 +281,7 @@ describe('reconcileJoinedChannels', () => {
   });
 
   it('no-ops when the client is not connected, even with a client present', async () => {
-    const client = makeMockClient(['#stale']);
+    const client = makeMockClient(['stale']);
     setTmiClient(client as any);
     setConnected(false);
 
@@ -293,7 +293,7 @@ describe('reconcileJoinedChannels', () => {
   });
 
   it('parts a channel the client has joined but is no longer in activeChannels (stale)', async () => {
-    const client = makeMockClient(['#stale']);
+    const client = makeMockClient(['stale']);
     setTmiClient(client as any);
     setConnected(true);
 
@@ -306,7 +306,7 @@ describe('reconcileJoinedChannels', () => {
   });
 
   it('continues reconciling other stale channels when parting one fails', async () => {
-    const client = makeMockClient(['#stale', '#other']);
+    const client = makeMockClient(['stale', 'other']);
     setTmiClient(client as any);
     setConnected(true);
     client.part.mockImplementation(async (channel: string) => {
@@ -323,7 +323,7 @@ describe('reconcileJoinedChannels', () => {
   });
 
   it('refreshes status to online for a joined channel that is still in activeChannels', async () => {
-    const client = makeMockClient(['#alice']); // real Twurple channel names are #-prefixed
+    const client = makeMockClient(['alice']); // Twurple's currentChannels are unprefixed (no leading #)
     setTmiClient(client as any);
     setConnected(true);
     await joinTwitchChannel('alice'); // already-joined branch — adds to activeChannels
