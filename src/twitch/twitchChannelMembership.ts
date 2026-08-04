@@ -44,7 +44,11 @@ async function throttledJoin(client: ChatClient, channel: string): Promise<void>
   }
 }
 
-/** Sets the active Twurple chat client instance (called from twitchBot after connect). */
+/**
+ * Sets the active Twurple chat client instance (called from twitchBot after connect).
+ * @param c - The connected chat client, or `null` to clear it (e.g. on shutdown).
+ * @returns Nothing — mutates the module-level `_client` reference in place.
+ */
 export function setTmiClient(c: ChatClient | null): void {
   _client = c;
 }

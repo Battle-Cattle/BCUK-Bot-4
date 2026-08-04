@@ -236,10 +236,14 @@ function onConnected(): void {
 }
 
 /**
- * Twurple `onDisconnect` event handler: marks the bot disconnected and marks every active
- * channel's status as disconnected. Unlike tmi.js, Twurple's underlying IRC client resets its own
- * joined-channel list on every (re)connect, so there's no equivalent of tmi.js's manual
- * internal-state reset to avoid double-joining on reconnect.
+ * Twurple `onDisconnect` event handler: marks the bot disconnected, marks every active channel's
+ * status as disconnected, and clears {@link privilegedChannels}. Unlike tmi.js, Twurple's
+ * underlying IRC client resets its own joined-channel list on every (re)connect, so there's no
+ * equivalent of tmi.js's manual internal-state reset to avoid double-joining on reconnect. Clearing
+ * privilege state matters because Twurple reconnects within the same `ChatClient` instance (this
+ * handler doesn't imply a new client, unlike {@link stopTwitchBot}) — without this, a channel that
+ * revoked the bot's mod/VIP status while disconnected would keep the stale privileged rate-limit
+ * ceiling until its next `USERSTATE`, rather than reverting to the conservative default immediately.
  * @param manually - Whether the disconnect was requested by this process (e.g. via {@link stopTwitchBot}).
  * @param reason - The error that caused the disconnect, if any.
  */
@@ -248,6 +252,7 @@ function onDisconnected(manually: boolean, reason?: Error): void {
   setConnected(false);
   log.warn(`Disconnected${manually ? ' (manual)' : ''}: ${reason?.message ?? 'no reason given'}`);
   getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
+  privilegedChannels.clear();
 }
 
 /**
@@ -420,7 +425,7 @@ function quitAndWait(c: ChatClient): Promise<void> {
  * Stops the Twitch bot: disconnects the Twurple chat client (marking channels
  * disconnected if the disconnect itself fails or doesn't settle within
  * {@link DISCONNECT_TIMEOUT_MS}), tears down the client reference, and
- * clears channel-membership state.
+ * clears channel-membership and privilege state.
  * @returns Resolves once shutdown is complete.
  */
 export async function stopTwitchBot(): Promise<void> {
@@ -437,5 +442,6 @@ export async function stopTwitchBot(): Promise<void> {
     setTmiClient(null);
   }
   clearMembershipState();
+  privilegedChannels.clear();
   log.info('Disconnected.');
 }

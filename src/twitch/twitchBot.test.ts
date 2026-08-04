@@ -6,6 +6,7 @@ import { mockLogger } from '../test-utils/loggerMock';
 const { mockClient, handlers } = vi.hoisted(() => {
   type Handler = (...args: any[]) => any;
 
+  /** Builds a mock Twurple `onX`-style event binder that records handlers into `list`, mirroring the real `client.onX(handler) => Listener` shape (including `.unbind()`). */
   function makeBinder(list: Handler[]) {
     return vi.fn((handler: Handler) => {
       list.push(handler);
@@ -793,6 +794,33 @@ describe('stopTwitchBot', () => {
     expect(getActiveChannelUserIds().size).toBe(0);
   });
 
+  it('clears cached privileged status even when the disconnect event never fires', async () => {
+    await connectBot();
+    fireUserState('#streamer', 'moderator/1');
+    mockClient.quit.mockImplementation(() => {}); // never fires onDisconnect
+
+    const stopped = stopTwitchBot();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await stopped;
+
+    // Restart and reconnect without a fresh USERSTATE — privilege must not carry over.
+    await connectBot();
+    await sayInChannel('#streamer', 'first');
+    const second = sayInChannel('#streamer', 'second');
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await second;
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
+
+    // Restore quit()'s default behavior so the outer afterEach's stopTwitchBot() call doesn't hang.
+    mockClient.quit.mockImplementation(() => {
+      queueMicrotask(() => fireDisconnect(true));
+    });
+  });
+
   it('calls client.quit', async () => {
     await connectBot();
 
@@ -946,5 +974,25 @@ describe('onDisconnected', () => {
     fireDisconnect(false, new Error('Connection closed.'));
 
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
+  });
+
+  it('clears cached privileged status, so a reconnect without a fresh USERSTATE is treated as non-privileged', async () => {
+    await connectBot();
+    fireUserState('#streamer', 'moderator/1');
+
+    fireDisconnect(false, new Error('Connection closed.'));
+    // Twurple reconnects within the same ChatClient instance — model that by re-firing
+    // onAuthenticationSuccess without a fresh USERSTATE for the channel.
+    fireAuthSuccess();
+
+    await sayInChannel('#streamer', 'first');
+    const second = sayInChannel('#streamer', 'second');
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await second;
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
   });
 });
