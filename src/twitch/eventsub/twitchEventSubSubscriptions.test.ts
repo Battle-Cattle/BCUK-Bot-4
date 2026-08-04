@@ -318,6 +318,47 @@ describe('subscribeForStreamer', () => {
     expect(deleteEventSubSubscription).toHaveBeenCalledWith('stale-sub', 'tok-z');
   });
 
+  it('prunes a duplicate subscription of a still-desired type left over from a prior session', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new-follow');
+    // The old, orphaned subscription (e.g. from a process that died without stop()) is still
+    // "enabled" and shows up alongside the one just created this round.
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      { id: 'sub-new-follow', type: 'channel.follow' },
+      { id: 'sub-stale-follow', type: 'channel.follow' },
+    ] as any);
+
+    await subscribeForStreamer('sess-dup', {
+      uid: 'uid-dup',
+      token: 'tok-dup',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 22,
+    });
+
+    expect(deleteEventSubSubscription).toHaveBeenCalledWith('sub-stale-follow', 'tok-dup');
+    expect(deleteEventSubSubscription).not.toHaveBeenCalledWith('sub-new-follow', 'tok-dup');
+  });
+
+  it('does not prune any existing subscription of a type when creating it hit a 409 (already exists)', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    // 409 -> createEventSubSubscription resolves null, so subscribe() has no fresh id for this type.
+    vi.mocked(createEventSubSubscription).mockResolvedValue(null);
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      { id: 'sub-existing-follow', type: 'channel.follow' },
+    ] as any);
+
+    await subscribeForStreamer('sess-409', {
+      uid: 'uid-409',
+      token: 'tok-409',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 23,
+    });
+
+    expect(deleteEventSubSubscription).not.toHaveBeenCalledWith('sub-existing-follow', 'tok-409');
+  });
+
   it('subscribes to stream.online and stream.offline whenever config and token are present', async () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');

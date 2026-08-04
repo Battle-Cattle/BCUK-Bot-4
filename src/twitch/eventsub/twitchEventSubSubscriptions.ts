@@ -52,12 +52,37 @@ const notificationHandlers = new Map<string, NotificationHandler>([
   ['channel.update',                                    (l) => handleChannelUpdate(l)],
 ]);
 
-async function deleteStaleSubscriptions(uid: string, desired: Set<string>, userToken: string | null): Promise<void> {
+/**
+ * Deletes subscriptions that shouldn't be active any more: those whose type isn't in
+ * `desired` at all (e.g. the streamer turned off raid alerts), and — for types that were
+ * freshly (re)created this round — any *other* existing subscription of that same type, i.e.
+ * a duplicate left over from a session whose owning process died without calling
+ * `StreamerConnection.stop()` (crash, container restart, redeploy). Twitch eventually revokes
+ * an orphaned WebSocket subscription on its own, but not instantaneously — until then it stays
+ * "enabled" and delivers notifications alongside the new one, double-firing the type's handler
+ * for every event (e.g. `handleRedemption` recording two dashboard entries for one redemption).
+ * A type whose subscribe() returned null this round (409 — Twitch says an identical
+ * type+condition subscription already exists) is left untouched: `created` has no entry for
+ * it, so none of its existing subscriptions get pruned, since we can't tell which one Twitch
+ * considers the live one without risking deleting the subscription actually receiving events.
+ *
+ * @param uid - Broadcaster's Twitch user ID, used only for error logging.
+ * @param desired - Subscription types that should exist after this call.
+ * @param created - Type → subscription id for subscriptions freshly created this round (see
+ *   {@link createSubscriptionsForStreamer}); a type present here has any other existing
+ *   subscription of that type pruned as a stale duplicate.
+ * @param userToken - Broadcaster's valid user token; no-ops if null (no token to authenticate with).
+ */
+async function deleteStaleSubscriptions(
+  uid: string, desired: Set<string>, created: ReadonlyMap<string, string>, userToken: string | null,
+): Promise<void> {
   if (!userToken) return;
   try {
     const existing = await listEventSubSubscriptions(userToken);
     for (const sub of existing) {
-      if (!desired.has(sub.type)) await deleteEventSubSubscription(sub.id, userToken);
+      const keptId = created.get(sub.type);
+      const isStaleDuplicate = keptId !== undefined && sub.id !== keptId;
+      if (!desired.has(sub.type) || isStaleDuplicate) await deleteEventSubSubscription(sub.id, userToken);
     }
   } catch (err) {
     log.error(`Subscription cleanup failed for uid ${uid}:`, err);
@@ -203,29 +228,44 @@ export interface StreamerEventSubData {
   enabledAlerts?: ReadonlySet<AlertEventType>;
 }
 
-/** Creates all desired EventSub subscriptions for a single streamer and returns the desired-types set. */
+/** Desired subscription types alongside the ones freshly created this round, keyed by type
+ *  (see {@link createSubscriptionsForStreamer}). */
+interface SubscriptionResult {
+  desired: Set<string>;
+  created: Map<string, string>;
+}
+
+/**
+ * Creates all desired EventSub subscriptions for a single streamer.
+ * @returns The desired-types set alongside a type → id map of subscriptions actually created
+ *   this round (a type is absent from `created` if `subscribe` hit a 409 — Twitch already has
+ *   an identical type+condition subscription active — so the caller has no id to prefer over
+ *   whatever else `listEventSubSubscriptions` later reports for that type).
+ */
 async function createSubscriptionsForStreamer(
   sessionId: string, data: StreamerEventSubData,
-): Promise<Set<string>> {
+): Promise<SubscriptionResult> {
   const { uid, token, name, config, enabledAlerts = new Set<AlertEventType>() } = data;
   const normalizedName = normalizeTwitchChannelName(name) ?? name.toLowerCase();
   if (!getActiveChannels().has(normalizedName)) {
     log.info(`Skipping EventSub subscriptions for ${name} — bot not in channel`);
-    return new Set();
+    return { desired: new Set(), created: new Map() };
   }
 
   const desired = new Set<string>();
-  if (!token) return desired;
+  const created = new Map<string, string>();
+  if (!token) return { desired, created };
 
   for (const group of SUBSCRIPTION_GROUPS) {
     if (!isGroupEnabled(group, config, enabledAlerts)) continue;
     for (const spec of group.specs(uid)) {
       desired.add(spec.type);
-      await subscribe(sessionId, spec, token, name);
+      const id = await subscribe(sessionId, spec, token, name);
+      if (id !== null) created.set(spec.type, id);
     }
   }
 
-  return desired;
+  return { desired, created };
 }
 
 /**
@@ -256,8 +296,8 @@ export async function subscribeForStreamer(
 ): Promise<number> {
   const { uid, token, name, config, streamerId } = data;
   streamerMap.set(uid, { login: name, streamerId, config });
-  const desired = await createSubscriptionsForStreamer(sessionId, data);
-  await deleteStaleSubscriptions(uid, desired, token);
+  const { desired, created } = await createSubscriptionsForStreamer(sessionId, data);
+  await deleteStaleSubscriptions(uid, desired, created, token);
   return desired.size;
 }
 
@@ -266,15 +306,20 @@ export function removeStreamerFromMap(uid: string): void {
   streamerMap.delete(uid);
 }
 
-async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<void> {
+/** Creates a single EventSub subscription. Returns the created subscription's id, or null if
+ *  it was skipped (previously auth-failed), Twitch reported it already exists (409), or the
+ *  create call failed — callers use a non-null id to identify "the subscription created this
+ *  round" when pruning stale duplicates in {@link deleteStaleSubscriptions}. */
+async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<string | null> {
   const skipKey = `${login}:${spec.type}:${token}`;
-  if (authFailedSubs.has(skipKey)) return;
+  if (authFailedSubs.has(skipKey)) return null;
   try {
     const id = await createEventSubSubscription(spec.type, spec.version, spec.condition, sessionId, token);
     if (id !== null) {
       authFailedSubs.delete(skipKey);
       log.info(`Subscribed to ${spec.type} for ${login}`);
     }
+    return id;
   } catch (err) {
     if (err instanceof TwitchAuthError) {
       authFailedSubs.add(skipKey);
@@ -282,6 +327,7 @@ async function subscribe(sessionId: string, spec: SubSpec, token: string, login:
     } else {
       log.error(`Failed to subscribe to ${spec.type} for ${login}:`, err);
     }
+    return null;
   }
 }
 
