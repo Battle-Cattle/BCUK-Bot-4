@@ -12,7 +12,7 @@ vi.mock('../pricing/rewardPricingService', () => ({ applyRedemptionPricing: vi.f
 
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
-  handleStreamOnline, handleStreamOffline, handleChannelUpdate,
+  handleStreamOnline, handleStreamOffline, handleChannelUpdate, seenRedemptionIds,
 } from './twitchEventSubHandler';
 import {
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
@@ -728,6 +728,7 @@ describe('handleRedemption', () => {
 
   beforeEach(() => {
     vi.mocked(getStreamerById).mockResolvedValue({ discord_id: '999888777' } as any);
+    seenRedemptionIds.clear();
   });
 
   it('does not call pushOverlayEvent when getVideosForReward returns an empty array', async () => {
@@ -833,6 +834,27 @@ describe('handleRedemption', () => {
     await handleRedemption('streamer', event, makeConfig(), streamerId);
 
     expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
+  });
+
+  it('ignores a second notification carrying the same redemption id', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await handleRedemption('streamer', event, makeConfig(), streamerId);
+    await handleRedemption('streamer', event, makeConfig(), streamerId);
+
+    expect(recordStreamerEvent).toHaveBeenCalledOnce();
+    expect(mockPushDashboardEvent).toHaveBeenCalledOnce();
+    expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
+    expect(applyRedemptionPricing).toHaveBeenCalledOnce();
+  });
+
+  it('processes two notifications with different redemption ids normally', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await handleRedemption('streamer', event, makeConfig(), streamerId);
+    await handleRedemption('streamer', { ...event, id: 'redemption-2' }, makeConfig(), streamerId);
+
+    expect(recordStreamerEvent).toHaveBeenCalledTimes(2);
   });
 });
 

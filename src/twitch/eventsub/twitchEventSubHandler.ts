@@ -68,6 +68,30 @@ function tierName(tier: string): string {
   return ({ '1000': 'Tier 1', '2000': 'Tier 2', '3000': 'Tier 3' } as Record<string, string>)[tier] ?? tier;
 }
 
+/** How long a redemption id is remembered for deduplication (ms). */
+const REDEMPTION_DEDUP_TTL_MS = 10 * 60 * 1000;
+
+// TTL-based dedup keyed by Twitch's own redemption id, not the EventSub message envelope id.
+// twitchEventSubConnection.ts's message_id dedup only catches the same WebSocket delivery being
+// replayed (e.g. during a documented session-migration window); it can't catch the same physical
+// redemption arriving via two independently-created "enabled" subscriptions (e.g. a stale
+// subscription left over from a prior process that Twitch hasn't yet revoked, or two bot
+// instances briefly running against the same channel) — those arrive as distinct messages with
+// distinct message_ids but carry the same redemption `event.id`. Exported so tests can reset it.
+export const seenRedemptionIds = new Map<string, number>();
+
+/** Returns true if redemptionId has been seen within REDEMPTION_DEDUP_TTL_MS; records it otherwise. */
+function isDuplicateRedemption(redemptionId: string): boolean {
+  const now = Date.now();
+  const expiry = seenRedemptionIds.get(redemptionId);
+  if (expiry !== undefined && now <= expiry) return true;
+  seenRedemptionIds.set(redemptionId, now + REDEMPTION_DEDUP_TTL_MS);
+  for (const [id, exp] of seenRedemptionIds) {
+    if (exp < now) seenRedemptionIds.delete(id);
+  }
+  return false;
+}
+
 /**
  * Sends a chat message via the injected Twitch runtime, logging and swallowing any failure
  * (e.g. the bot lacking channel access, or a transient Twitch API error) instead of letting it
@@ -341,6 +365,11 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
  * caught via `.catch` instead of awaited), so its network latency truly can't delay the
  * overlay-video logic below.
  *
+ * Deduplicates on Twitch's own redemption id ({@link isDuplicateRedemption}) before doing
+ * anything else — a duplicate is dropped silently, since every effect below (companion push,
+ * dashboard record, pricing, overlay trigger) would otherwise double-fire for one physical
+ * redemption.
+ *
  * @param login - Broadcaster login name.
  * @param event - Redemption event payload including reward ID and user details.
  * @param _config - Streamer event config (unused for redemptions; reserved for future use).
@@ -352,6 +381,11 @@ export async function handleRedemption(
   _config: EventSubConfig,
   streamerId: number,
 ): Promise<void> {
+  if (isDuplicateRedemption(event.id)) {
+    log.warn(`Duplicate redemption notification for "${event.reward.title}" (id=${event.id}) — ignoring`);
+    return;
+  }
+
   try {
     const streamer = await getStreamerById(streamerId);
     if (streamer) {
