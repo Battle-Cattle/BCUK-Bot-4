@@ -37,6 +37,9 @@ const { mockClient, handlers } = vi.hoisted(() => {
         userStateHandlers.push(handler);
         return 'mock-handler-id';
       }),
+      removeMessageListener: vi.fn((_handlerId: string) => {
+        userStateHandlers.length = 0;
+      }),
       say: vi.fn(),
     },
   };
@@ -228,14 +231,20 @@ function makeChatMessage(overrides: {
   };
 }
 
-/** Dispatches a chat message to every registered `onMessage` handler, as Twurple would. */
+/**
+ * Dispatches a chat message to every registered `onMessage` handler, as Twurple would — including
+ * stripping any leading `#` from `channel` first, since Twurple's `ChatClient` emits `onMessage`
+ * with `toUserName(channel)` (the plain login, no `#`), unlike the raw `#channel` form `USERSTATE`
+ * carries (see {@link fireUserState}).
+ */
 function sendMessage(
   channel: string,
   user: string,
   message: string,
   msgOverrides: Parameters<typeof makeChatMessage>[0] = {},
 ): void {
-  handlers.messageHandlers.slice().forEach((h) => h(channel, user, message, makeChatMessage(msgOverrides)));
+  const normalizedChannel = channel.replace(/^#/, '');
+  handlers.messageHandlers.slice().forEach((h) => h(normalizedChannel, user, message, makeChatMessage(msgOverrides)));
 }
 
 /**
@@ -682,6 +691,14 @@ describe('sayInChannel', () => {
     expect(chunks.join('')).toBe('a'.repeat(600));
   });
 
+  it('keeps an exact-500-character final remainder as one message, even though it contains a space', async () => {
+    await connectBot();
+    const message = `${'a'.repeat(500)} ${'b'.repeat(250)} ${'c'.repeat(249)}`;
+    await sayInChannel('#streamer', message);
+    const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
+    expect(chunks).toEqual(['a'.repeat(500), `${'b'.repeat(250)} ${'c'.repeat(249)}`]);
+  });
+
   // Twitch's rate-limit window and per-channel floor are exercised exhaustively in
   // twitchSendQueue.test.ts — these just confirm sayInChannel wires channel + the live
   // privilege check (populated from raw USERSTATE messages, see onOwnUserState) into it,
@@ -717,7 +734,7 @@ describe('sayInChannel', () => {
 
   it('does not treat a channel as privileged from another channel\'s USERSTATE', async () => {
     await connectBot();
-    fireUserState('#other-channel', 'moderator/1');
+    fireUserState('#otherchannel', 'moderator/1');
     await sayInChannel('#streamer', 'first');
     const second = sayInChannel('#streamer', 'second');
 
@@ -786,6 +803,24 @@ describe('startTwitchBot', () => {
     });
 
     await expect(startTwitchBot()).rejects.toThrow('token fetch failed');
+  });
+
+  it('does not become connected if authentication succeeds after the connect timeout', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    mockClient.connect.mockImplementation(() => {}); // never fires any connectAndWait event
+
+    const started = startTwitchBot();
+    // Attached immediately so Node doesn't flag `started`'s rejection as unhandled during the gap
+    // between it settling (when the fake timer below fires) and the `await expect(...)` below.
+    started.catch(() => {});
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(started).rejects.toThrow('Twitch connect timed out');
+
+    // A late authentication success arrives after startup already reported failure — the
+    // persistent onConnected listener should have been unbound by the timeout cleanup, so this
+    // must not mark the bot connected.
+    fireAuthSuccess();
+    await expect(sayInChannel('streamer', 'hi')).rejects.toThrow('not connected');
   });
 });
 

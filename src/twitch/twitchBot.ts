@@ -313,22 +313,38 @@ export async function startTwitchBot(): Promise<void> {
   await initializeActiveChannels();
 
   const authProvider = new StaticAuthProvider(TWITCH_CLIENT_ID, stripOauthPrefix(TWITCH_OAUTH_TOKEN));
-  client = new ChatClient({
+  const newClient = new ChatClient({
     authProvider,
     channels: [],
   });
+  client = newClient;
   setTmiClient(client);
 
-  client.onMessage(handleTwitchMessage);
-  client.onAuthenticationSuccess(onConnected);
-  client.onDisconnect(onDisconnected);
+  const messageListener = newClient.onMessage(handleTwitchMessage);
+  const authSuccessListener = newClient.onAuthenticationSuccess(onConnected);
+  const disconnectListener = newClient.onDisconnect(onDisconnected);
   // USERSTATE isn't exposed by ChatClient itself — only via the underlying ircv3 client.
-  client.irc.onTypedMessage(UserState, onOwnUserState);
+  const userStateListenerId = newClient.irc.onTypedMessage(UserState, onOwnUserState);
 
   try {
-    await withTimeout(connectAndWait(client), CONNECT_TIMEOUT_MS, 'Twitch connect');
+    await withTimeout(connectAndWait(newClient), CONNECT_TIMEOUT_MS, 'Twitch connect');
   } catch (err) {
     log.error('Failed to connect:', err);
+    // withTimeout() abandons connectAndWait() rather than cancelling it — its listeners (and the
+    // ones registered above) would otherwise stay live on `newClient` and could still update
+    // module state (e.g. marking the bot connected) via a late event, even though startup already
+    // reported failure to the caller.
+    messageListener.unbind();
+    authSuccessListener.unbind();
+    disconnectListener.unbind();
+    newClient.irc.removeMessageListener(userStateListenerId);
+    try {
+      newClient.quit();
+    } catch (quitErr) {
+      log.warn('Error quitting client after failed connect:', quitErr);
+    }
+    client = null;
+    setTmiClient(null);
     throw err;
   }
 }
@@ -341,10 +357,13 @@ const MAX_MESSAGE_LENGTH = 500;
 
 /**
  * Splits `text` into chunks no longer than `maxLength`, breaking on the last space at or before
- * each boundary where possible so words aren't cut mid-word. Ported from Twurple's own internal
+ * each boundary where possible so words aren't cut mid-word. Adapted from Twurple's own internal
  * `ChatClient#say()` splitting logic (`splitOnSpaces` in `@twurple/chat`'s `messageUtil`), which
  * isn't exported from its public API — needed here because {@link sendRawChatMessage} bypasses
  * `ChatClient#say()` entirely (see its docs for why) and so no longer gets that splitting for free.
+ * Fixes an off-by-one present in Twurple's original: its fit check used `remaining + 1 <= maxLength`,
+ * which — for a final remainder exactly `maxLength` long — falsely failed the check and let an
+ * unrelated space inside that remainder force an unnecessary extra chunk.
  * @param text - The message text to split.
  * @param maxLength - Maximum length of each returned chunk.
  * @returns One or more chunks within `maxLength`, or `[text]` unchanged if it already fits.
@@ -357,7 +376,7 @@ function splitMessageOnSpaces(text: string, maxLength: number): string[] {
   let endIndex = maxLength;
   while (startIndex < trimmed.length) {
     let spaceIndex = trimmed.lastIndexOf(' ', endIndex);
-    if (spaceIndex === -1 || spaceIndex <= startIndex || trimmed.length - startIndex + 1 <= maxLength) {
+    if (spaceIndex === -1 || spaceIndex <= startIndex || trimmed.length - startIndex <= maxLength) {
       spaceIndex = startIndex + maxLength;
     }
     const chunk = trimmed.slice(startIndex, spaceIndex).trim();
