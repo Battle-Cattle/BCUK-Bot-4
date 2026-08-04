@@ -12,7 +12,7 @@ vi.mock('./twitchApi', () => ({ getUsers: vi.fn() }));
 vi.mock('../shared/statusStore', () => ({ setTwitchChannel: vi.fn() }));
 
 import {
-  setTmiClient,
+  setChatClient,
   setConnected,
   setChannelJoinedHook,
   reconcileJoinedChannels,
@@ -40,7 +40,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers();
   clearMembershipState();
-  setTmiClient(null);
+  setChatClient(null);
   setConnected(false);
   setChannelJoinedHook(() => {});
   vi.mocked(getUsers).mockResolvedValue([]);
@@ -60,7 +60,7 @@ describe('joinTwitchChannel', () => {
 
   it('queues the channel locally without calling client.join when not connected', async () => {
     const client = makeMockClient();
-    setTmiClient(client as any); // client present but disconnected — isolates the !_connected guard
+    setChatClient(client as any); // client present but disconnected — isolates the !_connected guard
     setConnected(false);
 
     await joinTwitchChannel('alice');
@@ -72,7 +72,7 @@ describe('joinTwitchChannel', () => {
 
   it('joins via the client and marks the channel active when connected', async () => {
     const client = makeMockClient();
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
     const hook = vi.fn();
     setChannelJoinedHook(hook);
@@ -87,7 +87,7 @@ describe('joinTwitchChannel', () => {
 
   it('syncs local state without re-joining when the client already has the channel joined', async () => {
     const client = makeMockClient(['alice']);
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
     const hook = vi.fn();
     setChannelJoinedHook(hook);
@@ -102,7 +102,7 @@ describe('joinTwitchChannel', () => {
   it('rolls back local state and rethrows when client.join fails', async () => {
     const client = makeMockClient();
     client.join.mockRejectedValue(new Error('join failed'));
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
 
     await expect(joinTwitchChannel('alice')).rejects.toThrow('join failed');
@@ -113,7 +113,7 @@ describe('joinTwitchChannel', () => {
 
   it('caches the channel user ID via getUsers after joining', async () => {
     const client = makeMockClient();
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
     vi.mocked(getUsers).mockResolvedValue([{ login: 'alice', id: 'uid-alice' }]);
 
@@ -125,7 +125,7 @@ describe('joinTwitchChannel', () => {
 
   it('logs and does not throw when the joined-channel hook itself throws', async () => {
     const client = makeMockClient();
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
     setChannelJoinedHook(() => { throw new Error('hook boom'); });
 
@@ -145,7 +145,7 @@ describe('partTwitchChannel', () => {
 
   it('is a no-op when the channel is neither active nor joined', async () => {
     const client = makeMockClient();
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
 
     await partTwitchChannel('alice');
@@ -156,7 +156,7 @@ describe('partTwitchChannel', () => {
 
   it('removes local state without calling client.part when not connected', async () => {
     const client = makeMockClient();
-    setTmiClient(client as any); // client present but disconnected — isolates the !_connected guard
+    setChatClient(client as any); // client present but disconnected — isolates the !_connected guard
     setConnected(false);
     await joinTwitchChannel('alice');
 
@@ -168,7 +168,7 @@ describe('partTwitchChannel', () => {
 
   it('parts via the client when connected and joined', async () => {
     const client = makeMockClient(['alice']);
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
     await joinTwitchChannel('alice');
 
@@ -181,7 +181,7 @@ describe('partTwitchChannel', () => {
   it('keeps state removed and rethrows when client.part fails', async () => {
     const client = makeMockClient(['alice']);
     client.part.mockImplementation(() => { throw new Error('part failed'); });
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
     await joinTwitchChannel('alice');
 
@@ -196,7 +196,7 @@ describe('partTwitchChannel', () => {
 describe('membershipMutationQueue serialization', () => {
   it('serializes join then part on the same channel', async () => {
     const client = makeMockClient();
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
     const order: string[] = [];
     const { promise: gate, resolve: openGate } = deferred();
@@ -221,7 +221,7 @@ describe('membershipMutationQueue serialization', () => {
     // client.join() calls are globally throttled (see the throttledJoin describe block below),
     // so this exercises the queue's per-channel independence using part instead.
     const client = makeMockClient(['alice', 'carol']);
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
     const order: string[] = [];
     const { promise: gate, resolve: openGate } = deferred();
@@ -245,7 +245,7 @@ describe('membershipMutationQueue serialization', () => {
 describe('joinTwitchChannel global join throttle', () => {
   it('spaces client.join() calls across different channels by JOIN_THROTTLE_MS, not just per-channel', async () => {
     const client = makeMockClient();
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
 
     const alicePromise = joinTwitchChannel('alice');
@@ -272,7 +272,7 @@ describe('joinTwitchChannel global join throttle', () => {
 
 describe('reconcileJoinedChannels', () => {
   it('no-ops when there is no client, even if connected is true', async () => {
-    setTmiClient(null);
+    setChatClient(null);
     setConnected(true);
 
     await expect(reconcileJoinedChannels()).resolves.toBeUndefined();
@@ -282,7 +282,7 @@ describe('reconcileJoinedChannels', () => {
 
   it('no-ops when the client is not connected, even with a client present', async () => {
     const client = makeMockClient(['stale']);
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(false);
 
     await expect(reconcileJoinedChannels()).resolves.toBeUndefined();
@@ -294,7 +294,7 @@ describe('reconcileJoinedChannels', () => {
 
   it('parts a channel the client has joined but is no longer in activeChannels (stale)', async () => {
     const client = makeMockClient(['stale']);
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
 
     const p = reconcileJoinedChannels();
@@ -307,7 +307,7 @@ describe('reconcileJoinedChannels', () => {
 
   it('continues reconciling other stale channels when parting one fails', async () => {
     const client = makeMockClient(['stale', 'other']);
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
     client.part.mockImplementation(async (channel: string) => {
       if (channel === 'stale') throw new Error('part failed');
@@ -324,7 +324,7 @@ describe('reconcileJoinedChannels', () => {
 
   it('refreshes status to online for a joined channel that is still in activeChannels', async () => {
     const client = makeMockClient(['alice']); // Twurple's currentChannels are unprefixed (no leading #)
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(true);
     await joinTwitchChannel('alice'); // already-joined branch — adds to activeChannels
     vi.mocked(setTwitchChannel).mockClear();
@@ -339,7 +339,7 @@ describe('reconcileJoinedChannels', () => {
 
   it('joins a queued-but-unjoined active channel, throttled by JOIN_THROTTLE_MS', async () => {
     const client = makeMockClient([]);
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(false);
     await joinTwitchChannel('alice'); // queues into activeChannels without calling client.join
     setConnected(true); // simulate reconnect
@@ -354,7 +354,7 @@ describe('reconcileJoinedChannels', () => {
 
   it('continues reconciling other channels when one fails to join', async () => {
     const client = makeMockClient([]);
-    setTmiClient(client as any);
+    setChatClient(client as any);
     setConnected(false);
     await joinTwitchChannel('alice');
     await joinTwitchChannel('carol');

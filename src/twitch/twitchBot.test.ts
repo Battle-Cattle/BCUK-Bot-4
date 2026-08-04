@@ -266,7 +266,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetMockClient();
   clearHandlerArrays();
-  twitchChannelMembership.setTmiClient(null);
+  twitchChannelMembership.setChatClient(null);
   twitchChannelMembership.setConnected(false);
   vi.useFakeTimers();
   __resetTwitchSendQueueForTests();
@@ -459,7 +459,7 @@ describe('joinTwitchChannel', () => {
     // A client can be assigned before the connection is confirmed (e.g. while startTwitchBot's
     // connectAndWait is still pending) — drive that state directly via the same setters
     // startTwitchBot itself uses, rather than racing an unawaited startTwitchBot() call.
-    twitchChannelMembership.setTmiClient(mockClient as any);
+    twitchChannelMembership.setChatClient(mockClient as any);
     twitchChannelMembership.setConnected(false);
 
     await joinTwitchChannel('streamer');
@@ -554,7 +554,7 @@ describe('joinTwitchChannel', () => {
 
   it('caches the user ID when queuing a channel while disconnected', async () => {
     vi.mocked(getUsers).mockResolvedValue([{ login: 'streamer', id: 'uid77' } as any]);
-    twitchChannelMembership.setTmiClient(mockClient as any);
+    twitchChannelMembership.setChatClient(mockClient as any);
     twitchChannelMembership.setConnected(false);
 
     await joinTwitchChannel('streamer');
@@ -581,7 +581,7 @@ describe('partTwitchChannel', () => {
   });
 
   it('removes local state only when the client is not connected', async () => {
-    twitchChannelMembership.setTmiClient(mockClient as any);
+    twitchChannelMembership.setChatClient(mockClient as any);
     twitchChannelMembership.setConnected(false);
     await joinTwitchChannel('streamer'); // queued into activeChannels
 
@@ -917,7 +917,7 @@ describe('stopTwitchBot', () => {
     await joinTwitchChannel('streamer');
     mockClient.quit.mockImplementation(() => {}); // never fires onDisconnect
     vi.mocked(setTwitchChannel).mockClear();
-    const setTmiClientSpy = vi.spyOn(twitchChannelMembership, 'setTmiClient');
+    const setChatClientSpy = vi.spyOn(twitchChannelMembership, 'setChatClient');
 
     const stopped = stopTwitchBot();
     await vi.advanceTimersByTimeAsync(DISCONNECT_TIMEOUT_MS);
@@ -925,8 +925,8 @@ describe('stopTwitchBot', () => {
 
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
     expect(getActiveChannels().size).toBe(0);
-    expect(setTmiClientSpy).toHaveBeenCalledWith(null);
-    setTmiClientSpy.mockRestore();
+    expect(setChatClientSpy).toHaveBeenCalledWith(null);
+    setChatClientSpy.mockRestore();
 
     // Client reference was cleared despite the hang: a second stop is a no-op
     // (mirrors the "no-op when never started" case) rather than awaiting the

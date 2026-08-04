@@ -23,7 +23,7 @@ import {
 } from '../db';
 import { resolveGuildIdForDiscordId } from '../discord/voicePresence';
 import {
-  setTmiClient,
+  setChatClient,
   setConnected,
   clearMembershipState,
   getActiveChannels,
@@ -318,7 +318,7 @@ export async function startTwitchBot(): Promise<void> {
     channels: [],
   });
   client = newClient;
-  setTmiClient(client);
+  setChatClient(client);
 
   const messageListener = newClient.onMessage(handleTwitchMessage);
   const authSuccessListener = newClient.onAuthenticationSuccess(onConnected);
@@ -344,7 +344,7 @@ export async function startTwitchBot(): Promise<void> {
       log.warn('Error quitting client after failed connect:', quitErr);
     }
     client = null;
-    setTmiClient(null);
+    setChatClient(null);
     throw err;
   }
 }
@@ -466,7 +466,7 @@ export async function stopTwitchBot(): Promise<void> {
       getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
     }
     client = null;
-    setTmiClient(null);
+    setChatClient(null);
   }
   clearMembershipState();
   privilegedChannels.clear();
