@@ -30,13 +30,13 @@ const { mockClient, handlers } = vi.hoisted(() => {
     quit: vi.fn(),
     join: vi.fn(),
     part: vi.fn(),
-    say: vi.fn(),
     currentChannels: [] as string[],
     irc: {
       onTypedMessage: vi.fn((_type: unknown, handler: Handler) => {
         userStateHandlers.push(handler);
         return 'mock-handler-id';
       }),
+      say: vi.fn(),
     },
   };
 
@@ -171,7 +171,7 @@ function resetMockClient(): void {
   });
   mockClient.join.mockResolvedValue(undefined);
   mockClient.part.mockImplementation(() => undefined);
-  mockClient.say.mockResolvedValue(undefined);
+  mockClient.irc.say.mockImplementation(() => undefined);
   mockClient.currentChannels = [];
 }
 
@@ -657,15 +657,26 @@ describe('sayInChannel', () => {
     await expect(sayInChannel('streamer', 'hi')).rejects.toThrow('not connected');
   });
 
-  it('delegates to client.say with the normalized channel', async () => {
+  it('delegates to the raw IRC client with the normalized, #-prefixed channel', async () => {
     await connectBot();
     await sayInChannel('#STREAMER', 'hello!');
-    expect(mockClient.say).toHaveBeenCalledWith('streamer', 'hello!');
+    expect(mockClient.irc.say).toHaveBeenCalledWith('#streamer', 'hello!');
+  });
+
+  it('splits a message longer than the Twitch length limit on spaces', async () => {
+    await connectBot();
+    const longMessage = `${'a'.repeat(490)} ${'b'.repeat(20)}`;
+    await sayInChannel('#streamer', longMessage);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
+    expect(mockClient.irc.say).toHaveBeenNthCalledWith(1, '#streamer', 'a'.repeat(490));
+    expect(mockClient.irc.say).toHaveBeenNthCalledWith(2, '#streamer', 'b'.repeat(20));
   });
 
   // Twitch's rate-limit window and per-channel floor are exercised exhaustively in
   // twitchSendQueue.test.ts — these just confirm sayInChannel wires channel + the live
-  // privilege check (populated from raw USERSTATE messages, see onOwnUserState) into it.
+  // privilege check (populated from raw USERSTATE messages, see onOwnUserState) into it,
+  // and that it bypasses ChatClient#say() (see sendRawChatMessage) so no second, fixed
+  // per-channel floor from Twurple's own rate limiter can undermine the privileged exemption.
 
   it('treats the channel as non-privileged when no USERSTATE has been seen for it yet', async () => {
     await connectBot();
@@ -673,11 +684,11 @@ describe('sayInChannel', () => {
     const second = sayInChannel('#streamer', 'second');
 
     await vi.advanceTimersByTimeAsync(999);
-    expect(mockClient.say).toHaveBeenCalledTimes(1);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1);
     await second;
-    expect(mockClient.say).toHaveBeenCalledTimes(2);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -691,7 +702,7 @@ describe('sayInChannel', () => {
     fireUserState('#streamer', rawBadges);
     await sayInChannel('#streamer', 'first');
     await sayInChannel('#streamer', 'second');
-    expect(mockClient.say).toHaveBeenCalledTimes(2);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
   });
 
   it('does not treat a channel as privileged from another channel\'s USERSTATE', async () => {
@@ -701,11 +712,11 @@ describe('sayInChannel', () => {
     const second = sayInChannel('#streamer', 'second');
 
     await vi.advanceTimersByTimeAsync(999);
-    expect(mockClient.say).toHaveBeenCalledTimes(1);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1);
     await second;
-    expect(mockClient.say).toHaveBeenCalledTimes(2);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
   });
 });
 

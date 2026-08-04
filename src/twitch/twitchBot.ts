@@ -113,7 +113,11 @@ async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promis
   return resolveGuildIdForDiscordId(discordId);
 }
 
-/** Parses a raw IRC `badges` tag value (e.g. `"moderator/1,subscriber/12"`) into a set of badge names. */
+/**
+ * Parses a raw IRC `badges` tag value (e.g. `"moderator/1,subscriber/12"`) into a set of badge names.
+ * @param rawBadges - The raw `badges` tag value, or `undefined` if the tag was absent.
+ * @returns The badge names present (e.g. `{'moderator', 'subscriber'}`), or an empty set if `rawBadges` was `undefined`.
+ */
 function parseBadgeNames(rawBadges: string | undefined): Set<string> {
   if (!rawBadges) return new Set();
   return new Set(rawBadges.split(',').map((entry) => entry.split('/')[0]));
@@ -125,6 +129,7 @@ function parseBadgeNames(rawBadges: string | undefined): Set<string> {
  * API call.
  * @param channel - Normalized Twitch channel name the badges were observed in.
  * @param badgeNames - Badge names parsed from the `USERSTATE`'s `badges` tag (see {@link parseBadgeNames}).
+ * @returns Nothing — mutates {@link privilegedChannels} in place.
  */
 function updateOwnPrivilegeStatus(channel: string, badgeNames: Set<string>): void {
   const privileged = badgeNames.has('moderator') || badgeNames.has('vip') || badgeNames.has('broadcaster');
@@ -139,6 +144,7 @@ function updateOwnPrivilegeStatus(channel: string, badgeNames: Set<string>): voi
  * the bot's own current badges in that channel — the only reliable live source for this, since
  * Twitch does not echo the bot's own `PRIVMSG`s back through `onMessage`.
  * @param msg - The raw `USERSTATE` message, including the channel (`#channel`) and IRC tags.
+ * @returns Nothing — updates {@link privilegedChannels} via {@link updateOwnPrivilegeStatus}.
  */
 function onOwnUserState(msg: UserState): void {
   const normalizedChannel = normalizeTwitchChannelName(msg.channel);
@@ -265,12 +271,15 @@ function stripOauthPrefix(token: string): string {
  */
 function connectAndWait(c: ChatClient): Promise<void> {
   return new Promise((resolve, reject) => {
+    // Settles the promise exactly once, however connect() turns out — resolve on success, reject
+    // on either failure — then tears down all three listeners so none can fire again later.
     const authSuccessListener = c.onAuthenticationSuccess(() => { cleanup(); resolve(); });
     const authFailureListener = c.onAuthenticationFailure((text) => {
       cleanup();
       reject(new Error(`Twitch chat authentication failed: ${text}`));
     });
     const tokenFailureListener = c.onTokenFetchFailure((err) => { cleanup(); reject(err); });
+    /** Unbinds all three listeners registered above, once any one of them has fired. */
     function cleanup(): void {
       authSuccessListener.unbind();
       authFailureListener.unbind();
@@ -312,15 +321,71 @@ export async function startTwitchBot(): Promise<void> {
 }
 
 /**
- * Sends `message` to a Twitch channel via the connected Twurple chat client, throttled against
- * Twitch's global per-account rate-limit buckets (see {@link throttledTwitchSend}) so this
- * shared entry point — used by every auto-posting feature (custom commands, counters, timers,
- * shoutouts, EventSub, etc.) — can never burst past them, regardless of how many features fire
- * at once or which channels they target. Whether the bot is currently privileged
- * (moderator/VIP/broadcaster) in the target channel is re-checked live (see
- * {@link isPrivilegedInChannel}) right before the send actually runs, not when it's queued, since
- * this call may sit behind others for a while — the same reason the connection itself is
- * rechecked below rather than trusted from before queueing.
+ * Twitch's practical chat message length limit, in characters. `sendRawChatMessage` splits longer
+ * text at this boundary rather than sending it as one oversized message.
+ */
+const MAX_MESSAGE_LENGTH = 500;
+
+/**
+ * Splits `text` into chunks no longer than `maxLength`, breaking on the last space at or before
+ * each boundary where possible so words aren't cut mid-word. Ported from Twurple's own internal
+ * `ChatClient#say()` splitting logic (`splitOnSpaces` in `@twurple/chat`'s `messageUtil`), which
+ * isn't exported from its public API — needed here because {@link sendRawChatMessage} bypasses
+ * `ChatClient#say()` entirely (see its docs for why) and so no longer gets that splitting for free.
+ * @param text - The message text to split.
+ * @param maxLength - Maximum length of each returned chunk.
+ * @returns One or more chunks within `maxLength`, or `[text]` unchanged if it already fits.
+ */
+function splitMessageOnSpaces(text: string, maxLength: number): string[] {
+  if (text.length <= maxLength) return [text];
+  const trimmed = text.trim();
+  const chunks: string[] = [];
+  let startIndex = 0;
+  let endIndex = maxLength;
+  while (startIndex < trimmed.length) {
+    let spaceIndex = trimmed.lastIndexOf(' ', endIndex);
+    if (spaceIndex === -1 || spaceIndex <= startIndex || trimmed.length - startIndex + 1 <= maxLength) {
+      spaceIndex = startIndex + maxLength;
+    }
+    const chunk = trimmed.slice(startIndex, spaceIndex).trim();
+    if (chunk.length) chunks.push(chunk);
+    startIndex = spaceIndex + (trimmed[spaceIndex] === ' ' ? 1 : 0);
+    endIndex = startIndex + maxLength;
+  }
+  return chunks;
+}
+
+/**
+ * Sends `text` to `channel` via the underlying `ircv3` client directly, bypassing
+ * `ChatClient#say()`. Twurple's `say()` runs every send through its own internal rate limiter,
+ * which — unless the client is configured with a static `isAlwaysMod: true` — enforces a fixed
+ * 1.2s-per-channel floor with no per-call override, regardless of the sender's actual moderator/
+ * VIP/broadcaster status. That would silently re-impose a floor under exactly the privileged sends
+ * {@link throttledTwitchSend} is meant to exempt from one, on top of whatever `twitchSendQueue.ts`
+ * already decided — so `twitchSendQueue.ts` needs to be the only rate limiter on this path. Splits
+ * `text` first (see {@link splitMessageOnSpaces}) since bypassing `say()` also bypasses its own
+ * message-length splitting.
+ * @param c - The connected Twurple chat client (only its underlying `irc` client is used).
+ * @param channel - Normalized Twitch channel name (without a leading `#`).
+ * @param text - Message text to send.
+ * @returns Nothing — sends are fire-and-forget over the IRC connection, like `IrcClient#say()` itself.
+ */
+function sendRawChatMessage(c: ChatClient, channel: string, text: string): void {
+  for (const chunk of splitMessageOnSpaces(text, MAX_MESSAGE_LENGTH)) {
+    c.irc.say(`#${channel}`, chunk);
+  }
+}
+
+/**
+ * Sends `message` to a Twitch channel, throttled against Twitch's global per-account rate-limit
+ * buckets (see {@link throttledTwitchSend}) so this shared entry point — used by every auto-posting
+ * feature (custom commands, counters, timers, shoutouts, EventSub, etc.) — can never burst past
+ * them, regardless of how many features fire at once or which channels they target. Whether the
+ * bot is currently privileged (moderator/VIP/broadcaster) in the target channel is re-checked live
+ * (see {@link isPrivilegedInChannel}) right before the send actually runs, not when it's queued,
+ * since this call may sit behind others for a while — the same reason the connection itself is
+ * rechecked below rather than trusted from before queueing. Sends via {@link sendRawChatMessage}
+ * rather than `ChatClient#say()` directly — see its docs for why.
  * @param channel - Twitch channel to send to (normalized before sending).
  * @param message - Message text to send.
  * @returns Resolves once the message has actually been sent.
@@ -334,7 +399,7 @@ export async function sayInChannel(channel: string, message: string): Promise<vo
   if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
   await throttledTwitchSend(normalized, () => isPrivilegedInChannel(normalized), async () => {
     if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
-    await client.say(normalized, message);
+    sendRawChatMessage(client, normalized, message);
   });
 }
 
