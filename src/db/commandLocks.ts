@@ -25,6 +25,7 @@ const COMMAND_WRITE_LOCK_TIMEOUT_SECONDS = 10;
 
 export const MAX_DEADLOCK_RETRIES = 3;
 
+/** Returns true if `error` is a MySQL deadlock error (`ER_LOCK_DEADLOCK` / errno 1213). */
 export function isDeadlockError(error: unknown): boolean {
   const err = error as { code?: string; errno?: number };
   return err.code === 'ER_LOCK_DEADLOCK' || err.errno === 1213;
@@ -32,10 +33,12 @@ export function isDeadlockError(error: unknown): boolean {
 
 // ─── Named locks ─────────────────────────────────────────────────────────────
 
+/** Derives a stable, length-bounded MySQL named-lock name for a command string, via a truncated SHA-256 hash. */
 export function getCommandWriteLockName(command: string): string {
   return `bcuk_cmd_${createHash('sha256').update(command).digest('hex').slice(0, 48)}`;
 }
 
+/** Maps `commands` to their lock names, sorted so callers always acquire multiple locks in a consistent order (avoids lock-order deadlocks). */
 function getSortedCommandLockNames(commands: string[]): string[] {
   return commands
     .slice()
@@ -46,6 +49,15 @@ function getSortedCommandLockNames(commands: string[]): string[] {
     .map((command) => getCommandWriteLockName(command));
 }
 
+/**
+ * Acquires a MySQL `GET_LOCK` named lock on `connection`, waiting up to
+ * `COMMAND_WRITE_LOCK_TIMEOUT_SECONDS`.
+ * @param connection - Pool connection to run `GET_LOCK` on.
+ * @param lockName - Name of the lock to acquire (see {@link getCommandWriteLockName}).
+ * @returns Resolves once the lock is held.
+ * @throws If `GET_LOCK` times out (result `0`), returns null (an internal MySQL error), or
+ *   returns any other unexpected value.
+ */
 export async function acquireNamedLock(connection: mysql.PoolConnection, lockName: string): Promise<void> {
   const [rows] = await connection.execute<mysql.RowDataPacket[]>(
     'SELECT GET_LOCK(?, ?) AS lock_status',
@@ -65,6 +77,7 @@ export async function acquireNamedLock(connection: mysql.PoolConnection, lockNam
   throw new Error(`${message} (lock_status=${String(lockStatus)}).`);
 }
 
+/** Releases a MySQL named lock on `connection`. Swallows and logs any error — releasing must never block the caller's cleanup. */
 export async function releaseNamedLock(connection: mysql.PoolConnection, lockName: string): Promise<void> {
   try {
     await connection.execute('SELECT RELEASE_LOCK(?)', [lockName]);
@@ -73,12 +86,24 @@ export async function releaseNamedLock(connection: mysql.PoolConnection, lockNam
   }
 }
 
+/**
+ * Acquires each of `lockNames` in order (see {@link getSortedCommandLockNames} for why order matters).
+ * @param connection - Pool connection to acquire the locks on.
+ * @param lockNames - Lock names to acquire, in acquisition order.
+ * @returns Resolves once every lock in `lockNames` is held.
+ */
 async function acquireNamedLocks(connection: mysql.PoolConnection, lockNames: string[]): Promise<void> {
   for (const lockName of lockNames) {
     await acquireNamedLock(connection, lockName);
   }
 }
 
+/**
+ * Releases `lockNames` in reverse-acquisition order.
+ * @param connection - Pool connection the locks were acquired on.
+ * @param lockNames - Lock names to release, in the same order they were acquired.
+ * @returns Resolves once every release attempt has completed.
+ */
 async function releaseNamedLocks(connection: mysql.PoolConnection, lockNames: string[]): Promise<void> {
   for (let index = lockNames.length - 1; index >= 0; index -= 1) {
     await releaseNamedLock(connection, lockNames[index]);
@@ -92,6 +117,13 @@ interface SqlExistsCheckPlan {
   params: Array<string | number>;
 }
 
+/**
+ * Builds the SQL + params for checking whether `normalizedCommands` collide with an existing `custom_command` row.
+ * @param placeholders - `IN (...)` placeholder string sized for `normalizedCommands.length`.
+ * @param normalizedCommands - Normalized command strings to check for a collision.
+ * @param options.excludeCustomCommandId - A `command_id` to exclude from the check.
+ * @returns The SQL and params to run via {@link executeExistsCheck}.
+ */
 function buildCustomCommandExistsCheckPlan(
   placeholders: string,
   normalizedCommands: string[],
@@ -109,6 +141,13 @@ function buildCustomCommandExistsCheckPlan(
   return { sql, params };
 }
 
+/**
+ * Builds the SQL + params for checking whether `normalizedCommands` collide with an existing `counter` row's trigger/check command.
+ * @param placeholders - `IN (...)` placeholder string sized for `normalizedCommands.length`.
+ * @param normalizedCommands - Normalized command strings to check for a collision.
+ * @param options.excludeCounterId - A counter `id` to exclude from the check.
+ * @returns The SQL and params to run via {@link executeExistsCheck}.
+ */
 function buildCounterExistsCheckPlan(
   placeholders: string,
   normalizedCommands: string[],
@@ -126,11 +165,28 @@ function buildCounterExistsCheckPlan(
   return { sql, params };
 }
 
+/**
+ * Runs an exists-check plan built by {@link buildCustomCommandExistsCheckPlan}/{@link buildCounterExistsCheckPlan} and reports whether any row matched.
+ * @param executor - Query executor to run the plan on.
+ * @param plan - The SQL and params to execute.
+ * @returns True if the query matched at least one row.
+ */
 async function executeExistsCheck(executor: SqlExecutor, plan: SqlExistsCheckPlan): Promise<boolean> {
   const [rows] = await executor.execute<mysql.RowDataPacket[]>(plan.sql, plan.params);
   return rows.length > 0;
 }
 
+/**
+ * Checks whether any of `commandOrCommands` is already taken by a `custom_command` or
+ * `counter` row (whichever tables `checks` enables), optionally excluding a specific
+ * command/counter id from the check (used when updating an existing row in place).
+ * @param commandOrCommands - A single command string or array of command strings to check.
+ * @param options - Ids to exclude from the collision check, if updating an existing row.
+ * @param executor - Query executor to run the checks on; defaults to the pool, but a
+ *   transaction connection is passed when called from {@link runSerializedCommandWrite}.
+ * @param checks - Which tables to check; both default to enabled.
+ * @returns True if any command in `commandOrCommands` is already taken.
+ */
 export async function isAnyCommandTakenAcrossTables(
   commandOrCommands: string | string[],
   options?: { excludeCustomCommandId?: number; excludeCounterId?: number },
@@ -160,16 +216,49 @@ export async function isAnyCommandTakenAcrossTables(
   return results.some((exists) => exists);
 }
 
+/**
+ * Checks whether `triggerString` is already taken by a custom command or counter, optionally excluding `excludeCommandId` from the check.
+ * @param triggerString - Trigger string to check for a collision.
+ * @param excludeCommandId - A `command_id` to exclude from the check, if updating an existing row.
+ * @returns True if `triggerString` is already taken.
+ */
 export async function isCustomCommandTriggerTaken(triggerString: string, excludeCommandId?: number): Promise<boolean> {
   return isAnyCommandTakenAcrossTables(triggerString, { excludeCustomCommandId: excludeCommandId });
 }
 
 // ─── Serialized write ─────────────────────────────────────────────────────────
 
+/**
+ * Checks whether a `custom_command` row with the given `id` exists.
+ * @param id - The `command_id` to look up.
+ * @param executor - Query executor to run the check on; defaults to the pool.
+ * @returns True if a row with that `id` exists.
+ */
 export async function commandExists(id: number, executor: SqlExecutor = getPool()): Promise<boolean> {
   return rowExists(executor, 'custom_command', 'command_id', id);
 }
 
+/**
+ * Runs `writeOperation` inside a transaction, serialized against other writers of the same
+ * command(s) via MySQL named locks, with a fresh trigger-collision check and automatic
+ * retry on deadlock.
+ *
+ * Acquires a named lock per command in `commandOrCommands` (sorted, to avoid lock-order
+ * deadlocks across concurrent multi-command writes), then — for up to
+ * {@link MAX_DEADLOCK_RETRIES} attempts — opens a transaction, re-checks for a trigger
+ * collision against whichever tables `checks` enables (guarding against a race between the
+ * caller's earlier check and now), runs `writeOperation`, and commits. A `ER_LOCK_DEADLOCK`
+ * during a non-final attempt rolls back and retries; any other error (including a collision,
+ * which throws {@link CommandConflictError}) rolls back and propagates immediately. Lock
+ * release is attempted and the connection returned to the pool in a `finally`; a release
+ * failure is logged and swallowed rather than masking the original error.
+ * @param commandOrCommands - The command(s) this write claims; also used for the collision check.
+ * @param options - Ids to exclude from the collision check, if updating an existing row.
+ * @param writeOperation - The transactional write to perform once locks are held and no collision exists.
+ * @param checks - Which tables to include in the collision check; both default to enabled.
+ * @returns The value returned by `writeOperation`.
+ * @throws {@link CommandConflictError} if a collision is detected.
+ */
 export async function runSerializedCommandWrite<T>(
   commandOrCommands: string | string[],
   options: { excludeCustomCommandId?: number; excludeCounterId?: number } | undefined,

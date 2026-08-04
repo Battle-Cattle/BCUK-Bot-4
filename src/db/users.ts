@@ -170,6 +170,10 @@ async function withShortLockTimeout<T>(fn: (conn: mysql.PoolConnection) => Promi
 
 /**
  * Upserts a user record.
+ *
+ * This module is a pure DB layer with no cache knowledge — `db.ts`'s `upsertUser` facade
+ * wraps this function with a cache invalidation call. A new write function added here that
+ * affects custom-command resolution needs the same treatment in `db.ts`.
  * @param discordId - Discord snowflake as a string.
  * @param discordName - Display name to store; blank after trimming is stored as null.
  * @param accessLevel - Legacy global access level; must be one of `AccessLevel`'s values.
@@ -274,6 +278,9 @@ export async function getAllTwitchLinkedUsers(): Promise<TwitchLinkedUser[]> {
 
 /**
  * Sets whether a user's Twitch bot integration is enabled.
+ *
+ * Pure DB layer — no cache invalidation here. `db.ts`'s `updateTwitchBotEnabled` facade wraps
+ * this function with `withInvalidation`.
  * @param discordId - Discord snowflake as a string.
  * @param enabled - True to enable the Twitch bot for this user, false to disable it.
  * @returns Resolves once the update completes.

@@ -30,13 +30,13 @@
     "mediaplex": "^1.0.0",
     "multer": "^2.2.0",
     "mysql2": "^3.23.1",
-    "openai": "^7.2.0",
+    "openai": "^7.3.0",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0"
   },
   "overrides": {
     "ws": ">=8.21.1",
-    "undici": "^7.24.1",
+    "undici": "^7.29.0",
     "mysql2": "^3.23.1"
   },
   "devDependencies": {
