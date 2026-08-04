@@ -673,6 +673,15 @@ describe('sayInChannel', () => {
     expect(mockClient.irc.say).toHaveBeenNthCalledWith(2, '#streamer', 'b'.repeat(20));
   });
 
+  it('splits a single token longer than the length limit, with no space to break on', async () => {
+    await connectBot();
+    await sayInChannel('#streamer', 'a'.repeat(600));
+    const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
+    expect(chunks.length).toBeGreaterThan(1);
+    chunks.forEach((chunk) => { expect(chunk.length).toBeLessThanOrEqual(500); });
+    expect(chunks.join('')).toBe('a'.repeat(600));
+  });
+
   // Twitch's rate-limit window and per-channel floor are exercised exhaustively in
   // twitchSendQueue.test.ts — these just confirm sayInChannel wires channel + the live
   // privilege check (populated from raw USERSTATE messages, see onOwnUserState) into it,
@@ -799,26 +808,30 @@ describe('stopTwitchBot', () => {
     fireUserState('#streamer', 'moderator/1');
     mockClient.quit.mockImplementation(() => {}); // never fires onDisconnect
 
-    const stopped = stopTwitchBot();
-    await vi.advanceTimersByTimeAsync(5_000);
-    await stopped;
+    // Restore quit()'s default behavior in a finally, even on assertion failure — otherwise the
+    // outer afterEach's stopTwitchBot() call would hang for the full DISCONNECT_TIMEOUT_MS under
+    // fake timers nothing advances, masking the real failure behind a hook-timeout error instead.
+    try {
+      const stopped = stopTwitchBot();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await stopped;
 
-    // Restart and reconnect without a fresh USERSTATE — privilege must not carry over.
-    await connectBot();
-    await sayInChannel('#streamer', 'first');
-    const second = sayInChannel('#streamer', 'second');
+      // Restart and reconnect without a fresh USERSTATE — privilege must not carry over.
+      await connectBot();
+      await sayInChannel('#streamer', 'first');
+      const second = sayInChannel('#streamer', 'second');
 
-    await vi.advanceTimersByTimeAsync(999);
-    expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(1);
-    await second;
-    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
-
-    // Restore quit()'s default behavior so the outer afterEach's stopTwitchBot() call doesn't hang.
-    mockClient.quit.mockImplementation(() => {
-      queueMicrotask(() => fireDisconnect(true));
-    });
+      await vi.advanceTimersByTimeAsync(1);
+      await second;
+      expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
+    } finally {
+      mockClient.quit.mockImplementation(() => {
+        queueMicrotask(() => fireDisconnect(true));
+      });
+    }
   });
 
   it('calls client.quit', async () => {

@@ -44,6 +44,14 @@ let connected = false;
 const DISCONNECT_TIMEOUT_MS = 5_000;
 
 /**
+ * Upper bound on how long {@link startTwitchBot} waits for authentication to complete after
+ * calling `client.connect()`. If Twitch accepts the raw socket but registration never completes,
+ * none of `connectAndWait`'s events would otherwise fire — bounding the wait here guarantees
+ * startup always settles (successfully or with an error) instead of hanging indefinitely.
+ */
+const CONNECT_TIMEOUT_MS = 30_000;
+
+/**
  * Per-channel badge status (moderator/VIP/broadcaster) for the bot's own account, refreshed from
  * the raw IRC `USERSTATE` message Twitch sends after joining a channel and after every send in it
  * (see {@link onOwnUserState}) — Twurple's `ChatClient` has no higher-level "am I currently
@@ -318,7 +326,7 @@ export async function startTwitchBot(): Promise<void> {
   client.irc.onTypedMessage(UserState, onOwnUserState);
 
   try {
-    await connectAndWait(client);
+    await withTimeout(connectAndWait(client), CONNECT_TIMEOUT_MS, 'Twitch connect');
   } catch (err) {
     log.error('Failed to connect:', err);
     throw err;
