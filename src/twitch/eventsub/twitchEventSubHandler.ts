@@ -6,6 +6,7 @@ import { createLogger } from '../../shared/logger';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 import { fillTemplate } from '../../shared/textTemplate';
 import { applyRedemptionPricing } from '../pricing/rewardPricingService';
+import { isDuplicateRedemption } from './twitchEventSubRedemptionDedup';
 import {
   overlayRuntimeRegistry,
   companionRuntimeRegistry,
@@ -66,30 +67,6 @@ export interface RedemptionEvent {
 
 function tierName(tier: string): string {
   return ({ '1000': 'Tier 1', '2000': 'Tier 2', '3000': 'Tier 3' } as Record<string, string>)[tier] ?? tier;
-}
-
-/** How long a redemption id is remembered for deduplication (ms). */
-const REDEMPTION_DEDUP_TTL_MS = 10 * 60 * 1000;
-
-// TTL-based dedup keyed by Twitch's own redemption id, not the EventSub message envelope id.
-// twitchEventSubConnection.ts's message_id dedup only catches the same WebSocket delivery being
-// replayed (e.g. during a documented session-migration window); it can't catch the same physical
-// redemption arriving via two independently-created "enabled" subscriptions (e.g. a stale
-// subscription left over from a prior process that Twitch hasn't yet revoked, or two bot
-// instances briefly running against the same channel) — those arrive as distinct messages with
-// distinct message_ids but carry the same redemption `event.id`. Exported so tests can reset it.
-export const seenRedemptionIds = new Map<string, number>();
-
-/** Returns true if redemptionId has been seen within REDEMPTION_DEDUP_TTL_MS; records it otherwise. */
-function isDuplicateRedemption(redemptionId: string): boolean {
-  const now = Date.now();
-  const expiry = seenRedemptionIds.get(redemptionId);
-  if (expiry !== undefined && now <= expiry) return true;
-  seenRedemptionIds.set(redemptionId, now + REDEMPTION_DEDUP_TTL_MS);
-  for (const [id, exp] of seenRedemptionIds) {
-    if (exp < now) seenRedemptionIds.delete(id);
-  }
-  return false;
 }
 
 /**

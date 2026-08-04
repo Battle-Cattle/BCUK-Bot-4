@@ -12,8 +12,9 @@ vi.mock('../pricing/rewardPricingService', () => ({ applyRedemptionPricing: vi.f
 
 import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
-  handleStreamOnline, handleStreamOffline, handleChannelUpdate, seenRedemptionIds,
+  handleStreamOnline, handleStreamOffline, handleChannelUpdate,
 } from './twitchEventSubHandler';
+import { seenRedemptionIds } from './twitchEventSubRedemptionDedup';
 import {
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
   registerEventSubAlertRuntime, registerEventSubDashboardRuntime,
