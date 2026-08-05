@@ -92,6 +92,12 @@ async function waitForChannelFloor(channel: string): Promise<void> {
   if (elapsed < NON_PRIVILEGED_CHANNEL_FLOOR_MS) await delay(NON_PRIVILEGED_CHANNEL_FLOOR_MS - elapsed);
 }
 
+/** Waits out both of `privileged`'s rate-limit constraints for `channel` — the shared 30s window (at the privileged or non-privileged ceiling) and, if non-privileged, the per-channel floor. */
+async function waitForRateLimit(privileged: boolean, channel: string): Promise<void> {
+  await waitForWindowRoom(privileged ? PRIVILEGED_LIMIT : NON_PRIVILEGED_LIMIT);
+  if (!privileged) await waitForChannelFloor(channel);
+}
+
 /**
  * Races `promise` against a `ms`-millisecond timeout, rejecting with a timeout error if it
  * doesn't settle in time. `promise` itself is left running — its eventual settlement is still
@@ -135,8 +141,7 @@ export async function throttledTwitchSend(channel: string, isPrivileged: () => b
   await globalQueue.run('global', async () => {
     let privileged = isPrivileged();
     for (let attempt = 0; attempt < MAX_PRIVILEGE_RECHECKS; attempt++) {
-      await waitForWindowRoom(privileged ? PRIVILEGED_LIMIT : NON_PRIVILEGED_LIMIT);
-      if (!privileged) await waitForChannelFloor(channel);
+      await waitForRateLimit(privileged, channel);
 
       // The wait above can itself take a while (up to the full 30s window), so status may have
       // changed again while waiting. Loop under the refreshed status until a pass finds it
@@ -150,10 +155,7 @@ export async function throttledTwitchSend(channel: string, isPrivileged: () => b
       // A change caught on the very last allowed attempt would otherwise fall out of the loop
       // without ever waiting under this newest status's own limit/floor — apply it once here so
       // giving up on rechecking can't also skip the rate limit for whichever status we settle on.
-      if (attempt === MAX_PRIVILEGE_RECHECKS - 1) {
-        await waitForWindowRoom(privileged ? PRIVILEGED_LIMIT : NON_PRIVILEGED_LIMIT);
-        if (!privileged) await waitForChannelFloor(channel);
-      }
+      if (attempt === MAX_PRIVILEGE_RECHECKS - 1) await waitForRateLimit(privileged, channel);
     }
 
     const sentAt = Date.now();
