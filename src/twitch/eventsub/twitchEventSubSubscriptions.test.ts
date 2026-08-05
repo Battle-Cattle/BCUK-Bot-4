@@ -6,13 +6,25 @@ const { logMock } = vi.hoisted(() => ({
 vi.mock('../../shared/logger', () => ({ createLogger: () => logMock }));
 vi.mock('../../shared/config', () => ({}));
 // './twitchEventSubSubscriptions' re-exports dispatchNotification/handleRevocation/
-// removeStreamerFromMap from './twitchEventSubDispatch', which in turn imports these two real
-// modules — mocked here purely so that transitive import chain resolves, even though this
-// file's own tests exercise subscribeForStreamer/loadStreamersForEventSub, not dispatch.
+// removeStreamerFromMap from './twitchEventSubDispatch', which in turn imports
+// clearStreamerToken/DEFAULT_EVENT_CONFIG from '../../db' — both mocked here purely so that
+// transitive import chain resolves, even though this file's own tests exercise
+// subscribeForStreamer/loadStreamersForEventSub, not dispatch.
 vi.mock('../../db', () => ({
   getAllEventSubStreamers: vi.fn(),
   clearStreamerToken: vi.fn().mockResolvedValue(undefined),
   getEnabledAlertEventTypesBatch: vi.fn().mockResolvedValue(new Map()),
+  DEFAULT_EVENT_CONFIG: {
+    follow_enabled: false,
+    follow_message: 'Thanks {display_name} for the follow!',
+    sub_enabled: false,
+    sub_message: 'Thanks {display_name} for subscribing! ({tier_name})',
+    resub_message: 'Thanks {display_name} for {months} months! ({tier_name})',
+    giftsub_message: '{gifter_display} gifted {count} sub(s) to the community!',
+    raid_enabled: false,
+    raid_message: 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!',
+    raid_shoutout_enabled: false,
+  },
 }));
 vi.mock('../twitchApi', () => ({ getUsers: vi.fn() }));
 vi.mock('../twitchChannelMembership', () => ({ getActiveChannels: vi.fn().mockReturnValue(new Set<string>()) }));
@@ -571,6 +583,31 @@ describe('error handling in subscription setup', () => {
 
     expect(logMock.error).toHaveBeenCalledWith('Subscription cleanup failed for uid uid-err:', expect.any(Error));
     expect(count).toBeGreaterThan(0);
+  });
+
+  it('continues deleting remaining stale subscriptions after one deletion fails', async () => {
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      { id: 'stale-1', type: 'channel.subscribe' },
+      { id: 'stale-2', type: 'channel.raid' },
+    ] as any);
+    vi.mocked(deleteEventSubSubscription)
+      .mockRejectedValueOnce(new Error('delete failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await subscribeForStreamer('sess-delete-err', {
+      uid: 'uid-delete-err',
+      token: 'tok-delete-err',
+      name: 'errStreamer',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 71,
+    });
+
+    expect(deleteEventSubSubscription).toHaveBeenCalledWith('stale-1', 'tok-delete-err');
+    expect(deleteEventSubSubscription).toHaveBeenCalledWith('stale-2', 'tok-delete-err');
+    expect(logMock.error).toHaveBeenCalledWith(
+      'Failed to delete subscription stale-1 (channel.subscribe) for uid uid-delete-err:', expect.any(Error),
+    );
   });
 
   it('logs and excludes the streamer when resolving a raid-only streamer\'s Twitch user ID fails', async () => {

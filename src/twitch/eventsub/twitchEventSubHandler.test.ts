@@ -838,7 +838,9 @@ describe('handleRedemption', () => {
   });
 
   it('ignores a second notification carrying the same redemption id', async () => {
-    vi.mocked(getVideosForReward).mockResolvedValue([]);
+    const videos = [{ file: 'clip1.mp4', weight: 1 }] as any[];
+    vi.mocked(getVideosForReward).mockResolvedValue(videos);
+    vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
 
     await handleRedemption('streamer', event, makeConfig(), streamerId);
     await handleRedemption('streamer', event, makeConfig(), streamerId);
@@ -847,6 +849,8 @@ describe('handleRedemption', () => {
     expect(mockPushDashboardEvent).toHaveBeenCalledOnce();
     expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
     expect(applyRedemptionPricing).toHaveBeenCalledOnce();
+    expect(getVideosForReward).toHaveBeenCalledOnce();
+    expect(mockPushOverlayEvent).toHaveBeenCalledOnce();
   });
 
   it('processes two notifications with different redemption ids normally', async () => {

@@ -80,8 +80,8 @@ export function handleRevocation(sub: { type: string; status: string; condition:
       const info = streamerMap.get(broadcasterId);
       if (info) {
         clearStreamerToken(info.streamerId)
+          .then(() => log.warn(`Cleared token for ${info.login} (${sub.status})`))
           .catch((err) => log.error('Clear token error:', err));
-        log.warn(`Cleared token for ${info.login} (${sub.status})`);
       }
     }
   }

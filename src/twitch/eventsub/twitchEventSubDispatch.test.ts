@@ -183,15 +183,17 @@ describe('handleRevocation', () => {
     expect(clearStreamerToken).not.toHaveBeenCalled();
   });
 
-  it('clears the token when status is authorization_revoked for a known broadcaster', () => {
+  it('clears the token when status is authorization_revoked for a known broadcaster', async () => {
     handleRevocation({ type: 'channel.follow', status: 'authorization_revoked', condition: { broadcaster_user_id: 'uid-revoke' } });
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(clearStreamerToken).toHaveBeenCalledWith(100);
     expect(logMock.warn).toHaveBeenCalledWith('Cleared token for revokedStreamer (authorization_revoked)');
   });
 
-  it('clears the token when status is user_removed, using to_broadcaster_user_id', () => {
+  it('clears the token when status is user_removed, using to_broadcaster_user_id', async () => {
     handleRevocation({ type: 'channel.raid', status: 'user_removed', condition: { to_broadcaster_user_id: 'uid-revoke' } });
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(clearStreamerToken).toHaveBeenCalledWith(100);
     expect(logMock.warn).toHaveBeenCalledWith('Cleared token for revokedStreamer (user_removed)');

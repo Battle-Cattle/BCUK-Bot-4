@@ -9,7 +9,7 @@ interface SubscriptionGroup {
    * Alert event types that share this group's subscription(s) — declaring these as data (rather
    * than each group hand-writing its own `enabledAlerts.has('literal')` checks) lets
    * `getAlertTypesCoveredBySubscriptionGroups` verify every {@link AlertEventType} is wired to a
-   * group; a test in `twitchEventSubSubscriptions.test.ts` fails if a new alert type is added
+   * group; a test in `twitchEventSubSubscriptionGroups.test.ts` fails if a new alert type is added
    * without adding it here, instead of the gap silently compiling.
    */
   alertTypes: AlertEventType[];
@@ -105,7 +105,7 @@ export const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
 
 /**
  * Returns the set of alert event types covered by at least one subscription group. Exported for
- * the exhaustiveness test in `twitchEventSubSubscriptions.test.ts`, which asserts this covers
+ * the exhaustiveness test in `twitchEventSubSubscriptionGroups.test.ts`, which asserts this covers
  * every member of `ALERT_EVENT_TYPES` — catching a new alert type being added without also being
  * wired into a subscription group's `alertTypes` (which would otherwise compile fine and only
  * surface as "the subscription is never created" at runtime).

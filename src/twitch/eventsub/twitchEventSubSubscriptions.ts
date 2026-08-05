@@ -54,15 +54,26 @@ async function deleteStaleSubscriptions(
   uid: string, desired: Set<string>, created: ReadonlyMap<string, string>, userToken: string | null,
 ): Promise<void> {
   if (!userToken) return;
+  let existing: Array<{ id: string; type: string }>;
   try {
-    const existing = await listEventSubSubscriptions(userToken);
-    for (const sub of existing) {
-      const keptId = created.get(sub.type);
-      const isStaleDuplicate = keptId !== undefined && sub.id !== keptId;
-      if (!desired.has(sub.type) || isStaleDuplicate) await deleteEventSubSubscription(sub.id, userToken);
-    }
+    existing = await listEventSubSubscriptions(userToken);
   } catch (err) {
     log.error(`Subscription cleanup failed for uid ${uid}:`, err);
+    return;
+  }
+  // Each deletion is isolated so one failure (e.g. a transient Twitch API error) doesn't abort
+  // the rest of the cleanup — leaving a still-undeleted stale duplicate would keep delivering
+  // notifications and double-firing the type's handler, the exact failure this cleanup targets.
+  for (const sub of existing) {
+    const keptId = created.get(sub.type);
+    const isStaleDuplicate = keptId !== undefined && sub.id !== keptId;
+    if (!desired.has(sub.type) || isStaleDuplicate) {
+      try {
+        await deleteEventSubSubscription(sub.id, userToken);
+      } catch (err) {
+        log.error(`Failed to delete subscription ${sub.id} (${sub.type}) for uid ${uid}:`, err);
+      }
+    }
   }
 }
 
