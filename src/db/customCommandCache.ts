@@ -9,9 +9,6 @@ import {
 } from './lookupCache';
 import { normalizeCommand } from './commandStringUtils';
 import { getTwitchEnabledChannels } from './users';
-// customCommands imports invalidateCustomCommandLookupCache from this module;
-// this module imports getAllCustomCommandsWithAssignments from customCommands.
-// Both calls happen inside function bodies, so CommonJS resolves the cycle correctly.
 import {
   getAllCustomCommandsWithAssignments,
   type DbCustomCommand,

@@ -50,6 +50,10 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Check circular dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run check:circular
+
       - name: Run tests with coverage
         run: npm run test:coverage
 

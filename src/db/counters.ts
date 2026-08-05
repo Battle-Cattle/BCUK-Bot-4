@@ -4,7 +4,6 @@ import { requireTrimmedString, normalizeCommand, type SqlExecutor } from './comm
 import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
 import { fromBit, rowExists, affectedOrExists, getRowCount } from './utils';
-import { invalidateCounterLookupCache } from './counterCache';
 import {
   createManagedLookupCache,
   type RefreshingLookupCache,
@@ -274,8 +273,6 @@ export async function addCounter(
       );
     },
   );
-
-  invalidateCounterLookupCache();
 }
 
 /**
@@ -357,8 +354,6 @@ export async function updateCounter(input: UpdateCounterInput): Promise<void> {
       }
     },
   );
-
-  invalidateCounterLookupCache();
 }
 
 /**
@@ -381,8 +376,6 @@ export async function removeCounter(id: number): Promise<void> {
       if (result.affectedRows === 0) throw new CounterNotFoundError(id);
     },
   );
-
-  invalidateCounterLookupCache();
 }
 
 /**
@@ -399,12 +392,6 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
   if (!(await affectedOrExists(result.affectedRows, () => counterExists(id)))) {
     throw new CounterNotFoundError(id);
   }
-  if (result.affectedRows === 0) {
-    // Counter exists but value was already 0 — nothing changed, skip invalidation.
-    return;
-  }
-
-  invalidateCounterLookupCache();
 }
 
 /**
@@ -426,7 +413,6 @@ export async function incrementCounter(id: number): Promise<number> {
     );
     return (rows[0] as mysql.RowDataPacket).current_value as number;
   });
-  invalidateCounterLookupCache();
   return newValue;
 }
 
@@ -445,6 +431,5 @@ export async function archiveAndResetYearlyCounters(year: number): Promise<numbe
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `UPDATE counter SET \`${columnName}\` = current_value, current_value = 0 WHERE reset_yearly = 1 AND \`${columnName}\` IS NULL`,
   );
-  invalidateCounterLookupCache();
   return result.affectedRows;
 }

@@ -10,7 +10,6 @@ import {
   assertDiscordTriggerAvailable, assertMultiTwitchTriggerAvailable, assertNoSingleTwitchAssignmentOverlap,
   assignUserToCommandWithinTransaction, assignUsersToCommandWithinTransaction,
 } from './commandConflicts';
-import { invalidateCustomCommandLookupCache } from './customCommandCache';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -99,7 +98,7 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
 
 /**
  * Create a new custom command. Validates and normalises the trigger string, checks for
- * conflicts, and invalidates the lookup cache on success.
+ * conflicts.
  *
  * @param triggerString - Full prefixed command string (e.g. `!clap`); lowercased before storing.
  * @param output - Response text, max 2000 characters.
@@ -141,15 +140,13 @@ export async function addCustomCommand(
     { includeCustomCommandTable: false, includeCounterTable: true },
   );
 
-  invalidateCustomCommandLookupCache();
-
   return commandId;
 }
 
 /**
  * Update an existing custom command's trigger string, output, and flags.
  * Validates conflicts against other commands, throws {@link CommandNotFoundError}
- * if the command does not exist, and invalidates the lookup cache on success.
+ * if the command does not exist.
  *
  * @param commandId - ID of the command to update.
  * @param triggerString - New trigger string; lowercased before storing.
@@ -196,14 +193,11 @@ export async function updateCustomCommand(
     },
     { includeCustomCommandTable: false, includeCounterTable: true },
   );
-
-  invalidateCustomCommandLookupCache();
 }
 
 /**
  * Delete a custom command and all its user assignments within a transaction.
  * Throws {@link CommandNotFoundError} if the command does not exist.
- * Invalidates the lookup cache only after a successful commit.
  *
  * @param commandId - ID of the command to delete.
  */
@@ -226,8 +220,6 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
       throw new CommandNotFoundError(commandId);
     }
     await connection.commit();
-    // Invalidate only after a successful commit; refresh remains lazy on next lookup.
-    invalidateCustomCommandLookupCache();
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -241,7 +233,7 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
  * Assign a Discord user to a custom command's Twitch streamer list.
  * Acquires a named lock for the command ID, then delegates to
  * {@link assignUserToCommandWithinTransaction} to check cross-command conflicts
- * before inserting. Invalidates the lookup cache on success.
+ * before inserting.
  *
  * @param commandId - ID of the command to assign the user to.
  * @param discordId - Discord snowflake of the user to assign.
@@ -259,9 +251,6 @@ export async function assignUserToCommand(commandId: number, discordId: string):
     await acquireNamedLock(connection, lockNameById);
 
     await assignUserToCommandWithinTransaction(connection, commandId, discordId);
-
-    // Invalidate only after commit; keep lock ownership and connection lifecycle deterministic.
-    invalidateCustomCommandLookupCache();
   } finally {
     // Always release the id lock
     await releaseNamedLock(connection, lockNameById);
@@ -273,8 +262,7 @@ export async function assignUserToCommand(commandId: number, discordId: string):
  * Assign multiple Discord users to a custom command's Twitch streamer list in one transaction.
  * Acquires the command ID's named lock once, then delegates to
  * {@link assignUsersToCommandWithinTransaction} to check cross-command conflicts and insert all
- * assignments before invalidating the lookup cache once. A no-op (no connection opened) when
- * `discordIds` is empty.
+ * assignments. A no-op (no connection opened) when `discordIds` is empty.
  *
  * @param commandId - ID of the command to assign the users to.
  * @param discordIds - Discord snowflakes of the users to assign.
@@ -289,8 +277,6 @@ export async function assignUsersToCommand(commandId: number, discordIds: string
     await acquireNamedLock(connection, lockNameById);
 
     await assignUsersToCommandWithinTransaction(connection, commandId, discordIds);
-
-    invalidateCustomCommandLookupCache();
   } finally {
     await releaseNamedLock(connection, lockNameById);
     connection.release();
@@ -298,7 +284,7 @@ export async function assignUsersToCommand(commandId: number, discordIds: string
 }
 
 /**
- * Remove a Discord user's assignment from a custom command and invalidate the lookup cache.
+ * Remove a Discord user's assignment from a custom command.
  *
  * @param commandId - ID of the command to remove the assignment from.
  * @param discordId - Discord snowflake of the user to unassign.
@@ -308,8 +294,6 @@ export async function unassignUserFromCommand(commandId: number, discordId: stri
     'DELETE FROM twitch_user_commands WHERE command_id = ? AND discord_id = ?',
     [commandId, discordId],
   );
-
-  invalidateCustomCommandLookupCache();
 }
 
 // Unused in this module but exported so commandLocks.ts helpers remain type-safe
