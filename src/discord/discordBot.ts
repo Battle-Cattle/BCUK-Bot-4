@@ -11,20 +11,20 @@ import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
 import { upsertGuild, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
 import { userMutationQueue } from '../web/routes/adminUserMutationQueue';
 import { createLogger } from '../shared/logger';
+import { getDiscordClient, setDiscordClient } from './discordClientStore';
 
 const log = createLogger('Discord');
 
-let client: Client | null = null;
 let bootingClient: Client | null = null;
 
-/** Returns the Discord.js Client once it has fired `clientReady`, or null before then. */
-export function getDiscordClient(): Client | null { return client; }
+export { getDiscordClient };
 
 /**
  * Resolve a guild by ID from the discord.js cache, falling back to a fetch.
  * @throws if the client is not ready.
  */
 async function getGuild(guildId: string): Promise<Guild> {
+  const client = getDiscordClient();
   if (!client) {
     throw new Error('Discord client is not ready');
   }
@@ -47,7 +47,7 @@ export async function fetchMemberDisplayName(
   guildId: string,
   force = false,
 ): Promise<string | null> {
-  if (!client) return null;
+  if (!getDiscordClient()) return null;
   try {
     const guild = await getGuild(guildId);
     const member = await guild.members.fetch({ user: discordId, force });
@@ -115,7 +115,7 @@ async function provisionGuildOwner(guild: Guild): Promise<void> {
  * client connects, so the `messageCreate` gate can recognise registered guilds.
  */
 export function startDiscordBot(): void {
-  if (client || bootingClient) return;
+  if (getDiscordClient() || bootingClient) return;
   const localClient = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -183,7 +183,7 @@ export function startDiscordBot(): void {
       return;
     }
     bootingClient = null;
-    client = c;
+    setDiscordClient(c);
     log.info(`Logged in as ${c.user.tag}`);
     setDiscordReady(c.user.tag);
   });
@@ -204,9 +204,9 @@ export function startDiscordBot(): void {
  * `destroy()` rejections are caught and logged rather than left unhandled.
  */
 export function stopDiscordBot(): void {
-  const existingReady = client;
+  const existingReady = getDiscordClient();
   const existingBooting = bootingClient;
-  client = null;
+  setDiscordClient(null);
   bootingClient = null;
   existingReady?.destroy().catch((err: unknown) => log.error('Error destroying client:', err));
   existingBooting?.destroy().catch((err: unknown) => log.error('Error destroying booting client:', err));

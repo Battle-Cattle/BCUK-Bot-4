@@ -1,6 +1,6 @@
 import { createLogger } from '../shared/logger';
 import { DiscordAPIError, RESTJSONErrorCodes, ChannelType, type Client, type MessageEditOptions, type TextBasedChannel } from 'discord.js';
-import { getDiscordClient } from './discordBot';
+import { getDiscordClient } from './discordClientStore';
 
 const log = createLogger('Discord');
 
