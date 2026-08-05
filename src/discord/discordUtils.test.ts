@@ -3,7 +3,7 @@ import { mockLogger } from '../test-utils/loggerMock';
 
 /** Mocks the shared logger so this module's log calls don't produce real output during tests. */
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
-vi.mock('./discordBot', () => ({ getDiscordClient: vi.fn() }));
+vi.mock('./discordClientStore', () => ({ getDiscordClient: vi.fn() }));
 
 vi.mock('discord.js', () => {
   class DiscordAPIError extends Error {
@@ -39,7 +39,7 @@ import {
   tryEditDiscordMessage,
 } from './discordUtils';
 import { DiscordAPIError } from 'discord.js';
-import { getDiscordClient } from './discordBot';
+import { getDiscordClient } from './discordClientStore';
 
 // The mock above replaces DiscordAPIError with a simpler single-arg constructor.
 // Cast here so TypeScript accepts the mock's signature without casting at every call site.
