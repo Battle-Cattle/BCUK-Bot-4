@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 
 /** Hoisted so the `vi.mock('../../shared/logger', ...)` factory below can safely reference it. */
-const { mockLogger } = vi.hoisted(() => ({
-  mockLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
-}));
+const { mockLogger, loggerInstance } = vi.hoisted(() => {
+  const loggerInstance = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  return { mockLogger: () => loggerInstance, loggerInstance };
+});
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({ getAllEnabledTimerCommandsWithChannel: vi.fn() }));
@@ -202,6 +203,57 @@ describe('runTimerCommandTick', () => {
     await Promise.all([first, second]);
 
     expect(getAllEnabledTimerCommandsWithChannel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('block-reason logging', () => {
+  it('logs once when a row becomes stuck waiting on chat activity after its interval elapses, and does not repeat the log on later ticks in the same state', async () => {
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue(
+      [timerRow({ interval_seconds: 600, min_messages: 5 })] as any,
+    );
+    await runTimerCommandTick(); // seeds messagesAtLastFire at the current count (0)
+    await vi.advanceTimersByTimeAsync(600_000);
+    vi.mocked(getMessageCount).mockReturnValue(3); // below the 5-message threshold
+
+    await runTimerCommandTick();
+    expect(loggerInstance.info).toHaveBeenCalledWith(
+      expect.stringContaining('interval elapsed, waiting on chat activity (3/5 messages since last fire)'),
+    );
+
+    loggerInstance.info.mockClear();
+    await vi.advanceTimersByTimeAsync(15_000);
+    await runTimerCommandTick(); // still stuck on the same reason — must not log again
+    expect(loggerInstance.info).not.toHaveBeenCalled();
+  });
+
+  it('logs once when a row goes offline, and again once it comes back and gets blocked on messages', async () => {
+    vi.mocked(isChannelLive).mockReturnValue(false);
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue(
+      [timerRow({ interval_seconds: 600, min_messages: 5, require_live: true })] as any,
+    );
+    await runTimerCommandTick(); // seed
+    await vi.advanceTimersByTimeAsync(600_000);
+
+    await runTimerCommandTick();
+    expect(loggerInstance.info).toHaveBeenCalledWith(expect.stringContaining('waiting — channel not live'));
+  });
+
+  it('does not log anything for the routine interval wait', async () => {
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([timerRow({ interval_seconds: 600 })] as any);
+    await runTimerCommandTick(); // seed
+    await vi.advanceTimersByTimeAsync(300_000);
+
+    await runTimerCommandTick(); // interval not yet elapsed
+    expect(loggerInstance.info).not.toHaveBeenCalledWith(expect.stringContaining('waiting'));
+  });
+
+  it('logs a successful post', async () => {
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([timerRow({ interval_seconds: 600 })] as any);
+    await runTimerCommandTick(); // seed
+    await vi.advanceTimersByTimeAsync(600_000);
+
+    await runTimerCommandTick();
+    expect(loggerInstance.info).toHaveBeenCalledWith(expect.stringContaining('Posted timer 1 to somestreamer'));
   });
 });
 
