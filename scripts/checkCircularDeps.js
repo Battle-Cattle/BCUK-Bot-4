@@ -15,18 +15,20 @@ madge('src', {
   if (skipped.length > 0) {
     console.error('madge could not resolve the following files, so its circular-dependency check is incomplete:');
     for (const file of skipped) console.error(`  - ${file}`);
-    process.exit(2);
+    process.exitCode = 2;
+    return;
   }
 
   const circular = result.circular();
   if (circular.length > 0) {
     console.error(`Found ${circular.length} circular dependencies:`);
     for (const cycle of circular) console.error(`  ${cycle.join(' > ')}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   console.log('No circular dependencies found.');
 }).catch((error) => {
   console.error(error);
-  process.exit(2);
+  process.exitCode = 2;
 });
