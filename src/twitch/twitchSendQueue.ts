@@ -30,6 +30,17 @@ const PRIVILEGED_LIMIT = 100;
 const NON_PRIVILEGED_CHANNEL_FLOOR_MS = 1_000;
 
 /**
+ * Caps how many times {@link throttledTwitchSend} re-checks `isPrivileged` before giving up and
+ * proceeding with whichever status it last observed. Without this bound, a status that keeps
+ * flipping between every check (e.g. tmi.js's per-channel userstate churning during a busy
+ * Shared Chat session) would spin the recheck loop forever — since that loop runs *before*
+ * {@link SEND_TIMEOUT_MS} ever applies (that only bounds the final `send()` call), an unbounded
+ * loop would never call `send()` at all, and would wedge {@link globalQueue}'s single `'global'`
+ * lane for every later send, across every channel and feature, with no error and nothing to log.
+ */
+const MAX_PRIVILEGE_RECHECKS = 5;
+
+/**
  * Every send in this module runs behind a single global queue, so one stalled `send()` (tmi.js's
  * `client.say()` has no built-in timeout and can hang indefinitely on a stalled socket) would
  * otherwise wedge every later send, across every channel and feature, forever. Bounding it here
@@ -82,6 +93,18 @@ async function waitForChannelFloor(channel: string): Promise<void> {
 }
 
 /**
+ * Waits out both of `privileged`'s rate-limit constraints for `channel` — the shared 30s window
+ * (at the privileged or non-privileged ceiling) and, if non-privileged, the per-channel floor.
+ * @param privileged - Whether the send is currently classified as moderator/VIP/broadcaster.
+ * @param channel - Normalized Twitch channel the send is targeting.
+ * @returns Resolves once both applicable constraints are satisfied.
+ */
+async function waitForRateLimit(privileged: boolean, channel: string): Promise<void> {
+  await waitForWindowRoom(privileged ? PRIVILEGED_LIMIT : NON_PRIVILEGED_LIMIT);
+  if (!privileged) await waitForChannelFloor(channel);
+}
+
+/**
  * Races `promise` against a `ms`-millisecond timeout, rejecting with a timeout error if it
  * doesn't settle in time. `promise` itself is left running — its eventual settlement is still
  * observed (and silently ignored) so it can never surface as an unhandled rejection later.
@@ -112,7 +135,8 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
  *   call may have been waiting behind others — the same reason `send` rechecks the connection
  *   itself rather than trusting a snapshot taken before it was queued. Re-checked again after
  *   each wait and the checks re-run under the refreshed status if it changed, since the wait
- *   itself (up to the full 30s window) is another window for status to change again.
+ *   itself (up to the full 30s window) is another window for status to change again — bounded by
+ *   {@link MAX_PRIVILEGE_RECHECKS} so a status that never stops changing can't spin this forever.
  * @param send - Performs the actual send, bounded by {@link SEND_TIMEOUT_MS} so a stalled send
  *   can't wedge the queue forever. Rejecting (including via that timeout) doesn't affect the
  *   timing of later queued sends.
@@ -122,16 +146,22 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
 export async function throttledTwitchSend(channel: string, isPrivileged: () => boolean, send: () => Promise<void>): Promise<void> {
   await globalQueue.run('global', async () => {
     let privileged = isPrivileged();
-    for (;;) {
-      await waitForWindowRoom(privileged ? PRIVILEGED_LIMIT : NON_PRIVILEGED_LIMIT);
-      if (!privileged) await waitForChannelFloor(channel);
+    for (let attempt = 0; attempt < MAX_PRIVILEGE_RECHECKS; attempt++) {
+      await waitForRateLimit(privileged, channel);
 
       // The wait above can itself take a while (up to the full 30s window), so status may have
       // changed again while waiting. Loop under the refreshed status until a pass finds it
-      // unchanged from what it started with — i.e. nothing to re-wait for.
+      // unchanged from what it started with — i.e. nothing to re-wait for. Gives up after
+      // MAX_PRIVILEGE_RECHECKS and proceeds with the last-observed status rather than waiting
+      // forever — see the constant's doc for why an unbounded loop here is unsafe.
       const recheck = isPrivileged();
       if (recheck === privileged) break;
       privileged = recheck;
+
+      // A change caught on the very last allowed attempt would otherwise fall out of the loop
+      // without ever waiting under this newest status's own limit/floor — apply it once here so
+      // giving up on rechecking can't also skip the rate limit for whichever status we settle on.
+      if (attempt === MAX_PRIVILEGE_RECHECKS - 1) await waitForRateLimit(privileged, channel);
     }
 
     const sentAt = Date.now();

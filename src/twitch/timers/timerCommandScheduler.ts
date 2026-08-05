@@ -1,9 +1,12 @@
 import { createLogger } from '../../shared/logger';
 import { getAllEnabledTimerCommandsWithChannel, type TimerCommandForScheduler } from '../../db';
 import { getMessageCount } from '../twitchChatActivity';
-import { isChannelLive } from '../monitor/twitchMonitor';
 import { resolveSharedChatSessionId } from '../../commands/customCommandHandler';
 import { createRuntimeRegistry, type TwitchSendRuntime } from '../../commands/twitchRuntime';
+import {
+  evaluateFireBlock, logBlockReasonChange, forgetBlockReason, pruneBlockReasonLog, clearBlockReasonLog,
+  type TimerRuntimeState,
+} from './timerCommandFireGate';
 
 const log = createLogger('TimerCommandScheduler');
 
@@ -25,12 +28,6 @@ export function registerTimerCommandsRuntime(runtime: TimerCommandsRuntime): voi
 }
 
 const TICK_INTERVAL_MS = 15_000;
-
-/** A timer's in-memory firing state — never persisted, so a restart simply restarts the countdown. */
-interface TimerRuntimeState {
-  lastFiredAt: number;
-  messagesAtLastFire: number;
-}
 
 /**
  * Firing state is keyed by (timer id, channel) rather than timer id alone: a timer can now be
@@ -71,33 +68,17 @@ let tickRunning = false;
 let currentTickPromise: Promise<void> = Promise.resolve();
 
 /**
- * Decides whether a timer should fire right now, given its config and current in-memory state.
- * Does not account for the Shared Chat group cooldown — see {@link pickRowsToFire}.
- * @param row - The timer's config, joined with its Twitch channel.
- * @param state - The timer's current in-memory firing state.
- * @param now - Current time in epoch ms.
- */
-function shouldFire(
-  row: { interval_seconds: number; min_messages: number; require_live: boolean; channel: string },
-  state: TimerRuntimeState,
-  now: number,
-): boolean {
-  if (row.require_live && !isChannelLive(row.channel)) return false;
-  if (now - state.lastFiredAt < row.interval_seconds * 1000) return false;
-  if (row.min_messages > 0 && getMessageCount(row.channel) - state.messagesAtLastFire < row.min_messages) return false;
-  return true;
-}
-
-/**
  * Removes in-memory state for any (timer id, channel) pair no longer present in the latest
  * enabled-rows fetch.
  * @param currentKeys - {@link rowKey} values for every row in the latest enabled-rows fetch.
- * @returns Nothing — mutates the module-level `timerState` map in place.
+ * @returns Nothing — mutates the module-level `timerState` map (and the fire-gate's own
+ *   block-reason log — see {@link pruneBlockReasonLog}) in place.
  */
 function pruneStaleTimerState(currentKeys: ReadonlySet<string>): void {
   for (const key of timerState.keys()) {
     if (!currentKeys.has(key)) timerState.delete(key);
   }
+  pruneBlockReasonLog(currentKeys);
 }
 
 /**
@@ -131,7 +112,7 @@ interface PickedRow {
 }
 
 /**
- * From the rows that already passed their own {@link shouldFire} check, decides which ones
+ * From the rows that already passed their own {@link evaluateFireBlock} check, decides which ones
  * actually get to fire this tick, applying the Shared Chat group cooldown: rows with no resolved
  * session always fire (unaffected — this is the fully-independent, outside-of-multitwitch case).
  * For rows sharing a session that's currently off cooldown, only the single row that has gone
@@ -142,7 +123,7 @@ interface PickedRow {
  * send can't silence the whole group for the full cooldown window. Rows in a session still on
  * cooldown, and rows not picked from an eligible session, are left untouched so they're
  * reconsidered on a later tick.
- * @param eligibleRows - Rows that already passed their own per-timer `shouldFire` check.
+ * @param eligibleRows - Rows that already passed their own per-timer {@link evaluateFireBlock} check.
  * @param sessionIdByChannel - Each row's channel's resolved Shared Chat session id (or null).
  * @param now - Current time in epoch ms, shared across the whole tick.
  */
@@ -198,11 +179,14 @@ async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionI
     return;
   }
 
-  const state = timerState.get(rowKey(row))!;
+  const key = rowKey(row);
+  const state = timerState.get(key)!;
   try {
     await runtime.send(row.channel, row.message);
     state.lastFiredAt = now;
     state.messagesAtLastFire = getMessageCount(row.channel);
+    forgetBlockReason(key);
+    log.info(`Posted timer ${row.id} to ${row.channel}`);
   } catch (err) {
     if (sessionId && sessionLastFiredAt.get(sessionId) === now) sessionLastFiredAt.delete(sessionId);
     log.error(`Failed to post timer command ${row.id} to ${row.channel}:`, err);
@@ -212,11 +196,13 @@ async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionI
 /**
  * Runs one scheduler tick: fetches every enabled timer, prunes in-memory state for timers that no
  * longer exist/are disabled, seeds any newly-seen timer without firing it, then for the rest:
- * evaluates each row's own fire condition, resolves Shared Chat sessions for the ones that are
- * ready, picks which of those actually get to fire this tick (applying the group cooldown — see
- * {@link pickRowsToFire}), and sends the picked rows concurrently via `Promise.allSettled` so one
- * channel's send failure can't block another's. No-ops (re-uses the in-flight promise) if a tick
- * is already running.
+ * evaluates each row's own fire condition (logging via {@link logBlockReasonChange} when a row is
+ * newly blocked on being offline or on chat activity, so a stuck gate is diagnosable from logs
+ * instead of looking identical to a healthy row still waiting out its interval), resolves Shared
+ * Chat sessions for the ones that are ready, picks which of those actually get to fire this tick
+ * (applying the group cooldown — see {@link pickRowsToFire}), and sends the picked rows
+ * concurrently via `Promise.allSettled` so one channel's send failure can't block another's.
+ * No-ops (re-uses the in-flight promise) if a tick is already running.
  */
 export async function runTimerCommandTick(): Promise<void> {
   if (tickRunning) return currentTickPromise;
@@ -237,7 +223,9 @@ export async function runTimerCommandTick(): Promise<void> {
           timerState.set(key, { lastFiredAt: now, messagesAtLastFire: getMessageCount(row.channel) });
           continue;
         }
-        if (shouldFire(row, state, now)) eligibleRows.push(row);
+        const blockReason = evaluateFireBlock(row, state, now);
+        logBlockReasonChange(key, row, blockReason, state);
+        if (blockReason === null) eligibleRows.push(row);
       }
 
       const loginUserIds = timerCommandsRuntime.get()?.getLoginUserIds() ?? new Map<string, string>();
@@ -272,4 +260,5 @@ export async function stopTimerCommandScheduler(): Promise<void> {
   await currentTickPromise;
   timerState.clear();
   sessionLastFiredAt.clear();
+  clearBlockReasonLog();
 }
