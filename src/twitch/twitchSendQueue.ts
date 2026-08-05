@@ -92,7 +92,13 @@ async function waitForChannelFloor(channel: string): Promise<void> {
   if (elapsed < NON_PRIVILEGED_CHANNEL_FLOOR_MS) await delay(NON_PRIVILEGED_CHANNEL_FLOOR_MS - elapsed);
 }
 
-/** Waits out both of `privileged`'s rate-limit constraints for `channel` — the shared 30s window (at the privileged or non-privileged ceiling) and, if non-privileged, the per-channel floor. */
+/**
+ * Waits out both of `privileged`'s rate-limit constraints for `channel` — the shared 30s window
+ * (at the privileged or non-privileged ceiling) and, if non-privileged, the per-channel floor.
+ * @param privileged - Whether the send is currently classified as moderator/VIP/broadcaster.
+ * @param channel - Normalized Twitch channel the send is targeting.
+ * @returns Resolves once both applicable constraints are satisfied.
+ */
 async function waitForRateLimit(privileged: boolean, channel: string): Promise<void> {
   await waitForWindowRoom(privileged ? PRIVILEGED_LIMIT : NON_PRIVILEGED_LIMIT);
   if (!privileged) await waitForChannelFloor(channel);
