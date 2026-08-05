@@ -10,7 +10,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
-    "check:circular": "madge --circular --extensions ts --ts-config tsconfig.json src",
+    "check:circular": "node scripts/checkCircularDeps.js",
     "graphify:hook": "graphify hook install",
     "deploy": "bash deploy.sh"
   },

@@ -49,4 +49,18 @@ module.exports = tseslint.config(
       },
     },
   },
+  {
+    // Plain CommonJS CLI scripts, run directly via `node` — not part of the src/**/*.ts
+    // TypeScript program, so they need their own Node globals instead of tsconfig's.
+    files: ['scripts/**/*.js'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: {
+        require: 'readonly',
+        module: 'readonly',
+        process: 'readonly',
+        console: 'readonly',
+      },
+    },
+  },
 );
