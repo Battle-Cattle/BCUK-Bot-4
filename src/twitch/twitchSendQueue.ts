@@ -146,6 +146,14 @@ export async function throttledTwitchSend(channel: string, isPrivileged: () => b
       const recheck = isPrivileged();
       if (recheck === privileged) break;
       privileged = recheck;
+
+      // A change caught on the very last allowed attempt would otherwise fall out of the loop
+      // without ever waiting under this newest status's own limit/floor — apply it once here so
+      // giving up on rechecking can't also skip the rate limit for whichever status we settle on.
+      if (attempt === MAX_PRIVILEGE_RECHECKS - 1) {
+        await waitForWindowRoom(privileged ? PRIVILEGED_LIMIT : NON_PRIVILEGED_LIMIT);
+        if (!privileged) await waitForChannelFloor(channel);
+      }
     }
 
     const sentAt = Date.now();

@@ -21,6 +21,7 @@ export type FireBlockReason = 'offline' | 'interval' | 'messages' | null;
  * @param row - The timer's config, joined with its Twitch channel.
  * @param state - The timer's current in-memory firing state.
  * @param now - Current time in epoch ms.
+ * @returns The reason the row can't fire right now (`'offline'`, `'interval'`, or `'messages'`), or `null` if it's clear to fire.
  */
 export function evaluateFireBlock(
   row: { interval_seconds: number; min_messages: number; require_live: boolean; channel: string },
@@ -51,6 +52,7 @@ const lastLoggedBlockReason = new Map<string, FireBlockReason>();
  * @param row - The timer's config, joined with its Twitch channel.
  * @param reason - This tick's block reason, from {@link evaluateFireBlock}.
  * @param state - The timer's current in-memory firing state.
+ * @returns Nothing — logs as a side effect and updates the module-level `lastLoggedBlockReason` map.
  */
 export function logBlockReasonChange(
   key: string,
@@ -70,19 +72,32 @@ export function logBlockReasonChange(
   }
 }
 
-/** Clears the logged block reason for one row — call once a row actually fires, so a future re-block logs fresh instead of staying suppressed by an unrelated, older block episode. */
+/**
+ * Clears the logged block reason for one row — call once a row actually fires, so a future
+ * re-block logs fresh instead of staying suppressed by an unrelated, older block episode.
+ * @param key - The row's `timerState` key (`"{id}::{channel}"`) to forget.
+ * @returns Nothing — mutates the module-level `lastLoggedBlockReason` map in place.
+ */
 export function forgetBlockReason(key: string): void {
   lastLoggedBlockReason.delete(key);
 }
 
-/** Drops logged-block-reason entries for any key no longer present in `currentKeys` — mirrors the scheduler's own `timerState` pruning. */
+/**
+ * Drops logged-block-reason entries for any key no longer present in `currentKeys` — mirrors the
+ * scheduler's own `timerState` pruning.
+ * @param currentKeys - Every row key present in the latest enabled-rows fetch; anything else is stale.
+ * @returns Nothing — mutates the module-level `lastLoggedBlockReason` map in place.
+ */
 export function pruneBlockReasonLog(currentKeys: ReadonlySet<string>): void {
   for (const key of lastLoggedBlockReason.keys()) {
     if (!currentKeys.has(key)) lastLoggedBlockReason.delete(key);
   }
 }
 
-/** Clears all logged block-reason state. Call on scheduler stop. */
+/**
+ * Clears all logged block-reason state. Call on scheduler stop.
+ * @returns Nothing — mutates the module-level `lastLoggedBlockReason` map in place.
+ */
 export function clearBlockReasonLog(): void {
   lastLoggedBlockReason.clear();
 }

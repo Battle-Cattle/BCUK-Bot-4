@@ -236,15 +236,24 @@ describe('block-reason logging', () => {
 
     await runTimerCommandTick();
     expect(loggerInstance.info).toHaveBeenCalledWith(expect.stringContaining('waiting — channel not live'));
+
+    loggerInstance.info.mockClear();
+    vi.mocked(isChannelLive).mockReturnValue(true);
+    vi.mocked(getMessageCount).mockReturnValue(3);
+    await runTimerCommandTick();
+    expect(loggerInstance.info).toHaveBeenCalledWith(
+      expect.stringContaining('interval elapsed, waiting on chat activity (3/5 messages since last fire)'),
+    );
   });
 
   it('does not log anything for the routine interval wait', async () => {
     vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([timerRow({ interval_seconds: 600 })] as any);
     await runTimerCommandTick(); // seed
+    loggerInstance.info.mockClear();
     await vi.advanceTimersByTimeAsync(300_000);
 
     await runTimerCommandTick(); // interval not yet elapsed
-    expect(loggerInstance.info).not.toHaveBeenCalledWith(expect.stringContaining('waiting'));
+    expect(loggerInstance.info).not.toHaveBeenCalled();
   });
 
   it('logs a successful post', async () => {
