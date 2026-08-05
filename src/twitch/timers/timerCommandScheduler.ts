@@ -1,9 +1,12 @@
 import { createLogger } from '../../shared/logger';
 import { getAllEnabledTimerCommandsWithChannel, type TimerCommandForScheduler } from '../../db';
 import { getMessageCount } from '../twitchChatActivity';
-import { isChannelLive } from '../monitor/twitchMonitor';
 import { resolveSharedChatSessionId } from '../../commands/customCommandHandler';
 import { createRuntimeRegistry, type TwitchSendRuntime } from '../../commands/twitchRuntime';
+import {
+  evaluateFireBlock, logBlockReasonChange, forgetBlockReason, pruneBlockReasonLog, clearBlockReasonLog,
+  type TimerRuntimeState,
+} from './timerCommandFireGate';
 
 const log = createLogger('TimerCommandScheduler');
 
@@ -25,12 +28,6 @@ export function registerTimerCommandsRuntime(runtime: TimerCommandsRuntime): voi
 }
 
 const TICK_INTERVAL_MS = 15_000;
-
-/** A timer's in-memory firing state — never persisted, so a restart simply restarts the countdown. */
-interface TimerRuntimeState {
-  lastFiredAt: number;
-  messagesAtLastFire: number;
-}
 
 /**
  * Firing state is keyed by (timer id, channel) rather than timer id alone: a timer can now be
@@ -70,76 +67,18 @@ let tickTimer: ReturnType<typeof setInterval> | null = null;
 let tickRunning = false;
 let currentTickPromise: Promise<void> = Promise.resolve();
 
-/** Why a row didn't fire on a given tick — `null` means it's clear to fire. */
-type FireBlockReason = 'offline' | 'interval' | 'messages' | null;
-
-/**
- * Evaluates whether a timer is currently blocked from firing, and why. Does not account for the
- * Shared Chat group cooldown — see {@link pickRowsToFire}.
- * @param row - The timer's config, joined with its Twitch channel.
- * @param state - The timer's current in-memory firing state.
- * @param now - Current time in epoch ms.
- */
-function evaluateFireBlock(
-  row: { interval_seconds: number; min_messages: number; require_live: boolean; channel: string },
-  state: TimerRuntimeState,
-  now: number,
-): FireBlockReason {
-  if (row.require_live && !isChannelLive(row.channel)) return 'offline';
-  if (now - state.lastFiredAt < row.interval_seconds * 1000) return 'interval';
-  if (row.min_messages > 0 && getMessageCount(row.channel) - state.messagesAtLastFire < row.min_messages) return 'messages';
-  return null;
-}
-
-/**
- * Firing-block reason last logged for each (timer id, channel) — keyed like {@link timerState} —
- * so a stuck gate (e.g. `min_messages` never being met) is logged once when entered rather than
- * every 15s tick, while still being visible at all: previously a blocked timer produced no log
- * output whatsoever, indistinguishable from a healthy one that just hasn't reached its interval yet.
- */
-const lastLoggedBlockReason = new Map<string, FireBlockReason>();
-
-/**
- * Logs a timer's block reason the first tick it's seen — skips the routine `'interval'` wait
- * (expected on every row, every cycle) and only logs `'offline'`/`'messages'`, the two states
- * that can silently persist for hours if something upstream (live tracking, chat-activity
- * counting) is broken.
- * @param key - {@link rowKey} for this row.
- * @param row - The timer's config, joined with its Twitch channel.
- * @param reason - This tick's block reason, from {@link evaluateFireBlock}.
- * @param state - The timer's current in-memory firing state.
- */
-function logBlockReasonChange(
-  key: string,
-  row: TimerCommandForScheduler,
-  reason: FireBlockReason,
-  state: TimerRuntimeState,
-): void {
-  const previous = lastLoggedBlockReason.get(key);
-  lastLoggedBlockReason.set(key, reason);
-  if (reason === previous || reason === 'interval' || reason === null) return;
-
-  if (reason === 'offline') {
-    log.info(`Timer ${row.id} (${row.channel}): waiting — channel not live`);
-  } else if (reason === 'messages') {
-    const have = getMessageCount(row.channel) - state.messagesAtLastFire;
-    log.info(`Timer ${row.id} (${row.channel}): interval elapsed, waiting on chat activity (${have}/${row.min_messages} messages since last fire)`);
-  }
-}
-
 /**
  * Removes in-memory state for any (timer id, channel) pair no longer present in the latest
  * enabled-rows fetch.
  * @param currentKeys - {@link rowKey} values for every row in the latest enabled-rows fetch.
- * @returns Nothing — mutates the module-level `timerState` map in place.
+ * @returns Nothing — mutates the module-level `timerState` map (and the fire-gate's own
+ *   block-reason log — see {@link pruneBlockReasonLog}) in place.
  */
 function pruneStaleTimerState(currentKeys: ReadonlySet<string>): void {
   for (const key of timerState.keys()) {
     if (!currentKeys.has(key)) timerState.delete(key);
   }
-  for (const key of lastLoggedBlockReason.keys()) {
-    if (!currentKeys.has(key)) lastLoggedBlockReason.delete(key);
-  }
+  pruneBlockReasonLog(currentKeys);
 }
 
 /**
@@ -246,7 +185,7 @@ async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionI
     await runtime.send(row.channel, row.message);
     state.lastFiredAt = now;
     state.messagesAtLastFire = getMessageCount(row.channel);
-    lastLoggedBlockReason.delete(key);
+    forgetBlockReason(key);
     log.info(`Posted timer ${row.id} to ${row.channel}`);
   } catch (err) {
     if (sessionId && sessionLastFiredAt.get(sessionId) === now) sessionLastFiredAt.delete(sessionId);
@@ -321,5 +260,5 @@ export async function stopTimerCommandScheduler(): Promise<void> {
   await currentTickPromise;
   timerState.clear();
   sessionLastFiredAt.clear();
-  lastLoggedBlockReason.clear();
+  clearBlockReasonLog();
 }
