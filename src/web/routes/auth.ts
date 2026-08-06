@@ -16,6 +16,7 @@ import { fetchMemberDisplayName } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { renderError, isLoopbackRedirectUri, renderView } from './shared';
+import { userMutationQueue } from './adminUserMutationQueue';
 
 const log = createLogger('Web');
 const router = Router();
@@ -153,7 +154,7 @@ router.get('/discord/callback', async (req, res) => {
         syncedDiscordName = trimmedDisplayName;
       }
       if (syncedDiscordName !== dbUser.discord_name) {
-        await updateDiscordName(profile.id, syncedDiscordName);
+        await userMutationQueue.run(profile.id, () => updateDiscordName(profile.id, syncedDiscordName));
       }
     } catch (syncErr) {
       log.warn('Non-blocking discord_name sync failed:', syncErr);

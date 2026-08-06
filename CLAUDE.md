@@ -25,7 +25,7 @@ npm test      # Vitest
 - **Blank Twitch names → `NULL`** — `user.twitch_name` has a unique index; empty strings collide.
 - **`mutationQueue`** for concurrent-unsafe DB writes — user mutations serialise through it.
 - **POST routes redirect to `?error=code`** on failure; GET reads it and passes to EJS. Never render errors from a POST handler.
-- **`src/discordUtils.ts`** has `isDiscordNotFoundError` and `tryDeleteDiscordMessage` — import, don't duplicate.
+- **`src/discord/discordUtils.ts`** has `isDiscordNotFoundError` and `tryDeleteDiscordMessage` — import, don't duplicate.
 
 ---
 
