@@ -10,6 +10,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
+    "check:circular": "node scripts/checkCircularDeps.js",
     "graphify:hook": "graphify hook install",
     "deploy": "bash deploy.sh"
   },
@@ -36,7 +37,10 @@
   "overrides": {
     "ws": ">=8.21.1",
     "undici": "^7.29.0",
-    "mysql2": "^3.23.1"
+    "mysql2": "^3.23.1",
+    "madge": {
+      "typescript": "$typescript"
+    }
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -51,6 +55,7 @@
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^10.8.0",
+    "madge": "^8.0.0",
     "supertest": "^7.2.2",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3",

@@ -1,10 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 import { fromBit, affectedOrExists, rowExists, getRowCount } from './utils';
-// sfxCache imports getAllSfxTriggers from this module; this module imports
-// invalidateSfxLookupCache from sfxCache. Both calls happen inside function
-// bodies, so CommonJS resolves the cycle correctly.
-import { invalidateSfxLookupCache } from './sfxCache';
 
 export interface SfxTrigger {
   id: bigint;
@@ -178,7 +174,6 @@ export async function createSfxTrigger(
      VALUES (?, ?, ?, ?)`,
     [command, categoryId, description, hidden ? 1 : 0],
   );
-  invalidateSfxLookupCache();
   return BigInt(result.insertId);
 }
 
@@ -208,9 +203,7 @@ export async function updateSfxTrigger(
      WHERE id = ?`,
     [command, categoryId, description, hidden ? 1 : 0, id.toString()],
   );
-  const updated = await affectedOrExists(result.affectedRows, () => rowExists(getPool(), 'sfxtrigger', 'id', id.toString()));
-  if (updated) invalidateSfxLookupCache();
-  return updated;
+  return affectedOrExists(result.affectedRows, () => rowExists(getPool(), 'sfxtrigger', 'id', id.toString()));
 }
 
 /**
@@ -247,7 +240,6 @@ export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } 
       await conn.execute(`DELETE FROM sfxtrigger WHERE id = ?`, [id.toString()]);
       return { files };
     });
-    invalidateSfxLookupCache();
     return result;
   } catch (err) {
     if (err instanceof TriggerNotFoundError) return null;
@@ -272,7 +264,6 @@ export async function addSfxFile(
     `INSERT INTO sfx (trigger_id, file, weight, hidden) VALUES (?, ?, ?, ?)`,
     [triggerId.toString(), file, weight, hidden ? 1 : 0],
   );
-  invalidateSfxLookupCache();
   return result.insertId;
 }
 
@@ -306,9 +297,7 @@ export async function updateSfxFile(id: number, weight: number, hidden: boolean)
     `UPDATE sfx SET weight = ?, hidden = ? WHERE id = ?`,
     [weight, hidden ? 1 : 0, id],
   );
-  const updated = await affectedOrExists(result.affectedRows, () => rowExists(getPool(), 'sfx', 'id', id));
-  if (updated) invalidateSfxLookupCache();
-  return updated;
+  return affectedOrExists(result.affectedRows, () => rowExists(getPool(), 'sfx', 'id', id));
 }
 
 /**
@@ -339,7 +328,6 @@ export async function deleteSfxFile(id: number): Promise<string | null> {
       }
       return file;
     });
-    invalidateSfxLookupCache();
     return file;
   } catch (err) {
     if (err instanceof FileNotFoundError) return null;

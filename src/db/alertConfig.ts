@@ -1,11 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 import { fromBit } from './utils';
-// invalidateAlertConfigLookupCache lives in alertConfigCache.ts, which imports getAllAlertConfigs
-// from this file for its read-side load. Both calls happen inside function bodies (never at
-// module-eval time), so the cyclic import between the two files is safe — mirrors sfx.ts's own
-// import of invalidateSfxLookupCache from sfxCache.ts.
-import { invalidateAlertConfigLookupCache } from './alertConfigCache';
 
 /** Twitch event types the alerts overlay can react to. */
 export type AlertEventType = 'follow' | 'sub' | 'resub' | 'giftsub' | 'raid';
@@ -141,7 +136,6 @@ export async function initAlertConfigs(streamerId: number): Promise<void> {
      VALUES ${placeholders}`,
     params,
   );
-  invalidateAlertConfigLookupCache();
 }
 
 /**
@@ -166,7 +160,6 @@ export async function saveAlertConfig(
        text_animation=new_row.text_animation`,
     [streamerId, eventType, config.enabled ? 1 : 0, config.message_template, config.duration_ms, config.text_animation],
   );
-  invalidateAlertConfigLookupCache();
 }
 
 /**
@@ -217,7 +210,6 @@ async function setAlertAssetColumn(
     );
     return previous;
   });
-  invalidateAlertConfigLookupCache();
   return previous;
 }
 
