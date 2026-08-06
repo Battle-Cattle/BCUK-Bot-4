@@ -16,6 +16,7 @@ import { fetchMemberDisplayName } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { renderError, isLoopbackRedirectUri, renderView } from './shared';
+import { userMutationQueue } from './adminUserMutationQueue';
 
 const log = createLogger('Web');
 const router = Router();
@@ -54,7 +55,10 @@ router.get('/discord', (req, res) => {
  * syncing the display name, regenerating the session), or — if this login was
  * initiated via the companion app's loopback flow (`req.session.companionOAuth`
  * set by companionAuth.ts) — skips session creation entirely and redirects to
- * the companion app's `redirectUri` with a one-time code instead.
+ * the companion app's `redirectUri` with a one-time code instead. The
+ * `discord_name` sync is serialized per Discord ID through `userMutationQueue`,
+ * so it can't race a concurrent admin edit or the name-refresh job on the same
+ * user row.
  * @param req - Express request; reads `code`/`state` query params and the stored
  *   `oauthState` session value.
  * @param res - Express response; redirects to `/` on success, or to the
@@ -153,7 +157,7 @@ router.get('/discord/callback', async (req, res) => {
         syncedDiscordName = trimmedDisplayName;
       }
       if (syncedDiscordName !== dbUser.discord_name) {
-        await updateDiscordName(profile.id, syncedDiscordName);
+        await userMutationQueue.run(profile.id, () => updateDiscordName(profile.id, syncedDiscordName));
       }
     } catch (syncErr) {
       log.warn('Non-blocking discord_name sync failed:', syncErr);

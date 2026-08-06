@@ -40,6 +40,7 @@ import {
   AccessLevel,
 } from '../../db';
 import { fetchMemberDisplayName } from '../../discord/discordBot';
+import { userMutationQueue } from './adminUserMutationQueue';
 
 function buildApp(sessionOverrides: Record<string, unknown> = {}, captureSession?: (session: any) => void) {
   const app = express();
@@ -239,6 +240,24 @@ describe('GET /discord/callback', () => {
     const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
       .get('/discord/callback?code=code&state=state123');
     expect(res.status).toBe(302);
+    expect(updateDiscordName).toHaveBeenCalledWith('111', 'NewDisplayName');
+  });
+
+  it('serializes the discord_name update through userMutationQueue', async () => {
+    mockFetch([
+      { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
+      { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
+    ]);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'OldName', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER, is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: '555', name: 'Guild', voice_channel_id: null }] as any);
+    vi.mocked(fetchMemberDisplayName).mockResolvedValue('NewDisplayName');
+    const runSpy = vi.spyOn(userMutationQueue, 'run');
+
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
+      .get('/discord/callback?code=code&state=state123');
+
+    expect(res.status).toBe(302);
+    expect(runSpy).toHaveBeenCalledWith('111', expect.any(Function));
     expect(updateDiscordName).toHaveBeenCalledWith('111', 'NewDisplayName');
   });
 
