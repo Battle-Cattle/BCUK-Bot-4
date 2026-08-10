@@ -11,7 +11,7 @@ export { getPool, closePool } from './db/pool';
 export {
   getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember, upsertGuild,
 } from './db/guilds';
-export type { DbGuild } from './db/guilds';
+export type { DbGuild, DbGuildMembership } from './db/guilds';
 
 export {
   getMemberAccessLevel, setMemberAccessLevel,

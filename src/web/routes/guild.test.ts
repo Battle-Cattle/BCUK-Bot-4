@@ -29,8 +29,8 @@ const TWO_GUILDS = [
 ];
 
 const TWO_DB_GUILDS = [
-  { guild_id: '100000000000000001', name: 'Alpha', voice_channel_id: null },
-  { guild_id: '100000000000000002', name: 'Beta', voice_channel_id: null },
+  { guild_id: '100000000000000001', name: 'Alpha', voice_channel_id: null, access_level: AccessLevel.USER },
+  { guild_id: '100000000000000002', name: 'Beta', voice_channel_id: null, access_level: AccessLevel.MANAGER },
 ];
 
 function buildApp(sessionUser: unknown) {
@@ -75,8 +75,7 @@ describe('GET /guild/select', () => {
 });
 
 describe('POST /guild/select', () => {
-  it('selects a guild the user belongs to and recomputes the access level', async () => {
-    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.MANAGER);
+  it('selects a guild the user belongs to, taking the access level from the already-fetched membership list', async () => {
     const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
     const app = express();
     app.use(express.urlencoded({ extended: false }));
@@ -96,7 +95,9 @@ describe('POST /guild/select', () => {
     expect(res.headers.location).toBe('/');
     expect(user.currentGuildId).toBe('100000000000000002');
     expect(user.accessLevel).toBe(AccessLevel.MANAGER);
-    expect(vi.mocked(getEffectiveAccessLevelForUser)).toHaveBeenCalledWith('100000000000000002', { discord_id: 'u1', is_owner: false });
+    // Non-owner: the access level comes from getGuildsForMember's own access_level column,
+    // not a second getEffectiveAccessLevelForUser query.
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
 
   it('rejects a guild the user does not belong to (cross-guild IDOR guard)', async () => {
@@ -285,7 +286,9 @@ describe('POST /guild/select', () => {
   });
 
   it('redirects to the picker and does not mutate the session when an unexpected error occurs', async () => {
-    vi.mocked(getEffectiveAccessLevelForUser).mockRejectedValue(new Error('DB unavailable'));
+    // Non-owner: getGuildsForMember is the DB call still made on this path (access level
+    // now comes from its result, not a separate getEffectiveAccessLevelForUser query).
+    vi.mocked(getGuildsForMember).mockRejectedValue(new Error('DB unavailable'));
     const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
     const app = buildApp(user);
 

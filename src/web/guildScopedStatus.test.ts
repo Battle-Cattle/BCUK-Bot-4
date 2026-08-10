@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../shared/statusStore', () => ({
   getStatus: vi.fn(),
@@ -13,7 +13,7 @@ vi.mock('../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn((s: string) => (s ? s.toLowerCase() : null)),
 }));
 
-import { getGuildScopedStatus } from './guildScopedStatus';
+import { getGuildScopedStatus, clearGuildScopedStatusCache } from './guildScopedStatus';
 import { getStatus } from '../shared/statusStore';
 import { getGuildById, getGuildMemberUsers } from '../db';
 
@@ -28,6 +28,9 @@ const BASE_STATUS = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The guild-info cache is a module-level singleton (short TTL in production) — reset it
+  // so each test's DB mocks aren't shadowed by a previous test's cached result.
+  clearGuildScopedStatusCache();
   vi.mocked(getStatus).mockReturnValue(BASE_STATUS as any);
   vi.mocked(getGuildById).mockResolvedValue({ guild_id: 'guild-A', name: 'Our Guild', voice_channel_id: null });
   vi.mocked(getGuildMemberUsers).mockResolvedValue([
@@ -98,5 +101,38 @@ describe('getGuildScopedStatus — voice', () => {
   it('passes through the already guild-scoped voice status unchanged', async () => {
     const result = await getGuildScopedStatus('guild-A');
     expect(result.voice).toEqual(BASE_STATUS.voice);
+  });
+});
+
+describe('getGuildScopedStatus — guild-info caching', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('reuses the cached guild/member lookup for a second call within the TTL', async () => {
+    await getGuildScopedStatus('guild-A');
+    await getGuildScopedStatus('guild-A');
+    expect(getGuildById).toHaveBeenCalledTimes(1);
+    expect(getGuildMemberUsers).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-fetches once the TTL has elapsed', async () => {
+    await getGuildScopedStatus('guild-A');
+    vi.advanceTimersByTime(20_001);
+    await getGuildScopedStatus('guild-A');
+    expect(getGuildById).toHaveBeenCalledTimes(2);
+    expect(getGuildMemberUsers).toHaveBeenCalledTimes(2);
+  });
+
+  it('caches independently per guild', async () => {
+    await getGuildScopedStatus('guild-A');
+    await getGuildScopedStatus('guild-B');
+    expect(getGuildById).toHaveBeenCalledTimes(2);
+    expect(getGuildById).toHaveBeenNthCalledWith(1, 'guild-A');
+    expect(getGuildById).toHaveBeenNthCalledWith(2, 'guild-B');
   });
 });

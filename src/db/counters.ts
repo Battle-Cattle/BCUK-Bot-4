@@ -396,6 +396,13 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
 
 /**
  * Atomically increments a counter's `current_value` and returns the new value.
+ *
+ * Uses the `LAST_INSERT_ID(expr)` trick to learn the post-increment value: the `UPDATE`
+ * stashes the computed value in the connection's session-scoped `LAST_INSERT_ID()`, so the
+ * follow-up `SELECT LAST_INSERT_ID()` reads connection state rather than re-reading the
+ * `counter` table/index — cheaper than a second `SELECT ... FROM counter WHERE id = ?`, and
+ * this function runs on every chat message that hits an active counter's trigger command.
+ *
  * @param id The counter's numeric id.
  * @returns The counter's `current_value` after the increment.
  * @throws {CounterNotFoundError} If no counter exists with the given id.
@@ -403,14 +410,11 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
 export async function incrementCounter(id: number): Promise<number> {
   const newValue = await withTransaction(async (conn) => {
     const [result] = await conn.execute<mysql.ResultSetHeader>(
-      'UPDATE counter SET current_value = current_value + 1 WHERE id = ?',
+      'UPDATE counter SET current_value = LAST_INSERT_ID(current_value + 1) WHERE id = ?',
       [id],
     );
     if (result.affectedRows === 0) throw new CounterNotFoundError(id);
-    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-      'SELECT current_value FROM counter WHERE id = ?',
-      [id],
-    );
+    const [rows] = await conn.execute<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() AS current_value');
     return (rows[0] as mysql.RowDataPacket).current_value as number;
   });
   return newValue;
