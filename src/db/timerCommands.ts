@@ -3,6 +3,7 @@ import { getPool } from './pool';
 import { fromBit, affectedOrExists, rowExists } from './utils';
 import { AccessLevel } from './users';
 import type { AccessLevelValue } from './users';
+import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 
 /** A timer command row from the database. */
 export interface DbTimerCommand {
@@ -231,9 +232,14 @@ export async function unassignUserFromTimer(timerId: number, discordId: string):
 /**
  * Lists every enabled timer command joined with each of its assigned users' linked Twitch
  * channel, for the scheduler's per-tick read. A timer assigned to several streamers appears
- * once per assigned channel, each firing independently — assignees with no linked Twitch name
- * are excluded, since there's no channel to post to. Queried fresh every scheduler tick rather
- * than cached, mirroring `getAllEnabledPricingRows()`.
+ * once per assigned channel, each firing independently — assignees with no linked Twitch name,
+ * or one that fails to normalize, are excluded, since there's no channel to post to. The channel
+ * is normalized here (matching `getTwitchEnabledChannels`/`getAllTwitchLinkedUsers`) rather than
+ * trusting `user.twitch_name` as stored: the scheduler uses this same string as the lookup key
+ * into `twitchChatActivity`'s per-channel message counts, which are always recorded under the
+ * normalized (lowercased) form — an un-normalized channel here would silently and permanently
+ * miss that counter, blocking `min_messages` forever with no error. Queried fresh every
+ * scheduler tick rather than cached, mirroring `getAllEnabledPricingRows()`.
  */
 export async function getAllEnabledTimerCommandsWithChannel(): Promise<TimerCommandForScheduler[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -244,12 +250,18 @@ export async function getAllEnabledTimerCommandsWithChannel(): Promise<TimerComm
      WHERE tc.enabled = 1 AND u.twitch_name IS NOT NULL AND u.twitch_name <> ''
      ORDER BY tc.id, u.discord_id`,
   );
-  return rows.map((r) => ({
-    id: r.id,
-    channel: r.channel,
-    message: r.message,
-    interval_seconds: r.interval_seconds,
-    min_messages: r.min_messages,
-    require_live: fromBit(r.require_live),
-  }));
+  return rows
+    .map((r) => {
+      const channel = normalizeTwitchChannelName(String(r.channel));
+      if (!channel) return null;
+      return {
+        id: r.id,
+        channel,
+        message: r.message,
+        interval_seconds: r.interval_seconds,
+        min_messages: r.min_messages,
+        require_live: fromBit(r.require_live),
+      };
+    })
+    .filter((row): row is TimerCommandForScheduler => row !== null);
 }
