@@ -639,6 +639,44 @@ describe('error handling in subscription setup', () => {
     );
   });
 
+  it('deletes stale subscriptions concurrently, isolating one deletion failure from the other', async () => {
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      { id: 'stale-1', type: 'channel.subscribe' },
+      { id: 'stale-2', type: 'channel.raid' },
+    ] as any);
+
+    let rejectFirst!: (err: Error) => void;
+    const firstGate = new Promise<void>((_resolve, reject) => { rejectFirst = reject; });
+    let secondStarted = false;
+
+    vi.mocked(deleteEventSubSubscription).mockImplementation(async (id: string) => {
+      if (id === 'stale-1') {
+        await firstGate;
+      } else {
+        secondStarted = true;
+      }
+    });
+
+    const call = subscribeForStreamer('sess-concurrent-delete', {
+      uid: 'uid-concurrent-delete',
+      token: 'tok-concurrent-delete',
+      name: 'errStreamer',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 72,
+    });
+
+    // Flush microtasks until the second deletion starts (or give up after a bounded number of
+    // ticks) — proves the second deletion isn't waiting on the first to settle.
+    for (let i = 0; i < 20 && !secondStarted; i++) {
+      await Promise.resolve();
+    }
+    expect(secondStarted).toBe(true);
+
+    rejectFirst(new Error('delete failed'));
+    await expect(call).resolves.not.toThrow();
+  });
+
   it('logs and excludes the streamer when resolving a raid-only streamer\'s Twitch user ID fails', async () => {
     vi.mocked(getAllEventSubStreamers).mockResolvedValue([{
       id: 80,
