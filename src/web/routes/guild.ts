@@ -43,6 +43,11 @@ router.get('/select', requireAuth, csrfProtection, (req, res) => {
  * For a non-owner, the access level is read off the same `getGuildsForMember` result already
  * fetched to build `user.guilds` (each entry carries the user's `access_level` for that guild)
  * instead of a second `guild_member` query, mirroring `requireGuildContext` in `../middleware`.
+ *
+ * @param req - Express request; reads `req.session.user` and the `guild_id` form field.
+ * @param res - Express response; redirects to `/` on success, or back to `/guild/select` /
+ *   `/auth/login` when the selection can't be accepted.
+ * @returns Resolves once the redirect has been issued.
  */
 router.post('/select', requireAuth, csrfProtection, async (req, res) => {
   const user = getSessionUser(req);

@@ -135,4 +135,22 @@ describe('getGuildScopedStatus — guild-info caching', () => {
     expect(getGuildById).toHaveBeenNthCalledWith(1, 'guild-A');
     expect(getGuildById).toHaveBeenNthCalledWith(2, 'guild-B');
   });
+
+  it('coalesces concurrent cache misses for the same guild onto a single DB fetch', async () => {
+    let resolveGuild!: (value: { guild_id: string; name: string; voice_channel_id: string | null }) => void;
+    vi.mocked(getGuildById).mockReturnValue(new Promise((resolve) => { resolveGuild = resolve; }));
+
+    // Two callers race in before the first fetch resolves — e.g. a status poll and a
+    // pushStatusUpdate broadcast landing for the same guild at the same time.
+    const first = getGuildScopedStatus('guild-A');
+    const second = getGuildScopedStatus('guild-A');
+
+    resolveGuild({ guild_id: 'guild-A', name: 'Our Guild', voice_channel_id: null });
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(getGuildById).toHaveBeenCalledTimes(1);
+    expect(getGuildMemberUsers).toHaveBeenCalledTimes(1);
+    expect(firstResult.discord.guildName).toBe('Our Guild');
+    expect(secondResult.discord.guildName).toBe('Our Guild');
+  });
 });

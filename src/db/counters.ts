@@ -415,7 +415,13 @@ export async function incrementCounter(id: number): Promise<number> {
     );
     if (result.affectedRows === 0) throw new CounterNotFoundError(id);
     const [rows] = await conn.execute<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() AS current_value');
-    return (rows[0] as mysql.RowDataPacket).current_value as number;
+    // LAST_INSERT_ID() is a BIGINT expression, so the pool's bigNumberStrings setting can
+    // return it as a string even though `current_value` itself is a plain INT column — parse
+    // it back with Number() rather than trusting the driver's JS type. Safe here: this is an
+    // application counter incremented one chat message at a time, nowhere near
+    // Number.MAX_SAFE_INTEGER (unlike a Discord snowflake, which is why that case is never
+    // parsed back this way elsewhere in this codebase).
+    return Number((rows[0] as mysql.RowDataPacket).current_value);
   });
   return newValue;
 }

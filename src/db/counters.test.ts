@@ -406,6 +406,18 @@ describe('incrementCounter', () => {
     expect(conn.commit).toHaveBeenCalled();
   });
 
+  it('parses a string current_value into a number (LAST_INSERT_ID() is a BIGINT expression, so the pool\'s bigNumberStrings setting can return it as a string)', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([[{ current_value: '7' }], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await incrementCounter(1);
+    expect(result).toBe(7);
+    expect(typeof result).toBe('number');
+  });
+
   it('reads the new value via LAST_INSERT_ID() instead of re-querying the counter table', async () => {
     const pool = makePool();
     const conn = pool._conn;

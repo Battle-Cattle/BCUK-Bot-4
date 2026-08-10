@@ -28,9 +28,18 @@ interface CachedGuildInfo {
  */
 const guildInfoCache = new Map<string, CachedGuildInfo>();
 
+/**
+ * Guilds with a fetch already in flight — coalesces concurrent cache misses (e.g. a status
+ * poll and a `pushStatusUpdate` broadcast landing for the same guild before the first fetch
+ * resolves) onto a single pair of `getGuildById`/`getGuildMemberUsers` calls, instead of each
+ * caller firing its own.
+ */
+const guildInfoInFlight = new Map<string, Promise<CachedGuildInfo>>();
+
 /** Test-only: clears the guild-info cache so DB mocks aren't shadowed across test cases. */
 export function clearGuildScopedStatusCache(): void {
   guildInfoCache.clear();
+  guildInfoInFlight.clear();
 }
 
 async function getCachedGuildInfo(guildId: string): Promise<CachedGuildInfo> {
@@ -40,13 +49,24 @@ async function getCachedGuildInfo(guildId: string): Promise<CachedGuildInfo> {
     return cached;
   }
 
-  const [guild, members] = await Promise.all([
-    getGuildById(guildId),
-    getGuildMemberUsers(guildId),
-  ]);
-  const info: CachedGuildInfo = { guild, members, fetchedAt: now };
-  guildInfoCache.set(guildId, info);
-  return info;
+  const inFlight = guildInfoInFlight.get(guildId);
+  if (inFlight) return inFlight;
+
+  const load = (async (): Promise<CachedGuildInfo> => {
+    try {
+      const [guild, members] = await Promise.all([
+        getGuildById(guildId),
+        getGuildMemberUsers(guildId),
+      ]);
+      const info: CachedGuildInfo = { guild, members, fetchedAt: Date.now() };
+      guildInfoCache.set(guildId, info);
+      return info;
+    } finally {
+      guildInfoInFlight.delete(guildId);
+    }
+  })();
+  guildInfoInFlight.set(guildId, load);
+  return load;
 }
 
 /**
