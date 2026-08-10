@@ -461,43 +461,55 @@ export async function insertUserCommandAssignments(
 }
 
 /**
- * Throws if `discordId` has no matching eligibility entry, or if it's eligible for a
- * Twitch-channel conflict check and that check finds one.
- * @param connection Transaction-capable pool connection to query with.
- * @param commandId Command id being assigned.
- * @param discordId Discord snowflake of the user being checked.
- * @param normalizedTriggerString Normalized trigger string being assigned.
- * @param eligibilityByDiscordId Batch-fetched eligibility, keyed by `discordId`.
- * @throws {CommandConflictError} If the user's Twitch channel would create a trigger conflict.
- * @throws If `discordId` has no matching entry in `eligibilityByDiscordId`.
+ * Batched form of {@link hasTwitchChannelTriggerConflict}: checks whether `triggerString` is
+ * already used by another command that is either multi-Twitch or assigned to a user whose
+ * normalized Twitch channel name is in `normalizedTwitchNames` — one query covering every
+ * eligible user in a bulk assignment, instead of one query per user.
+ * @param executor Pool or transaction connection to query with.
+ * @param commandId Command id to exclude from the conflict check.
+ * @param triggerString Trigger string to check for conflicts.
+ * @param normalizedTwitchNames Normalized (lowercased) Twitch channel names to match against.
+ *   Must be non-empty.
+ * @returns True if a conflicting command exists for any of the given names.
  */
-async function assertUserAssignable(
-  connection: mysql.PoolConnection,
+async function hasAnyTwitchChannelTriggerConflict(
+  executor: SqlExecutor,
   commandId: number,
-  discordId: string,
-  normalizedTriggerString: string,
-  eligibilityByDiscordId: Map<string, UserTwitchEligibility>,
-): Promise<void> {
-  const eligibility = eligibilityByDiscordId.get(discordId);
-  if (!eligibility) {
-    throw new Error(`User not found: ${discordId}`);
-  }
-  if (eligibility.normalizedTwitchName && eligibility.isTwitchBotEnabled) {
-    await assertNoTwitchChannelTriggerConflict(connection, commandId, normalizedTriggerString, eligibility.normalizedTwitchName);
-  }
+  triggerString: string,
+  normalizedTwitchNames: string[],
+): Promise<boolean> {
+  const [conflictRows] = await executor.execute<mysql.RowDataPacket[]>(
+    `SELECT c.command_id
+     FROM custom_command c
+     LEFT JOIN twitch_user_commands tuc ON tuc.command_id = c.command_id
+     LEFT JOIN \`user\` u ON u.discord_id = tuc.discord_id
+     WHERE c.command_id <> ?
+       AND c.trigger_string = ?
+       AND (
+         c.is_multi_twitch = 1
+         OR (
+           u.twitch_name IS NOT NULL
+           AND u.is_twitch_bot_enabled = 1
+           AND LOWER(u.twitch_name) IN (${buildInClausePlaceholders(normalizedTwitchNames.length)})
+         )
+       )
+     LIMIT 1`,
+    [commandId, triggerString, ...normalizedTwitchNames],
+  );
+
+  return conflictRows.length > 0;
 }
 
 /**
- * Runs {@link assertUserAssignable} for every `discordId`, in order. A single MySQL connection
- * only ever has one command in flight (mysql2 queues, rather than pipelines, queries issued
- * without awaiting the previous one), so these checks are issued sequentially rather than via
- * `Promise.all` — that would add complexity without reducing round trips.
+ * Throws if any `discordId` has no matching eligibility entry, or if any Twitch-eligible user's
+ * channel would create a trigger conflict — checked in a single batched query across every
+ * eligible user (see {@link hasAnyTwitchChannelTriggerConflict}) rather than one query per user.
  * @param connection Transaction-capable pool connection to query with.
  * @param commandId Command id being assigned.
  * @param discordIds Discord snowflakes of the users being checked.
  * @param normalizedTriggerString Normalized trigger string being assigned.
  * @param eligibilityByDiscordId Batch-fetched eligibility, keyed by `discordId`.
- * @throws {CommandConflictError} If any user's Twitch channel would create a trigger conflict.
+ * @throws {CommandConflictError} If any eligible user's Twitch channel would create a trigger conflict.
  * @throws If any `discordId` has no matching entry in `eligibilityByDiscordId`.
  */
 async function assertAllUsersAssignable(
@@ -507,9 +519,21 @@ async function assertAllUsersAssignable(
   normalizedTriggerString: string,
   eligibilityByDiscordId: Map<string, UserTwitchEligibility>,
 ): Promise<void> {
+  const eligibleNames: string[] = [];
   for (const discordId of discordIds) {
-    await assertUserAssignable(connection, commandId, discordId, normalizedTriggerString, eligibilityByDiscordId);
+    const eligibility = eligibilityByDiscordId.get(discordId);
+    if (!eligibility) {
+      throw new Error(`User not found: ${discordId}`);
+    }
+    if (eligibility.normalizedTwitchName && eligibility.isTwitchBotEnabled) {
+      eligibleNames.push(eligibility.normalizedTwitchName);
+    }
   }
+
+  if (eligibleNames.length === 0) return;
+
+  await assertConflictFree(normalizedTriggerString, () =>
+    hasAnyTwitchChannelTriggerConflict(connection, commandId, normalizedTriggerString, eligibleNames));
 }
 
 /**
