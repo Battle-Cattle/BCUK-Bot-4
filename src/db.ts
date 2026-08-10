@@ -532,7 +532,7 @@ export type { RewardPricingRow, RewardPricingInput, StreamerPricingSettings } fr
 export {
   getPricingForReward, getPricingConfigsForStreamer, getAllEnabledPricingRows,
   upsertPricingConfig, recordPricingUpdate, deletePricingConfig, markPricingUnsupported,
-  updatePricingCooldownForReward, getPricingSettingsForStreamer, savePricingSettingsForStreamer,
+  updatePricingCooldownForReward, getPricingSettingsForStreamer, getPricingSettingsForStreamers, savePricingSettingsForStreamer,
   DEFAULT_PRICING_COOLDOWN_SECONDS,
 } from './db/rewardPricing';
 

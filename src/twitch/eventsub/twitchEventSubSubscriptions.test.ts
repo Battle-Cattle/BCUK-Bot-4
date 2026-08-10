@@ -232,6 +232,35 @@ describe('loadStreamersForEventSub', () => {
     expect(getEnabledAlertEventTypesBatch).toHaveBeenCalledWith([20, 21]);
   });
 
+  it('resolves streamers concurrently rather than waiting for each token refresh in turn', async () => {
+    const streamerA = { id: 30, twitch_name: 'streamerA', twitch_user_id: 'uid-30', config: { follow_enabled: true } };
+    const streamerB = { id: 31, twitch_name: 'streamerB', twitch_user_id: 'uid-31', config: { follow_enabled: true } };
+    vi.mocked(getAllEventSubStreamers).mockResolvedValue([streamerA, streamerB] as any);
+
+    let resolveFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { resolveFirst = resolve; });
+    let secondStarted = false;
+
+    vi.mocked(getValidToken).mockImplementation(async (streamer: any) => {
+      if (streamer.id === 30) {
+        await firstGate; // blocks the first streamer's token refresh until released below
+      } else {
+        secondStarted = true; // only reachable if the second streamer didn't wait for the first
+      }
+      return 'tok';
+    });
+
+    const resultPromise = loadStreamersForEventSub();
+    for (let i = 0; i < 20 && !secondStarted; i++) {
+      await Promise.resolve();
+    }
+    expect(secondStarted).toBe(true);
+
+    resolveFirst();
+    const result = await resultPromise;
+    expect(result).toHaveLength(2);
+  });
+
   it('defaults enabledAlerts to an empty Set for a streamer missing from the batch result', async () => {
     const fakeStreamer = { id: 15, twitch_name: 'noAlerts', twitch_user_id: 'uid-15', config: { follow_enabled: true } };
     vi.mocked(getAllEventSubStreamers).mockResolvedValue([fakeStreamer] as any);
