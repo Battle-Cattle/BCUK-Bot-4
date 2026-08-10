@@ -265,13 +265,13 @@ describe('getAllEnabledTimerCommandsWithChannel', () => {
 
   it('returns one row per assigned channel when a timer has multiple assignments', async () => {
     const rows = [
-      { id: 1, channel: 'streamer-a', message: 'hi', interval_seconds: 600, min_messages: 0, require_live: 1 },
-      { id: 1, channel: 'streamer-b', message: 'hi', interval_seconds: 600, min_messages: 0, require_live: 1 },
+      { id: 1, channel: 'streamer_a', message: 'hi', interval_seconds: 600, min_messages: 0, require_live: 1 },
+      { id: 1, channel: 'streamer_b', message: 'hi', interval_seconds: 600, min_messages: 0, require_live: 1 },
     ];
     vi.mocked(getPool).mockReturnValue(makeMockPool({ rows }) as any);
     const result = await getAllEnabledTimerCommandsWithChannel();
     expect(result).toHaveLength(2);
-    expect(result.map((r) => r.channel)).toEqual(['streamer-a', 'streamer-b']);
+    expect(result.map((r) => r.channel)).toEqual(['streamer_a', 'streamer_b']);
   });
 
   it('queries with no parameters (filtering happens in SQL)', async () => {
@@ -279,5 +279,28 @@ describe('getAllEnabledTimerCommandsWithChannel', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getAllEnabledTimerCommandsWithChannel();
     expect(pool.execute.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it('normalizes the channel so it matches the lowercased key chat activity is recorded under', async () => {
+    // If this returned the raw stored value unnormalized, a channel with any uppercase
+    // characters would produce a `row.channel` that never matches the lowercase key
+    // `recordChatMessage` stores counts under — silently and permanently blocking
+    // `min_messages` with no error, since a message-count miss looks identical to "no chat yet."
+    const joinedRow = {
+      id: 1, channel: 'SomeStreamer', message: 'hi', interval_seconds: 600, min_messages: 0, require_live: 1,
+    };
+    vi.mocked(getPool).mockReturnValue(makeMockPool({ rows: [joinedRow] }) as any);
+    const rows = await getAllEnabledTimerCommandsWithChannel();
+    expect(rows).toEqual([expect.objectContaining({ channel: 'somestreamer' })]);
+  });
+
+  it('drops a row whose stored channel fails to normalize', async () => {
+    const rows = [
+      { id: 1, channel: 'validname', message: 'hi', interval_seconds: 600, min_messages: 0, require_live: 1 },
+      { id: 2, channel: 'x', message: 'hi', interval_seconds: 600, min_messages: 0, require_live: 1 }, // too short to be a valid channel name
+    ];
+    vi.mocked(getPool).mockReturnValue(makeMockPool({ rows }) as any);
+    const result = await getAllEnabledTimerCommandsWithChannel();
+    expect(result.map((r) => r.id)).toEqual([1]);
   });
 });
