@@ -2,6 +2,9 @@
   "name": "bcuk-bot-4",
   "version": "1.0.0",
   "description": "Community bot",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc -p tsconfig.build.json",
