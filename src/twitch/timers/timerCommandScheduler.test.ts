@@ -393,6 +393,36 @@ describe('Per-command Shared Chat cooldown', () => {
 
     expect(send).toHaveBeenCalledWith('streamer-a', 'msg-a');
   });
+
+  it('releases a command-session reservation for a timer that loses the cross-command channel floor, instead of leaving it stuck for its own full interval', async () => {
+    // Two different timers both assigned to one shared-chat channel: each clears its own
+    // per-command session cooldown independently at layer 1 (they don't share one), but only one
+    // of them can actually post to the channel this tick at layer 2. The loser's layer-1
+    // reservation must be released — otherwise it would sit "used" until its own (long) interval
+    // elapses despite never having posted, even once the channel floor reopens well before then.
+    getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a']]));
+    stubSessions({ 'uid-a': 'session-1' });
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+      timerRow({ id: 1, channel: 'streamer-a', message: 'msg-a', interval_seconds: 60 }),
+      timerRow({ id: 2, channel: 'streamer-a', message: 'msg-b', interval_seconds: 300 }),
+    ] as any);
+
+    await runTimerCommandTick(); // seed both
+
+    await vi.advanceTimersByTimeAsync(300_000); // both eligible together for the first time; tie broken to timer 1
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('streamer-a', 'msg-a');
+
+    send.mockClear();
+    // Only 120s later — well under timer 2's own 300s interval, so timer 2 can only be a candidate
+    // again this soon if its layer-1 reservation was actually released rather than left to expire
+    // naturally on its own schedule.
+    await vi.advanceTimersByTimeAsync(120_000);
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('streamer-a', 'msg-b');
+  });
 });
 
 describe('Cross-command channel floor', () => {
@@ -445,6 +475,30 @@ describe('Cross-command channel floor', () => {
     await runTimerCommandTick(); // seed both, both lastFiredAt = 0
 
     await vi.advanceTimersByTimeAsync(60_000); // both eligible; equal lastFiredAt so the first (timer 1) is picked
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('somestreamer', 'msg-a');
+  });
+
+  it('lets the same timer repeat during an active floor even when a longer-waiting different timer is also eligible', async () => {
+    // The floor exists to space out *different* commands, not to hold the poster back from its own
+    // next cycle. Picking the globally-longest-waiting row first (ignoring who set the floor) would
+    // pick timer 2 here, find it blocked by the floor, and defer the whole channel — silently
+    // skipping timer 1's due repeat too. It must fall back to timer 1 specifically.
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+      timerRow({ id: 1, channel: 'somestreamer', message: 'msg-a', interval_seconds: 60 }),
+      timerRow({ id: 2, channel: 'somestreamer', message: 'msg-b', interval_seconds: 30 }),
+    ] as any);
+
+    await runTimerCommandTick(); // seed both
+
+    await vi.advanceTimersByTimeAsync(60_000); // both eligible, no floor yet, tie broken to timer 1
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('somestreamer', 'msg-a');
+
+    send.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000); // t=120s: timer 1 due again (own 60s interval); timer 2 still starved and eligible; floor still active (60s since timer 1's post)
     await runTimerCommandTick();
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith('somestreamer', 'msg-a');

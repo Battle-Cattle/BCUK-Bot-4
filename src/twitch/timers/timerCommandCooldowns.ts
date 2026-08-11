@@ -73,6 +73,19 @@ export function pruneStaleCooldowns(now: number): void {
   pruneStaleChannelCooldowns(now);
 }
 
+/** Releases a command-session cooldown reservation if it's still the one made at `now` (not a newer one made since). */
+function releaseCommandSessionReservation(sessionKey: string | null, now: number): void {
+  if (!sessionKey) return;
+  const entry = commandSessionLastFiredAt.get(sessionKey);
+  if (entry && entry.firedAt === now) commandSessionLastFiredAt.delete(sessionKey);
+}
+
+/** Releases a channel-floor reservation if it's still the one made at `now` for `timerId` (not a newer/different one made since). */
+function releaseChannelReservation(channel: string, timerId: number, now: number): void {
+  const entry = channelLastFiredAt.get(channel);
+  if (entry && entry.firedAt === now && entry.timerId === timerId) channelLastFiredAt.delete(channel);
+}
+
 /** Clears all cooldown state in both maps. Call on scheduler stop. */
 export function clearCooldowns(): void {
   commandSessionLastFiredAt.clear();
@@ -140,10 +153,16 @@ function applyCommandSessionCooldown(
 }
 
 /**
- * Layer 2 of {@link pickRowsToFire}: groups whatever survived layer 1 by channel, and for a channel
- * whose last post came from a *different* timer than the longest-waiting candidate here, within
- * {@link CHANNEL_MIN_SPACING_MS}, defers it to a later tick — applied regardless of Shared Chat
- * status. See the module doc above `channelLastFiredAt`.
+ * Layer 2 of {@link pickRowsToFire}: groups whatever survived layer 1 by channel. While the
+ * channel's floor is active (its last post was within {@link CHANNEL_MIN_SPACING_MS}), only a
+ * repeat of that *same* timer may post now — the floor exists to space out *different* commands,
+ * not to hold back the one that just posted from its own next cycle, so a lone fast timer is never
+ * throttled by this layer. If no such repeat is eligible this tick, the whole channel is deferred.
+ * Once the floor has cleared, whichever eligible row has waited longest wins as usual. Every row
+ * that loses its channel this tick — because a different row won it, or the floor deferred it
+ * outright — has its layer 1 (Shared Chat) reservation released immediately, since it never gets a
+ * chance to actually send: without this, it would sit "reserved" for its full command-session
+ * cooldown despite nothing having been posted for it. See the module doc above `channelLastFiredAt`.
  * @param layer1Survivors - Rows (with their layer 1 session-key reservation, if any) that cleared {@link applyCommandSessionCooldown}.
  * @param now - Current time in epoch ms, shared across the whole tick.
  * @param lastFiredAtOf - Resolves a row's current `lastFiredAt`, for the longest-waiting tie-break.
@@ -158,13 +177,20 @@ function applyChannelFloor(layer1Survivors: readonly PickedRow[], now: number, l
   }
 
   for (const [channel, picks] of byChannel) {
-    const candidate = pickLongestWaiting(picks.map((p) => p.row), lastFiredAtOf);
-    const candidatePick = picks.find((p) => p.row === candidate)!;
-
     const lastPoster = channelLastFiredAt.get(channel);
-    if (lastPoster && lastPoster.timerId !== candidate.id && now - lastPoster.firedAt < CHANNEL_MIN_SPACING_MS) continue;
+    const floorActive = !!lastPoster && now - lastPoster.firedAt < CHANNEL_MIN_SPACING_MS;
 
-    channelLastFiredAt.set(channel, { firedAt: now, timerId: candidate.id }); // provisional — released by releaseReservations on failure
+    const candidatePick = floorActive
+      ? picks.find((p) => p.row.id === lastPoster!.timerId)
+      : picks.find((p) => p.row === pickLongestWaiting(picks.map((p2) => p2.row), lastFiredAtOf));
+
+    for (const pick of picks) {
+      if (pick !== candidatePick) releaseCommandSessionReservation(pick.sessionKey, now);
+    }
+
+    if (!candidatePick) continue; // floor active and no eligible repeat of the last poster this tick
+
+    channelLastFiredAt.set(channel, { firedAt: now, timerId: candidatePick.row.id }); // provisional — released on failure
     toFire.push(candidatePick);
   }
 
@@ -206,12 +232,6 @@ export function pickRowsToFire(
  * @returns Nothing — mutates the module-level cooldown maps in place.
  */
 export function releaseReservations(sessionKey: string | null, channel: string, timerId: number, now: number): void {
-  if (sessionKey) {
-    const entry = commandSessionLastFiredAt.get(sessionKey);
-    if (entry && entry.firedAt === now) commandSessionLastFiredAt.delete(sessionKey);
-  }
-  const channelEntry = channelLastFiredAt.get(channel);
-  if (channelEntry && channelEntry.firedAt === now && channelEntry.timerId === timerId) {
-    channelLastFiredAt.delete(channel);
-  }
+  releaseCommandSessionReservation(sessionKey, now);
+  releaseChannelReservation(channel, timerId, now);
 }
