@@ -399,11 +399,38 @@ describe('incrementCounter', () => {
     const conn = pool._conn;
     conn.execute
       .mockResolvedValueOnce([{ affectedRows: 1 }, []])       // UPDATE: ResultSetHeader
-      .mockResolvedValueOnce([[{ current_value: 7 }], []]);    // SELECT: rows
+      .mockResolvedValueOnce([[{ current_value: 7 }], []]);    // SELECT LAST_INSERT_ID(): rows
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await incrementCounter(1);
     expect(result).toBe(7);
     expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('parses a string current_value into a number (LAST_INSERT_ID() is a BIGINT expression, so the pool\'s bigNumberStrings setting can return it as a string)', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([[{ current_value: '7' }], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await incrementCounter(1);
+    expect(result).toBe(7);
+    expect(typeof result).toBe('number');
+  });
+
+  it('reads the new value via LAST_INSERT_ID() instead of re-querying the counter table', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([[{ current_value: 3 }], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await incrementCounter(1);
+    const [updateSql] = conn.execute.mock.calls[0];
+    const [selectSql, selectParams] = conn.execute.mock.calls[1];
+    expect(updateSql).toContain('LAST_INSERT_ID(current_value + 1)');
+    expect(selectSql).toBe('SELECT LAST_INSERT_ID() AS current_value');
+    expect(selectParams).toBeUndefined();
   });
 
   it('releases the connection even when it throws', async () => {

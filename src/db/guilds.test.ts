@@ -40,17 +40,18 @@ describe('getAllGuilds', () => {
 });
 
 describe('getGuildsForMember', () => {
-  it('joins guild_member and maps BIGINT columns for the given user', async () => {
+  it('joins guild_member and maps BIGINT columns plus access_level for the given user', async () => {
     pool.execute.mockResolvedValueOnce([
-      [{ guild_id: 111n, name: 'Alpha', voice_channel_id: 222n }],
+      [{ guild_id: 111n, name: 'Alpha', voice_channel_id: 222n, access_level: 2 }],
       [],
     ]);
 
     const result = await getGuildsForMember('555');
 
-    expect(result).toEqual([{ guild_id: '111', name: 'Alpha', voice_channel_id: '222' }]);
+    expect(result).toEqual([{ guild_id: '111', name: 'Alpha', voice_channel_id: '222', access_level: 2 }]);
     const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('JOIN guild_member');
+    expect(sql).toContain('gm.access_level');
     expect(params).toEqual(['555']);
   });
 
