@@ -84,6 +84,14 @@ fi
 echo "==> Pruning dev dependencies..."
 npm prune --omit=dev
 
+# npm (as of npm 12) rewrites package-lock.json during `prune --omit=dev` to
+# drop dev-only entries, even though nothing in package.json changed. Left
+# alone, that leaves the working tree dirty and trips the next deploy's
+# uncommitted-changes check above. The pruned node_modules is unaffected by
+# discarding this rewrite — restore the tracked lockfile so it still reflects
+# the full dev+prod graph `npm ci` needs next time.
+git checkout -- package-lock.json
+
 trap - ERR  # Rollback no longer needed — code is good.
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
