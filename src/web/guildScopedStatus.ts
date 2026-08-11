@@ -42,6 +42,13 @@ export function clearGuildScopedStatusCache(): void {
   guildInfoInFlight.clear();
 }
 
+/**
+ * Returns `guildId`'s cached name + member list, refreshing it (via `getGuildById`/
+ * `getGuildMemberUsers`) when missing or past `GUILD_INFO_CACHE_TTL_MS`. Concurrent calls for
+ * the same stale/missing guild share one in-flight fetch instead of each firing their own.
+ * @param guildId - Guild to look up.
+ * @returns The guild's cached (or freshly fetched) name and member list.
+ */
 async function getCachedGuildInfo(guildId: string): Promise<CachedGuildInfo> {
   const cached = guildInfoCache.get(guildId);
   const now = Date.now();
