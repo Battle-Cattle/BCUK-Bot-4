@@ -12,10 +12,10 @@ const POLL_INTERVAL_MS = 60_000;
 /**
  * Last-seen redemption timestamp (epoch ms) per `${broadcasterUserId}:${twitchRewardId}`,
  * tracked purely in memory (mirrors the existing WebSocket/redemption dedup caches). A key's
- * first poll only records the current time as a baseline instead of replaying history — this
- * poll exists to catch redemptions missed *while the bot was running* (a WebSocket reconnect
- * gap, a keepalive timeout, a session migration window), not to backfill everything that
- * happened before this process started or before a reward was first seen.
+ * first poll looks back only one {@link POLL_INTERVAL_MS} instead of the reward's full history —
+ * this poll exists to catch redemptions missed *while the bot was running* (a WebSocket
+ * reconnect gap, a keepalive timeout, a session migration window, including the window right
+ * after startup), not to backfill everything that ever happened for a reward.
  */
 const lastSeenRedeemedAt = new Map<string, number>();
 
@@ -36,12 +36,52 @@ function toRedemptionEvent(broadcasterLogin: string, r: TwitchRewardRedemption):
 }
 
 /**
+ * Fetches every redemption for one reward+status newer than `cutoff`, paging (newest first)
+ * until a page contains a redemption at or before `cutoff` — everything after that point, and on
+ * every later page, is even older, so pagination stops there rather than walking the reward's
+ * entire history. This bounds the call count even for a reward with heavy redemption volume: a
+ * long-lived reward with thousands of past redemptions only ever pages through however many are
+ * actually newer than the cursor, typically zero or one page at the normal poll cadence.
+ *
+ * @param uid - Broadcaster's Twitch user ID.
+ * @param rewardId - Twitch reward UUID.
+ * @param status - Redemption status to query (see {@link getRewardRedemptions}).
+ * @param token - Broadcaster's currently-valid OAuth user token.
+ * @param cutoff - Epoch ms; only redemptions redeemed strictly after this are returned.
+ */
+async function fetchRedemptionsNewerThan(
+  uid: string, rewardId: string, status: 'UNFULFILLED' | 'FULFILLED', token: string, cutoff: number,
+): Promise<TwitchRewardRedemption[]> {
+  const result: TwitchRewardRedemption[] = [];
+  let after: string | undefined;
+  for (;;) {
+    const page = await getRewardRedemptions(uid, rewardId, status, token, after);
+    let hitCutoff = false;
+    for (const r of page.redemptions) {
+      const redeemedAt = Date.parse(r.redeemed_at);
+      if (!Number.isFinite(redeemedAt) || redeemedAt <= cutoff) { hitCutoff = true; break; }
+      result.push(r);
+    }
+    if (hitCutoff || !page.cursor || page.redemptions.length === 0) break;
+    after = page.cursor;
+  }
+  return result;
+}
+
+/**
  * Fetches recent redemptions for one reward (both UNFULFILLED — still in the queue — and
  * FULFILLED — including rewards with `should_redemptions_skip_request_queue` set, which never
  * appear as UNFULFILLED) and replays any redeemed after the reward's tracked cursor through
  * {@link handleRedemption}. `handleRedemption` itself dedupes on the redemption id, so a
  * redemption already delivered live via the WebSocket is a safe no-op here — this only ever
  * has an effect for a redemption the WebSocket never delivered at all.
+ *
+ * The cursor only advances past a redemption once `handleRedemption` has actually succeeded for
+ * it; if any redemption in this tick fails to handle, the cursor is left exactly where it was
+ * before this tick, so every redemption fetched this tick (including ones that already
+ * succeeded) is retried on the next tick. That reprocessing is safe: it lands well within
+ * `handleRedemption`'s own redemption-id dedup TTL, so an already-handled redemption is a no-op
+ * there rather than a real duplicate.
  *
  * @param info - Dispatch info for the redemption's streamer (login/streamerId/config).
  * @param uid - Broadcaster's Twitch user ID.
@@ -50,17 +90,16 @@ function toRedemptionEvent(broadcasterLogin: string, r: TwitchRewardRedemption):
  */
 async function reconcileReward(info: StreamerInfo, uid: string, token: string, rewardId: string): Promise<void> {
   const key = `${uid}:${rewardId}`;
-  const cutoff = lastSeenRedeemedAt.get(key);
-  if (cutoff === undefined) {
-    lastSeenRedeemedAt.set(key, Date.now());
-    return;
-  }
+  // First time seeing this reward: look back one poll interval rather than the reward's full
+  // history — this still covers the window right after the bot (re)started or first subscribed
+  // for this streamer, instead of leaving it as a permanent blind spot.
+  const cutoff = lastSeenRedeemedAt.get(key) ?? Date.now() - POLL_INTERVAL_MS;
 
   let redemptions: TwitchRewardRedemption[];
   try {
     const [unfulfilled, fulfilled] = await Promise.all([
-      getRewardRedemptions(uid, rewardId, 'UNFULFILLED', token),
-      getRewardRedemptions(uid, rewardId, 'FULFILLED', token),
+      fetchRedemptionsNewerThan(uid, rewardId, 'UNFULFILLED', token, cutoff),
+      fetchRedemptionsNewerThan(uid, rewardId, 'FULFILLED', token, cutoff),
     ]);
     redemptions = [...unfulfilled, ...fulfilled];
   } catch (err) {
@@ -69,18 +108,20 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
   }
 
   let maxSeen = cutoff;
+  let hadFailure = false;
   for (const r of redemptions) {
     const redeemedAt = Date.parse(r.redeemed_at);
-    if (!Number.isFinite(redeemedAt) || redeemedAt <= cutoff) continue;
-    if (redeemedAt > maxSeen) maxSeen = redeemedAt;
+    if (!Number.isFinite(redeemedAt)) continue;
     log.warn(`Reconciliation caught a redemption missed by EventSub: "${r.reward.title}" (id=${r.id}) for ${info.login}`);
     try {
       await handleRedemption(info.login, toRedemptionEvent(info.login, r), info.config ?? DEFAULT_EVENT_CONFIG, info.streamerId);
+      if (redeemedAt > maxSeen) maxSeen = redeemedAt;
     } catch (err) {
       log.error(`Reconciled-redemption handler error for redemption ${r.id} (${info.login}):`, err);
+      hadFailure = true;
     }
   }
-  lastSeenRedeemedAt.set(key, maxSeen);
+  if (!hadFailure) lastSeenRedeemedAt.set(key, maxSeen);
 }
 
 /**
