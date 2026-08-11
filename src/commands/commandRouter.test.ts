@@ -66,10 +66,21 @@ describe('handleCommand', () => {
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
 
-  it('skips with a warning and does not look anything up when no guild is resolved', async () => {
+  it('skips without warning when no guild is resolved and the message is not a known trigger', async () => {
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(null);
+
+    await handleCommand('just chatting about stuff', 'twitch', null);
+
+    expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledWith('just');
+    expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+  });
+
+  it('skips with a warning when a known trigger fires but no guild is resolved', async () => {
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
+
     await handleCommand('!ding', 'twitch', null);
 
-    expect(vi.mocked(findCachedSfxTrigger)).not.toHaveBeenCalled();
+    expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledWith('!ding');
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
 

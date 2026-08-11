@@ -125,7 +125,9 @@ function tryClaimGuildSlot(
  * @param source     Label used for console logging ('twitch' | 'discord').
  * @param guildId    The guild to target; null when no active guild could be
  *   resolved (e.g. a Twitch command fired while the streamer isn't
- *   connected to voice anywhere) — the command is skipped with a warning.
+ *   connected to voice anywhere) — the command is skipped, with a warning
+ *   logged only if the message actually matches a known trigger (most chat
+ *   messages don't, and would otherwise spam this warning on every message).
  */
 export async function handleCommand(
   rawMessage: string,
@@ -138,7 +140,9 @@ export async function handleCommand(
   if (!command) return;
 
   if (guildId === null) {
-    log.warn(`[${source}] No active guild resolved for command '${command}', skipping`);
+    if (await findCachedSfxTrigger(command)) {
+      log.warn(`[${source}] No active guild resolved for command '${command}', skipping`);
+    }
     return;
   }
 
