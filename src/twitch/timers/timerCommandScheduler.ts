@@ -43,23 +43,79 @@ function rowKey(row: { id: number; channel: string }): string {
 
 const timerState = new Map<string, TimerRuntimeState>();
 
-// ─── Shared Chat group cooldown ──────────────────────────────────────────────
+/** Picks whichever of `rows` has gone longest without firing (oldest `timerState.lastFiredAt`), breaking ties by keeping the first. */
+function pickLongestWaiting(rows: readonly TimerCommandForScheduler[]): TimerCommandForScheduler {
+  return rows.reduce((oldest, row) => {
+    const oldestState = timerState.get(rowKey(oldest))!;
+    const rowState = timerState.get(rowKey(row))!;
+    return rowState.lastFiredAt < oldestState.lastFiredAt ? row : oldest;
+  });
+}
+
+// ─── Per-command Shared Chat cooldown ────────────────────────────────────────
 //
-// When several streamers' channels are merged into one Twitch Shared Chat session
-// (multitwitch), each streamer's timer otherwise keeps firing on its own independent
-// schedule — and since Shared Chat shows every participating channel's messages in
-// one merged view, that stacks up and floods it. This caps how often ANY timer may
-// post into a given session, and rotates fairly among the timers sharing it (see
-// `pickRowsToFire`) so distinct messages take turns instead of one dominating.
+// When several of one timer's assigned streamers are merged into the same Twitch Shared Chat
+// session (multitwitch), each of that timer's assigned channels otherwise keeps firing on its own
+// independent schedule — and since Shared Chat shows every participating channel's messages in one
+// merged view, that stacks up into the same command posting several times in a few minutes. This
+// caps a given timer to firing at most once per its own `interval_seconds` into a given session —
+// as if that whole session were one channel, for this command specifically — and rotates fairly
+// among the timer's channels sharing it (see `pickRowsToFire`) so each gets a turn instead of one
+// dominating. Scoped per (timer id, session id): a *different* timer assigned to the same
+// shared-chat streamers gets its own independent cooldown, sized to its own interval, and never
+// competes with this one for a turn.
 
-const SHARED_SESSION_COOLDOWN_MS = 120_000;
-const sessionLastFiredAt = new Map<string, number>();
-const SESSION_COOLDOWN_ENTRY_MAX_AGE_MS = 10 * SHARED_SESSION_COOLDOWN_MS;
+interface CommandSessionCooldown {
+  firedAt: number;
+  /** The interval (ms) that was actually applied when this cooldown was reserved — needed to prune it correctly later, since different timers (and a live-edited interval) can each imply a different cooldown length. */
+  cooldownMs: number;
+}
 
-/** Drops session-cooldown entries older than {@link SESSION_COOLDOWN_ENTRY_MAX_AGE_MS} so the map doesn't grow unbounded as Shared Chat sessions come and go over long uptimes. */
-function pruneStaleSessionCooldowns(now: number): void {
-  for (const [sessionId, firedAt] of sessionLastFiredAt) {
-    if (now - firedAt > SESSION_COOLDOWN_ENTRY_MAX_AGE_MS) sessionLastFiredAt.delete(sessionId);
+const commandSessionLastFiredAt = new Map<string, CommandSessionCooldown>();
+
+/** Composite key for {@link commandSessionLastFiredAt}: one cooldown per (timer, Shared Chat session). */
+function commandSessionKey(timerId: number, sessionId: string): string {
+  return `${timerId}::${sessionId}`;
+}
+
+/** A stale command-session cooldown entry is kept around for this many multiples of its own cooldown length before being pruned, so the map doesn't grow unbounded as Shared Chat sessions come and go over long uptimes. */
+const COMMAND_SESSION_COOLDOWN_PRUNE_FACTOR = 10;
+
+/** Drops command-session cooldown entries old enough (relative to their own recorded cooldown length) that the session or assignment behind them is almost certainly gone. */
+function pruneStaleCommandSessionCooldowns(now: number): void {
+  for (const [key, entry] of commandSessionLastFiredAt) {
+    if (now - entry.firedAt > entry.cooldownMs * COMMAND_SESSION_COOLDOWN_PRUNE_FACTOR) {
+      commandSessionLastFiredAt.delete(key);
+    }
+  }
+}
+
+// ─── Cross-command channel floor ─────────────────────────────────────────────
+//
+// Independent of Shared Chat: if a single Twitch channel has several *different* timer commands
+// assigned to it, each fires on its own schedule with nothing otherwise stopping two of them from
+// landing seconds apart. This enforces a minimum gap between any two *different* commands posting
+// into the same channel, and — like the Shared Chat cooldown above — lets whichever has waited
+// longest go first. It deliberately does not slow down a single command's own cadence: the floor
+// only applies when the channel's last post came from a *different* timer than the one about to
+// post now, so a lone timer with a short interval (as low as `chk_timer_command_interval`'s 60s
+// floor) is never throttled below its own configured interval just for being alone on its channel.
+
+const CHANNEL_MIN_SPACING_MS = 120_000;
+
+interface ChannelCooldown {
+  firedAt: number;
+  timerId: number;
+}
+
+const channelLastFiredAt = new Map<string, ChannelCooldown>();
+
+const CHANNEL_MIN_SPACING_PRUNE_MS = 10 * CHANNEL_MIN_SPACING_MS;
+
+/** Drops channel-floor entries older than {@link CHANNEL_MIN_SPACING_PRUNE_MS} so the map doesn't grow unbounded as channels stop being assigned any timer over long uptimes. */
+function pruneStaleChannelCooldowns(now: number): void {
+  for (const [channel, entry] of channelLastFiredAt) {
+    if (now - entry.firedAt > CHANNEL_MIN_SPACING_PRUNE_MS) channelLastFiredAt.delete(channel);
   }
 }
 
@@ -105,24 +161,29 @@ async function resolveSessionIdsByChannel(
   return sessionIdByChannel;
 }
 
-/** A row picked to fire this tick, paired with the Shared Chat session (if any) it was picked for. */
+/** A row picked to fire this tick, paired with the reservations {@link sendTimerRow} must release if the send doesn't succeed. */
 interface PickedRow {
   row: TimerCommandForScheduler;
-  sessionId: string | null;
+  /** The {@link commandSessionKey} reserved for this pick, or null if its channel isn't in a Shared Chat session. */
+  sessionKey: string | null;
 }
 
 /**
  * From the rows that already passed their own {@link evaluateFireBlock} check, decides which ones
- * actually get to fire this tick, applying the Shared Chat group cooldown: rows with no resolved
- * session always fire (unaffected — this is the fully-independent, outside-of-multitwitch case).
- * For rows sharing a session that's currently off cooldown, only the single row that has gone
- * longest without firing (oldest `lastFiredAt`) is picked, and the session is tentatively reserved
- * — this rotates fairly among the timers sharing a session (instead of one perpetually winning) and
- * prevents two rows in the same session both firing in one tick. The reservation is only
- * provisional: {@link sendTimerRow} releases it if the send doesn't actually succeed, so a failed
- * send can't silence the whole group for the full cooldown window. Rows in a session still on
- * cooldown, and rows not picked from an eligible session, are left untouched so they're
- * reconsidered on a later tick.
+ * actually get to fire this tick, in two layers:
+ *
+ * 1. Per-command Shared Chat cooldown: groups rows by (timer id, Shared Chat session), and for a
+ *    group off its own cooldown (sized to that timer's `interval_seconds`), picks the row that's
+ *    gone longest without firing and reserves the cooldown. Rows whose channel isn't in a session
+ *    pass straight through. See the module doc above `commandSessionLastFiredAt`.
+ * 2. Cross-command channel floor: groups whatever survived layer 1 by channel, and for a channel
+ *    whose last post came from a *different* timer than the longest-waiting candidate here, within
+ *    {@link CHANNEL_MIN_SPACING_MS}, defers it to a later tick. See the module doc above
+ *    `channelLastFiredAt`.
+ *
+ * Both reservations are only provisional: {@link sendTimerRow} releases them if the send doesn't
+ * actually succeed, so a failed send can't silence a session/channel for the full cooldown window.
+ * Rows not picked at either layer are left untouched so they're reconsidered on a later tick.
  * @param eligibleRows - Rows that already passed their own per-timer {@link evaluateFireBlock} check.
  * @param sessionIdByChannel - Each row's channel's resolved Shared Chat session id (or null).
  * @param now - Current time in epoch ms, shared across the whole tick.
@@ -132,50 +193,89 @@ function pickRowsToFire(
   sessionIdByChannel: ReadonlyMap<string, string | null>,
   now: number,
 ): PickedRow[] {
-  const toFire: PickedRow[] = [];
-  const bySession = new Map<string, TimerCommandForScheduler[]>();
+  // Layer 1 — per-command Shared Chat cooldown.
+  const layer1Survivors: PickedRow[] = [];
+  const bySessionAndTimer = new Map<string, TimerCommandForScheduler[]>();
 
   for (const row of eligibleRows) {
     const sessionId = sessionIdByChannel.get(row.channel) ?? null;
     if (!sessionId) {
-      toFire.push({ row, sessionId: null });
+      layer1Survivors.push({ row, sessionKey: null });
       continue;
     }
-    const group = bySession.get(sessionId);
-    if (group) group.push(row); else bySession.set(sessionId, [row]);
+    const key = commandSessionKey(row.id, sessionId);
+    const group = bySessionAndTimer.get(key);
+    if (group) group.push(row); else bySessionAndTimer.set(key, [row]);
   }
 
-  for (const [sessionId, rows] of bySession) {
-    const lastFired = sessionLastFiredAt.get(sessionId) ?? 0;
-    if (now - lastFired < SHARED_SESSION_COOLDOWN_MS) continue;
+  for (const [key, rows] of bySessionAndTimer) {
+    const cooldownMs = rows[0].interval_seconds * 1000;
+    const entry = commandSessionLastFiredAt.get(key);
+    if (entry && now - entry.firedAt < cooldownMs) continue;
 
-    const picked = rows.reduce((oldest, row) => {
-      const oldestState = timerState.get(rowKey(oldest))!;
-      const rowState = timerState.get(rowKey(row))!;
-      return rowState.lastFiredAt < oldestState.lastFiredAt ? row : oldest;
-    });
-    sessionLastFiredAt.set(sessionId, now); // provisional — released by sendTimerRow on failure
-    toFire.push({ row: picked, sessionId });
+    const picked = pickLongestWaiting(rows);
+    commandSessionLastFiredAt.set(key, { firedAt: now, cooldownMs }); // provisional — released by sendTimerRow on failure
+    layer1Survivors.push({ row: picked, sessionKey: key });
+  }
+
+  // Layer 2 — cross-command channel floor, applied regardless of Shared Chat status.
+  const toFire: PickedRow[] = [];
+  const byChannel = new Map<string, PickedRow[]>();
+  for (const picked of layer1Survivors) {
+    const group = byChannel.get(picked.row.channel);
+    if (group) group.push(picked); else byChannel.set(picked.row.channel, [picked]);
+  }
+
+  for (const [channel, picks] of byChannel) {
+    const candidate = pickLongestWaiting(picks.map((p) => p.row));
+    const candidatePick = picks.find((p) => p.row === candidate)!;
+
+    const lastPoster = channelLastFiredAt.get(channel);
+    if (lastPoster && lastPoster.timerId !== candidate.id && now - lastPoster.firedAt < CHANNEL_MIN_SPACING_MS) continue;
+
+    channelLastFiredAt.set(channel, { firedAt: now, timerId: candidate.id }); // provisional — released by sendTimerRow on failure
+    toFire.push(candidatePick);
   }
 
   return toFire;
 }
 
 /**
+ * Releases the provisional cooldown reservations {@link pickRowsToFire} made for a row, if the send
+ * that would have justified them didn't actually happen (no runtime, or `runtime.send` threw).
+ * Guarded by matching the reservation's own identity so a release can't clobber a newer reservation
+ * made by a different row on a later tick.
+ * @param sessionKey - The command-session cooldown key reserved for this row, or null.
+ * @param channel - The row's Twitch channel — the channel-floor reservation to potentially release.
+ * @param timerId - The row's timer id — must match the channel-floor reservation's own recorded id.
+ * @param now - The epoch-ms timestamp the reservations were made under, shared across the whole tick.
+ * @returns Nothing — mutates the module-level cooldown maps in place.
+ */
+function releaseReservations(sessionKey: string | null, channel: string, timerId: number, now: number): void {
+  if (sessionKey) {
+    const entry = commandSessionLastFiredAt.get(sessionKey);
+    if (entry && entry.firedAt === now) commandSessionLastFiredAt.delete(sessionKey);
+  }
+  const channelEntry = channelLastFiredAt.get(channel);
+  if (channelEntry && channelEntry.firedAt === now && channelEntry.timerId === timerId) {
+    channelLastFiredAt.delete(channel);
+  }
+}
+
+/**
  * Posts one selected timer row to its channel and records the fire in the in-memory state.
  * No-ops if no runtime is registered. Never throws — a send failure is logged and swallowed so it
- * can't block other rows in the same tick. If `sessionId` is set and the send doesn't succeed (no
- * runtime, or `runtime.send` throws), releases that session's cooldown reservation made by
- * {@link pickRowsToFire} — guarded by a timestamp match so it can't clobber a newer reservation
- * made by another row in the same session on a later tick.
+ * can't block other rows in the same tick. If the send doesn't succeed (no runtime, or
+ * `runtime.send` throws), releases the cooldown reservation(s) {@link pickRowsToFire} made for this
+ * row — see {@link releaseReservations}.
  * @param row - The timer's config, joined with its Twitch channel.
  * @param now - Current time in epoch ms, shared across the whole tick.
- * @param sessionId - The Shared Chat session this row was provisionally reserved for, or null.
+ * @param sessionKey - The command-session cooldown key this row was provisionally reserved for, or null.
  */
-async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionId: string | null): Promise<void> {
+async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionKey: string | null): Promise<void> {
   const runtime = timerCommandsRuntime.get();
   if (!runtime) {
-    if (sessionId && sessionLastFiredAt.get(sessionId) === now) sessionLastFiredAt.delete(sessionId);
+    releaseReservations(sessionKey, row.channel, row.id, now);
     return;
   }
 
@@ -188,7 +288,7 @@ async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionI
     forgetBlockReason(key);
     log.info(`Posted timer ${row.id} to ${row.channel}`);
   } catch (err) {
-    if (sessionId && sessionLastFiredAt.get(sessionId) === now) sessionLastFiredAt.delete(sessionId);
+    releaseReservations(sessionKey, row.channel, row.id, now);
     log.error(`Failed to post timer command ${row.id} to ${row.channel}:`, err);
   }
 }
@@ -200,9 +300,10 @@ async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionI
  * newly blocked on being offline or on chat activity, so a stuck gate is diagnosable from logs
  * instead of looking identical to a healthy row still waiting out its interval), resolves Shared
  * Chat sessions for the ones that are ready, picks which of those actually get to fire this tick
- * (applying the group cooldown — see {@link pickRowsToFire}), and sends the picked rows
- * concurrently via `Promise.allSettled` so one channel's send failure can't block another's.
- * No-ops (re-uses the in-flight promise) if a tick is already running.
+ * (applying the per-command Shared Chat cooldown and the cross-command channel floor — see
+ * {@link pickRowsToFire}), and sends the picked rows concurrently via `Promise.allSettled` so one
+ * channel's send failure can't block another's. No-ops (re-uses the in-flight promise) if a tick
+ * is already running.
  */
 export async function runTimerCommandTick(): Promise<void> {
   if (tickRunning) return currentTickPromise;
@@ -213,7 +314,8 @@ export async function runTimerCommandTick(): Promise<void> {
       pruneStaleTimerState(new Set(rows.map(rowKey)));
 
       const now = Date.now();
-      pruneStaleSessionCooldowns(now);
+      pruneStaleCommandSessionCooldowns(now);
+      pruneStaleChannelCooldowns(now);
 
       const eligibleRows: TimerCommandForScheduler[] = [];
       for (const row of rows) {
@@ -232,7 +334,7 @@ export async function runTimerCommandTick(): Promise<void> {
       const sessionIdByChannel = await resolveSessionIdsByChannel(eligibleRows.map((row) => row.channel), loginUserIds);
       const toFire = pickRowsToFire(eligibleRows, sessionIdByChannel, now);
 
-      await Promise.allSettled(toFire.map(({ row, sessionId }) => sendTimerRow(row, now, sessionId)));
+      await Promise.allSettled(toFire.map(({ row, sessionKey }) => sendTimerRow(row, now, sessionKey)));
     } catch (err) {
       log.error('Failed to load enabled timer commands:', err);
     } finally {
@@ -259,6 +361,7 @@ export async function stopTimerCommandScheduler(): Promise<void> {
   if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
   await currentTickPromise;
   timerState.clear();
-  sessionLastFiredAt.clear();
+  commandSessionLastFiredAt.clear();
+  channelLastFiredAt.clear();
   clearBlockReasonLog();
 }
