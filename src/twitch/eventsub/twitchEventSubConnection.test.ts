@@ -369,6 +369,7 @@ describe('StreamerConnection lifecycle', () => {
     expect((conn as any).ws).not.toBeNull();
   });
 
+  /** Verifies the keepalive-timeout path force-reconnects without waiting on the socket's own 'close' event; returns void. */
   it('reconnects on a keepalive timeout even if the socket never fires its own close event', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
@@ -389,6 +390,7 @@ describe('StreamerConnection lifecycle', () => {
     expect((conn as any).reconnectAttempts).toBe(1);
   });
 
+  /** Verifies a stale close event arriving after a keepalive-triggered reconnect is ignored; returns void. */
   it('ignores a late close event from a socket already superseded by a keepalive-triggered reconnect', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();

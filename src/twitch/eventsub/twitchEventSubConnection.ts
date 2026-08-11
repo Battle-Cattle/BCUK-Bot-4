@@ -175,6 +175,13 @@ export class StreamerConnection {
     }
   }
 
+  /**
+   * Handles the socket's `'close'` event: ignores it if `socket` is no longer this connection's
+   * active socket (a stale event from a socket already superseded by a force-reconnect or
+   * session migration), otherwise tears it down and schedules a reconnect via {@link forceReconnect}.
+   * @param ev - The close event, used only for logging the code/reason.
+   * @param socket - The socket that emitted the event.
+   */
   private onClose(ev: CloseEvent, socket: WebSocket): void {
     if (this.ws !== socket) return; // old socket closed during session migration, or already force-reconnected — ignore
     log.warn(`[${this.name}] WebSocket closed: ${ev.code} ${ev.reason}`);
@@ -192,6 +199,8 @@ export class StreamerConnection {
    * this connection's current socket any more (e.g. a session migration or an earlier
    * force-reconnect already superseded it) — including the case where `socket`'s real
    * `'close'` event does eventually land after this already ran.
+   * @param socket - The socket to tear down, or `null` (always a no-op in that case).
+   * @returns Nothing.
    */
   private forceReconnect(socket: WebSocket | null): void {
     if (this.ws !== socket) return;
@@ -281,6 +290,11 @@ export class StreamerConnection {
     if (this.keepaliveTimer) { clearTimeout(this.keepaliveTimer); this.keepaliveTimer = null; }
   }
 
+  /**
+   * (Re)starts the keepalive watchdog: clears any existing timer and arms a new one that, if no
+   * message (including `session_keepalive`) arrives before it fires, force-reconnects immediately
+   * rather than waiting on the socket's own `'close'` event — see {@link forceReconnect}.
+   */
   private resetKeepaliveTimer(): void {
     this.clearKeepaliveTimer();
     this.keepaliveTimer = setTimeout(() => {
