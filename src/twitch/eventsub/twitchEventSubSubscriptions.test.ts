@@ -666,12 +666,8 @@ describe('error handling in subscription setup', () => {
       streamerId: 72,
     });
 
-    // Flush microtasks until the second deletion starts (or give up after a bounded number of
-    // ticks) — proves the second deletion isn't waiting on the first to settle.
-    for (let i = 0; i < 20 && !secondStarted; i++) {
-      await Promise.resolve();
-    }
-    expect(secondStarted).toBe(true);
+    // Waits until the second deletion starts — proves it isn't waiting on the first to settle.
+    await vi.waitFor(() => expect(secondStarted).toBe(true));
 
     rejectFirst(new Error('delete failed'));
     await expect(call).resolves.not.toThrow();
