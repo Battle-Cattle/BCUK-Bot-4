@@ -3,10 +3,7 @@ import { getAllEnabledTimerCommandsWithChannel, type TimerCommandForScheduler } 
 import { getMessageCount } from '../twitchChatActivity';
 import { resolveSharedChatSessionId } from '../../commands/customCommandHandler';
 import { createRuntimeRegistry, type TwitchSendRuntime } from '../../commands/twitchRuntime';
-import {
-  evaluateFireBlock, logBlockReasonChange, forgetBlockReason, pruneBlockReasonLog, clearBlockReasonLog,
-  type TimerRuntimeState,
-} from './timerCommandFireGate';
+import { shouldFire, type TimerRuntimeState } from './timerCommandFireGate';
 import { pickRowsToFire, releaseReservations, pruneStaleCooldowns, clearCooldowns } from './timerCommandCooldowns';
 
 const log = createLogger('TimerCommandScheduler');
@@ -52,14 +49,12 @@ let currentTickPromise: Promise<void> = Promise.resolve();
  * Removes in-memory state for any (timer id, channel) pair no longer present in the latest
  * enabled-rows fetch.
  * @param currentKeys - {@link rowKey} values for every row in the latest enabled-rows fetch.
- * @returns Nothing — mutates the module-level `timerState` map (and the fire-gate's own
- *   block-reason log — see {@link pruneBlockReasonLog}) in place.
+ * @returns Nothing — mutates the module-level `timerState` map in place.
  */
 function pruneStaleTimerState(currentKeys: ReadonlySet<string>): void {
   for (const key of timerState.keys()) {
     if (!currentKeys.has(key)) timerState.delete(key);
   }
-  pruneBlockReasonLog(currentKeys);
 }
 
 /**
@@ -109,8 +104,6 @@ async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionK
     await runtime.send(row.channel, row.message);
     state.lastFiredAt = now;
     state.messagesAtLastFire = getMessageCount(row.channel);
-    forgetBlockReason(key);
-    log.info(`Posted timer ${row.id} to ${row.channel}`);
   } catch (err) {
     releaseReservations(sessionKey, row.channel, row.id, now);
     log.error(`Failed to post timer command ${row.id} to ${row.channel}:`, err);
@@ -120,14 +113,12 @@ async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionK
 /**
  * Runs one scheduler tick: fetches every enabled timer, prunes in-memory state for timers that no
  * longer exist/are disabled, seeds any newly-seen timer without firing it, then for the rest:
- * evaluates each row's own fire condition (logging via {@link logBlockReasonChange} when a row is
- * newly blocked on being offline or on chat activity, so a stuck gate is diagnosable from logs
- * instead of looking identical to a healthy row still waiting out its interval), resolves Shared
- * Chat sessions for the ones that are ready, picks which of those actually get to fire this tick
- * (applying the per-command Shared Chat cooldown and the cross-command channel floor — see
- * `pickRowsToFire` in `timerCommandCooldowns.ts`), and sends the picked rows concurrently via
- * `Promise.allSettled` so one channel's send failure can't block another's. No-ops (re-uses the
- * in-flight promise) if a tick is already running.
+ * evaluates each row's own fire condition ({@link shouldFire}), resolves Shared Chat sessions for
+ * the ones that are ready, picks which of those actually get to fire this tick (applying the
+ * per-command Shared Chat cooldown and the cross-command channel floor — see `pickRowsToFire` in
+ * `timerCommandCooldowns.ts`), and sends the picked rows concurrently via `Promise.allSettled` so
+ * one channel's send failure can't block another's. No-ops (re-uses the in-flight promise) if a
+ * tick is already running.
  */
 export async function runTimerCommandTick(): Promise<void> {
   if (tickRunning) return currentTickPromise;
@@ -148,9 +139,7 @@ export async function runTimerCommandTick(): Promise<void> {
           timerState.set(key, { lastFiredAt: now, messagesAtLastFire: getMessageCount(row.channel) });
           continue;
         }
-        const blockReason = evaluateFireBlock(row, state, now);
-        logBlockReasonChange(key, row, blockReason, state);
-        if (blockReason === null) eligibleRows.push(row);
+        if (shouldFire(row, state, now)) eligibleRows.push(row);
       }
 
       const loginUserIds = timerCommandsRuntime.get()?.getLoginUserIds() ?? new Map<string, string>();
@@ -186,5 +175,4 @@ export async function stopTimerCommandScheduler(): Promise<void> {
   await currentTickPromise;
   timerState.clear();
   clearCooldowns();
-  clearBlockReasonLog();
 }
