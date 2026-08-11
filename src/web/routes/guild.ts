@@ -4,10 +4,13 @@ import { AccessLevel, findUser, getAllGuilds, getEffectiveAccessLevelForUser, ge
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
-import { normalizeDiscordId, renderView } from './shared';
+import { filterQueryParam, logAndRedirectError, normalizeDiscordId, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
+
+/** Error codes `GET /guild/select` accepts via `?error=`, all originating from `POST /guild/select`. */
+const KNOWN_ERRORS = new Set(['invalid_guild', 'guild_not_found', 'select_failed']);
 
 // ─── Guild picker ──────────────────────────────────────────────────────────
 //
@@ -17,9 +20,11 @@ const router = Router();
 
 /**
  * Renders the guild picker page for multi-guild users.
- * @param req - Express request; reads `req.session.user.guilds`.
- * @param res - Express response; renders `guildSelect`, or redirects to `/` when the user
- *   has at most one guild (single-guild users are sent straight to the dashboard).
+ * @param req - Express request; reads `req.session.user.guilds` and `req.query.error`
+ *   (set by `POST /guild/select` on failure) to show a banner.
+ * @param res - Express response; renders `guildSelect` with the sanitized `error` code
+ *   if any, or redirects to `/` when the user has at most one guild (single-guild
+ *   users are sent straight to the dashboard).
  */
 router.get('/select', requireAuth, csrfProtection, (req, res) => {
   const user = getSessionUser(req);
@@ -30,6 +35,7 @@ router.get('/select', requireAuth, csrfProtection, (req, res) => {
     user,
     guilds: user.guilds,
     csrfToken: req.csrfToken(),
+    error: filterQueryParam(req.query.error, KNOWN_ERRORS),
   });
 });
 
@@ -46,13 +52,13 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
   const requestedGuildId = typeof guild_id === 'string' ? normalizeDiscordId(guild_id) : null;
 
   if (!requestedGuildId) {
-    return res.redirect('/guild/select');
+    return res.redirect('/guild/select?error=invalid_guild');
   }
 
   try {
     const dbUser = await findUser(user.discordId);
     if (!dbUser) {
-      return res.redirect('/auth/login');
+      return res.redirect('/auth/login?error=user_not_found');
     }
     const isOwner = dbUser.is_owner;
     const liveGuilds = isOwner ? await getAllGuilds() : await getGuildsForMember(user.discordId);
@@ -60,17 +66,23 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
     user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
     if (user.guilds.length === 0) {
       user.currentGuildId = null;
-      return res.redirect('/auth/login');
+      return res.redirect('/auth/login?error=no_guilds');
     }
     if (!liveGuilds.some((g) => g.guild_id === requestedGuildId)) {
-      return res.redirect('/guild/select');
+      return res.redirect('/guild/select?error=guild_not_found');
     }
     const accessLevel = (await getEffectiveAccessLevelForUser(requestedGuildId, dbUser)) as (typeof AccessLevel)[keyof typeof AccessLevel];
     user.currentGuildId = requestedGuildId;
     user.accessLevel = accessLevel;
   } catch (err) {
-    log.error('Guild select failed:', err);
-    return res.redirect('/guild/select');
+    return logAndRedirectError({
+      res,
+      log,
+      logLabel: 'Guild select failed:',
+      err,
+      basePath: '/guild/select',
+      errorCode: 'select_failed',
+    });
   }
   res.redirect('/');
 });

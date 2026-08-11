@@ -363,6 +363,18 @@ describe('GET /login', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/');
   });
+
+  it('passes a known ?error= code through to the view', async () => {
+    const res = await supertest(buildApp()).get('/login?error=no_guilds');
+    expect(res.status).toBe(200);
+    expect((res.body as any).locals.error).toBe('no_guilds');
+  });
+
+  it('filters out an unrecognized ?error= code', async () => {
+    const res = await supertest(buildApp()).get('/login?error=not_a_real_code');
+    expect(res.status).toBe(200);
+    expect((res.body as any).locals.error).toBeNull();
+  });
 });
 
 // ─── POST /logout ─────────────────────────────────────────────────────────────

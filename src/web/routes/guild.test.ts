@@ -72,6 +72,20 @@ describe('GET /guild/select', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/');
   });
+
+  it('passes a known ?error= code through to the view', async () => {
+    const res = await supertest(buildApp({ discordId: 'u1', currentGuildId: null, guilds: TWO_GUILDS }))
+      .get('/guild/select?error=guild_not_found');
+    expect(res.status).toBe(200);
+    expect((res.body as any).locals.error).toBe('guild_not_found');
+  });
+
+  it('filters out an unrecognized ?error= code', async () => {
+    const res = await supertest(buildApp({ discordId: 'u1', currentGuildId: null, guilds: TWO_GUILDS }))
+      .get('/guild/select?error=not_a_real_code');
+    expect(res.status).toBe(200);
+    expect((res.body as any).locals.error).toBeNull();
+  });
 });
 
 describe('POST /guild/select', () => {
@@ -116,7 +130,7 @@ describe('POST /guild/select', () => {
       .send({ guild_id: '999000999000999000' });
 
     expect(res.status).toBe(302);
-    expect(res.headers.location).toBe('/guild/select');
+    expect(res.headers.location).toBe('/guild/select?error=guild_not_found');
     expect(user.currentGuildId).toBeNull();
     expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
@@ -141,7 +155,7 @@ describe('POST /guild/select', () => {
       .send({ guild_id: '100000000000000002' });
 
     expect(res.status).toBe(302);
-    expect(res.headers.location).toBe('/guild/select');
+    expect(res.headers.location).toBe('/guild/select?error=guild_not_found');
     expect(user.currentGuildId).toBeNull();
     expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
@@ -221,7 +235,7 @@ describe('POST /guild/select', () => {
       .send({ guild_id: '100000000000000002' });
 
     expect(res.status).toBe(302);
-    expect(res.headers.location).toBe('/guild/select');
+    expect(res.headers.location).toBe('/guild/select?error=guild_not_found');
     expect(user.guilds).toEqual([{ guildId: '100000000000000001', name: 'Alpha' }]);
   });
 
@@ -236,7 +250,7 @@ describe('POST /guild/select', () => {
       .send({ guild_id: '100000000000000002' });
 
     expect(res.status).toBe(302);
-    expect(res.headers.location).toBe('/auth/login');
+    expect(res.headers.location).toBe('/auth/login?error=no_guilds');
     expect(user.currentGuildId).toBeNull();
     expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
@@ -259,7 +273,7 @@ describe('POST /guild/select', () => {
       .send({ guild_id: '100000000000000002' });
 
     expect(res.status).toBe(302);
-    expect(res.headers.location).toBe('/auth/login');
+    expect(res.headers.location).toBe('/auth/login?error=user_not_found');
     expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
 
@@ -280,7 +294,7 @@ describe('POST /guild/select', () => {
       .send({ guild_id: 'not-a-snowflake' });
 
     expect(res.status).toBe(302);
-    expect(res.headers.location).toBe('/guild/select');
+    expect(res.headers.location).toBe('/guild/select?error=invalid_guild');
     expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
 
@@ -295,7 +309,7 @@ describe('POST /guild/select', () => {
       .send({ guild_id: '100000000000000002' });
 
     expect(res.status).toBe(302);
-    expect(res.headers.location).toBe('/guild/select');
+    expect(res.headers.location).toBe('/guild/select?error=select_failed');
     expect(user.currentGuildId).toBeNull();
   });
 });
