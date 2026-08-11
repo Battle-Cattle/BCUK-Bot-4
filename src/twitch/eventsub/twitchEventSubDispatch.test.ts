@@ -31,7 +31,7 @@ vi.mock('./twitchEventSubHandler', () => ({
   handleChannelUpdate: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { setStreamerInfo, removeStreamerFromMap, dispatchNotification, handleRevocation } from './twitchEventSubDispatch';
+import { setStreamerInfo, removeStreamerFromMap, dispatchNotification, handleRevocation, getAllStreamerInfo } from './twitchEventSubDispatch';
 import { clearStreamerToken, DEFAULT_EVENT_CONFIG } from '../../db';
 import {
   handleStreamOnline, handleStreamOffline, handleChannelUpdate,
@@ -212,5 +212,15 @@ describe('handleRevocation', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(logMock.error).toHaveBeenCalledWith('Clear token error:', expect.any(Error));
+  });
+});
+
+describe('getAllStreamerInfo', () => {
+  it('reflects entries added via setStreamerInfo and removed via removeStreamerFromMap', () => {
+    setStreamerInfo('uid-getall', { login: 'getAllStreamer', streamerId: 999, config: null });
+    expect(getAllStreamerInfo().get('uid-getall')).toEqual({ login: 'getAllStreamer', streamerId: 999, config: null });
+
+    removeStreamerFromMap('uid-getall');
+    expect(getAllStreamerInfo().has('uid-getall')).toBe(false);
   });
 });

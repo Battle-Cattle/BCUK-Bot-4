@@ -265,6 +265,45 @@ export async function getCustomRewards(broadcasterId: string, userToken: string)
   return data.data;
 }
 
+/** A single channel-points redemption, as returned by Twitch's Get Custom Reward Redemptions endpoint. */
+export interface TwitchRewardRedemption {
+  id: string;
+  user_id: string;
+  user_login: string;
+  user_name: string;
+  user_input: string;
+  status: string;
+  redeemed_at: string;
+  reward: { id: string; title: string; prompt: string; cost: number };
+}
+
+/**
+ * Lists a broadcaster's most recent redemptions for one custom reward and status, via Helix,
+ * newest first. Used by the EventSub reconciliation poll to catch redemptions the WebSocket
+ * connection missed (e.g. during a reconnect gap) — the live notification path is driven
+ * entirely by EventSub and never calls this.
+ *
+ * @param broadcasterId - Twitch user ID whose reward redemptions to list.
+ * @param rewardId - Twitch reward UUID to scope the query to.
+ * @param status - Redemption status to filter on. Callers must check both 'UNFULFILLED' and
+ *   'FULFILLED' to cover both queue-held and auto-fulfilled (`should_redemptions_skip_request_queue`)
+ *   redemptions — Twitch requires exactly one status per call.
+ * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
+ * @returns Up to the 50 most recent matching redemptions, or `[]` on a 403 (reward not owned by
+ *   this app's client_id, or channel points unavailable for the broadcaster).
+ * @throws If Twitch returns a non-OK, non-403 status.
+ */
+export async function getRewardRedemptions(
+  broadcasterId: string, rewardId: string, status: 'UNFULFILLED' | 'FULFILLED', userToken: string,
+): Promise<TwitchRewardRedemption[]> {
+  const url = `https://api.twitch.tv/helix/channel_points/custom_rewards/redemptions?broadcaster_id=${encodeURIComponent(broadcasterId)}&reward_id=${encodeURIComponent(rewardId)}&status=${status}&sort=NEWEST_FIRST&first=50`;
+  const res = await twitchFetch(url, { headers: authHeaders(userToken) });
+  if (res.status === 403) return [];
+  if (!res.ok) throw new Error(`[TwitchAPI] getRewardRedemptions failed: ${res.status}`);
+  const data = await res.json() as { data: TwitchRewardRedemption[] };
+  return data.data;
+}
+
 /**
  * Thrown when Twitch returns 403 for a reward create/update/delete/cost-update call — Twitch
  * only allows the app that created a reward to manage it (or, on create, the broadcaster may

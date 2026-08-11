@@ -41,6 +41,10 @@ vi.mock('./twitch/eventsub/twitchEventSub', () => ({
   stopEventSub: vi.fn(),
   reloadEventSubSubscriptions: vi.fn(),
 }));
+vi.mock('./twitch/eventsub/twitchEventSubReconciliation', () => ({
+  startEventSubReconciliation: vi.fn(),
+  stopEventSubReconciliation: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock('./web/server', () => ({ startWebPanel: vi.fn() }));
 vi.mock('./audio/audioPlayer', () => ({ disconnect: vi.fn() }));
 vi.mock('./commands/customCommandHandler', () => ({ registerTwitchChatRuntime: vi.fn() }));
@@ -207,11 +211,13 @@ describe('startup — reward pricing scheduler', () => {
   it('starts the scheduler and continues startup through to startEventSub on a clean run', async () => {
     const { startRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
     const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
+    const { startEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
 
     await runMain();
 
     expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
+    expect(vi.mocked(startEventSubReconciliation)).toHaveBeenCalledOnce();
     expect(exitSpy).not.toHaveBeenCalled();
   });
 });
@@ -219,12 +225,14 @@ describe('startup — reward pricing scheduler', () => {
 describe('shutdown', () => {
   it('stops the reward pricing scheduler on SIGINT', async () => {
     const { stopRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
+    const { stopEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
 
     await runMain();
     process.emit('SIGINT');
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(vi.mocked(stopRewardPricingScheduler)).toHaveBeenCalledOnce();
+    expect(vi.mocked(stopEventSubReconciliation)).toHaveBeenCalledOnce();
   });
 });
 
