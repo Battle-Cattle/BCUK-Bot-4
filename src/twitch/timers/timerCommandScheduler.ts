@@ -169,38 +169,28 @@ interface PickedRow {
 }
 
 /**
- * From the rows that already passed their own {@link evaluateFireBlock} check, decides which ones
- * actually get to fire this tick, in two layers:
- *
- * 1. Per-command Shared Chat cooldown: groups rows by (timer id, Shared Chat session), and for a
- *    group off its own cooldown (sized to that timer's `interval_seconds`), picks the row that's
- *    gone longest without firing and reserves the cooldown. Rows whose channel isn't in a session
- *    pass straight through. See the module doc above `commandSessionLastFiredAt`.
- * 2. Cross-command channel floor: groups whatever survived layer 1 by channel, and for a channel
- *    whose last post came from a *different* timer than the longest-waiting candidate here, within
- *    {@link CHANNEL_MIN_SPACING_MS}, defers it to a later tick. See the module doc above
- *    `channelLastFiredAt`.
- *
- * Both reservations are only provisional: {@link sendTimerRow} releases them if the send doesn't
- * actually succeed, so a failed send can't silence a session/channel for the full cooldown window.
- * Rows not picked at either layer are left untouched so they're reconsidered on a later tick.
+ * Layer 1 of {@link pickRowsToFire}: groups `eligibleRows` by (timer id, Shared Chat session), and
+ * for a group off its own cooldown (sized to that timer's `interval_seconds`), picks the row that's
+ * gone longest without firing and reserves the cooldown. Rows whose channel isn't in a session pass
+ * straight through untouched. See the module doc above `commandSessionLastFiredAt`.
  * @param eligibleRows - Rows that already passed their own per-timer {@link evaluateFireBlock} check.
  * @param sessionIdByChannel - Each row's channel's resolved Shared Chat session id (or null).
  * @param now - Current time in epoch ms, shared across the whole tick.
+ * @returns One entry per row that cleared this layer, paired with the command-session cooldown key
+ *   reserved for it (or null if its channel isn't in a session).
  */
-function pickRowsToFire(
+function applyCommandSessionCooldown(
   eligibleRows: readonly TimerCommandForScheduler[],
   sessionIdByChannel: ReadonlyMap<string, string | null>,
   now: number,
 ): PickedRow[] {
-  // Layer 1 — per-command Shared Chat cooldown.
-  const layer1Survivors: PickedRow[] = [];
+  const survivors: PickedRow[] = [];
   const bySessionAndTimer = new Map<string, TimerCommandForScheduler[]>();
 
   for (const row of eligibleRows) {
     const sessionId = sessionIdByChannel.get(row.channel) ?? null;
     if (!sessionId) {
-      layer1Survivors.push({ row, sessionKey: null });
+      survivors.push({ row, sessionKey: null });
       continue;
     }
     const key = commandSessionKey(row.id, sessionId);
@@ -215,10 +205,22 @@ function pickRowsToFire(
 
     const picked = pickLongestWaiting(rows);
     commandSessionLastFiredAt.set(key, { firedAt: now, cooldownMs }); // provisional — released by sendTimerRow on failure
-    layer1Survivors.push({ row: picked, sessionKey: key });
+    survivors.push({ row: picked, sessionKey: key });
   }
 
-  // Layer 2 — cross-command channel floor, applied regardless of Shared Chat status.
+  return survivors;
+}
+
+/**
+ * Layer 2 of {@link pickRowsToFire}: groups whatever survived layer 1 by channel, and for a channel
+ * whose last post came from a *different* timer than the longest-waiting candidate here, within
+ * {@link CHANNEL_MIN_SPACING_MS}, defers it to a later tick — applied regardless of Shared Chat
+ * status. See the module doc above `channelLastFiredAt`.
+ * @param layer1Survivors - Rows (with their layer 1 session-key reservation, if any) that cleared {@link applyCommandSessionCooldown}.
+ * @param now - Current time in epoch ms, shared across the whole tick.
+ * @returns The final set of rows to actually send this tick.
+ */
+function applyChannelFloor(layer1Survivors: readonly PickedRow[], now: number): PickedRow[] {
   const toFire: PickedRow[] = [];
   const byChannel = new Map<string, PickedRow[]>();
   for (const picked of layer1Survivors) {
@@ -238,6 +240,26 @@ function pickRowsToFire(
   }
 
   return toFire;
+}
+
+/**
+ * From the rows that already passed their own {@link evaluateFireBlock} check, decides which ones
+ * actually get to fire this tick: {@link applyCommandSessionCooldown} (per-command Shared Chat
+ * cooldown), then {@link applyChannelFloor} (cross-command channel floor) on whatever survives.
+ * Both layers' reservations are only provisional: {@link sendTimerRow} releases them if the send
+ * doesn't actually succeed, so a failed send can't silence a session/channel for the full cooldown
+ * window. Rows not picked at either layer are left untouched so they're reconsidered on a later tick.
+ * @param eligibleRows - Rows that already passed their own per-timer {@link evaluateFireBlock} check.
+ * @param sessionIdByChannel - Each row's channel's resolved Shared Chat session id (or null).
+ * @param now - Current time in epoch ms, shared across the whole tick.
+ */
+function pickRowsToFire(
+  eligibleRows: readonly TimerCommandForScheduler[],
+  sessionIdByChannel: ReadonlyMap<string, string | null>,
+  now: number,
+): PickedRow[] {
+  const layer1Survivors = applyCommandSessionCooldown(eligibleRows, sessionIdByChannel, now);
+  return applyChannelFloor(layer1Survivors, now);
 }
 
 /**
