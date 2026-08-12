@@ -15,11 +15,14 @@ import {
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { renderError, isLoopbackRedirectUri, renderView } from './shared';
+import { renderError, filterQueryParam, isLoopbackRedirectUri, renderView } from './shared';
 import { userMutationQueue } from './adminUserMutationQueue';
 
 const log = createLogger('Web');
 const router = Router();
+
+/** Error codes `GET /auth/login` accepts via `?error=`, both originating from `POST /guild/select`. */
+const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds']);
 
 // ─── Redirect to Discord OAuth2 ─────────────────────────────────────────────
 
@@ -215,13 +218,14 @@ router.post('/logout', requireAuth, csrfProtection, (req, res) => {
 
 /**
  * GET /auth/login — renders the login page.
- * @param req - Express request; checked for an existing `session.user`.
+ * @param req - Express request; checked for an existing `session.user`, and reads
+ *   `req.query.error` (set by `POST /guild/select` on failure) to show a banner.
  * @param res - Express response; redirects to `/` if already logged in, otherwise
- *   renders the `login` view.
+ *   renders the `login` view with the sanitized `error` code, if any.
  */
 router.get('/login', (req, res) => {
   if (req.session.user) return res.redirect('/');
-  renderView(res, 'login', { user: null });
+  renderView(res, 'login', { user: null, error: filterQueryParam(req.query.error, LOGIN_KNOWN_ERRORS) });
 });
 
 export default router;
