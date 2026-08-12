@@ -3,6 +3,11 @@ import path from 'path';
 import type { SfxTrigger, SfxFile, SfxLookupResult } from '../db';
 
 const SFX_ROOT = '/sfx';
+const { log } = vi.hoisted(() => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+vi.mock('../shared/logger', () => ({ createLogger: () => log }));
 
 vi.mock('../shared/config', () => ({
   SFX_FOLDER: '/sfx',
@@ -73,6 +78,7 @@ describe('handleCommand', () => {
 
     expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledWith('just');
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+    expect(log.warn).not.toHaveBeenCalled();
   });
 
   it('skips with a warning when a known trigger fires but no guild is resolved', async () => {
@@ -82,6 +88,7 @@ describe('handleCommand', () => {
 
     expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledWith('!ding');
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith("[twitch] No active guild resolved for command '!ding', skipping");
   });
 
   it('ignores the command while audio is already playing in that guild', async () => {
