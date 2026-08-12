@@ -23,19 +23,22 @@ const KNOWN_ERRORS = new Set(['invalid_guild', 'guild_not_found', 'select_failed
  * @param req - Express request; reads `req.session.user.guilds` and `req.query.error`
  *   (set by `POST /guild/select` on failure) to show a banner.
  * @param res - Express response; renders `guildSelect` with the sanitized `error` code
- *   if any, or redirects to `/` when the user has at most one guild (single-guild
- *   users are sent straight to the dashboard).
+ *   if any, or redirects to `/` when the user has at most one guild and no error is
+ *   present (single-guild users are normally sent straight to the dashboard, but a
+ *   `guild_not_found`/`select_failed` error must still be shown even if the live-guild
+ *   refresh in `POST /guild/select` left the session with only one guild).
  */
 router.get('/select', requireAuth, csrfProtection, (req, res) => {
   const user = getSessionUser(req);
-  if (user.guilds.length <= 1) {
+  const error = filterQueryParam(req.query.error, KNOWN_ERRORS);
+  if (user.guilds.length <= 1 && !error) {
     return res.redirect('/');
   }
   renderView(res, 'guildSelect', {
     user,
     guilds: user.guilds,
     csrfToken: req.csrfToken(),
-    error: filterQueryParam(req.query.error, KNOWN_ERRORS),
+    error,
   });
 });
 
@@ -44,7 +47,11 @@ router.get('/select', requireAuth, csrfProtection, (req, res) => {
  * membership are re-read from the database (not the session's cached `isOwner`/`guilds`,
  * which can be stale if either was revoked after login) before the guild is accepted.
  * On success the effective access level is recomputed for that guild so authorization
- * reflects the current guild, never the previous one.
+ * reflects the current guild, never the previous one. When the session's user no longer
+ * exists in the DB or has no accessible guilds, the session is destroyed (not just
+ * partially cleared) before redirecting to `/auth/login` — otherwise `GET /auth/login`
+ * would see a still-populated `session.user` and bounce straight to `/` without ever
+ * rendering the error.
  */
 router.post('/select', requireAuth, csrfProtection, async (req, res) => {
   const user = getSessionUser(req);
@@ -58,15 +65,19 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
   try {
     const dbUser = await findUser(user.discordId);
     if (!dbUser) {
-      return res.redirect('/auth/login?error=user_not_found');
+      // The session's user no longer exists in the DB — destroy the session so GET
+      // /auth/login doesn't see a still-populated session.user and bounce straight
+      // back to `/` before the error banner ever renders.
+      return req.session.destroy(() => res.redirect('/auth/login?error=user_not_found'));
     }
     const isOwner = dbUser.is_owner;
     const liveGuilds = isOwner ? await getAllGuilds() : await getGuildsForMember(user.discordId);
     user.isOwner = isOwner;
     user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
     if (user.guilds.length === 0) {
-      user.currentGuildId = null;
-      return res.redirect('/auth/login?error=no_guilds');
+      // Same reasoning as above: destroy the session rather than just clearing
+      // currentGuildId, so the login page's error banner actually reaches the user.
+      return req.session.destroy(() => res.redirect('/auth/login?error=no_guilds'));
     }
     if (!liveGuilds.some((g) => g.guild_id === requestedGuildId)) {
       return res.redirect('/guild/select?error=guild_not_found');

@@ -221,10 +221,12 @@ describe('POST /guild/select', () => {
     expect(vi.mocked(getAllGuilds)).not.toHaveBeenCalled();
   });
 
-  it('refreshes the session guild list before rejecting a stale guild selection', async () => {
+  it('refreshes the session guild list before rejecting a stale guild selection, and still shows the error once guilds shrinks to one', async () => {
     // Membership was revoked after login; the session's cached guild list is stale.
     // Even though the request is rejected, the session must be refreshed with the
-    // live guild list so the picker doesn't keep rendering stale entries.
+    // live guild list so the picker doesn't keep rendering stale entries. That refresh
+    // can leave the session with only one guild — GET /guild/select must still render
+    // the error banner in that case instead of silently redirecting to `/`.
     vi.mocked(getGuildsForMember).mockResolvedValue([TWO_DB_GUILDS[0]] as any);
     const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
     const app = buildApp(user);
@@ -237,12 +239,25 @@ describe('POST /guild/select', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/guild/select?error=guild_not_found');
     expect(user.guilds).toEqual([{ guildId: '100000000000000001', name: 'Alpha' }]);
+
+    const followUp = await supertest(app).get(res.headers.location);
+    expect(followUp.status).toBe(200);
+    expect((followUp.body as any).view).toBe('guildSelect');
+    expect((followUp.body as any).locals.error).toBe('guild_not_found');
   });
 
-  it('redirects to login when the live guild list is empty', async () => {
+  it('destroys the session and redirects to login when the live guild list is empty', async () => {
     vi.mocked(getGuildsForMember).mockResolvedValue([]);
     const user: any = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
-    const app = buildApp(user);
+    const destroy = vi.fn((cb: () => void) => cb());
+    const app = express();
+    app.use(express.urlencoded({ extended: false }));
+    app.use((req: any, _res: any, next: any) => {
+      req.session = { user, destroy };
+      req.csrfToken = () => 'csrf-token';
+      next();
+    });
+    app.use('/guild', router);
 
     const res = await supertest(app)
       .post('/guild/select')
@@ -251,17 +266,18 @@ describe('POST /guild/select', () => {
 
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/auth/login?error=no_guilds');
-    expect(user.currentGuildId).toBeNull();
+    expect(destroy).toHaveBeenCalled();
     expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
 
-  it('redirects to login when the session user no longer exists in the database', async () => {
+  it('destroys the session and redirects to login when the session user no longer exists in the database', async () => {
     vi.mocked(findUser).mockResolvedValue(null);
     const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+    const destroy = vi.fn((cb: () => void) => cb());
     const app = express();
     app.use(express.urlencoded({ extended: false }));
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user };
+      req.session = { user, destroy };
       req.csrfToken = () => 'csrf-token';
       next();
     });
@@ -274,6 +290,7 @@ describe('POST /guild/select', () => {
 
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/auth/login?error=user_not_found');
+    expect(destroy).toHaveBeenCalled();
     expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
 
