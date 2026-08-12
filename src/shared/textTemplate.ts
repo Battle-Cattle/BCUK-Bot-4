@@ -1,6 +1,8 @@
 /** Strategy for handling `{key}` placeholders with no matching entry in `vars`. */
 export type FillTemplateFallback = 'empty' | 'keep';
 
+const PLACEHOLDER_PATTERN = /\{(\w+)\}/g;
+
 /**
  * Substitutes `{key}` placeholders in `template` with values from `vars`.
  * Unknown placeholders (keys not present in `vars`) are handled per `fallback`:
@@ -18,7 +20,7 @@ export function fillTemplate(
   vars: Record<string, string>,
   fallback: FillTemplateFallback = 'empty',
 ): string {
-  return template.replace(/\{(\w+)\}/g, (match, k: string) => {
+  return template.replace(PLACEHOLDER_PATTERN, (match, k: string) => {
     const value = vars[k];
     if (value !== undefined) return value;
     return fallback === 'keep' ? match : '';

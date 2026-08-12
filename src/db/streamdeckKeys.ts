@@ -48,7 +48,7 @@ function initialStatus(accessLevel: number): 'pending' | 'approved' {
  */
 export async function hasApiKey(discordId: string): Promise<boolean> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT 1 FROM streamdeck_api_keys WHERE discord_id = ?',
+    'SELECT 1 FROM streamdeck_api_keys WHERE discord_id = ? LIMIT 1',
     [discordId],
   );
   return rows.length > 0;
@@ -165,7 +165,7 @@ export async function rotateApiKey(discordId: string): Promise<{ plain: string }
  */
 export async function findKeyByHash(hash: string): Promise<{ discordId: string } | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT discord_id, key_hash FROM streamdeck_api_keys WHERE key_hash = ?',
+    'SELECT discord_id, key_hash FROM streamdeck_api_keys WHERE key_hash = ? LIMIT 1',
     [hash],
   );
   if (rows.length === 0 || !hashesMatch(String(rows[0].key_hash), hash)) return null;

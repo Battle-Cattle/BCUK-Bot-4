@@ -52,6 +52,16 @@ describe('csrfProtection — body token', () => {
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('EBADCSRFTOKEN');
   });
+
+  it('rejects a 64-char token that is not valid hex, without throwing', async () => {
+    const notHex = 'z'.repeat(64);
+    const res = await supertest(buildApp())
+      .post('/test')
+      .send(`_csrf=${notHex}`)
+      .set('Content-Type', 'application/x-www-form-urlencoded');
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('EBADCSRFTOKEN');
+  });
 });
 
 describe('csrfProtection — X-CSRF-Token header', () => {
