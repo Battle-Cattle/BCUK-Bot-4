@@ -73,12 +73,15 @@ describe('GET /guild/select', () => {
     expect(res.headers.location).toBe('/');
   });
 
-  it('passes a known ?error= code through to the view', async () => {
-    const res = await supertest(buildApp({ discordId: 'u1', currentGuildId: null, guilds: TWO_GUILDS }))
-      .get('/guild/select?error=guild_not_found');
-    expect(res.status).toBe(200);
-    expect((res.body as any).locals.error).toBe('guild_not_found');
-  });
+  it.each(['invalid_guild', 'guild_not_found', 'select_failed'])(
+    'passes a known ?error=%s code through to the view',
+    async (error) => {
+      const res = await supertest(buildApp({ discordId: 'u1', currentGuildId: null, guilds: TWO_GUILDS }))
+        .get(`/guild/select?error=${error}`);
+      expect(res.status).toBe(200);
+      expect((res.body as any).locals.error).toBe(error);
+    },
+  );
 
   it('filters out an unrecognized ?error= code', async () => {
     const res = await supertest(buildApp({ discordId: 'u1', currentGuildId: null, guilds: TWO_GUILDS }))
