@@ -15,6 +15,7 @@ import {
   markPricingUnsupported,
   updatePricingCooldownForReward,
   getPricingSettingsForStreamer,
+  getPricingSettingsForStreamers,
   savePricingSettingsForStreamer,
 } from './rewardPricing';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
@@ -246,6 +247,45 @@ describe('getPricingSettingsForStreamer', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getPricingSettingsForStreamer(7);
     expect(pool.execute.mock.calls[0][1]).toEqual([7]);
+  });
+});
+
+describe('getPricingSettingsForStreamers', () => {
+  it('returns an empty map without querying when given an empty array', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await getPricingSettingsForStreamers([]);
+    expect(result.size).toBe(0);
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+
+  it('returns a map keyed by streamer_id, converted to numbers', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([
+      { streamer_id: 7, half_life_seconds: '900', time_to_max_multiplier: '3.000' },
+      { streamer_id: 9, half_life_seconds: '1800', time_to_max_multiplier: '2.000' },
+    ]) as any);
+    const result = await getPricingSettingsForStreamers([7, 9]);
+    expect(result.size).toBe(2);
+    expect(result.get(7)).toEqual({ half_life_seconds: 900, time_to_max_multiplier: 3 });
+    expect(result.get(9)).toEqual({ half_life_seconds: 1800, time_to_max_multiplier: 2 });
+  });
+
+  it('omits a streamer with no settings row rather than defaulting it', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([
+      { streamer_id: 7, half_life_seconds: '900', time_to_max_multiplier: '3.000' },
+    ]) as any);
+    const result = await getPricingSettingsForStreamers([7, 9]);
+    expect(result.has(7)).toBe(true);
+    expect(result.has(9)).toBe(false);
+  });
+
+  it('builds an IN clause with one placeholder per streamer id', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getPricingSettingsForStreamers([1, 2, 3]);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('streamer_id IN (?, ?, ?)');
+    expect(params).toEqual([1, 2, 3]);
   });
 });
 

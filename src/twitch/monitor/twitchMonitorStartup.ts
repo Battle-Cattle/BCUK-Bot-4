@@ -142,21 +142,28 @@ export async function performStartupLiveCheck(
 
   const groupsWithChanges = new Set<number>();
 
-  for (const streamer of streamersData) {
-    const loginKey = streamer.twitch_name?.toLowerCase();
-    const userId = loginKey ? loginToUserId.get(loginKey) : undefined;
-    if (!userId) continue;
+  // Each streamer's reconciliation (a different Discord message/channel) is independent, and
+  // handleLiveStreamerOnStartup/handleOfflineStreamerOnStartup already isolate their own
+  // errors internally — so these run concurrently instead of one streamer at a time.
+  await Promise.allSettled(
+    streamersData.map(async (streamer) => {
+      const loginKey = streamer.twitch_name?.toLowerCase();
+      const userId = loginKey ? loginToUserId.get(loginKey) : undefined;
+      if (!userId) return;
 
-    const liveStream = liveByUserId.get(userId);
+      const liveStream = liveByUserId.get(userId);
 
-    if (liveStream) {
-      await handleLiveStreamerOnStartup(liveStates, streamer, liveStream, groupsWithChanges);
-    } else if (streamer.discord_message_id) {
-      await handleOfflineStreamerOnStartup(streamer, groupsWithChanges);
-    }
-  }
+      if (liveStream) {
+        await handleLiveStreamerOnStartup(liveStates, streamer, liveStream, groupsWithChanges);
+      } else if (streamer.discord_message_id) {
+        await handleOfflineStreamerOnStartup(streamer, groupsWithChanges);
+      }
+    }).map((work) => work.catch((err) => log.error('Startup reconciliation failed for a streamer:', err))),
+  );
 
-  for (const gid of groupsWithChanges) {
-    await updateMultitwitch(gid, liveStates);
-  }
+  // Each group's MultiTwitch refresh is independent of the others.
+  await Promise.allSettled(
+    Array.from(groupsWithChanges, (gid) =>
+      updateMultitwitch(gid, liveStates).catch((err) => log.error(`MultiTwitch refresh failed for group ${gid}:`, err))),
+  );
 }

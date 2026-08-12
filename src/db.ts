@@ -11,7 +11,7 @@ export { getPool, closePool } from './db/pool';
 export {
   getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember, upsertGuild,
 } from './db/guilds';
-export type { DbGuild } from './db/guilds';
+export type { DbGuild, DbGuildMembership } from './db/guilds';
 
 export {
   getMemberAccessLevel, setMemberAccessLevel,
@@ -532,7 +532,7 @@ export type { RewardPricingRow, RewardPricingInput, StreamerPricingSettings } fr
 export {
   getPricingForReward, getPricingConfigsForStreamer, getAllEnabledPricingRows,
   upsertPricingConfig, recordPricingUpdate, deletePricingConfig, markPricingUnsupported,
-  updatePricingCooldownForReward, getPricingSettingsForStreamer, savePricingSettingsForStreamer,
+  updatePricingCooldownForReward, getPricingSettingsForStreamer, getPricingSettingsForStreamers, savePricingSettingsForStreamer,
   DEFAULT_PRICING_COOLDOWN_SECONDS,
 } from './db/rewardPricing';
 

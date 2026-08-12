@@ -23,6 +23,15 @@ export function removeStreamerFromMap(uid: string): void {
   streamerMap.delete(uid);
 }
 
+/**
+ * Returns the live streamer-dispatch map, keyed by broadcaster Twitch user ID. Read-only view
+ * used by the EventSub reconciliation poll to enumerate every streamer currently connected via
+ * EventSub, without duplicating this module's connection-tracking state.
+ */
+export function getAllStreamerInfo(): ReadonlyMap<string, StreamerInfo> {
+  return streamerMap;
+}
+
 // Maps EventSub notification types to their handler functions.
 // Using Map instead of a plain object prevents prototype-chain lookup on user-controlled keys.
 type NotificationHandler = (login: string, event: unknown, config: EventSubConfig, streamerId: number) => Promise<void>;

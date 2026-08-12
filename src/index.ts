@@ -6,6 +6,7 @@ import { startDiscordBot, stopDiscordBot } from './discord/discordBot';
 import { reloadGuildRegistry } from './discord/guildRegistry';
 import { startTwitchMonitor, stopTwitchMonitor, getMultiTwitchDataForChannel } from './twitch/monitor/twitchMonitor';
 import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitch/eventsub/twitchEventSub';
+import { startEventSubReconciliation, stopEventSubReconciliation } from './twitch/eventsub/twitchEventSubReconciliation';
 import { startWebPanel } from './web/server';
 import { disconnect } from './audio/audioPlayer';
 import { registerTwitchChatRuntime } from './commands/customCommandHandler';
@@ -39,6 +40,7 @@ async function shutdown(signal: string): Promise<void> {
   stopCounterScheduler();
   await stopRewardPricingScheduler();
   await stopTimerCommandScheduler();
+  await stopEventSubReconciliation();
   stopEventSub();
   await stopTwitchMonitor();
   await stopTwitchBot();
@@ -132,6 +134,7 @@ async function main(): Promise<void> {
 
   startTwitchMonitor().catch((err) => log.error('TwitchMonitor startup error:', err));
   startEventSub();
+  startEventSubReconciliation();
 }
 
 main().catch((err) => {

@@ -396,6 +396,13 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
 
 /**
  * Atomically increments a counter's `current_value` and returns the new value.
+ *
+ * Uses the `LAST_INSERT_ID(expr)` trick to learn the post-increment value: the `UPDATE`
+ * stashes the computed value in the connection's session-scoped `LAST_INSERT_ID()`, so the
+ * follow-up `SELECT LAST_INSERT_ID()` reads connection state rather than re-reading the
+ * `counter` table/index — cheaper than a second `SELECT ... FROM counter WHERE id = ?`, and
+ * this function runs on every chat message that hits an active counter's trigger command.
+ *
  * @param id The counter's numeric id.
  * @returns The counter's `current_value` after the increment.
  * @throws {CounterNotFoundError} If no counter exists with the given id.
@@ -403,15 +410,18 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
 export async function incrementCounter(id: number): Promise<number> {
   const newValue = await withTransaction(async (conn) => {
     const [result] = await conn.execute<mysql.ResultSetHeader>(
-      'UPDATE counter SET current_value = current_value + 1 WHERE id = ?',
+      'UPDATE counter SET current_value = LAST_INSERT_ID(current_value + 1) WHERE id = ?',
       [id],
     );
     if (result.affectedRows === 0) throw new CounterNotFoundError(id);
-    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-      'SELECT current_value FROM counter WHERE id = ?',
-      [id],
-    );
-    return (rows[0] as mysql.RowDataPacket).current_value as number;
+    const [rows] = await conn.execute<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() AS current_value');
+    // LAST_INSERT_ID() is a BIGINT expression, so the pool's bigNumberStrings setting can
+    // return it as a string even though `current_value` itself is a plain INT column — parse
+    // it back with Number() rather than trusting the driver's JS type. Safe here: this is an
+    // application counter incremented one chat message at a time, nowhere near
+    // Number.MAX_SAFE_INTEGER (unlike a Discord snowflake, which is why that case is never
+    // parsed back this way elsewhere in this codebase).
+    return Number((rows[0] as mysql.RowDataPacket).current_value);
   });
   return newValue;
 }
