@@ -10,6 +10,7 @@ vi.mock('../shared/config', () => ({
 import {
   getUsers, getStreams, getChannelInfo, getSharedChatSession, getAppToken,
   getCustomRewards, updateRewardCost, createCustomReward, updateCustomReward, deleteCustomReward,
+  getRewardRedemptions,
   TwitchRewardUnsupportedError, TwitchRewardAuthError,
 } from './twitchApi';
 
@@ -183,6 +184,54 @@ describe('getCustomRewards', () => {
   it('throws a generic error for other non-OK statuses', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
     await expect(getCustomRewards('bc1', 'user-token')).rejects.toThrow('getCustomRewards failed: 500');
+  });
+});
+
+describe('getRewardRedemptions', () => {
+  it('sends a GET with broadcaster_id, reward_id, and status query params, returning the redemption page', async () => {
+    const redemptions = [{ id: 'redemp1', user_login: 'viewer1', status: 'UNFULFILLED' }];
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: redemptions, pagination: { cursor: 'next-page' } }));
+
+    const result = await getRewardRedemptions('bc1', 'rwd1', 'UNFULFILLED', 'user-token');
+
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(String(url)).toContain('broadcaster_id=bc1');
+    expect(String(url)).toContain('reward_id=rwd1');
+    expect(String(url)).toContain('status=UNFULFILLED');
+    expect(String(url)).toContain('sort=NEWEST');
+    expect(String(url)).not.toContain('after=');
+    expect(init?.method).toBeUndefined(); // defaults to GET
+    expect(result).toEqual({ redemptions, cursor: 'next-page' });
+  });
+
+  it('includes the after cursor when paginating to a later page', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: [] }));
+
+    await getRewardRedemptions('bc1', 'rwd1', 'UNFULFILLED', 'user-token', 'cursor-abc');
+
+    const [url] = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(String(url)).toContain('after=cursor-abc');
+  });
+
+  it('returns a null cursor when the response has no pagination field', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: [] }));
+    const result = await getRewardRedemptions('bc1', 'rwd1', 'UNFULFILLED', 'user-token');
+    expect(result.cursor).toBeNull();
+  });
+
+  it('throws with the response status on a 401 response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(401, {}));
+    await expect(getRewardRedemptions('bc1', 'rwd1', 'FULFILLED', 'user-token')).rejects.toThrow('getRewardRedemptions failed: 401');
+  });
+
+  it('returns an empty page with a null cursor on a 403 response, rather than throwing', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(403, {}));
+    expect(await getRewardRedemptions('bc1', 'rwd1', 'UNFULFILLED', 'user-token')).toEqual({ redemptions: [], cursor: null });
+  });
+
+  it('throws a generic error for other non-OK statuses', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
+    await expect(getRewardRedemptions('bc1', 'rwd1', 'UNFULFILLED', 'user-token')).rejects.toThrow('getRewardRedemptions failed: 500');
   });
 });
 

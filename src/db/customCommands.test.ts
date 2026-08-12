@@ -18,9 +18,6 @@ vi.mock('./commandConflicts', () => ({
   assignUserToCommandWithinTransaction: vi.fn().mockResolvedValue(undefined),
   assignUsersToCommandWithinTransaction: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('./customCommandCache', () => ({
-  invalidateCustomCommandLookupCache: vi.fn(),
-}));
 vi.mock('./reservedCommands', () => ({
   assertNotReservedCommand: vi.fn(),
 }));
@@ -51,7 +48,6 @@ import {
   assignUserToCommandWithinTransaction,
   assignUsersToCommandWithinTransaction,
 } from './commandConflicts';
-import { invalidateCustomCommandLookupCache } from './customCommandCache';
 import { assertNotReservedCommand } from './reservedCommands';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
@@ -243,13 +239,6 @@ describe('addCustomCommand', () => {
     expect(assertMultiTwitchTriggerAvailable).not.toHaveBeenCalled();
   });
 
-  it('calls invalidateCustomCommandLookupCache on success', async () => {
-    const conn = makeWriteConn([[{ insertId: 1 }, []]]);
-    setupRunSerializedCommandWrite(conn);
-    await addCustomCommand('!clap', 'Clap!', false, false);
-    expect(invalidateCustomCommandLookupCache).toHaveBeenCalled();
-  });
-
   it('propagates errors from assertNotReservedCommand', async () => {
     vi.mocked(assertNotReservedCommand).mockImplementationOnce(() => { throw new Error('Reserved!'); });
     await expect(addCustomCommand('!sfx', 'output', false, false)).rejects.toThrow('Reserved!');
@@ -291,12 +280,6 @@ describe('updateCustomCommand', () => {
     await expect(updateCustomCommand(99, '!clap', 'Clap!', false, false)).rejects.toThrow('Command not found: 99');
   });
 
-  it('calls invalidateCustomCommandLookupCache on success', async () => {
-    const conn = makeWriteConn([[{ affectedRows: 1 }, []]]);
-    setupRunSerializedCommandWrite(conn);
-    await updateCustomCommand(1, '!clap', 'Clap!', false, false);
-    expect(invalidateCustomCommandLookupCache).toHaveBeenCalled();
-  });
 });
 
 // ─── removeCustomCommand ──────────────────────────────────────────────────────
@@ -328,17 +311,6 @@ describe('removeCustomCommand', () => {
     expect(conn.rollback).toHaveBeenCalled();
   });
 
-  it('invalidates cache on success', async () => {
-    const pool = makePool();
-    const conn = pool._conn;
-    conn.execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []]);
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await removeCustomCommand(5);
-    expect(invalidateCustomCommandLookupCache).toHaveBeenCalled();
-  });
-
   it('releases connection even when an error is thrown', async () => {
     const pool = makePool();
     const conn = pool._conn;
@@ -362,12 +334,6 @@ describe('assignUserToCommand', () => {
     expect(assignUserToCommandWithinTransaction).toHaveBeenCalledWith(conn, 3, 'user1');
     expect(releaseNamedLock).toHaveBeenCalledWith(conn, 'bcuk_cmdid_3');
     expect(conn.release).toHaveBeenCalled();
-  });
-
-  it('calls invalidateCustomCommandLookupCache on success', async () => {
-    vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await assignUserToCommand(3, 'user1');
-    expect(invalidateCustomCommandLookupCache).toHaveBeenCalled();
   });
 
   it('releases lock and connection even when assignUserToCommandWithinTransaction throws', async () => {
@@ -402,13 +368,6 @@ describe('assignUsersToCommand', () => {
     expect(conn.release).toHaveBeenCalled();
   });
 
-  it('calls invalidateCustomCommandLookupCache once on success', async () => {
-    vi.mocked(getPool).mockReturnValue(makePool() as any);
-    vi.mocked(invalidateCustomCommandLookupCache).mockClear();
-    await assignUsersToCommand(3, ['user1', 'user2']);
-    expect(invalidateCustomCommandLookupCache).toHaveBeenCalledTimes(1);
-  });
-
   it('releases lock and connection even when assignUsersToCommandWithinTransaction throws', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
@@ -430,11 +389,5 @@ describe('unassignUserFromCommand', () => {
     expect(sql).toContain('DELETE FROM twitch_user_commands');
     expect(params).toContain(4);
     expect(params).toContain('user2');
-  });
-
-  it('calls invalidateCustomCommandLookupCache', async () => {
-    vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await unassignUserFromCommand(4, 'user2');
-    expect(invalidateCustomCommandLookupCache).toHaveBeenCalled();
   });
 });

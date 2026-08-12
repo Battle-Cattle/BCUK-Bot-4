@@ -7,10 +7,10 @@ const { mockLogger } = vi.hoisted(() => ({
 
 /** Mocks the shared logger so the scheduler's log calls don't produce real output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
-vi.mock('../../db', () => ({ getAllEnabledPricingRows: vi.fn(), getPricingSettingsForStreamer: vi.fn() }));
+vi.mock('../../db', () => ({ getAllEnabledPricingRows: vi.fn(), getPricingSettingsForStreamers: vi.fn() }));
 vi.mock('./rewardPricingService', () => ({ applyDecayTick: vi.fn() }));
 
-import { getAllEnabledPricingRows, getPricingSettingsForStreamer } from '../../db';
+import { getAllEnabledPricingRows, getPricingSettingsForStreamers } from '../../db';
 import { applyDecayTick } from './rewardPricingService';
 import { runDecayTick, startRewardPricingScheduler, stopRewardPricingScheduler } from './rewardPricingScheduler';
 
@@ -19,7 +19,11 @@ const settings = { half_life_seconds: 1800, time_to_max_multiplier: 2 };
 beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers();
-  vi.mocked(getPricingSettingsForStreamer).mockResolvedValue(settings);
+  // Default: every requested streamer id gets `settings` — matches getPricingSettingsForStreamers'
+  // real shape (a Map keyed by streamer id) without each test having to spell out the ids.
+  vi.mocked(getPricingSettingsForStreamers).mockImplementation(
+    async (streamerIds: number[]) => new Map(streamerIds.map((id) => [id, settings])),
+  );
 });
 
 afterEach(async () => {
@@ -41,7 +45,7 @@ describe('runDecayTick', () => {
     expect(applyDecayTick).toHaveBeenCalledWith(2, 'r2', settings);
   });
 
-  it('fetches settings once per distinct streamer, not once per reward', async () => {
+  it('fetches settings for every distinct streamer in a single batched call, not once per reward', async () => {
     vi.mocked(getAllEnabledPricingRows).mockResolvedValue([
       { streamer_id: 1, twitch_reward_id: 'r1' },
       { streamer_id: 1, twitch_reward_id: 'r2' },
@@ -51,26 +55,36 @@ describe('runDecayTick', () => {
 
     await runDecayTick();
 
-    expect(getPricingSettingsForStreamer).toHaveBeenCalledTimes(2);
-    expect(getPricingSettingsForStreamer).toHaveBeenCalledWith(1);
-    expect(getPricingSettingsForStreamer).toHaveBeenCalledWith(2);
+    expect(getPricingSettingsForStreamers).toHaveBeenCalledTimes(1);
+    expect(getPricingSettingsForStreamers).toHaveBeenCalledWith([1, 2]);
     expect(applyDecayTick).toHaveBeenCalledWith(1, 'r1', settings);
     expect(applyDecayTick).toHaveBeenCalledWith(1, 'r2', settings);
     expect(applyDecayTick).toHaveBeenCalledWith(2, 'r3', settings);
   });
 
-  it('falls back to an undefined settings hint for a streamer whose settings prefetch fails, without blocking other streamers', async () => {
+  it('falls back to an undefined settings hint for every reward when the batched settings prefetch fails', async () => {
     vi.mocked(getAllEnabledPricingRows).mockResolvedValue([
       { streamer_id: 1, twitch_reward_id: 'r1' },
       { streamer_id: 2, twitch_reward_id: 'r2' },
     ] as any);
-    vi.mocked(getPricingSettingsForStreamer).mockImplementation(async (streamerId) => {
-      if (streamerId === 1) throw new Error('settings db down');
-      return settings;
-    });
+    vi.mocked(getPricingSettingsForStreamers).mockRejectedValue(new Error('settings db down'));
     vi.mocked(applyDecayTick).mockResolvedValue(undefined);
 
     await expect(runDecayTick()).resolves.toBeUndefined();
+
+    expect(applyDecayTick).toHaveBeenCalledWith(1, 'r1', undefined);
+    expect(applyDecayTick).toHaveBeenCalledWith(2, 'r2', undefined);
+  });
+
+  it('falls back to an undefined settings hint for a streamer omitted from the batch result (no settings row), without affecting others', async () => {
+    vi.mocked(getAllEnabledPricingRows).mockResolvedValue([
+      { streamer_id: 1, twitch_reward_id: 'r1' },
+      { streamer_id: 2, twitch_reward_id: 'r2' },
+    ] as any);
+    vi.mocked(getPricingSettingsForStreamers).mockResolvedValue(new Map([[2, settings]]));
+    vi.mocked(applyDecayTick).mockResolvedValue(undefined);
+
+    await runDecayTick();
 
     expect(applyDecayTick).toHaveBeenCalledWith(1, 'r1', undefined);
     expect(applyDecayTick).toHaveBeenCalledWith(2, 'r2', settings);
@@ -112,8 +126,8 @@ describe('runDecayTick', () => {
 
     const tick = runDecayTick();
     // Flush microtasks until the second row starts (or give up after a bounded number of
-    // ticks) — the batched per-streamer settings prefetch now adds a variable number of
-    // hops before applyDecayTick is reached, so a fixed tick count is too fragile here.
+    // ticks) — the single batched settings prefetch still adds a variable number of hops
+    // before applyDecayTick is reached, so a fixed tick count is too fragile here.
     for (let i = 0; i < 20 && !secondStarted; i++) {
       await Promise.resolve();
     }

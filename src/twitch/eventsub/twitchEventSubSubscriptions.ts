@@ -1,25 +1,17 @@
 import { createLogger } from '../../shared/logger';
-import { getAllEventSubStreamers, clearStreamerToken, getEnabledAlertEventTypesBatch, DEFAULT_EVENT_CONFIG } from '../../db';
+import { getAllEventSubStreamers, getEnabledAlertEventTypesBatch } from '../../db';
 import type { DbStreamerEventSub, EventSubConfig, AlertEventType } from '../../db';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
 import { normalizeTwitchChannelName } from '../twitchChannelName';
 import { createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, getValidToken, TwitchAuthError } from './twitchApiEventSub';
-import {
-  handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
-  handleStreamOnline, handleStreamOffline, handleChannelUpdate,
-  FollowEvent, SubEvent, ResubEvent, GiftSubEvent, RaidEvent, RedemptionEvent,
-} from './twitchEventSubHandler';
+import { SubSpec, SUBSCRIPTION_GROUPS, isGroupEnabled } from './twitchEventSubSubscriptionGroups';
+import { setStreamerInfo } from './twitchEventSubDispatch';
 
 const log = createLogger('EventSub');
 
-
-/** Describes a single EventSub subscription to create. */
-export interface SubSpec { type: string; version: string; condition: Record<string, string> }
-
-/** In-memory streamer info keyed by broadcaster user ID. */
-export interface StreamerInfo { login: string; streamerId: number; config: EventSubConfig | null }
-const streamerMap = new Map<string, StreamerInfo>();
+export { dispatchNotification, handleRevocation, removeStreamerFromMap, getAllStreamerInfo } from './twitchEventSubDispatch';
+export { getAlertTypesCoveredBySubscriptionGroups } from './twitchEventSubSubscriptionGroups';
 
 // Tracks "login:type:token" triples that failed with 403 — skipped until bot restarts or token changes
 const authFailedSubs = new Set<string>();
@@ -37,31 +29,53 @@ export function clearAuthFailedSubs(login: string): void {
   for (const key of authFailedSubs) if (key.startsWith(prefix)) authFailedSubs.delete(key);
 }
 
-// Maps EventSub notification types to their handler functions.
-// Using Map instead of a plain object prevents prototype-chain lookup on user-controlled keys.
-type NotificationHandler = (login: string, event: unknown, config: EventSubConfig, streamerId: number) => Promise<void>;
-const notificationHandlers = new Map<string, NotificationHandler>([
-  ['channel.follow',                                   (l, e, c, sid) => handleFollow(l, e as FollowEvent, c, sid)],
-  ['channel.subscribe',                                (l, e, c, sid) => handleSub(l, e as SubEvent, c, sid)],
-  ['channel.subscription.message',                     (l, e, c, sid) => handleResub(l, e as ResubEvent, c, sid)],
-  ['channel.subscription.gift',                        (l, e, c, sid) => handleGiftSub(l, e as GiftSubEvent, c, sid)],
-  ['channel.raid',                                     (l, e, c, sid) => handleRaid(l, e as RaidEvent, c, sid)],
-  ['channel.channel_points_custom_reward_redemption.add',  (l, e, c, sid) => handleRedemption(l, e as RedemptionEvent, c, sid)],
-  ['stream.online',                                    (l) => handleStreamOnline(l)],
-  ['stream.offline',                                   (l) => handleStreamOffline(l)],
-  ['channel.update',                                    (l) => handleChannelUpdate(l)],
-]);
-
-async function deleteStaleSubscriptions(uid: string, desired: Set<string>, userToken: string | null): Promise<void> {
+/**
+ * Deletes subscriptions that shouldn't be active any more: those whose type isn't in
+ * `desired` at all (e.g. the streamer turned off raid alerts), and — for types that were
+ * freshly (re)created this round — any *other* existing subscription of that same type, i.e.
+ * a duplicate left over from a session whose owning process died without calling
+ * `StreamerConnection.stop()` (crash, container restart, redeploy). Twitch eventually revokes
+ * an orphaned WebSocket subscription on its own, but not instantaneously — until then it stays
+ * "enabled" and delivers notifications alongside the new one, double-firing the type's handler
+ * for every event (e.g. `handleRedemption` recording two dashboard entries for one redemption).
+ * A type whose subscribe() returned null this round (409 — Twitch says an identical
+ * type+condition subscription already exists) is left untouched: `created` has no entry for
+ * it, so none of its existing subscriptions get pruned, since we can't tell which one Twitch
+ * considers the live one without risking deleting the subscription actually receiving events.
+ *
+ * @param uid - Broadcaster's Twitch user ID, used only for error logging.
+ * @param desired - Subscription types that should exist after this call.
+ * @param created - Type → subscription id for subscriptions freshly created this round (see
+ *   {@link createSubscriptionsForStreamer}); a type present here has any other existing
+ *   subscription of that type pruned as a stale duplicate.
+ * @param userToken - Broadcaster's valid user token; no-ops if null (no token to authenticate with).
+ */
+async function deleteStaleSubscriptions(
+  uid: string, desired: Set<string>, created: ReadonlyMap<string, string>, userToken: string | null,
+): Promise<void> {
   if (!userToken) return;
+  let existing: Array<{ id: string; type: string }>;
   try {
-    const existing = await listEventSubSubscriptions(userToken);
-    for (const sub of existing) {
-      if (!desired.has(sub.type)) await deleteEventSubSubscription(sub.id, userToken);
-    }
+    existing = await listEventSubSubscriptions(userToken);
   } catch (err) {
     log.error(`Subscription cleanup failed for uid ${uid}:`, err);
+    return;
   }
+  // Each deletion is isolated (and run concurrently, since they target different
+  // subscriptions) so one failure (e.g. a transient Twitch API error) doesn't abort the rest
+  // of the cleanup — leaving a still-undeleted stale duplicate would keep delivering
+  // notifications and double-firing the type's handler, the exact failure this cleanup targets.
+  const staleSubs = existing.filter((sub) => {
+    const keptId = created.get(sub.type);
+    const isStaleDuplicate = keptId !== undefined && sub.id !== keptId;
+    return !desired.has(sub.type) || isStaleDuplicate;
+  });
+  await Promise.allSettled(
+    staleSubs.map((sub) =>
+      deleteEventSubSubscription(sub.id, userToken).catch((err) => {
+        log.error(`Failed to delete subscription ${sub.id} (${sub.type}) for uid ${uid}:`, err);
+      })),
+  );
 }
 
 /** Resolves the broadcaster's Twitch user ID. Uses the stored OAuth ID if available;
@@ -80,117 +94,6 @@ async function resolveBroadcasterId(streamer: DbStreamerEventSub, config: EventS
   }
 }
 
-/** One gated group of EventSub subscriptions: created together whenever `isGroupEnabled` passes. */
-interface SubscriptionGroup {
-  /**
-   * Alert event types that share this group's subscription(s) — declaring these as data (rather
-   * than each group hand-writing its own `enabledAlerts.has('literal')` checks) lets
-   * `getAlertTypesCoveredBySubscriptionGroups` verify every {@link AlertEventType} is wired to a
-   * group; a test in `twitchEventSubSubscriptions.test.ts` fails if a new alert type is added
-   * without adding it here, instead of the gap silently compiling.
-   */
-  alertTypes: AlertEventType[];
-  /**
-   * Returns true if this group's subscriptions should be created based on the streamer's config
-   * alone — either a genuine chat-message toggle, or (for a group with no `alertTypes`)
-   * {@link hasCompletedEventSubSetup} as a proxy for "this streamer is set up enough to want this
-   * subscription at all". Independent of `alertTypes` — `isGroupEnabled` ORs the alerts-overlay
-   * gating in generically, since a streamer can want the subscription created purely to drive a
-   * browser-source alert, with chat messages off.
-   * @param config - The streamer's event response configuration, or null if unset.
-   */
-  configGate: (config: EventSubConfig | null) => boolean;
-  /**
-   * Builds this group's subscription specs.
-   * @param uid - The broadcaster's Twitch user ID.
-   * @returns The subscription specs to create for this group.
-   */
-  specs: (uid: string) => SubSpec[];
-}
-
-/**
- * Returns true if `group`'s subscriptions should be created: either its `configGate` passes, or
- * any of its `alertTypes` has an enabled alerts-overlay config.
- * @param group - The subscription group to evaluate.
- * @param config - The streamer's event response configuration, or null if unset.
- * @param enabledAlerts - Event types with an enabled alerts-overlay config row for this streamer.
- */
-function isGroupEnabled(
-  group: SubscriptionGroup,
-  config: EventSubConfig | null,
-  enabledAlerts: ReadonlySet<AlertEventType>,
-): boolean {
-  return group.configGate(config) || group.alertTypes.some((type) => enabledAlerts.has(type));
-}
-
-/**
- * `configGate` for a group with no `alertTypes` — unlike the alert-driven groups, there's no
- * alert-only path that needs the subscription without a real config row, so a row's mere
- * existence is used as a proxy for "this streamer completed the full EventSub/chat-message
- * setup". (`dispatchNotification` itself no longer early-exits without config — it falls back to
- * `DEFAULT_EVENT_CONFIG` for alert-only streamers — but that's moot for these groups since they
- * never subscribe for one.)
- * @param config - The streamer's event response configuration, or null if unset.
- */
-function hasCompletedEventSubSetup(config: EventSubConfig | null): boolean {
-  return Boolean(config);
-}
-
-// Every group also requires a broadcaster token (WebSocket transport only works with a user
-// token, not an app token — see createSubscriptionsForStreamer's upfront `!token` check).
-const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
-  {
-    alertTypes: ['follow'],
-    configGate: (config) => Boolean(config?.follow_enabled),
-    specs: (uid) => [{ type: 'channel.follow', version: '2', condition: { broadcaster_user_id: uid, moderator_user_id: uid } }],
-  },
-  {
-    alertTypes: ['sub', 'resub', 'giftsub'],
-    configGate: (config) => Boolean(config?.sub_enabled),
-    specs: (uid) => [
-      { type: 'channel.subscribe', version: '1', condition: { broadcaster_user_id: uid } },
-      { type: 'channel.subscription.message', version: '1', condition: { broadcaster_user_id: uid } },
-      { type: 'channel.subscription.gift', version: '1', condition: { broadcaster_user_id: uid } },
-    ],
-  },
-  {
-    // Subscribe when the welcome message, the auto-shoutout toggle, or the raid alert is on —
-    // handleRaid gates its three behaviours independently, but the subscription itself must
-    // exist for any of them to fire.
-    alertTypes: ['raid'],
-    configGate: (config) => Boolean(config?.raid_enabled || config?.raid_shoutout_enabled),
-    specs: (uid) => [{ type: 'channel.raid', version: '1', condition: { to_broadcaster_user_id: uid } }],
-  },
-  {
-    alertTypes: [],
-    configGate: hasCompletedEventSubSetup,
-    specs: (uid) => [{ type: 'channel.channel_points_custom_reward_redemption.add', version: '1', condition: { broadcaster_user_id: uid } }],
-  },
-  {
-    // stream.online/offline and channel.update require no scope beyond a valid token. This
-    // drives an immediate live-check that supplements (not replaces) the 60s poller. Not tied to
-    // any alert type.
-    alertTypes: [],
-    configGate: hasCompletedEventSubSetup,
-    specs: (uid) => [
-      { type: 'stream.online', version: '1', condition: { broadcaster_user_id: uid } },
-      { type: 'stream.offline', version: '1', condition: { broadcaster_user_id: uid } },
-      { type: 'channel.update', version: '2', condition: { broadcaster_user_id: uid } },
-    ],
-  },
-];
-
-/**
- * Returns the set of alert event types covered by at least one subscription group. Exported for
- * the exhaustiveness test in `twitchEventSubSubscriptions.test.ts`, which asserts this covers
- * every member of `ALERT_EVENT_TYPES` — catching a new alert type being added without also being
- * wired into a subscription group's `alertTypes` (which would otherwise compile fine and only
- * surface as "the subscription is never created" at runtime).
- */
-export function getAlertTypesCoveredBySubscriptionGroups(): Set<AlertEventType> {
-  return new Set(SUBSCRIPTION_GROUPS.flatMap((group) => group.alertTypes));
-}
-
 /** Data bundle passed to a StreamerConnection for setting up EventSub subscriptions. */
 export interface StreamerEventSubData {
   uid: string;
@@ -203,78 +106,95 @@ export interface StreamerEventSubData {
   enabledAlerts?: ReadonlySet<AlertEventType>;
 }
 
-/** Creates all desired EventSub subscriptions for a single streamer and returns the desired-types set. */
+/** Desired subscription types alongside the ones freshly created this round, keyed by type
+ *  (see {@link createSubscriptionsForStreamer}). */
+interface SubscriptionResult {
+  desired: Set<string>;
+  created: Map<string, string>;
+}
+
+/**
+ * Creates all desired EventSub subscriptions for a single streamer.
+ * @returns The desired-types set alongside a type → id map of subscriptions actually created
+ *   this round (a type is absent from `created` if `subscribe` hit a 409 — Twitch already has
+ *   an identical type+condition subscription active — so the caller has no id to prefer over
+ *   whatever else `listEventSubSubscriptions` later reports for that type).
+ */
 async function createSubscriptionsForStreamer(
   sessionId: string, data: StreamerEventSubData,
-): Promise<Set<string>> {
+): Promise<SubscriptionResult> {
   const { uid, token, name, config, enabledAlerts = new Set<AlertEventType>() } = data;
   const normalizedName = normalizeTwitchChannelName(name) ?? name.toLowerCase();
   if (!getActiveChannels().has(normalizedName)) {
     log.info(`Skipping EventSub subscriptions for ${name} — bot not in channel`);
-    return new Set();
+    return { desired: new Set(), created: new Map() };
   }
 
   const desired = new Set<string>();
-  if (!token) return desired;
+  const created = new Map<string, string>();
+  if (!token) return { desired, created };
 
   for (const group of SUBSCRIPTION_GROUPS) {
     if (!isGroupEnabled(group, config, enabledAlerts)) continue;
     for (const spec of group.specs(uid)) {
       desired.add(spec.type);
-      await subscribe(sessionId, spec, token, name);
+      const id = await subscribe(sessionId, spec, token, name);
+      if (id !== null) created.set(spec.type, id);
     }
   }
 
-  return desired;
+  return { desired, created };
 }
 
 /**
  * Fetches all streamers from the DB, resolves their broadcaster IDs and valid tokens. Alert-gating
  * state for every streamer is fetched in a single batched query (`getEnabledAlertEventTypesBatch`)
  * up front, rather than one query per streamer, mirroring `getAllEventSubStreamers`'s own
- * bulk-JOIN fetch of `streamer_event_config`.
+ * bulk-JOIN fetch of `streamer_event_config`. Per-streamer token refresh (`getValidToken`) and
+ * broadcaster-ID resolution run concurrently across streamers via `Promise.all` — each streamer
+ * is independent, so this doesn't wait on one streamer's token refresh before starting the next.
  */
 export async function loadStreamersForEventSub(): Promise<StreamerEventSubData[]> {
   const streamers = await getAllEventSubStreamers();
   const alertsByStreamer = await getEnabledAlertEventTypesBatch(streamers.map((s) => s.id));
-  const result: StreamerEventSubData[] = [];
-  for (const streamer of streamers) {
+  const resolved = await Promise.all(streamers.map(async (streamer): Promise<StreamerEventSubData | null> => {
     const token = await getValidToken(streamer);
     const config = streamer.config;
     const uid = await resolveBroadcasterId(streamer, config);
-    if (!uid) continue;
+    if (!uid) return null;
     const enabledAlerts = alertsByStreamer.get(streamer.id) ?? new Set<AlertEventType>();
-    result.push({ uid, token, name: streamer.twitch_name ?? '', config, streamerId: streamer.id, enabledAlerts });
-  }
-  return result;
+    return { uid, token, name: streamer.twitch_name ?? '', config, streamerId: streamer.id, enabledAlerts };
+  }));
+  return resolved.filter((r): r is StreamerEventSubData => r !== null);
 }
 
-/** Creates all subscriptions for one streamer on their dedicated session, updates streamerMap,
- *  and cleans up stale subscriptions. Returns the count of desired subscriptions. */
+/** Creates all subscriptions for one streamer on their dedicated session, updates the
+ *  dispatch-side streamer map, and cleans up stale subscriptions. Returns the count of
+ *  desired subscriptions. */
 export async function subscribeForStreamer(
   sessionId: string, data: StreamerEventSubData,
 ): Promise<number> {
   const { uid, token, name, config, streamerId } = data;
-  streamerMap.set(uid, { login: name, streamerId, config });
-  const desired = await createSubscriptionsForStreamer(sessionId, data);
-  await deleteStaleSubscriptions(uid, desired, token);
+  setStreamerInfo(uid, { login: name, streamerId, config });
+  const { desired, created } = await createSubscriptionsForStreamer(sessionId, data);
+  await deleteStaleSubscriptions(uid, desired, created, token);
   return desired.size;
 }
 
-/** Removes a streamer from the in-memory map (called when their connection is stopped). */
-export function removeStreamerFromMap(uid: string): void {
-  streamerMap.delete(uid);
-}
-
-async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<void> {
+/** Creates a single EventSub subscription. Returns the created subscription's id, or null if
+ *  it was skipped (previously auth-failed), Twitch reported it already exists (409), or the
+ *  create call failed — callers use a non-null id to identify "the subscription created this
+ *  round" when pruning stale duplicates in {@link deleteStaleSubscriptions}. */
+async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<string | null> {
   const skipKey = `${login}:${spec.type}:${token}`;
-  if (authFailedSubs.has(skipKey)) return;
+  if (authFailedSubs.has(skipKey)) return null;
   try {
     const id = await createEventSubSubscription(spec.type, spec.version, spec.condition, sessionId, token);
     if (id !== null) {
       authFailedSubs.delete(skipKey);
       log.info(`Subscribed to ${spec.type} for ${login}`);
     }
+    return id;
   } catch (err) {
     if (err instanceof TwitchAuthError) {
       authFailedSubs.add(skipKey);
@@ -282,55 +202,6 @@ async function subscribe(sessionId: string, spec: SubSpec, token: string, login:
     } else {
       log.error(`Failed to subscribe to ${spec.type} for ${login}:`, err);
     }
-  }
-}
-
-
-/**
- * Routes an EventSub notification to the appropriate handler based on subscription type.
- * A streamer with no `streamer_event_config` row (`info.config` null) — e.g. one who has only
- * ever enabled a browser-source alert and never completed the chat-message OAuth setup — still
- * dispatches, using `DEFAULT_EVENT_CONFIG` (every chat-message flag disabled) in place of the
- * missing config, so their alert-only subscriptions aren't silently discarded here. Without
- * this fallback, `isGroupEnabled`'s alert-driven subscription creation and this dispatch gate
- * would disagree: the subscription would exist but every notification for it would be dropped.
- */
-export function dispatchNotification(type: string, event: Record<string, unknown>, condition: Record<string, string>): void {
-  const broadcasterId = condition.broadcaster_user_id ?? condition.to_broadcaster_user_id;
-  if (!broadcasterId) return;
-
-  const info = streamerMap.get(broadcasterId);
-  if (!info) return;
-  const config = info.config ?? DEFAULT_EVENT_CONFIG;
-
-  const handler = notificationHandlers.get(type);
-  if (!handler) {
-    log.warn(`Unsupported EventSub notification type: ${type}`);
-    return;
-  }
-  // TypeScript has already narrowed handler to NotificationHandler here, but the explicit
-  // typeof check is required for CodeQL's taint analysis to trust the call is safe.
-  if (typeof handler !== 'function') {
-    log.warn(`Invalid EventSub handler for type: ${type}`);
-    return;
-  }
-  handler(info.login, event, config, info.streamerId)
-    .catch((err) => log.error(`${type} handler error:`, err));
-}
-
-/** Handles a subscription revocation message, clearing the broadcaster's token if authorisation was revoked. */
-export function handleRevocation(sub: { type: string; status: string; condition: Record<string, string> }): void {
-  log.warn(`Subscription revoked: type=${sub.type} status=${sub.status}`);
-
-  if (sub.status === 'authorization_revoked' || sub.status === 'user_removed') {
-    const broadcasterId = sub.condition.broadcaster_user_id ?? sub.condition.to_broadcaster_user_id;
-    if (broadcasterId) {
-      const info = streamerMap.get(broadcasterId);
-      if (info) {
-        clearStreamerToken(info.streamerId)
-          .catch((err) => log.error('Clear token error:', err));
-        log.warn(`Cleared token for ${info.login} (${sub.status})`);
-      }
-    }
+    return null;
   }
 }

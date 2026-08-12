@@ -1,11 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 
-/** Hoisted so the `vi.mock('../../shared/logger', ...)` factory below can safely reference it. */
-const { mockLogger } = vi.hoisted(() => ({
-  mockLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+vi.mock('../../shared/logger', () => ({
+  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
-
-vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({ getAllEnabledTimerCommandsWithChannel: vi.fn() }));
 vi.mock('../twitchChatActivity', () => ({ getMessageCount: vi.fn() }));
 vi.mock('../monitor/twitchMonitor', () => ({ isChannelLive: vi.fn() }));
@@ -205,13 +202,64 @@ describe('runTimerCommandTick', () => {
   });
 });
 
-describe('Shared Chat group cooldown', () => {
+describe('Per-command Shared Chat cooldown', () => {
   /** Routes `resolveSharedChatSessionId` to a fixed session id per Twitch user id. */
   function stubSessions(sessionIdByUserId: Record<string, string>): void {
     vi.mocked(resolveSharedChatSessionId).mockImplementation(async (userId: string) => sessionIdByUserId[userId] ?? null);
   }
 
-  it('suppresses a second ready timer sharing the same session, then fires it once the group cooldown elapses', async () => {
+  it("suppresses a second ready channel for the same command sharing a session, then fires it once the command's own interval elapses as the group cooldown", async () => {
+    getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a'], ['streamer-b', 'uid-b']]));
+    stubSessions({ 'uid-a': 'session-1', 'uid-b': 'session-1' });
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+      timerRow({ id: 1, channel: 'streamer-a', message: 'msg', interval_seconds: 60 }),
+      timerRow({ id: 1, channel: 'streamer-b', message: 'msg', interval_seconds: 60 }),
+    ] as any);
+
+    await runTimerCommandTick(); // seed both
+    await vi.advanceTimersByTimeAsync(60_000);
+    await runTimerCommandTick(); // both ready, command-session cooldown off -> only the oldest (streamer-a) fires
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('streamer-a', 'msg');
+
+    send.mockClear();
+    await vi.advanceTimersByTimeAsync(45_000); // streamer-b still eligible on its own gate, but the command's own 60s cooldown hasn't elapsed
+    await runTimerCommandTick();
+    expect(send).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(15_000); // now exactly 60s since streamer-a's fire — cooldown elapsed
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('streamer-b', 'msg');
+  });
+
+  it('rotates fairly among three channels of the same command sharing a session instead of favoring the same one', async () => {
+    getLoginUserIds.mockReturnValue(new Map([
+      ['streamer-a', 'uid-a'], ['streamer-b', 'uid-b'], ['streamer-c', 'uid-c'],
+    ]));
+    stubSessions({ 'uid-a': 'session-1', 'uid-b': 'session-1', 'uid-c': 'session-1' });
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+      timerRow({ id: 1, channel: 'streamer-a', message: 'msg', interval_seconds: 60 }),
+      timerRow({ id: 1, channel: 'streamer-b', message: 'msg', interval_seconds: 60 }),
+      timerRow({ id: 1, channel: 'streamer-c', message: 'msg', interval_seconds: 60 }),
+    ] as any);
+
+    await runTimerCommandTick(); // seed all three
+
+    const fired: string[] = [];
+    for (let round = 0; round < 3; round++) {
+      await vi.advanceTimersByTimeAsync(60_000); // clears both each channel's own interval and the command's own session cooldown
+      await runTimerCommandTick();
+      expect(send).toHaveBeenCalledTimes(1);
+      fired.push(send.mock.calls[0][0]); // channel arg, since the message is identical across all three
+      send.mockClear();
+    }
+
+    // Each of the three channels gets a turn — none is skipped in favor of another.
+    expect(new Set(fired)).toEqual(new Set(['streamer-a', 'streamer-b', 'streamer-c']));
+  });
+
+  it('does not let two different commands sharing the same session block each other, each governed by its own interval', async () => {
     getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a'], ['streamer-b', 'uid-b']]));
     stubSessions({ 'uid-a': 'session-1', 'uid-b': 'session-1' });
     vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
@@ -221,45 +269,11 @@ describe('Shared Chat group cooldown', () => {
 
     await runTimerCommandTick(); // seed both
     await vi.advanceTimersByTimeAsync(60_000);
-    await runTimerCommandTick(); // both ready, same session off cooldown -> only the oldest (streamer-a) fires
-    expect(send).toHaveBeenCalledTimes(1);
+    await runTimerCommandTick(); // both commands' own interval elapsed — different timer ids, so neither's cooldown blocks the other
+
+    expect(send).toHaveBeenCalledTimes(2);
     expect(send).toHaveBeenCalledWith('streamer-a', 'msg-a');
-
-    send.mockClear();
-    await vi.advanceTimersByTimeAsync(60_000); // both ready again, but group cooldown (120s) not yet elapsed
-    await runTimerCommandTick();
-    expect(send).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(60_000); // group cooldown now elapsed (120s since streamer-a fired)
-    await runTimerCommandTick();
-    expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith('streamer-b', 'msg-b');
-  });
-
-  it('rotates fairly among three timers sharing a session instead of favoring the same one', async () => {
-    getLoginUserIds.mockReturnValue(new Map([
-      ['streamer-a', 'uid-a'], ['streamer-b', 'uid-b'], ['streamer-c', 'uid-c'],
-    ]));
-    stubSessions({ 'uid-a': 'session-1', 'uid-b': 'session-1', 'uid-c': 'session-1' });
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
-      timerRow({ id: 1, channel: 'streamer-a', message: 'msg-a', interval_seconds: 60 }),
-      timerRow({ id: 2, channel: 'streamer-b', message: 'msg-b', interval_seconds: 60 }),
-      timerRow({ id: 3, channel: 'streamer-c', message: 'msg-c', interval_seconds: 60 }),
-    ] as any);
-
-    await runTimerCommandTick(); // seed all three
-
-    const fired: string[] = [];
-    for (let window = 0; window < 3; window++) {
-      await vi.advanceTimersByTimeAsync(120_000); // clears both each timer's own interval and the group cooldown
-      await runTimerCommandTick();
-      expect(send).toHaveBeenCalledTimes(1);
-      fired.push(send.mock.calls[0][1]);
-      send.mockClear();
-    }
-
-    // Each of the three distinct messages gets a turn — none is skipped in favor of another.
-    expect(new Set(fired)).toEqual(new Set(['msg-a', 'msg-b', 'msg-c']));
   });
 
   it('fires independently when timers resolve to different sessions', async () => {
@@ -278,12 +292,12 @@ describe('Shared Chat group cooldown', () => {
     expect(send).toHaveBeenCalledWith('streamer-b', 'msg-b');
   });
 
-  it('releases the group cooldown reservation when the picked row fails to send', async () => {
+  it('releases the command-session cooldown reservation when the picked row fails to send', async () => {
     getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a'], ['streamer-b', 'uid-b']]));
     stubSessions({ 'uid-a': 'session-1', 'uid-b': 'session-1' });
     vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
-      timerRow({ id: 1, channel: 'streamer-a', message: 'msg-a', interval_seconds: 60 }),
-      timerRow({ id: 2, channel: 'streamer-b', message: 'msg-b', interval_seconds: 60 }),
+      timerRow({ id: 1, channel: 'streamer-a', message: 'msg', interval_seconds: 60 }),
+      timerRow({ id: 1, channel: 'streamer-b', message: 'msg', interval_seconds: 60 }),
     ] as any);
 
     await runTimerCommandTick(); // seed both
@@ -292,14 +306,14 @@ describe('Shared Chat group cooldown', () => {
     send.mockRejectedValueOnce(new Error('helix down')); // fails for whichever row is picked (streamer-a, being oldest)
     await runTimerCommandTick();
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith('streamer-a', 'msg-a');
+    expect(send).toHaveBeenCalledWith('streamer-a', 'msg');
 
     // The failed send released the reservation, so the session can be retried on the very next
-    // tick instead of being blocked for the full 120s group cooldown.
+    // tick instead of being blocked for the command's full cooldown.
     send.mockClear();
     await runTimerCommandTick();
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith('streamer-a', 'msg-a');
+    expect(send).toHaveBeenCalledWith('streamer-a', 'msg');
   });
 
   it('fires normally when the session lookup fails (treated as not in Shared Chat)', async () => {
@@ -314,6 +328,138 @@ describe('Shared Chat group cooldown', () => {
     await runTimerCommandTick();
 
     expect(send).toHaveBeenCalledWith('streamer-a', 'msg-a');
+  });
+
+  it('releases a command-session reservation for a timer that loses the cross-command channel floor, instead of leaving it stuck for its own full interval', async () => {
+    // Two different timers both assigned to one shared-chat channel: each clears its own
+    // per-command session cooldown independently at layer 1 (they don't share one), but only one
+    // of them can actually post to the channel this tick at layer 2. The loser's layer-1
+    // reservation must be released — otherwise it would sit "used" until its own (long) interval
+    // elapses despite never having posted, even once the channel floor reopens well before then.
+    getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a']]));
+    stubSessions({ 'uid-a': 'session-1' });
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+      timerRow({ id: 1, channel: 'streamer-a', message: 'msg-a', interval_seconds: 60 }),
+      timerRow({ id: 2, channel: 'streamer-a', message: 'msg-b', interval_seconds: 300 }),
+    ] as any);
+
+    await runTimerCommandTick(); // seed both
+
+    await vi.advanceTimersByTimeAsync(300_000); // both eligible together for the first time; tie broken to timer 1
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('streamer-a', 'msg-a');
+
+    send.mockClear();
+    // Only 120s later — well under timer 2's own 300s interval, so timer 2 can only be a candidate
+    // again this soon if its layer-1 reservation was actually released rather than left to expire
+    // naturally on its own schedule.
+    await vi.advanceTimersByTimeAsync(120_000);
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('streamer-a', 'msg-b');
+  });
+});
+
+describe('Cross-command channel floor', () => {
+  it("defers a different command from posting to the same channel within 120s of another command's post there", async () => {
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+      timerRow({ id: 1, channel: 'somestreamer', message: 'msg-a', interval_seconds: 60 }),
+      timerRow({ id: 2, channel: 'somestreamer', message: 'msg-b', interval_seconds: 90 }),
+    ] as any);
+
+    await runTimerCommandTick(); // seed both
+
+    await vi.advanceTimersByTimeAsync(60_000); // timer 1 eligible; timer 2 needs 90s, not yet
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('somestreamer', 'msg-a');
+
+    send.mockClear();
+    await vi.advanceTimersByTimeAsync(30_000); // t=90s: timer 2 now eligible on its own gate, but only 30s since timer 1's post — different command, floor not yet clear
+    await runTimerCommandTick();
+    expect(send).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(90_000); // t=180s: 120s have now passed since timer 1's post at t=60s
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('somestreamer', 'msg-b');
+  });
+
+  it('does not throttle a lone command below its own interval just for having no competition on its channel', async () => {
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue(
+      [timerRow({ id: 1, channel: 'somestreamer', interval_seconds: 90 })] as any,
+    );
+
+    await runTimerCommandTick(); // seed
+    await vi.advanceTimersByTimeAsync(90_000);
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+
+    send.mockClear();
+    await vi.advanceTimersByTimeAsync(90_000); // only 90s later — would still be blocked if the 120s floor applied to a lone command's own repeats
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('picks whichever different command has waited longest when both are eligible for the same channel at once', async () => {
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+      timerRow({ id: 1, channel: 'somestreamer', message: 'msg-a', interval_seconds: 60 }),
+      timerRow({ id: 2, channel: 'somestreamer', message: 'msg-b', interval_seconds: 30 }),
+    ] as any);
+
+    await runTimerCommandTick(); // seed both, both lastFiredAt = 0
+
+    await vi.advanceTimersByTimeAsync(60_000); // both eligible; equal lastFiredAt so the first (timer 1) is picked
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('somestreamer', 'msg-a');
+  });
+
+  it('lets the same timer repeat during an active floor even when a longer-waiting different timer is also eligible', async () => {
+    // The floor exists to space out *different* commands, not to hold the poster back from its own
+    // next cycle. Picking the globally-longest-waiting row first (ignoring who set the floor) would
+    // pick timer 2 here, find it blocked by the floor, and defer the whole channel — silently
+    // skipping timer 1's due repeat too. It must fall back to timer 1 specifically.
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+      timerRow({ id: 1, channel: 'somestreamer', message: 'msg-a', interval_seconds: 60 }),
+      timerRow({ id: 2, channel: 'somestreamer', message: 'msg-b', interval_seconds: 30 }),
+    ] as any);
+
+    await runTimerCommandTick(); // seed both
+
+    await vi.advanceTimersByTimeAsync(60_000); // both eligible, no floor yet, tie broken to timer 1
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('somestreamer', 'msg-a');
+
+    send.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000); // t=120s: timer 1 due again (own 60s interval); timer 2 still starved and eligible; floor still active (60s since timer 1's post)
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('somestreamer', 'msg-a');
+  });
+
+  it('releases the channel-floor reservation when the picked command fails to send', async () => {
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+      timerRow({ id: 1, channel: 'somestreamer', message: 'msg-a', interval_seconds: 60 }),
+      timerRow({ id: 2, channel: 'somestreamer', message: 'msg-b', interval_seconds: 60 }),
+    ] as any);
+
+    await runTimerCommandTick(); // seed both
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    send.mockRejectedValueOnce(new Error('boom')); // fails for whichever is picked (timer 1, tie broken to first)
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('somestreamer', 'msg-a');
+
+    // The failed send released the channel-floor reservation, so it can be retried on the very
+    // next tick instead of being blocked for the full 120s floor.
+    send.mockClear();
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('somestreamer', 'msg-a');
   });
 });
 

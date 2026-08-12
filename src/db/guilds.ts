@@ -11,6 +11,11 @@ export interface DbGuild {
   voice_channel_id: string | null;
 }
 
+/** A guild the user is a member of, plus their access level there (from their `guild_member` row). */
+export interface DbGuildMembership extends DbGuild {
+  access_level: number;
+}
+
 // ─── Row mapper ───────────────────────────────────────────────────────────────
 
 // guild_id and voice_channel_id are BIGINT → strings (bigNumberStrings: true).
@@ -70,22 +75,25 @@ export async function getGuildById(guildId: string): Promise<DbGuild | null> {
 }
 
 /**
- * Returns the guilds a user is a member of (one row per guild_member), ordered by name.
- * Used to build the web panel's guild switcher for non-owner users.
+ * Returns the guilds a user is a member of (one row per guild_member), ordered by name, each
+ * paired with the user's access level in that guild. Used to build the web panel's guild
+ * switcher for non-owner users; the included `access_level` lets callers resolve the current
+ * guild's access level from this same result instead of a second `guild_member` query (see
+ * `requireGuildContext` in `src/web/middleware.ts`).
  *
  * @param discordId BIGINT snowflake as a string.
- * @returns The user's member guilds; empty if they belong to none.
+ * @returns The user's member guilds with access level; empty if they belong to none.
  */
-export async function getGuildsForMember(discordId: string): Promise<DbGuild[]> {
+export async function getGuildsForMember(discordId: string): Promise<DbGuildMembership[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT g.guild_id, g.name, g.voice_channel_id
+    `SELECT g.guild_id, g.name, g.voice_channel_id, gm.access_level
      FROM guild g
      JOIN guild_member gm ON gm.guild_id = g.guild_id
      WHERE gm.discord_id = ?
      ORDER BY g.name`,
     [discordId],
   );
-  return rows.map(mapGuild);
+  return rows.map((row) => ({ ...mapGuild(row), access_level: row.access_level as number }));
 }
 
 // ─── Mutations ─────────────────────────────────────────────────────────────────

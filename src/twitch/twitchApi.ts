@@ -265,6 +265,55 @@ export async function getCustomRewards(broadcasterId: string, userToken: string)
   return data.data;
 }
 
+/** A single channel-points redemption, as returned by Twitch's Get Custom Reward Redemptions endpoint. */
+export interface TwitchRewardRedemption {
+  id: string;
+  user_id: string;
+  user_login: string;
+  user_name: string;
+  user_input: string;
+  status: string;
+  redeemed_at: string;
+  reward: { id: string; title: string; prompt: string; cost: number };
+}
+
+/** One page of {@link getRewardRedemptions} results, plus the cursor to fetch the next page (if any). */
+export interface TwitchRewardRedemptionPage {
+  redemptions: TwitchRewardRedemption[];
+  /** Pass as `after` to fetch the next page; null once there are no more pages. */
+  cursor: string | null;
+}
+
+/**
+ * Lists one page (up to 50) of a broadcaster's redemptions for one custom reward and status, via
+ * Helix, newest first. Used by the EventSub reconciliation poll to catch redemptions the
+ * WebSocket connection missed (e.g. during a reconnect gap) — the live notification path is
+ * driven entirely by EventSub and never calls this.
+ *
+ * @param broadcasterId - Twitch user ID whose reward redemptions to list.
+ * @param rewardId - Twitch reward UUID to scope the query to.
+ * @param status - Redemption status to filter on. Callers must check both 'UNFULFILLED' and
+ *   'FULFILLED' to cover both queue-held and auto-fulfilled (`should_redemptions_skip_request_queue`)
+ *   redemptions — Twitch requires exactly one status per call.
+ * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
+ * @param after - Pagination cursor from a previous call's `cursor`, to fetch the next page.
+ * @returns Up to 50 matching redemptions (newest first) plus a cursor for the next page, or an
+ *   empty page with a null cursor on a 403 (reward not owned by this app's client_id, or channel
+ *   points unavailable for the broadcaster).
+ * @throws If Twitch returns a non-OK, non-403 status.
+ */
+export async function getRewardRedemptions(
+  broadcasterId: string, rewardId: string, status: 'UNFULFILLED' | 'FULFILLED', userToken: string, after?: string,
+): Promise<TwitchRewardRedemptionPage> {
+  let url = `https://api.twitch.tv/helix/channel_points/custom_rewards/redemptions?broadcaster_id=${encodeURIComponent(broadcasterId)}&reward_id=${encodeURIComponent(rewardId)}&status=${status}&sort=NEWEST&first=50`;
+  if (after) url += `&after=${encodeURIComponent(after)}`;
+  const res = await twitchFetch(url, { headers: authHeaders(userToken) });
+  if (res.status === 403) return { redemptions: [], cursor: null };
+  if (!res.ok) throw new Error(`[TwitchAPI] getRewardRedemptions failed: ${res.status}`);
+  const data = await res.json() as { data: TwitchRewardRedemption[]; pagination?: { cursor?: string } };
+  return { redemptions: data.data, cursor: data.pagination?.cursor ?? null };
+}
+
 /**
  * Thrown when Twitch returns 403 for a reward create/update/delete/cost-update call — Twitch
  * only allows the app that created a reward to manage it (or, on create, the broadcaster may

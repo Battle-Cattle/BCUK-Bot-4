@@ -369,6 +369,44 @@ describe('StreamerConnection lifecycle', () => {
     expect((conn as any).ws).not.toBeNull();
   });
 
+  /** Verifies the keepalive-timeout path force-reconnects without waiting on the socket's own 'close' event; returns void. */
+  it('reconnects on a keepalive timeout even if the socket never fires its own close event', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstWs = (conn as any).ws as MockWebSocket;
+    firstWs.listeners.get('open')!();
+
+    // Default keepaliveTimeoutSecs is 10 (set in the constructor, before any session_welcome
+    // sets a Twitch-provided value), so the timer fires after (10 + 10) * 1000ms.
+    vi.advanceTimersByTime(20_000);
+    expect(firstWs.close).toHaveBeenCalledWith(4000, 'keepalive timeout');
+
+    vi.advanceTimersByTime(1_000); // first reconnect attempt's backoff delay
+    // Reconnected without the mock socket ever invoking its 'close' listener — this is the
+    // half-dead-connection scenario a real close() call can silently never resolve.
+    const secondWs = (conn as any).ws as MockWebSocket;
+    expect(secondWs).not.toBeNull();
+    expect(secondWs).not.toBe(firstWs);
+    expect((conn as any).reconnectAttempts).toBe(1);
+  });
+
+  /** Verifies a stale close event arriving after a keepalive-triggered reconnect is ignored; returns void. */
+  it('ignores a late close event from a socket already superseded by a keepalive-triggered reconnect', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstWs = (conn as any).ws as MockWebSocket;
+    firstWs.listeners.get('open')!();
+
+    vi.advanceTimersByTime(20_000); // keepalive timeout fires
+    vi.advanceTimersByTime(1_000); // first reconnect attempt's backoff delay
+    const secondWs = (conn as any).ws as MockWebSocket;
+
+    // The first socket's close() eventually does fire its 'close' listener, late.
+    firstWs.listeners.get('close')!({ code: 4000, reason: 'keepalive timeout' } as any);
+
+    expect((conn as any).ws).toBe(secondWs); // unaffected by the stale event
+  });
+
   it('ignores a close event from a stale socket replaced during session migration', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();

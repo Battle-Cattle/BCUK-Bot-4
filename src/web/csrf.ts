@@ -3,6 +3,20 @@ import type { RequestHandler } from 'express';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+// Session tokens are always 64 lowercase hex chars (crypto.randomBytes(32).toString('hex')).
+const CSRF_TOKEN_HEX_PATTERN = /^[0-9a-f]{64}$/i;
+
+/**
+ * Converts a CSRF token to a 32-byte buffer for constant-time comparison, or null if it isn't
+ * valid 64-char hex (an attacker-controlled submitted token can be any string). Format-checking
+ * the length here doesn't leak anything security-relevant — a CSRF token's expected length is
+ * public knowledge, not part of the secret — so this is just a cheap pre-check to guarantee both
+ * buffers passed to `timingSafeEqual` are always the same length, without hashing either token.
+ */
+function csrfTokenBuffer(token: string): Buffer | null {
+  return CSRF_TOKEN_HEX_PATTERN.test(token) ? Buffer.from(token, 'hex') : null;
+}
+
 function createCsrfError(): Error & { code: string } {
   const error = new Error('Invalid CSRF token') as Error & { code: string };
   error.code = 'EBADCSRFTOKEN';
@@ -62,11 +76,9 @@ export const csrfProtection: RequestHandler = (req, _res, next) => {
     return;
   }
 
-  // Compare hex digests so both buffers are always the same byte length,
-  // eliminating any timing side-channel from a length mismatch check.
-  const a = Buffer.from(crypto.createHash('sha256').update(submittedToken).digest('hex'));
-  const b = Buffer.from(crypto.createHash('sha256').update(sessionToken).digest('hex'));
-  if (!crypto.timingSafeEqual(a, b)) {
+  const submittedBuffer = csrfTokenBuffer(submittedToken);
+  const sessionBuffer = csrfTokenBuffer(sessionToken);
+  if (!submittedBuffer || !sessionBuffer || !crypto.timingSafeEqual(submittedBuffer, sessionBuffer)) {
     next(createCsrfError());
     return;
   }

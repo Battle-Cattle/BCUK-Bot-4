@@ -15,10 +15,14 @@ import {
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { renderError, isLoopbackRedirectUri, renderView } from './shared';
+import { renderError, filterQueryParam, isLoopbackRedirectUri, renderView } from './shared';
+import { userMutationQueue } from './adminUserMutationQueue';
 
 const log = createLogger('Web');
 const router = Router();
+
+/** Error codes `GET /auth/login` accepts via `?error=`, both originating from `POST /guild/select`. */
+const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds']);
 
 // ─── Redirect to Discord OAuth2 ─────────────────────────────────────────────
 
@@ -54,7 +58,10 @@ router.get('/discord', (req, res) => {
  * syncing the display name, regenerating the session), or — if this login was
  * initiated via the companion app's loopback flow (`req.session.companionOAuth`
  * set by companionAuth.ts) — skips session creation entirely and redirects to
- * the companion app's `redirectUri` with a one-time code instead.
+ * the companion app's `redirectUri` with a one-time code instead. The
+ * `discord_name` sync is serialized per Discord ID through `userMutationQueue`,
+ * so it can't race a concurrent admin edit or the name-refresh job on the same
+ * user row.
  * @param req - Express request; reads `code`/`state` query params and the stored
  *   `oauthState` session value.
  * @param res - Express response; redirects to `/` on success, or to the
@@ -153,7 +160,7 @@ router.get('/discord/callback', async (req, res) => {
         syncedDiscordName = trimmedDisplayName;
       }
       if (syncedDiscordName !== dbUser.discord_name) {
-        await updateDiscordName(profile.id, syncedDiscordName);
+        await userMutationQueue.run(profile.id, () => updateDiscordName(profile.id, syncedDiscordName));
       }
     } catch (syncErr) {
       log.warn('Non-blocking discord_name sync failed:', syncErr);
@@ -211,13 +218,14 @@ router.post('/logout', requireAuth, csrfProtection, (req, res) => {
 
 /**
  * GET /auth/login — renders the login page.
- * @param req - Express request; checked for an existing `session.user`.
+ * @param req - Express request; checked for an existing `session.user`, and reads
+ *   `req.query.error` (set by `POST /guild/select` on failure) to show a banner.
  * @param res - Express response; redirects to `/` if already logged in, otherwise
- *   renders the `login` view.
+ *   renders the `login` view with the sanitized `error` code, if any.
  */
 router.get('/login', (req, res) => {
   if (req.session.user) return res.redirect('/');
-  renderView(res, 'login', { user: null });
+  renderView(res, 'login', { user: null, error: filterQueryParam(req.query.error, LOGIN_KNOWN_ERRORS) });
 });
 
 export default router;

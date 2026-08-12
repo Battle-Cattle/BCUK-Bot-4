@@ -513,22 +513,40 @@ describe('assignUsersToCommandWithinTransaction', () => {
     expect(releaseNamedLock).toHaveBeenCalledOnce();
   });
 
-  it('runs a channel trigger conflict check for each eligible user', async () => {
+  it('runs a single batched channel trigger conflict check covering every eligible user', async () => {
     const connection = makeConnection([
       [{ trigger_string: '!clap' }],
       [
         { discord_id: 'user1', twitch_name: 'alice', is_twitch_bot_enabled: 1 },
         { discord_id: 'user2', twitch_name: 'bob', is_twitch_bot_enabled: 1 },
       ],
-      [], // conflict check for user1
-      [], // conflict check for user2
+      [], // one batched conflict check covering both eligible users
       [], // insert
     ]);
 
     await assignUsersToCommandWithinTransaction(connection, 1, ['user1', 'user2']);
 
     expect(connection.commit).toHaveBeenCalledOnce();
-    expect(connection.execute).toHaveBeenCalledTimes(5);
+    expect(connection.execute).toHaveBeenCalledTimes(4);
+    const [conflictSql, conflictParams] = connection.execute.mock.calls[2] as [string, unknown[]];
+    expect(conflictSql).toContain('IN (?, ?)');
+    expect(conflictParams).toEqual([1, '!clap', 'alice', 'bob']);
+  });
+
+  it('skips the conflict check entirely when no assigned user is Twitch-eligible', async () => {
+    const connection = makeConnection([
+      [{ trigger_string: '!clap' }],
+      [
+        { discord_id: 'user1', twitch_name: null, is_twitch_bot_enabled: 0 },
+        { discord_id: 'user2', twitch_name: 'bob', is_twitch_bot_enabled: 0 },
+      ],
+      [], // insert
+    ]);
+
+    await assignUsersToCommandWithinTransaction(connection, 1, ['user1', 'user2']);
+
+    expect(connection.commit).toHaveBeenCalledOnce();
+    expect(connection.execute).toHaveBeenCalledTimes(3);
   });
 
   it('rolls back and throws CommandConflictError when any eligible user has a channel conflict', async () => {

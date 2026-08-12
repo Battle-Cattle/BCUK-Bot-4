@@ -8,9 +8,6 @@ import {
 } from './lookupCache';
 import { normalizeCommandList, normalizeCommand } from './commandStringUtils';
 import { isAnyCommandTakenAcrossTables } from './commandLocks';
-// counters imports invalidateCounterLookupCache from this module;
-// this module imports getAllCounters from counters.
-// Both calls happen inside function bodies, so CommonJS resolves the cycle correctly.
 import { getAllCounters, type DbCounter, type DbMatchedCounter, type CounterMatchType } from './counters';
 
 const log = createLogger('DB');

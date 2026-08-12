@@ -1,13 +1,16 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { AccessLevel, findUser, getAllGuilds, getEffectiveAccessLevelForUser, getGuildsForMember } from '../../db';
+import { AccessLevel, findUser, getAllGuilds, getEffectiveAccessLevelForUser, getGuildsForMember, type DbGuild } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
-import { normalizeDiscordId, renderView } from './shared';
+import { filterQueryParam, logAndRedirectError, normalizeDiscordId, renderView } from './shared';
 
 const log = createLogger('Web');
 const router = Router();
+
+/** Error codes `GET /guild/select` accepts via `?error=`, all originating from `POST /guild/select`. */
+const KNOWN_ERRORS = new Set(['invalid_guild', 'guild_not_found', 'select_failed']);
 
 // ─── Guild picker ──────────────────────────────────────────────────────────
 //
@@ -17,19 +20,25 @@ const router = Router();
 
 /**
  * Renders the guild picker page for multi-guild users.
- * @param req - Express request; reads `req.session.user.guilds`.
- * @param res - Express response; renders `guildSelect`, or redirects to `/` when the user
- *   has at most one guild (single-guild users are sent straight to the dashboard).
+ * @param req - Express request; reads `req.session.user.guilds` and `req.query.error`
+ *   (set by `POST /guild/select` on failure) to show a banner.
+ * @param res - Express response; renders `guildSelect` with the sanitized `error` code
+ *   if any, or redirects to `/` when the user has at most one guild and no error is
+ *   present (single-guild users are normally sent straight to the dashboard, but a
+ *   `guild_not_found`/`select_failed` error must still be shown even if the live-guild
+ *   refresh in `POST /guild/select` left the session with only one guild).
  */
 router.get('/select', requireAuth, csrfProtection, (req, res) => {
   const user = getSessionUser(req);
-  if (user.guilds.length <= 1) {
+  const error = filterQueryParam(req.query.error, KNOWN_ERRORS);
+  if (user.guilds.length <= 1 && !error) {
     return res.redirect('/');
   }
   renderView(res, 'guildSelect', {
     user,
     guilds: user.guilds,
     csrfToken: req.csrfToken(),
+    error,
   });
 });
 
@@ -39,6 +48,20 @@ router.get('/select', requireAuth, csrfProtection, (req, res) => {
  * which can be stale if either was revoked after login) before the guild is accepted.
  * On success the effective access level is recomputed for that guild so authorization
  * reflects the current guild, never the previous one.
+ *
+ * For a non-owner, the access level is read off the same `getGuildsForMember` result already
+ * fetched to build `user.guilds` (each entry carries the user's `access_level` for that guild)
+ * instead of a second `guild_member` query, mirroring `requireGuildContext` in `../middleware`.
+ *
+ * When the session's user no longer exists in the DB or has no accessible guilds, the session
+ * is destroyed (not just partially cleared) before redirecting to `/auth/login` — otherwise
+ * `GET /auth/login` would see a still-populated `session.user` and bounce straight to `/`
+ * without ever rendering the error.
+ *
+ * @param req - Express request; reads `req.session.user` and the `guild_id` form field.
+ * @param res - Express response; redirects to `/` on success, or back to `/guild/select` /
+ *   `/auth/login` when the selection can't be accepted.
+ * @returns Resolves once the redirect has been issued.
  */
 router.post('/select', requireAuth, csrfProtection, async (req, res) => {
   const user = getSessionUser(req);
@@ -46,31 +69,54 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
   const requestedGuildId = typeof guild_id === 'string' ? normalizeDiscordId(guild_id) : null;
 
   if (!requestedGuildId) {
-    return res.redirect('/guild/select');
+    return res.redirect('/guild/select?error=invalid_guild');
   }
 
   try {
     const dbUser = await findUser(user.discordId);
     if (!dbUser) {
-      return res.redirect('/auth/login');
+      // The session's user no longer exists in the DB — destroy the session so GET
+      // /auth/login doesn't see a still-populated session.user and bounce straight
+      // back to `/` before the error banner ever renders.
+      return req.session.destroy(() => res.redirect('/auth/login?error=user_not_found'));
     }
     const isOwner = dbUser.is_owner;
-    const liveGuilds = isOwner ? await getAllGuilds() : await getGuildsForMember(user.discordId);
+
+    let liveGuilds: DbGuild[];
+    let accessLevelByGuildId: Map<string, number> | null = null;
+    if (isOwner) {
+      liveGuilds = await getAllGuilds();
+    } else {
+      const memberships = await getGuildsForMember(user.discordId);
+      liveGuilds = memberships;
+      accessLevelByGuildId = new Map(memberships.map((g) => [g.guild_id, g.access_level]));
+    }
     user.isOwner = isOwner;
     user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
     if (user.guilds.length === 0) {
-      user.currentGuildId = null;
-      return res.redirect('/auth/login');
+      // Same reasoning as above: destroy the session rather than just clearing
+      // currentGuildId, so the login page's error banner actually reaches the user.
+      return req.session.destroy(() => res.redirect('/auth/login?error=no_guilds'));
     }
     if (!liveGuilds.some((g) => g.guild_id === requestedGuildId)) {
-      return res.redirect('/guild/select');
+      return res.redirect('/guild/select?error=guild_not_found');
     }
-    const accessLevel = (await getEffectiveAccessLevelForUser(requestedGuildId, dbUser)) as (typeof AccessLevel)[keyof typeof AccessLevel];
+    const accessLevel = (
+      accessLevelByGuildId
+        ? accessLevelByGuildId.get(requestedGuildId) ?? AccessLevel.USER
+        : await getEffectiveAccessLevelForUser(requestedGuildId, dbUser)
+    ) as (typeof AccessLevel)[keyof typeof AccessLevel];
     user.currentGuildId = requestedGuildId;
     user.accessLevel = accessLevel;
   } catch (err) {
-    log.error('Guild select failed:', err);
-    return res.redirect('/guild/select');
+    return logAndRedirectError({
+      res,
+      log,
+      logLabel: 'Guild select failed:',
+      err,
+      basePath: '/guild/select',
+      errorCode: 'select_failed',
+    });
   }
   res.redirect('/');
 });

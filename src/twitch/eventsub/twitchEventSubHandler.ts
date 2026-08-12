@@ -6,6 +6,7 @@ import { createLogger } from '../../shared/logger';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 import { fillTemplate } from '../../shared/textTemplate';
 import { applyRedemptionPricing } from '../pricing/rewardPricingService';
+import { isDuplicateRedemption } from './twitchEventSubRedemptionDedup';
 import {
   overlayRuntimeRegistry,
   companionRuntimeRegistry,
@@ -341,6 +342,11 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
  * caught via `.catch` instead of awaited), so its network latency truly can't delay the
  * overlay-video logic below.
  *
+ * Deduplicates on Twitch's own redemption id ({@link isDuplicateRedemption}) before doing
+ * anything else — a duplicate is dropped silently, since every effect below (companion push,
+ * dashboard record, pricing, overlay trigger) would otherwise double-fire for one physical
+ * redemption.
+ *
  * @param login - Broadcaster login name.
  * @param event - Redemption event payload including reward ID and user details.
  * @param _config - Streamer event config (unused for redemptions; reserved for future use).
@@ -352,6 +358,11 @@ export async function handleRedemption(
   _config: EventSubConfig,
   streamerId: number,
 ): Promise<void> {
+  if (isDuplicateRedemption(event.id)) {
+    log.warn(`Duplicate redemption notification for "${event.reward.title}" (id=${event.id}) — ignoring`);
+    return;
+  }
+
   try {
     const streamer = await getStreamerById(streamerId);
     if (streamer) {

@@ -57,9 +57,6 @@ vi.mock('./utils', () => ({
   }),
   getRowCount: vi.fn(),
 }));
-vi.mock('./counterCache', () => ({
-  invalidateCounterLookupCache: vi.fn(),
-}));
 
 import { makeMockConnection } from '../test-utils/mockMysqlPool';
 
@@ -82,7 +79,6 @@ import {
 } from './counters';
 import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
-import { invalidateCounterLookupCache } from './counterCache';
 import { getRowCount } from './utils';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
@@ -313,13 +309,6 @@ describe('addCounter', () => {
     );
   });
 
-  it('invalidates the counter cache after success', async () => {
-    vi.mocked(getPool).mockReturnValue(makePool() as any);
-    mockConnection.execute.mockResolvedValue([{}, []]);
-    await addCounter('!hits', '!checkhits', 'msg', 'inc', false);
-    expect(invalidateCounterLookupCache).toHaveBeenCalled();
-  });
-
   it('throws when trigger and check differ only by case (normalized to same value)', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
     await expect(addCounter('!HITS', '!hits', 'msg', 'inc', false)).rejects.toThrow('must be different');
@@ -349,12 +338,6 @@ describe('updateCounter', () => {
     expect(assertNotReservedCommand).toHaveBeenCalledWith('!newcheck');
   });
 
-  it('invalidates the counter cache after success', async () => {
-    vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!old', check_command: '!oldcheck' }]) as any);
-    mockConnection.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
-    await updateCounter({ id: 1, triggerCommand: '!new', checkCommand: '!check', message: 'm', incrementMessage: 'i', resetYearly: false });
-    expect(invalidateCounterLookupCache).toHaveBeenCalled();
-  });
 });
 
 // ─── removeCounter ────────────────────────────────────────────────────────────
@@ -376,12 +359,6 @@ describe('removeCounter', () => {
     );
   });
 
-  it('invalidates cache after removal', async () => {
-    vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!hits', check_command: '!checkhits' }]) as any);
-    mockConnection.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
-    await removeCounter(1);
-    expect(invalidateCounterLookupCache).toHaveBeenCalled();
-  });
 });
 
 // ─── resetCounterCurrentValue ─────────────────────────────────────────────────
@@ -401,14 +378,6 @@ describe('resetCounterCurrentValue', () => {
     pool.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(resetCounterCurrentValue(1)).resolves.not.toThrow();
-  });
-
-  it('invalidates cache on success', async () => {
-    const pool = makePool();
-    pool.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await resetCounterCurrentValue(1);
-    expect(invalidateCounterLookupCache).toHaveBeenCalled();
   });
 });
 
@@ -430,11 +399,38 @@ describe('incrementCounter', () => {
     const conn = pool._conn;
     conn.execute
       .mockResolvedValueOnce([{ affectedRows: 1 }, []])       // UPDATE: ResultSetHeader
-      .mockResolvedValueOnce([[{ current_value: 7 }], []]);    // SELECT: rows
+      .mockResolvedValueOnce([[{ current_value: 7 }], []]);    // SELECT LAST_INSERT_ID(): rows
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await incrementCounter(1);
     expect(result).toBe(7);
     expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('parses a string current_value into a number (LAST_INSERT_ID() is a BIGINT expression, so the pool\'s bigNumberStrings setting can return it as a string)', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([[{ current_value: '7' }], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await incrementCounter(1);
+    expect(result).toBe(7);
+    expect(typeof result).toBe('number');
+  });
+
+  it('reads the new value via LAST_INSERT_ID() instead of re-querying the counter table', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([[{ current_value: 3 }], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await incrementCounter(1);
+    const [updateSql] = conn.execute.mock.calls[0];
+    const [selectSql, selectParams] = conn.execute.mock.calls[1];
+    expect(updateSql).toContain('LAST_INSERT_ID(current_value + 1)');
+    expect(selectSql).toBe('SELECT LAST_INSERT_ID() AS current_value');
+    expect(selectParams).toBeUndefined();
   });
 
   it('releases the connection even when it throws', async () => {
@@ -444,17 +440,6 @@ describe('incrementCounter', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(incrementCounter(1)).rejects.toThrow('DB error');
     expect(conn.release).toHaveBeenCalled();
-  });
-
-  it('invalidates cache on success', async () => {
-    const pool = makePool();
-    const conn = pool._conn;
-    conn.execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
-      .mockResolvedValueOnce([[{ current_value: 3 }], []]);
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await incrementCounter(1);
-    expect(invalidateCounterLookupCache).toHaveBeenCalled();
   });
 });
 
@@ -499,13 +484,5 @@ describe('archiveAndResetYearlyCounters', () => {
     await archiveAndResetYearlyCounters(2024);
     const [sql] = pool.execute.mock.calls[0] as [string];
     expect(sql).toContain('value2024');
-  });
-
-  it('invalidates cache after archiving', async () => {
-    const pool = makePool();
-    pool.execute.mockResolvedValue([{ affectedRows: 2 }, []]);
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await archiveAndResetYearlyCounters(2025);
-    expect(invalidateCounterLookupCache).toHaveBeenCalled();
   });
 });

@@ -15,6 +15,17 @@
       <h2 class="section-title">Choose a Server</h2>
       <p class="section-subtitle">You manage more than one server. Pick which one to work in.</p>
 
+      <% if (error) { %>
+      <% const errorMessages = {
+        invalid_guild: 'That server selection was invalid. Please try again.',
+        guild_not_found: 'That server is no longer available to you. Please choose another.',
+        select_failed: 'Something went wrong while switching servers. Please try again.',
+      }; %>
+      <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
+        <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
+      </div>
+      <% } %>
+
       <div class="guild-list">
         <% guilds.forEach(function (g) { %>
         <form method="POST" action="/guild/select" class="guild-select-form">
