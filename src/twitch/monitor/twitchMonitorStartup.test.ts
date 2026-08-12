@@ -246,4 +246,66 @@ describe('performStartupLiveCheck', () => {
     await performStartupLiveCheck(new Map(), new Map([['alice', 'u1']]), [streamer]);
     expect(updateMultitwitch).toHaveBeenCalledWith(7, expect.any(Map));
   });
+
+  it('reconciles streamers concurrently, isolating one failure from the other', async () => {
+    const streamA = makeStream({ user_id: 'u1', user_login: 'alice', type: 'live' });
+    const streamB = makeStream({ user_id: 'u2', user_login: 'bob', type: 'live' });
+    vi.mocked(getStreams).mockResolvedValue([streamA, streamB]);
+    const streamerA = makeStreamer({ id: 10, twitch_name: 'alice', discord_message_id: null });
+    const streamerB = makeStreamer({ id: 11, twitch_name: 'bob', discord_message_id: null });
+
+    let rejectFirst!: (err: Error) => void;
+    const firstGate = new Promise<void>((_resolve, reject) => { rejectFirst = reject; });
+    let secondStarted = false;
+
+    vi.mocked(postAnnouncement).mockImplementation(async (_liveStates: any, streamer: any) => {
+      if (streamer.twitch_name === 'alice') {
+        await firstGate;
+      } else {
+        secondStarted = true;
+      }
+    });
+
+    const check = performStartupLiveCheck(new Map(), new Map([['alice', 'u1'], ['bob', 'u2']]), [streamerA, streamerB]);
+    // Flush microtasks until the second streamer starts (or give up after a bounded number of
+    // ticks) — proves it isn't waiting on the first streamer to settle.
+    for (let i = 0; i < 20 && !secondStarted; i++) {
+      await Promise.resolve();
+    }
+    expect(secondStarted).toBe(true);
+
+    rejectFirst(new Error('announce failed'));
+    await expect(check).resolves.not.toThrow();
+  });
+
+  it('refreshes MultiTwitch for each changed group concurrently, isolating one failure from the other', async () => {
+    const streamA = makeStream({ user_id: 'u1', user_login: 'alice', type: 'live' });
+    const streamB = makeStream({ user_id: 'u2', user_login: 'bob', type: 'live' });
+    vi.mocked(getStreams).mockResolvedValue([streamA, streamB]);
+    const channel = makeChannel();
+    vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: vi.fn().mockResolvedValue(channel) } } as any);
+    const streamerA = makeStreamer({ id: 10, twitch_name: 'alice', discord_message_id: 'msg1', discord_channel_id: 'ch1', group: makeGroup({ id: 7 }) });
+    const streamerB = makeStreamer({ id: 11, twitch_name: 'bob', discord_message_id: 'msg2', discord_channel_id: 'ch1', group: makeGroup({ id: 8 }) });
+
+    let rejectFirst!: (err: Error) => void;
+    const firstGate = new Promise<void>((_resolve, reject) => { rejectFirst = reject; });
+    let secondStarted = false;
+
+    vi.mocked(updateMultitwitch).mockImplementation(async (groupId: number) => {
+      if (groupId === 7) {
+        await firstGate;
+      } else {
+        secondStarted = true;
+      }
+    });
+
+    const check = performStartupLiveCheck(new Map(), new Map([['alice', 'u1'], ['bob', 'u2']]), [streamerA, streamerB]);
+    for (let i = 0; i < 20 && !secondStarted; i++) {
+      await Promise.resolve();
+    }
+    expect(secondStarted).toBe(true);
+
+    rejectFirst(new Error('multitwitch failed'));
+    await expect(check).resolves.not.toThrow();
+  });
 });

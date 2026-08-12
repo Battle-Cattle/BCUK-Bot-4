@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { getAllEnabledPricingRows, getPricingSettingsForStreamer, type StreamerPricingSettings } from '../../db';
+import { getAllEnabledPricingRows, getPricingSettingsForStreamers, type StreamerPricingSettings } from '../../db';
 import { applyDecayTick } from './rewardPricingService';
 
 const log = createLogger('RewardPricingScheduler');
@@ -65,11 +65,13 @@ function resumeAfterDbRecovery(): void {
  * Rows are processed concurrently — `applyDecayTick` already serializes work per reward via
  * its own mutation queue, so different rows are independent and don't need to wait on each
  * other, keeping tick duration from growing linearly with the number of enabled rewards.
- * A streamer's pricing settings are fetched once per tick and shared across all of that
- * streamer's rewards (rather than once per reward) — settings aren't part of the
- * per-reward concurrency-sensitive state `applyDecayTick` re-reads fresh, so a tick-old
- * value is harmless. No-ops (re-uses the in-flight promise) if a tick is already running,
- * so a slow tick can't overlap with the next interval firing.
+ * A streamer's pricing settings are fetched once per tick, in one batched query across every
+ * distinct streamer with enabled pricing rows (`getPricingSettingsForStreamers`), and shared
+ * across all of that streamer's rewards (rather than once per reward or one query per
+ * streamer) — settings aren't part of the per-reward concurrency-sensitive state
+ * `applyDecayTick` re-reads fresh, so a tick-old value is harmless. No-ops (re-uses the
+ * in-flight promise) if a tick is already running, so a slow tick can't overlap with the next
+ * interval firing.
  */
 export async function runDecayTick(): Promise<void> {
   if (tickRunning) return currentTickPromise;
@@ -79,20 +81,15 @@ export async function runDecayTick(): Promise<void> {
       const rows = await getAllEnabledPricingRows();
       resumeAfterDbRecovery();
       const distinctStreamerIds = [...new Set(rows.map((row) => row.streamer_id))];
-      // Settled (not Promise.all) so one streamer's settings-fetch failure doesn't abort
-      // the whole tick — that streamer's rewards simply fall back to fetching their own
-      // settings inside applyDecayTick, isolated by the per-row .catch below like before.
-      const settingsResults = await Promise.allSettled(
-        distinctStreamerIds.map(async (streamerId): Promise<[number, StreamerPricingSettings]> =>
-          [streamerId, await getPricingSettingsForStreamer(streamerId)]),
-      );
-      const settingsByStreamerId = new Map<number, StreamerPricingSettings>();
-      for (const result of settingsResults) {
-        if (result.status === 'fulfilled') {
-          settingsByStreamerId.set(...result.value);
-        } else {
-          log.error('Failed to pre-fetch pricing settings for a streamer during decay tick:', result.reason);
-        }
+      // A streamer absent from the result (no settings row, or the whole batch fetch failed)
+      // is simply missing from the map — applyDecayTick falls back to fetching its own
+      // per-reward default when `settingsByStreamerId.get(...)` is undefined, same as before.
+      let settingsByStreamerId: Map<number, StreamerPricingSettings>;
+      try {
+        settingsByStreamerId = await getPricingSettingsForStreamers(distinctStreamerIds);
+      } catch (err) {
+        log.error('Failed to pre-fetch pricing settings during decay tick:', err);
+        settingsByStreamerId = new Map();
       }
 
       await Promise.allSettled(

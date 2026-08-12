@@ -61,20 +61,21 @@ async function deleteStaleSubscriptions(
     log.error(`Subscription cleanup failed for uid ${uid}:`, err);
     return;
   }
-  // Each deletion is isolated so one failure (e.g. a transient Twitch API error) doesn't abort
-  // the rest of the cleanup — leaving a still-undeleted stale duplicate would keep delivering
+  // Each deletion is isolated (and run concurrently, since they target different
+  // subscriptions) so one failure (e.g. a transient Twitch API error) doesn't abort the rest
+  // of the cleanup — leaving a still-undeleted stale duplicate would keep delivering
   // notifications and double-firing the type's handler, the exact failure this cleanup targets.
-  for (const sub of existing) {
+  const staleSubs = existing.filter((sub) => {
     const keptId = created.get(sub.type);
     const isStaleDuplicate = keptId !== undefined && sub.id !== keptId;
-    if (!desired.has(sub.type) || isStaleDuplicate) {
-      try {
-        await deleteEventSubSubscription(sub.id, userToken);
-      } catch (err) {
+    return !desired.has(sub.type) || isStaleDuplicate;
+  });
+  await Promise.allSettled(
+    staleSubs.map((sub) =>
+      deleteEventSubSubscription(sub.id, userToken).catch((err) => {
         log.error(`Failed to delete subscription ${sub.id} (${sub.type}) for uid ${uid}:`, err);
-      }
-    }
-  }
+      })),
+  );
 }
 
 /** Resolves the broadcaster's Twitch user ID. Uses the stored OAuth ID if available;
@@ -149,21 +150,22 @@ async function createSubscriptionsForStreamer(
  * Fetches all streamers from the DB, resolves their broadcaster IDs and valid tokens. Alert-gating
  * state for every streamer is fetched in a single batched query (`getEnabledAlertEventTypesBatch`)
  * up front, rather than one query per streamer, mirroring `getAllEventSubStreamers`'s own
- * bulk-JOIN fetch of `streamer_event_config`.
+ * bulk-JOIN fetch of `streamer_event_config`. Per-streamer token refresh (`getValidToken`) and
+ * broadcaster-ID resolution run concurrently across streamers via `Promise.all` — each streamer
+ * is independent, so this doesn't wait on one streamer's token refresh before starting the next.
  */
 export async function loadStreamersForEventSub(): Promise<StreamerEventSubData[]> {
   const streamers = await getAllEventSubStreamers();
   const alertsByStreamer = await getEnabledAlertEventTypesBatch(streamers.map((s) => s.id));
-  const result: StreamerEventSubData[] = [];
-  for (const streamer of streamers) {
+  const resolved = await Promise.all(streamers.map(async (streamer): Promise<StreamerEventSubData | null> => {
     const token = await getValidToken(streamer);
     const config = streamer.config;
     const uid = await resolveBroadcasterId(streamer, config);
-    if (!uid) continue;
+    if (!uid) return null;
     const enabledAlerts = alertsByStreamer.get(streamer.id) ?? new Set<AlertEventType>();
-    result.push({ uid, token, name: streamer.twitch_name ?? '', config, streamerId: streamer.id, enabledAlerts });
-  }
-  return result;
+    return { uid, token, name: streamer.twitch_name ?? '', config, streamerId: streamer.id, enabledAlerts };
+  }));
+  return resolved.filter((r): r is StreamerEventSubData => r !== null);
 }
 
 /** Creates all subscriptions for one streamer on their dedicated session, updates the

@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
 import { fromBit } from './utils';
+import { buildInClausePlaceholders } from './commandStringUtils';
 
 /** A reward's dynamic-pricing configuration and current demand state. */
 export interface RewardPricingRow {
@@ -244,6 +245,33 @@ export async function getPricingSettingsForStreamer(streamerId: number): Promise
     half_life_seconds: Number(rows[0].half_life_seconds),
     time_to_max_multiplier: Number(rows[0].time_to_max_multiplier),
   };
+}
+
+/**
+ * Batched form of {@link getPricingSettingsForStreamer}: reads pricing settings for every
+ * streamer in `streamerIds` in a single query, instead of one query per streamer. Used by
+ * the decay-tick scheduler, which otherwise fetches one row per distinct streamer on every
+ * 30s tick. Streamers with no settings row are omitted from the result (not defaulted) — the
+ * default is per-streamer, so callers should fall back to `DEFAULT_STREAMER_PRICING_SETTINGS`
+ * (or {@link getPricingSettingsForStreamer}'s own default) themselves for a missing entry.
+ *
+ * @param streamerIds - DB row IDs of the streamers to fetch settings for.
+ * @returns Map of streamer id to their settings; empty if `streamerIds` is empty or none have settings.
+ */
+export async function getPricingSettingsForStreamers(streamerIds: number[]): Promise<Map<number, StreamerPricingSettings>> {
+  if (streamerIds.length === 0) return new Map();
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT streamer_id, half_life_seconds, time_to_max_multiplier FROM reward_pricing_settings
+     WHERE streamer_id IN (${buildInClausePlaceholders(streamerIds.length)})`,
+    streamerIds,
+  );
+  return new Map(rows.map((row) => [
+    row.streamer_id as number,
+    {
+      half_life_seconds: Number(row.half_life_seconds),
+      time_to_max_multiplier: Number(row.time_to_max_multiplier),
+    },
+  ]));
 }
 
 /**
