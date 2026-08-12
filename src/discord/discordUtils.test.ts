@@ -15,8 +15,18 @@ vi.mock('discord.js', () => {
       this.status = status;
     }
   }
+  /** Minimal mock of `@discordjs/rest`'s HTTPError, carrying just the `status` this module reads. */
+  class HTTPError extends Error {
+    status: number;
+    /** Builds a mock HTTPError with the given HTTP status. */
+    constructor(status: number) {
+      super('Service Unavailable');
+      this.status = status;
+    }
+  }
   return {
     DiscordAPIError,
+    HTTPError,
     RESTJSONErrorCodes: {
       UnknownMessage: 10008,
       UnknownChannel: 10003,
@@ -38,12 +48,14 @@ import {
   getTextChannel,
   tryEditDiscordMessage,
 } from './discordUtils';
-import { DiscordAPIError } from 'discord.js';
+import { DiscordAPIError, HTTPError } from 'discord.js';
 import { getDiscordClient } from './discordClientStore';
 
 // The mock above replaces DiscordAPIError with a simpler single-arg constructor.
 // Cast here so TypeScript accepts the mock's signature without casting at every call site.
 const MockedDiscordAPIError = DiscordAPIError as unknown as new (opts: { code: number; status: number }) => DiscordAPIError;
+// Same story for HTTPError, mocked with a single-arg (status) constructor.
+const MockedHTTPError = HTTPError as unknown as new (status: number) => HTTPError;
 
 describe('isDiscordNotFoundError', () => {
   it('returns true for UnknownMessage code', () => {
@@ -172,6 +184,44 @@ describe('tryDeleteDiscordMessage', () => {
     vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: channelsFetch } } as any);
 
     await expect(tryDeleteDiscordMessage('chan1', 'msg1')).rejects.toThrow('network blip');
+  });
+
+  it('retries a transient 5xx error and succeeds once the channel fetch recovers', async () => {
+    vi.useFakeTimers();
+    try {
+      const deleteMessage = vi.fn().mockResolvedValue(undefined);
+      const fetchMessage = vi.fn().mockResolvedValue({ delete: deleteMessage });
+      const channelsFetch = vi.fn()
+        .mockRejectedValueOnce(new MockedHTTPError(503))
+        .mockResolvedValueOnce({ isTextBased: () => true, messages: { fetch: fetchMessage } });
+      vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: channelsFetch } } as any);
+
+      const promise = tryDeleteDiscordMessage('chan1', 'msg1');
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(promise).resolves.toBeUndefined();
+      expect(channelsFetch).toHaveBeenCalledTimes(2);
+      expect(deleteMessage).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rethrows a transient 5xx error once retries are exhausted', async () => {
+    vi.useFakeTimers();
+    try {
+      const err = new MockedHTTPError(503);
+      const channelsFetch = vi.fn().mockRejectedValue(err);
+      vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: channelsFetch } } as any);
+
+      const promise = tryDeleteDiscordMessage('chan1', 'msg1');
+      const assertion = expect(promise).rejects.toBe(err);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await assertion;
+      expect(channelsFetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

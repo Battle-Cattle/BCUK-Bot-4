@@ -1,8 +1,26 @@
 import { createLogger } from '../shared/logger';
-import { DiscordAPIError, RESTJSONErrorCodes, ChannelType, type Client, type MessageEditOptions, type TextBasedChannel } from 'discord.js';
+import { DiscordAPIError, HTTPError, RESTJSONErrorCodes, ChannelType, type Client, type MessageEditOptions, type TextBasedChannel } from 'discord.js';
 import { getDiscordClient } from './discordClientStore';
 
 const log = createLogger('Discord');
+
+// @discordjs/rest already retries 5xx responses internally (up to its own `retries`
+// option, default 3) before giving up, so these delays are for outages that outlast
+// that internal retry budget (e.g. a multi-second Discord API blip).
+const TRANSIENT_ERROR_RETRY_DELAYS_MS = [5_000, 15_000];
+
+/**
+ * Checks whether `err` is a transient Discord API failure (5xx `HTTPError`/`DiscordAPIError`)
+ * worth retrying, as opposed to a permanent failure like missing access or malformed input.
+ *
+ * @param err - Caught error to inspect.
+ * @returns True if `err` represents a 5xx Discord API/HTTP error.
+ */
+function isTransientDiscordError(err: unknown): boolean {
+  if (err instanceof HTTPError) return err.status >= 500 && err.status < 600;
+  if (err instanceof DiscordAPIError) return err.status >= 500 && err.status < 600;
+  return false;
+}
 
 /**
  * Checks whether `err` represents a Discord "not found" condition (unknown
@@ -42,9 +60,21 @@ export function isPermanentVoiceMisconfigurationError(err: unknown): boolean {
 }
 
 /**
+ * Resolves after `ms` milliseconds.
+ *
+ * @param ms - Delay in milliseconds.
+ * @returns Resolves once the delay has elapsed.
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Fetches `messageId` from `channelId` and deletes it, if a Discord client is
  * available and the channel is text-based. Not-found errors (message/channel
- * already gone) are swallowed; any other error is logged and rethrown.
+ * already gone) are swallowed. Transient 5xx errors are retried with backoff
+ * (see {@link TRANSIENT_ERROR_RETRY_DELAYS_MS}); any other error — including a
+ * transient error that exhausts its retries — is logged and rethrown.
  *
  * @param channelId - ID of the channel containing the message.
  * @param messageId - ID of the message to delete.
@@ -53,15 +83,25 @@ export function isPermanentVoiceMisconfigurationError(err: unknown): boolean {
 export async function tryDeleteDiscordMessage(channelId: string, messageId: string): Promise<void> {
   const discordClient = getDiscordClient();
   if (!discordClient) return;
-  try {
-    const ch = await discordClient.channels.fetch(channelId);
-    if (!ch || !ch.isTextBased()) return;
-    const msg = await ch.messages.fetch(messageId);
-    await msg.delete();
-  } catch (err) {
-    if (isDiscordNotFoundError(err)) return;
-    log.error(`Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
-    throw err;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const ch = await discordClient.channels.fetch(channelId);
+      if (!ch || !ch.isTextBased()) return;
+      const msg = await ch.messages.fetch(messageId);
+      await msg.delete();
+      return;
+    } catch (err) {
+      if (isDiscordNotFoundError(err)) return;
+      if (isTransientDiscordError(err) && attempt < TRANSIENT_ERROR_RETRY_DELAYS_MS.length) {
+        const wait = TRANSIENT_ERROR_RETRY_DELAYS_MS[attempt];
+        log.warn(`Transient error deleting Discord message ${messageId} in channel ${channelId} (attempt ${attempt + 1}), retrying in ${wait}ms:`, err);
+        await delay(wait);
+        continue;
+      }
+      log.error(`Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);
+      throw err;
+    }
   }
 }
 
