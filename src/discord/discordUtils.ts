@@ -60,6 +60,16 @@ export function isPermanentVoiceMisconfigurationError(err: unknown): boolean {
 }
 
 /**
+ * Resolves after `ms` milliseconds.
+ *
+ * @param ms - Delay in milliseconds.
+ * @returns Resolves once the delay has elapsed.
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Fetches `messageId` from `channelId` and deletes it, if a Discord client is
  * available and the channel is text-based. Not-found errors (message/channel
  * already gone) are swallowed. Transient 5xx errors are retried with backoff
@@ -86,7 +96,7 @@ export async function tryDeleteDiscordMessage(channelId: string, messageId: stri
       if (isTransientDiscordError(err) && attempt < TRANSIENT_ERROR_RETRY_DELAYS_MS.length) {
         const wait = TRANSIENT_ERROR_RETRY_DELAYS_MS[attempt];
         log.warn(`Transient error deleting Discord message ${messageId} in channel ${channelId} (attempt ${attempt + 1}), retrying in ${wait}ms:`, err);
-        await new Promise<void>((resolve) => setTimeout(resolve, wait));
+        await delay(wait);
         continue;
       }
       log.error(`Failed to delete Discord message ${messageId} in channel ${channelId}:`, err);

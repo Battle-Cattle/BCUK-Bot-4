@@ -15,8 +15,10 @@ vi.mock('discord.js', () => {
       this.status = status;
     }
   }
+  /** Minimal mock of `@discordjs/rest`'s HTTPError, carrying just the `status` this module reads. */
   class HTTPError extends Error {
     status: number;
+    /** Builds a mock HTTPError with the given HTTP status. */
     constructor(status: number) {
       super('Service Unavailable');
       this.status = status;
