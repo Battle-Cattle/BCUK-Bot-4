@@ -12,6 +12,7 @@ vi.mock('../db', () => ({
 
 vi.mock('../discord/discordUtils', () => ({
   isDiscordNotFoundError: vi.fn().mockReturnValue(false),
+  NO_MENTIONS: { parse: [] },
 }));
 
 import {
@@ -93,7 +94,7 @@ describe('executeCounterCommandForDiscord', () => {
 
     await executeCounterCommandForDiscord(msg as any, 'viewer1');
 
-    expect(msg.reply).toHaveBeenCalledWith('Count is now 5!');
+    expect(msg.reply).toHaveBeenCalledWith({ content: 'Count is now 5!', allowedMentions: { parse: [] } });
   });
 
   it('replies with check message (no increment) for a check counter', async () => {
@@ -103,7 +104,16 @@ describe('executeCounterCommandForDiscord', () => {
     await executeCounterCommandForDiscord(msg as any);
 
     expect(vi.mocked(incrementCounter)).not.toHaveBeenCalled();
-    expect(msg.reply).toHaveBeenCalledWith('Current count: 7');
+    expect(msg.reply).toHaveBeenCalledWith({ content: 'Current count: 7', allowedMentions: { parse: [] } });
+  });
+
+  it('sets allowedMentions to suppress parsing, so @everyone/@here text in an admin-authored template cannot ping', async () => {
+    vi.mocked(findCounterByCommand).mockResolvedValue({ ...CHECK_COUNTER, message: '@everyone current count: %d' } as any);
+    const msg = makeMockMessage('!count');
+
+    await executeCounterCommandForDiscord(msg as any);
+
+    expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({ allowedMentions: { parse: [] } }));
   });
 
   it('does NOT reply when incrementCounter fails', async () => {
