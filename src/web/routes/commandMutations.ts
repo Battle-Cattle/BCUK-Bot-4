@@ -11,7 +11,7 @@ import {
   updateCustomCommand,
 } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireMod } from '../middleware';
+import { requireGuildContext, requireMod } from '../middleware';
 import {
   logAndRedirectError,
   normalizeRequiredText,
@@ -64,7 +64,7 @@ async function assignUsersToNewCommand(commandId: number, discordIds: string[]):
  *   command insert fails (`add_failed`), or an assignment fails (`command_taken` or
  *   `assign_failed`).
  */
-router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
+router.post('/commands/add', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const { trigger_string, output } = req.body as Record<string, string | undefined>;
   const isDiscordEnabled = parseCheckboxField(req.body.is_discord_enabled);
   const isMultiTwitch = parseCheckboxField(req.body.is_multi_twitch);
@@ -105,7 +105,7 @@ router.post('/commands/add', requireMod, csrfProtection, async (req, res) => {
  *   (`command_not_found`), the trigger is reserved (`reserved_command`) or already
  *   taken (`command_taken`), or the update fails (`update_failed`).
  */
-router.post('/commands/update', requireMod, csrfProtection, async (req, res) => {
+router.post('/commands/update', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const { command_id, trigger_string, output } = req.body as Record<string, string | undefined>;
   const isDiscordEnabled = parseCheckboxField(req.body.is_discord_enabled);
   const isMultiTwitch = parseCheckboxField(req.body.is_multi_twitch);
@@ -141,7 +141,7 @@ router.post('/commands/update', requireMod, csrfProtection, async (req, res) => 
  *   `command_id` is absent, or to `/commands?error=<code>` if it's malformed
  *   (`invalid_id`) or the delete fails (`remove_failed`).
  */
-router.post('/commands/remove', requireMod, csrfProtection, async (req, res) => {
+router.post('/commands/remove', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const { command_id } = req.body as { command_id?: string };
   if (!command_id) return res.redirect('/commands');
 

@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import type { Logger } from 'winston';
 import { findUser } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireMod } from '../middleware';
+import { requireGuildContext, requireMod } from '../middleware';
 import { normalizeDiscordId, logAndRedirectError } from './shared';
 
 /** Options for {@link createAssignmentRouter}. */
@@ -134,13 +134,14 @@ async function handleUnassign<TId>(req: Request, res: Response, options: Assignm
 /**
  * Builds a `POST {basePath}/assign` / `POST {basePath}/unassign` router pair: assigns or removes
  * a Twitch-linked Discord user's association with an entity (a custom command, a timer command,
- * ...). Both routes are gated `requireMod` + `csrfProtection`. Shared by `commandAssignments.ts`
- * and `timerAssignments.ts`, which previously duplicated this same shape end to end.
+ * ...). Both routes are gated `requireGuildContext` + `requireMod` + `csrfProtection`. Shared by
+ * `commandAssignments.ts` and `timerAssignments.ts`, which previously duplicated this same shape
+ * end to end.
  * @param options - See {@link AssignmentRouterOptions}.
  */
 export function createAssignmentRouter<TId>(options: AssignmentRouterOptions<TId>): Router {
   const router = Router();
-  router.post(`${options.basePath}/assign`, requireMod, csrfProtection, (req, res) => handleAssign(req, res, options));
-  router.post(`${options.basePath}/unassign`, requireMod, csrfProtection, (req, res) => handleUnassign(req, res, options));
+  router.post(`${options.basePath}/assign`, requireGuildContext, requireMod, csrfProtection, (req, res) => handleAssign(req, res, options));
+  router.post(`${options.basePath}/unassign`, requireGuildContext, requireMod, csrfProtection, (req, res) => handleUnassign(req, res, options));
   return router;
 }

@@ -17,8 +17,10 @@ vi.mock('../csrf', () => ({
   },
 }));
 
+const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
 vi.mock('../middleware', () => ({
-  requireManager: (_req: any, _res: any, next: any) => next(),
+  requireGuildContext: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireGuildContext'); next(); },
+  requireManager: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireManager'); next(); },
 }));
 
 // This module composes timersMutations's and timerAssignments's routers too; stub them out so
@@ -46,11 +48,17 @@ function buildApp() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  middlewareCallOrder.length = 0;
   vi.mocked(getAllTimerCommandsWithAssignments).mockResolvedValue([]);
   vi.mocked(getAllUsers).mockResolvedValue([]);
 });
 
 describe('GET /timers', () => {
+  it('runs requireGuildContext before requireManager, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).get('/timers');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireManager']);
+  });
+
   it('renders the timers view with an empty list when there are no timers', async () => {
     const res = await supertest(buildApp()).get('/timers');
     expect(res.status).toBe(200);

@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
+const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
 vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
-  requireMod: (_req: any, _res: any, next: any) => next(),
+  requireGuildContext: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireGuildContext'); next(); },
+  requireMod: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireMod'); next(); },
 }));
 
 vi.mock('../csrf', () => ({
@@ -56,6 +58,7 @@ function buildApp(currentGuildId: string | null = GUILD_ID) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  middlewareCallOrder.length = 0;
   vi.mocked(getGuildScopedStatus).mockResolvedValue({ discord: {}, voice: {}, twitch: {} } as never);
   vi.mocked(getDiscordClient).mockReturnValue({} as never);
   vi.mocked(connect).mockResolvedValue(undefined);
@@ -85,6 +88,11 @@ describe('GET /status', () => {
 });
 
 describe('GET /voice/channels', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).get('/voice/channels');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('reports the current channel and DB default for the session guild', async () => {
     const res = await supertest(buildApp()).get('/voice/channels').expect(200);
     expect(res.body).toMatchObject({
@@ -115,6 +123,11 @@ describe('GET /voice/channels', () => {
 });
 
 describe('POST /voice/join', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/voice/join').send({ channelId: '123456789012345678' });
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('disconnects then joins the requested channel for the session guild', async () => {
     const res = await supertest(buildApp())
       .post('/voice/join')
@@ -170,6 +183,11 @@ describe('POST /voice/join', () => {
 });
 
 describe('POST /voice/leave', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/voice/leave');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('disconnects the session guild and returns ok', async () => {
     const res = await supertest(buildApp()).post('/voice/leave').expect(200);
     expect(res.body).toEqual({ ok: true });
