@@ -54,7 +54,12 @@
             <div class="form-section-gap">
               <label for="output" class="form-label">Output</label>
               <p class="hint hint-compact">Reply text to send when the trigger matches.</p>
-              <p class="hint hint-compact">Variables: <code>{user} {args} {arg}</code></p>
+              <p class="hint hint-compact">
+                Variables: <code>{user}</code> sender's name, <code>{args}</code> everything typed after the trigger, <code>{arg}</code> just the first word of that. Unknown <code>{...}</code> placeholders are left blank.
+              </p>
+              <p class="hint hint-compact">
+                Example: trigger <code>!greet</code>, output <code>Thanks {user}, {arg} says: {args}</code> &mdash; <code>!greet hello there</code> from Alice replies <code>Thanks Alice, hello says: hello there</code>.
+              </p>
               <textarea id="output" class="input stream-textarea" name="output" rows="3" placeholder="Hello chat!" required></textarea>
             </div>
             <% if (assignableUsers.length > 0) { %>
@@ -156,7 +161,12 @@
                       </div>
                       <div class="form-section-gap">
                         <label for="output_<%= command.command_id %>" class="form-label">Output</label>
-                        <p class="hint hint-compact">Variables: <code>{user} {args} {arg}</code></p>
+                        <p class="hint hint-compact">
+                          Variables: <code>{user}</code> sender's name, <code>{args}</code> everything typed after the trigger, <code>{arg}</code> just the first word of that. Unknown <code>{...}</code> placeholders are left blank.
+                        </p>
+                        <p class="hint hint-compact">
+                          Example: trigger <code>!greet</code>, output <code>Thanks {user}, {arg} says: {args}</code> &mdash; <code>!greet hello there</code> from Alice replies <code>Thanks Alice, hello says: hello there</code>.
+                        </p>
                         <textarea id="output_<%= command.command_id %>" class="input stream-textarea" name="output" rows="3" required><%= command.output %></textarea>
                       </div>
                       <div class="button-row-wrap">
