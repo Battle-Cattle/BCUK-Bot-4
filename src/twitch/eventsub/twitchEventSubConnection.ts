@@ -156,7 +156,7 @@ export class StreamerConnection {
     socket.addEventListener('open', () => this.onOpen());
     socket.addEventListener('message', (ev: MessageEvent) => this.onMessage(ev));
     socket.addEventListener('close', (ev: CloseEvent) => this.onClose(ev, socket));
-    socket.addEventListener('error', () => { log.warn(`[${this.name}] WebSocket error`); });
+    socket.addEventListener('error', () => this.onError(socket));
     this.ws = socket;
   }
 
@@ -189,9 +189,23 @@ export class StreamerConnection {
   }
 
   /**
+   * Handles the socket's `'error'` event: logs it and immediately force-reconnects, without
+   * waiting for a `'close'` event that a dead-but-not-yet-torn-down socket may never actually
+   * emit (observed in production: an `error` with no following `close`, leaving the connection
+   * silently stuck until the keepalive-timeout backstop eventually caught it minutes later).
+   * @param socket - The socket that emitted the event.
+   */
+  private onError(socket: WebSocket): void {
+    if (this.ws !== socket) return;
+    log.warn(`[${this.name}] WebSocket error`);
+    this.forceReconnect(socket);
+  }
+
+  /**
    * Tears down `socket` as this connection's active WebSocket and schedules a reconnect,
    * without depending on the socket ever emitting its own `'close'` event. Shared by
-   * {@link onClose} (a real close event did arrive) and the keepalive-timeout path in
+   * {@link onClose} (a real close event did arrive), {@link onError} (a socket error arrived
+   * but its `'close'` may never follow), and the keepalive-timeout path in
    * {@link resetKeepaliveTimer} (a close was requested but might never actually fire — a
    * half-dead TCP connection, e.g. after a silent NAT/load-balancer drop, can leave `close()`
    * pending forever with no `'close'` event ever following it, which would otherwise strand
