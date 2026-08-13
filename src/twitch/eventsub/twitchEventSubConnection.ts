@@ -194,6 +194,7 @@ export class StreamerConnection {
    * emit (observed in production: an `error` with no following `close`, leaving the connection
    * silently stuck until the keepalive-timeout backstop eventually caught it minutes later).
    * @param socket - The socket that emitted the event.
+   * @returns Nothing.
    */
   private onError(socket: WebSocket): void {
     if (this.ws !== socket) return;
