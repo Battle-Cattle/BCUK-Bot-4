@@ -173,6 +173,13 @@ describe('POST /commands/add', () => {
 // ─── POST /commands/update ────────────────────────────────────────────────────
 
 describe('POST /commands/update', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp())
+      .post('/commands/update')
+      .send('command_id=1&trigger_string=!clap&output=Clap');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to /commands on success', async () => {
     const res = await supertest(buildApp())
       .post('/commands/update')
@@ -223,6 +230,11 @@ describe('POST /commands/update', () => {
 // ─── POST /commands/remove ────────────────────────────────────────────────────
 
 describe('POST /commands/remove', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/commands/remove').send('command_id=5');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to /commands on success', async () => {
     const res = await supertest(buildApp()).post('/commands/remove').send('command_id=5');
     expect(res.status).toBe(302);

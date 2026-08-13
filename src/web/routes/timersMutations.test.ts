@@ -149,6 +149,11 @@ describe('POST /timers/add', () => {
 // ─── POST /timers/update ──────────────────────────────────────────────────────
 
 describe('POST /timers/update', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/timers/update').send(`id=1&${VALID_FIELDS}`);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to /timers on success', async () => {
     const res = await supertest(buildApp()).post('/timers/update').send(`id=1&${VALID_FIELDS}`);
     expect(res.status).toBe(302);
@@ -189,6 +194,11 @@ describe('POST /timers/update', () => {
 // ─── POST /timers/remove ──────────────────────────────────────────────────────
 
 describe('POST /timers/remove', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/timers/remove').send('id=5');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to /timers on success', async () => {
     const res = await supertest(buildApp()).post('/timers/remove').send('id=5');
     expect(res.status).toBe(302);
@@ -210,6 +220,11 @@ describe('POST /timers/remove', () => {
 // ─── POST /timers/toggle ──────────────────────────────────────────────────────
 
 describe('POST /timers/toggle', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/timers/toggle').send('id=1&enabled=true');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to /timers on success', async () => {
     const res = await supertest(buildApp()).post('/timers/toggle').send('id=1&enabled=true');
     expect(res.status).toBe(302);

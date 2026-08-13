@@ -16,9 +16,10 @@ vi.mock('../../db', () => {
 vi.mock('../csrf', () => ({
   csrfProtection: (_req: any, _res: any, next: any) => next(),
 }));
+const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
 vi.mock('../middleware', () => ({
-  requireGuildContext: (_req: any, _res: any, next: any) => next(),
-  requireMod: (_req: any, _res: any, next: any) => next(),
+  requireGuildContext: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireGuildContext'); next(); },
+  requireMod: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireMod'); next(); },
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
@@ -38,6 +39,7 @@ const VALID_DISCORD_ID = '123456789012345678'; // 18 digits
 
 beforeEach(() => {
   vi.clearAllMocks();
+  middlewareCallOrder.length = 0;
   vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, discord_name: 'Alice', is_twitch_bot_enabled: true, twitch_name: 'alice', access_level: AccessLevel.USER } as any);
   vi.mocked(assignUserToCommand).mockResolvedValue(undefined);
   vi.mocked(unassignUserFromCommand).mockResolvedValue(undefined);
@@ -47,6 +49,13 @@ beforeEach(() => {
 // ─── POST /commands/assign ────────────────────────────────────────────────────
 
 describe('POST /commands/assign', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp())
+      .post('/commands/assign')
+      .send(`command_id=${VALID_COMMAND_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to /commands on success', async () => {
     const res = await supertest(buildApp())
       .post('/commands/assign')
@@ -119,6 +128,13 @@ describe('POST /commands/assign', () => {
 // ─── POST /commands/unassign ──────────────────────────────────────────────────
 
 describe('POST /commands/unassign', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp())
+      .post('/commands/unassign')
+      .send(`command_id=${VALID_COMMAND_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to /commands on success', async () => {
     const res = await supertest(buildApp())
       .post('/commands/unassign')

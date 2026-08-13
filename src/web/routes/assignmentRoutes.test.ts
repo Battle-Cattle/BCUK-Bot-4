@@ -153,6 +153,16 @@ describe('createAssignmentRouter — assign', () => {
 });
 
 describe('createAssignmentRouter — unassign', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    const router = createAssignmentRouter({
+      basePath: '/things', idField: 'thing_id', parseId, assign: vi.fn(), unassign: vi.fn(), log: mockLogger() as any,
+    });
+    await supertest(buildApp(router))
+      .post('/things/unassign')
+      .send(`thing_id=${VALID_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to basePath on success', async () => {
     const unassign = vi.fn().mockResolvedValue(undefined);
     const router = createAssignmentRouter({

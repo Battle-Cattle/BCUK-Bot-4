@@ -224,6 +224,11 @@ describe('POST /counters/add', () => {
 // --- POST /counters/update ---
 
 describe('POST /counters/update', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/counters/update').type('form').send(VALID_UPDATE);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('11. redirects ?error=missing_fields when required fields are absent', async () => {
     const res = await supertest(buildApp())
       .post('/counters/update')
@@ -284,6 +289,11 @@ describe('POST /counters/update', () => {
 // --- POST /counters/remove ---
 
 describe('POST /counters/remove', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/counters/remove').type('form').send({ id: '5' });
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('17. redirects ?error=invalid_id when id is non-numeric', async () => {
     const res = await supertest(buildApp())
       .post('/counters/remove')

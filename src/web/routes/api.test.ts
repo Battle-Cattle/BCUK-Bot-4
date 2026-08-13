@@ -123,6 +123,11 @@ describe('GET /voice/channels', () => {
 });
 
 describe('POST /voice/join', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/voice/join').send({ channelId: '123456789012345678' });
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('disconnects then joins the requested channel for the session guild', async () => {
     const res = await supertest(buildApp())
       .post('/voice/join')
@@ -178,6 +183,11 @@ describe('POST /voice/join', () => {
 });
 
 describe('POST /voice/leave', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/voice/leave');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('disconnects the session guild and returns ok', async () => {
     const res = await supertest(buildApp()).post('/voice/leave').expect(200);
     expect(res.body).toEqual({ ok: true });
