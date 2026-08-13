@@ -17,6 +17,7 @@ vi.mock('../csrf', () => ({
   csrfProtection: (_req: any, _res: any, next: any) => next(),
 }));
 vi.mock('../middleware', () => ({
+  requireGuildContext: (_req: any, _res: any, next: any) => next(),
   requireMod: (_req: any, _res: any, next: any) => next(),
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));

@@ -1,7 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Request, type Response } from 'express';
 import { getGuildScopedStatus } from '../guildScopedStatus';
-import { requireAuth, requireMod } from '../middleware';
+import { requireAuth, requireGuildContext, requireMod } from '../middleware';
 import { connect, disconnect, getCurrentChannelId } from '../../audio/audioPlayer';
 import { csrfProtection } from '../csrf';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
@@ -58,7 +58,7 @@ router.get('/status', requireAuth, async (req, res) => {
  *   currentChannelId }` on success, 400 if no guild is selected, or 500 on
  *   failure.
  */
-router.get('/voice/channels', requireMod, async (req, res) => {
+router.get('/voice/channels', requireGuildContext, requireMod, async (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
   try {
@@ -87,7 +87,7 @@ router.get('/voice/channels', requireMod, async (req, res) => {
  *   guild is selected, `channelId` is malformed, or no channel is resolvable,
  *   503 if the Discord client isn't ready, or 500 on failure.
  */
-router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
+router.post('/voice/join', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
 
@@ -127,7 +127,7 @@ router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
  * @param res - Express response; JSON `{ ok: true }` on success, or 400 if no
  *   guild is selected.
  */
-router.post('/voice/leave', requireMod, csrfProtection, (req, res) => {
+router.post('/voice/leave', requireGuildContext, requireMod, csrfProtection, (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
   disconnect(guildId);

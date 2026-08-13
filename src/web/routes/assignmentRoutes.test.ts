@@ -9,8 +9,10 @@ vi.mock('../../db', () => ({
 vi.mock('../csrf', () => ({
   csrfProtection: (_req: any, _res: any, next: any) => next(),
 }));
+const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
 vi.mock('../middleware', () => ({
-  requireMod: (_req: any, _res: any, next: any) => next(),
+  requireGuildContext: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireGuildContext'); next(); },
+  requireMod: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireMod'); next(); },
 }));
 
 import supertest from 'supertest';
@@ -33,10 +35,21 @@ const parseId = (raw: string): number | null => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  middlewareCallOrder.length = 0;
   vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, discord_name: 'Alice', twitch_name: 'alice' } as any);
 });
 
 describe('createAssignmentRouter — assign', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    const router = createAssignmentRouter({
+      basePath: '/things', idField: 'thing_id', parseId, assign: vi.fn(), unassign: vi.fn(), log: mockLogger() as any,
+    });
+    await supertest(buildApp(router))
+      .post('/things/assign')
+      .send(`thing_id=${VALID_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to basePath on success', async () => {
     const assign = vi.fn().mockResolvedValue(undefined);
     const router = createAssignmentRouter({

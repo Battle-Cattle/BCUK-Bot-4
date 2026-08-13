@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { DbTimerCommandWithAssignments, DbUser, getAllTimerCommandsWithAssignments, getAllUsers } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireManager } from '../middleware';
+import { requireGuildContext, requireManager } from '../middleware';
 import { renderError, filterQueryParam, renderView } from './shared';
 import timersMutationsRouter from './timersMutations';
 import timerAssignmentsRouter from './timerAssignments';
@@ -26,7 +26,7 @@ interface TimerViewModel extends DbTimerCommandWithAssignments {
  * lists every Twitch-linked user's discord_id/discord_name/twitch_name plus every timer's
  * assignments, so authentication alone isn't enough (mutations additionally require Mod+).
  */
-router.get('/timers', requireManager, csrfProtection, async (req, res) => {
+router.get('/timers', requireGuildContext, requireManager, csrfProtection, async (req, res) => {
   try {
     const [timers, users] = await Promise.all([
       getAllTimerCommandsWithAssignments(),

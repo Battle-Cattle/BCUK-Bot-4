@@ -20,7 +20,11 @@ vi.mock('../../db', () => {
   };
 });
 vi.mock('../csrf', () => ({ csrfProtection: (_req: any, _res: any, next: any) => next() }));
-vi.mock('../middleware', () => ({ requireMod: (_req: any, _res: any, next: any) => next() }));
+const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
+vi.mock('../middleware', () => ({
+  requireGuildContext: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireGuildContext'); next(); },
+  requireMod: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireMod'); next(); },
+}));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import supertest from 'supertest';
@@ -43,6 +47,7 @@ const VALID_DISCORD_ID = '123456789012345678';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  middlewareCallOrder.length = 0;
   vi.mocked(addCustomCommand).mockResolvedValue(1);
   vi.mocked(updateCustomCommand).mockResolvedValue(undefined);
   vi.mocked(removeCustomCommand).mockResolvedValue(undefined);
@@ -54,6 +59,13 @@ beforeEach(() => {
 // ─── POST /commands/add ───────────────────────────────────────────────────────
 
 describe('POST /commands/add', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp())
+      .post('/commands/add')
+      .send('trigger_string=!clap&output=Clap%21');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to /commands on success', async () => {
     const res = await supertest(buildApp())
       .post('/commands/add')

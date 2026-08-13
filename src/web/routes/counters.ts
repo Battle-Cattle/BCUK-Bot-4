@@ -10,7 +10,7 @@ import {
   updateCounter,
 } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireAuth, requireMod, requireManager } from '../middleware';
+import { requireAuth, requireGuildContext, requireMod, requireManager } from '../middleware';
 import {
   logAndRedirectError,
   normalizeRequiredText,
@@ -116,7 +116,7 @@ router.get('/counters', requireAuth, csrfProtection, async (req, res) => {
  *   `same_commands`, `duplicate_command`, `reserved_command`) or a DB failure
  *   (`add_failed`).
  */
-router.post('/counters/add', requireMod, csrfProtection, async (req, res) => {
+router.post('/counters/add', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const form = validateAndNormalizeCounterForm(req.body as Record<string, string | undefined>);
   if (form.error) {
     return res.redirect(`/counters?error=${form.error}`);
@@ -157,7 +157,7 @@ router.post('/counters/add', requireMod, csrfProtection, async (req, res) => {
  *   counter no longer exists (`counter_not_found`), or the update fails
  *   (`update_failed`).
  */
-router.post('/counters/update', requireMod, csrfProtection, async (req, res) => {
+router.post('/counters/update', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const { id } = req.body as Record<string, string | undefined>;
 
   const parsedId = parsePositiveIntId(id);
@@ -205,7 +205,7 @@ router.post('/counters/update', requireMod, csrfProtection, async (req, res) => 
  *   `/counters?error=<code>` if `id` is malformed (`invalid_id`), the counter
  *   doesn't exist (`counter_not_found`), or the delete fails (`remove_failed`).
  */
-router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => {
+router.post('/counters/remove', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const { id } = req.body as { id?: string };
   const parsedId = parsePositiveIntId(id);
 
@@ -234,7 +234,7 @@ router.post('/counters/remove', requireMod, csrfProtection, async (req, res) => 
  *   to `/counters?error=<code>` if `id` is malformed (`invalid_id`), the counter
  *   doesn't exist (`counter_not_found`), or the reset fails (`reset_failed`).
  */
-router.post('/counters/reset/:id', requireManager, csrfProtection, async (req, res) => {
+router.post('/counters/reset/:id', requireGuildContext, requireManager, csrfProtection, async (req, res) => {
   const rawId = req.params.id;
   const parsedId = parsePositiveIntId(typeof rawId === 'string' ? rawId : undefined);
   if (parsedId === null) {

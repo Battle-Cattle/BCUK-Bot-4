@@ -6,7 +6,7 @@ import {
 } from '../../db';
 import type { TimerCommandInput } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireMod } from '../middleware';
+import { requireGuildContext, requireMod } from '../middleware';
 import {
   logAndRedirectError, normalizeDiscordId, normalizeRequiredText, parseCheckboxField, parsePositiveIntId,
 } from './shared';
@@ -98,7 +98,7 @@ async function assignUsersToNewTimer(timerId: number, discordIds: string[]): Pro
  *   `invalid_min_messages`), the insert fails (`add_failed`), or an assignment fails
  *   (`assign_failed`).
  */
-router.post('/timers/add', requireMod, csrfProtection, async (req, res) => {
+router.post('/timers/add', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const body = req.body as Record<string, string | string[] | undefined>;
   const result = parseTimerCommandFields(body);
   if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
@@ -129,7 +129,7 @@ router.post('/timers/add', requireMod, csrfProtection, async (req, res) => {
  *   (`missing_fields`, `invalid_interval`, `invalid_min_messages`), the timer doesn't exist
  *   (`timer_not_found`), or the update fails (`update_failed`).
  */
-router.post('/timers/update', requireMod, csrfProtection, async (req, res) => {
+router.post('/timers/update', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const body = req.body as Record<string, string | string[] | undefined>;
   const id = parsePositiveIntId(body.id);
   if (id === null) return res.redirect('/timers?error=invalid_id');
@@ -157,7 +157,7 @@ router.post('/timers/update', requireMod, csrfProtection, async (req, res) => {
  *   `/timers?error=<code>` if `id` is malformed (`invalid_id`) or the delete fails
  *   (`remove_failed`).
  */
-router.post('/timers/remove', requireMod, csrfProtection, async (req, res) => {
+router.post('/timers/remove', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const id = parsePositiveIntId((req.body as Record<string, string | string[] | undefined>).id);
   if (id === null) return res.redirect('/timers?error=invalid_id');
 
@@ -178,7 +178,7 @@ router.post('/timers/remove', requireMod, csrfProtection, async (req, res) => {
  *   if `id` is malformed (`invalid_id`), the timer doesn't exist (`timer_not_found`), or the
  *   update fails (`toggle_failed`).
  */
-router.post('/timers/toggle', requireMod, csrfProtection, async (req, res) => {
+router.post('/timers/toggle', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const body = req.body as Record<string, string | string[] | undefined>;
   const id = parsePositiveIntId(body.id);
   if (id === null) return res.redirect('/timers?error=invalid_id');
