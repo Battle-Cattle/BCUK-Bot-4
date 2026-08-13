@@ -4,7 +4,7 @@ import { findCounterByCommand, incrementCounter } from '../db';
 
 const log = createLogger('Counter');
 import { extractCommand } from './commandUtils';
-import { isDiscordNotFoundError } from '../discord/discordUtils';
+import { isDiscordNotFoundError, NO_MENTIONS } from '../discord/discordUtils';
 import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
 import { createCooldownGate } from './cooldownGate';
 
@@ -140,7 +140,7 @@ export async function executeCounterCommandForDiscord(
   if (!result.canReply) return;
 
   try {
-    await message.reply(result.response);
+    await message.reply({ content: result.response, allowedMentions: NO_MENTIONS });
     log.info(`[Discord] Sent ${result.label} '${command}'.`);
   } catch (err) {
     if (!isDiscordNotFoundError(err)) {

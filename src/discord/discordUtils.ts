@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { DiscordAPIError, HTTPError, RESTJSONErrorCodes, ChannelType, type Client, type MessageEditOptions, type TextBasedChannel } from 'discord.js';
+import { DiscordAPIError, HTTPError, RESTJSONErrorCodes, ChannelType, type Client, type MessageEditOptions, type MessageMentionOptions, type TextBasedChannel } from 'discord.js';
 import { getDiscordClient } from './discordClientStore';
 
 const log = createLogger('Discord');
@@ -8,6 +8,15 @@ const log = createLogger('Discord');
 // option, default 3) before giving up, so these delays are for outages that outlast
 // that internal retry budget (e.g. a multi-second Discord API blip).
 const TRANSIENT_ERROR_RETRY_DELAYS_MS = [5_000, 15_000];
+
+/**
+ * Passed as `allowedMentions` on any outbound message built from user-supplied or
+ * template text (e.g. custom command/counter output), so `@everyone`/`@here`/role/user
+ * mentions embedded in that text never actually ping — Discord's default behavior
+ * otherwise parses and triggers them whenever the bot holds the relevant permission
+ * in that channel, letting an unprivileged chat member ping via the bot's identity.
+ */
+export const NO_MENTIONS: MessageMentionOptions = { parse: [] };
 
 /**
  * Checks whether `err` is a transient Discord API failure (5xx `HTTPError`/`DiscordAPIError`)

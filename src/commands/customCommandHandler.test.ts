@@ -16,6 +16,7 @@ vi.mock('../twitch/twitchApi', () => ({
 
 vi.mock('../discord/discordUtils', () => ({
   isDiscordNotFoundError: vi.fn().mockReturnValue(false),
+  NO_MENTIONS: { parse: [] },
 }));
 
 import {
@@ -89,7 +90,7 @@ describe('executeCustomCommandForDiscord', () => {
 
     await executeCustomCommandForDiscord(msg as any, 'viewer1');
 
-    expect(msg.reply).toHaveBeenCalledWith('Hello Discord!');
+    expect(msg.reply).toHaveBeenCalledWith({ content: 'Hello Discord!', allowedMentions: { parse: [] } });
   });
 
   it('swallows Discord not-found errors on reply failure', async () => {
@@ -141,7 +142,7 @@ describe('executeCustomCommandForDiscord', () => {
     await executeCustomCommandForDiscord(msg as any, 'viewer1');
 
     const expected = 'viewer1 said foo bar (first: foo)';
-    expect(msg.reply).toHaveBeenCalledWith(expected);
+    expect(msg.reply).toHaveBeenCalledWith({ content: expected, allowedMentions: { parse: [] } });
   });
 
   it('substitutes an unknown placeholder with an empty string', async () => {
@@ -153,7 +154,7 @@ describe('executeCustomCommandForDiscord', () => {
 
     await executeCustomCommandForDiscord(msg as any, 'viewer1');
 
-    expect(msg.reply).toHaveBeenCalledWith('Hi viewer1, unknown: []');
+    expect(msg.reply).toHaveBeenCalledWith({ content: 'Hi viewer1, unknown: []', allowedMentions: { parse: [] } });
   });
 
   it('substitutes {args} and {arg} as empty strings when no args are given', async () => {
@@ -165,7 +166,19 @@ describe('executeCustomCommandForDiscord', () => {
 
     await executeCustomCommandForDiscord(msg as any, 'viewer1');
 
-    expect(msg.reply).toHaveBeenCalledWith('args=[] arg=[]');
+    expect(msg.reply).toHaveBeenCalledWith({ content: 'args=[] arg=[]', allowedMentions: { parse: [] } });
+  });
+
+  it('sets allowedMentions to suppress parsing, so @everyone/@here/role text in {args}/{user} cannot ping', async () => {
+    vi.mocked(getCustomCommandForDiscord).mockResolvedValue({
+      output: 'Thanks {user}: {args}',
+      is_multi_twitch: false,
+    } as any);
+    const msg = mockMsg('!hello @everyone <@&123456789012345678>');
+
+    await executeCustomCommandForDiscord(msg as any, 'viewer1');
+
+    expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({ allowedMentions: { parse: [] } }));
   });
 });
 
