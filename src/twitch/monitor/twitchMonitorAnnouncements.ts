@@ -113,6 +113,55 @@ async function repost(textChannel: TextChannel, content: string, embed: EmbedBui
 }
 
 /**
+ * Resolves `state`'s Discord channel and applies the edit/repost, per `editAnnouncement`'s
+ * delete-and-repost vs. edit-in-place-with-fallback-repost rules. Split out from
+ * `editAnnouncement` to keep each function's branching (and return-point count) manageable.
+ * @param discordClient - The ready Discord client.
+ * @param state - Current live state for the streamer being updated (mutated in place on success).
+ * @param content - Rendered message content.
+ * @param embed - Rendered stream embed.
+ * @param templateKey - Which group template was rendered: 'live_message' or 'new_game_message'.
+ * @param isCurrent - See {@link editAnnouncement}.
+ * @returns `true` if the caller should continue on to persisting the new state — the channel was
+ *   found and the caller wasn't superseded at any checkpoint. `false` otherwise (channel missing,
+ *   or superseded partway through — see {@link editAnnouncement}'s doc for what "superseded" means
+ *   for in-flight Discord calls that already can't be undone).
+ */
+async function publishEditedAnnouncement(
+  discordClient: NonNullable<ReturnType<typeof getDiscordClient>>,
+  state: LiveState,
+  content: string,
+  embed: EmbedBuilder,
+  templateKey: 'live_message' | 'new_game_message',
+  isCurrent: () => boolean,
+): Promise<boolean> {
+  const channel = await getTextChannel(discordClient, state.channelId!);
+  if (!isCurrent() || !channel) return false;
+  const textChannel = channel as TextChannel;
+
+  if (state.group.delete_old_posts && templateKey === 'new_game_message') {
+    const staleMessageId = state.messageId!;
+    const staleChannelId = state.channelId!;
+    await repost(textChannel, content, embed, state, isCurrent);
+    if (!isCurrent()) return false;
+    try {
+      await tryDeleteDiscordMessage(staleChannelId, staleMessageId);
+    } catch (err) {
+      log.error(`Failed to delete old announcement for ${state.login}, continuing:`, err);
+    }
+    return true;
+  }
+
+  const edited = await tryEditDiscordMessage(discordClient, state.channelId!, state.messageId!, { content, embeds: [embed] });
+  if (!isCurrent()) return false;
+  if (!edited) {
+    await repost(textChannel, content, embed, state, isCurrent);
+    if (!isCurrent()) return false;
+  }
+  return true;
+}
+
+/**
  * Updates an existing "now live" announcement to reflect a new game/title.
  * Delete+repost (when the group has `delete_old_posts` enabled) is reserved
  * for actual game changes (`templateKey === 'new_game_message'`) — title-only
@@ -153,29 +202,8 @@ export async function editAnnouncement(
   const embed = buildEmbed(stream);
 
   try {
-    const channel = await getTextChannel(discordClient, state.channelId);
-    if (!isCurrent()) return;
-    if (!channel) return;
-    const textChannel = channel as TextChannel;
-
-    if (group.delete_old_posts && templateKey === 'new_game_message') {
-      const staleMessageId = state.messageId;
-      const staleChannelId = state.channelId;
-      await repost(textChannel, content, embed, state, isCurrent);
-      if (!isCurrent()) return;
-      try {
-        await tryDeleteDiscordMessage(staleChannelId, staleMessageId);
-      } catch (err) {
-        log.error(`Failed to delete old announcement for ${state.login}, continuing:`, err);
-      }
-    } else {
-      const edited = await tryEditDiscordMessage(discordClient, state.channelId, state.messageId, { content, embeds: [embed] });
-      if (!isCurrent()) return;
-      if (!edited) {
-        await repost(textChannel, content, embed, state, isCurrent);
-        if (!isCurrent()) return;
-      }
-    }
+    const published = await publishEditedAnnouncement(discordClient, state, content, embed, templateKey, isCurrent);
+    if (!published) return;
 
     await persistStreamerLive(state.streamerId, state.messageId!, state.channelId!, stream.game_name, isCurrent);
     if (!isCurrent()) return;
