@@ -53,6 +53,8 @@ let joinGate: Promise<void> = Promise.resolve();
  * @param channel - The channel the call was for.
  * @param call - The raw (un-timed-out) `client.join()`/`client.part()` promise to watch.
  * @param kind - Which operation `call` performed.
+ * @returns Nothing — returns immediately without waiting on `call`. Reconciliation (if any) runs
+ *   asynchronously in the background whenever `call` eventually settles.
  */
 function compensateIfStale(channel: string, call: Promise<unknown>, kind: 'join' | 'part'): void {
   const startedAt = Date.now();
@@ -136,6 +138,7 @@ function fireChannelJoinedHook(channel: string): void {
  * {@link membershipMutationQueue} for this channel forever.
  * @param channel - The already-normalized channel name to reconcile.
  * @returns Resolves once the channel's status has been synced (and parted, if it was stale).
+ *   Rejects if the part call fails or times out — the channel's status is not synced in that case.
  */
 async function partStaleChannel(channel: string): Promise<void> {
   if (activeChannels.has(channel)) {

@@ -59,6 +59,7 @@ export function withLoginLock<T>(login: string, fn: (isCurrent: () => boolean) =
     // entire run — a concurrently *enqueued* call isn't "newer" until it actually gets its turn.
     const generation = (loginGenerations.get(login) ?? 0) + 1;
     loginGenerations.set(login, generation);
+    /** Returns whether this call is still the newest operation started for `login`. */
     const isCurrent = () => loginGenerations.get(login) === generation;
     return withTimeout(fn(isCurrent), LOGIN_LOCK_TIMEOUT_MS, `Login lock (${login})`);
   });

@@ -10,6 +10,34 @@ import { LiveState, makeLiveState } from './twitchMonitorTypes';
 import { buildEmbed, templateVars } from './twitchMonitorEmbed';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
 import { fillTemplate } from '../../shared/textTemplate';
+import { createMutationQueue } from '../../shared/mutationQueue';
+
+// `setStreamerLive` performs an unconditional row UPDATE with no ordering guarantee against
+// another in-flight call for the same streamer — a stale, timed-out withLoginLock operation's
+// write could otherwise land after a newer operation's, silently overwriting fresher message/game
+// state with stale data. Serializing writes per streamer ID guarantees a write can't start until
+// any earlier one has fully completed, and re-checking `isCurrent` immediately before writing
+// (inside the queued operation, not just before enqueueing) catches a stale write that reaches its
+// turn only after a newer operation has since taken over.
+const persistQueue = createMutationQueue<string>();
+
+/**
+ * Writes `streamerId`'s live status to the DB, serialized per streamer ID via {@link persistQueue}
+ * so overlapping writes for the same streamer can't complete out of order. No-ops if `isCurrent`
+ * reports superseded by the time this write reaches the front of the queue.
+ * @param streamerId - DB row id of the streamer being written.
+ * @param messageId - Discord message id of the live announcement.
+ * @param channelId - Discord channel id the announcement was posted in.
+ * @param gameName - Current game name to record.
+ * @param isCurrent - See `withLoginLock` in twitchMonitorPoll.ts.
+ * @returns Resolves once the write has completed or been skipped as stale.
+ */
+async function persistStreamerLive(streamerId: number, messageId: string, channelId: string, gameName: string, isCurrent: () => boolean): Promise<void> {
+  await persistQueue.run(String(streamerId), async () => {
+    if (!isCurrent()) return;
+    await setStreamerLive(streamerId, messageId, channelId, gameName);
+  });
+}
 
 /**
  * Posts a new "now live" announcement message for a streamer and records the
@@ -57,7 +85,7 @@ export async function postAnnouncement(
 
     liveStates.set(key, makeLiveState(streamerData, stream, msg.id, msg.channelId));
 
-    await setStreamerLive(streamerData.id, msg.id, msg.channelId, stream.game_name);
+    await persistStreamerLive(streamerData.id, msg.id, msg.channelId, stream.game_name, isCurrent);
     if (!isCurrent()) return;
     await updateMultitwitch(group.id, liveStates);
   } catch (err) {
@@ -149,7 +177,7 @@ export async function editAnnouncement(
       }
     }
 
-    await setStreamerLive(state.streamerId, state.messageId!, state.channelId!, stream.game_name);
+    await persistStreamerLive(state.streamerId, state.messageId!, state.channelId!, stream.game_name, isCurrent);
     if (!isCurrent()) return;
     await updateMultitwitch(group.id, liveStates);
   } catch (err) {

@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { deferred } from '../../test-utils/deferredPromise';
+import { flushMicrotasks } from '../../test-utils/flushMicrotasks';
 
 // Shared with the discordUtils mock factory below so tests can still drive
 // isDiscordNotFoundError's return value directly, even though production code
@@ -166,6 +168,36 @@ describe('postAnnouncement', () => {
     expect(liveStates.size).toBe(0);
     expect(setStreamerLive).not.toHaveBeenCalled();
     expect(updateMultitwitch).not.toHaveBeenCalled();
+  });
+
+  // CodeRabbit review finding on PR #533: setStreamerLive's own DB write has no ordering
+  // guarantee against another in-flight write for the same streamer, so a slow, stale write could
+  // otherwise complete *after* a faster, newer write and silently overwrite it. Writes are now
+  // serialized per streamer ID, so the older call's write is guaranteed to fully complete (for
+  // better or worse) before the newer call's write can even start — the newer write always lands
+  // last, regardless of how long the older one takes to settle.
+  it('does not let a slow write for one call clobber a faster write from a later call for the same streamer', async () => {
+    const channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    const streamer = makeStreamer(); // same streamer (id: 10) for both calls
+    const liveStates = new Map<string, LiveState>();
+
+    const staleWrite = deferred<void>();
+    vi.mocked(setStreamerLive).mockReturnValueOnce(staleWrite.promise);
+
+    const stalePromise = postAnnouncement(liveStates, streamer, makeStream({ game_name: 'Stale Game' }));
+    await flushMicrotasks(); // let the first call reach and start its (deferred) DB write
+
+    const freshPromise = postAnnouncement(liveStates, streamer, makeStream({ game_name: 'Fresh Game' }));
+    await flushMicrotasks(); // the second call's write must be queued behind the first, not racing it
+    expect(setStreamerLive).toHaveBeenCalledTimes(1); // only the stale write has been issued so far
+
+    staleWrite.resolve();
+    await Promise.all([stalePromise, freshPromise]);
+
+    expect(setStreamerLive).toHaveBeenCalledTimes(2);
+    expect(setStreamerLive).toHaveBeenNthCalledWith(1, 10, 'msg1', 'ch1', 'Stale Game');
+    expect(setStreamerLive).toHaveBeenNthCalledWith(2, 10, 'msg1', 'ch1', 'Fresh Game'); // the newer write lands last
   });
 });
 
