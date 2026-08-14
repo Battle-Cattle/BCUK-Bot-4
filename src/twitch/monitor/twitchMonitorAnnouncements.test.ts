@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 import { deferred } from '../../test-utils/deferredPromise';
 import { flushMicrotasks } from '../../test-utils/flushMicrotasks';
@@ -98,7 +98,12 @@ function makeLiveState(overrides: Partial<LiveState> = {}): LiveState {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useFakeTimers();
   vi.mocked(isDiscordNotFoundError).mockReturnValue(false);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ─── postAnnouncement ─────────────────────────────────────────────────────────
@@ -198,6 +203,26 @@ describe('postAnnouncement', () => {
     expect(setStreamerLive).toHaveBeenCalledTimes(2);
     expect(setStreamerLive).toHaveBeenNthCalledWith(1, 10, 'msg1', 'ch1', 'Stale Game');
     expect(setStreamerLive).toHaveBeenNthCalledWith(2, 10, 'msg1', 'ch1', 'Fresh Game'); // the newer write lands last
+  });
+
+  // CodeRabbit review finding on PR #533: setStreamerLive ran inside the per-streamer persist
+  // queue with no timeout, so a stalled DB call could wedge that streamer's queue forever —
+  // exactly the class of bug this PR otherwise guards against for Twitch/Discord calls.
+  it('times out a hung setStreamerLive write and still releases the queue for a later write to the same streamer', async () => {
+    const channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    const streamer = makeStreamer(); // same streamer (id: 10) for both calls
+    vi.mocked(setStreamerLive).mockImplementationOnce(() => new Promise(() => {})); // hangs
+
+    const hungPromise = postAnnouncement(new Map(), streamer, makeStream());
+    await vi.advanceTimersByTimeAsync(10_000); // PERSIST_TIMEOUT_MS
+    // postAnnouncement's own try/catch swallows and logs the timeout — it must still resolve
+    // rather than hang forever waiting on the DB write.
+    await expect(hungPromise).resolves.toBeUndefined();
+
+    vi.mocked(setStreamerLive).mockResolvedValue(undefined);
+    await expect(postAnnouncement(new Map(), streamer, makeStream())).resolves.toBeUndefined();
+    expect(setStreamerLive).toHaveBeenCalledTimes(2); // the later write wasn't queued behind the hung one forever
   });
 });
 

@@ -11,6 +11,7 @@ import { buildEmbed, templateVars } from './twitchMonitorEmbed';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
 import { fillTemplate } from '../../shared/textTemplate';
 import { createMutationQueue } from '../../shared/mutationQueue';
+import { withTimeout } from '../twitchSendQueue';
 
 // `setStreamerLive` performs an unconditional row UPDATE with no ordering guarantee against
 // another in-flight call for the same streamer — a stale, timed-out withLoginLock operation's
@@ -21,6 +22,9 @@ import { createMutationQueue } from '../../shared/mutationQueue';
 // turn only after a newer operation has since taken over.
 const persistQueue = createMutationQueue<string>();
 
+/** Bounds each queued {@link persistStreamerLive} write so a stalled DB call can't wedge {@link persistQueue} for that streamer forever. */
+const PERSIST_TIMEOUT_MS = 10_000;
+
 /**
  * Writes `streamerId`'s live status to the DB, serialized per streamer ID via {@link persistQueue}
  * so overlapping writes for the same streamer can't complete out of order. No-ops if `isCurrent`
@@ -30,12 +34,13 @@ const persistQueue = createMutationQueue<string>();
  * @param channelId - Discord channel id the announcement was posted in.
  * @param gameName - Current game name to record.
  * @param isCurrent - See `withLoginLock` in twitchMonitorPoll.ts.
- * @returns Resolves once the write has completed or been skipped as stale.
+ * @returns Resolves once the write has completed or been skipped as stale. Rejects if the write
+ *   fails or times out.
  */
 async function persistStreamerLive(streamerId: number, messageId: string, channelId: string, gameName: string, isCurrent: () => boolean): Promise<void> {
   await persistQueue.run(String(streamerId), async () => {
     if (!isCurrent()) return;
-    await setStreamerLive(streamerId, messageId, channelId, gameName);
+    await withTimeout(setStreamerLive(streamerId, messageId, channelId, gameName), PERSIST_TIMEOUT_MS, 'Persist streamer live status');
   });
 }
 

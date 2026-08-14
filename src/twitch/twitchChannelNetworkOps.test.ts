@@ -120,6 +120,41 @@ describe('compensateIfStale', () => {
     expect(client.part).toHaveBeenCalledWith('alice');
   });
 
+  // CodeRabbit review finding on PR #533: the revert branch's own corrective client.part() call
+  // wasn't itself registered with compensateIfStale, so if THAT call timed out but later actually
+  // succeeded after membership became desired again, nothing would notice and rejoin.
+  it("rejoins after a stale join's own corrective part times out but later settles while membership is desired again", async () => {
+    const client = makeMockClient(['alice']);
+    const deps = makeDeps();
+    deps.setClient(client);
+    deps.setDesired('alice', false); // triggers the initial revert
+
+    let resolveRevertPart!: () => void;
+    client.part.mockImplementation(() => new Promise<void>((resolve) => { resolveRevertPart = resolve; }));
+
+    const staleJoin = new Promise<void>((resolve) => setTimeout(resolve, JOIN_PART_TIMEOUT_MS));
+    compensateIfStale(deps, 'alice', staleJoin, 'join');
+    await vi.advanceTimersByTimeAsync(JOIN_PART_TIMEOUT_MS); // staleJoin settles, the revert's part() is issued
+    await flushMicrotasks();
+    expect(client.part).toHaveBeenCalledWith('alice'); // revert issued, but hangs
+
+    // While the revert is still hanging, membership becomes desired again (e.g. a fresh join request).
+    deps.setDesired('alice', true);
+
+    // The revert's own withTimeout gives up waiting on it (logged and swallowed internally), and
+    // compensateIfStale's watch on the revert call itself is now also past its own timeout window.
+    await vi.advanceTimersByTimeAsync(JOIN_PART_TIMEOUT_MS);
+
+    // The revert call finally settles late — simulate it having actually removed the channel.
+    client.getChannels.mockReturnValue([]);
+    resolveRevertPart();
+    await flushMicrotasks();
+
+    // Actual membership (parted) no longer matches desired (active again) — the revert's own
+    // staleness watcher must notice and rejoin.
+    expect(client.join).toHaveBeenCalledWith('alice');
+  });
+
   it('rejoins after a stale part lands while the channel is still desired active', async () => {
     const client = makeMockClient([]); // part already "took effect" per the mock's channel list
     const deps = makeDeps();

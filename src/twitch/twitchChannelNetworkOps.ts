@@ -80,7 +80,11 @@ export function compensateIfStale(deps: MembershipDeps, channel: string, call: P
       const desiredJoined = deps.isDesiredJoined(channel);
       if (kind === 'join' && !desiredJoined && deps.isChannelJoined(channel)) {
         log.warn(`[Twitch] Stale join for ${channel} landed after it was no longer desired active — reverting`);
-        await withTimeout(client.part(channel), JOIN_PART_TIMEOUT_MS, 'Twitch part');
+        const revertCall = client.part(channel);
+        // The revert itself can time out and land late, same as any other part call — watch it
+        // too, so a stale revert can't silently undo a join that's since become desired again.
+        compensateIfStale(deps, channel, revertCall, 'part');
+        await withTimeout(revertCall, JOIN_PART_TIMEOUT_MS, 'Twitch part');
       } else if (kind === 'part' && desiredJoined && !deps.isChannelJoined(channel)) {
         log.warn(`[Twitch] Stale part for ${channel} landed while it was still desired active — rejoining`);
         await throttledJoin(client, channel, (joinCall) => compensateIfStale(deps, channel, joinCall, 'join'));
