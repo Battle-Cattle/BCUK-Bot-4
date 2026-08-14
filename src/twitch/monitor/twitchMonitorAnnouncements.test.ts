@@ -1,5 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { deferred } from '../../test-utils/deferredPromise';
+import { flushMicrotasks } from '../../test-utils/flushMicrotasks';
 
 // Shared with the discordUtils mock factory below so tests can still drive
 // isDiscordNotFoundError's return value directly, even though production code
@@ -96,7 +98,12 @@ function makeLiveState(overrides: Partial<LiveState> = {}): LiveState {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useFakeTimers();
   vi.mocked(isDiscordNotFoundError).mockReturnValue(false);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ─── postAnnouncement ─────────────────────────────────────────────────────────
@@ -146,6 +153,76 @@ describe('postAnnouncement', () => {
     vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: vi.fn().mockRejectedValue(new Error('network')) } } as any);
     await expect(postAnnouncement(new Map(), makeStreamer(), makeStream())).resolves.not.toThrow();
     expect(setStreamerLive).not.toHaveBeenCalled();
+  });
+
+  // A withLoginLock timeout doesn't cancel postAnnouncement — it may still be running (and could
+  // still send/mutate) after a newer same-login operation has taken over. isCurrent must be
+  // re-checked after each await so a superseded call stops instead of racing the newer one
+  // (CodeRabbit review finding on PR #533).
+  it('sends the message but skips liveStates/DB updates once superseded partway through', async () => {
+    const channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    let current = true;
+    // Simulate a newer operation taking over while this send is in flight.
+    channel.send.mockImplementation(async () => { current = false; return { id: 'msg1', channelId: 'ch1' }; });
+    const liveStates = new Map<string, LiveState>();
+
+    await postAnnouncement(liveStates, makeStreamer(), makeStream(), () => current);
+
+    expect(channel.send).toHaveBeenCalled(); // already in flight before staleness could be observed
+    expect(liveStates.size).toBe(0);
+    expect(setStreamerLive).not.toHaveBeenCalled();
+    expect(updateMultitwitch).not.toHaveBeenCalled();
+  });
+
+  // CodeRabbit review finding on PR #533: setStreamerLive's own DB write has no ordering
+  // guarantee against another in-flight write for the same streamer, so a slow, stale write could
+  // otherwise complete *after* a faster, newer write and silently overwrite it. Writes are now
+  // serialized per streamer ID, so the older call's write is guaranteed to fully complete (for
+  // better or worse) before the newer call's write can even start — the newer write always lands
+  // last, regardless of how long the older one takes to settle.
+  it('does not let a slow write for one call clobber a faster write from a later call for the same streamer', async () => {
+    const channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    const streamer = makeStreamer(); // same streamer (id: 10) for both calls
+    const liveStates = new Map<string, LiveState>();
+
+    const staleWrite = deferred<void>();
+    vi.mocked(setStreamerLive).mockReturnValueOnce(staleWrite.promise);
+
+    const stalePromise = postAnnouncement(liveStates, streamer, makeStream({ game_name: 'Stale Game' }));
+    await flushMicrotasks(); // let the first call reach and start its (deferred) DB write
+
+    const freshPromise = postAnnouncement(liveStates, streamer, makeStream({ game_name: 'Fresh Game' }));
+    await flushMicrotasks(); // the second call's write must be queued behind the first, not racing it
+    expect(setStreamerLive).toHaveBeenCalledTimes(1); // only the stale write has been issued so far
+
+    staleWrite.resolve();
+    await Promise.all([stalePromise, freshPromise]);
+
+    expect(setStreamerLive).toHaveBeenCalledTimes(2);
+    expect(setStreamerLive).toHaveBeenNthCalledWith(1, 10, 'msg1', 'ch1', 'Stale Game');
+    expect(setStreamerLive).toHaveBeenNthCalledWith(2, 10, 'msg1', 'ch1', 'Fresh Game'); // the newer write lands last
+  });
+
+  // CodeRabbit review finding on PR #533: setStreamerLive ran inside the per-streamer persist
+  // queue with no timeout, so a stalled DB call could wedge that streamer's queue forever —
+  // exactly the class of bug this PR otherwise guards against for Twitch/Discord calls.
+  it('times out a hung setStreamerLive write and still releases the queue for a later write to the same streamer', async () => {
+    const channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    const streamer = makeStreamer(); // same streamer (id: 10) for both calls
+    vi.mocked(setStreamerLive).mockImplementationOnce(() => new Promise(() => {})); // hangs
+
+    const hungPromise = postAnnouncement(new Map(), streamer, makeStream());
+    await vi.advanceTimersByTimeAsync(10_000); // PERSIST_TIMEOUT_MS
+    // postAnnouncement's own try/catch swallows and logs the timeout — it must still resolve
+    // rather than hang forever waiting on the DB write.
+    await expect(hungPromise).resolves.toBeUndefined();
+
+    vi.mocked(setStreamerLive).mockResolvedValue(undefined);
+    await expect(postAnnouncement(new Map(), streamer, makeStream())).resolves.toBeUndefined();
+    expect(setStreamerLive).toHaveBeenCalledTimes(2); // the later write wasn't queued behind the hung one forever
   });
 });
 
@@ -240,6 +317,39 @@ describe('editAnnouncement', () => {
     const state = makeLiveState({ group: makeGroup({ delete_old_posts: false }) });
     await expect(editAnnouncement(new Map(), state, makeStream(), 'live_message')).resolves.not.toThrow();
     // Error is caught by outer try/catch and logged; state is not updated.
+    expect(setStreamerLive).not.toHaveBeenCalled();
+  });
+
+  // Mirrors the postAnnouncement isCurrent fencing tests above (CodeRabbit review finding on PR
+  // #533) — a withLoginLock timeout doesn't cancel editAnnouncement, so isCurrent must be
+  // re-checked after each await so a superseded call stops instead of racing a newer operation.
+  it('edits the message but skips DB/multitwitch updates once superseded partway through', async () => {
+    const channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    let current = true;
+    channel._message.edit.mockImplementation(async () => { current = false; });
+    const state = makeLiveState({ group: makeGroup({ delete_old_posts: false }) });
+
+    await editAnnouncement(new Map(), state, makeStream(), 'live_message', () => current);
+
+    expect(channel._message.edit).toHaveBeenCalled();
+    expect(setStreamerLive).not.toHaveBeenCalled();
+    expect(updateMultitwitch).not.toHaveBeenCalled();
+  });
+
+  it('reposts the message but skips recording its id on state, and skips deleting the old one, once superseded partway through', async () => {
+    const channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    let current = true;
+    channel.send.mockImplementation(async () => { current = false; return { id: 'msg2', channelId: 'ch1' }; });
+    const state = makeLiveState({ group: makeGroup({ delete_old_posts: true }) });
+    const originalMessageId = state.messageId;
+
+    await editAnnouncement(new Map(), state, makeStream(), 'new_game_message', () => current);
+
+    expect(channel.send).toHaveBeenCalled();
+    expect(state.messageId).toBe(originalMessageId); // repost()'s own state mutation was skipped
+    expect(tryDeleteDiscordMessage).not.toHaveBeenCalled();
     expect(setStreamerLive).not.toHaveBeenCalled();
   });
 });

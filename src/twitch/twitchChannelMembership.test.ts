@@ -268,6 +268,119 @@ describe('joinTwitchChannel global join throttle', () => {
   });
 });
 
+// ─── join/part timeout safeguard ───────────────────────────────────────────
+
+describe('join/part timeout safeguard', () => {
+  it('times out a hung client.join and still releases the join gate for a later join', async () => {
+    const client = makeMockClient();
+    setTmiClient(client as any);
+    setConnected(true);
+    client.join.mockImplementation((channel: string) => (channel === 'alice' ? new Promise<void>(() => {}) : Promise.resolve()));
+
+    const alicePromise = joinTwitchChannel('alice');
+    const aliceAssertion = expect(alicePromise).rejects.toThrow('Twitch join timed out after 10000ms');
+    await vi.advanceTimersByTimeAsync(10_000); // JOIN_PART_TIMEOUT_MS
+    await aliceAssertion;
+
+    // The global join gate must have been released by throttledJoin's `finally` despite the
+    // timeout — a later join for a different channel must still go through instead of queuing
+    // behind the hung one forever.
+    const carolPromise = joinTwitchChannel('carol');
+    const carolAssertion = expect(carolPromise).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(600); // JOIN_THROTTLE_MS
+    await carolAssertion;
+    expect(client.join).toHaveBeenCalledWith('carol');
+  });
+
+  it('times out a hung client.part and still releases the per-channel queue for a later operation on the same channel', async () => {
+    const client = makeMockClient(['alice']);
+    setTmiClient(client as any);
+    setConnected(true);
+    await joinTwitchChannel('alice'); // already-joined branch — syncs local state, no client.join call
+    client.part.mockImplementation(() => new Promise<void>(() => {}));
+
+    const partPromise = partTwitchChannel('alice');
+    const partAssertion = expect(partPromise).rejects.toThrow('Twitch part timed out after 10000ms');
+    await vi.advanceTimersByTimeAsync(10_000); // JOIN_PART_TIMEOUT_MS
+    await partAssertion;
+
+    // membershipMutationQueue's 'alice' entry must have released — a later same-key operation
+    // (still seeing the channel as joined, since the hung part never actually completed) must
+    // resolve instead of queuing behind the timed-out part forever.
+    await expect(joinTwitchChannel('alice')).resolves.toBeUndefined();
+  });
+});
+
+// ─── stale join/part compensation ──────────────────────────────────────────
+// A timeout only stops *waiting* on client.join()/client.part() — it doesn't cancel the real
+// network call. If that call later actually succeeds, after the caller already gave up and moved
+// on, its effect on real Twitch-side membership must be reconciled against activeChannels instead
+// of being trusted blindly (CodeRabbit review finding on PR #533).
+
+describe('stale join/part compensation', () => {
+  it('reverts a stale join that lands late, after the channel is no longer desired active', async () => {
+    const client = makeMockClient();
+    setTmiClient(client as any);
+    setConnected(true);
+    let resolveJoin!: () => void;
+    client.join.mockImplementation(() => new Promise<void>((resolve) => { resolveJoin = resolve; }));
+
+    const joinPromise = joinTwitchChannel('alice');
+    const assertion = expect(joinPromise).rejects.toThrow('Twitch join timed out after 10000ms');
+    await vi.advanceTimersByTimeAsync(10_000); // JOIN_PART_TIMEOUT_MS — the caller gives up and rolls back
+    await assertion;
+    expect(getActiveChannels().has('alice')).toBe(false);
+
+    // The real join now actually lands, out of band, well after the caller stopped waiting.
+    client.getChannels.mockReturnValue(['alice']);
+    resolveJoin();
+    await flushMicrotasks();
+
+    // Actual membership no longer matches desired state (not active) — compensateIfStale must
+    // notice and part the channel again rather than leaving a stale, unwanted join in place.
+    expect(client.part).toHaveBeenCalledWith('alice');
+  });
+
+  it('rejoins after a stale part lands late, while the channel is still desired active', async () => {
+    const client = makeMockClient(['alice']);
+    setTmiClient(client as any);
+    setConnected(true);
+    await joinTwitchChannel('alice'); // already-joined branch — syncs local state, no client.join call
+    let resolvePart!: () => void;
+    client.part.mockImplementation(() => new Promise<void>((resolve) => { resolvePart = resolve; }));
+
+    const partPromise = partTwitchChannel('alice');
+    const assertion = expect(partPromise).rejects.toThrow('Twitch part timed out after 10000ms');
+    await vi.advanceTimersByTimeAsync(10_000); // JOIN_PART_TIMEOUT_MS — the caller gives up
+    await assertion;
+
+    // Channel is re-requested while the stale part is still hanging in the background — since
+    // the client still reports it joined, this is the already-joined branch (no network call).
+    await joinTwitchChannel('alice');
+    expect(getActiveChannels().has('alice')).toBe(true);
+
+    // The real part now actually lands, out of band, well after its caller stopped waiting.
+    client.getChannels.mockReturnValue([]);
+    resolvePart();
+    await flushMicrotasks();
+
+    // Actual membership no longer matches desired state (still active) — compensateIfStale must
+    // notice and rejoin rather than leaving the channel stuck parted.
+    expect(client.join).toHaveBeenCalledWith('alice');
+  });
+
+  it('does not compensate a join that settles normally, within the timeout window', async () => {
+    const client = makeMockClient();
+    setTmiClient(client as any);
+    setConnected(true);
+
+    await joinTwitchChannel('alice');
+    await flushMicrotasks();
+
+    expect(client.part).not.toHaveBeenCalled();
+  });
+});
+
 // ─── reconcileJoinedChannels ────────────────────────────────────────────────
 
 describe('reconcileJoinedChannels', () => {

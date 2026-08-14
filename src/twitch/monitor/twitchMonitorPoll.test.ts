@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
@@ -42,6 +42,11 @@ function makeLiveState(overrides: Partial<LiveState> = {}): LiveState {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ─── handlePollStreamer ───────────────────────────────────────────────────────
@@ -67,7 +72,7 @@ describe('handlePollStreamer', () => {
     await handlePollStreamer(liveStates, loginToUserId, makeStreamer(), liveByUserId);
 
     expect(setTwitchChannelLive).toHaveBeenCalledWith('teststreamer', true);
-    expect(postAnnouncement).toHaveBeenCalledWith(liveStates, expect.objectContaining({ id: 5 }), expect.objectContaining({ user_id: 'uid-5' }));
+    expect(postAnnouncement).toHaveBeenCalledWith(liveStates, expect.objectContaining({ id: 5 }), expect.objectContaining({ user_id: 'uid-5' }), expect.any(Function));
   });
 
   it('cancels offline timers when a streamer with a running grace period comes back live', async () => {
@@ -87,7 +92,7 @@ describe('handlePollStreamer', () => {
 
     await handlePollStreamer(liveStates, loginToUserId, makeStreamer(), liveByUserId);
 
-    expect(editAnnouncement).toHaveBeenCalledWith(liveStates, expect.anything(), expect.objectContaining({ game_name: 'Valorant' }), 'new_game_message');
+    expect(editAnnouncement).toHaveBeenCalledWith(liveStates, expect.anything(), expect.objectContaining({ game_name: 'Valorant' }), 'new_game_message', expect.any(Function));
   });
 
   it('edits with live_message when only the title changes', async () => {
@@ -97,7 +102,7 @@ describe('handlePollStreamer', () => {
 
     await handlePollStreamer(liveStates, loginToUserId, makeStreamer(), liveByUserId);
 
-    expect(editAnnouncement).toHaveBeenCalledWith(liveStates, expect.anything(), expect.objectContaining({ title: 'New title' }), 'live_message');
+    expect(editAnnouncement).toHaveBeenCalledWith(liveStates, expect.anything(), expect.objectContaining({ title: 'New title' }), 'live_message', expect.any(Function));
   });
 
   it('syncs currentStream without posting or editing when nothing changed', async () => {
@@ -112,6 +117,18 @@ describe('handlePollStreamer', () => {
     expect(postAnnouncement).not.toHaveBeenCalled();
     expect(editAnnouncement).not.toHaveBeenCalled();
     expect(liveState.currentStream).toBe(newStream);
+  });
+
+  it('skips the direct state sync when isCurrent() reports superseded (a newer same-login operation has since taken over)', async () => {
+    const liveState = makeLiveState({ messageId: 'msg1' });
+    const liveStates = new Map<string, LiveState>([['5', liveState]]);
+    const loginToUserId = new Map([['teststreamer', 'uid-5']]);
+    const newStream = makeStream();
+    const liveByUserId = new Map([['uid-5', newStream]]);
+
+    await handlePollStreamer(liveStates, loginToUserId, makeStreamer(), liveByUserId, () => false);
+
+    expect(liveState.currentStream).not.toBe(newStream);
   });
 
   it('starts the offline grace period when a previously-live streamer is now offline', async () => {
@@ -210,5 +227,45 @@ describe('withLoginLock', () => {
   it('resolves with the wrapped function\'s return value', async () => {
     const result = await withLoginLock('alice', async () => 42);
     expect(result).toBe(42);
+  });
+
+  it('times out a hung fn and still releases the queue for a later operation on the same login', async () => {
+    const hung = withLoginLock('alice', () => new Promise<void>(() => {}));
+    const assertion = expect(hung).rejects.toThrow('Login lock (alice) timed out after 20000ms');
+    await vi.advanceTimersByTimeAsync(20_000); // LOGIN_LOCK_TIMEOUT_MS
+    await assertion;
+
+    const order: string[] = [];
+    await withLoginLock('alice', async () => { order.push('after-timeout'); });
+    expect(order).toEqual(['after-timeout']);
+  });
+
+  it('reports isCurrent() as true for the duration of a normal (non-superseded) run', async () => {
+    const seen: boolean[] = [];
+    await withLoginLock('alice', async (isCurrent) => {
+      seen.push(isCurrent());
+      await Promise.resolve();
+      seen.push(isCurrent());
+    });
+    expect(seen).toEqual([true, true]);
+  });
+
+  it('flips isCurrent() to false for a timed-out fn once a later operation for the same login has started', async () => {
+    let isCurrentAfterResume!: () => boolean;
+    let resumeStalled!: () => void;
+    const stalled = withLoginLock('alice', (isCurrent) => {
+      isCurrentAfterResume = isCurrent;
+      return new Promise<void>((resolve) => { resumeStalled = resolve; });
+    });
+    const stalledAssertion = expect(stalled).rejects.toThrow('Login lock (alice) timed out after 20000ms');
+    await vi.advanceTimersByTimeAsync(20_000); // LOGIN_LOCK_TIMEOUT_MS — frees the queue, stalled fn keeps "running"
+    await stalledAssertion;
+
+    // A later operation for the same login takes over the queue.
+    await withLoginLock('alice', async () => {});
+
+    // The original (still-running-in-the-background) fn must now see itself as superseded.
+    expect(isCurrentAfterResume()).toBe(false);
+    resumeStalled(); // let the original fn actually settle so it doesn't leak into later tests
   });
 });
