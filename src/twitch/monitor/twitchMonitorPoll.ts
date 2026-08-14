@@ -150,7 +150,6 @@ export async function handlePollStreamer(
   } else if (existing && !existing.offlineTimer) {
     // Appears offline — start grace period (handleStreamOffline handles all groups for this login)
     await handleStreamOffline(liveStates, loginToUserId, loginKey);
-    if (!isCurrent()) return;
   }
 }
 

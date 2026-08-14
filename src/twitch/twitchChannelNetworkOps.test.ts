@@ -12,22 +12,22 @@ function makeMockClient(channels: string[] = []) {
 }
 
 /** Builds a {@link MembershipDeps} bundle backed by mutable test state, overridable per test. */
-function makeDeps(overrides: Partial<MembershipDeps> = {}): MembershipDeps & { setClient: (c: unknown) => void; setDesired: (channel: string, desired: boolean) => void } {
+function makeDeps(overrides: Partial<MembershipDeps> = {}): MembershipDeps & { setClient: (c: unknown) => void; setConnected: (v: boolean) => void; setDesired: (channel: string, desired: boolean) => void } {
   let client: unknown = null;
-  const connected = true;
+  let connected = true;
   const desired = new Set<string>();
-  const runs: string[] = [];
   const deps: MembershipDeps = {
     getClient: () => client as any,
     isConnected: () => connected,
     isChannelJoined: (channel) => (client as any)?.getChannels().includes(channel) ?? false,
     isDesiredJoined: (channel) => desired.has(channel),
-    runExclusive: (channel, op) => { runs.push(channel); return op(); },
+    runExclusive: (_channel, op) => op(),
     ...overrides,
   };
   return {
     ...deps,
     setClient: (c: unknown) => { client = c; },
+    setConnected: (v: boolean) => { connected = v; },
     setDesired: (channel: string, isDesired: boolean) => {
       if (isDesired) desired.add(channel);
       else desired.delete(channel);
@@ -104,6 +104,22 @@ describe('compensateIfStale', () => {
     await flushMicrotasks();
 
     expect(client.part).not.toHaveBeenCalled();
+  });
+
+  it('does not attempt a corrective join/part when the client has since disconnected', async () => {
+    const client = makeMockClient(['alice']);
+    const deps = makeDeps();
+    deps.setClient(client);
+    deps.setDesired('alice', false); // would trigger a revert if the client were still connected
+
+    const staleCall = new Promise<void>((resolve) => setTimeout(resolve, JOIN_PART_TIMEOUT_MS));
+    compensateIfStale(deps, 'alice', staleCall, 'join');
+    deps.setConnected(false);
+    await vi.advanceTimersByTimeAsync(JOIN_PART_TIMEOUT_MS);
+    await flushMicrotasks();
+
+    expect(client.part).not.toHaveBeenCalled();
+    expect(client.join).not.toHaveBeenCalled();
   });
 
   it('reverts a stale join that lands after the channel is no longer desired active', async () => {

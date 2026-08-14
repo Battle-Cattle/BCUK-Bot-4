@@ -21,7 +21,7 @@ const JOIN_THROTTLE_MS = 600;
 // queue and could otherwise collectively exceed Twitch's IRC JOIN rate limit.
 let joinGate: Promise<void> = Promise.resolve();
 
-/** Resets the global join throttle gate (used in tests). */
+/** Resets the global join throttle gate. */
 export function resetJoinGate(): void {
   joinGate = Promise.resolve();
 }
