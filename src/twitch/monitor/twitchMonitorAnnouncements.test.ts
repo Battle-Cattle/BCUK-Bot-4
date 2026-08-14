@@ -147,6 +147,26 @@ describe('postAnnouncement', () => {
     await expect(postAnnouncement(new Map(), makeStreamer(), makeStream())).resolves.not.toThrow();
     expect(setStreamerLive).not.toHaveBeenCalled();
   });
+
+  // A withLoginLock timeout doesn't cancel postAnnouncement — it may still be running (and could
+  // still send/mutate) after a newer same-login operation has taken over. isCurrent must be
+  // re-checked after each await so a superseded call stops instead of racing the newer one
+  // (CodeRabbit review finding on PR #533).
+  it('sends the message but skips liveStates/DB updates once superseded partway through', async () => {
+    const channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    let current = true;
+    // Simulate a newer operation taking over while this send is in flight.
+    channel.send.mockImplementation(async () => { current = false; return { id: 'msg1', channelId: 'ch1' }; });
+    const liveStates = new Map<string, LiveState>();
+
+    await postAnnouncement(liveStates, makeStreamer(), makeStream(), () => current);
+
+    expect(channel.send).toHaveBeenCalled(); // already in flight before staleness could be observed
+    expect(liveStates.size).toBe(0);
+    expect(setStreamerLive).not.toHaveBeenCalled();
+    expect(updateMultitwitch).not.toHaveBeenCalled();
+  });
 });
 
 // ─── editAnnouncement ─────────────────────────────────────────────────────────
@@ -240,6 +260,39 @@ describe('editAnnouncement', () => {
     const state = makeLiveState({ group: makeGroup({ delete_old_posts: false }) });
     await expect(editAnnouncement(new Map(), state, makeStream(), 'live_message')).resolves.not.toThrow();
     // Error is caught by outer try/catch and logged; state is not updated.
+    expect(setStreamerLive).not.toHaveBeenCalled();
+  });
+
+  // Mirrors the postAnnouncement isCurrent fencing tests above (CodeRabbit review finding on PR
+  // #533) — a withLoginLock timeout doesn't cancel editAnnouncement, so isCurrent must be
+  // re-checked after each await so a superseded call stops instead of racing a newer operation.
+  it('edits the message but skips DB/multitwitch updates once superseded partway through', async () => {
+    const channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    let current = true;
+    channel._message.edit.mockImplementation(async () => { current = false; });
+    const state = makeLiveState({ group: makeGroup({ delete_old_posts: false }) });
+
+    await editAnnouncement(new Map(), state, makeStream(), 'live_message', () => current);
+
+    expect(channel._message.edit).toHaveBeenCalled();
+    expect(setStreamerLive).not.toHaveBeenCalled();
+    expect(updateMultitwitch).not.toHaveBeenCalled();
+  });
+
+  it('reposts the message but skips recording its id on state, and skips deleting the old one, once superseded partway through', async () => {
+    const channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    let current = true;
+    channel.send.mockImplementation(async () => { current = false; return { id: 'msg2', channelId: 'ch1' }; });
+    const state = makeLiveState({ group: makeGroup({ delete_old_posts: true }) });
+    const originalMessageId = state.messageId;
+
+    await editAnnouncement(new Map(), state, makeStream(), 'new_game_message', () => current);
+
+    expect(channel.send).toHaveBeenCalled();
+    expect(state.messageId).toBe(originalMessageId); // repost()'s own state mutation was skipped
+    expect(tryDeleteDiscordMessage).not.toHaveBeenCalled();
     expect(setStreamerLive).not.toHaveBeenCalled();
   });
 });

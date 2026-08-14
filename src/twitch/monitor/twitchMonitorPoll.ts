@@ -89,17 +89,17 @@ async function handleLiveStreamer(params: LiveStreamerParams): Promise<void> {
   const isNew = !liveStates.has(stateKey);
   if (isNew || (existing && !existing.messageId)) {
     // Went live, or state exists with no Discord message (e.g. Discord wasn't ready at startup)
-    await postAnnouncement(liveStates, streamer, pollStream);
+    await postAnnouncement(liveStates, streamer, pollStream, isCurrent);
     if (!isCurrent()) return; // superseded while awaiting — a newer op already owns this login's state
     if (isNew) log.info(`${loginKey} went live in group ${streamer.group.name}`);
   } else if (existing && existing.currentGame !== pollStream.game_name) {
     // Game changed
-    await editAnnouncement(liveStates, existing, pollStream, 'new_game_message');
+    await editAnnouncement(liveStates, existing, pollStream, 'new_game_message', isCurrent);
     if (!isCurrent()) return;
     log.info(`${loginKey} game changed to ${pollStream.game_name}`);
   } else if (existing && existing.title !== pollStream.title) {
     // Title-only change — refresh the existing post without re-announcing a game change
-    await editAnnouncement(liveStates, existing, pollStream, 'live_message');
+    await editAnnouncement(liveStates, existing, pollStream, 'live_message', isCurrent);
     if (!isCurrent()) return;
     log.info(`${loginKey} title changed`);
   } else if (existing) {

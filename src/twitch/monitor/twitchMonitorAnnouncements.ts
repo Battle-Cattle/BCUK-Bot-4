@@ -18,12 +18,17 @@ import { fillTemplate } from '../../shared/textTemplate';
  * @param liveStates - Map of live streamer states, keyed by streamer DB row id.
  * @param streamerData - Full streamer record (including its stream group) from the database.
  * @param stream - The live Twitch stream data.
+ * @param isCurrent - See `withLoginLock` in twitchMonitorPoll.ts; checked after each `await` so a
+ *   caller superseded by a newer same-login operation stops instead of mutating `liveStates` or
+ *   writing to the DB with stale context. A Discord message already sent before staleness is
+ *   detected can't be un-sent, but nothing further is applied on top of it once stale.
  * @returns Resolves once the announcement is posted (or skipped) and state is updated.
  */
 export async function postAnnouncement(
   liveStates: Map<string, LiveState>,
   streamerData: DbStreamerFull,
   stream: TwitchStream,
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
   // Key by DB row id so each streamer×group pair has independent state
   const key = String(streamerData.id);
@@ -41,16 +46,19 @@ export async function postAnnouncement(
 
   try {
     const channel = await getTextChannel(discordClient, group.discord_channel);
+    if (!isCurrent()) return; // superseded while resolving the channel — don't post using stale context
     if (!channel) {
       log.error(`Channel ${group.discord_channel} not found or not text-based`);
       return;
     }
     const textChannel = channel as TextChannel;
     const msg = await textChannel.send({ content, embeds: [embed] });
+    if (!isCurrent()) return; // superseded while sending — don't record this message against newer state
 
     liveStates.set(key, makeLiveState(streamerData, stream, msg.id, msg.channelId));
 
     await setStreamerLive(streamerData.id, msg.id, msg.channelId, stream.game_name);
+    if (!isCurrent()) return;
     await updateMultitwitch(group.id, liveStates);
   } catch (err) {
     log.error(`Failed to post announcement for ${stream.user_login}:`, err);
@@ -64,10 +72,14 @@ export async function postAnnouncement(
  * @param content - Rendered message content.
  * @param embed - Rendered stream embed.
  * @param state - Live state to update with the new message's id/channel.
- * @returns Resolves once the message is sent and `state` is updated.
+ * @param isCurrent - See {@link editAnnouncement}; checked after sending so a superseded caller
+ *   doesn't record a sent message's id against state a newer operation now owns.
+ * @returns Resolves once the message is sent and `state` is updated (or updating is skipped
+ *   because the caller has since been superseded).
  */
-async function repost(textChannel: TextChannel, content: string, embed: EmbedBuilder, state: LiveState): Promise<void> {
+async function repost(textChannel: TextChannel, content: string, embed: EmbedBuilder, state: LiveState, isCurrent: () => boolean): Promise<void> {
   const msg = await textChannel.send({ content, embeds: [embed] });
+  if (!isCurrent()) return;
   state.messageId = msg.id;
   state.channelId = msg.channelId;
 }
@@ -84,6 +96,9 @@ async function repost(textChannel: TextChannel, content: string, embed: EmbedBui
  * @param state - Current live state for the streamer being updated.
  * @param stream - The updated Twitch stream data.
  * @param templateKey - Which group template to render: 'live_message' or 'new_game_message'.
+ * @param isCurrent - See `withLoginLock` in twitchMonitorPoll.ts; checked after each `await` so a
+ *   caller superseded by a newer same-login operation stops instead of editing/reposting or
+ *   writing to the DB with stale context.
  * @returns Resolves once the announcement is edited or reposted and state is updated.
  */
 export async function editAnnouncement(
@@ -91,6 +106,7 @@ export async function editAnnouncement(
   state: LiveState,
   stream: TwitchStream,
   templateKey: 'live_message' | 'new_game_message',
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
   state.currentGame = stream.game_name;
   state.title = stream.title;
@@ -110,13 +126,15 @@ export async function editAnnouncement(
 
   try {
     const channel = await getTextChannel(discordClient, state.channelId);
+    if (!isCurrent()) return;
     if (!channel) return;
     const textChannel = channel as TextChannel;
 
     if (group.delete_old_posts && templateKey === 'new_game_message') {
       const staleMessageId = state.messageId;
       const staleChannelId = state.channelId;
-      await repost(textChannel, content, embed, state);
+      await repost(textChannel, content, embed, state, isCurrent);
+      if (!isCurrent()) return;
       try {
         await tryDeleteDiscordMessage(staleChannelId, staleMessageId);
       } catch (err) {
@@ -124,12 +142,15 @@ export async function editAnnouncement(
       }
     } else {
       const edited = await tryEditDiscordMessage(discordClient, state.channelId, state.messageId, { content, embeds: [embed] });
+      if (!isCurrent()) return;
       if (!edited) {
-        await repost(textChannel, content, embed, state);
+        await repost(textChannel, content, embed, state, isCurrent);
+        if (!isCurrent()) return;
       }
     }
 
     await setStreamerLive(state.streamerId, state.messageId!, state.channelId!, stream.game_name);
+    if (!isCurrent()) return;
     await updateMultitwitch(group.id, liveStates);
   } catch (err) {
     log.error(`Failed to edit announcement for ${state.login}:`, err);

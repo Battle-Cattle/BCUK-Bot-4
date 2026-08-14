@@ -72,7 +72,7 @@ describe('handlePollStreamer', () => {
     await handlePollStreamer(liveStates, loginToUserId, makeStreamer(), liveByUserId);
 
     expect(setTwitchChannelLive).toHaveBeenCalledWith('teststreamer', true);
-    expect(postAnnouncement).toHaveBeenCalledWith(liveStates, expect.objectContaining({ id: 5 }), expect.objectContaining({ user_id: 'uid-5' }));
+    expect(postAnnouncement).toHaveBeenCalledWith(liveStates, expect.objectContaining({ id: 5 }), expect.objectContaining({ user_id: 'uid-5' }), expect.any(Function));
   });
 
   it('cancels offline timers when a streamer with a running grace period comes back live', async () => {
@@ -92,7 +92,7 @@ describe('handlePollStreamer', () => {
 
     await handlePollStreamer(liveStates, loginToUserId, makeStreamer(), liveByUserId);
 
-    expect(editAnnouncement).toHaveBeenCalledWith(liveStates, expect.anything(), expect.objectContaining({ game_name: 'Valorant' }), 'new_game_message');
+    expect(editAnnouncement).toHaveBeenCalledWith(liveStates, expect.anything(), expect.objectContaining({ game_name: 'Valorant' }), 'new_game_message', expect.any(Function));
   });
 
   it('edits with live_message when only the title changes', async () => {
@@ -102,7 +102,7 @@ describe('handlePollStreamer', () => {
 
     await handlePollStreamer(liveStates, loginToUserId, makeStreamer(), liveByUserId);
 
-    expect(editAnnouncement).toHaveBeenCalledWith(liveStates, expect.anything(), expect.objectContaining({ title: 'New title' }), 'live_message');
+    expect(editAnnouncement).toHaveBeenCalledWith(liveStates, expect.anything(), expect.objectContaining({ title: 'New title' }), 'live_message', expect.any(Function));
   });
 
   it('syncs currentStream without posting or editing when nothing changed', async () => {
