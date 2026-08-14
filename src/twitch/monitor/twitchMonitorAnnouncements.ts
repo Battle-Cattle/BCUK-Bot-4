@@ -112,53 +112,80 @@ async function repost(textChannel: TextChannel, content: string, embed: EmbedBui
   state.channelId = msg.channelId;
 }
 
+/** Shared context for {@link publishByDeleteAndRepost}/{@link publishByEditWithFallback}. */
+interface PublishContext {
+  textChannel: TextChannel;
+  content: string;
+  embed: EmbedBuilder;
+  state: LiveState;
+  isCurrent: () => boolean;
+}
+
+/**
+ * Publishes via delete-old-then-post-new, for `editAnnouncement`'s `delete_old_posts` branch.
+ * @param ctx - See {@link PublishContext}.
+ * @returns `true` if the repost succeeded and the caller wasn't superseded partway through
+ *   (the old message's deletion is best-effort and doesn't affect this — see
+ *   {@link editAnnouncement}'s doc). `false` if superseded before the repost could be recorded.
+ */
+async function publishByDeleteAndRepost(ctx: PublishContext): Promise<boolean> {
+  const { textChannel, content, embed, state, isCurrent } = ctx;
+  const staleMessageId = state.messageId!;
+  const staleChannelId = state.channelId!;
+  await repost(textChannel, content, embed, state, isCurrent);
+  if (!isCurrent()) return false;
+  try {
+    await tryDeleteDiscordMessage(staleChannelId, staleMessageId);
+  } catch (err) {
+    log.error(`Failed to delete old announcement for ${state.login}, continuing:`, err);
+  }
+  return true;
+}
+
+/**
+ * Publishes via in-place edit, falling back to a fresh repost if the original message is gone,
+ * for `editAnnouncement`'s non-`delete_old_posts` branch.
+ * @param ctx - See {@link PublishContext}, plus the Discord client the edit attempt needs.
+ * @returns `true` if the edit (or fallback repost) succeeded and the caller wasn't superseded
+ *   partway through. `false` otherwise.
+ */
+async function publishByEditWithFallback(ctx: PublishContext & { discordClient: NonNullable<ReturnType<typeof getDiscordClient>> }): Promise<boolean> {
+  const { discordClient, textChannel, content, embed, state, isCurrent } = ctx;
+  const edited = await tryEditDiscordMessage(discordClient, state.channelId!, state.messageId!, { content, embeds: [embed] });
+  if (!isCurrent()) return false;
+  if (edited) return true;
+  await repost(textChannel, content, embed, state, isCurrent);
+  return isCurrent();
+}
+
 /**
  * Resolves `state`'s Discord channel and applies the edit/repost, per `editAnnouncement`'s
  * delete-and-repost vs. edit-in-place-with-fallback-repost rules. Split out from
  * `editAnnouncement` to keep each function's branching (and return-point count) manageable.
- * @param discordClient - The ready Discord client.
- * @param state - Current live state for the streamer being updated (mutated in place on success).
- * @param content - Rendered message content.
- * @param embed - Rendered stream embed.
- * @param templateKey - Which group template was rendered: 'live_message' or 'new_game_message'.
- * @param isCurrent - See {@link editAnnouncement}.
+ * @param params - Bundles the Discord client, live state, rendered content/embed, which template
+ *   was rendered, and the `isCurrent` staleness check (see {@link editAnnouncement}).
  * @returns `true` if the caller should continue on to persisting the new state — the channel was
  *   found and the caller wasn't superseded at any checkpoint. `false` otherwise (channel missing,
  *   or superseded partway through — see {@link editAnnouncement}'s doc for what "superseded" means
  *   for in-flight Discord calls that already can't be undone).
  */
-async function publishEditedAnnouncement(
-  discordClient: NonNullable<ReturnType<typeof getDiscordClient>>,
-  state: LiveState,
-  content: string,
-  embed: EmbedBuilder,
-  templateKey: 'live_message' | 'new_game_message',
-  isCurrent: () => boolean,
-): Promise<boolean> {
+async function publishEditedAnnouncement(params: {
+  discordClient: NonNullable<ReturnType<typeof getDiscordClient>>;
+  state: LiveState;
+  content: string;
+  embed: EmbedBuilder;
+  templateKey: 'live_message' | 'new_game_message';
+  isCurrent: () => boolean;
+}): Promise<boolean> {
+  const { discordClient, state, content, embed, templateKey, isCurrent } = params;
   const channel = await getTextChannel(discordClient, state.channelId!);
   if (!isCurrent() || !channel) return false;
-  const textChannel = channel as TextChannel;
+  const ctx: PublishContext = { textChannel: channel as TextChannel, content, embed, state, isCurrent };
 
   if (state.group.delete_old_posts && templateKey === 'new_game_message') {
-    const staleMessageId = state.messageId!;
-    const staleChannelId = state.channelId!;
-    await repost(textChannel, content, embed, state, isCurrent);
-    if (!isCurrent()) return false;
-    try {
-      await tryDeleteDiscordMessage(staleChannelId, staleMessageId);
-    } catch (err) {
-      log.error(`Failed to delete old announcement for ${state.login}, continuing:`, err);
-    }
-    return true;
+    return publishByDeleteAndRepost(ctx);
   }
-
-  const edited = await tryEditDiscordMessage(discordClient, state.channelId!, state.messageId!, { content, embeds: [embed] });
-  if (!isCurrent()) return false;
-  if (!edited) {
-    await repost(textChannel, content, embed, state, isCurrent);
-    if (!isCurrent()) return false;
-  }
-  return true;
+  return publishByEditWithFallback({ ...ctx, discordClient });
 }
 
 /**
@@ -202,7 +229,7 @@ export async function editAnnouncement(
   const embed = buildEmbed(stream);
 
   try {
-    const published = await publishEditedAnnouncement(discordClient, state, content, embed, templateKey, isCurrent);
+    const published = await publishEditedAnnouncement({ discordClient, state, content, embed, templateKey, isCurrent });
     if (!published) return;
 
     await persistStreamerLive(state.streamerId, state.messageId!, state.channelId!, stream.game_name, isCurrent);
