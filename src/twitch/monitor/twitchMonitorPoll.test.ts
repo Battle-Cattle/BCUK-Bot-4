@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
@@ -42,6 +42,11 @@ function makeLiveState(overrides: Partial<LiveState> = {}): LiveState {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ─── handlePollStreamer ───────────────────────────────────────────────────────
@@ -210,5 +215,16 @@ describe('withLoginLock', () => {
   it('resolves with the wrapped function\'s return value', async () => {
     const result = await withLoginLock('alice', async () => 42);
     expect(result).toBe(42);
+  });
+
+  it('times out a hung fn and still releases the queue for a later operation on the same login', async () => {
+    const hung = withLoginLock('alice', () => new Promise<void>(() => {}));
+    const assertion = expect(hung).rejects.toThrow('Login lock (alice) timed out after 20000ms');
+    await vi.advanceTimersByTimeAsync(20_000); // LOGIN_LOCK_TIMEOUT_MS
+    await assertion;
+
+    const order: string[] = [];
+    await withLoginLock('alice', async () => { order.push('after-timeout'); });
+    expect(order).toEqual(['after-timeout']);
   });
 });

@@ -268,6 +268,49 @@ describe('joinTwitchChannel global join throttle', () => {
   });
 });
 
+// ─── join/part timeout safeguard ───────────────────────────────────────────
+
+describe('join/part timeout safeguard', () => {
+  it('times out a hung client.join and still releases the join gate for a later join', async () => {
+    const client = makeMockClient();
+    setTmiClient(client as any);
+    setConnected(true);
+    client.join.mockImplementation((channel: string) => (channel === 'alice' ? new Promise<void>(() => {}) : Promise.resolve()));
+
+    const alicePromise = joinTwitchChannel('alice');
+    const aliceAssertion = expect(alicePromise).rejects.toThrow('Twitch join timed out after 10000ms');
+    await vi.advanceTimersByTimeAsync(10_000); // JOIN_PART_TIMEOUT_MS
+    await aliceAssertion;
+
+    // The global join gate must have been released by throttledJoin's `finally` despite the
+    // timeout — a later join for a different channel must still go through instead of queuing
+    // behind the hung one forever.
+    const carolPromise = joinTwitchChannel('carol');
+    const carolAssertion = expect(carolPromise).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(600); // JOIN_THROTTLE_MS
+    await carolAssertion;
+    expect(client.join).toHaveBeenCalledWith('carol');
+  });
+
+  it('times out a hung client.part and still releases the per-channel queue for a later operation on the same channel', async () => {
+    const client = makeMockClient(['alice']);
+    setTmiClient(client as any);
+    setConnected(true);
+    await joinTwitchChannel('alice'); // already-joined branch — syncs local state, no client.join call
+    client.part.mockImplementation(() => new Promise<void>(() => {}));
+
+    const partPromise = partTwitchChannel('alice');
+    const partAssertion = expect(partPromise).rejects.toThrow('Twitch part timed out after 10000ms');
+    await vi.advanceTimersByTimeAsync(10_000); // JOIN_PART_TIMEOUT_MS
+    await partAssertion;
+
+    // membershipMutationQueue's 'alice' entry must have released — a later same-key operation
+    // (still seeing the channel as joined, since the hung part never actually completed) must
+    // resolve instead of queuing behind the timed-out part forever.
+    await expect(joinTwitchChannel('alice')).resolves.toBeUndefined();
+  });
+});
+
 // ─── reconcileJoinedChannels ────────────────────────────────────────────────
 
 describe('reconcileJoinedChannels', () => {

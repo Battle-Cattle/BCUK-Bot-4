@@ -5,6 +5,7 @@ import { LiveState } from './twitchMonitorTypes';
 import { postAnnouncement, editAnnouncement } from './twitchMonitorAnnouncements';
 import { cancelOfflineTimersForLogin, handleStreamOffline } from './twitchMonitorOffline';
 import { setTwitchChannelLive } from '../../shared/statusStore';
+import { withTimeout } from '../twitchSendQueue';
 
 const log = createLogger('TwitchMonitor');
 
@@ -13,14 +14,26 @@ const log = createLogger('TwitchMonitor');
 const loginQueues = new Map<string, Promise<void>>();
 
 /**
+ * `fn` ultimately calls into discord.js `send`/`edit`/`fetch` (via postAnnouncement/
+ * editAnnouncement/handleStreamOffline), none of which have an explicit timeout configured in
+ * this codebase. Since those calls run behind {@link loginQueues}, a stalled one would otherwise
+ * wedge every later poll and immediate-check for that login forever. Bounding the whole queued
+ * operation guarantees the queue always frees up, even though the underlying call may still be
+ * stuck.
+ */
+const LOGIN_LOCK_TIMEOUT_MS = 20_000;
+
+/**
  * Runs `fn` after any previously queued operation for `login` has settled, so callers
  * from different entrypoints (60s poll loop vs. triggerImmediateLiveCheck) never race on
- * the same login's liveStates entry. A failure in `fn` rejects the caller's promise but
- * does not block subsequent operations queued for the same login.
+ * the same login's liveStates entry. `fn` is bounded by {@link LOGIN_LOCK_TIMEOUT_MS} so a
+ * stalled Discord call inside it can't wedge the queue for this login forever. A failure in
+ * `fn` (including a timeout) rejects the caller's promise but does not block subsequent
+ * operations queued for the same login.
  */
 export function withLoginLock<T>(login: string, fn: () => Promise<T>): Promise<T> {
   const previous = loginQueues.get(login) ?? Promise.resolve();
-  const run = previous.then(() => fn());
+  const run = previous.then(() => withTimeout(fn(), LOGIN_LOCK_TIMEOUT_MS, `Login lock (${login})`));
   loginQueues.set(login, run.then(() => undefined, () => undefined));
   return run;
 }
