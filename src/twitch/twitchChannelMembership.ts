@@ -35,9 +35,51 @@ let _onChannelJoined: ((channel: string) => void) | null = null;
 let joinGate: Promise<void> = Promise.resolve();
 
 /**
+ * Watches `call` — a `client.join()`/`client.part()` promise — for a late successful settlement
+ * that arrives only after its caller has already stopped waiting on it via
+ * {@link JOIN_PART_TIMEOUT_MS}. Detected directly from `call`'s own timing (settling at or past
+ * the timeout window means the caller's `withTimeout` race already gave up on it) rather than
+ * tracking a separate "newer operation" marker, so this catches a timed-out call landing late
+ * even when nothing else has since touched the channel — e.g. the timed-out `joinTwitchChannel`
+ * call's own rollback of `activeChannels` is itself enough to make a late join stale.
+ *
+ * A late rejection needs no compensation (the call never took effect). A late *success* did take
+ * effect on the real Twitch-side membership, so if it no longer matches what `activeChannels`
+ * wants, this reconciles it: reverts a stale late join by parting again, or restores a stale late
+ * part by rejoining. Runs detached from the caller's own await, which already observed the
+ * timeout race independently. The corrective action itself goes through
+ * {@link membershipMutationQueue} so it can't interleave with a concurrent legitimate operation
+ * on the same channel.
+ * @param channel - The channel the call was for.
+ * @param call - The raw (un-timed-out) `client.join()`/`client.part()` promise to watch.
+ * @param kind - Which operation `call` performed.
+ */
+function compensateIfStale(channel: string, call: Promise<unknown>, kind: 'join' | 'part'): void {
+  const startedAt = Date.now();
+  call.then(() => {
+    // Settled within the normal window — the caller's own withTimeout race never gave up on
+    // this call, so there's nothing to reconcile.
+    if (Date.now() - startedAt < JOIN_PART_TIMEOUT_MS) return;
+    void membershipMutationQueue.run(channel, async () => {
+      if (!_client || !_connected) return;
+      const desiredJoined = activeChannels.has(channel);
+      if (kind === 'join' && !desiredJoined && isChannelJoined(channel)) {
+        log.warn(`[Twitch] Stale join for ${channel} landed after it was no longer desired active — reverting`);
+        await withTimeout(_client.part(channel), JOIN_PART_TIMEOUT_MS, 'Twitch part');
+      } else if (kind === 'part' && desiredJoined && !isChannelJoined(channel) && _client) {
+        log.warn(`[Twitch] Stale part for ${channel} landed while it was still desired active — rejoining`);
+        await throttledJoin(_client, channel);
+      }
+    }).catch((err) => log.error(`Failed to reconcile stale ${kind} for ${channel}:`, err));
+  }, () => {});
+}
+
+/**
  * Calls `client.join(channel)`, globally throttled to JOIN_THROTTLE_MS between joins across all
  * channels. Bounded by {@link JOIN_PART_TIMEOUT_MS} so a stalled join can't wedge {@link joinGate}
- * — and every join queued behind it — forever.
+ * — and every join queued behind it — forever. A join that times out but later actually succeeds
+ * is reconciled against `activeChannels` by {@link compensateIfStale} instead of being trusted
+ * blindly.
  * @param client - The connected tmi.js client to join with.
  * @param channel - The already-normalized channel name to join.
  * @returns Resolves once the join call itself has completed (not once the throttle window has
@@ -48,8 +90,10 @@ async function throttledJoin(client: tmi.Client, channel: string): Promise<void>
   let releaseGate!: () => void;
   joinGate = new Promise((resolve) => { releaseGate = resolve; });
   await previousGate;
+  const joinCall = client.join(channel);
+  compensateIfStale(channel, joinCall, 'join');
   try {
-    await withTimeout(client.join(channel), JOIN_PART_TIMEOUT_MS, 'Twitch join');
+    await withTimeout(joinCall, JOIN_PART_TIMEOUT_MS, 'Twitch join');
   } finally {
     setTimeout(releaseGate, JOIN_THROTTLE_MS);
   }
@@ -85,7 +129,14 @@ function fireChannelJoinedHook(channel: string): void {
   try { _onChannelJoined?.(channel); } catch (err) { log.error('Channel joined hook error:', err); }
 }
 
-/** Parts `channel` if it's no longer active, bounded by {@link JOIN_PART_TIMEOUT_MS} so a stalled part can't wedge {@link membershipMutationQueue} for this channel forever. */
+/**
+ * Parts `channel` via the tmi.js client if it's currently joined but no longer in
+ * `activeChannels` (a "stale" membership left over from before a reconnect); otherwise just
+ * syncs the status store. Bounded by {@link JOIN_PART_TIMEOUT_MS} so a stalled part can't wedge
+ * {@link membershipMutationQueue} for this channel forever.
+ * @param channel - The already-normalized channel name to reconcile.
+ * @returns Resolves once the channel's status has been synced (and parted, if it was stale).
+ */
 async function partStaleChannel(channel: string): Promise<void> {
   if (activeChannels.has(channel)) {
     setTwitchChannel(channel, true);
@@ -96,7 +147,9 @@ async function partStaleChannel(channel: string): Promise<void> {
     setTwitchChannel(channel, false);
     return;
   }
-  await withTimeout(_client.part(channel), JOIN_PART_TIMEOUT_MS, 'Twitch part');
+  const partCall = _client.part(channel);
+  compensateIfStale(channel, partCall, 'part');
+  await withTimeout(partCall, JOIN_PART_TIMEOUT_MS, 'Twitch part');
   setTwitchChannel(channel, false);
   log.info(`Parted stale channel after reconnect: ${channel}`);
 }
@@ -219,7 +272,14 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
   });
 }
 
-/** Parts a Twitch channel and removes it from active tracking. Serialised via mutationQueue; the part call itself is bounded by {@link JOIN_PART_TIMEOUT_MS}. */
+/**
+ * Parts a Twitch channel and removes it from active tracking. Serialised per-channel via
+ * {@link membershipMutationQueue}; the underlying `client.part()` call is bounded by
+ * {@link JOIN_PART_TIMEOUT_MS} so a stalled part can't wedge that channel's queue forever.
+ * @param channel - The channel name to part (normalized internally; a no-op if invalid).
+ * @returns Resolves once local tracking is updated and, if applicable, the client has parted —
+ *   or the part attempt has timed out. Rejects if the underlying part call fails or times out.
+ */
 export async function partTwitchChannel(channel: string): Promise<void> {
   const normalized = normalizeTwitchChannelName(channel);
   if (!normalized) return;
@@ -241,7 +301,9 @@ export async function partTwitchChannel(channel: string): Promise<void> {
       activeChannelUserIds.delete(normalized);
       setTwitchChannel(normalized, false);
       if (isChannelJoined(normalized)) {
-        await withTimeout(_client.part(normalized), JOIN_PART_TIMEOUT_MS, 'Twitch part');
+        const partCall = _client.part(normalized);
+        compensateIfStale(normalized, partCall, 'part');
+        await withTimeout(partCall, JOIN_PART_TIMEOUT_MS, 'Twitch part');
       }
     } catch (err) {
       // Keep desired membership removed so later reconciliation can retry

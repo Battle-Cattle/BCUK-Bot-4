@@ -17,6 +17,10 @@ export function createMutationQueue<K = string>(): {
    * - `operation` must never call `run()` again for this same `key` and await the result — that
    *   inner call queues behind the outer one, which is itself waiting on the inner call: a
    *   circular wait that never resolves.
+   * @param key - Operations sharing a key are serialized; operations on different keys run
+   *   independently.
+   * @param operation - The async work to run once queued.
+   * @returns Resolves or rejects with `operation`'s own result.
    */
   run<T>(key: K, operation: () => Promise<T>): Promise<T>;
   /** Number of keys with at least one operation in flight. */

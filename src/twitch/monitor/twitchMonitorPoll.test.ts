@@ -119,6 +119,18 @@ describe('handlePollStreamer', () => {
     expect(liveState.currentStream).toBe(newStream);
   });
 
+  it('skips the direct state sync when isCurrent() reports superseded (a newer same-login operation has since taken over)', async () => {
+    const liveState = makeLiveState({ messageId: 'msg1' });
+    const liveStates = new Map<string, LiveState>([['5', liveState]]);
+    const loginToUserId = new Map([['teststreamer', 'uid-5']]);
+    const newStream = makeStream();
+    const liveByUserId = new Map([['uid-5', newStream]]);
+
+    await handlePollStreamer(liveStates, loginToUserId, makeStreamer(), liveByUserId, () => false);
+
+    expect(liveState.currentStream).not.toBe(newStream);
+  });
+
   it('starts the offline grace period when a previously-live streamer is now offline', async () => {
     const liveStates = new Map<string, LiveState>([['5', makeLiveState()]]);
     const loginToUserId = new Map([['teststreamer', 'uid-5']]);
@@ -226,5 +238,34 @@ describe('withLoginLock', () => {
     const order: string[] = [];
     await withLoginLock('alice', async () => { order.push('after-timeout'); });
     expect(order).toEqual(['after-timeout']);
+  });
+
+  it('reports isCurrent() as true for the duration of a normal (non-superseded) run', async () => {
+    const seen: boolean[] = [];
+    await withLoginLock('alice', async (isCurrent) => {
+      seen.push(isCurrent());
+      await Promise.resolve();
+      seen.push(isCurrent());
+    });
+    expect(seen).toEqual([true, true]);
+  });
+
+  it('flips isCurrent() to false for a timed-out fn once a later operation for the same login has started', async () => {
+    let isCurrentAfterResume!: () => boolean;
+    let resumeStalled!: () => void;
+    const stalled = withLoginLock('alice', (isCurrent) => {
+      isCurrentAfterResume = isCurrent;
+      return new Promise<void>((resolve) => { resumeStalled = resolve; });
+    });
+    const stalledAssertion = expect(stalled).rejects.toThrow('Login lock (alice) timed out after 20000ms');
+    await vi.advanceTimersByTimeAsync(20_000); // LOGIN_LOCK_TIMEOUT_MS — frees the queue, stalled fn keeps "running"
+    await stalledAssertion;
+
+    // A later operation for the same login takes over the queue.
+    await withLoginLock('alice', async () => {});
+
+    // The original (still-running-in-the-background) fn must now see itself as superseded.
+    expect(isCurrentAfterResume()).toBe(false);
+    resumeStalled(); // let the original fn actually settle so it doesn't leak into later tests
   });
 });
