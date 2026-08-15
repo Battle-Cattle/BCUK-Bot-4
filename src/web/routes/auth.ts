@@ -24,6 +24,41 @@ const router = Router();
 /** Error codes `GET /auth/login` accepts via `?error=`, both originating from `POST /guild/select`. */
 const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds']);
 
+/** HTTP status codes treated as transient failures on Discord's API, worth a retry. */
+const TRANSIENT_STATUS_CODES = new Set([502, 503, 504]);
+
+/**
+ * Calls `fetch`, retrying up to `maxRetries` times (with a short fixed delay
+ * between attempts) when the response status is one of `TRANSIENT_STATUS_CODES`.
+ * Discord's OAuth2 token endpoint intermittently returns 503s under load; a
+ * transient failure there shouldn't fail a login outright. Non-transient error
+ * statuses (and thrown errors) are returned/thrown immediately without retrying.
+ * @param input - `fetch` URL/request.
+ * @param init - `fetch` options.
+ * @param maxRetries - Number of retry attempts after the initial try (default 2).
+ * @param retryDelayMs - Delay between attempts, in milliseconds (default 500).
+ * @returns The `fetch` `Response`, which may still be non-ok if retries were exhausted.
+ */
+async function fetchWithRetry(
+  input: string,
+  init: RequestInit,
+  maxRetries = 2,
+  retryDelayMs = 500,
+): Promise<Response> {
+  let lastResponse: Response;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    lastResponse = await fetch(input, init);
+    if (lastResponse.ok || !TRANSIENT_STATUS_CODES.has(lastResponse.status)) {
+      return lastResponse;
+    }
+    if (attempt < maxRetries) {
+      log.warn(`Transient ${lastResponse.status} from ${input}, retrying (attempt ${attempt + 1}/${maxRetries})...`);
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
+  return lastResponse!;
+}
+
 // ─── Redirect to Discord OAuth2 ─────────────────────────────────────────────
 
 /**
@@ -83,7 +118,7 @@ router.get('/discord/callback', async (req, res) => {
 
   try {
     // 1. Exchange code for access token
-    const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
+    const tokenRes = await fetchWithRetry('https://discord.com/api/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -99,7 +134,7 @@ router.get('/discord/callback', async (req, res) => {
     const { access_token } = (await tokenRes.json()) as { access_token: string };
 
     // 2. Fetch Discord user profile
-    const profileRes = await fetch('https://discord.com/api/users/@me', {
+    const profileRes = await fetchWithRetry('https://discord.com/api/users/@me', {
       headers: { Authorization: `Bearer ${access_token}` },
       signal: AbortSignal.timeout(10_000),
     });
