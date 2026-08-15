@@ -15,7 +15,7 @@ import {
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { renderError, filterQueryParam, isLoopbackRedirectUri, renderView } from './shared';
+import { renderError, filterQueryParam, isLoopbackRedirectUri, renderView, fetchWithRetry } from './shared';
 import { userMutationQueue } from './adminUserMutationQueue';
 
 const log = createLogger('Web');
@@ -23,41 +23,6 @@ const router = Router();
 
 /** Error codes `GET /auth/login` accepts via `?error=`, both originating from `POST /guild/select`. */
 const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds']);
-
-/** HTTP status codes treated as transient failures on Discord's API, worth a retry. */
-const TRANSIENT_STATUS_CODES = new Set([502, 503, 504]);
-
-/**
- * Calls `fetch`, retrying up to `maxRetries` times (with a short fixed delay
- * between attempts) when the response status is one of `TRANSIENT_STATUS_CODES`.
- * Discord's OAuth2 token endpoint intermittently returns 503s under load; a
- * transient failure there shouldn't fail a login outright. Non-transient error
- * statuses (and thrown errors) are returned/thrown immediately without retrying.
- * @param input - `fetch` URL/request.
- * @param init - `fetch` options.
- * @param maxRetries - Number of retry attempts after the initial try (default 2).
- * @param retryDelayMs - Delay between attempts, in milliseconds (default 500).
- * @returns The `fetch` `Response`, which may still be non-ok if retries were exhausted.
- */
-async function fetchWithRetry(
-  input: string,
-  init: RequestInit,
-  maxRetries = 2,
-  retryDelayMs = 500,
-): Promise<Response> {
-  let lastResponse: Response;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    lastResponse = await fetch(input, init);
-    if (lastResponse.ok || !TRANSIENT_STATUS_CODES.has(lastResponse.status)) {
-      return lastResponse;
-    }
-    if (attempt < maxRetries) {
-      log.warn(`Transient ${lastResponse.status} from ${input}, retrying (attempt ${attempt + 1}/${maxRetries})...`);
-      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-    }
-  }
-  return lastResponse!;
-}
 
 // ─── Redirect to Discord OAuth2 ─────────────────────────────────────────────
 
@@ -129,7 +94,7 @@ router.get('/discord/callback', async (req, res) => {
         redirect_uri: DISCORD_CALLBACK_URL,
       }),
       signal: AbortSignal.timeout(10_000),
-    });
+    }, log);
     if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
     const { access_token } = (await tokenRes.json()) as { access_token: string };
 
@@ -137,7 +102,7 @@ router.get('/discord/callback', async (req, res) => {
     const profileRes = await fetchWithRetry('https://discord.com/api/users/@me', {
       headers: { Authorization: `Bearer ${access_token}` },
       signal: AbortSignal.timeout(10_000),
-    });
+    }, log);
     if (!profileRes.ok) throw new Error(`Profile fetch failed: ${profileRes.status}`);
     const profile = (await profileRes.json()) as {
       id: string;
