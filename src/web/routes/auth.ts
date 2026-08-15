@@ -15,7 +15,8 @@ import {
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { renderError, filterQueryParam, isLoopbackRedirectUri, renderView, fetchWithRetry } from './shared';
+import { renderError, filterQueryParam, isLoopbackRedirectUri, renderView } from './shared';
+import { fetchWithRetry } from '../../shared/fetchWithRetry';
 import { userMutationQueue } from './adminUserMutationQueue';
 
 const log = createLogger('Web');
