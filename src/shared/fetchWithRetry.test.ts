@@ -8,10 +8,14 @@ function mockLog() {
 
 function mockResponses(responses: { ok: boolean; status?: number }[]) {
   let callIndex = 0;
-  return vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+  const cancelFns: ReturnType<typeof vi.fn>[] = [];
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
     const r = responses[callIndex++];
-    return Promise.resolve({ ok: r.ok, status: r.status ?? 200 } as Response);
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    cancelFns.push(cancel);
+    return Promise.resolve({ ok: r.ok, status: r.status ?? 200, body: { cancel } } as unknown as Response);
   });
+  return { fetchSpy, cancelFns };
 }
 
 describe('fetchWithRetry', () => {
@@ -20,7 +24,7 @@ describe('fetchWithRetry', () => {
   });
 
   it('returns the response immediately when it is ok, without retrying', async () => {
-    const fetchSpy = mockResponses([{ ok: true, status: 200 }]);
+    const { fetchSpy, cancelFns } = mockResponses([{ ok: true, status: 200 }]);
     const { log, warn } = mockLog();
 
     const res = await fetchWithRetry('https://example.com', {}, log);
@@ -28,10 +32,11 @@ describe('fetchWithRetry', () => {
     expect(res.ok).toBe(true);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(warn).not.toHaveBeenCalled();
+    expect(cancelFns[0]).not.toHaveBeenCalled();
   });
 
   it('does not retry a non-transient error status', async () => {
-    const fetchSpy = mockResponses([{ ok: false, status: 400 }]);
+    const { fetchSpy, cancelFns } = mockResponses([{ ok: false, status: 400 }]);
     const { log, warn } = mockLog();
 
     const res = await fetchWithRetry('https://example.com', {}, log);
@@ -40,10 +45,11 @@ describe('fetchWithRetry', () => {
     expect(res.status).toBe(400);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(warn).not.toHaveBeenCalled();
+    expect(cancelFns[0]).not.toHaveBeenCalled();
   });
 
   it('retries a transient 503 and returns the successful response', async () => {
-    const fetchSpy = mockResponses([{ ok: false, status: 503 }, { ok: true, status: 200 }]);
+    const { fetchSpy } = mockResponses([{ ok: false, status: 503 }, { ok: true, status: 200 }]);
     const { log, warn } = mockLog();
 
     const res = await fetchWithRetry('https://example.com', {}, log, 2, 1);
@@ -54,7 +60,7 @@ describe('fetchWithRetry', () => {
   });
 
   it('gives up and returns the last response after exhausting retries', async () => {
-    const fetchSpy = mockResponses([{ ok: false, status: 503 }, { ok: false, status: 503 }, { ok: false, status: 503 }]);
+    const { fetchSpy } = mockResponses([{ ok: false, status: 503 }, { ok: false, status: 503 }, { ok: false, status: 503 }]);
     const { log, warn } = mockLog();
 
     const res = await fetchWithRetry('https://example.com', {}, log, 2, 1);
@@ -63,5 +69,17 @@ describe('fetchWithRetry', () => {
     expect(res.status).toBe(503);
     expect(fetchSpy).toHaveBeenCalledTimes(3);
     expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels the body of every discarded retry response, but not the final returned response', async () => {
+    const { cancelFns } = mockResponses([{ ok: false, status: 503 }, { ok: false, status: 503 }, { ok: true, status: 200 }]);
+    const { log } = mockLog();
+
+    const res = await fetchWithRetry('https://example.com', {}, log, 2, 1);
+
+    expect(res.ok).toBe(true);
+    expect(cancelFns[0]).toHaveBeenCalledTimes(1);
+    expect(cancelFns[1]).toHaveBeenCalledTimes(1);
+    expect(cancelFns[2]).not.toHaveBeenCalled();
   });
 });

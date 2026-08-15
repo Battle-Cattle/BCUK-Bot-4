@@ -54,7 +54,10 @@ router.get('/discord', (req, res) => {
 /**
  * GET /auth/discord/callback — completes the Discord OAuth2 flow. Validates the
  * `state` param against the session, exchanges the `code` for an access token,
- * fetches the Discord profile, and checks the user whitelist. Then either:
+ * fetches the Discord profile, and checks the user whitelist. The token-exchange
+ * and profile-fetch requests go through `fetchWithRetry`, which retries transient
+ * 502/503/504 responses from Discord's API instead of failing the login outright.
+ * Then either:
  * creates/refreshes the dashboard session as usual (resolving accessible guilds,
  * syncing the display name, regenerating the session), or — if this login was
  * initiated via the companion app's loopback flow (`req.session.companionOAuth`

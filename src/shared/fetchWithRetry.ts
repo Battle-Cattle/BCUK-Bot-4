@@ -32,6 +32,10 @@ export async function fetchWithRetry(
     }
     if (attempt < maxRetries) {
       log.warn(`Transient ${lastResponse.status} from ${input}, retrying (attempt ${attempt + 1}/${maxRetries})...`);
+      // Undici won't return the connection to the pool until the body is drained or
+      // cancelled — leaving it unconsumed across retries can exhaust the connection pool.
+      await lastResponse.body?.cancel();
+      // Delay before the next attempt.
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }
   }
