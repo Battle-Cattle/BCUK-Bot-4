@@ -192,6 +192,30 @@ export function startDiscordBot(): void {
     log.error('Client error:', err);
   });
 
+  // discord.js's own WebSocketManager already retries every recoverable gateway
+  // disconnect on its own (reflected by 'shardReconnecting'), so these are purely
+  // visibility logging — without them, a reconnect cycle produces zero log output,
+  // making post-incident diagnosis impossible. 'shardError' is a connection-level
+  // error on the gateway socket itself (distinct from the generic 'error' handler
+  // above); the manager keeps retrying after it, so it's also log-only.
+  localClient.on('shardReconnecting', (shardId) => {
+    log.warn(`Shard ${shardId} lost its connection and is reconnecting...`);
+  });
+  localClient.on('shardError', (err, shardId) => {
+    log.error(`Shard ${shardId} gateway connection error:`, err);
+  });
+
+  // 'shardDisconnect' fires only for an unrecoverable close code — the one case
+  // where discord.js gives up and will *not* reconnect that shard on its own. With
+  // this bot running a single (unsharded) client, that means every guild silently
+  // stops receiving events. Force a fresh login so the process self-heals instead
+  // of sitting alive-but-dead until someone notices and restarts it manually.
+  localClient.on('shardDisconnect', (event, shardId) => {
+    log.error(`Shard ${shardId} disconnected permanently (code ${event.code}) — reconnecting client.`);
+    stopDiscordBot();
+    startDiscordBot();
+  });
+
   localClient.login(DISCORD_TOKEN).catch((err) => {
     log.error('Login failed:', err);
     bootingClient = null; // clear so the next startDiscordBot() call can retry

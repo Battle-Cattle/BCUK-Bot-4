@@ -389,6 +389,40 @@ describe('startDiscordBot — error event', () => {
   });
 });
 
+// ─── startDiscordBot — gateway watchdog ────────────────────────────────────────
+
+describe('startDiscordBot — gateway watchdog', () => {
+  /** Finds the handler registered for `event` via `mockInstance.on`. */
+  function findHandler(event: string): (...args: any[]) => unknown {
+    return mockInstance.on.mock.calls.find(([e]: string[]) => e === event)?.[1];
+  }
+
+  it('logs a warning when a shard is reconnecting, without throwing', () => {
+    mod.startDiscordBot();
+    const handler = findHandler('shardReconnecting');
+    expect(() => handler(0)).not.toThrow();
+  });
+
+  it('logs an error when a shard reports a gateway connection error, without throwing', () => {
+    mod.startDiscordBot();
+    const handler = findHandler('shardError');
+    expect(() => handler(new Error('gateway socket error'), 0)).not.toThrow();
+  });
+
+  it('forces a fresh login when a shard disconnects permanently', () => {
+    mod.startDiscordBot();
+    expect(mockInstance.login).toHaveBeenCalledOnce();
+
+    const handler = findHandler('shardDisconnect');
+    handler({ code: 4004 }, 0);
+
+    // stopDiscordBot() destroyed the dead client, and startDiscordBot() logged back in.
+    expect(mockInstance.destroy).toHaveBeenCalledOnce();
+    expect(mockInstance.login).toHaveBeenCalledTimes(2);
+    expect(mod.getDiscordClient()).toBeNull();
+  });
+});
+
 // ─── stopDiscordBot ───────────────────────────────────────────────────────────
 
 describe('stopDiscordBot', () => {
