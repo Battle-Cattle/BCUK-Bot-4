@@ -26,15 +26,25 @@ describe('runUserMutation', () => {
     await expect(runUserMutation('discord-1', () => Promise.reject(boom))).rejects.toBe(boom);
   });
 
-  it('rejects with a timeout error, freeing the key, when the operation stalls', async () => {
-    const result = runUserMutation('discord-1', () => new Promise(() => {}));
+  it('rejects the caller with a timeout error when the operation stalls, without abandoning it', async () => {
+    let settleStalled!: (value: string) => void;
+    const stalled = new Promise<string>((resolve) => { settleStalled = resolve; });
+    const result = runUserMutation('discord-1', () => stalled);
     const assertion = expect(result).rejects.toThrow('User mutation timed out after 15000ms');
     await vi.advanceTimersByTimeAsync(15_000);
     await assertion;
 
-    // The key is freed even though the stalled operation never itself settled, so the next
-    // mutation for the same discordId isn't wedged behind it.
-    const next = await runUserMutation('discord-1', () => Promise.resolve('next'));
-    expect(next).toBe('next');
+    // The queue key for this discordId is NOT freed at the timeout — a second mutation queued
+    // behind the still-running stalled one must wait for it to genuinely finish, so it can never
+    // run concurrently with (and race) the abandoned operation's eventual side effects.
+    const next = runUserMutation('discord-1', () => Promise.resolve('next'));
+    await vi.advanceTimersByTimeAsync(1_000);
+    const order: string[] = [];
+    void next.then(() => order.push('next'));
+    await Promise.resolve();
+    expect(order).toEqual([]); // still waiting on the stalled operation
+
+    settleStalled('stalled result');
+    expect(await next).toBe('next');
   });
 });
