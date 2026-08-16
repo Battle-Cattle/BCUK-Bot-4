@@ -108,6 +108,8 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 
 - All functions — including exported functions, internal helpers, and anonymous functions (e.g. inline Express route handlers) — **must** have a JSDoc comment describing what they do, their parameters, and return value — one line is enough for simple cases.
 - When you change a function's signature or behaviour, update its JSDoc to match — stale docs are worse than no docs.
+- **Test files (`*.test.ts`) are exempt.** Test-local helpers (mock builders like `mockLog`/`mockRes`, response/fixture factories, etc.) and `describe`/`it`/`vi.mock` callbacks don't need JSDoc — a descriptive `it('...')` name documents the behaviour instead. This applies only inside `*.test.ts` files; source files still follow the rule above.
+- **Concise inline callbacks** (e.g. `.map()` row mappers, a `Promise` executor, a `setTimeout` callback, a `catch` handler) don't need a separate JSDoc block. Add a short inline comment only when the behaviour isn't obvious from the code itself.
 
 ---
 
