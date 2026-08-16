@@ -147,7 +147,7 @@ describe('triggerImmediateLiveCheck', () => {
     await triggerImmediateLiveCheck('teststreamer'); // second check: title changed, game unchanged
 
     expect(editAnnouncementSpy).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(), expect.objectContaining({ title: 'New title' }), 'live_message',
+      expect.anything(), expect.anything(), expect.objectContaining({ title: 'New title' }), 'live_message', expect.any(Function),
     );
     expect(getLiveStates('guild-1')[0].title).toBe('New title');
   });
@@ -160,7 +160,7 @@ describe('triggerImmediateLiveCheck', () => {
     await triggerImmediateLiveCheck('teststreamer'); // second check: game changed
 
     expect(editAnnouncementSpy).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(), expect.objectContaining({ game_name: 'Valorant' }), 'new_game_message',
+      expect.anything(), expect.anything(), expect.objectContaining({ game_name: 'Valorant' }), 'new_game_message', expect.any(Function),
     );
   });
 

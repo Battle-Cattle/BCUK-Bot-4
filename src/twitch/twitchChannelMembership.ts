@@ -4,7 +4,9 @@ import { getTwitchEnabledChannels } from '../db';
 import { normalizeTwitchChannelName } from './twitchChannelName';
 import { getUsers } from './twitchApi';
 import { createMutationQueue } from '../shared/mutationQueue';
+import { withTimeout } from './twitchSendQueue';
 import { createLogger } from '../shared/logger';
+import { throttledJoin, compensateIfStale, resetJoinGate, partAsync, JOIN_PART_TIMEOUT_MS, MembershipDeps } from './twitchChannelNetworkOps';
 
 const log = createLogger('Twitch');
 
@@ -14,34 +16,23 @@ let _connected = false;
 const activeChannels = new Set<string>();
 const activeChannelUserIds = new Map<string, string>();
 const membershipMutationQueue = createMutationQueue();
-// Twitch rate-limits JOIN to 20 per 10 s (2/s). 600 ms ≈ 1.67/s, ~83% of the ceiling.
-const JOIN_THROTTLE_MS = 600;
 let _onChannelJoined: ((channel: string) => void) | null = null;
 
-// A chain of promises gating client.join() calls so they're spaced JOIN_THROTTLE_MS apart
-// globally — across both the reconnect-reconciliation path and ad-hoc single joins (e.g. from
-// the admin panel) — since those are only serialised per-channel by membershipMutationQueue and
-// could otherwise collectively exceed Twitch's IRC JOIN rate limit.
-let joinGate: Promise<void> = Promise.resolve();
-
 /**
- * Calls `client.join(channel)`, globally throttled to JOIN_THROTTLE_MS between joins across all
- * channels.
- * @param client - The connected Twurple chat client to join with.
- * @param channel - The already-normalized channel name to join.
- * @returns Resolves once the join call itself has completed (not once the throttle window has
- *   elapsed — the throttle only delays the *next* queued join).
+ * Bundles this module's live client/membership state for {@link compensateIfStale} — see
+ * `twitchChannelNetworkOps.ts`'s {@link MembershipDeps}. Built fresh at each join/part call site
+ * so `runExclusive` closes over the current `channel`, but its accessor functions still read
+ * `_client`/`_connected`/`activeChannels` live, not a snapshot, since reconciliation can run long
+ * after this bundle was built.
  */
-async function throttledJoin(client: ChatClient, channel: string): Promise<void> {
-  const previousGate = joinGate;
-  let releaseGate!: () => void;
-  joinGate = new Promise((resolve) => { releaseGate = resolve; });
-  await previousGate;
-  try {
-    await client.join(channel);
-  } finally {
-    setTimeout(releaseGate, JOIN_THROTTLE_MS);
-  }
+function membershipDeps(): MembershipDeps {
+  return {
+    getClient: () => _client,
+    isConnected: () => _connected,
+    isChannelJoined,
+    isDesiredJoined: (channel) => activeChannels.has(channel),
+    runExclusive: (channel, op) => membershipMutationQueue.run(channel, op),
+  };
 }
 
 /**
@@ -78,6 +69,15 @@ function fireChannelJoinedHook(channel: string): void {
   try { _onChannelJoined?.(channel); } catch (err) { log.error('Channel joined hook error:', err); }
 }
 
+/**
+ * Parts `channel` via the Twurple chat client if it's currently joined but no longer in
+ * `activeChannels` (a "stale" membership left over from before a reconnect); otherwise just
+ * syncs the status store. Bounded by {@link JOIN_PART_TIMEOUT_MS} so a stalled part can't wedge
+ * {@link membershipMutationQueue} for this channel forever.
+ * @param channel - The already-normalized channel name to reconcile.
+ * @returns Resolves once the channel's status has been synced (and parted, if it was stale).
+ *   Rejects if the part call fails or times out — the channel's status is not synced in that case.
+ */
 async function partStaleChannel(channel: string): Promise<void> {
   if (activeChannels.has(channel)) {
     setTwitchChannel(channel, true);
@@ -88,7 +88,9 @@ async function partStaleChannel(channel: string): Promise<void> {
     setTwitchChannel(channel, false);
     return;
   }
-  await _client.part(channel);
+  const partCall = partAsync(_client, channel);
+  compensateIfStale(membershipDeps(), channel, partCall, 'part');
+  await withTimeout(partCall, JOIN_PART_TIMEOUT_MS, 'Twitch part');
   setTwitchChannel(channel, false);
   log.info(`Parted stale channel after reconnect: ${channel}`);
 }
@@ -104,7 +106,7 @@ async function joinMissingChannel(channel: string): Promise<void> {
     cacheChannelUserId(channel);
     return;
   }
-  await throttledJoin(_client, channel);
+  await throttledJoin(_client, channel, (call) => compensateIfStale(membershipDeps(), channel, call, 'join'));
   setTwitchChannel(channel, true);
   cacheChannelUserId(channel);
   fireChannelJoinedHook(channel);
@@ -197,7 +199,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
     activeChannels.add(normalized);
     setTwitchChannel(normalized, false);
     try {
-      await throttledJoin(_client, normalized);
+      await throttledJoin(_client, normalized, (call) => compensateIfStale(membershipDeps(), normalized, call, 'join'));
       setTwitchChannel(normalized, true);
       cacheChannelUserId(normalized);
     } catch (err) {
@@ -211,7 +213,14 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
   });
 }
 
-/** Parts a Twitch channel and removes it from active tracking. Serialised via mutationQueue. */
+/**
+ * Parts a Twitch channel and removes it from active tracking. Serialised per-channel via
+ * {@link membershipMutationQueue}; the underlying `client.part()` call is bounded by
+ * {@link JOIN_PART_TIMEOUT_MS} so a stalled part can't wedge that channel's queue forever.
+ * @param channel - The channel name to part (normalized internally; a no-op if invalid).
+ * @returns Resolves once local tracking is updated and, if applicable, the client has parted —
+ *   or the part attempt has timed out. Rejects if the underlying part call fails or times out.
+ */
 export async function partTwitchChannel(channel: string): Promise<void> {
   const normalized = normalizeTwitchChannelName(channel);
   if (!normalized) return;
@@ -233,7 +242,9 @@ export async function partTwitchChannel(channel: string): Promise<void> {
       activeChannelUserIds.delete(normalized);
       setTwitchChannel(normalized, false);
       if (isChannelJoined(normalized)) {
-        await _client.part(normalized);
+        const partCall = partAsync(_client, normalized);
+        compensateIfStale(membershipDeps(), normalized, partCall, 'part');
+        await withTimeout(partCall, JOIN_PART_TIMEOUT_MS, 'Twitch part');
       }
     } catch (err) {
       // Keep desired membership removed so later reconciliation can retry
@@ -258,5 +269,5 @@ export function getActiveChannelUserIds(): ReadonlyMap<string, string> {
 export function clearMembershipState(): void {
   activeChannels.clear();
   activeChannelUserIds.clear();
-  joinGate = Promise.resolve();
+  resetJoinGate();
 }

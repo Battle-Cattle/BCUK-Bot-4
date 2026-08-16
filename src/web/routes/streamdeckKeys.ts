@@ -18,7 +18,7 @@ import { requireAdmin } from '../middleware';
 import { getSessionUser } from '../session';
 import { WEB_PORT } from '../../shared/config';
 import { logAndRedirectError, normalizeDiscordId, renderError, filterQueryParam, renderView } from './shared';
-import { userMutationQueue } from './adminUserMutationQueue';
+import { runUserMutation } from './adminUserMutationQueue';
 
 const log = createLogger('Web');
 const router = Router();
@@ -85,12 +85,12 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
  * Idempotent when this guild already has a pending/approved request on file —
  * it just re-renders the current status without touching the key, so an
  * accidental duplicate submission (double-click, browser retry, two requests
- * racing through `userMutationQueue`) never silently invalidates a plaintext
+ * racing through `runUserMutation`) never silently invalidates a plaintext
  * key the user was just shown. Genuine key rotation (the "lost my key" flow)
  * is a separate explicit action — see `POST /streamdeck-key/rotate` below.
  *
  * The check-then-act sequence below is serialized per `discordId` through
- * `userMutationQueue` — without it, two concurrent requests from a brand-new
+ * `runUserMutation` — without it, two concurrent requests from a brand-new
  * user could both see "no existing key" and race on the identity insert.
  *
  * @param req - Express request; reads `req.session.user` (discordId, accessLevel, currentGuildId).
@@ -103,7 +103,7 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
   const accessLevel = getSessionUser(req).accessLevel;
   const guildId = getSessionUser(req).currentGuildId!;
   try {
-    const { plain, keyRow } = await userMutationQueue.run(discordId, async () => {
+    const { plain, keyRow } = await runUserMutation(discordId, async () => {
       const existingGuildStatus = await getGuildStatusForKey(discordId, guildId);
       let resolvedPlain: string | null = null;
       if (existingGuildStatus) {
@@ -170,7 +170,7 @@ export function __resetRecentRotationsForTests(): void {
  * transient failure of that read never strands an already-rotated (and now
  * unrecoverable — only the hash is ever stored) plaintext key behind a
  * "failed" response. Rotation itself is serialized per `discordId` through
- * `userMutationQueue` for the same reason as `/streamdeck-key/request` — to
+ * `runUserMutation` for the same reason as `/streamdeck-key/request` — to
  * keep the has-a-key check and the rotation atomic with respect to
  * concurrent requests. A rotation within `ROTATE_DEDUPE_WINDOW_MS` of the
  * last one for this user reuses that plaintext instead of rotating again
@@ -188,7 +188,7 @@ router.post('/streamdeck-key/rotate', csrfProtection, async (req, res) => {
   const guildId = getSessionUser(req).currentGuildId!;
   try {
     const keyRow = await getGuildStatusForKey(discordId, guildId);
-    const plain = await userMutationQueue.run(discordId, async () => {
+    const plain = await runUserMutation(discordId, async () => {
       const recent = recentRotations.get(discordId);
       if (recent && Date.now() - recent.rotatedAt < ROTATE_DEDUPE_WINDOW_MS) return recent.plain;
 

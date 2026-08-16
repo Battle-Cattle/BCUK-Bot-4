@@ -27,10 +27,12 @@ vi.mock('../csrf', () => ({
   },
 }));
 
+const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
 vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
-  requireMod: (_req: any, _res: any, next: any) => next(),
-  requireManager: (_req: any, _res: any, next: any) => next(),
+  requireGuildContext: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireGuildContext'); next(); },
+  requireMod: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireMod'); next(); },
+  requireManager: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireManager'); next(); },
 }));
 
 vi.mock('../../logger', () => ({
@@ -81,6 +83,7 @@ const VALID_UPDATE = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  middlewareCallOrder.length = 0;
   vi.mocked(getAllCounters).mockResolvedValue([]);
   vi.mocked(addCounter).mockResolvedValue(undefined);
   vi.mocked(updateCounter).mockResolvedValue(undefined);
@@ -116,6 +119,11 @@ describe('GET /counters', () => {
 // --- POST /counters/add ---
 
 describe('POST /counters/add', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/counters/add').type('form').send(VALID_ADD);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('1. redirects ?error=missing_fields when trigger_command is absent', async () => {
     const res = await supertest(buildApp())
       .post('/counters/add')
@@ -216,6 +224,11 @@ describe('POST /counters/add', () => {
 // --- POST /counters/update ---
 
 describe('POST /counters/update', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/counters/update').type('form').send(VALID_UPDATE);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('11. redirects ?error=missing_fields when required fields are absent', async () => {
     const res = await supertest(buildApp())
       .post('/counters/update')
@@ -276,6 +289,11 @@ describe('POST /counters/update', () => {
 // --- POST /counters/remove ---
 
 describe('POST /counters/remove', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/counters/remove').type('form').send({ id: '5' });
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('17. redirects ?error=invalid_id when id is non-numeric', async () => {
     const res = await supertest(buildApp())
       .post('/counters/remove')
@@ -308,6 +326,11 @@ describe('POST /counters/remove', () => {
 // --- POST /counters/reset/:id ---
 
 describe('POST /counters/reset/:id', () => {
+  it('runs requireGuildContext before requireManager, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/counters/reset/7');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireManager']);
+  });
+
   it('20. redirects ?error=invalid_id when :id is non-numeric', async () => {
     const res = await supertest(buildApp())
       .post('/counters/reset/notanumber');

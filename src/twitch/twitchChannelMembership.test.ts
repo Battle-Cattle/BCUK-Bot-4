@@ -268,6 +268,99 @@ describe('joinTwitchChannel global join throttle', () => {
   });
 });
 
+// ─── join/part timeout safeguard ───────────────────────────────────────────
+
+describe('join/part timeout safeguard', () => {
+  it('times out a hung client.join and still releases the join gate for a later join', async () => {
+    const client = makeMockClient();
+    setChatClient(client as any);
+    setConnected(true);
+    client.join.mockImplementation((channel: string) => (channel === 'alice' ? new Promise<void>(() => {}) : Promise.resolve()));
+
+    const alicePromise = joinTwitchChannel('alice');
+    const aliceAssertion = expect(alicePromise).rejects.toThrow('Twitch join timed out after 10000ms');
+    await vi.advanceTimersByTimeAsync(10_000); // JOIN_PART_TIMEOUT_MS
+    await aliceAssertion;
+
+    // The global join gate must have been released by throttledJoin's `finally` despite the
+    // timeout — a later join for a different channel must still go through instead of queuing
+    // behind the hung one forever.
+    const carolPromise = joinTwitchChannel('carol');
+    const carolAssertion = expect(carolPromise).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(600); // JOIN_THROTTLE_MS
+    await carolAssertion;
+    expect(client.join).toHaveBeenCalledWith('carol');
+  });
+
+  // Unlike tmi.js's client.part() (a real network round trip that could hang), Twurple's part()
+  // is synchronous and fire-and-forget — see partAsync() in twitchChannelNetworkOps.ts. It can
+  // never hang, so the only failure mode left to guard is a synchronous throw from part() itself
+  // still propagating as a rejection instead of wedging the per-channel queue.
+  it('propagates a synchronous throw from client.part and still releases the per-channel queue for a later operation on the same channel', async () => {
+    const client = makeMockClient(['alice']);
+    setChatClient(client as any);
+    setConnected(true);
+    await joinTwitchChannel('alice'); // already-joined branch — syncs local state, no client.join call
+    client.part.mockImplementation(() => { throw new Error('part failed'); });
+
+    await expect(partTwitchChannel('alice')).rejects.toThrow('part failed');
+
+    // membershipMutationQueue's 'alice' entry must have released — a later same-key operation
+    // (still seeing the channel as joined, since the throwing part never actually took effect)
+    // must resolve instead of queuing behind the failed part forever.
+    await expect(joinTwitchChannel('alice')).resolves.toBeUndefined();
+  });
+});
+
+// ─── stale join/part compensation ──────────────────────────────────────────
+// A timeout only stops *waiting* on client.join()/client.part() — it doesn't cancel the real
+// network call. If that call later actually succeeds, after the caller already gave up and moved
+// on, its effect on real Twitch-side membership must be reconciled against activeChannels instead
+// of being trusted blindly (CodeRabbit review finding on PR #533).
+
+describe('stale join/part compensation', () => {
+  it('reverts a stale join that lands late, after the channel is no longer desired active', async () => {
+    const client = makeMockClient();
+    setChatClient(client as any);
+    setConnected(true);
+    let resolveJoin!: () => void;
+    client.join.mockImplementation(() => new Promise<void>((resolve) => { resolveJoin = resolve; }));
+
+    const joinPromise = joinTwitchChannel('alice');
+    const assertion = expect(joinPromise).rejects.toThrow('Twitch join timed out after 10000ms');
+    await vi.advanceTimersByTimeAsync(10_000); // JOIN_PART_TIMEOUT_MS — the caller gives up and rolls back
+    await assertion;
+    expect(getActiveChannels().has('alice')).toBe(false);
+
+    // The real join now actually lands, out of band, well after the caller stopped waiting.
+    client.currentChannels = ['alice'];
+    resolveJoin();
+    await flushMicrotasks();
+
+    // Actual membership no longer matches desired state (not active) — compensateIfStale must
+    // notice and part the channel again rather than leaving a stale, unwanted join in place.
+    expect(client.part).toHaveBeenCalledWith('alice');
+  });
+
+  // No equivalent "stale part lands late" scenario exists for Twurple: partAsync() wraps
+  // client.part() (synchronous, fire-and-forget) in an already-settled promise, so a part can
+  // never still be pending by the time a later operation on the same channel runs — unlike
+  // tmi.js's part(), which was a real network round trip that could land after its caller had
+  // already timed out and moved on. The join-side equivalent above still applies, since
+  // client.join() genuinely is an async round trip that can hang.
+
+  it('does not compensate a join that settles normally, within the timeout window', async () => {
+    const client = makeMockClient();
+    setChatClient(client as any);
+    setConnected(true);
+
+    await joinTwitchChannel('alice');
+    await flushMicrotasks();
+
+    expect(client.part).not.toHaveBeenCalled();
+  });
+});
+
 // ─── reconcileJoinedChannels ────────────────────────────────────────────────
 
 describe('reconcileJoinedChannels', () => {

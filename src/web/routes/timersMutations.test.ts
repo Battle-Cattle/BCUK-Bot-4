@@ -16,7 +16,11 @@ vi.mock('../../db', () => {
   };
 });
 vi.mock('../csrf', () => ({ csrfProtection: (_req: any, _res: any, next: any) => next() }));
-vi.mock('../middleware', () => ({ requireMod: (_req: any, _res: any, next: any) => next() }));
+const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
+vi.mock('../middleware', () => ({
+  requireGuildContext: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireGuildContext'); next(); },
+  requireMod: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireMod'); next(); },
+}));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import supertest from 'supertest';
@@ -37,6 +41,7 @@ const VALID_DISCORD_ID = '123456789012345678';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  middlewareCallOrder.length = 0;
   vi.mocked(addTimerCommand).mockResolvedValue(1);
   vi.mocked(updateTimerCommand).mockResolvedValue(undefined);
   vi.mocked(removeTimerCommand).mockResolvedValue(undefined);
@@ -50,6 +55,11 @@ const VALID_FIELDS = 'name=Discord+plug&message=Join+our+Discord&interval_second
 // ─── POST /timers/add ─────────────────────────────────────────────────────────
 
 describe('POST /timers/add', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/timers/add').send(VALID_FIELDS);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to /timers on success', async () => {
     const res = await supertest(buildApp()).post('/timers/add').send(VALID_FIELDS);
     expect(res.status).toBe(302);
@@ -139,6 +149,11 @@ describe('POST /timers/add', () => {
 // ─── POST /timers/update ──────────────────────────────────────────────────────
 
 describe('POST /timers/update', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/timers/update').send(`id=1&${VALID_FIELDS}`);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to /timers on success', async () => {
     const res = await supertest(buildApp()).post('/timers/update').send(`id=1&${VALID_FIELDS}`);
     expect(res.status).toBe(302);
@@ -179,6 +194,11 @@ describe('POST /timers/update', () => {
 // ─── POST /timers/remove ──────────────────────────────────────────────────────
 
 describe('POST /timers/remove', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/timers/remove').send('id=5');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to /timers on success', async () => {
     const res = await supertest(buildApp()).post('/timers/remove').send('id=5');
     expect(res.status).toBe(302);
@@ -200,6 +220,11 @@ describe('POST /timers/remove', () => {
 // ─── POST /timers/toggle ──────────────────────────────────────────────────────
 
 describe('POST /timers/toggle', () => {
+  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+    await supertest(buildApp()).post('/timers/toggle').send('id=1&enabled=true');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
   it('redirects to /timers on success', async () => {
     const res = await supertest(buildApp()).post('/timers/toggle').send('id=1&enabled=true');
     expect(res.status).toBe(302);

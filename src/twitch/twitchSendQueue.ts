@@ -1,4 +1,5 @@
 import { createMutationQueue } from '../shared/mutationQueue';
+import { withTimeout } from '../shared/withTimeout';
 
 /**
  * Twitch's chat message rate limits (dev.twitch.tv/docs/irc/#rate-limits), per bot account,
@@ -106,25 +107,8 @@ async function waitForRateLimit(privileged: boolean, channel: string): Promise<v
   if (!privileged) await waitForChannelFloor(channel);
 }
 
-/**
- * Races `promise` against a `ms`-millisecond timeout, rejecting with a timeout error if it
- * doesn't settle in time. `promise` itself is left running — its eventual settlement is still
- * observed (and silently ignored) so it can never surface as an unhandled rejection later.
- * @param promise - The promise to bound.
- * @param ms - Milliseconds to wait before rejecting with a timeout error.
- * @param label - Describes what timed out, used in the rejection message (e.g. `'Twitch send'`).
- * @returns `promise`'s resolved value if it settles first; otherwise rejects with `promise`'s
- *   own rejection reason, or a timeout error if neither happens within `ms`.
- */
-export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (err) => { clearTimeout(timer); reject(err); },
-    );
-  });
-}
+/** Re-exported so existing importers of `withTimeout` from this module keep working unchanged. */
+export { withTimeout };
 
 /**
  * Runs `send` for `channel`, waiting as needed for Twitch's global per-account rate limit to

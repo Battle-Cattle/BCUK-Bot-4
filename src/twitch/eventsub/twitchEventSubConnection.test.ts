@@ -369,6 +369,24 @@ describe('StreamerConnection lifecycle', () => {
     expect((conn as any).ws).not.toBeNull();
   });
 
+  it('reconnects on a socket error even if no close event ever follows', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstWs = (conn as any).ws as MockWebSocket;
+
+    firstWs.listeners.get('error')!();
+    expect((conn as any).ws).toBeNull();
+    expect((conn as any).reconnectAttempts).toBe(1);
+
+    vi.advanceTimersByTime(1_000);
+    const secondWs = (conn as any).ws as MockWebSocket;
+    expect(secondWs).not.toBe(firstWs);
+
+    // The stale socket's close event (if it ever arrives) must not affect the new connection.
+    firstWs.listeners.get('close')!({ code: 1006, reason: 'abnormal' } as any);
+    expect((conn as any).ws).toBe(secondWs);
+  });
+
   /** Verifies the keepalive-timeout path force-reconnects without waiting on the socket's own 'close' event; returns void. */
   it('reconnects on a keepalive timeout even if the socket never fires its own close event', () => {
     const conn = new StreamerConnection(makeStreamerData());

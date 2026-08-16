@@ -1,7 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Request, type Response } from 'express';
 import { getGuildScopedStatus } from '../guildScopedStatus';
-import { requireAuth, requireMod } from '../middleware';
+import { requireAuth, requireGuildContext, requireMod } from '../middleware';
 import { connect, disconnect, getCurrentChannelId } from '../../audio/audioPlayer';
 import { csrfProtection } from '../csrf';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
@@ -17,6 +17,11 @@ const router = Router();
  * guild is selected. Voice and status routes are guild-scoped — the bot can hold
  * a separate connection per guild — and the guild is taken from the session
  * (never the request body) so a Mod cannot drive or view another guild's state.
+ *
+ * The 400 branch is the normal path for `/status` (gated only by `requireAuth`),
+ * but is a defensive fallback rather than the normal path on the `/voice/*` routes
+ * below — those run `requireGuildContext` first, which already guarantees
+ * `currentGuildId` is set (or redirects away) before this function ever runs.
  *
  * @returns The current guild ID, or null when the response has already been sent.
  */
@@ -55,10 +60,12 @@ router.get('/status', requireAuth, async (req, res) => {
  * along with the configured default and currently-connected channel (Mod+).
  * @param req - Express request; guild is taken from the session.
  * @param res - Express response; JSON `{ ok: true, channels, defaultChannelId,
- *   currentChannelId }` on success, 400 if no guild is selected, or 500 on
- *   failure.
+ *   currentChannelId }` on success, or 500 on failure. `requireGuildContext`
+ *   guarantees `currentGuildId` is set before this handler runs (or redirects
+ *   away otherwise), so `getSessionGuildId`'s 400 branch is a defensive
+ *   fallback here, not the normal path.
  */
-router.get('/voice/channels', requireMod, async (req, res) => {
+router.get('/voice/channels', requireGuildContext, requireMod, async (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
   try {
@@ -83,11 +90,14 @@ router.get('/voice/channels', requireMod, async (req, res) => {
  * default channel if none is supplied (Mod+).
  * @param req - Express request; reads `channelId` from `req.body`; guild is
  *   taken from the session.
- * @param res - Express response; JSON `{ ok: true }` on success, 400 if no
- *   guild is selected, `channelId` is malformed, or no channel is resolvable,
- *   503 if the Discord client isn't ready, or 500 on failure.
+ * @param res - Express response; JSON `{ ok: true }` on success, 400 if
+ *   `channelId` is malformed or no channel is resolvable, 503 if the Discord
+ *   client isn't ready, or 500 on failure. `requireGuildContext` guarantees
+ *   `currentGuildId` is set before this handler runs (or redirects away
+ *   otherwise), so `getSessionGuildId`'s "no guild selected" 400 is a
+ *   defensive fallback here, not the normal path.
  */
-router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
+router.post('/voice/join', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
 
@@ -124,10 +134,12 @@ router.post('/voice/join', requireMod, csrfProtection, async (req, res) => {
  * POST /voice/leave — disconnects from the current guild's voice channel
  * (Mod+).
  * @param req - Express request; guild is taken from the session.
- * @param res - Express response; JSON `{ ok: true }` on success, or 400 if no
- *   guild is selected.
+ * @param res - Express response; JSON `{ ok: true }` on success.
+ *   `requireGuildContext` guarantees `currentGuildId` is set before this
+ *   handler runs (or redirects away otherwise), so `getSessionGuildId`'s 400
+ *   branch is a defensive fallback here, not the normal path.
  */
-router.post('/voice/leave', requireMod, csrfProtection, (req, res) => {
+router.post('/voice/leave', requireGuildContext, requireMod, csrfProtection, (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
   disconnect(guildId);

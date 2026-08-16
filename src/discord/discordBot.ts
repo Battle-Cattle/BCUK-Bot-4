@@ -9,7 +9,7 @@ import { forgetGuild as forgetGuildVoiceState } from '../audio/audioPlayer';
 import { forgetGuildRefreshState } from './guildRefreshState';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
 import { upsertGuild, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
-import { userMutationQueue } from '../web/routes/adminUserMutationQueue';
+import { runUserMutation } from '../web/routes/adminUserMutationQueue';
 import { createLogger } from '../shared/logger';
 import { getDiscordClient, setDiscordClient } from './discordClientStore';
 
@@ -78,7 +78,7 @@ export async function fetchMemberDisplayName(
  * @returns Resolves once the owner's access is granted, or once an owner-fetch
  *   failure has been logged. Rejects if granting DB access fails.
  *
- * The user-row read/upsert/access-grant sequence is serialised through {@link userMutationQueue}
+ * The user-row read/upsert/access-grant sequence is serialised through {@link runUserMutation}
  * on `owner.id`, matching every other write path that touches a user row by `discord_id` (e.g.
  * the webpanel's admin routes) — a user can belong to multiple guilds, so an unqueued sequence
  * here could otherwise race against a concurrent webpanel edit of the same user.
@@ -91,7 +91,7 @@ async function provisionGuildOwner(guild: Guild): Promise<void> {
     log.error(`Failed to fetch owner for guild ${guild.id}:`, err);
     return;
   }
-  await userMutationQueue.run(owner.id, async () => {
+  await runUserMutation(owner.id, async () => {
     const existingUser = await findUser(owner.id);
     if (!existingUser) {
       await upsertUser(owner.id, owner.user.username, AccessLevel.USER);
@@ -190,6 +190,30 @@ export function startDiscordBot(): void {
 
   localClient.on('error', (err) => {
     log.error('Client error:', err);
+  });
+
+  // discord.js's own WebSocketManager already retries every recoverable gateway
+  // disconnect on its own (reflected by 'shardReconnecting'), so these are purely
+  // visibility logging — without them, a reconnect cycle produces zero log output,
+  // making post-incident diagnosis impossible. 'shardError' is a connection-level
+  // error on the gateway socket itself (distinct from the generic 'error' handler
+  // above); the manager keeps retrying after it, so it's also log-only.
+  localClient.on('shardReconnecting', (shardId) => {
+    log.warn(`Shard ${shardId} lost its connection and is reconnecting...`);
+  });
+  localClient.on('shardError', (err, shardId) => {
+    log.error(`Shard ${shardId} gateway connection error:`, err);
+  });
+
+  // 'shardDisconnect' fires only for an unrecoverable close code — the one case
+  // where discord.js gives up and will *not* reconnect that shard on its own. With
+  // this bot running a single (unsharded) client, that means every guild silently
+  // stops receiving events. Force a fresh login so the process self-heals instead
+  // of sitting alive-but-dead until someone notices and restarts it manually.
+  localClient.on('shardDisconnect', (event, shardId) => {
+    log.error(`Shard ${shardId} disconnected permanently (code ${event.code}) — reconnecting client.`);
+    stopDiscordBot();
+    startDiscordBot();
   });
 
   localClient.login(DISCORD_TOKEN).catch((err) => {

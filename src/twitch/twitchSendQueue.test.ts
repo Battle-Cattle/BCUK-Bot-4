@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import { throttledTwitchSend, withTimeout, __resetTwitchSendQueueForTests } from './twitchSendQueue';
+import { throttledTwitchSend, __resetTwitchSendQueueForTests } from './twitchSendQueue';
 
 const WINDOW_MS = 30_000;
 const PRIVILEGED_LIMIT = 100;
@@ -74,7 +74,7 @@ describe('throttledTwitchSend', () => {
   });
 
   it('gives up re-checking a privileged status that never stabilizes, instead of spinning forever', async () => {
-    // A status that flips on every single check (e.g. tmi.js userstate churning mid-session)
+    // A status that flips on every single check (e.g. USERSTATE-derived privilege churning mid-session)
     // would previously spin the recheck loop indefinitely, since that loop runs before send()'s
     // own timeout ever applies — wedging the shared queue for every later send, forever, with no
     // error. It must give up after a bounded number of attempts and still call send().
@@ -230,25 +230,5 @@ describe('throttledTwitchSend', () => {
     const call = throttledTwitchSend('streamer', () => false, send);
     await vi.advanceTimersByTimeAsync(5_000);
     await expect(call).resolves.toBeUndefined();
-  });
-});
-
-describe('withTimeout', () => {
-  it('resolves with the wrapped promise\'s value when it settles before the timeout', async () => {
-    const result = withTimeout(Promise.resolve('done'), 1_000, 'test op');
-    await expect(result).resolves.toBe('done');
-  });
-
-  it('rejects with the wrapped promise\'s own rejection reason when it settles before the timeout', async () => {
-    const reason = new Error('boom');
-    const result = withTimeout(Promise.reject(reason), 1_000, 'test op');
-    await expect(result).rejects.toBe(reason);
-  });
-
-  it('rejects with a labeled timeout error when the wrapped promise never settles', async () => {
-    const result = withTimeout(new Promise(() => {}), 1_000, 'test op');
-    const assertion = expect(result).rejects.toThrow('test op timed out after 1000ms');
-    await vi.advanceTimersByTimeAsync(1_000);
-    await assertion;
   });
 });

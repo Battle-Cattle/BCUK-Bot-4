@@ -40,6 +40,13 @@ describe('getPool', () => {
     );
   });
 
+  it('enables TCP keepalive so a silently dead connection is detected and evicted', () => {
+    getPool();
+    expect(createPool).toHaveBeenCalledWith(
+      expect.objectContaining({ enableKeepAlive: true, keepAliveInitialDelay: 10_000 }),
+    );
+  });
+
   it('returns the same pool instance on repeated calls (singleton)', () => {
     const first = getPool();
     const second = getPool();

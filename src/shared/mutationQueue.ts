@@ -6,6 +6,22 @@
  * later operations on the same key from running.
  */
 export function createMutationQueue<K = string>(): {
+  /**
+   * Runs `operation` once any previously queued operation for `key` has settled. Two hazards
+   * to avoid when writing `operation`, both of which hang this key's queue forever with no
+   * error and nothing to log:
+   * - `operation` has no built-in timeout — if it awaits something that can stall indefinitely
+   *   (e.g. a network call with no timeout of its own), bound it yourself. See `withTimeout` in
+   *   `src/twitch/twitchSendQueue.ts` for the established pattern, reused by
+   *   `twitchChannelMembership.ts` and `twitchMonitorPoll.ts`.
+   * - `operation` must never call `run()` again for this same `key` and await the result — that
+   *   inner call queues behind the outer one, which is itself waiting on the inner call: a
+   *   circular wait that never resolves.
+   * @param key - Operations sharing a key are serialized; operations on different keys run
+   *   independently.
+   * @param operation - The async work to run once queued.
+   * @returns Resolves or rejects with `operation`'s own result.
+   */
   run<T>(key: K, operation: () => Promise<T>): Promise<T>;
   /** Number of keys with at least one operation in flight. */
   size(): number;

@@ -133,6 +133,36 @@ describe('GET /discord/callback', () => {
     expect((res.body as any).view).toBe('error');
   });
 
+  it('retries a transient 503 from the token endpoint and succeeds on the next attempt', async () => {
+    mockFetch([
+      { ok: false, status: 503 },
+      { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
+      { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
+    ]);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER, is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: '555', name: 'Guild', voice_channel_id: null }] as any);
+
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
+      .get('/discord/callback?code=code&state=state123');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/');
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+  }, 10_000);
+
+  it('renders error 500 when the token endpoint keeps returning transient 503s past the retry limit', async () => {
+    mockFetch([
+      { ok: false, status: 503 },
+      { ok: false, status: 503 },
+      { ok: false, status: 503 },
+    ]);
+
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
+      .get('/discord/callback?code=code&state=state123');
+    expect(res.status).toBe(500);
+    expect((res.body as any).view).toBe('error');
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+  }, 10_000);
+
   it('renders error 500 when profile fetch fails', async () => {
     mockFetch([
       { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
