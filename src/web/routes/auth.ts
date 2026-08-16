@@ -16,6 +16,7 @@ import { fetchMemberDisplayName } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { renderError, filterQueryParam, isLoopbackRedirectUri, renderView } from './shared';
+import { fetchWithRetry } from '../../shared/fetchWithRetry';
 import { userMutationQueue } from './adminUserMutationQueue';
 
 const log = createLogger('Web');
@@ -53,7 +54,10 @@ router.get('/discord', (req, res) => {
 /**
  * GET /auth/discord/callback — completes the Discord OAuth2 flow. Validates the
  * `state` param against the session, exchanges the `code` for an access token,
- * fetches the Discord profile, and checks the user whitelist. Then either:
+ * fetches the Discord profile, and checks the user whitelist. The token-exchange
+ * and profile-fetch requests go through `fetchWithRetry`, which retries transient
+ * 502/503/504 responses from Discord's API instead of failing the login outright.
+ * Then either:
  * creates/refreshes the dashboard session as usual (resolving accessible guilds,
  * syncing the display name, regenerating the session), or — if this login was
  * initiated via the companion app's loopback flow (`req.session.companionOAuth`
@@ -83,7 +87,7 @@ router.get('/discord/callback', async (req, res) => {
 
   try {
     // 1. Exchange code for access token
-    const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
+    const tokenRes = await fetchWithRetry('https://discord.com/api/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -94,15 +98,15 @@ router.get('/discord/callback', async (req, res) => {
         redirect_uri: DISCORD_CALLBACK_URL,
       }),
       signal: AbortSignal.timeout(10_000),
-    });
+    }, log);
     if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
     const { access_token } = (await tokenRes.json()) as { access_token: string };
 
     // 2. Fetch Discord user profile
-    const profileRes = await fetch('https://discord.com/api/users/@me', {
+    const profileRes = await fetchWithRetry('https://discord.com/api/users/@me', {
       headers: { Authorization: `Bearer ${access_token}` },
       signal: AbortSignal.timeout(10_000),
-    });
+    }, log);
     if (!profileRes.ok) throw new Error(`Profile fetch failed: ${profileRes.status}`);
     const profile = (await profileRes.json()) as {
       id: string;
