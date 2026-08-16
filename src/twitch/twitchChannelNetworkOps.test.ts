@@ -91,6 +91,19 @@ describe('throttledJoin', () => {
     expect(seen).toHaveLength(1);
     await expect(seen[0]).resolves.toBeUndefined();
   });
+
+  it('releases the join gate even when onSettled throws synchronously', async () => {
+    const client = makeMockClient();
+
+    await expect(throttledJoin(client as any, 'alice', () => { throw new Error('onSettled boom'); }))
+      .rejects.toThrow('onSettled boom');
+
+    // A later join must still go through instead of queuing behind the failed one forever.
+    const carolPromise = throttledJoin(client as any, 'carol', () => {});
+    await vi.advanceTimersByTimeAsync(600); // JOIN_THROTTLE_MS
+    await carolPromise;
+    expect(client.join).toHaveBeenCalledWith('carol');
+  });
 });
 
 describe('compensateIfStale', () => {

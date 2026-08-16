@@ -113,7 +113,9 @@ export function compensateIfStale(deps: MembershipDeps, channel: string, call: P
  * @param channel - The already-normalized channel name to join.
  * @param onSettled - Called with the raw (un-timed-out) join promise right after it's issued, so
  *   the caller can watch for a late settlement after giving up on it via the timeout race — see
- *   {@link compensateIfStale}.
+ *   {@link compensateIfStale}. Issuing the join and calling this are both inside the `try`, so
+ *   even a synchronous throw from either still releases the gate via `finally` rather than
+ *   wedging every later queued join behind it.
  * @returns Resolves once the join call itself has completed (not once the throttle window has
  *   elapsed — the throttle only delays the *next* queued join). Rejects if the join times out.
  */
@@ -122,9 +124,9 @@ export async function throttledJoin(client: ChatClient, channel: string, onSettl
   let releaseGate!: () => void;
   joinGate = new Promise((resolve) => { releaseGate = resolve; });
   await previousGate;
-  const joinCall = client.join(channel);
-  onSettled(joinCall);
   try {
+    const joinCall = client.join(channel);
+    onSettled(joinCall);
     await withTimeout(joinCall, JOIN_PART_TIMEOUT_MS, 'Twitch join');
   } finally {
     setTimeout(releaseGate, JOIN_THROTTLE_MS);
