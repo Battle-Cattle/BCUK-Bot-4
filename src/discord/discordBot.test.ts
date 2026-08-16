@@ -39,7 +39,7 @@ vi.mock('../db', () => ({
   setMemberAccessLevel: vi.fn().mockResolvedValue(undefined),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
-vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
+vi.mock('../shared/logger', () => ({ createLogger: vi.fn(mockLogger) }));
 vi.mock('discord.js', () => ({
   Client: vi.fn(),
   GatewayIntentBits: { Guilds: 1, GuildMessages: 2, MessageContent: 4, GuildVoiceStates: 8 },
@@ -54,6 +54,7 @@ let commands: CommandRouterModule;
 let customCmds: CustomCommandModule;
 let mockInstance: ReturnType<typeof makeMockClient>;
 let mockGuild: { name: string; members: { fetch: ReturnType<typeof vi.fn> } };
+let mockLog: ReturnType<typeof mockLogger>;
 
 function makeMockClient() {
   mockGuild = { name: 'TestGuild', members: { fetch: vi.fn().mockResolvedValue({ displayName: 'Alice' }) } };
@@ -81,7 +82,9 @@ beforeEach(async () => {
   // Import commandRouter first so discordBot.ts picks up the same cached instance
   commands = await import('../commands/commandRouter.js') as CommandRouterModule;
   customCmds = await import('../commands/customCommandHandler.js') as CustomCommandModule;
+  const loggerModule = await import('../shared/logger.js');
   mod = await import('./discordBot.js') as DiscordBotModule;
+  mockLog = vi.mocked(loggerModule.createLogger).mock.results[0]?.value;
 });
 
 // ─── getDiscordClient ─────────────────────────────────────────────────────────
@@ -397,16 +400,19 @@ describe('startDiscordBot — gateway watchdog', () => {
     return mockInstance.on.mock.calls.find(([e]: string[]) => e === event)?.[1];
   }
 
-  it('logs a warning when a shard is reconnecting, without throwing', () => {
+  it('logs a warning with the shard id when a shard is reconnecting, without throwing', () => {
     mod.startDiscordBot();
     const handler = findHandler('shardReconnecting');
     expect(() => handler(0)).not.toThrow();
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('0'));
   });
 
-  it('logs an error when a shard reports a gateway connection error, without throwing', () => {
+  it('logs an error with the shard id and error when a shard reports a gateway connection error, without throwing', () => {
     mod.startDiscordBot();
     const handler = findHandler('shardError');
-    expect(() => handler(new Error('gateway socket error'), 0)).not.toThrow();
+    const gatewayError = new Error('gateway socket error');
+    expect(() => handler(gatewayError, 0)).not.toThrow();
+    expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('0'), gatewayError);
   });
 
   it('forces a fresh login when a shard disconnects permanently', () => {
