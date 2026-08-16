@@ -12,7 +12,7 @@ import { csrfProtection } from '../csrf';
 import { requireManager, requireAdmin } from '../middleware';
 import { getSessionUser } from '../session';
 import { trimField, renderError, filterQueryParam, renderView } from './shared';
-import { userMutationQueue } from './adminUserMutationQueue';
+import { runUserMutation } from './adminUserMutationQueue';
 import adminRefreshRouter, { getRefreshState } from './adminRefresh';
 import {
   DuplicateTwitchNameError,
@@ -117,7 +117,7 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
   if (addAuthErr) return res.redirect(`/admin/users?error=${addAuthErr}`);
   try {
     const trimmedDiscordName = trimField(discord_name);
-    await userMutationQueue.run(trimmedDiscordId, async () => {
+    await runUserMutation(trimmedDiscordId, async () => {
       // Ensure the global user row (whitelist + Twitch identity) exists, then grant
       // membership of the current guild at the chosen level.
       await addOrUpdateUserMutation({
@@ -166,7 +166,7 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
   const updateAuthErr = await checkManagerEditAuth(getSessionUser(req), trimmedDiscordId, level, guildId);
   if (updateAuthErr) return res.redirect(`/admin/users?error=${updateAuthErr}`);
   try {
-    await userMutationQueue.run(trimmedDiscordId, () => setMemberAccessLevel(guildId, trimmedDiscordId, level));
+    await runUserMutation(trimmedDiscordId, () => setMemberAccessLevel(guildId, trimmedDiscordId, level));
   } catch (err) {
     return handleDbError(err, res, 'update_failed', 'Update access level');
   }
@@ -197,7 +197,7 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
     return res.redirect('/admin/users?error=self_remove_forbidden');
   }
   try {
-    await userMutationQueue.run(trimmedDiscordId, () => removeGuildMember(guildId, trimmedDiscordId));
+    await runUserMutation(trimmedDiscordId, () => removeGuildMember(guildId, trimmedDiscordId));
   } catch (err) {
     return handleDbError(err, res, 'remove_failed', 'Remove user');
   }
@@ -231,7 +231,7 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   if (nextEnabled === null) return;
 
   try {
-    await userMutationQueue.run(trimmedDiscordId, () => toggleTwitchMutation(trimmedDiscordId, nextEnabled));
+    await runUserMutation(trimmedDiscordId, () => toggleTwitchMutation(trimmedDiscordId, nextEnabled));
   } catch (err) {
     return handleDbError(err, res, 'toggle_failed', 'Toggle twitch user');
   }

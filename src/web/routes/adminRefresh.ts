@@ -5,7 +5,7 @@ import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { getSessionUser } from '../session';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
-import { userMutationQueue } from './adminUserMutationQueue';
+import { runUserMutation } from './adminUserMutationQueue';
 import {
   type RefreshOutcome, type RefreshState, refreshStates, getRefreshState, forgetGuildRefreshState,
 } from '../../discord/guildRefreshState';
@@ -41,7 +41,7 @@ async function runDiscordNameRefresh(guildId: string): Promise<void> {
 
         const trimmedName = name?.trim();
         if (trimmedName && trimmedName !== user.discord_name) {
-          await userMutationQueue.run(user.discord_id, () => updateDiscordName(user.discord_id, trimmedName));
+          await runUserMutation(user.discord_id, () => updateDiscordName(user.discord_id, trimmedName));
           updatedCount++;
           state.updatedCount = updatedCount;
         }
