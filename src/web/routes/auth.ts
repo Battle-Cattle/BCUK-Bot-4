@@ -17,7 +17,7 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { renderError, filterQueryParam, isLoopbackRedirectUri, renderView } from './shared';
 import { fetchWithRetry } from '../../shared/fetchWithRetry';
-import { userMutationQueue } from './adminUserMutationQueue';
+import { runUserMutation } from './adminUserMutationQueue';
 
 const log = createLogger('Web');
 const router = Router();
@@ -63,7 +63,7 @@ router.get('/discord', (req, res) => {
  * initiated via the companion app's loopback flow (`req.session.companionOAuth`
  * set by companionAuth.ts) — skips session creation entirely and redirects to
  * the companion app's `redirectUri` with a one-time code instead. The
- * `discord_name` sync is serialized per Discord ID through `userMutationQueue`,
+ * `discord_name` sync is serialized per Discord ID through `runUserMutation`,
  * so it can't race a concurrent admin edit or the name-refresh job on the same
  * user row.
  * @param req - Express request; reads `code`/`state` query params and the stored
@@ -164,7 +164,7 @@ router.get('/discord/callback', async (req, res) => {
         syncedDiscordName = trimmedDisplayName;
       }
       if (syncedDiscordName !== dbUser.discord_name) {
-        await userMutationQueue.run(profile.id, () => updateDiscordName(profile.id, syncedDiscordName));
+        await runUserMutation(profile.id, () => updateDiscordName(profile.id, syncedDiscordName));
       }
     } catch (syncErr) {
       log.warn('Non-blocking discord_name sync failed:', syncErr);

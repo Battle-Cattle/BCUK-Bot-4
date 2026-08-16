@@ -9,7 +9,7 @@ import { forgetGuild as forgetGuildVoiceState } from '../audio/audioPlayer';
 import { forgetGuildRefreshState } from './guildRefreshState';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
 import { upsertGuild, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
-import { userMutationQueue } from '../web/routes/adminUserMutationQueue';
+import { runUserMutation } from '../web/routes/adminUserMutationQueue';
 import { createLogger } from '../shared/logger';
 import { getDiscordClient, setDiscordClient } from './discordClientStore';
 
@@ -78,7 +78,7 @@ export async function fetchMemberDisplayName(
  * @returns Resolves once the owner's access is granted, or once an owner-fetch
  *   failure has been logged. Rejects if granting DB access fails.
  *
- * The user-row read/upsert/access-grant sequence is serialised through {@link userMutationQueue}
+ * The user-row read/upsert/access-grant sequence is serialised through {@link runUserMutation}
  * on `owner.id`, matching every other write path that touches a user row by `discord_id` (e.g.
  * the webpanel's admin routes) — a user can belong to multiple guilds, so an unqueued sequence
  * here could otherwise race against a concurrent webpanel edit of the same user.
@@ -91,7 +91,7 @@ async function provisionGuildOwner(guild: Guild): Promise<void> {
     log.error(`Failed to fetch owner for guild ${guild.id}:`, err);
     return;
   }
-  await userMutationQueue.run(owner.id, async () => {
+  await runUserMutation(owner.id, async () => {
     const existingUser = await findUser(owner.id);
     if (!existingUser) {
       await upsertUser(owner.id, owner.user.username, AccessLevel.USER);

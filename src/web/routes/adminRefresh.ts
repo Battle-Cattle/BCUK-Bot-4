@@ -5,7 +5,7 @@ import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { getSessionUser } from '../session';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
-import { userMutationQueue } from './adminUserMutationQueue';
+import { runUserMutation } from './adminUserMutationQueue';
 import {
   type RefreshOutcome, type RefreshState, refreshStates, getRefreshState, forgetGuildRefreshState,
 } from '../../discord/guildRefreshState';
@@ -15,6 +15,13 @@ export { refreshStates, getRefreshState, forgetGuildRefreshState };
 
 const log = createLogger('Web');
 
+/**
+ * Re-fetches each of `guildId`'s members' current Discord display name and persists any that
+ * changed, tracking progress/outcome in `refreshStates` for `/users/refresh-status` to poll.
+ * @param guildId - Guild whose members' Discord names are refreshed.
+ * @returns Resolves once every member has been processed (success, no-op, or per-member failure);
+ *   never rejects — failures are recorded on the guild's `RefreshState` instead.
+ */
 async function runDiscordNameRefresh(guildId: string): Promise<void> {
   const state: RefreshState = { outcome: 'running', updatedCount: 0, failureCount: 0, startedAt: Date.now(), finishedAt: null };
   refreshStates.set(guildId, state);
@@ -41,7 +48,7 @@ async function runDiscordNameRefresh(guildId: string): Promise<void> {
 
         const trimmedName = name?.trim();
         if (trimmedName && trimmedName !== user.discord_name) {
-          await userMutationQueue.run(user.discord_id, () => updateDiscordName(user.discord_id, trimmedName));
+          await runUserMutation(user.discord_id, () => updateDiscordName(user.discord_id, trimmedName));
           updatedCount++;
           state.updatedCount = updatedCount;
         }
