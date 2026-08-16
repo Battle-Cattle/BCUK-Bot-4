@@ -18,6 +18,15 @@ export function getPool(): mysql.Pool {
       connectionLimit: 15,
       queueLimit: 100,
       connectTimeout: 10_000,
+      // `connectTimeout` only bounds opening a *new* connection. Without these, a
+      // connection whose socket goes silently dead (e.g. a network drop that never
+      // sends a TCP RST/FIN) can sit hung indefinitely — mysql2 only frees a pooled
+      // connection on an 'error'/'end' event, which a true black hole never fires,
+      // so stuck connections would otherwise leak out of the 15-connection pool
+      // permanently. TCP keepalive probes detect that dead socket and surface it as
+      // a connection error instead, so the pool can evict and replace it.
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10_000,
     });
   }
   return pool;
