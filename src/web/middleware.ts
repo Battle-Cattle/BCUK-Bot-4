@@ -116,6 +116,31 @@ export const requireMod = requireAccessLevel(AccessLevel.MOD, 'Mod or above');
 export const requireManager = requireAccessLevel(AccessLevel.MANAGER, 'Manager or above');
 
 /**
+ * Creates a middleware that ensures the current-guild access level is at least `level`,
+ * otherwise responds `403 { error: 'forbidden' }`. JSON counterpart to
+ * {@link requireAccessLevel}, for routes whose handlers respond with `res.json(...)`
+ * rather than rendering a view.
+ * @param level - Minimum required `AccessLevel` value.
+ * @returns An Express middleware: calls `next()` when the session user meets `level`,
+ *   otherwise sends a 403 JSON response.
+ */
+function requireAccessLevelJson(level: number): (req: Request, res: Response, next: NextFunction) => void {
+  return (req, res, next) => {
+    if (req.session.user && req.session.user.accessLevel >= level) {
+      next();
+    } else {
+      res.status(403).json({ error: 'forbidden' });
+    }
+  };
+}
+
+/** Ensures the current-guild access level is Mod or above, otherwise sends a 403 JSON response. */
+export const requireModJson = requireAccessLevelJson(AccessLevel.MOD);
+
+/** Ensures the current-guild access level is Manager or above, otherwise sends a 403 JSON response. */
+export const requireManagerJson = requireAccessLevelJson(AccessLevel.MANAGER);
+
+/**
  * Creates a middleware that authenticates a request via a `Bearer` token: hashes it with
  * SHA-256, resolves the hash to an identity via `lookup`, and stores it on `req` via `assign`
  * on success. Responds 401 when the header is missing/empty or `lookup` finds no match, and
@@ -174,6 +199,9 @@ export const requireCompanionKey = authenticateBearerToken(
 /** Ensures the current-guild access level is Admin, otherwise renders a 403. */
 export const requireAdmin = requireAccessLevel(AccessLevel.ADMIN, 'Admin');
 
+/** Ensures the current-guild access level is Admin, otherwise sends a 403 JSON response. */
+export const requireAdminJson = requireAccessLevelJson(AccessLevel.ADMIN);
+
 /**
  * Ensures the session user is the bot owner (`user.is_owner`), otherwise renders a
  * 403. Distinct from {@link requireAdmin}: `isOwner` is a global super-admin flag set
@@ -202,10 +230,10 @@ export function requireOwner(req: Request, res: Response, next: NextFunction): v
  * Same check as {@link requireOwner}, for JSON-only routes: responds
  * `403 { error: 'forbidden' }` instead of rendering an HTML error page, so a
  * denied `fetch` call gets a real error payload instead of falling back to a
- * generic parse-failure message. See issue #451 — this is intentionally a
- * one-off next to `requireOwner` rather than a generic render-vs-json option
- * on `requireAccessLevel`; extract a shared factory once a second JSON-over-session
- * guard is needed.
+ * generic parse-failure message. See issue #451. Kept separate from
+ * {@link requireAccessLevelJson} (the generalized JSON variant for the
+ * `AccessLevel` ladder) since owner status is a global `isOwner` flag, not
+ * a per-guild access level.
  * @param req - Express request; checked for `req.session.user?.isOwner`.
  * @param res - Express response; used to send a 403 JSON body when denied.
  * @param next - Called when the session user is the owner.
