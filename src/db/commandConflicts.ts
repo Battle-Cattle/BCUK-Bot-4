@@ -360,6 +360,11 @@ async function withDeadlockRetryAndTriggerLock(
     await runWithDeadlockRetry(
       connection,
       retryLogLabel,
+      // Looks up the command's current trigger string, acquires the session-scoped named lock
+      // on it if this is the first attempt to reach here, then runs the caller's `body`. Returns
+      // nothing — `body` performs the actual write; a thrown error (e.g. a fresh
+      // `CommandConflictError`) propagates up through `runWithDeadlockRetry`, which rolls back
+      // and either retries (on deadlock) or rethrows.
       async () => {
         const normalizedTriggerString = await getCommandTriggerStringById(connection, commandId);
 

@@ -327,6 +327,11 @@ export async function runSerializedCommandWrite<T>(
     await acquireNamedLocks(conn, lockNames);
 
     return await runWithDeadlockRetry(conn, 'runSerializedCommandWrite', async () => {
+      // Re-checks for a trigger collision on every attempt (a race between the caller's earlier
+      // check and now, or a fresh collision from another writer since the last attempt), then
+      // runs the caller's write. Returns `writeOperation`'s result, or throws
+      // `CommandConflictError` on a collision — `runWithDeadlockRetry` rolls back and rethrows
+      // either way, retrying only if the error is a deadlock.
       if (await isAnyCommandTakenAcrossTables(normalizedCommands, options, conn, checks)) {
         throw new CommandConflictError(normalizedCommands);
       }
