@@ -32,7 +32,7 @@
     "mediaplex": "^1.0.0",
     "multer": "^2.2.0",
     "mysql2": "^3.23.1",
-    "openai": "^7.4.0",
+    "openai": "^7.5.0",
     "tmi.js": "^1.8.5",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0"
