@@ -5,7 +5,9 @@ import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, 
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
-import { logAndRedirectError, trimField, renderError, filterQueryParam, renderView } from './shared';
+import { trimField, filterQueryParam } from './validation';
+import { renderError, renderView } from './viewHelpers';
+import { logAndRedirectError } from './errorHandling';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 import { TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, EVENTSUB_TOKEN_SECRET } from '../../shared/config';

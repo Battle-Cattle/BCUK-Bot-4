@@ -4,7 +4,9 @@ import { findUser } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
-import { filterQueryParam, logAndRedirectError, normalizeDiscordId, renderView } from './shared';
+import { filterQueryParam, normalizeDiscordId } from './validation';
+import { renderView } from './viewHelpers';
+import { logAndRedirectError } from './errorHandling';
 import { fetchLiveGuildsForUser, resolveAccessLevelForGuild } from '../guildAccess';
 
 const log = createLogger('Web');

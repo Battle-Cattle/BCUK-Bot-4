@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { getPublicSfxTriggers } from '../../db';
 import type { PublicSfxTrigger } from '../../db';
-import { renderError, renderView } from './shared';
+import { renderError, renderView } from './viewHelpers';
 
 const log = createLogger('Web');
 const router = Router();

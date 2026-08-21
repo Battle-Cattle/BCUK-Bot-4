@@ -17,7 +17,9 @@ import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
 import { getSessionUser } from '../session';
 import { WEB_PORT } from '../../shared/config';
-import { logAndRedirectError, normalizeDiscordId, renderError, filterQueryParam, renderView } from './shared';
+import { normalizeDiscordId, filterQueryParam } from './validation';
+import { renderError, renderView } from './viewHelpers';
+import { logAndRedirectError } from './errorHandling';
 import { runUserMutation } from './adminUserMutationQueue';
 
 const log = createLogger('Web');

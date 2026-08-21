@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { ensureSessionCsrfToken } from '../csrf';
-import { renderView } from './shared';
+import { renderView } from './viewHelpers';
 
 const router = Router();
 

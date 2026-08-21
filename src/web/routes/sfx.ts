@@ -5,7 +5,8 @@ import { getAllSfxTriggers, getAllCategories, getSfxFileById, AccessLevel } from
 import { csrfProtection } from '../csrf';
 import { SFX_FOLDER, SFX_MAX_FILE_MB, OPENAI_API_KEY } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
-import { filterQueryParam, parsePositiveIntId, renderError, renderView } from './shared';
+import { filterQueryParam, parsePositiveIntId } from './validation';
+import { renderError, renderView } from './viewHelpers';
 
 const log = createLogger('Web');
 const router = Router();

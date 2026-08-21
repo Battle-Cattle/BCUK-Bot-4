@@ -45,7 +45,7 @@ import tosRouter from './routes/tos';
 import serviceWorkerRouter from './routes/serviceWorker';
 import { requireAuth, requireGuildContext } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
-import { renderView } from './routes/shared';
+import { renderView } from './routes/viewHelpers';
 import {
   authLimiter,
   ipKey,
