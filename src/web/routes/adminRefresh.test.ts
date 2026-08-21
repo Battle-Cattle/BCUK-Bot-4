@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
+const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
 vi.mock('../../db', () => ({
   getGuildMemberUsers: vi.fn(),
   updateDiscordName: vi.fn(),
@@ -10,8 +11,8 @@ vi.mock('../../discord/discordBot', () => ({
   fetchMemberDisplayName: vi.fn(),
 }));
 vi.mock('../middleware', () => ({
-  requireManager: (_req: any, _res: any, next: any) => next(),
-  requireManagerJson: (_req: any, _res: any, next: any) => next(),
+  requireManager: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireManager'); next(); },
+  requireManagerJson: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireManagerJson'); next(); },
 }));
 vi.mock('../csrf', () => ({
   csrfProtection: (_req: any, _res: any, next: any) => next(),
@@ -55,6 +56,7 @@ async function waitForRefreshComplete(guildId: string = GUILD_ID, timeoutMs = 20
 
 beforeEach(() => {
   vi.clearAllMocks();
+  middlewareCallOrder.length = 0;
   refreshStates.clear();
   vi.useFakeTimers();
 });
@@ -69,6 +71,11 @@ afterEach(() => {
 // ─── GET /users/refresh-status ────────────────────────────────────────────────
 
 describe('GET /users/refresh-status', () => {
+  it('gates the route behind requireManagerJson, not requireManager, so a denial returns JSON', async () => {
+    await buildApp().get('/users/refresh-status');
+    expect(middlewareCallOrder).toEqual(['requireManagerJson']);
+  });
+
   it('returns the current guild refresh state as JSON', async () => {
     const app = buildApp();
     const res = await app.get('/users/refresh-status');

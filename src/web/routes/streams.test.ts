@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
+const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
 vi.mock('../../db', () => ({
   getStreamGroupsForGuild: vi.fn(),
   getStreamersForGuild: vi.fn(),
@@ -24,8 +25,8 @@ vi.mock('../csrf', () => ({
 }));
 
 vi.mock('../middleware', () => ({
-  requireManager: (_req: any, _res: any, next: any) => next(),
-  requireManagerJson: (_req: any, _res: any, next: any) => next(),
+  requireManager: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireManager'); next(); },
+  requireManagerJson: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireManagerJson'); next(); },
 }));
 
 vi.mock('../../twitch/monitor/twitchMonitor', () => ({
@@ -57,6 +58,7 @@ function buildApp(sessionUser: SessionUser = MANAGER) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  middlewareCallOrder.length = 0;
   vi.mocked(getStreamGroupsForGuild).mockResolvedValue([]);
   vi.mocked(getStreamersForGuild).mockResolvedValue([]);
   vi.mocked(getAllUsers).mockResolvedValue([]);
@@ -94,6 +96,11 @@ describe('GET /streams — query param filtering', () => {
 });
 
 describe('GET /streams/live', () => {
+  it('gates the route behind requireManagerJson, not requireManager, so a denial returns JSON', async () => {
+    await supertest(buildApp()).get('/streams/live');
+    expect(middlewareCallOrder).toEqual(['requireManagerJson']);
+  });
+
   it('returns the current live states as JSON', async () => {
     vi.mocked(getLiveStates).mockReturnValue([{ login: 'streamera' } as any]);
     const res = await supertest(buildApp()).get('/streams/live');
