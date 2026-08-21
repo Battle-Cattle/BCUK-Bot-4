@@ -1,10 +1,11 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { AccessLevel, findUser, getAllGuilds, getEffectiveAccessLevelForUser, getGuildsForMember, type DbGuild } from '../../db';
+import { findUser } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { filterQueryParam, logAndRedirectError, normalizeDiscordId, renderView } from './shared';
+import { fetchLiveGuildsForUser, resolveAccessLevelForGuild } from '../guildAccess';
 
 const log = createLogger('Web');
 const router = Router();
@@ -49,9 +50,8 @@ router.get('/select', requireAuth, csrfProtection, (req, res) => {
  * On success the effective access level is recomputed for that guild so authorization
  * reflects the current guild, never the previous one.
  *
- * For a non-owner, the access level is read off the same `getGuildsForMember` result already
- * fetched to build `user.guilds` (each entry carries the user's `access_level` for that guild)
- * instead of a second `guild_member` query, mirroring `requireGuildContext` in `../middleware`.
+ * Guild fetching and access-level resolution are shared with `requireGuildContext`
+ * (`../middleware`) via `fetchLiveGuildsForUser`/`resolveAccessLevelForGuild` (`../guildAccess`).
  *
  * When the session's user no longer exists in the DB or has no accessible guilds, the session
  * is destroyed (not just partially cleared) before redirecting to `/auth/login` — otherwise
@@ -80,18 +80,8 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
       // back to `/` before the error banner ever renders.
       return req.session.destroy(() => res.redirect('/auth/login?error=user_not_found'));
     }
-    const isOwner = dbUser.is_owner;
-
-    let liveGuilds: DbGuild[];
-    let accessLevelByGuildId: Map<string, number> | null = null;
-    if (isOwner) {
-      liveGuilds = await getAllGuilds();
-    } else {
-      const memberships = await getGuildsForMember(user.discordId);
-      liveGuilds = memberships;
-      accessLevelByGuildId = new Map(memberships.map((g) => [g.guild_id, g.access_level]));
-    }
-    user.isOwner = isOwner;
+    const { guilds: liveGuilds, accessLevelByGuildId } = await fetchLiveGuildsForUser(dbUser);
+    user.isOwner = dbUser.is_owner;
     user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
     if (user.guilds.length === 0) {
       // Same reasoning as above: destroy the session rather than just clearing
@@ -101,13 +91,8 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
     if (!liveGuilds.some((g) => g.guild_id === requestedGuildId)) {
       return res.redirect('/guild/select?error=guild_not_found');
     }
-    const accessLevel = (
-      accessLevelByGuildId
-        ? accessLevelByGuildId.get(requestedGuildId) ?? AccessLevel.USER
-        : await getEffectiveAccessLevelForUser(requestedGuildId, dbUser)
-    ) as (typeof AccessLevel)[keyof typeof AccessLevel];
     user.currentGuildId = requestedGuildId;
-    user.accessLevel = accessLevel;
+    user.accessLevel = await resolveAccessLevelForGuild(dbUser, requestedGuildId, accessLevelByGuildId);
   } catch (err) {
     return logAndRedirectError({
       res,
