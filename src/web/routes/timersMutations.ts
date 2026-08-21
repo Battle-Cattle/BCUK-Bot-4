@@ -7,9 +7,8 @@ import {
 import type { TimerCommandInput } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext, requireMod } from '../middleware';
-import {
-  logAndRedirectError, normalizeDiscordId, normalizeRequiredText, parseCheckboxField, parsePositiveIntId,
-} from './shared';
+import { normalizeDiscordId, normalizeRequiredText, parseCheckboxField, parsePositiveIntId } from './validation';
+import { logAndRedirectError } from './errorHandling';
 
 const log = createLogger('Web');
 const router = Router();

@@ -8,7 +8,8 @@ import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
 import { SFX_FOLDER, SFX_MAX_FILE_MB } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
-import { parsePositiveIntId, parsePositiveBigIntId, createMulterErrorRedirectHandler, makeUploadMiddleware, parseCheckboxField } from './shared';
+import { parsePositiveIntId, parsePositiveBigIntId, parseCheckboxField } from './validation';
+import { createMulterErrorRedirectHandler, makeUploadMiddleware } from './uploadMiddleware';
 
 const log = createLogger('Web');
 const router = Router();

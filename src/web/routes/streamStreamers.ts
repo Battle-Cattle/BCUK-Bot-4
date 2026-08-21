@@ -4,7 +4,7 @@ import { addStreamer, removeStreamer, findUser } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { getSessionUser } from '../session';
-import { parsePositiveIntId, normalizeDiscordId } from './shared';
+import { parsePositiveIntId, normalizeDiscordId } from './validation';
 import { redirectStreamsInvalid, redirectStreamsFailure } from './streamsErrors';
 import { triggerRestart } from './streamRestart';
 

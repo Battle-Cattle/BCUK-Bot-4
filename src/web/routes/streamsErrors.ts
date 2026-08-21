@@ -1,6 +1,6 @@
 import type { Response } from 'express';
 import type { Logger } from 'winston';
-import { logAndRedirectError } from './shared';
+import { logAndRedirectError } from './errorHandling';
 
 /** Path every streams-page error redirect targets. */
 const STREAMS_BASE_PATH = '/admin/streams';

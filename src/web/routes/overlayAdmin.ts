@@ -9,7 +9,8 @@ import { getVideosForStreamer, getRewardsForStreamer } from '../../db';
 import { PUBLIC_URL } from '../../shared/config';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { filterQueryParam, renderError, renderView } from './shared';
+import { filterQueryParam } from './validation';
+import { renderError, renderView } from './viewHelpers';
 import { router as mutationsRouter, MAX_UPLOAD_MB } from './overlayAdminMutations';
 import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';
 

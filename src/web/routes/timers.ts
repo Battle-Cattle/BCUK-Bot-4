@@ -3,7 +3,8 @@ import { Router } from 'express';
 import { DbTimerCommandWithAssignments, DbUser, getAllTimerCommandsWithAssignments, getAllUsers } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext, requireManager } from '../middleware';
-import { renderError, filterQueryParam, renderView } from './shared';
+import { filterQueryParam } from './validation';
+import { renderError, renderView } from './viewHelpers';
 import timersMutationsRouter from './timersMutations';
 import timerAssignmentsRouter from './timerAssignments';
 

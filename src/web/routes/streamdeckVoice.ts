@@ -4,7 +4,7 @@ import { getApprovedGuildIdsForKey } from '../../db';
 import { requireApiKey } from '../middleware';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
-import { normalizeDiscordId } from './shared';
+import { normalizeDiscordId } from './validation';
 import {
   resolveChannelGuildOrRespond,
   resolvePresenceGuildOrRespond,

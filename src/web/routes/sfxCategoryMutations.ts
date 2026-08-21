@@ -3,7 +3,8 @@ import { Router } from 'express';
 import { createCategory, renameCategory, deleteCategory } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
-import { logAndRedirectError, normalizeRequiredText, parsePositiveIntId } from './shared';
+import { normalizeRequiredText, parsePositiveIntId } from './validation';
+import { logAndRedirectError } from './errorHandling';
 
 const log = createLogger('Web');
 const router = Router();

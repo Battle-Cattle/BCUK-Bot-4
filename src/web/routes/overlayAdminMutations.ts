@@ -9,9 +9,10 @@ import { requireAuth } from '../middleware';
 import type { DbStreamerEventSub } from '../../db';
 import { addVideo, deleteVideo } from '../../db';
 import { OVERLAY_FOLDER, OVERLAY_MAX_FILE_MB } from '../../shared/config';
-import {
-  logAndRedirectError, parsePositiveIntId, requireStreamer, createMulterErrorRedirectHandler, makeUploadMiddleware,
-} from './shared';
+import { parsePositiveIntId } from './validation';
+import { requireStreamer } from './viewHelpers';
+import { logAndRedirectError } from './errorHandling';
+import { createMulterErrorRedirectHandler, makeUploadMiddleware } from './uploadMiddleware';
 import { safeResolve } from '../../shared/pathUtils';
 
 const log = createLogger('OverlayAdmin');
