@@ -25,6 +25,7 @@ vi.mock('../csrf', () => ({
 
 vi.mock('../middleware', () => ({
   requireManager: (_req: any, _res: any, next: any) => next(),
+  requireManagerJson: (_req: any, _res: any, next: any) => next(),
 }));
 
 vi.mock('../../twitch/monitor/twitchMonitor', () => ({

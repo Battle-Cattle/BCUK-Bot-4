@@ -11,6 +11,7 @@ vi.mock('../../discord/discordBot', () => ({
 }));
 vi.mock('../middleware', () => ({
   requireManager: (_req: any, _res: any, next: any) => next(),
+  requireManagerJson: (_req: any, _res: any, next: any) => next(),
 }));
 vi.mock('../csrf', () => ({
   csrfProtection: (_req: any, _res: any, next: any) => next(),
