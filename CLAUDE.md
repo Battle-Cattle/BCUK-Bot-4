@@ -87,7 +87,7 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 
 **Voice adapter:** `audioPlayer.ts` uses a custom `DiscordGatewayAdapterCreator` via `client.on('raw', ...)`. `guild.voiceAdapterCreator` is unused — discord.js v14 incompatibility.
 
-**`customCommands.ts` owns its cache:** Write functions call `invalidateCustomCommandLookupCache()` internally — don't add a second call in `db.ts`.
+**`customCommands.ts` does not own its cache:** it's a pure DB layer with no cache knowledge, to break its import cycle with `customCommandCache.ts`. `db.ts` owns invalidation instead, via `withInvalidation()`-wrapped write functions that call `invalidateCustomCommandLookupCache()` after the underlying `customCommands.ts` write succeeds (same pattern used for `counters.ts`/`alertConfig.ts`/`sfx.ts`). Don't add a second invalidation call inside `customCommands.ts` itself.
 
 **MySQL 8 upsert:** Row-alias form only: `VALUES (...) AS new_row`. Deprecated `VALUES(col)` not used.
 

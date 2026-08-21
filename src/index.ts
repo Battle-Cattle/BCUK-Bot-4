@@ -82,6 +82,13 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 
+/**
+ * Boots the bot: verifies DB connectivity, wires every Twitch/EventSub runtime callback,
+ * loads the guild registry, then starts the Discord bot, Twitch bot, web panel, and
+ * schedulers, in that order (see the Startup Sequence section of `CLAUDE.md`).
+ * @returns Resolves once every component has started; rejects (and exits the process,
+ *   via the `.catch` below) if DB connectivity or the guild registry load fails.
+ */
 async function main(): Promise<void> {
   log.info('Starting BCUK Bot 4...');
 
