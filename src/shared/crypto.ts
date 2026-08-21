@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const ENC_PREFIX = 'enc:';
@@ -37,4 +37,17 @@ export function decryptToken(stored: string, secret: string): string {
   const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivB64, 'base64'));
   decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
   return Buffer.concat([decipher.update(Buffer.from(dataB64, 'base64')), decipher.final()]).toString('utf8');
+}
+
+/**
+ * Generates a random hex secret and its SHA-256 hash, for the "store only the hash,
+ * return the plaintext exactly once" pattern used by API keys, companion tokens, and
+ * companion OAuth codes.
+ * @param byteLength - Number of random bytes to generate before hex-encoding (default 32).
+ * @returns The plaintext secret (hex-encoded) and its SHA-256 hash (hex-encoded).
+ */
+export function generateSecretAndHash(byteLength = 32): { secret: string; hash: string } {
+  const secret = randomBytes(byteLength).toString('hex');
+  const hash = createHash('sha256').update(secret).digest('hex');
+  return { secret, hash };
 }
