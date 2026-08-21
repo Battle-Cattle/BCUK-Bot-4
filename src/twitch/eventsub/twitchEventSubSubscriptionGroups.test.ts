@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../../shared/config', () => ({}));
 
 import { getAlertTypesCoveredBySubscriptionGroups } from './twitchEventSubSubscriptionGroups';
-import { ALERT_EVENT_TYPES } from '../../db/alertConfig';
+import { ALERT_EVENT_TYPES } from '../../db';
 
 // ---------------------------------------------------------------------------
 // Subscription-group alert-type coverage (exhaustiveness)

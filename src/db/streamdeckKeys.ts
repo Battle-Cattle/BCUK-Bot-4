@@ -1,8 +1,8 @@
-import { randomBytes, createHash } from 'crypto';
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 import { AccessLevel } from './users';
 import { hashesMatch } from './utils';
+import { generateSecretAndHash } from '../shared/crypto';
 
 /** Per-guild approval state for a Streamdeck API key. */
 export interface StreamdeckKeyGuildStatusRow {
@@ -70,8 +70,7 @@ export async function createApiKeyAndRequestGuildAccess(
   accessLevel: number,
   guildId: string,
 ): Promise<{ plain: string; status: 'pending' | 'approved' }> {
-  const plain = randomBytes(32).toString('hex');
-  const hash = createHash('sha256').update(plain).digest('hex');
+  const { secret: plain, hash } = generateSecretAndHash();
   const status = initialStatus(accessLevel);
   const now = new Date();
 
@@ -144,8 +143,7 @@ export async function requestGuildAccessForExistingKey(
  * @returns The new plaintext key.
  */
 export async function rotateApiKey(discordId: string): Promise<{ plain: string }> {
-  const plain = randomBytes(32).toString('hex');
-  const hash = createHash('sha256').update(plain).digest('hex');
+  const { secret: plain, hash } = generateSecretAndHash();
   await getPool().execute(
     'UPDATE streamdeck_api_keys SET key_hash = ?, created_at = ? WHERE discord_id = ?',
     [hash, new Date(), discordId],

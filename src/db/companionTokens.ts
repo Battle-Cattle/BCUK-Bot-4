@@ -1,7 +1,7 @@
-import { randomBytes, createHash } from 'crypto';
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
 import { hashesMatch } from './utils';
+import { generateSecretAndHash } from '../shared/crypto';
 
 export interface CompanionTokenStatus {
   hasToken: boolean;
@@ -24,8 +24,7 @@ export async function issueTokenOnConnection(
   executor: mysql.Pool | mysql.PoolConnection,
   discordId: string,
 ): Promise<string> {
-  const plain = randomBytes(32).toString('hex');
-  const hash = createHash('sha256').update(plain).digest('hex');
+  const { secret: plain, hash } = generateSecretAndHash();
   const now = new Date();
   await executor.execute(
     `INSERT INTO companion_app_tokens (discord_id, key_hash, created_at, revoked_at)
