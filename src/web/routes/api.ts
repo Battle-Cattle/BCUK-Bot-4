@@ -6,7 +6,7 @@ import { connect, disconnect, getCurrentChannelId } from '../../audio/audioPlaye
 import { csrfProtection } from '../csrf';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { getGuildById } from '../../db';
-import { normalizeDiscordId } from './shared';
+import { normalizeDiscordId } from './validation';
 import { getReadyDiscordClientOrRespond } from './streamdeckGuildResolution';
 
 const log = createLogger('API');

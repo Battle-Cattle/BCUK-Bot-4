@@ -3,9 +3,9 @@ import type { Logger } from 'winston';
 import { DEFAULT_PRICING_COOLDOWN_SECONDS } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import type { CustomRewardInput, TwitchCustomReward } from '../../twitch/twitchApi';
-import {
-  trimField, logAndRedirectError, requireStreamer, parsePositiveIntId, parseRewardIdParam, parseCheckboxField,
-} from './shared';
+import { trimField, parsePositiveIntId, parseRewardIdParam, parseCheckboxField } from './validation';
+import { requireStreamer } from './viewHelpers';
+import { logAndRedirectError } from './errorHandling';
 
 /** Redirect target used when the requester isn't a streamer, scoped to the channel-points admin page. */
 const NOT_A_STREAMER_REDIRECT = '/channel-points?error=not_a_streamer';

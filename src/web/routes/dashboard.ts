@@ -4,7 +4,7 @@ import { getGuildScopedStatus } from '../guildScopedStatus';
 import { csrfProtection } from '../csrf';
 import { getStreamerByDiscordId, getSfxTriggerCount, getCustomCommandCount, getCounterCount, getRecentStreamerEvents } from '../../db';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
-import { renderError, renderView } from './shared';
+import { renderError, renderView } from './viewHelpers';
 import { RECENT_EVENTS_LIMIT, type DashboardEvent } from './dashboardEvents';
 
 const log = createLogger('Web');

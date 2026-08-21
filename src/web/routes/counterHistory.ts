@@ -3,7 +3,8 @@ import { Router } from 'express';
 import { getCounterHistory } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { parsePositiveIntId, renderError, renderView } from './shared';
+import { parsePositiveIntId } from './validation';
+import { renderError, renderView } from './viewHelpers';
 
 // Split out of counters.ts to keep that file's per-file complexity down, mirroring
 // the sfxCategoryMutations / sfxTriggerMutations / sfxFileMutations split.

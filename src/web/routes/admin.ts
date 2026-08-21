@@ -11,7 +11,8 @@ import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { csrfProtection } from '../csrf';
 import { requireManager, requireAdmin } from '../middleware';
 import { getSessionUser } from '../session';
-import { trimField, renderError, filterQueryParam, renderView } from './shared';
+import { trimField, filterQueryParam } from './validation';
+import { renderError, renderView } from './viewHelpers';
 import { runUserMutation } from './adminUserMutationQueue';
 import adminRefreshRouter, { getRefreshState } from './adminRefresh';
 import {
