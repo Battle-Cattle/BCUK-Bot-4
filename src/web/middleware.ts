@@ -6,12 +6,9 @@ import {
   findKeyByHash,
   findDiscordIdByTokenHash,
   findUser,
-  getAllGuilds,
-  getEffectiveAccessLevelForUser,
-  getGuildsForMember,
-  type DbGuild,
 } from '../db';
 import { renderView } from './routes/shared';
+import { fetchLiveGuildsForUser, resolveAccessLevelForGuild } from './guildAccess';
 
 /**
  * Ensures the request has a logged-in session user, redirecting to login otherwise.
@@ -39,12 +36,9 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
  * level is recomputed for the resolved guild so authorization always reflects the
  * current guild, never a stale login-time value.
  *
- * For a non-owner, the access level is read off the same `getGuildsForMember` result already
- * fetched to build `user.guilds` (each entry carries the user's `access_level` for that guild)
- * instead of a second `guild_member` query — `getGuildsForMember` and `getMemberAccessLevel`
- * would otherwise query the exact same row. Owners still resolve via
- * `getEffectiveAccessLevelForUser`, which short-circuits to Admin for `is_owner` without a
- * query, so this doesn't add a query on that path either.
+ * Guild fetching and access-level resolution are shared with `POST /guild/select` via
+ * `fetchLiveGuildsForUser`/`resolveAccessLevelForGuild` (`./guildAccess`) — see those for
+ * why a non-owner's access level never needs a second `guild_member` query.
  *
  * @param req - Express request; reads and mutates `req.session.user`.
  * @param res - Express response; used to redirect when no guild context can be resolved.
@@ -64,15 +58,7 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
     return;
   }
 
-  let liveGuilds: DbGuild[];
-  let accessLevelByGuildId: Map<string, number> | null = null;
-  if (dbUser.is_owner) {
-    liveGuilds = await getAllGuilds();
-  } else {
-    const memberships = await getGuildsForMember(user.discordId);
-    liveGuilds = memberships;
-    accessLevelByGuildId = new Map(memberships.map((g) => [g.guild_id, g.access_level]));
-  }
+  const { guilds: liveGuilds, accessLevelByGuildId } = await fetchLiveGuildsForUser(dbUser);
   user.isOwner = dbUser.is_owner;
   user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
 
@@ -95,11 +81,7 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
     }
   }
 
-  user.accessLevel = (
-    accessLevelByGuildId
-      ? accessLevelByGuildId.get(user.currentGuildId) ?? AccessLevel.USER
-      : await getEffectiveAccessLevelForUser(user.currentGuildId, dbUser)
-  ) as (typeof AccessLevel)[keyof typeof AccessLevel];
+  user.accessLevel = await resolveAccessLevelForGuild(dbUser, user.currentGuildId, accessLevelByGuildId);
 
   next();
 }

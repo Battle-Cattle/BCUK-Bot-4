@@ -20,7 +20,7 @@ import {
   findUserByTwitchName,
   type RefreshingLookupCache,
 } from '../db';
-import { resolveGuildIdForDiscordId } from '../discord/voicePresence';
+import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
 import {
   setTmiClient,
   setConnected,
