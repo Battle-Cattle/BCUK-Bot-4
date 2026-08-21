@@ -5,7 +5,8 @@ import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { getStreamerByDiscordId, getAlertConfigsForStreamer, ALERT_EVENT_TYPES, ALERT_TEXT_ANIMATIONS } from '../../db';
 import { PUBLIC_URL } from '../../shared/config';
-import { filterQueryParam, renderError, renderView } from './shared';
+import { filterQueryParam } from './validation';
+import { renderError, renderView } from './viewHelpers';
 import { router as mutationsRouter } from './alertsAdminMutations';
 import { router as assetMutationsRouter, MAX_IMAGE_MB, MAX_SOUND_MB } from './alertsAssetMutations';
 

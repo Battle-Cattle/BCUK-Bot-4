@@ -1,7 +1,8 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { exchangeCodeForToken } from '../../db';
-import { renderError, isLoopbackRedirectUri } from './shared';
+import { isLoopbackRedirectUri } from './validation';
+import { renderError } from './viewHelpers';
 import { authLimiter } from '../rateLimits';
 
 const log = createLogger('CompanionAuth');

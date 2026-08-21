@@ -4,7 +4,7 @@ import fs from 'fs';
 import type { AlertPayload } from '../../twitch/eventsub/twitchEventSubRuntime';
 import { ALERT_ASSETS_FOLDER, ALERT_MAX_SSE_PER_CHANNEL } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
-import { renderView } from './shared';
+import { renderView } from './viewHelpers';
 import { createSseEventsHandler, createLoginValidator, broadcastToChannel } from './sseChannel';
 
 const log = createLogger('AlertsOverlaySource');

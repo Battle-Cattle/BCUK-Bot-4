@@ -3,7 +3,8 @@ import type { Logger } from 'winston';
 import { findUser } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext, requireMod } from '../middleware';
-import { normalizeDiscordId, logAndRedirectError } from './shared';
+import { normalizeDiscordId } from './validation';
+import { logAndRedirectError } from './errorHandling';
 
 /** Options for {@link createAssignmentRouter}. */
 export interface AssignmentRouterOptions<TId> {

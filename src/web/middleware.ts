@@ -7,7 +7,7 @@ import {
   findDiscordIdByTokenHash,
   findUser,
 } from '../db';
-import { renderView } from './routes/shared';
+import { renderView } from './routes/viewHelpers';
 import { fetchLiveGuildsForUser, resolveAccessLevelForGuild } from './guildAccess';
 
 /**

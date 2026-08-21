@@ -4,7 +4,8 @@ import { upsertOverride, removeOverride } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod, requireGuildContext } from '../middleware';
 import { getSessionUser } from '../session';
-import { logAndRedirectError, parsePositiveIntId, trimField } from './shared';
+import { parsePositiveIntId, trimField } from './validation';
+import { logAndRedirectError } from './errorHandling';
 
 const log = createLogger('Web');
 const router = Router();

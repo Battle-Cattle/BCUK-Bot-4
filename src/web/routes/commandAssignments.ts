@@ -5,7 +5,7 @@ import {
   isMysqlDuplicateEntryError,
   unassignUserFromCommand,
 } from '../../db';
-import { parsePositiveIntId } from './shared';
+import { parsePositiveIntId } from './validation';
 import { createAssignmentRouter } from './assignmentRoutes';
 
 /**

@@ -13,7 +13,8 @@ import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscript
 import { computePrice } from '../../twitch/pricing/rewardPricingMath';
 import { simulateConstantUsageCycle } from '../../twitch/pricing/rewardPricingSimulation';
 import { renderPriceHistoryChart } from '../priceHistoryChart';
-import { filterQueryParam, renderError, renderView } from './shared';
+import { filterQueryParam } from './validation';
+import { renderError, renderView } from './viewHelpers';
 import { router as channelPointsMutationsRouter } from './channelPointsAdminMutations';
 import channelPointsEventsRouter from './channelPointsEvents';
 

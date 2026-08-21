@@ -11,17 +11,9 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth, requireGuildContext, requireMod, requireManager } from '../middleware';
-import {
-  logAndRedirectError,
-  normalizeRequiredText,
-  normalizeSingleTokenRequiredText,
-  parsePositiveIntId,
-  parseCheckboxField,
-  renderError,
-  filterQueryParam,
-  renderView,
-  handleReservedOrConflictCommandError,
-} from './shared';
+import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parseCheckboxField, filterQueryParam } from './validation';
+import { renderError, renderView } from './viewHelpers';
+import { logAndRedirectError, handleReservedOrConflictCommandError } from './errorHandling';
 
 const log = createLogger('Web');
 const router = Router();

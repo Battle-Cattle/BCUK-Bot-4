@@ -2,7 +2,9 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { issueToken, getTokenStatus, revokeToken } from '../../db';
 import { csrfProtection } from '../csrf';
-import { logAndRedirectError, renderError, filterQueryParam, renderView } from './shared';
+import { filterQueryParam } from './validation';
+import { renderError, renderView } from './viewHelpers';
+import { logAndRedirectError } from './errorHandling';
 import { getSessionUser } from '../session';
 
 const log = createLogger('Web');
