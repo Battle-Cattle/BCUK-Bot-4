@@ -110,6 +110,55 @@ async function releaseNamedLocks(connection: mysql.PoolConnection, lockNames: st
   }
 }
 
+/**
+ * Runs `body` inside a transaction on `connection`, for up to {@link MAX_DEADLOCK_RETRIES}
+ * attempts: begins a transaction, runs `body`, and commits on success. On error, rolls back;
+ * if the error is a deadlock and this wasn't the final attempt, logs and retries; otherwise
+ * rethrows the original error, unless `exhaustedErrorMessage` is given, in which case a
+ * deadlock on the final attempt throws a new `Error(exhaustedErrorMessage)` instead of the raw
+ * driver error (a non-deadlock error always rethrows as-is, on any attempt). Factors out the
+ * retry/transaction scaffolding shared by {@link runSerializedCommandWrite} (in `commandLocks.ts`)
+ * and `withDeadlockRetryAndTriggerLock` (in `commandConflicts.ts`), which differ only in how
+ * their named lock(s) are acquired around this loop.
+ * @param connection Transaction-capable pool connection to run `body` on.
+ * @param retryLogLabel Short label for the deadlock-retry log message.
+ * @param body Per-attempt work to run inside the transaction, given the 0-based attempt index.
+ *   Must not itself begin/commit/rollback a transaction.
+ * @param exhaustedErrorMessage When given, thrown instead of the raw deadlock error if a
+ *   deadlock persists through every attempt.
+ * @returns The value returned by `body` on the attempt that commits successfully.
+ * @throws Whatever `body` throws, when not a deadlock (or once retries are exhausted and
+ *   `exhaustedErrorMessage` isn't given); {@link Error}(`exhaustedErrorMessage`) if retries
+ *   are exhausted and it is given.
+ */
+export async function runWithDeadlockRetry<T>(
+  connection: mysql.PoolConnection,
+  retryLogLabel: string,
+  body: (attempt: number) => Promise<T>,
+  exhaustedErrorMessage?: string,
+): Promise<T> {
+  for (let attempt = 0; attempt < MAX_DEADLOCK_RETRIES; attempt++) {
+    await connection.beginTransaction();
+    try {
+      const result = await body(attempt);
+      await connection.commit();
+      return result;
+    } catch (error) {
+      await connection.rollback();
+      const deadlock = isDeadlockError(error);
+      if (deadlock && attempt < MAX_DEADLOCK_RETRIES - 1) {
+        log.warn(`Deadlock in ${retryLogLabel}, retrying (attempt ${attempt + 1}/${MAX_DEADLOCK_RETRIES}).`);
+        continue;
+      }
+      if (deadlock && exhaustedErrorMessage !== undefined) {
+        throw new Error(exhaustedErrorMessage, { cause: error });
+      }
+      throw error;
+    }
+  }
+  throw new Error(`[DB] Deadlock retry limit reached in ${retryLogLabel}.`);
+}
+
 // ─── Exists checks ────────────────────────────────────────────────────────────
 
 interface SqlExistsCheckPlan {
@@ -274,29 +323,15 @@ export async function runSerializedCommandWrite<T>(
 
   try {
     connection = await getPool().getConnection();
-    await acquireNamedLocks(connection, lockNames);
+    const conn = connection;
+    await acquireNamedLocks(conn, lockNames);
 
-    for (let attempt = 0; attempt < MAX_DEADLOCK_RETRIES; attempt++) {
-      await connection.beginTransaction();
-      try {
-        if (await isAnyCommandTakenAcrossTables(normalizedCommands, options, connection, checks)) {
-          throw new CommandConflictError(normalizedCommands);
-        }
-
-        const result = await writeOperation(connection);
-        await connection.commit();
-        return result;
-      } catch (error) {
-        await connection.rollback();
-        if (isDeadlockError(error) && attempt < MAX_DEADLOCK_RETRIES - 1) {
-          log.warn(`Deadlock detected, retrying transaction (attempt ${attempt + 1}/${MAX_DEADLOCK_RETRIES}).`);
-          continue;
-        }
-        throw error;
+    return await runWithDeadlockRetry(conn, 'runSerializedCommandWrite', async () => {
+      if (await isAnyCommandTakenAcrossTables(normalizedCommands, options, conn, checks)) {
+        throw new CommandConflictError(normalizedCommands);
       }
-    }
-
-    throw new Error('[DB] Deadlock retry limit reached without success.');
+      return await writeOperation(conn);
+    });
   } finally {
     if (connection) {
       try { await releaseNamedLocks(connection, lockNames); } catch (err) { log.warn('Failed to release named locks:', err); }

@@ -1,7 +1,8 @@
-import { randomBytes, createHash } from 'crypto';
+import { createHash } from 'crypto';
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 import { issueTokenOnConnection } from './companionTokens';
+import { generateSecretAndHash } from '../shared/crypto';
 
 const CODE_TTL_SECONDS = 60;
 
@@ -16,8 +17,7 @@ const CODE_TTL_SECONDS = 60;
  * @returns The plaintext code (only ever returned here — only the hash is stored).
  */
 export async function createCode(discordId: string): Promise<string> {
-  const plain = randomBytes(24).toString('hex');
-  const hash = createHash('sha256').update(plain).digest('hex');
+  const { secret: plain, hash } = generateSecretAndHash(24);
   await getPool().execute(
     `INSERT INTO companion_oauth_codes (code_hash, discord_id, expires_at, used_at)
      VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), NULL)`,
