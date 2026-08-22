@@ -3,9 +3,9 @@ import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { upsertReward, setRewardVideos, deleteReward } from '../../db';
-import {
-  logAndRedirectError, parsePositiveIntId, requireStreamer, parseWeight, parseRewardIdParam, trimField,
-} from './shared';
+import { parsePositiveIntId, parseWeight, parseRewardIdParam, trimField } from './validation';
+import { requireStreamer } from './viewHelpers';
+import { logAndRedirectError } from './errorHandling';
 import { toStringArray } from './overlayAdminShared';
 
 const log = createLogger('OverlayAdminReward');

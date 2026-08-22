@@ -5,7 +5,9 @@ import { requireAuth } from '../middleware';
 import { updatePricingCooldownForReward } from '../../db';
 import { createCustomReward, updateCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { logAndRedirectError, requireStreamer, parseRewardIdParam } from './shared';
+import { parseRewardIdParam } from './validation';
+import { requireStreamer } from './viewHelpers';
+import { logAndRedirectError } from './errorHandling';
 import {
   parseRewardFields, effectiveCooldownSeconds, handleRewardDeleteAction,
 } from './channelPointsAdminShared';

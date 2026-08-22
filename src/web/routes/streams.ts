@@ -2,11 +2,12 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { getStreamGroupsForGuild, getStreamersForGuild, getAllEventSubStreamers, getAllUsers } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireManager } from '../middleware';
+import { requireManager, requireManagerJson } from '../middleware';
 import { getSessionUser } from '../session';
 import { getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db';
-import { filterQueryParam, renderView, renderError } from './shared';
+import { filterQueryParam } from './validation';
+import { renderView, renderError } from './viewHelpers';
 import { STREAMS_ERROR_CODES, STREAMS_ERROR_MESSAGES, type StreamsErrorCode } from './streamsErrors';
 import groupsRouter from './streamGroups';
 import streamersRouter from './streamStreamers';
@@ -80,7 +81,7 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
  * @param req - Express request; reads `req.session.user.currentGuildId`.
  * @param res - Express response; returns `{ streams }` from `getLiveStates(guildId)`.
  */
-router.get('/streams/live', requireManager, (req, res) => {
+router.get('/streams/live', requireManagerJson, (req, res) => {
   res.json({ streams: getLiveStates(getSessionUser(req).currentGuildId!) });
 });
 

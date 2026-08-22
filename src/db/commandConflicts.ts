@@ -8,8 +8,7 @@ import {
   acquireNamedLock,
   releaseNamedLock,
   getCommandWriteLockName,
-  isDeadlockError,
-  MAX_DEADLOCK_RETRIES,
+  runWithDeadlockRetry,
 } from './commandLocks';
 import { fromBit } from './utils';
 
@@ -330,12 +329,13 @@ export async function insertUserCommandAssignment(
 
 /**
  * Runs `body` inside a transaction guarded by a named lock on `commandId`'s trigger string,
- * retrying on deadlock up to `MAX_DEADLOCK_RETRIES` times. The named lock is session-scoped:
- * acquired once (on the first attempt, after the trigger string is known) and released in the
- * outer `finally`, so deadlock retries on the inner transaction still hold the lock between
- * attempts. Factors out the retry/lock/transaction scaffolding shared by
- * {@link assignUserToCommandWithinTransaction} and {@link assignUsersToCommandWithinTransaction},
- * which differ only in the eligibility lookup, conflict checks, and insert `body` performs.
+ * retrying on deadlock up to `MAX_DEADLOCK_RETRIES` times (via {@link runWithDeadlockRetry}).
+ * The named lock is session-scoped: acquired once (on the first attempt, after the trigger
+ * string is known) and released in the outer `finally`, so deadlock retries on the inner
+ * transaction still hold the lock between attempts. Factors out the retry/lock/transaction
+ * scaffolding shared by {@link assignUserToCommandWithinTransaction} and
+ * {@link assignUsersToCommandWithinTransaction}, which differ only in the eligibility lookup,
+ * conflict checks, and insert `body` performs.
  * @param connection Transaction-capable pool connection to run the work on.
  * @param commandId Command id whose trigger string the named lock is scoped to.
  * @param retryLogLabel Short name of the calling function, used in the deadlock-retry log message.
@@ -357,9 +357,15 @@ async function withDeadlockRetryAndTriggerLock(
   let lockNameByTrigger: string | null = null;
 
   try {
-    for (let attempt = 0; attempt < MAX_DEADLOCK_RETRIES; attempt++) {
-      await connection.beginTransaction();
-      try {
+    await runWithDeadlockRetry(
+      connection,
+      retryLogLabel,
+      // Looks up the command's current trigger string, acquires the session-scoped named lock
+      // on it if this is the first attempt to reach here, then runs the caller's `body`. Returns
+      // nothing — `body` performs the actual write; a thrown error (e.g. a fresh
+      // `CommandConflictError`) propagates up through `runWithDeadlockRetry`, which rolls back
+      // and either retries (on deadlock) or rethrows.
+      async () => {
         const normalizedTriggerString = await getCommandTriggerStringById(connection, commandId);
 
         if (!lockNameByTrigger) {
@@ -368,22 +374,9 @@ async function withDeadlockRetryAndTriggerLock(
         }
 
         await body(normalizedTriggerString);
-        await connection.commit();
-        return;
-      } catch (error) {
-        await connection.rollback();
-        if (isDeadlockError(error)) {
-          if (attempt < MAX_DEADLOCK_RETRIES - 1) {
-            log.warn(`Deadlock in ${retryLogLabel}, retrying (attempt ${attempt + 1}/${MAX_DEADLOCK_RETRIES}).`);
-            continue;
-          }
-          break;
-        }
-        throw error;
-      }
-    }
-
-    throw new Error(`[DB] Deadlock retry limit reached in ${retryLimitFnName}.`);
+      },
+      `[DB] Deadlock retry limit reached in ${retryLimitFnName}.`,
+    );
   } finally {
     if (lockNameByTrigger) {
       try { await releaseNamedLock(connection, lockNameByTrigger); } catch (err) { log.warn('Failed to release named lock:', err); }

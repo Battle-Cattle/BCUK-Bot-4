@@ -4,7 +4,7 @@ import { addStreamGroup, updateStreamGroup, removeStreamGroupAndStreamers } from
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { getSessionUser } from '../session';
-import { parsePositiveIntId, parseCheckboxField } from './shared';
+import { parsePositiveIntId, parseCheckboxField } from './validation';
 import { redirectStreamsInvalid, redirectStreamsFailure } from './streamsErrors';
 import { triggerRestart } from './streamRestart';
 

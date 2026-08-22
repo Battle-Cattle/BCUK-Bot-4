@@ -91,7 +91,7 @@ vi.mock('../db', async () => {
   };
 });
 
-vi.mock('../discord/voicePresence', () => ({
+vi.mock('./twitchGuildResolutionRuntime', () => ({
   resolveGuildIdForDiscordId: vi.fn(),
 }));
 
@@ -152,7 +152,7 @@ import {
 } from './twitchChannelMembership';
 import * as twitchChannelMembership from './twitchChannelMembership';
 import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName } from '../db';
-import { resolveGuildIdForDiscordId } from '../discord/voicePresence';
+import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
 import { getUsers } from './twitchApi';
 import { setTwitchChannel } from '../shared/statusStore';
 import { executeCustomCommandForTwitch } from '../commands/customCommandHandler';

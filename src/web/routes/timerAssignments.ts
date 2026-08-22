@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { assignUserToTimer, unassignUserFromTimer } from '../../db';
-import { parsePositiveIntId } from './shared';
+import { parsePositiveIntId } from './validation';
 import { createAssignmentRouter } from './assignmentRoutes';
 
 /**

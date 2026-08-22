@@ -5,7 +5,7 @@ const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as s
 vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
   requireGuildContext: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireGuildContext'); next(); },
-  requireMod: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireMod'); next(); },
+  requireModJson: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireModJson'); next(); },
 }));
 
 vi.mock('../csrf', () => ({
@@ -88,9 +88,9 @@ describe('GET /status', () => {
 });
 
 describe('GET /voice/channels', () => {
-  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+  it('runs requireGuildContext before requireModJson, so a demoted session is re-checked with a fresh access level', async () => {
     await supertest(buildApp()).get('/voice/channels');
-    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireModJson']);
   });
 
   it('reports the current channel and DB default for the session guild', async () => {
@@ -123,9 +123,9 @@ describe('GET /voice/channels', () => {
 });
 
 describe('POST /voice/join', () => {
-  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+  it('runs requireGuildContext before requireModJson, so a demoted session is re-checked with a fresh access level', async () => {
     await supertest(buildApp()).post('/voice/join').send({ channelId: '123456789012345678' });
-    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireModJson']);
   });
 
   it('disconnects then joins the requested channel for the session guild', async () => {
@@ -183,9 +183,9 @@ describe('POST /voice/join', () => {
 });
 
 describe('POST /voice/leave', () => {
-  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+  it('runs requireGuildContext before requireModJson, so a demoted session is re-checked with a fresh access level', async () => {
     await supertest(buildApp()).post('/voice/leave');
-    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireModJson']);
   });
 
   it('disconnects the session guild and returns ok', async () => {

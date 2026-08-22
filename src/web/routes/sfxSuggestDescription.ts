@@ -11,7 +11,7 @@ import { csrfProtection } from '../csrf';
 import { requireOwnerJson } from '../middleware';
 import { OPENAI_API_KEY, SFX_FOLDER } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
-import { parsePositiveBigIntId, normalizeRequiredText } from './shared';
+import { parsePositiveBigIntId, normalizeRequiredText } from './validation';
 
 const log = createLogger('Web');
 const router = Router();

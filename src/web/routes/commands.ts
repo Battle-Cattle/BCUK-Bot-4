@@ -10,7 +10,8 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { renderError, filterQueryParam, renderView } from './shared';
+import { filterQueryParam } from './validation';
+import { renderError, renderView } from './viewHelpers';
 import commandMutationsRouter from './commandMutations';
 import commandAssignmentsRouter from './commandAssignments';
 import commandGuildOverridesRouter from './commandGuildOverrides';

@@ -15,7 +15,8 @@ import {
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { renderError, filterQueryParam, isLoopbackRedirectUri, renderView } from './shared';
+import { filterQueryParam, isLoopbackRedirectUri } from './validation';
+import { renderError, renderView } from './viewHelpers';
 import { fetchWithRetry } from '../../shared/fetchWithRetry';
 import { runUserMutation } from './adminUserMutationQueue';
 

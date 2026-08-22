@@ -9,14 +9,8 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
-import {
-  logAndRedirectError,
-  normalizeRequiredText,
-  normalizeSingleTokenRequiredText,
-  parsePositiveIntId,
-  parsePositiveBigIntId,
-  parseCheckboxField,
-} from './shared';
+import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parsePositiveBigIntId, parseCheckboxField } from './validation';
+import { logAndRedirectError } from './errorHandling';
 import { removeSfxFiles } from './sfxMutationsShared';
 
 const log = createLogger('Web');

@@ -3,7 +3,8 @@ import { mockLogger } from '../test-utils/loggerMock';
 
 vi.mock('./logger', () => ({ createLogger: mockLogger }));
 
-import { encryptToken, decryptToken } from './crypto';
+import { encryptToken, decryptToken, generateSecretAndHash } from './crypto';
+import { createHash } from 'node:crypto';
 
 const VALID_SECRET = 'a'.repeat(64); // 64 hex chars = 32 bytes
 
@@ -67,5 +68,29 @@ describe('decryptToken', () => {
     const parts = token.split('.');
     parts[2] = parts[2]!.split('').reverse().join('');
     expect(() => decryptToken(parts.join('.'), VALID_SECRET)).toThrow();
+  });
+});
+
+describe('generateSecretAndHash', () => {
+  it('returns a hex secret matching its SHA-256 hash', () => {
+    const { secret, hash } = generateSecretAndHash();
+    expect(secret).toMatch(/^[0-9a-f]+$/);
+    expect(hash).toBe(createHash('sha256').update(secret).digest('hex'));
+  });
+
+  it('defaults to 32 bytes (64 hex characters)', () => {
+    const { secret } = generateSecretAndHash();
+    expect(secret).toHaveLength(64);
+  });
+
+  it('honors a custom byte length', () => {
+    const { secret } = generateSecretAndHash(24);
+    expect(secret).toHaveLength(48);
+  });
+
+  it('produces different secrets on repeated calls', () => {
+    const a = generateSecretAndHash();
+    const b = generateSecretAndHash();
+    expect(a.secret).not.toBe(b.secret);
   });
 });

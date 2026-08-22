@@ -3,7 +3,8 @@ import { Router } from 'express';
 import { updateSfxFile, deleteSfxFile } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
-import { logAndRedirectError, parsePositiveIntId, parseCheckboxField } from './shared';
+import { parsePositiveIntId, parseCheckboxField } from './validation';
+import { logAndRedirectError } from './errorHandling';
 import { removeSfxFiles } from './sfxMutationsShared';
 
 const log = createLogger('Web');

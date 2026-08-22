@@ -8,7 +8,9 @@ import {
 } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { logAndRedirectError, requireStreamer, parsePositiveIntId, parseRewardIdParam, parseCheckboxField } from './shared';
+import { parsePositiveIntId, parseRewardIdParam, parseCheckboxField } from './validation';
+import { requireStreamer } from './viewHelpers';
+import { logAndRedirectError } from './errorHandling';
 import {
   parseNonNegativeNumberField, parsePositiveNumberField,
   parseRoundToNearestField, effectiveCooldownSeconds, handleRewardDeleteAction,

@@ -12,15 +12,8 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext, requireMod } from '../middleware';
-import {
-  logAndRedirectError,
-  normalizeRequiredText,
-  normalizeSingleTokenRequiredText,
-  parsePositiveIntId,
-  parseCheckboxField,
-  normalizeDiscordId,
-  handleReservedOrConflictCommandError,
-} from './shared';
+import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parseCheckboxField, normalizeDiscordId } from './validation';
+import { logAndRedirectError, handleReservedOrConflictCommandError } from './errorHandling';
 
 const log = createLogger('Web');
 const router = Router();

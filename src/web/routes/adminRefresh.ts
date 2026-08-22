@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { getGuildMemberUsers, updateDiscordName } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireManager } from '../middleware';
+import { requireManager, requireManagerJson } from '../middleware';
 import { getSessionUser } from '../session';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
 import { runUserMutation } from './adminUserMutationQueue';
@@ -85,7 +85,7 @@ const router = Router();
  * @param res - Express response; always responds 200 with the guild's `RefreshState`
  *   as JSON.
  */
-router.get('/users/refresh-status', requireManager, (req, res) => {
+router.get('/users/refresh-status', requireManagerJson, (req, res) => {
   res.json(getRefreshState(getSessionUser(req).currentGuildId!));
 });
 

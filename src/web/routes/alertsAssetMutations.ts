@@ -10,7 +10,9 @@ import { setAlertImage, setAlertSound } from '../../db';
 import type { AlertEventType, DbStreamerEventSub } from '../../db';
 import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
-import { logAndRedirectError, requireStreamer, createMulterErrorRedirectHandler, makeUploadMiddleware } from './shared';
+import { requireStreamer } from './viewHelpers';
+import { logAndRedirectError } from './errorHandling';
+import { createMulterErrorRedirectHandler, makeUploadMiddleware } from './uploadMiddleware';
 import { detectAudioType } from './sfxFileUpload';
 import { NOT_A_STREAMER_REDIRECT, parseEventType } from './alertsShared';
 

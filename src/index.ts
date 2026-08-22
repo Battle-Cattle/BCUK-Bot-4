@@ -4,6 +4,8 @@ import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot'
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startDiscordBot, stopDiscordBot } from './discord/discordBot';
 import { reloadGuildRegistry } from './discord/guildRegistry';
+import { resolveGuildIdForDiscordId } from './discord/voicePresence';
+import { registerTwitchGuildResolutionRuntime } from './twitch/twitchGuildResolutionRuntime';
 import { startTwitchMonitor, stopTwitchMonitor, getMultiTwitchDataForChannel } from './twitch/monitor/twitchMonitor';
 import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitch/eventsub/twitchEventSub';
 import { startEventSubReconciliation, stopEventSubReconciliation } from './twitch/eventsub/twitchEventSubReconciliation';
@@ -80,6 +82,13 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 
+/**
+ * Boots the bot: verifies DB connectivity, wires every Twitch/EventSub runtime callback,
+ * loads the guild registry, then starts the Discord bot, Twitch bot, web panel, and
+ * schedulers, in that order (see the Startup Sequence section of `CLAUDE.md`).
+ * @returns Resolves once every component has started; rejects (and exits the process,
+ *   via the `.catch` below) if DB connectivity or the guild registry load fails.
+ */
 async function main(): Promise<void> {
   log.info('Starting BCUK Bot 4...');
 
@@ -114,6 +123,7 @@ async function main(): Promise<void> {
   registerEventSubTwitchRuntime({ send: sayInChannel });
   registerRewardPricingRuntime({ pushPricingUpdate });
   registerTimerCommandsRuntime({ send: sayInChannel, getLoginUserIds: getActiveChannelUserIds });
+  registerTwitchGuildResolutionRuntime({ resolveGuildIdForDiscordId });
 
   // Load the guild registry before the Discord client connects so the
   // messageCreate gate recognises registered guilds from the first message.

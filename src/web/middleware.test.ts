@@ -15,7 +15,7 @@ vi.mock('./csrf', () => ({
 }));
 
 import { createHash } from 'crypto';
-import { requireAuth, requireManager, requireMod, requireAdmin, requireOwner, requireOwnerJson, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
+import { requireAuth, requireManager, requireMod, requireAdmin, requireOwner, requireOwnerJson, requireModJson, requireManagerJson, requireAdminJson, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
 import { findKeyByHash, findDiscordIdByTokenHash, getEffectiveAccessLevelForUser, findUser, getAllGuilds, getGuildsForMember, AccessLevel } from '../db';
 
 function makeReq(overrides: object = {}): any {
@@ -246,6 +246,93 @@ describe('requireOwnerJson', () => {
     const req = makeReq({ session: {} });
     const res = makeRes();
     requireOwnerJson(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+// ─── requireModJson ────────────────────────────────────────────────────────────
+
+describe('requireModJson', () => {
+  it('calls next() when access level is MOD (1)', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.MOD } } });
+    requireModJson(req, makeRes(), next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('returns a JSON 403 when access level is USER (0)', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER } } });
+    const res = makeRes();
+    requireModJson(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
+    expect(res.render).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns a JSON 403 when session.user is absent', () => {
+    const req = makeReq({ session: {} });
+    const res = makeRes();
+    requireModJson(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+// ─── requireManagerJson ────────────────────────────────────────────────────────
+
+describe('requireManagerJson', () => {
+  it('calls next() when access level is MANAGER (2)', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.MANAGER } } });
+    requireManagerJson(req, makeRes(), next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('returns a JSON 403 when access level is MOD (1)', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.MOD } } });
+    const res = makeRes();
+    requireManagerJson(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
+    expect(res.render).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns a JSON 403 when no session user', () => {
+    const req = makeReq({ session: {} });
+    const res = makeRes();
+    requireManagerJson(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+// ─── requireAdminJson ──────────────────────────────────────────────────────────
+
+describe('requireAdminJson', () => {
+  it('calls next() when access level is ADMIN (3)', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN } } });
+    requireAdminJson(req, makeRes(), next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('returns a JSON 403 when access level is MANAGER (2)', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.MANAGER } } });
+    const res = makeRes();
+    requireAdminJson(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
+    expect(res.render).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns a JSON 403 when no session user', () => {
+    const req = makeReq({ session: {} });
+    const res = makeRes();
+    requireAdminJson(req, res, next);
     expect(res.status).toHaveBeenCalledWith(403);
     expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
     expect(next).not.toHaveBeenCalled();

@@ -7,13 +7,39 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 vi.mock('../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn((s: string) => (s ? s.toLowerCase() : null)),
 }));
-vi.mock('./commandLocks', () => ({
-  acquireNamedLock: vi.fn().mockResolvedValue(undefined),
-  releaseNamedLock: vi.fn().mockResolvedValue(undefined),
-  getCommandWriteLockName: vi.fn((s: string) => `bcuk_cmd_${s}`),
-  isDeadlockError: vi.fn().mockReturnValue(false),
-  MAX_DEADLOCK_RETRIES: 3,
-}));
+vi.mock('./commandLocks', () => {
+  const isDeadlockError = vi.fn().mockReturnValue(false);
+  const MAX_DEADLOCK_RETRIES = 3;
+  // Faithful re-implementation of the real runWithDeadlockRetry (commandLocks.ts), wired to
+  // this factory's own isDeadlockError/MAX_DEADLOCK_RETRIES mocks so tests can drive retry
+  // behavior by queuing isDeadlockError return values, same as they did before this helper
+  // was extracted out of commandConflicts.ts.
+  const runWithDeadlockRetry = vi.fn(async (connection: any, retryLogLabel: string, body: (attempt: number) => Promise<unknown>, exhaustedErrorMessage?: string) => {
+    for (let attempt = 0; attempt < MAX_DEADLOCK_RETRIES; attempt++) {
+      await connection.beginTransaction();
+      try {
+        const result = await body(attempt);
+        await connection.commit();
+        return result;
+      } catch (error) {
+        await connection.rollback();
+        const deadlock = isDeadlockError(error);
+        if (deadlock && attempt < MAX_DEADLOCK_RETRIES - 1) continue;
+        if (deadlock && exhaustedErrorMessage !== undefined) throw new Error(exhaustedErrorMessage, { cause: error });
+        throw error;
+      }
+    }
+    throw new Error(`[DB] Deadlock retry limit reached in ${retryLogLabel}.`);
+  });
+  return {
+    acquireNamedLock: vi.fn().mockResolvedValue(undefined),
+    releaseNamedLock: vi.fn().mockResolvedValue(undefined),
+    getCommandWriteLockName: vi.fn((s: string) => `bcuk_cmd_${s}`),
+    isDeadlockError,
+    MAX_DEADLOCK_RETRIES,
+    runWithDeadlockRetry,
+  };
+});
 vi.mock('./commandStringUtils', () => ({
   CommandConflictError: class CommandConflictError extends Error {
     commands: string[];

@@ -1,12 +1,12 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Request, type Response } from 'express';
 import { getGuildScopedStatus } from '../guildScopedStatus';
-import { requireAuth, requireGuildContext, requireMod } from '../middleware';
+import { requireAuth, requireGuildContext, requireModJson } from '../middleware';
 import { connect, disconnect, getCurrentChannelId } from '../../audio/audioPlayer';
 import { csrfProtection } from '../csrf';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { getGuildById } from '../../db';
-import { normalizeDiscordId } from './shared';
+import { normalizeDiscordId } from './validation';
 import { getReadyDiscordClientOrRespond } from './streamdeckGuildResolution';
 
 const log = createLogger('API');
@@ -65,7 +65,7 @@ router.get('/status', requireAuth, async (req, res) => {
  *   away otherwise), so `getSessionGuildId`'s 400 branch is a defensive
  *   fallback here, not the normal path.
  */
-router.get('/voice/channels', requireGuildContext, requireMod, async (req, res) => {
+router.get('/voice/channels', requireGuildContext, requireModJson, async (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
   try {
@@ -97,7 +97,7 @@ router.get('/voice/channels', requireGuildContext, requireMod, async (req, res) 
  *   otherwise), so `getSessionGuildId`'s "no guild selected" 400 is a
  *   defensive fallback here, not the normal path.
  */
-router.post('/voice/join', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
+router.post('/voice/join', requireGuildContext, requireModJson, csrfProtection, async (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
 
@@ -139,7 +139,7 @@ router.post('/voice/join', requireGuildContext, requireMod, csrfProtection, asyn
  *   handler runs (or redirects away otherwise), so `getSessionGuildId`'s 400
  *   branch is a defensive fallback here, not the normal path.
  */
-router.post('/voice/leave', requireGuildContext, requireMod, csrfProtection, (req, res) => {
+router.post('/voice/leave', requireGuildContext, requireModJson, csrfProtection, (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
   disconnect(guildId);

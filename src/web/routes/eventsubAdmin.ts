@@ -5,7 +5,7 @@ import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
 import { getSessionUser } from '../session';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
-import { parsePositiveIntId } from './shared';
+import { parsePositiveIntId } from './validation';
 import { redirectStreamsInvalid, redirectStreamsFailure } from './streamsErrors';
 
 const log = createLogger('Web');

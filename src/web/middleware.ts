@@ -6,12 +6,9 @@ import {
   findKeyByHash,
   findDiscordIdByTokenHash,
   findUser,
-  getAllGuilds,
-  getEffectiveAccessLevelForUser,
-  getGuildsForMember,
-  type DbGuild,
 } from '../db';
-import { renderView } from './routes/shared';
+import { renderView } from './routes/viewHelpers';
+import { fetchLiveGuildsForUser, resolveAccessLevelForGuild } from './guildAccess';
 
 /**
  * Ensures the request has a logged-in session user, redirecting to login otherwise.
@@ -39,12 +36,9 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
  * level is recomputed for the resolved guild so authorization always reflects the
  * current guild, never a stale login-time value.
  *
- * For a non-owner, the access level is read off the same `getGuildsForMember` result already
- * fetched to build `user.guilds` (each entry carries the user's `access_level` for that guild)
- * instead of a second `guild_member` query — `getGuildsForMember` and `getMemberAccessLevel`
- * would otherwise query the exact same row. Owners still resolve via
- * `getEffectiveAccessLevelForUser`, which short-circuits to Admin for `is_owner` without a
- * query, so this doesn't add a query on that path either.
+ * Guild fetching and access-level resolution are shared with `POST /guild/select` via
+ * `fetchLiveGuildsForUser`/`resolveAccessLevelForGuild` (`./guildAccess`) — see those for
+ * why a non-owner's access level never needs a second `guild_member` query.
  *
  * @param req - Express request; reads and mutates `req.session.user`.
  * @param res - Express response; used to redirect when no guild context can be resolved.
@@ -64,15 +58,7 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
     return;
   }
 
-  let liveGuilds: DbGuild[];
-  let accessLevelByGuildId: Map<string, number> | null = null;
-  if (dbUser.is_owner) {
-    liveGuilds = await getAllGuilds();
-  } else {
-    const memberships = await getGuildsForMember(user.discordId);
-    liveGuilds = memberships;
-    accessLevelByGuildId = new Map(memberships.map((g) => [g.guild_id, g.access_level]));
-  }
+  const { guilds: liveGuilds, accessLevelByGuildId } = await fetchLiveGuildsForUser(dbUser);
   user.isOwner = dbUser.is_owner;
   user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
 
@@ -95,11 +81,7 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
     }
   }
 
-  user.accessLevel = (
-    accessLevelByGuildId
-      ? accessLevelByGuildId.get(user.currentGuildId) ?? AccessLevel.USER
-      : await getEffectiveAccessLevelForUser(user.currentGuildId, dbUser)
-  ) as (typeof AccessLevel)[keyof typeof AccessLevel];
+  user.accessLevel = await resolveAccessLevelForGuild(dbUser, user.currentGuildId, accessLevelByGuildId);
 
   next();
 }
@@ -132,6 +114,31 @@ export const requireMod = requireAccessLevel(AccessLevel.MOD, 'Mod or above');
 
 /** Ensures the current-guild access level is Manager or above, otherwise renders a 403. */
 export const requireManager = requireAccessLevel(AccessLevel.MANAGER, 'Manager or above');
+
+/**
+ * Creates a middleware that ensures the current-guild access level is at least `level`,
+ * otherwise responds `403 { error: 'forbidden' }`. JSON counterpart to
+ * {@link requireAccessLevel}, for routes whose handlers respond with `res.json(...)`
+ * rather than rendering a view.
+ * @param level - Minimum required `AccessLevel` value.
+ * @returns An Express middleware: calls `next()` when the session user meets `level`,
+ *   otherwise sends a 403 JSON response.
+ */
+function requireAccessLevelJson(level: number): (req: Request, res: Response, next: NextFunction) => void {
+  return (req, res, next) => {
+    if (req.session.user && req.session.user.accessLevel >= level) {
+      next();
+    } else {
+      res.status(403).json({ error: 'forbidden' });
+    }
+  };
+}
+
+/** Ensures the current-guild access level is Mod or above, otherwise sends a 403 JSON response. */
+export const requireModJson = requireAccessLevelJson(AccessLevel.MOD);
+
+/** Ensures the current-guild access level is Manager or above, otherwise sends a 403 JSON response. */
+export const requireManagerJson = requireAccessLevelJson(AccessLevel.MANAGER);
 
 /**
  * Creates a middleware that authenticates a request via a `Bearer` token: hashes it with
@@ -192,6 +199,9 @@ export const requireCompanionKey = authenticateBearerToken(
 /** Ensures the current-guild access level is Admin, otherwise renders a 403. */
 export const requireAdmin = requireAccessLevel(AccessLevel.ADMIN, 'Admin');
 
+/** Ensures the current-guild access level is Admin, otherwise sends a 403 JSON response. */
+export const requireAdminJson = requireAccessLevelJson(AccessLevel.ADMIN);
+
 /**
  * Ensures the session user is the bot owner (`user.is_owner`), otherwise renders a
  * 403. Distinct from {@link requireAdmin}: `isOwner` is a global super-admin flag set
@@ -220,10 +230,10 @@ export function requireOwner(req: Request, res: Response, next: NextFunction): v
  * Same check as {@link requireOwner}, for JSON-only routes: responds
  * `403 { error: 'forbidden' }` instead of rendering an HTML error page, so a
  * denied `fetch` call gets a real error payload instead of falling back to a
- * generic parse-failure message. See issue #451 — this is intentionally a
- * one-off next to `requireOwner` rather than a generic render-vs-json option
- * on `requireAccessLevel`; extract a shared factory once a second JSON-over-session
- * guard is needed.
+ * generic parse-failure message. See issue #451. Kept separate from
+ * {@link requireAccessLevelJson} (the generalized JSON variant for the
+ * `AccessLevel` ladder) since owner status is a global `isOwner` flag, not
+ * a per-guild access level.
  * @param req - Express request; checked for `req.session.user?.isOwner`.
  * @param res - Express response; used to send a 403 JSON body when denied.
  * @param next - Called when the session user is the owner.

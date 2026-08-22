@@ -5,7 +5,7 @@ import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiE
 import { TWITCH_EVENTSUB_REDIRECT_URI } from '../../shared/config';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { clearAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
-import { logAndRedirectError } from './shared';
+import { logAndRedirectError } from './errorHandling';
 
 const log = createLogger('Web');
 const router = Router();
