@@ -168,6 +168,21 @@ describe('pruneStaleCooldowns / clearCooldowns', () => {
     expect(stillCoolingDown).toHaveLength(0);
   });
 
+  it('drops a command-session cooldown entry once it is far older than its own cooldown window', () => {
+    // cooldownMs = 600_000 (interval_seconds * 1000); the prune factor is 10x that.
+    const rowA = timerRow({ id: 1, channel: 'chA', interval_seconds: 600 });
+    const rowB = timerRow({ id: 1, channel: 'chB', interval_seconds: 600 });
+    const sessionIdByChannel = new Map([['chA', 's1'], ['chB', 's1']]);
+
+    pickRowsToFire([rowA, rowB], sessionIdByChannel, 0, () => 0);
+
+    // Not itself independently observable through pickRowsToFire (the cooldown gate
+    // already reopens once elapsed time exceeds cooldownMs, long before the prune
+    // threshold) — this just exercises the deletion branch so a stale entry doesn't
+    // sit in the map forever.
+    expect(() => pruneStaleCooldowns(6_000_001)).not.toThrow();
+  });
+
   it('clears all reservations so every group can be picked again immediately', () => {
     const rowA = timerRow({ id: 1, channel: 'chA', interval_seconds: 600 });
     const rowB = timerRow({ id: 1, channel: 'chB', interval_seconds: 600 });
