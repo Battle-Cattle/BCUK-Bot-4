@@ -185,6 +185,22 @@ describe('getCustomRewards', () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
     await expect(getCustomRewards('bc1', 'user-token')).rejects.toThrow('getCustomRewards failed: 500');
   });
+
+  it('retries after a transient network error and returns the successful result', async () => {
+    vi.useFakeTimers();
+    const rewards = [{ id: 'rwd1', title: 'Cool Reward', cost: 500 }];
+    vi.mocked(globalThis.fetch)
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(mockResponse(200, { data: rewards }));
+
+    const promise = getCustomRewards('bc1', 'user-token');
+    await vi.runAllTimersAsync();
+    const result = await promise;
+
+    expect(result).toEqual(rewards);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
 });
 
 describe('getRewardRedemptions', () => {
@@ -232,6 +248,22 @@ describe('getRewardRedemptions', () => {
   it('throws a generic error for other non-OK statuses', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
     await expect(getRewardRedemptions('bc1', 'rwd1', 'UNFULFILLED', 'user-token')).rejects.toThrow('getRewardRedemptions failed: 500');
+  });
+
+  it('retries after a transient network error and returns the successful result', async () => {
+    vi.useFakeTimers();
+    const redemptions = [{ id: 'redemp1', user_login: 'viewer1', status: 'UNFULFILLED' }];
+    vi.mocked(globalThis.fetch)
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(mockResponse(200, { data: redemptions }));
+
+    const promise = getRewardRedemptions('bc1', 'rwd1', 'UNFULFILLED', 'user-token');
+    await vi.runAllTimersAsync();
+    const result = await promise;
+
+    expect(result).toEqual({ redemptions, cursor: null });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 });
 
