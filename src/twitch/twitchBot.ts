@@ -32,6 +32,11 @@ import {
 
 const log = createLogger('Twitch');
 
+/** tmi.js's real internal shape for the confirmed-channel list, which isn't part of its public types. */
+interface TmiClientWithChannels {
+  channels: string[];
+}
+
 let client: tmi.Client | null = null;
 let connected = false;
 const TWITCH_CHAT_MESSAGE_PATTERN = /^\[#[^\]]+\] <[^>]+>: /;
@@ -186,7 +191,7 @@ function onDisconnected(reason: string): void {
   // disconnect, so without this reset the client would re-join every channel
   // twice on reconnect (once from its own queue, once from reconcileJoinedChannels).
   // `channels` is not part of the public type surface but is a real internal array.
-  (client as any).channels = [];
+  (client as unknown as TmiClientWithChannels).channels = [];
   log.warn(`Disconnected: ${reason}`);
   getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
 }
