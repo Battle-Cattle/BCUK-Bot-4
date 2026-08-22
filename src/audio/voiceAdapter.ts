@@ -67,8 +67,7 @@ function getOrCreateDispatcher(client: Client): ClientDispatcher {
 function makeSendPayload(channel: VoiceBasedChannel): (payload: unknown) => boolean {
   return function sendPayload(payload: unknown): boolean {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      channel.guild.shard.send(payload as any);
+      channel.guild.shard.send(payload);
       return true;
     } catch {
       return false;
