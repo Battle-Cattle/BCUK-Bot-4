@@ -251,14 +251,16 @@ function customRewardUrl(broadcasterId: string, rewardId?: string): string {
  * Lists a broadcaster's custom rewards via Helix. Unlike its create/update/delete siblings, a
  * 403 (the broadcaster is not a Twitch Partner or Affiliate, so channel points aren't available)
  * is treated as "no rewards" rather than a typed error, since listing is read-only and callers
- * generally just want to render whatever's available.
+ * generally just want to render whatever's available. Wrapped in fetchHelixWithRetry, unlike
+ * create/update/delete: this is a read used by the background reconciliation poll, not a
+ * synchronous admin action, so a transient network error is worth retrying rather than surfacing.
  * @param broadcasterId - Twitch user ID whose custom rewards to list.
  * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
  * @returns The broadcaster's custom rewards, or `[]` on a 403.
  * @throws If Twitch returns a non-OK, non-403 status.
  */
 export async function getCustomRewards(broadcasterId: string, userToken: string): Promise<TwitchCustomReward[]> {
-  const res = await twitchFetch(customRewardUrl(broadcasterId), { headers: authHeaders(userToken) });
+  const res = await fetchHelixWithRetry(customRewardUrl(broadcasterId), authHeaders(userToken));
   if (res.status === 403) return [];
   if (!res.ok) throw new Error(`[TwitchAPI] getCustomRewards failed: ${res.status}`);
   const data = await res.json() as { data: TwitchCustomReward[] };
@@ -288,7 +290,10 @@ export interface TwitchRewardRedemptionPage {
  * Lists one page (up to 50) of a broadcaster's redemptions for one custom reward and status, via
  * Helix, newest first. Used by the EventSub reconciliation poll to catch redemptions the
  * WebSocket connection missed (e.g. during a reconnect gap) — the live notification path is
- * driven entirely by EventSub and never calls this.
+ * driven entirely by EventSub and never calls this. Wrapped in fetchHelixWithRetry: this poll
+ * runs unattended in the background, so a transient network error should be retried rather than
+ * surfaced — unlike the reward create/update/delete calls, which are synchronous admin actions
+ * and leave retrying to the caller.
  *
  * @param broadcasterId - Twitch user ID whose reward redemptions to list.
  * @param rewardId - Twitch reward UUID to scope the query to.
@@ -307,7 +312,7 @@ export async function getRewardRedemptions(
 ): Promise<TwitchRewardRedemptionPage> {
   let url = `https://api.twitch.tv/helix/channel_points/custom_rewards/redemptions?broadcaster_id=${encodeURIComponent(broadcasterId)}&reward_id=${encodeURIComponent(rewardId)}&status=${status}&sort=NEWEST&first=50`;
   if (after) url += `&after=${encodeURIComponent(after)}`;
-  const res = await twitchFetch(url, { headers: authHeaders(userToken) });
+  const res = await fetchHelixWithRetry(url, authHeaders(userToken));
   if (res.status === 403) return { redemptions: [], cursor: null };
   if (!res.ok) throw new Error(`[TwitchAPI] getRewardRedemptions failed: ${res.status}`);
   const data = await res.json() as { data: TwitchRewardRedemption[]; pagination?: { cursor?: string } };
