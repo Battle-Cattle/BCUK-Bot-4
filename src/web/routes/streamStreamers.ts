@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { addStreamer, removeStreamer, findUser } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
-import { getSessionUser } from '../session';
+import { getCurrentGuildId } from '../session';
 import { parsePositiveIntId, normalizeDiscordId } from './validation';
 import { redirectStreamsInvalid, redirectStreamsFailure } from './streamsErrors';
 import { triggerRestart } from './streamRestart';
@@ -33,7 +33,7 @@ router.post('/streams/streamers/add', requireManager, csrfProtection, async (req
   try {
     const user = await findUser(discordId);
     if (!user?.twitch_name) return redirectStreamsInvalid(res, 'missing_fields');
-    await addStreamer(discordId, parsedGroupId, getSessionUser(req).currentGuildId!);
+    await addStreamer(discordId, parsedGroupId, getCurrentGuildId(req));
     triggerRestart();
   } catch (err) {
     return redirectStreamsFailure(res, log, 'Add streamer error:', err, 'add_streamer_failed');
@@ -56,7 +56,7 @@ router.post('/streams/streamers/remove', requireManager, csrfProtection, async (
   if (parsedStreamerId === null) return redirectStreamsInvalid(res, 'invalid_id');
 
   try {
-    const removed = await removeStreamer(parsedStreamerId, getSessionUser(req).currentGuildId!);
+    const removed = await removeStreamer(parsedStreamerId, getCurrentGuildId(req));
     if (!removed) return redirectStreamsInvalid(res, 'remove_streamer_failed');
     triggerRestart();
   } catch (err) {

@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { upsertOverride, removeOverride } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod, requireGuildContext } from '../middleware';
-import { getSessionUser } from '../session';
+import { getCurrentGuildId } from '../session';
 import { parsePositiveIntId, trimField } from './validation';
 import { logAndRedirectError } from './errorHandling';
 
@@ -19,7 +19,7 @@ const router = Router();
  * no custom output), the override row is removed instead of upserted.
  */
 router.post('/commands/guild-override', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
-  const guildId = getSessionUser(req).currentGuildId!;
+  const guildId = getCurrentGuildId(req);
   const body = req.body as Record<string, unknown>;
   const commandId = parsePositiveIntId(body.command_id as string | string[] | undefined);
   if (!commandId) return res.redirect('/commands?error=invalid_id');
@@ -46,7 +46,7 @@ router.post('/commands/guild-override', requireGuildContext, requireMod, csrfPro
  * Accepts `command_id`. Guild ID is always taken from the session.
  */
 router.post('/commands/guild-override/reset', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
-  const guildId = getSessionUser(req).currentGuildId!;
+  const guildId = getCurrentGuildId(req);
   const body = req.body as Record<string, unknown>;
   const commandId = parsePositiveIntId(body.command_id as string | string[] | undefined);
   if (!commandId) return res.redirect('/commands?error=invalid_id');
