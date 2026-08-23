@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { TimerCommandForScheduler } from '../../db';
 import {
   pickRowsToFire, releaseReservations, pruneStaleCooldowns, clearCooldowns,
@@ -162,7 +162,11 @@ describe('pruneStaleCooldowns / clearCooldowns', () => {
     const sessionIdByChannel = new Map([['chA', 's1'], ['chB', 's1']]);
 
     pickRowsToFire([rowA, rowB], sessionIdByChannel, 0, () => 0);
+
+    const deleteSpy = vi.spyOn(Map.prototype, 'delete');
     pruneStaleCooldowns(1000);
+    expect(deleteSpy).not.toHaveBeenCalled();
+    deleteSpy.mockRestore();
 
     const stillCoolingDown = pickRowsToFire([rowA, rowB], sessionIdByChannel, 1000, () => 0);
     expect(stillCoolingDown).toHaveLength(0);
@@ -176,11 +180,14 @@ describe('pruneStaleCooldowns / clearCooldowns', () => {
 
     pickRowsToFire([rowA, rowB], sessionIdByChannel, 0, () => 0);
 
-    // Not itself independently observable through pickRowsToFire (the cooldown gate
-    // already reopens once elapsed time exceeds cooldownMs, long before the prune
-    // threshold) — this just exercises the deletion branch so a stale entry doesn't
-    // sit in the map forever.
-    expect(() => pruneStaleCooldowns(6_000_001)).not.toThrow();
+    // The deletion isn't independently observable through pickRowsToFire (the
+    // cooldown gate already reopens once elapsed time exceeds cooldownMs, long
+    // before the prune threshold), so spy on Map.prototype.delete to confirm the
+    // stale entry is actually removed rather than just asserting no throw.
+    const deleteSpy = vi.spyOn(Map.prototype, 'delete');
+    pruneStaleCooldowns(6_000_001);
+    expect(deleteSpy).toHaveBeenCalledWith('1::s1');
+    deleteSpy.mockRestore();
   });
 
   it('clears all reservations so every group can be picked again immediately', () => {
