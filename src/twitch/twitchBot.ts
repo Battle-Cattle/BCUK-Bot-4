@@ -357,8 +357,8 @@ export async function startTwitchBot(): Promise<void> {
 }
 
 /**
- * Twitch's practical chat message length limit, in characters. `sendRawChatMessage` splits longer
- * text at this boundary rather than sending it as one oversized message.
+ * Twitch's practical chat message length limit, in characters. `sayInChannel` splits longer text
+ * at this boundary rather than sending it as one oversized message.
  */
 const MAX_MESSAGE_LENGTH = 500;
 
@@ -366,8 +366,9 @@ const MAX_MESSAGE_LENGTH = 500;
  * Splits `text` into chunks no longer than `maxLength`, breaking on the last space at or before
  * each boundary where possible so words aren't cut mid-word. Adapted from Twurple's own internal
  * `ChatClient#say()` splitting logic (`splitOnSpaces` in `@twurple/chat`'s `messageUtil`), which
- * isn't exported from its public API — needed here because {@link sendRawChatMessage} bypasses
- * `ChatClient#say()` entirely (see its docs for why) and so no longer gets that splitting for free.
+ * isn't exported from its public API — needed here because {@link sayInChannel} bypasses
+ * `ChatClient#say()` entirely (see {@link sendRawChatMessage}'s docs for why) and so no longer
+ * gets that splitting for free.
  * Fixes an off-by-one present in Twurple's original: its fit check used `remaining + 1 <= maxLength`,
  * which — for a final remainder exactly `maxLength` long — falsely failed the check and let an
  * unrelated space inside that remainder force an unnecessary extra chunk.
@@ -395,51 +396,57 @@ function splitMessageOnSpaces(text: string, maxLength: number): string[] {
 }
 
 /**
- * Sends `text` to `channel` via the underlying `ircv3` client directly, bypassing
+ * Sends `chunk` to `channel` via the underlying `ircv3` client directly, bypassing
  * `ChatClient#say()`. Twurple's `say()` runs every send through its own internal rate limiter,
  * which — unless the client is configured with a static `isAlwaysMod: true` — enforces a fixed
  * 1.2s-per-channel floor with no per-call override, regardless of the sender's actual moderator/
  * VIP/broadcaster status. That would silently re-impose a floor under exactly the privileged sends
  * {@link throttledTwitchSend} is meant to exempt from one, on top of whatever `twitchSendQueue.ts`
- * already decided — so `twitchSendQueue.ts` needs to be the only rate limiter on this path. Splits
- * `text` first (see {@link splitMessageOnSpaces}) since bypassing `say()` also bypasses its own
- * message-length splitting.
+ * already decided — so `twitchSendQueue.ts` needs to be the only rate limiter on this path. Takes
+ * an already-split chunk (see {@link splitMessageOnSpaces}, called by {@link sayInChannel} before
+ * this) rather than splitting itself, so each chunk can be individually rate-limited — see
+ * {@link sayInChannel}'s docs for why that matters.
  * @param c - The connected Twurple chat client (only its underlying `irc` client is used).
  * @param channel - Normalized Twitch channel name (without a leading `#`).
- * @param text - Message text to send.
+ * @param chunk - A single message chunk, already within Twitch's length limit.
  * @returns Nothing — sends are fire-and-forget over the IRC connection, like `IrcClient#say()` itself.
  */
-function sendRawChatMessage(c: ChatClient, channel: string, text: string): void {
-  for (const chunk of splitMessageOnSpaces(text, MAX_MESSAGE_LENGTH)) {
-    c.irc.say(`#${channel}`, chunk);
-  }
+function sendRawChatMessage(c: ChatClient, channel: string, chunk: string): void {
+  c.irc.say(`#${channel}`, chunk);
 }
 
 /**
  * Sends `message` to a Twitch channel, throttled against Twitch's global per-account rate-limit
  * buckets (see {@link throttledTwitchSend}) so this shared entry point — used by every auto-posting
  * feature (custom commands, counters, timers, shoutouts, EventSub, etc.) — can never burst past
- * them, regardless of how many features fire at once or which channels they target. Whether the
- * bot is currently privileged (moderator/VIP/broadcaster) in the target channel is re-checked live
- * (see {@link isPrivilegedInChannel}) right before the send actually runs, not when it's queued,
- * since this call may sit behind others for a while — the same reason the connection itself is
- * rechecked below rather than trusted from before queueing. Sends via {@link sendRawChatMessage}
- * rather than `ChatClient#say()` directly — see its docs for why.
+ * them, regardless of how many features fire at once or which channels they target. `message` is
+ * split first (see {@link splitMessageOnSpaces}) and each chunk is run through its own
+ * {@link throttledTwitchSend} call in order — bypassing `ChatClient#say()` (see
+ * {@link sendRawChatMessage}'s docs for why) also bypasses its length-based splitting, and a
+ * multi-chunk message must count as multiple real sends against the rate limit (including the
+ * per-channel floor between them), not one, since Twitch itself receives one `PRIVMSG` per chunk.
+ * Whether the bot is currently privileged (moderator/VIP/broadcaster) in the target channel is
+ * re-checked live (see {@link isPrivilegedInChannel}) right before each chunk's send actually
+ * runs, not when it's queued, since a chunk may sit behind others for a while — the same reason
+ * the connection itself is rechecked below rather than trusted from before queueing.
  * @param channel - Twitch channel to send to (normalized before sending).
  * @param message - Message text to send.
- * @returns Resolves once the message has actually been sent.
+ * @returns Resolves once every chunk has actually been sent, in order.
  * @throws If `channel` doesn't normalize to a valid channel name, or the client isn't connected
- *   (checked both before queueing and again when the send actually runs, since the connection
- *   can drop while this send is waiting behind others in the global queue).
+ *   (checked before queueing and again before each chunk's send actually runs, since the
+ *   connection can drop while a chunk is waiting behind others in the global queue). A chunk that
+ *   throws aborts any remaining chunks — the rejection propagates without sending the rest.
  */
 export async function sayInChannel(channel: string, message: string): Promise<void> {
   const normalized = normalizeTwitchChannelName(channel);
   if (!normalized) throw new Error(`[Twitch] Invalid channel name: ${channel}`);
   if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
-  await throttledTwitchSend(normalized, () => isPrivilegedInChannel(normalized), async () => {
-    if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
-    sendRawChatMessage(client, normalized, message);
-  });
+  for (const chunk of splitMessageOnSpaces(message, MAX_MESSAGE_LENGTH)) {
+    await throttledTwitchSend(normalized, () => isPrivilegedInChannel(normalized), async () => {
+      if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
+      sendRawChatMessage(client, normalized, chunk);
+    });
+  }
 }
 
 /**

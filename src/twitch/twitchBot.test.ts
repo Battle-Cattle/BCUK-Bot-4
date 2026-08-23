@@ -678,7 +678,11 @@ describe('sayInChannel', () => {
   it('splits a message longer than the Twitch length limit on spaces', async () => {
     await connectBot();
     const longMessage = `${'a'.repeat(490)} ${'b'.repeat(20)}`;
-    await sayInChannel('#streamer', longMessage);
+    const sent = sayInChannel('#streamer', longMessage);
+    // Each chunk is its own throttled send, so the second chunk waits behind the non-privileged
+    // per-channel floor (NON_PRIVILEGED_CHANNEL_FLOOR_MS) before going out.
+    await vi.runAllTimersAsync();
+    await sent;
     expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
     expect(mockClient.irc.say).toHaveBeenNthCalledWith(1, '#streamer', 'a'.repeat(490));
     expect(mockClient.irc.say).toHaveBeenNthCalledWith(2, '#streamer', 'b'.repeat(20));
@@ -686,7 +690,9 @@ describe('sayInChannel', () => {
 
   it('splits a single token longer than the length limit, with no space to break on', async () => {
     await connectBot();
-    await sayInChannel('#streamer', 'a'.repeat(600));
+    const sent = sayInChannel('#streamer', 'a'.repeat(600));
+    await vi.runAllTimersAsync();
+    await sent;
     const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
     expect(chunks.length).toBeGreaterThan(1);
     chunks.forEach((chunk) => { expect(chunk.length).toBeLessThanOrEqual(500); });
@@ -696,9 +702,27 @@ describe('sayInChannel', () => {
   it('keeps an exact-500-character final remainder as one message, even though it contains a space', async () => {
     await connectBot();
     const message = `${'a'.repeat(500)} ${'b'.repeat(250)} ${'c'.repeat(249)}`;
-    await sayInChannel('#streamer', message);
+    const sent = sayInChannel('#streamer', message);
+    await vi.runAllTimersAsync();
+    await sent;
     const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
     expect(chunks).toEqual(['a'.repeat(500), `${'b'.repeat(250)} ${'c'.repeat(249)}`]);
+  });
+
+  it('applies the non-privileged per-channel floor between chunks of the same split message', async () => {
+    await connectBot();
+    const longMessage = `${'a'.repeat(490)} ${'b'.repeat(20)}`;
+    const sent = sayInChannel('#streamer', longMessage);
+
+    // The first chunk goes out immediately; the second must wait the full floor.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await sent;
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
   });
 
   // Twitch's rate-limit window and per-channel floor are exercised exhaustively in
