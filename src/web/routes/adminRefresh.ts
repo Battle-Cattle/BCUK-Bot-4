@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { getGuildMemberUsers, updateDiscordName } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager, requireManagerJson } from '../middleware';
-import { getSessionUser } from '../session';
+import { getCurrentGuildId } from '../session';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
 import { runUserMutation } from './adminUserMutationQueue';
 import {
@@ -81,24 +81,24 @@ const router = Router();
 /**
  * GET /admin/users/refresh-status — polling endpoint for the current guild's
  * in-progress (or most recent) Discord-name-refresh job.
- * @param req - Express request; reads `getSessionUser(req).currentGuildId`.
+ * @param req - Express request; reads `getCurrentGuildId(req)`.
  * @param res - Express response; always responds 200 with the guild's `RefreshState`
  *   as JSON.
  */
 router.get('/users/refresh-status', requireManagerJson, (req, res) => {
-  res.json(getRefreshState(getSessionUser(req).currentGuildId!));
+  res.json(getRefreshState(getCurrentGuildId(req)));
 });
 
 /**
  * POST /admin/users/refresh-names — kicks off a background job that re-fetches each
  * guild member's Discord display name and updates it if changed. No-ops if a refresh
  * is already running for the guild.
- * @param req - Express request; reads `getSessionUser(req).currentGuildId`.
+ * @param req - Express request; reads `getCurrentGuildId(req)`.
  * @param res - Express response; always redirects to `/admin/users` immediately —
  *   the refresh itself runs asynchronously and is polled via `/users/refresh-status`.
  */
 router.post('/users/refresh-names', requireManager, csrfProtection, async (req, res) => {
-  const guildId = getSessionUser(req).currentGuildId!;
+  const guildId = getCurrentGuildId(req);
   if (getRefreshState(guildId).outcome === 'running') {
     return res.redirect('/admin/users');
   }
