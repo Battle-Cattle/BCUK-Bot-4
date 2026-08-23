@@ -24,7 +24,7 @@ export async function fetchWithRetry(
   maxRetries = 2,
   retryDelayMs = 500,
 ): Promise<Response> {
-  let lastResponse: Response;
+  let lastResponse: Response | undefined;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     lastResponse = await fetch(input, init);
     if (lastResponse.ok || !TRANSIENT_STATUS_CODES.has(lastResponse.status)) {
@@ -39,5 +39,9 @@ export async function fetchWithRetry(
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }
   }
-  return lastResponse!;
+  // Unreachable in practice — the loop above always runs at least once (attempt 0
+  // <= maxRetries) since no caller passes a negative maxRetries — but this makes
+  // that invariant an explicit, type-checked throw instead of a bare `!` assertion.
+  if (!lastResponse) throw new Error('fetchWithRetry: no attempt was made');
+  return lastResponse;
 }
