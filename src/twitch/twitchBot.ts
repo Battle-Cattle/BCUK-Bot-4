@@ -316,6 +316,13 @@ export async function startTwitchBot(): Promise<void> {
   const newClient = new ChatClient({
     authProvider,
     channels: [],
+    // TWITCH_OAUTH_TOKEN currently carries the legacy `chat_login` scope rather than the modern
+    // `chat:read`/`chat:edit` ChatClient normally requires — tmi.js never checked scopes at all,
+    // so this went unnoticed until the Twurple migration. Without this, ChatClient rejects the
+    // token outright (surfaced only as a generic "None of the queried intents (chat) are known
+    // by the auth provider" — the real "missing scopes" error is swallowed internally). Tracked
+    // for a proper fix (a refreshing, modern-scoped token) in #550.
+    legacyScopes: true,
   });
   client = newClient;
   setChatClient(client);
