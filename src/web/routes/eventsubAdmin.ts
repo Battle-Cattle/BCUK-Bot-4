@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { clearStreamerToken } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
-import { getSessionUser } from '../session';
+import { getCurrentGuildId } from '../session';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { parsePositiveIntId } from './validation';
 import { redirectStreamsInvalid, redirectStreamsFailure } from './streamsErrors';
@@ -31,7 +31,7 @@ router.post('/streams/twitch-disconnect/:streamerId', requireAdmin, csrfProtecti
   if (streamerId === null) return redirectStreamsInvalid(res, 'invalid_id');
 
   try {
-    const cleared = await clearStreamerToken(streamerId, getSessionUser(req).currentGuildId!);
+    const cleared = await clearStreamerToken(streamerId, getCurrentGuildId(req));
     if (!cleared) return redirectStreamsInvalid(res, 'invalid_id');
     reloadEventSubSubscriptions();
   } catch (err) {

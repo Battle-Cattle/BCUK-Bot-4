@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { getStreamGroupsForGuild, getStreamersForGuild, getAllEventSubStreamers, getAllUsers } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager, requireManagerJson } from '../middleware';
-import { getSessionUser } from '../session';
+import { getCurrentGuildId } from '../session';
 import { getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db';
 import { filterQueryParam } from './validation';
@@ -37,7 +37,7 @@ function getFriendlyError(key: string): string {
 router.get('/streams', requireManager, csrfProtection, async (req, res) => {
   try {
     const isAdmin = (req.session.user?.accessLevel ?? 0) >= AccessLevel.ADMIN;
-    const guildId = getSessionUser(req).currentGuildId!;
+    const guildId = getCurrentGuildId(req);
     const [groups, streamers, eventSubStreamers, allUsers] = await Promise.all([
       getStreamGroupsForGuild(guildId),
       getStreamersForGuild(guildId),
@@ -82,7 +82,7 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
  * @param res - Express response; returns `{ streams }` from `getLiveStates(guildId)`.
  */
 router.get('/streams/live', requireManagerJson, (req, res) => {
-  res.json({ streams: getLiveStates(getSessionUser(req).currentGuildId!) });
+  res.json({ streams: getLiveStates(getCurrentGuildId(req)) });
 });
 
 router.use(groupsRouter);
