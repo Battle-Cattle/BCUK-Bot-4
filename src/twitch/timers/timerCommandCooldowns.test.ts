@@ -164,9 +164,12 @@ describe('pruneStaleCooldowns / clearCooldowns', () => {
     pickRowsToFire([rowA, rowB], sessionIdByChannel, 0, () => 0);
 
     const deleteSpy = vi.spyOn(Map.prototype, 'delete');
-    pruneStaleCooldowns(1000);
-    expect(deleteSpy).not.toHaveBeenCalled();
-    deleteSpy.mockRestore();
+    try {
+      pruneStaleCooldowns(1000);
+      expect(deleteSpy).not.toHaveBeenCalled();
+    } finally {
+      deleteSpy.mockRestore();
+    }
 
     const stillCoolingDown = pickRowsToFire([rowA, rowB], sessionIdByChannel, 1000, () => 0);
     expect(stillCoolingDown).toHaveLength(0);
@@ -185,9 +188,12 @@ describe('pruneStaleCooldowns / clearCooldowns', () => {
     // before the prune threshold), so spy on Map.prototype.delete to confirm the
     // stale entry is actually removed rather than just asserting no throw.
     const deleteSpy = vi.spyOn(Map.prototype, 'delete');
-    pruneStaleCooldowns(6_000_001);
-    expect(deleteSpy).toHaveBeenCalledWith('1::s1');
-    deleteSpy.mockRestore();
+    try {
+      pruneStaleCooldowns(6_000_001);
+      expect(deleteSpy).toHaveBeenCalledWith('1::s1');
+    } finally {
+      deleteSpy.mockRestore();
+    }
   });
 
   it('clears all reservations so every group can be picked again immediately', () => {
