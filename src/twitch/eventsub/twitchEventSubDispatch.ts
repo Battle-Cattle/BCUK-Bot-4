@@ -60,10 +60,16 @@ const notificationHandlers = new Map<string, NotificationHandler>([
  */
 export function dispatchNotification(type: string, event: Record<string, unknown>, condition: Record<string, string>): void {
   const broadcasterId = condition.broadcaster_user_id ?? condition.to_broadcaster_user_id;
-  if (!broadcasterId) return;
+  if (!broadcasterId) {
+    log.warn(`EventSub notification (${type}) has no broadcaster_user_id/to_broadcaster_user_id in its condition — dropping`);
+    return;
+  }
 
   const info = streamerMap.get(broadcasterId);
-  if (!info) return;
+  if (!info) {
+    log.warn(`EventSub notification (${type}) for unknown broadcaster ${broadcasterId} — not in the dispatch map, dropping`);
+    return;
+  }
   const config = info.config ?? DEFAULT_EVENT_CONFIG;
 
   const handler = notificationHandlers.get(type);
