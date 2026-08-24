@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { mockLogger } = vi.hoisted(() => ({
-  mockLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
-}));
+const { mockLog, mockLogger } = vi.hoisted(() => {
+  const mockLog = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  return { mockLog, mockLogger: () => mockLog };
+});
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({
@@ -56,7 +57,7 @@ beforeEach(() => {
   vi.mocked(getValidToken).mockResolvedValue('user-token');
   vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1' } as any]);
   vi.mocked(getRewardRedemptions).mockResolvedValue({ redemptions: [], cursor: null });
-  vi.mocked(handleRedemption).mockResolvedValue(undefined);
+  vi.mocked(handleRedemption).mockResolvedValue(true);
 });
 
 afterEach(async () => {
@@ -154,11 +155,32 @@ describe('runReconciliationTick', () => {
     expect(handleRedemption).toHaveBeenCalledTimes(1);
 
     // Cursor wasn't advanced past the failure — the same redemption is fetched and retried.
-    vi.mocked(handleRedemption).mockResolvedValue(undefined);
+    vi.mocked(handleRedemption).mockResolvedValue(true);
     await runReconciliationTick();
 
     expect(handleRedemption).toHaveBeenCalledTimes(2);
     expect(vi.mocked(handleRedemption).mock.calls[1][1]).toEqual(expect.objectContaining({ id: 'r1' }));
+  });
+
+  it('logs a "caught" warning only when handleRedemption reports it actually processed the redemption', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    mockFulfilledOnly({ redemptions: [redemption('r1', new Date().toISOString())], cursor: null });
+    vi.mocked(handleRedemption).mockResolvedValue(true);
+
+    await runReconciliationTick();
+
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Reconciliation caught a redemption missed by EventSub'));
+  });
+
+  it('does not log a "caught" warning when handleRedemption reports the redemption was already handled live (duplicate)', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    mockFulfilledOnly({ redemptions: [redemption('r1', new Date().toISOString())], cursor: null });
+    vi.mocked(handleRedemption).mockResolvedValue(false);
+
+    await runReconciliationTick();
+
+    expect(handleRedemption).toHaveBeenCalledTimes(1);
+    expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Reconciliation caught a redemption missed by EventSub'));
   });
 
   it('skips a streamer with no config row — they never got the redemption subscription in the first place', async () => {
