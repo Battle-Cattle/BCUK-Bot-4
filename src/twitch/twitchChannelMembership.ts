@@ -1,4 +1,4 @@
-import tmi from 'tmi.js';
+import type { ChatClient } from '@twurple/chat';
 import { setTwitchChannel } from '../shared/statusStore';
 import { getTwitchEnabledChannels } from '../db';
 import { normalizeTwitchChannelName } from './twitchChannelName';
@@ -6,11 +6,11 @@ import { getUsers } from './twitchApi';
 import { createMutationQueue } from '../shared/mutationQueue';
 import { withTimeout } from './twitchSendQueue';
 import { createLogger } from '../shared/logger';
-import { throttledJoin, compensateIfStale, resetJoinGate, JOIN_PART_TIMEOUT_MS, MembershipDeps } from './twitchChannelNetworkOps';
+import { throttledJoin, compensateIfStale, resetJoinGate, partAsync, JOIN_PART_TIMEOUT_MS, MembershipDeps } from './twitchChannelNetworkOps';
 
 const log = createLogger('Twitch');
 
-let _client: tmi.Client | null = null;
+let _client: ChatClient | null = null;
 let _connected = false;
 
 const activeChannels = new Set<string>();
@@ -35,8 +35,12 @@ function membershipDeps(): MembershipDeps {
   };
 }
 
-/** Sets the active tmi.js client instance (called from twitchBot after connect). */
-export function setTmiClient(c: tmi.Client | null): void {
+/**
+ * Sets the active Twurple chat client instance (called from twitchBot after connect).
+ * @param c - The connected chat client, or `null` to clear it (e.g. on shutdown).
+ * @returns Nothing — mutates the module-level `_client` reference in place.
+ */
+export function setChatClient(c: ChatClient | null): void {
   _client = c;
 }
 
@@ -52,7 +56,7 @@ export function setChannelJoinedHook(fn: (channel: string) => void): void {
 
 function isChannelJoined(channel: string): boolean {
   if (!_client || !_connected) return false;
-  return _client.getChannels().some((ch) => normalizeTwitchChannelName(ch) === channel);
+  return _client.currentChannels.some((ch) => normalizeTwitchChannelName(ch) === channel);
 }
 
 function cacheChannelUserId(channel: string): void {
@@ -66,7 +70,7 @@ function fireChannelJoinedHook(channel: string): void {
 }
 
 /**
- * Parts `channel` via the tmi.js client if it's currently joined but no longer in
+ * Parts `channel` via the Twurple chat client if it's currently joined but no longer in
  * `activeChannels` (a "stale" membership left over from before a reconnect); otherwise just
  * syncs the status store. Bounded by {@link JOIN_PART_TIMEOUT_MS} so a stalled part can't wedge
  * {@link membershipMutationQueue} for this channel forever.
@@ -84,7 +88,7 @@ async function partStaleChannel(channel: string): Promise<void> {
     setTwitchChannel(channel, false);
     return;
   }
-  const partCall = _client.part(channel);
+  const partCall = partAsync(_client, channel);
   compensateIfStale(membershipDeps(), channel, partCall, 'part');
   await withTimeout(partCall, JOIN_PART_TIMEOUT_MS, 'Twitch part');
   setTwitchChannel(channel, false);
@@ -113,7 +117,7 @@ async function joinMissingChannel(channel: string): Promise<void> {
 export async function reconcileJoinedChannels(): Promise<void> {
   if (!_client || !_connected) return;
 
-  const joinedChannels = _client.getChannels()
+  const joinedChannels = _client.currentChannels
     .map((channel) => normalizeTwitchChannelName(channel))
     .filter((channel): channel is string => channel !== null);
   const joinedChannelSet = new Set(joinedChannels);
@@ -175,7 +179,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
     // and the actual client.join() call.
     if (isChannelJoined(normalized)) {
       // Already joined — sync local tracking so status store and activeChannels
-      // agree with the live tmi.js state.
+      // agree with the live Twurple client state.
       activeChannels.add(normalized);
       setTwitchChannel(normalized, true);
       cacheChannelUserId(normalized);
@@ -226,7 +230,7 @@ export async function partTwitchChannel(channel: string): Promise<void> {
 
     if (!_client || !_connected) {
       // We remove local state immediately and let reconcileJoinedChannels() part
-      // any stale tmi.js channel memberships on the next successful connect.
+      // any stale Twurple channel memberships on the next successful connect.
       activeChannels.delete(normalized);
       activeChannelUserIds.delete(normalized);
       setTwitchChannel(normalized, false);
@@ -238,7 +242,7 @@ export async function partTwitchChannel(channel: string): Promise<void> {
       activeChannelUserIds.delete(normalized);
       setTwitchChannel(normalized, false);
       if (isChannelJoined(normalized)) {
-        const partCall = _client.part(normalized);
+        const partCall = partAsync(_client, normalized);
         compensateIfStale(membershipDeps(), normalized, partCall, 'part');
         await withTimeout(partCall, JOIN_PART_TIMEOUT_MS, 'Twitch part');
       }

@@ -33,18 +33,20 @@ const NON_PRIVILEGED_CHANNEL_FLOOR_MS = 1_000;
 /**
  * Caps how many times {@link throttledTwitchSend} re-checks `isPrivileged` before giving up and
  * proceeding with whichever status it last observed. Without this bound, a status that keeps
- * flipping between every check (e.g. tmi.js's per-channel userstate churning during a busy
- * Shared Chat session) would spin the recheck loop forever — since that loop runs *before*
- * {@link SEND_TIMEOUT_MS} ever applies (that only bounds the final `send()` call), an unbounded
- * loop would never call `send()` at all, and would wedge {@link globalQueue}'s single `'global'`
- * lane for every later send, across every channel and feature, with no error and nothing to log.
+ * flipping between every check (e.g. the bot's per-channel USERSTATE-derived privilege churning
+ * during a busy Shared Chat session) would spin the recheck loop forever — since that loop runs
+ * *before* {@link SEND_TIMEOUT_MS} ever applies (that only bounds the final `send()` call), an
+ * unbounded loop would never call `send()` at all, and would wedge {@link globalQueue}'s single
+ * `'global'` lane for every later send, across every channel and feature, with no error and
+ * nothing to log.
  */
 const MAX_PRIVILEGE_RECHECKS = 5;
 
 /**
- * Every send in this module runs behind a single global queue, so one stalled `send()` (tmi.js's
- * `client.say()` has no built-in timeout and can hang indefinitely on a stalled socket) would
- * otherwise wedge every later send, across every channel and feature, forever. Bounding it here
+ * Every send in this module runs behind a single global queue, so one stalled `send()` (the raw
+ * Twurple IRC send used by `sendRawChatMessage()` has no built-in timeout and can hang
+ * indefinitely on a stalled socket) would otherwise wedge every later send, across every channel
+ * and feature, forever. Bounding it here
  * guarantees the queue always frees up, even though the underlying send may still be stuck.
  */
 const SEND_TIMEOUT_MS = 10_000;

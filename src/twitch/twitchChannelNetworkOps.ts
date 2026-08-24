@@ -1,11 +1,11 @@
-import tmi from 'tmi.js';
+import type { ChatClient } from '@twurple/chat';
 import { createLogger } from '../shared/logger';
 import { withTimeout } from './twitchSendQueue';
 
 const log = createLogger('Twitch');
 
 /**
- * Like `client.say()`, tmi.js's `client.join()`/`client.part()` have no built-in timeout and can
+ * Like `client.say()`, Twurple's `ChatClient.join()`/`part()` have no built-in timeout and can
  * hang indefinitely on a stalled socket. Callers serialize these behind their own queue/gate, so
  * an unbounded hang here would wedge every later join/part — across every channel — forever.
  * Bounding it guarantees those always free up, even though the underlying call may still be stuck.
@@ -21,6 +21,18 @@ const JOIN_THROTTLE_MS = 600;
 // queue and could otherwise collectively exceed Twitch's IRC JOIN rate limit.
 let joinGate: Promise<void> = Promise.resolve();
 
+/**
+ * Calls `client.part(channel)` and wraps it in a promise. Unlike `client.join()`, Twurple's
+ * `part()` is synchronous and fire-and-forget (no server ack to wait on) — this wrapper exists
+ * only so callers can pass it through the same `withTimeout`/{@link compensateIfStale} plumbing
+ * shared with `join()`. In practice it always settles on the same tick, so a stalled `part()` and
+ * the "stale part landing late" compensation branch cannot occur — only a synchronous throw
+ * (converted here into a rejection) is possible.
+ */
+export async function partAsync(client: ChatClient, channel: string): Promise<void> {
+  client.part(channel);
+}
+
 /** Resets the global join throttle gate. */
 export function resetJoinGate(): void {
   joinGate = Promise.resolve();
@@ -34,11 +46,11 @@ export function resetJoinGate(): void {
  * minutes after the caller assembled this bundle.
  */
 export interface MembershipDeps {
-  /** Returns the current tmi.js client, or null if not set. */
-  getClient: () => tmi.Client | null;
+  /** Returns the current Twurple chat client, or null if not set. */
+  getClient: () => ChatClient | null;
   /** Whether the client is currently connected. */
   isConnected: () => boolean;
-  /** Whether `channel` is currently joined per the live tmi.js client's own channel list. */
+  /** Whether `channel` is currently joined per the live Twurple client's own channel list. */
   isChannelJoined: (channel: string) => boolean;
   /** Whether `channel` is currently desired to be joined (the source of truth for intent). */
   isDesiredJoined: (channel: string) => boolean;
@@ -80,7 +92,7 @@ export function compensateIfStale(deps: MembershipDeps, channel: string, call: P
       const desiredJoined = deps.isDesiredJoined(channel);
       if (kind === 'join' && !desiredJoined && deps.isChannelJoined(channel)) {
         log.warn(`[Twitch] Stale join for ${channel} landed after it was no longer desired active — reverting`);
-        const revertCall = client.part(channel);
+        const revertCall = partAsync(client, channel);
         // The revert itself can time out and land late, same as any other part call — watch it
         // too, so a stale revert can't silently undo a join that's since become desired again.
         compensateIfStale(deps, channel, revertCall, 'part');
@@ -97,22 +109,24 @@ export function compensateIfStale(deps: MembershipDeps, channel: string, call: P
  * Calls `client.join(channel)`, globally throttled to JOIN_THROTTLE_MS between joins across all
  * channels. Bounded by {@link JOIN_PART_TIMEOUT_MS} so a stalled join can't wedge the throttle
  * gate — and every join queued behind it — forever.
- * @param client - The connected tmi.js client to join with.
+ * @param client - The connected Twurple chat client to join with.
  * @param channel - The already-normalized channel name to join.
  * @param onSettled - Called with the raw (un-timed-out) join promise right after it's issued, so
  *   the caller can watch for a late settlement after giving up on it via the timeout race — see
- *   {@link compensateIfStale}.
+ *   {@link compensateIfStale}. Issuing the join and calling this are both inside the `try`, so
+ *   even a synchronous throw from either still releases the gate via `finally` rather than
+ *   wedging every later queued join behind it.
  * @returns Resolves once the join call itself has completed (not once the throttle window has
  *   elapsed — the throttle only delays the *next* queued join). Rejects if the join times out.
  */
-export async function throttledJoin(client: tmi.Client, channel: string, onSettled: (call: Promise<unknown>) => void): Promise<void> {
+export async function throttledJoin(client: ChatClient, channel: string, onSettled: (call: Promise<unknown>) => void): Promise<void> {
   const previousGate = joinGate;
   let releaseGate!: () => void;
   joinGate = new Promise((resolve) => { releaseGate = resolve; });
   await previousGate;
-  const joinCall = client.join(channel);
-  onSettled(joinCall);
   try {
+    const joinCall = client.join(channel);
+    onSettled(joinCall);
     await withTimeout(joinCall, JOIN_PART_TIMEOUT_MS, 'Twitch join');
   } finally {
     setTimeout(releaseGate, JOIN_THROTTLE_MS);

@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
+    "@twurple/auth": "^8.1.4",
+    "@twurple/chat": "^8.1.4",
     "discord.js": "^14.27.0",
     "dotenv": "^17.4.2",
     "ejs": "^6.0.1",
@@ -33,7 +35,6 @@
     "multer": "^2.2.0",
     "mysql2": "^3.23.1",
     "openai": "^7.5.0",
-    "tmi.js": "^1.8.5",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0"
   },
@@ -54,7 +55,6 @@
     "@types/multer": "^2.2.0",
     "@types/node": "^26.2.0",
     "@types/supertest": "^7.2.1",
-    "@types/tmi.js": "^1.8.6",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.8.1",

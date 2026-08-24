@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { throttledJoin, compensateIfStale, resetJoinGate, JOIN_PART_TIMEOUT_MS, MembershipDeps } from './twitchChannelNetworkOps';
 import { flushMicrotasks } from '../test-utils/flushMicrotasks';
 
-/** Builds a minimal fake tmi.js client, pre-seeded with the given already-joined channels. */
+/** Builds a minimal fake Twurple chat client, pre-seeded with the given already-joined channels. */
 function makeMockClient(channels: string[] = []) {
   return {
     getChannels: vi.fn(() => channels),
@@ -91,6 +91,19 @@ describe('throttledJoin', () => {
     expect(seen).toHaveLength(1);
     await expect(seen[0]).resolves.toBeUndefined();
   });
+
+  it('releases the join gate even when onSettled throws synchronously', async () => {
+    const client = makeMockClient();
+
+    await expect(throttledJoin(client as any, 'alice', () => { throw new Error('onSettled boom'); }))
+      .rejects.toThrow('onSettled boom');
+
+    // A later join must still go through instead of queuing behind the failed one forever.
+    const carolPromise = throttledJoin(client as any, 'carol', () => {});
+    await vi.advanceTimersByTimeAsync(600); // JOIN_THROTTLE_MS
+    await carolPromise;
+    expect(client.join).toHaveBeenCalledWith('carol');
+  });
 });
 
 describe('compensateIfStale', () => {
@@ -136,40 +149,12 @@ describe('compensateIfStale', () => {
     expect(client.part).toHaveBeenCalledWith('alice');
   });
 
-  // CodeRabbit review finding on PR #533: the revert branch's own corrective client.part() call
-  // wasn't itself registered with compensateIfStale, so if THAT call timed out but later actually
-  // succeeded after membership became desired again, nothing would notice and rejoin.
-  it("rejoins after a stale join's own corrective part times out but later settles while membership is desired again", async () => {
-    const client = makeMockClient(['alice']);
-    const deps = makeDeps();
-    deps.setClient(client);
-    deps.setDesired('alice', false); // triggers the initial revert
-
-    let resolveRevertPart!: () => void;
-    client.part.mockImplementation(() => new Promise<void>((resolve) => { resolveRevertPart = resolve; }));
-
-    const staleJoin = new Promise<void>((resolve) => setTimeout(resolve, JOIN_PART_TIMEOUT_MS));
-    compensateIfStale(deps, 'alice', staleJoin, 'join');
-    await vi.advanceTimersByTimeAsync(JOIN_PART_TIMEOUT_MS); // staleJoin settles, the revert's part() is issued
-    await flushMicrotasks();
-    expect(client.part).toHaveBeenCalledWith('alice'); // revert issued, but hangs
-
-    // While the revert is still hanging, membership becomes desired again (e.g. a fresh join request).
-    deps.setDesired('alice', true);
-
-    // The revert's own withTimeout gives up waiting on it (logged and swallowed internally), and
-    // compensateIfStale's watch on the revert call itself is now also past its own timeout window.
-    await vi.advanceTimersByTimeAsync(JOIN_PART_TIMEOUT_MS);
-
-    // The revert call finally settles late — simulate it having actually removed the channel.
-    client.getChannels.mockReturnValue([]);
-    resolveRevertPart();
-    await flushMicrotasks();
-
-    // Actual membership (parted) no longer matches desired (active again) — the revert's own
-    // staleness watcher must notice and rejoin.
-    expect(client.join).toHaveBeenCalledWith('alice');
-  });
+  // A prior version of this suite (written against tmi.js, whose client.part() was a real
+  // network round trip) covered the revert branch's own corrective client.part() call itself
+  // landing late — see PR #533. That scenario cannot occur with Twurple: partAsync() wraps
+  // client.part() (synchronous, fire-and-forget) in an already-settled promise, so the revert
+  // call here can never still be pending by the time compensateIfStale's own watch on it would
+  // otherwise notice a late settlement.
 
   it('rejoins after a stale part lands while the channel is still desired active', async () => {
     const client = makeMockClient([]); // part already "took effect" per the mock's channel list

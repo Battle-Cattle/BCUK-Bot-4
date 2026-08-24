@@ -74,7 +74,7 @@ describe('throttledTwitchSend', () => {
   });
 
   it('gives up re-checking a privileged status that never stabilizes, instead of spinning forever', async () => {
-    // A status that flips on every single check (e.g. tmi.js userstate churning mid-session)
+    // A status that flips on every single check (e.g. USERSTATE-derived privilege churning mid-session)
     // would previously spin the recheck loop indefinitely, since that loop runs before send()'s
     // own timeout ever applies — wedging the shared queue for every later send, forever, with no
     // error. It must give up after a bounded number of attempts and still call send().

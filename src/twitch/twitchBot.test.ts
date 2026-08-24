@@ -3,36 +3,77 @@ import { mockLogger } from '../test-utils/loggerMock';
 
 // ─── Hoisted state (available inside vi.mock factories) ───────────────────────
 
-const { mockClient, registeredHandlers } = vi.hoisted(() => {
-  const handlers: Record<string, (...args: any[]) => any> = {};
+const { mockClient, handlers } = vi.hoisted(() => {
+  type Handler = (...args: any[]) => any;
+
+  /** Builds a mock Twurple `onX`-style event binder that records handlers into `list`, mirroring the real `client.onX(handler) => Listener` shape (including `.unbind()`). */
+  function makeBinder(list: Handler[]) {
+    return vi.fn((handler: Handler) => {
+      list.push(handler);
+      return { unbind: () => { const i = list.indexOf(handler); if (i !== -1) list.splice(i, 1); } };
+    });
+  }
+
+  const messageHandlers: Handler[] = [];
+  const authSuccessHandlers: Handler[] = [];
+  const disconnectHandlers: Handler[] = [];
+  const authenticationFailureHandlers: Handler[] = [];
+  const tokenFetchFailureHandlers: Handler[] = [];
+  const userStateHandlers: Handler[] = [];
+
   const client = {
-    on: vi.fn(),
+    onMessage: makeBinder(messageHandlers),
+    onAuthenticationSuccess: makeBinder(authSuccessHandlers),
+    onDisconnect: makeBinder(disconnectHandlers),
+    onAuthenticationFailure: makeBinder(authenticationFailureHandlers),
+    onTokenFetchFailure: makeBinder(tokenFetchFailureHandlers),
     connect: vi.fn(),
-    disconnect: vi.fn(),
-    getChannels: vi.fn(),
+    quit: vi.fn(),
     join: vi.fn(),
     part: vi.fn(),
-    say: vi.fn(),
-    channels: [] as string[],
-    userstate: {} as Record<string, { badges?: Record<string, string> | null }>,
+    currentChannels: [] as string[],
+    irc: {
+      onTypedMessage: vi.fn((_type: unknown, handler: Handler) => {
+        userStateHandlers.push(handler);
+        return 'mock-handler-id';
+      }),
+      removeMessageListener: vi.fn((_handlerId: string) => {
+        userStateHandlers.length = 0;
+      }),
+      say: vi.fn(),
+    },
   };
-  return { mockClient: client, registeredHandlers: handlers };
+
+  return {
+    mockClient: client,
+    handlers: {
+      messageHandlers,
+      authSuccessHandlers,
+      disconnectHandlers,
+      authenticationFailureHandlers,
+      tokenFetchFailureHandlers,
+      userStateHandlers,
+    },
+  };
 });
 
 // ─── Module mocks (must precede imports) ─────────────────────────────────────
 
-// Must use a regular function (not an arrow) so `new tmi.Client()` works.
-vi.mock('tmi.js', () => ({
-  default: {
-    Client: vi.fn(function MockTmiClient() { return mockClient; }),
-  },
+// Must use a regular function (not an arrow) so `new ChatClient()` works.
+vi.mock('@twurple/chat', () => ({
+  ChatClient: vi.fn(function MockChatClient() { return mockClient; }),
+  UserState: class MockUserState {},
+}));
+
+vi.mock('@twurple/auth', () => ({
+  StaticAuthProvider: vi.fn(function MockStaticAuthProvider() { return {}; }),
 }));
 
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../shared/config', () => ({
-  TWITCH_USERNAME: 'testbot',
   TWITCH_OAUTH_TOKEN: 'oauth:test',
+  TWITCH_CLIENT_ID: 'test-client-id',
 }));
 
 // Uses the real createManagedLookupCache (not a fake) so tests below can
@@ -97,6 +138,9 @@ import {
   stopTwitchBot,
   sayInChannel,
   __resetTwitchChannelDiscordIdCacheForTests,
+  __resetTwitchPrivilegedChannelsForTests,
+  CONNECT_TIMEOUT_MS,
+  DISCONNECT_TIMEOUT_MS,
 } from './twitchBot';
 import { __resetTwitchSendQueueForTests } from './twitchSendQueue';
 import {
@@ -125,31 +169,95 @@ function resetMockClient(): void {
   // Re-apply default implementations after vi.clearAllMocks() wipes call history
   // but preserves implementations — some tests override join/part/etc., so we
   // explicitly restore defaults here each time.
-  mockClient.on.mockImplementation((event: string, handler: (...args: any[]) => any) => {
-    registeredHandlers[event] = handler;
+  mockClient.connect.mockImplementation(() => {
+    queueMicrotask(() => fireAuthSuccess());
   });
-  mockClient.connect.mockResolvedValue(undefined);
-  mockClient.disconnect.mockResolvedValue(undefined);
-  mockClient.getChannels.mockReturnValue([]);
+  mockClient.quit.mockImplementation(() => {
+    queueMicrotask(() => fireDisconnect(true));
+  });
   mockClient.join.mockResolvedValue(undefined);
-  mockClient.part.mockResolvedValue(undefined);
-  mockClient.say.mockResolvedValue(undefined);
-  mockClient.userstate = {};
+  mockClient.part.mockImplementation(() => undefined);
+  mockClient.irc.say.mockImplementation(() => undefined);
+  mockClient.currentChannels = [];
 }
 
-/** Start the bot with an empty channel list and simulate a successful connection. */
+/**
+ * Clears every registered event handler. Only safe to call before a client is (re-)started in
+ * the current test — calling it after `startTwitchBot()` would also drop the real, persistent
+ * `handleTwitchMessage`/`onConnected`/`onDisconnected`/`onOwnUserState` listeners it registered.
+ */
+function clearHandlerArrays(): void {
+  handlers.messageHandlers.length = 0;
+  handlers.authSuccessHandlers.length = 0;
+  handlers.disconnectHandlers.length = 0;
+  handlers.authenticationFailureHandlers.length = 0;
+  handlers.tokenFetchFailureHandlers.length = 0;
+  handlers.userStateHandlers.length = 0;
+}
+
+/** Fires every currently-registered `onAuthenticationSuccess` handler, simulating a successful chat login. */
+function fireAuthSuccess(): void {
+  handlers.authSuccessHandlers.slice().forEach((h) => h());
+}
+
+/** Fires every currently-registered `onDisconnect` handler, simulating the chat server disconnecting. */
+function fireDisconnect(manually = false, reason?: Error): void {
+  handlers.disconnectHandlers.slice().forEach((h) => h(manually, reason));
+}
+
+/** Start the bot with an empty channel list and let the mocked `connect()` simulate a successful connection. */
 async function connectBot(): Promise<void> {
   vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
   vi.mocked(getUsers).mockResolvedValue([]);
   await startTwitchBot();
-  // Simulate the IRC server acknowledging the connection.
-  registeredHandlers['connected']('irc.twitch.tv', 6667);
-  // Let reconcileJoinedChannels and queued microtasks settle.
-  await Promise.resolve();
 }
 
-function makeTags(overrides: Record<string, any> = {}): any {
-  return { mod: false, badges: null, ...overrides };
+/** Builds a minimal fake Twurple `ChatMessage` with the given userInfo/shared-chat overrides. */
+function makeChatMessage(overrides: {
+  isMod?: boolean;
+  isVip?: boolean;
+  isBroadcaster?: boolean;
+  displayName?: string;
+  channelId?: string | null;
+  sourceChannelId?: string | null;
+} = {}): any {
+  return {
+    userInfo: {
+      isMod: overrides.isMod ?? false,
+      isVip: overrides.isVip ?? false,
+      isBroadcaster: overrides.isBroadcaster ?? false,
+      displayName: overrides.displayName,
+    },
+    channelId: overrides.channelId ?? null,
+    sourceChannelId: overrides.sourceChannelId ?? null,
+  };
+}
+
+/**
+ * Dispatches a chat message to every registered `onMessage` handler, as Twurple would — including
+ * stripping any leading `#` from `channel` first, since Twurple's `ChatClient` emits `onMessage`
+ * with `toUserName(channel)` (the plain login, no `#`), unlike the raw `#channel` form `USERSTATE`
+ * carries (see {@link fireUserState}).
+ */
+function sendMessage(
+  channel: string,
+  user: string,
+  message: string,
+  msgOverrides: Parameters<typeof makeChatMessage>[0] = {},
+): void {
+  const normalizedChannel = channel.replace(/^#/, '');
+  handlers.messageHandlers.slice().forEach((h) => h(normalizedChannel, user, message, makeChatMessage(msgOverrides)));
+}
+
+/**
+ * Dispatches a raw `USERSTATE` message to every registered handler, as the underlying ircv3 client
+ * would after the bot joins `channel` or sends a message there.
+ * @param channel - Channel the USERSTATE was received for (as `#channel`).
+ * @param rawBadges - Raw IRC `badges` tag value (e.g. `"moderator/1"`), or omitted for no badges.
+ */
+function fireUserState(channel: string, rawBadges?: string): void {
+  const msg = { channel, tags: new Map(rawBadges ? [['badges', rawBadges]] : []) };
+  handlers.userStateHandlers.slice().forEach((h) => h(msg));
 }
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -157,9 +265,12 @@ function makeTags(overrides: Record<string, any> = {}): any {
 beforeEach(() => {
   vi.clearAllMocks();
   resetMockClient();
-  for (const key of Object.keys(registeredHandlers)) delete registeredHandlers[key];
+  clearHandlerArrays();
+  twitchChannelMembership.setChatClient(null);
+  twitchChannelMembership.setConnected(false);
   vi.useFakeTimers();
   __resetTwitchSendQueueForTests();
+  __resetTwitchPrivilegedChannelsForTests();
 });
 
 afterEach(async () => {
@@ -174,7 +285,10 @@ describe('handleTwitchMessage', () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([]);
     await joinTwitchChannel('streamer');
-    // Reset call history so only message-dispatch calls are visible to assertions.
+    // Reset call history so only message-dispatch calls are visible to assertions. Note:
+    // resetMockClient() only restores default mock implementations, it doesn't touch the
+    // handler arrays — handleTwitchMessage/onConnected/onDisconnected stay registered from
+    // the startTwitchBot() call in connectBot() above.
     vi.clearAllMocks();
     resetMockClient();
     vi.mocked(getAllTwitchLinkedUsers).mockResolvedValue([{ twitchName: 'streamer', discordId: 'streamer-discord-id' }]);
@@ -183,48 +297,33 @@ describe('handleTwitchMessage', () => {
     __resetTwitchChannelDiscordIdCacheForTests();
   });
 
-  function sendMessage(
-    channel: string,
-    msgTags: Record<string, any>,
-    message: string,
-    self = false,
-  ): void {
-    registeredHandlers['message'](channel, msgTags, message, self);
-  }
-
-  it('ignores self-messages', () => {
-    sendMessage('#streamer', makeTags(), 'hello', true);
-    expect(executeCustomCommandForTwitch).not.toHaveBeenCalled();
-    expect(recordChatMessage).not.toHaveBeenCalled();
-  });
-
   it('ignores messages for an invalid channel name', () => {
-    sendMessage('!!bad', makeTags(), 'hello');
+    sendMessage('!!bad', 'alice', 'hello');
     expect(executeCustomCommandForTwitch).not.toHaveBeenCalled();
     expect(recordChatMessage).not.toHaveBeenCalled();
   });
 
   it('ignores messages for channels not in activeChannels', () => {
-    sendMessage('#otherchan', makeTags(), 'hello');
+    sendMessage('#otherchan', 'alice', 'hello');
     expect(executeCustomCommandForTwitch).not.toHaveBeenCalled();
     expect(recordChatMessage).not.toHaveBeenCalled();
   });
 
   it('ignores shared-chat messages that originated in a different channel', () => {
-    sendMessage('#streamer', makeTags({ 'room-id': '111', 'source-room-id': '999' }), 'hello');
+    sendMessage('#streamer', 'alice', 'hello', { channelId: '111', sourceChannelId: '999' });
     expect(executeCustomCommandForTwitch).not.toHaveBeenCalled();
     expect(recordChatMessage).not.toHaveBeenCalled();
   });
 
-  it('processes messages when source-room-id matches room-id', () => {
+  it('processes messages when sourceChannelId matches channelId', () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
-    sendMessage('#streamer', makeTags({ 'room-id': '111', 'source-room-id': '111' }), 'hello');
-    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', 'hello', null);
+    sendMessage('#streamer', 'alice', 'hello', { channelId: '111', sourceChannelId: '111' });
+    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', 'hello', 'alice');
     expect(recordChatMessage).toHaveBeenCalledWith('streamer');
   });
 
   it('records chat activity for a normal message', () => {
-    sendMessage('#streamer', makeTags(), 'hello');
+    sendMessage('#streamer', 'alice', 'hello');
     expect(recordChatMessage).toHaveBeenCalledWith('streamer');
   });
 
@@ -236,7 +335,7 @@ describe('handleTwitchMessage', () => {
     vi.mocked(handleCommand).mockResolvedValue(undefined);
     vi.mocked(executeCountdownForTwitch).mockResolvedValue(undefined);
 
-    sendMessage('#streamer', makeTags({ 'display-name': 'Alice' }), '!cmd');
+    sendMessage('#streamer', 'alice', '!cmd', { displayName: 'Alice' });
 
     expect(executeCustomCommandForTwitch).toHaveBeenCalledOnce();
     expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce();
@@ -252,7 +351,7 @@ describe('handleTwitchMessage', () => {
   it('resolves the target guild via the linked streamer\'s active voice presence', async () => {
     vi.mocked(handleCommand).mockResolvedValue(undefined);
 
-    sendMessage('#streamer', makeTags(), '!cmd');
+    sendMessage('#streamer', 'alice', '!cmd');
 
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(getAllTwitchLinkedUsers).toHaveBeenCalled();
@@ -264,7 +363,7 @@ describe('handleTwitchMessage', () => {
     vi.mocked(findUserByTwitchName).mockResolvedValue(null);
     vi.mocked(handleCommand).mockResolvedValue(undefined);
 
-    sendMessage('#streamer', makeTags(), '!cmd');
+    sendMessage('#streamer', 'alice', '!cmd');
 
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', null);
@@ -278,7 +377,7 @@ describe('handleTwitchMessage', () => {
     vi.mocked(findUserByTwitchName).mockResolvedValue({ discord_id: 'freshly-linked-discord-id' } as any);
     vi.mocked(handleCommand).mockResolvedValue(undefined);
 
-    sendMessage('#streamer', makeTags(), '!cmd');
+    sendMessage('#streamer', 'alice', '!cmd');
 
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(findUserByTwitchName).toHaveBeenCalledWith('streamer');
@@ -288,7 +387,7 @@ describe('handleTwitchMessage', () => {
   it('does not fall back to a live lookup when the channel is already present in the bulk cache', async () => {
     vi.mocked(handleCommand).mockResolvedValue(undefined);
 
-    sendMessage('#streamer', makeTags(), '!cmd');
+    sendMessage('#streamer', 'alice', '!cmd');
 
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(findUserByTwitchName).not.toHaveBeenCalled();
@@ -297,7 +396,7 @@ describe('handleTwitchMessage', () => {
   it('re-resolves the linked discord_id after the cache TTL expires, picking up a relink', async () => {
     vi.mocked(handleCommand).mockResolvedValue(undefined);
 
-    sendMessage('#streamer', makeTags(), '!cmd');
+    sendMessage('#streamer', 'alice', '!cmd');
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(1));
     expect(getAllTwitchLinkedUsers).toHaveBeenCalledOnce();
 
@@ -307,50 +406,44 @@ describe('handleTwitchMessage', () => {
     // The cache is now stale — this lookup kicks a background refresh but
     // (per the shared lookupCache's stale-while-revalidate strategy) still
     // serves the last-good mapping for this call.
-    sendMessage('#streamer', makeTags(), '!again');
+    sendMessage('#streamer', 'alice', '!again');
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(getAllTwitchLinkedUsers).toHaveBeenCalledTimes(2));
 
     // A subsequent lookup picks up the refreshed mapping.
-    sendMessage('#streamer', makeTags(), '!third');
+    sendMessage('#streamer', 'alice', '!third');
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(3));
     expect(resolveGuildIdForDiscordId).toHaveBeenLastCalledWith('new-streamer-discord-id');
   });
 
   it('passes the normalized channel and message to executors', () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
-    sendMessage('#STREAMER', makeTags({ 'display-name': 'Alice' }), '!clap');
+    sendMessage('#STREAMER', 'alice', '!clap', { displayName: 'Alice' });
     expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!clap', 'Alice');
   });
 
-  it('falls back to username when display-name is absent', () => {
+  it('falls back to the login username when userInfo.displayName is absent', () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
-    sendMessage('#streamer', makeTags({ username: 'alice' }), '!hi');
+    sendMessage('#streamer', 'alice', '!hi');
     expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!hi', 'alice');
   });
 
-  it('passes null displayName when neither display-name nor username is present', () => {
-    vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
-    sendMessage('#streamer', makeTags(), '!hi');
-    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!hi', null);
+  it('detects isMod=true from userInfo.isMod', () => {
+    vi.mocked(executeShoutoutForTwitch).mockResolvedValue(undefined);
+    sendMessage('#streamer', 'alice', '!so alice', { isMod: true });
+    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', 'alice', true);
   });
 
-  it('detects isMod=true from the mod tag', () => {
+  it('detects isMod=true from userInfo.isBroadcaster', () => {
     vi.mocked(executeShoutoutForTwitch).mockResolvedValue(undefined);
-    sendMessage('#streamer', makeTags({ mod: true }), '!so alice');
-    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', null, true);
+    sendMessage('#streamer', 'alice', '!so alice', { isBroadcaster: true });
+    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', 'alice', true);
   });
 
-  it('detects isMod=true from the broadcaster badge', () => {
+  it('passes isMod=false when neither isMod nor isBroadcaster is set', () => {
     vi.mocked(executeShoutoutForTwitch).mockResolvedValue(undefined);
-    sendMessage('#streamer', makeTags({ badges: { broadcaster: '1' } }), '!so alice');
-    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', null, true);
-  });
-
-  it('passes isMod=false when neither mod nor broadcaster badge is set', () => {
-    vi.mocked(executeShoutoutForTwitch).mockResolvedValue(undefined);
-    sendMessage('#streamer', makeTags({ mod: false, badges: {} }), '!so alice');
-    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', null, false);
+    sendMessage('#streamer', 'alice', '!so alice');
+    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', 'alice', false);
   });
 });
 
@@ -363,10 +456,11 @@ describe('joinTwitchChannel', () => {
   });
 
   it('queues the channel locally when the client is not yet connected', async () => {
-    // startTwitchBot assigns client but 'connected' stays false until the event fires.
-    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
-    vi.mocked(getUsers).mockResolvedValue([]);
-    await startTwitchBot();
+    // A client can be assigned before the connection is confirmed (e.g. while startTwitchBot's
+    // connectAndWait is still pending) — drive that state directly via the same setters
+    // startTwitchBot itself uses, rather than racing an unawaited startTwitchBot() call.
+    twitchChannelMembership.setChatClient(mockClient as any);
+    twitchChannelMembership.setConnected(false);
 
     await joinTwitchChannel('streamer');
 
@@ -375,9 +469,9 @@ describe('joinTwitchChannel', () => {
     expect(mockClient.join).not.toHaveBeenCalled();
   });
 
-  it('syncs state without calling client.join when already joined in tmi.js', async () => {
+  it('syncs state without calling client.join when already joined', async () => {
     await connectBot();
-    mockClient.getChannels.mockReturnValue(['#streamer']);
+    mockClient.currentChannels = ['streamer'];
 
     await joinTwitchChannel('streamer');
 
@@ -436,21 +530,21 @@ describe('joinTwitchChannel', () => {
     expect(getActiveChannels().has('streamer')).toBe(true);
   });
 
-  it('fires the channel-joined hook when already joined in tmi.js', async () => {
+  it('fires the channel-joined hook when already joined', async () => {
     await connectBot();
     const hook = vi.fn();
     setChannelJoinedHook(hook);
-    mockClient.getChannels.mockReturnValue(['#streamer']);
+    mockClient.currentChannels = ['streamer'];
 
     await joinTwitchChannel('streamer');
 
     expect(hook).toHaveBeenCalledWith('streamer');
   });
 
-  it('caches the user ID when already joined in tmi.js', async () => {
+  it('caches the user ID when already joined', async () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([{ login: 'streamer', id: 'uid99' } as any]);
-    mockClient.getChannels.mockReturnValue(['#streamer']);
+    mockClient.currentChannels = ['streamer'];
 
     await joinTwitchChannel('streamer');
     await Promise.resolve(); // flush cacheChannelUserId
@@ -459,10 +553,9 @@ describe('joinTwitchChannel', () => {
   });
 
   it('caches the user ID when queuing a channel while disconnected', async () => {
-    // startTwitchBot assigns the client but 'connected' stays false until the event fires.
-    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     vi.mocked(getUsers).mockResolvedValue([{ login: 'streamer', id: 'uid77' } as any]);
-    await startTwitchBot();
+    twitchChannelMembership.setChatClient(mockClient as any);
+    twitchChannelMembership.setConnected(false);
 
     await joinTwitchChannel('streamer');
     await Promise.resolve(); // flush cacheChannelUserId
@@ -480,7 +573,7 @@ describe('partTwitchChannel', () => {
     expect(mockClient.part).not.toHaveBeenCalled();
   });
 
-  it('does nothing when the channel is neither active nor tmi-joined', async () => {
+  it('does nothing when the channel is neither active nor already joined', async () => {
     await connectBot();
     await partTwitchChannel('streamer');
     expect(mockClient.part).not.toHaveBeenCalled();
@@ -488,10 +581,8 @@ describe('partTwitchChannel', () => {
   });
 
   it('removes local state only when the client is not connected', async () => {
-    // start without firing 'connected' so connected=false
-    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
-    vi.mocked(getUsers).mockResolvedValue([]);
-    await startTwitchBot();
+    twitchChannelMembership.setChatClient(mockClient as any);
+    twitchChannelMembership.setConnected(false);
     await joinTwitchChannel('streamer'); // queued into activeChannels
 
     await partTwitchChannel('streamer');
@@ -500,11 +591,11 @@ describe('partTwitchChannel', () => {
     expect(mockClient.part).not.toHaveBeenCalled();
   });
 
-  it('calls client.part when the channel is active and tmi-joined', async () => {
+  it('calls client.part when the channel is active and already joined', async () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([]);
     await joinTwitchChannel('streamer');
-    mockClient.getChannels.mockReturnValue(['#streamer']);
+    mockClient.currentChannels = ['streamer'];
 
     await partTwitchChannel('streamer');
 
@@ -513,11 +604,11 @@ describe('partTwitchChannel', () => {
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
   });
 
-  it('removes from activeChannels without calling part when not tmi-joined', async () => {
+  it('removes from activeChannels without calling part when not already joined', async () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([]);
     await joinTwitchChannel('streamer');
-    mockClient.getChannels.mockReturnValue([]); // tmi.js reports no joined channels
+    mockClient.currentChannels = []; // client reports no joined channels
 
     await partTwitchChannel('streamer');
 
@@ -529,8 +620,8 @@ describe('partTwitchChannel', () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([]);
     await joinTwitchChannel('streamer');
-    mockClient.getChannels.mockReturnValue(['#streamer']);
-    mockClient.part.mockRejectedValue(new Error('part failed'));
+    mockClient.currentChannels = ['streamer'];
+    mockClient.part.mockImplementation(() => { throw new Error('part failed'); });
 
     await expect(partTwitchChannel('streamer')).rejects.toThrow('part failed');
     expect(getActiveChannels().has('streamer')).toBe(false);
@@ -541,7 +632,7 @@ describe('partTwitchChannel', () => {
     vi.mocked(getUsers).mockResolvedValue([{ login: 'streamer', id: 'uid42' } as any]);
     await joinTwitchChannel('streamer');
     await Promise.resolve(); // flush cacheChannelUserId
-    mockClient.getChannels.mockReturnValue(['#streamer']);
+    mockClient.currentChannels = ['streamer'];
 
     await partTwitchChannel('streamer');
 
@@ -555,7 +646,7 @@ describe('partTwitchChannel', () => {
       () => new Promise((resolve) => { resolveGetUsers = resolve; }),
     );
     await joinTwitchChannel('streamer'); // cacheChannelUserId fires but getUsers is pending
-    mockClient.getChannels.mockReturnValue(['#streamer']);
+    mockClient.currentChannels = ['streamer'];
     await partTwitchChannel('streamer'); // removes from activeChannels before getUsers resolves
 
     resolveGetUsers([{ login: 'streamer', id: 'uid-stale' }]);
@@ -578,56 +669,107 @@ describe('sayInChannel', () => {
     await expect(sayInChannel('streamer', 'hi')).rejects.toThrow('not connected');
   });
 
-  it('delegates to client.say with the normalized channel', async () => {
+  it('delegates to the raw IRC client with the normalized, #-prefixed channel', async () => {
     await connectBot();
     await sayInChannel('#STREAMER', 'hello!');
-    expect(mockClient.say).toHaveBeenCalledWith('streamer', 'hello!');
+    expect(mockClient.irc.say).toHaveBeenCalledWith('#streamer', 'hello!');
+  });
+
+  it('splits a message longer than the Twitch length limit on spaces', async () => {
+    await connectBot();
+    const longMessage = `${'a'.repeat(490)} ${'b'.repeat(20)}`;
+    const sent = sayInChannel('#streamer', longMessage);
+    // Each chunk is its own throttled send, so the second chunk waits behind the non-privileged
+    // per-channel floor (NON_PRIVILEGED_CHANNEL_FLOOR_MS) before going out.
+    await vi.runAllTimersAsync();
+    await sent;
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
+    expect(mockClient.irc.say).toHaveBeenNthCalledWith(1, '#streamer', 'a'.repeat(490));
+    expect(mockClient.irc.say).toHaveBeenNthCalledWith(2, '#streamer', 'b'.repeat(20));
+  });
+
+  it('splits a single token longer than the length limit, with no space to break on', async () => {
+    await connectBot();
+    const sent = sayInChannel('#streamer', 'a'.repeat(600));
+    await vi.runAllTimersAsync();
+    await sent;
+    const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
+    expect(chunks.length).toBeGreaterThan(1);
+    chunks.forEach((chunk) => { expect(chunk.length).toBeLessThanOrEqual(500); });
+    expect(chunks.join('')).toBe('a'.repeat(600));
+  });
+
+  it('keeps an exact-500-character final remainder as one message, even though it contains a space', async () => {
+    await connectBot();
+    const message = `${'a'.repeat(500)} ${'b'.repeat(250)} ${'c'.repeat(249)}`;
+    const sent = sayInChannel('#streamer', message);
+    await vi.runAllTimersAsync();
+    await sent;
+    const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
+    expect(chunks).toEqual(['a'.repeat(500), `${'b'.repeat(250)} ${'c'.repeat(249)}`]);
+  });
+
+  it('applies the non-privileged per-channel floor between chunks of the same split message', async () => {
+    await connectBot();
+    const longMessage = `${'a'.repeat(490)} ${'b'.repeat(20)}`;
+    const sent = sayInChannel('#streamer', longMessage);
+
+    // The first chunk goes out immediately; the second must wait the full floor.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await sent;
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
   });
 
   // Twitch's rate-limit window and per-channel floor are exercised exhaustively in
   // twitchSendQueue.test.ts — these just confirm sayInChannel wires channel + the live
-  // privilege check (read from tmi.js's internal per-channel userstate badges) into it.
+  // privilege check (populated from raw USERSTATE messages, see onOwnUserState) into it,
+  // and that it bypasses ChatClient#say() (see sendRawChatMessage) so no second, fixed
+  // per-channel floor from Twurple's own rate limiter can undermine the privileged exemption.
 
-  it('treats the channel as non-privileged when there is no userstate entry for it yet', async () => {
+  it('treats the channel as non-privileged when no USERSTATE has been seen for it yet', async () => {
     await connectBot();
     await sayInChannel('#streamer', 'first');
     const second = sayInChannel('#streamer', 'second');
 
     await vi.advanceTimersByTimeAsync(999);
-    expect(mockClient.say).toHaveBeenCalledTimes(1);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1);
     await second;
-    expect(mockClient.say).toHaveBeenCalledTimes(2);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
   });
 
   it.each([
-    ['moderator', { moderator: '1' }],
-    ['vip', { vip: '1' }],
-    ['broadcaster', { broadcaster: '1' }],
-  ])('exempts a channel from the per-channel floor when the badges show %s status', async (_label, badges) => {
+    ['moderator', 'moderator/1'],
+    ['vip', 'vip/1'],
+    ['broadcaster', 'broadcaster/1'],
+  ])('exempts a channel from the per-channel floor once a USERSTATE shows %s status', async (_label, rawBadges) => {
     await connectBot();
-    // tmi.js keys its internal userstate map by the IRC channel form ('#streamer'), not the
-    // bare normalized name — this must match that real shape, or a lookup-key regression
-    // (e.g. accidentally dropping the '#') would pass here despite never matching in production.
-    mockClient.userstate = { '#streamer': { badges } };
+    // The privilege map is keyed by the normalized channel name — this must match that shape,
+    // or a lookup-key regression would pass here despite never matching in production.
+    fireUserState('#streamer', rawBadges);
     await sayInChannel('#streamer', 'first');
     await sayInChannel('#streamer', 'second');
-    expect(mockClient.say).toHaveBeenCalledTimes(2);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
   });
 
-  it('does not treat a channel as privileged from another channel\'s badges', async () => {
+  it('does not treat a channel as privileged from another channel\'s USERSTATE', async () => {
     await connectBot();
-    mockClient.userstate = { '#other-channel': { badges: { moderator: '1' } } };
+    fireUserState('#otherchannel', 'moderator/1');
     await sayInChannel('#streamer', 'first');
     const second = sayInChannel('#streamer', 'second');
 
     await vi.advanceTimersByTimeAsync(999);
-    expect(mockClient.say).toHaveBeenCalledTimes(1);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1);
     await second;
-    expect(mockClient.say).toHaveBeenCalledTimes(2);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -667,11 +809,44 @@ describe('startTwitchBot', () => {
     expect(getUsers).not.toHaveBeenCalled();
   });
 
-  it('re-throws when client.connect fails', async () => {
+  it('re-throws when authentication fails', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
-    mockClient.connect.mockRejectedValue(new Error('connection refused'));
+    mockClient.connect.mockImplementation(() => {
+      queueMicrotask(() => {
+        handlers.authenticationFailureHandlers.slice().forEach((h) => h('bad credentials', 1));
+      });
+    });
 
-    await expect(startTwitchBot()).rejects.toThrow('connection refused');
+    await expect(startTwitchBot()).rejects.toThrow('Twitch chat authentication failed');
+  });
+
+  it('re-throws when fetching a token fails', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    mockClient.connect.mockImplementation(() => {
+      queueMicrotask(() => {
+        handlers.tokenFetchFailureHandlers.slice().forEach((h) => h(new Error('token fetch failed')));
+      });
+    });
+
+    await expect(startTwitchBot()).rejects.toThrow('token fetch failed');
+  });
+
+  it('does not become connected if authentication succeeds after the connect timeout', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    mockClient.connect.mockImplementation(() => {}); // never fires any connectAndWait event
+
+    const started = startTwitchBot();
+    // Attached immediately so Node doesn't flag `started`'s rejection as unhandled during the gap
+    // between it settling (when the fake timer below fires) and the `await expect(...)` below.
+    started.catch(() => {});
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
+    await expect(started).rejects.toThrow('Twitch connect timed out');
+
+    // A late authentication success arrives after startup already reported failure — the
+    // persistent onConnected listener should have been unbound by the timeout cleanup, so this
+    // must not mark the bot connected.
+    fireAuthSuccess();
+    await expect(sayInChannel('streamer', 'hi')).rejects.toThrow('not connected');
   });
 });
 
@@ -689,27 +864,54 @@ describe('stopTwitchBot', () => {
     expect(getActiveChannelUserIds().size).toBe(0);
   });
 
-  it('calls client.disconnect', async () => {
+  it('clears cached privileged status even when the disconnect event never fires', async () => {
+    await connectBot();
+    fireUserState('#streamer', 'moderator/1');
+    mockClient.quit.mockImplementation(() => {}); // never fires onDisconnect
+
+    // Restore quit()'s default behavior in a finally, even on assertion failure — otherwise the
+    // outer afterEach's stopTwitchBot() call would hang for the full DISCONNECT_TIMEOUT_MS under
+    // fake timers nothing advances, masking the real failure behind a hook-timeout error instead.
+    try {
+      const stopped = stopTwitchBot();
+      await vi.advanceTimersByTimeAsync(DISCONNECT_TIMEOUT_MS);
+      await stopped;
+
+      // Restart and reconnect without a fresh USERSTATE — privilege must not carry over.
+      await connectBot();
+      await sayInChannel('#streamer', 'first');
+      const second = sayInChannel('#streamer', 'second');
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await second;
+      expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
+    } finally {
+      mockClient.quit.mockImplementation(() => {
+        queueMicrotask(() => fireDisconnect(true));
+      });
+    }
+  });
+
+  it('calls client.quit', async () => {
     await connectBot();
 
     await stopTwitchBot();
 
-    expect(mockClient.disconnect).toHaveBeenCalledOnce();
+    expect(mockClient.quit).toHaveBeenCalledOnce();
   });
 
   it('is a no-op when the client was never started', async () => {
     await stopTwitchBot();
-    expect(mockClient.disconnect).not.toHaveBeenCalled();
+    expect(mockClient.quit).not.toHaveBeenCalled();
   });
 
-  it('active channels remain visible to the disconnected handler during client.disconnect', async () => {
+  it('active channels remain visible to the disconnected handler while quit() settles', async () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([]);
     await joinTwitchChannel('streamer');
-    // Make disconnect synchronously fire the 'disconnected' event, as tmi.js does in production.
-    mockClient.disconnect.mockImplementation(async () => {
-      registeredHandlers['disconnected']('Connection closed.');
-    });
     vi.mocked(setTwitchChannel).mockClear();
 
     await stopTwitchBot();
@@ -720,11 +922,11 @@ describe('stopTwitchBot', () => {
     expect(getActiveChannels().size).toBe(0);
   });
 
-  it('marks active channels offline when client.disconnect() rejects', async () => {
+  it('marks active channels offline when client.quit() throws synchronously', async () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([]);
     await joinTwitchChannel('streamer');
-    mockClient.disconnect.mockRejectedValue(new Error('disconnect failed'));
+    mockClient.quit.mockImplementation(() => { throw new Error('disconnect failed'); });
     vi.mocked(setTwitchChannel).mockClear();
 
     await stopTwitchBot();
@@ -733,120 +935,104 @@ describe('stopTwitchBot', () => {
     expect(getActiveChannels().size).toBe(0);
   });
 
-  it('does not hang forever when client.disconnect() never settles', async () => {
+  it('does not hang forever when the disconnect event never fires', async () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([]);
     await joinTwitchChannel('streamer');
-    mockClient.disconnect.mockImplementation(() => new Promise(() => {})); // never resolves/rejects
+    mockClient.quit.mockImplementation(() => {}); // never fires onDisconnect
     vi.mocked(setTwitchChannel).mockClear();
-    const setTmiClientSpy = vi.spyOn(twitchChannelMembership, 'setTmiClient');
+    const setChatClientSpy = vi.spyOn(twitchChannelMembership, 'setChatClient');
 
     const stopped = stopTwitchBot();
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(DISCONNECT_TIMEOUT_MS);
     await stopped;
 
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
     expect(getActiveChannels().size).toBe(0);
-    expect(setTmiClientSpy).toHaveBeenCalledWith(null);
-    setTmiClientSpy.mockRestore();
+    expect(setChatClientSpy).toHaveBeenCalledWith(null);
+    setChatClientSpy.mockRestore();
 
     // Client reference was cleared despite the hang: a second stop is a no-op
     // (mirrors the "no-op when never started" case) rather than awaiting the
-    // still-hanging disconnect() again.
-    mockClient.disconnect.mockClear();
+    // still-hanging quit() again.
+    mockClient.quit.mockClear();
     await stopTwitchBot();
-    expect(mockClient.disconnect).not.toHaveBeenCalled();
+    expect(mockClient.quit).not.toHaveBeenCalled();
   });
 });
 
 // ─── reconcileJoinedChannels (via onConnected) ────────────────────────────────
+//
+// startTwitchBot() itself only resolves once onAuthenticationSuccess fires (see connectAndWait),
+// and that same event triggers onConnected's fire-and-forget reconcileJoinedChannels() call — so by the
+// time `await startTwitchBot()` returns, the initial reconciliation has already been *kicked off*
+// against whatever mockClient.currentChannels was at that moment. These tests set currentChannels
+// up front, before starting the bot, rather than firing a separate synthetic reconnect afterward.
 
 describe('reconcileJoinedChannels', () => {
-  it('parts a tmi.js-joined channel that is not in activeChannels', async () => {
+  it('parts a joined channel that is not in activeChannels', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     vi.mocked(getUsers).mockResolvedValue([]);
-    await startTwitchBot();
-    mockClient.getChannels.mockReturnValue(['#stale']);
+    mockClient.currentChannels = ['stale'];
 
-    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    await startTwitchBot();
     await vi.runAllTimersAsync();
 
     expect(mockClient.part).toHaveBeenCalledWith('stale');
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('stale', false);
   });
 
-  it('joins an activeChannels channel that tmi.js is not yet joined to', async () => {
+  it('joins an activeChannels channel that the client is not yet joined to', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
     vi.mocked(getUsers).mockResolvedValue([]);
-    await startTwitchBot();
-    mockClient.getChannels.mockReturnValue([]);
+    mockClient.currentChannels = [];
 
-    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    await startTwitchBot();
     await vi.runAllTimersAsync(); // advance JOIN_THROTTLE_MS
 
     expect(mockClient.join).toHaveBeenCalledWith('streamer');
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', true);
   });
 
-  it('marks a channel online when it is in both activeChannels and tmi.js', async () => {
+  it('marks a channel online when it is in both activeChannels and the client', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
     vi.mocked(getUsers).mockResolvedValue([]);
-    await startTwitchBot();
-    mockClient.getChannels.mockReturnValue(['#streamer']);
+    mockClient.currentChannels = ['streamer'];
 
-    registeredHandlers['connected']('irc.twitch.tv', 6667);
-    await Promise.resolve();
+    await startTwitchBot();
+    await vi.runAllTimersAsync();
 
     expect(mockClient.part).not.toHaveBeenCalled();
     expect(mockClient.join).not.toHaveBeenCalled();
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', true);
   });
 
-  it('refreshes the user ID cache for a channel confirmed live by tmi.js on reconnect', async () => {
+  it('refreshes the user ID cache for a channel confirmed live at connect time', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
     vi.mocked(getUsers)
       .mockResolvedValueOnce([]) // initializeActiveChannels — simulate failed startup cache
       .mockResolvedValue([{ login: 'streamer', id: 'uid-reconcile' } as any]);
-    await startTwitchBot();
-    mockClient.getChannels.mockReturnValue(['#streamer']); // tmi.js already joined
+    mockClient.currentChannels = ['streamer']; // already joined
 
-    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    await startTwitchBot();
     await vi.runAllTimersAsync();
     await Promise.resolve(); // flush cacheChannelUserId .then
 
     expect(getActiveChannelUserIds().get('streamer')).toBe('uid-reconcile');
   });
 
-  it('caches the user ID when joinMissingChannel joins a channel on reconnect', async () => {
+  it('caches the user ID when joinMissingChannel joins a channel at connect time', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
     vi.mocked(getUsers)
       .mockResolvedValueOnce([]) // initializeActiveChannels
       .mockResolvedValue([{ login: 'streamer', id: 'uid-join' } as any]);
-    await startTwitchBot();
-    mockClient.getChannels.mockReturnValue([]); // tmi.js not yet joined
+    mockClient.currentChannels = []; // not yet joined
 
-    registeredHandlers['connected']('irc.twitch.tv', 6667);
+    await startTwitchBot();
     await vi.runAllTimersAsync(); // advance JOIN_THROTTLE_MS
     await Promise.resolve(); // flush cacheChannelUserId .then
 
     expect(getActiveChannelUserIds().get('streamer')).toBe('uid-join');
-  });
-
-  it('caches the user ID when joinMissingChannel finds the channel already joined', async () => {
-    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
-    vi.mocked(getUsers)
-      .mockResolvedValueOnce([]) // initializeActiveChannels
-      .mockResolvedValue([{ login: 'streamer', id: 'uid-prejoin' } as any]);
-    await startTwitchBot();
-    // Snapshot at reconcile start sees no joins; by the time joinMissingChannel
-    // runs its isChannelJoined check, the channel is already joined.
-    mockClient.getChannels.mockReturnValue([]);
-    registeredHandlers['connected']('irc.twitch.tv', 6667);
-    mockClient.getChannels.mockReturnValue(['#streamer']);
-    await vi.runAllTimersAsync();
-    await Promise.resolve(); // flush cacheChannelUserId .then
-
-    expect(getActiveChannelUserIds().get('streamer')).toBe('uid-prejoin');
   });
 });
 
@@ -859,17 +1045,28 @@ describe('onDisconnected', () => {
     await startTwitchBot();
     vi.mocked(setTwitchChannel).mockClear();
 
-    registeredHandlers['disconnected']('Connection closed.');
+    fireDisconnect(false, new Error('Connection closed.'));
 
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', false);
   });
 
-  it('clears the tmi.js channels array to prevent auto-rejoin', async () => {
+  it('clears cached privileged status, so a reconnect without a fresh USERSTATE is treated as non-privileged', async () => {
     await connectBot();
-    mockClient.channels = ['#streamer', '#other'];
+    fireUserState('#streamer', 'moderator/1');
 
-    registeredHandlers['disconnected']('Connection closed.');
+    fireDisconnect(false, new Error('Connection closed.'));
+    // Twurple reconnects within the same ChatClient instance — model that by re-firing
+    // onAuthenticationSuccess without a fresh USERSTATE for the channel.
+    fireAuthSuccess();
 
-    expect(mockClient.channels).toEqual([]);
+    await sayInChannel('#streamer', 'first');
+    const second = sayInChannel('#streamer', 'second');
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await second;
+    expect(mockClient.irc.say).toHaveBeenCalledTimes(2);
   });
 });
