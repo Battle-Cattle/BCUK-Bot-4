@@ -19,6 +19,19 @@ const membershipMutationQueue = createMutationQueue();
 let _onChannelJoined: ((channel: string) => void) | null = null;
 
 /**
+ * How often {@link startChannelReconciliationPoll} re-runs {@link reconcileJoinedChannels} in the
+ * background. {@link reconcileJoinedChannels} otherwise only runs once, from `onConnected` after a
+ * successful (re)connect — if a channel's join in that pass fails (e.g. a timeout, or racing the
+ * underlying Twurple client's own join-rate-limiter being paused/cleared by a near-simultaneous
+ * disconnect), nothing else ever retries it: the channel is left parted, silently, until the next
+ * full reconnect. This poll exists purely to catch and self-heal that case (mirrors the
+ * `twitchEventSubReconciliation.ts` periodic-poll pattern for the same class of problem).
+ */
+const RECONCILE_POLL_INTERVAL_MS = 60_000;
+
+let reconcileTickTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
  * Bundles this module's live client/membership state for {@link compensateIfStale} — see
  * `twitchChannelNetworkOps.ts`'s {@link MembershipDeps}. Built fresh at each join/part call site
  * so `runExclusive` closes over the current `channel`, but its accessor functions still read
@@ -139,6 +152,24 @@ export async function reconcileJoinedChannels(): Promise<void> {
       log.error(`Failed to join queued channel ${channel}:`, err);
     }
   }
+}
+
+/**
+ * Starts the periodic channel-membership reconciliation interval (see
+ * {@link RECONCILE_POLL_INTERVAL_MS}). Call once at bot startup, after {@link initializeActiveChannels}.
+ * No-ops if already started, so a second call can't leak the original interval handle.
+ */
+export function startChannelReconciliationPoll(): void {
+  if (reconcileTickTimer) return;
+  reconcileTickTimer = setInterval(() => {
+    reconcileJoinedChannels().catch((err) => log.error('Periodic channel reconciliation error:', err));
+  }, RECONCILE_POLL_INTERVAL_MS);
+  log.info(`Started periodic channel-membership reconciliation every ${RECONCILE_POLL_INTERVAL_MS / 1000}s`);
+}
+
+/** Stops the periodic channel-membership reconciliation interval. */
+export function stopChannelReconciliationPoll(): void {
+  if (reconcileTickTimer) { clearInterval(reconcileTickTimer); reconcileTickTimer = null; }
 }
 
 /** Loads enabled channels from the DB, populates activeChannels, and pre-resolves user IDs. */
@@ -270,4 +301,5 @@ export function clearMembershipState(): void {
   activeChannels.clear();
   activeChannelUserIds.clear();
   resetJoinGate();
+  stopChannelReconciliationPoll();
 }

@@ -30,6 +30,8 @@ vi.mock('./twitch/twitchChannelMembership', () => ({
   getActiveChannels: vi.fn(),
   getActiveChannelUserIds: vi.fn(),
   setChannelJoinedHook: vi.fn(),
+  startChannelReconciliationPoll: vi.fn(),
+  stopChannelReconciliationPoll: vi.fn(),
 }));
 vi.mock('./twitch/monitor/twitchMonitor', () => ({
   startTwitchMonitor: vi.fn().mockResolvedValue(undefined),
@@ -212,12 +214,14 @@ describe('startup — reward pricing scheduler', () => {
     const { startRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
     const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
     const { startEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
+    const { startChannelReconciliationPoll } = await import('./twitch/twitchChannelMembership.js');
 
     await runMain();
 
     expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSubReconciliation)).toHaveBeenCalledOnce();
+    expect(vi.mocked(startChannelReconciliationPoll)).toHaveBeenCalledOnce();
     expect(exitSpy).not.toHaveBeenCalled();
   });
 });
@@ -226,6 +230,7 @@ describe('shutdown', () => {
   it('stops the reward pricing scheduler on SIGINT', async () => {
     const { stopRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
     const { stopEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
+    const { stopChannelReconciliationPoll } = await import('./twitch/twitchChannelMembership.js');
 
     await runMain();
     process.emit('SIGINT');
@@ -233,6 +238,7 @@ describe('shutdown', () => {
 
     expect(vi.mocked(stopRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopEventSubReconciliation)).toHaveBeenCalledOnce();
+    expect(vi.mocked(stopChannelReconciliationPoll)).toHaveBeenCalledOnce();
   });
 });
 

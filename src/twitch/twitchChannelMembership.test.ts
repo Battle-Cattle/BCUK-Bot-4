@@ -22,6 +22,8 @@ import {
   getActiveChannels,
   getActiveChannelUserIds,
   clearMembershipState,
+  startChannelReconciliationPoll,
+  stopChannelReconciliationPoll,
 } from './twitchChannelMembership';
 import { getTwitchEnabledChannels } from '../db';
 import { getUsers } from './twitchApi';
@@ -463,6 +465,70 @@ describe('reconcileJoinedChannels', () => {
     expect(client.join).toHaveBeenCalledWith('carol');
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('carol', true);
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('alice', false);
+  });
+});
+
+// ─── startChannelReconciliationPoll / stopChannelReconciliationPoll ────────
+
+describe('startChannelReconciliationPoll', () => {
+  it('re-runs reconciliation on an interval, retrying a channel a prior pass failed to join', async () => {
+    const client = makeMockClient([]);
+    setChatClient(client as any);
+    setConnected(false);
+    await joinTwitchChannel('alice'); // queues into activeChannels without calling client.join
+    setConnected(true);
+
+    // Simulate the connect-time reconciliation pass (onConnected's own call) failing to join —
+    // unlike joinTwitchChannel's own failure path, this leaves 'alice' in activeChannels (still
+    // desired) but not actually joined, exactly the case the periodic poll exists to retry.
+    client.join.mockRejectedValueOnce(new Error('join failed'));
+    await reconcileJoinedChannels();
+    expect(client.join).toHaveBeenCalledWith('alice');
+    expect(getActiveChannels().has('alice')).toBe(true);
+    vi.mocked(setTwitchChannel).mockClear();
+    client.join.mockClear();
+
+    startChannelReconciliationPoll();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(client.join).toHaveBeenCalledWith('alice');
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('alice', true);
+  });
+
+  it('does not register a second interval when called again while already running', async () => {
+    const client = makeMockClient(['alice']);
+    setChatClient(client as any);
+    setConnected(true);
+    await joinTwitchChannel('alice');
+    vi.mocked(setTwitchChannel).mockClear();
+
+    startChannelReconciliationPoll();
+    startChannelReconciliationPoll();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // A duplicate interval would have run reconcileJoinedChannels twice in this window,
+    // marking the already-joined channel online twice instead of once.
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('stopChannelReconciliationPoll', () => {
+  it('stops further reconciliation passes', async () => {
+    const client = makeMockClient(['alice']);
+    setChatClient(client as any);
+    setConnected(true);
+    await joinTwitchChannel('alice');
+    vi.mocked(setTwitchChannel).mockClear();
+
+    startChannelReconciliationPoll();
+    stopChannelReconciliationPoll();
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(vi.mocked(setTwitchChannel)).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when the poll was never started', () => {
+    expect(() => stopChannelReconciliationPoll()).not.toThrow();
   });
 });
 
