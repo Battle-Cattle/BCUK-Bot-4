@@ -90,6 +90,13 @@ describe('countdown cooldown', () => {
 
     // Only the first call's 4 steps were sent; the second was blocked by cooldown.
     expect(mockRuntime.send).toHaveBeenCalledTimes(4);
+
+    // Once the cooldown window has elapsed, the channel can claim again.
+    await vi.advanceTimersByTimeAsync(COOLDOWN_MS + 1);
+    const retry = executeCountdownForTwitch('#chan', '!321');
+    await vi.advanceTimersByTimeAsync(3000);
+    await retry;
+    expect(mockRuntime.send).toHaveBeenCalledTimes(8);
   });
 
   it("does not apply one channel's cooldown to another channel", async () => {
