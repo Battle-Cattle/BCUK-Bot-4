@@ -14,7 +14,7 @@ import {
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
   handleStreamOnline, handleStreamOffline, handleChannelUpdate,
 } from './twitchEventSubHandler';
-import { seenRedemptionIds } from './twitchEventSubRedemptionDedup';
+import { seenRedemptionIds, pendingRedemptionIds } from './twitchEventSubRedemptionDedup';
 import {
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
   registerEventSubAlertRuntime, registerEventSubDashboardRuntime,
@@ -730,6 +730,7 @@ describe('handleRedemption', () => {
   beforeEach(() => {
     vi.mocked(getStreamerById).mockResolvedValue({ discord_id: '999888777' } as any);
     seenRedemptionIds.clear();
+    pendingRedemptionIds.clear();
   });
 
   it('does not call pushOverlayEvent when getVideosForReward returns an empty array', async () => {
@@ -851,6 +852,30 @@ describe('handleRedemption', () => {
     expect(applyRedemptionPricing).toHaveBeenCalledOnce();
     expect(getVideosForReward).toHaveBeenCalledOnce();
     expect(mockPushOverlayEvent).toHaveBeenCalledOnce();
+  });
+
+  it('retries and completes on a second attempt with the same redemption id after the first attempt throws', async () => {
+    const videos = [{ file: 'clip1.mp4', weight: 1 }] as any[];
+    vi.mocked(getVideosForReward).mockRejectedValueOnce(new Error('transient db error'));
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('transient db error');
+
+    // The failed attempt must not be misclassified as "already handled" — none of its effects
+    // should have been left counted from a partial run, and a retry must be free to run again.
+    vi.mocked(getVideosForReward).mockResolvedValue(videos);
+    vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBeUndefined();
+
+    // The dashboard/companion/pricing effects run ahead of the getVideosForReward call that
+    // failed the first time, so they fire once per attempt (twice total); the overlay trigger
+    // only ever completes on the successful second attempt.
+    expect(recordStreamerEvent).toHaveBeenCalledTimes(2);
+    expect(mockPushDashboardEvent).toHaveBeenCalledTimes(2);
+    expect(mockPushCompanionEvent).toHaveBeenCalledTimes(2);
+    expect(applyRedemptionPricing).toHaveBeenCalledTimes(2);
+    expect(mockPushOverlayEvent).toHaveBeenCalledOnce();
+    expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
   });
 
   it('processes two notifications with different redemption ids normally', async () => {

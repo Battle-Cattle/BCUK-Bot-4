@@ -6,7 +6,7 @@ import { createLogger } from '../../shared/logger';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 import { fillTemplate } from '../../shared/textTemplate';
 import { applyRedemptionPricing } from '../pricing/rewardPricingService';
-import { isDuplicateRedemption } from './twitchEventSubRedemptionDedup';
+import { isDuplicateRedemption, markRedemptionHandled, clearPendingRedemption } from './twitchEventSubRedemptionDedup';
 import {
   overlayRuntimeRegistry,
   companionRuntimeRegistry,
@@ -343,9 +343,12 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
  * overlay-video logic below.
  *
  * Deduplicates on Twitch's own redemption id ({@link isDuplicateRedemption}) before doing
- * anything else — a duplicate is dropped silently, since every effect below (companion push,
- * dashboard record, pricing, overlay trigger) would otherwise double-fire for one physical
- * redemption.
+ * anything else — a duplicate (or an id already being processed by another in-flight call) is
+ * dropped silently, since every effect below (companion push, dashboard record, pricing, overlay
+ * trigger) would otherwise double-fire for one physical redemption. The id is only marked as
+ * successfully handled ({@link markRedemptionHandled}) once every effect below has run without
+ * throwing; a failure clears the in-flight claim ({@link clearPendingRedemption}) instead, so a
+ * retry of the same redemption id is not misclassified as a duplicate.
  *
  * @param login - Broadcaster login name.
  * @param event - Redemption event payload including reward ID and user details.
@@ -363,39 +366,49 @@ export async function handleRedemption(
     return;
   }
 
+  // Only mark the redemption as handled (via markRedemptionHandled) once every effect below has
+  // run without throwing. If anything throws, clearPendingRedemption releases the in-flight claim
+  // and the error is rethrown, so a retry (e.g. reconciliation's next poll tick) re-runs this
+  // redemption from scratch instead of being silently dropped as a duplicate.
   try {
-    const streamer = await getStreamerById(streamerId);
-    if (streamer) {
-      companionRuntimeRegistry.get()?.pushCompanionEvent(streamer.discord_id, {
-        type: 'channel_points_redemption',
-        rewardId: event.reward.id,
-        rewardTitle: event.reward.title,
-        userLogin: event.user_login,
-        userName: event.user_name,
-        userInput: event.user_input,
-        redeemedAt: new Date().toISOString(),
-      });
+    try {
+      const streamer = await getStreamerById(streamerId);
+      if (streamer) {
+        companionRuntimeRegistry.get()?.pushCompanionEvent(streamer.discord_id, {
+          type: 'channel_points_redemption',
+          rewardId: event.reward.id,
+          rewardTitle: event.reward.title,
+          userLogin: event.user_login,
+          userName: event.user_name,
+          userInput: event.user_input,
+          redeemedAt: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      log.error('Failed to push companion event for redemption:', err);
     }
+
+    const detail = event.user_input ? `${event.reward.title}: ${event.user_input}` : event.reward.title;
+    await recordAndPushDashboardEvent(streamerId, 'redemption', event.user_name, detail);
+
+    // Not awaited: applyRedemptionPricing drives a queued Twitch Helix call, and there's no
+    // correctness reason to make the overlay-trigger path below wait on that network latency.
+    applyRedemptionPricing(streamerId, event.reward.id).catch((err) => {
+      log.error('Failed to apply dynamic pricing for redemption:', err);
+    });
+
+    const videos = await getVideosForReward(event.reward.id, streamerId);
+    if (videos.length > 0) {
+      const filename = pickWeightedRandom(videos);
+      const videoPath = `/overlay/videos/${streamerId}/${filename}`;
+      overlayRuntimeRegistry.get()?.pushOverlayEvent(login, videoPath);
+      log.info(`Overlay triggered for ${login}: reward="${event.reward.title}" video=${filename}`);
+    }
+    markRedemptionHandled(event.id);
   } catch (err) {
-    log.error('Failed to push companion event for redemption:', err);
+    clearPendingRedemption(event.id);
+    throw err;
   }
-
-  const detail = event.user_input ? `${event.reward.title}: ${event.user_input}` : event.reward.title;
-  await recordAndPushDashboardEvent(streamerId, 'redemption', event.user_name, detail);
-
-  // Not awaited: applyRedemptionPricing drives a queued Twitch Helix call, and there's no
-  // correctness reason to make the overlay-trigger path below wait on that network latency.
-  applyRedemptionPricing(streamerId, event.reward.id).catch((err) => {
-    log.error('Failed to apply dynamic pricing for redemption:', err);
-  });
-
-  const videos = await getVideosForReward(event.reward.id, streamerId);
-  if (videos.length === 0) return;
-
-  const filename = pickWeightedRandom(videos);
-  const videoPath = `/overlay/videos/${streamerId}/${filename}`;
-  overlayRuntimeRegistry.get()?.pushOverlayEvent(login, videoPath);
-  log.info(`Overlay triggered for ${login}: reward="${event.reward.title}" video=${filename}`);
 }
 
 /**
