@@ -54,19 +54,6 @@ async function consumeCodeOnConnection(executor: mysql.Pool | mysql.PoolConnecti
 }
 
 /**
- * Atomically consumes a companion OAuth code: marks it used and returns the
- * Discord ID it was issued for, but only if it exists, hasn't expired, and
- * hasn't already been consumed.
- *
- * @param code - Plaintext code presented by the companion app.
- * @returns The Discord ID the code was issued for, or null if invalid/expired/already used.
- */
-export async function consumeCode(code: string): Promise<string | null> {
-  const hash = createHash('sha256').update(code).digest('hex');
-  return consumeCodeOnConnection(getPool(), hash);
-}
-
-/**
  * Atomically exchanges a companion OAuth code for a companion app token: marks
  * the code used and issues the token in a single DB transaction, so a failure
  * issuing the token rolls back the "used" mark instead of permanently burning

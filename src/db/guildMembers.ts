@@ -11,32 +11,7 @@ export interface DbGuildMember {
   access_level: number;
 }
 
-function mapGuildMember(row: mysql.RowDataPacket): DbGuildMember {
-  return {
-    guild_id: String(row.guild_id),
-    discord_id: String(row.discord_id),
-    access_level: row.access_level,
-  };
-}
-
 // ─── Queries ─────────────────────────────────────────────────────────────────
-
-/**
- * Returns every membership row for a guild, ordered by access level descending.
- *
- * @param guildId - Guild snowflake ID.
- * @returns Array of guild member rows, highest access level first.
- */
-export async function getGuildMembers(guildId: string): Promise<DbGuildMember[]> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT guild_id, discord_id, access_level
-     FROM guild_member
-     WHERE guild_id = ?
-     ORDER BY access_level DESC`,
-    [guildId],
-  );
-  return rows.map(mapGuildMember);
-}
 
 /**
  * Returns a user's access level within a specific guild, or null if they have no
