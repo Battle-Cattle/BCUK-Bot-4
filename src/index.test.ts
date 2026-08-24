@@ -30,6 +30,8 @@ vi.mock('./twitch/twitchChannelMembership', () => ({
   getActiveChannels: vi.fn(),
   getActiveChannelUserIds: vi.fn(),
   setChannelJoinedHook: vi.fn(),
+}));
+vi.mock('./twitch/twitchChannelReconciliationPoll', () => ({
   startChannelReconciliationPoll: vi.fn(),
   stopChannelReconciliationPoll: vi.fn(),
 }));
@@ -214,7 +216,7 @@ describe('startup — reward pricing scheduler', () => {
     const { startRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
     const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
     const { startEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
-    const { startChannelReconciliationPoll } = await import('./twitch/twitchChannelMembership.js');
+    const { startChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
 
     await runMain();
 
@@ -230,7 +232,7 @@ describe('shutdown', () => {
   it('stops the reward pricing scheduler on SIGINT', async () => {
     const { stopRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
     const { stopEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
-    const { stopChannelReconciliationPoll } = await import('./twitch/twitchChannelMembership.js');
+    const { stopChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
 
     await runMain();
     process.emit('SIGINT');
