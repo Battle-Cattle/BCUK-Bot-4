@@ -24,13 +24,20 @@ import {
   clearMembershipState,
   startChannelReconciliationPoll,
   stopChannelReconciliationPoll,
+  __setConfirmedJoinedChannelsForTests,
 } from './twitchChannelMembership';
 import { getTwitchEnabledChannels } from '../db';
 import { getUsers } from './twitchApi';
 import { setTwitchChannel } from '../shared/statusStore';
 
-/** Builds a minimal fake Twurple chat client, pre-seeded with the given already-joined channels. */
+/**
+ * Builds a minimal fake Twurple chat client, pre-seeded with the given already-joined channels.
+ * Also seeds {@link __setConfirmedJoinedChannelsForTests} with the same list — that's what
+ * `isChannelJoined` actually reads (see its doc for why `client.currentChannels` isn't trusted).
+ * `currentChannels` is kept on the mock only for shape-compatibility with the real `ChatClient`.
+ */
 function makeMockClient(channels: string[] = []) {
+  __setConfirmedJoinedChannelsForTests(channels);
   return {
     currentChannels: channels,
     join: vi.fn().mockResolvedValue(undefined),
@@ -202,10 +209,9 @@ describe('membershipMutationQueue serialization', () => {
     setConnected(true);
     const order: string[] = [];
     const { promise: gate, resolve: openGate } = deferred();
-    client.join.mockImplementation(async (channel: string) => {
+    client.join.mockImplementation(async () => {
       order.push('join-start');
       await gate;
-      client.currentChannels = [channel]; // simulate the join taking effect
       order.push('join-end');
     });
     client.part.mockImplementation(async () => { order.push('part'); });
@@ -334,8 +340,8 @@ describe('stale join/part compensation', () => {
     await assertion;
     expect(getActiveChannels().has('alice')).toBe(false);
 
-    // The real join now actually lands, out of band, well after the caller stopped waiting.
-    client.currentChannels = ['alice'];
+    // The real join now actually lands, out of band, well after the caller stopped waiting —
+    // compensateIfStale's own markJoined callback (not client.currentChannels) is what records it.
     resolveJoin();
     await flushMicrotasks();
 

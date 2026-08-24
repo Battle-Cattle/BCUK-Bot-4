@@ -149,6 +149,7 @@ import {
   getActiveChannels,
   getActiveChannelUserIds,
   setChannelJoinedHook,
+  __setConfirmedJoinedChannelsForTests,
 } from './twitchChannelMembership';
 import * as twitchChannelMembership from './twitchChannelMembership';
 import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName } from '../db';
@@ -471,7 +472,7 @@ describe('joinTwitchChannel', () => {
 
   it('syncs state without calling client.join when already joined', async () => {
     await connectBot();
-    mockClient.currentChannels = ['streamer'];
+    __setConfirmedJoinedChannelsForTests(['streamer']);
 
     await joinTwitchChannel('streamer');
 
@@ -534,7 +535,7 @@ describe('joinTwitchChannel', () => {
     await connectBot();
     const hook = vi.fn();
     setChannelJoinedHook(hook);
-    mockClient.currentChannels = ['streamer'];
+    __setConfirmedJoinedChannelsForTests(['streamer']);
 
     await joinTwitchChannel('streamer');
 
@@ -544,7 +545,7 @@ describe('joinTwitchChannel', () => {
   it('caches the user ID when already joined', async () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([{ login: 'streamer', id: 'uid99' } as any]);
-    mockClient.currentChannels = ['streamer'];
+    __setConfirmedJoinedChannelsForTests(['streamer']);
 
     await joinTwitchChannel('streamer');
     await Promise.resolve(); // flush cacheChannelUserId
@@ -594,8 +595,7 @@ describe('partTwitchChannel', () => {
   it('calls client.part when the channel is active and already joined', async () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([]);
-    await joinTwitchChannel('streamer');
-    mockClient.currentChannels = ['streamer'];
+    await joinTwitchChannel('streamer'); // real join — confirms 'streamer' joined
 
     await partTwitchChannel('streamer');
 
@@ -608,7 +608,7 @@ describe('partTwitchChannel', () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([]);
     await joinTwitchChannel('streamer');
-    mockClient.currentChannels = []; // client reports no joined channels
+    __setConfirmedJoinedChannelsForTests([]); // simulate the channel no longer being joined
 
     await partTwitchChannel('streamer');
 
@@ -620,7 +620,6 @@ describe('partTwitchChannel', () => {
     await connectBot();
     vi.mocked(getUsers).mockResolvedValue([]);
     await joinTwitchChannel('streamer');
-    mockClient.currentChannels = ['streamer'];
     mockClient.part.mockImplementation(() => { throw new Error('part failed'); });
 
     await expect(partTwitchChannel('streamer')).rejects.toThrow('part failed');
@@ -632,7 +631,6 @@ describe('partTwitchChannel', () => {
     vi.mocked(getUsers).mockResolvedValue([{ login: 'streamer', id: 'uid42' } as any]);
     await joinTwitchChannel('streamer');
     await Promise.resolve(); // flush cacheChannelUserId
-    mockClient.currentChannels = ['streamer'];
 
     await partTwitchChannel('streamer');
 
@@ -646,7 +644,6 @@ describe('partTwitchChannel', () => {
       () => new Promise((resolve) => { resolveGetUsers = resolve; }),
     );
     await joinTwitchChannel('streamer'); // cacheChannelUserId fires but getUsers is pending
-    mockClient.currentChannels = ['streamer'];
     await partTwitchChannel('streamer'); // removes from activeChannels before getUsers resolves
 
     resolveGetUsers([{ login: 'streamer', id: 'uid-stale' }]);
@@ -964,16 +961,18 @@ describe('stopTwitchBot', () => {
 // ─── reconcileJoinedChannels (via onConnected) ────────────────────────────────
 //
 // startTwitchBot() itself only resolves once onAuthenticationSuccess fires (see connectAndWait),
-// and that same event triggers onConnected's fire-and-forget reconcileJoinedChannels() call — so by the
-// time `await startTwitchBot()` returns, the initial reconciliation has already been *kicked off*
-// against whatever mockClient.currentChannels was at that moment. These tests set currentChannels
-// up front, before starting the bot, rather than firing a separate synthetic reconnect afterward.
+// and that same event triggers onConnected's fire-and-forget reconcileJoinedChannels() call — so by
+// the time `await startTwitchBot()` returns, the initial reconciliation has already been *kicked
+// off*. These tests seed confirmedJoinedChannels (via __setConfirmedJoinedChannelsForTests) up
+// front, before starting the bot, rather than firing a separate synthetic reconnect afterward —
+// deliberately not mockClient.currentChannels, which reconcileJoinedChannels no longer trusts (see
+// confirmedJoinedChannels's doc in twitchChannelMembership.ts for why).
 
 describe('reconcileJoinedChannels', () => {
   it('parts a joined channel that is not in activeChannels', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     vi.mocked(getUsers).mockResolvedValue([]);
-    mockClient.currentChannels = ['stale'];
+    __setConfirmedJoinedChannelsForTests(['stale']);
 
     await startTwitchBot();
     await vi.runAllTimersAsync();
@@ -985,7 +984,6 @@ describe('reconcileJoinedChannels', () => {
   it('joins an activeChannels channel that the client is not yet joined to', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
     vi.mocked(getUsers).mockResolvedValue([]);
-    mockClient.currentChannels = [];
 
     await startTwitchBot();
     await vi.runAllTimersAsync(); // advance JOIN_THROTTLE_MS
@@ -994,10 +992,22 @@ describe('reconcileJoinedChannels', () => {
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', true);
   });
 
-  it('marks a channel online when it is in both activeChannels and the client', async () => {
+  it('rejoins an active channel even when the client still reports it as previously joined (a reconnect leaves currentChannels stale)', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
     vi.mocked(getUsers).mockResolvedValue([]);
-    mockClient.currentChannels = ['streamer'];
+    mockClient.currentChannels = ['streamer']; // stale Twurple bookkeeping — must not be trusted
+
+    await startTwitchBot();
+    await vi.runAllTimersAsync();
+
+    expect(mockClient.join).toHaveBeenCalledWith('streamer');
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', true);
+  });
+
+  it('marks a channel online when it is in both activeChannels and confirmed joined', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
+    vi.mocked(getUsers).mockResolvedValue([]);
+    __setConfirmedJoinedChannelsForTests(['streamer']);
 
     await startTwitchBot();
     await vi.runAllTimersAsync();
@@ -1012,7 +1022,7 @@ describe('reconcileJoinedChannels', () => {
     vi.mocked(getUsers)
       .mockResolvedValueOnce([]) // initializeActiveChannels — simulate failed startup cache
       .mockResolvedValue([{ login: 'streamer', id: 'uid-reconcile' } as any]);
-    mockClient.currentChannels = ['streamer']; // already joined
+    __setConfirmedJoinedChannelsForTests(['streamer']); // already joined
 
     await startTwitchBot();
     await vi.runAllTimersAsync();
@@ -1026,7 +1036,6 @@ describe('reconcileJoinedChannels', () => {
     vi.mocked(getUsers)
       .mockResolvedValueOnce([]) // initializeActiveChannels
       .mockResolvedValue([{ login: 'streamer', id: 'uid-join' } as any]);
-    mockClient.currentChannels = []; // not yet joined
 
     await startTwitchBot();
     await vi.runAllTimersAsync(); // advance JOIN_THROTTLE_MS
