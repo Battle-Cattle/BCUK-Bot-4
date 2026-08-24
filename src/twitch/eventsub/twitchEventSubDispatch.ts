@@ -41,6 +41,8 @@ const notificationHandlers = new Map<string, NotificationHandler>([
   ['channel.subscription.message',                     (l, e, c, sid) => handleResub(l, e as ResubEvent, c, sid)],
   ['channel.subscription.gift',                        (l, e, c, sid) => handleGiftSub(l, e as GiftSubEvent, c, sid)],
   ['channel.raid',                                     (l, e, c, sid) => handleRaid(l, e as RaidEvent, c, sid)],
+  // handleRedemption resolves a processed/duplicate boolean (used by reconciliation); discarded
+  // here since this dispatch table's live-notification path only needs the side effects.
   ['channel.channel_points_custom_reward_redemption.add',  async (l, e, c, sid) => { await handleRedemption(l, e as RedemptionEvent, c, sid); }],
   ['stream.online',                                    (l) => handleStreamOnline(l)],
   ['stream.offline',                                   (l) => handleStreamOffline(l)],
