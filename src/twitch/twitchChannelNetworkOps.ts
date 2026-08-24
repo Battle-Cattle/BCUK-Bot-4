@@ -50,7 +50,11 @@ export interface MembershipDeps {
   getClient: () => ChatClient | null;
   /** Whether the client is currently connected. */
   isConnected: () => boolean;
-  /** Whether `channel` is currently joined per the live Twurple client's own channel list. */
+  /**
+   * Whether `channel` is currently joined, per the caller's own application-owned bookkeeping
+   * (not Twurple's `ChatClient#currentChannels` — see `twitchChannelMembership.ts`'s
+   * `confirmedJoinedChannels` doc for why that can't be trusted across a reconnect).
+   */
   isChannelJoined: (channel: string) => boolean;
   /** Whether `channel` is currently desired to be joined (the source of truth for intent). */
   isDesiredJoined: (channel: string) => boolean;
