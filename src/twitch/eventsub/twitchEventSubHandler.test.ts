@@ -788,16 +788,30 @@ describe('handleRedemption', () => {
     expect(mockPushCompanionEvent).not.toHaveBeenCalled();
   });
 
-  it('still triggers the overlay when the companion lookup throws', async () => {
+  it('still resolves successfully when the companion lookup throws, after the overlay has already triggered', async () => {
     vi.mocked(getStreamerById).mockRejectedValue(new Error('db unavailable'));
     const videos = [{ file: 'clip1.mp4', weight: 1 }] as any[];
     vi.mocked(getVideosForReward).mockResolvedValue(videos);
     vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
 
-    await handleRedemption('streamer', event, makeConfig(), streamerId);
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
 
     expect(mockPushCompanionEvent).not.toHaveBeenCalled();
     expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
+  });
+
+  it('delivers the companion event only once when a getVideosForReward failure is retried, since the best-effort companion push runs after the overlay lookup', async () => {
+    const videos = [{ file: 'clip1.mp4', weight: 1 }] as any[];
+    vi.mocked(getVideosForReward).mockRejectedValueOnce(new Error('transient db error'));
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('transient db error');
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+
+    vi.mocked(getVideosForReward).mockResolvedValue(videos);
+    vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
+
+    expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
   });
 
   it('applies dynamic pricing for the redeemed reward', async () => {
@@ -827,15 +841,43 @@ describe('handleRedemption', () => {
     expect(recordStreamerEvent).toHaveBeenCalledWith(streamerId, 'redemption', 'Redeemer', 'Cool Reward: drink water!');
   });
 
-  it('still triggers the overlay lookup when applyRedemptionPricing throws', async () => {
+  it('rejects and skips the overlay lookup when applyRedemptionPricing throws, since pricing is a required effect', async () => {
     vi.mocked(applyRedemptionPricing).mockRejectedValueOnce(new Error('pricing failed'));
     const videos = [{ file: 'clip1.mp4', weight: 1 }] as any[];
     vi.mocked(getVideosForReward).mockResolvedValue(videos);
     vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
 
-    await handleRedemption('streamer', event, makeConfig(), streamerId);
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('pricing failed');
 
-    expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
+    expect(getVideosForReward).not.toHaveBeenCalled();
+    expect(mockPushOverlayEvent).not.toHaveBeenCalled();
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+  });
+
+  it('delivers the companion event only once when a pricing failure is retried, since the best-effort companion push runs after the required effects', async () => {
+    vi.mocked(applyRedemptionPricing).mockRejectedValueOnce(new Error('pricing failed'));
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('pricing failed');
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
+    expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
+  });
+
+  it('rejects and is not marked handled when recordStreamerEvent throws, since dashboard recording is a required effect', async () => {
+    vi.mocked(recordStreamerEvent).mockRejectedValueOnce(new Error('db unavailable'));
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('db unavailable');
+
+    expect(applyRedemptionPricing).not.toHaveBeenCalled();
+    expect(mockPushDashboardEvent).not.toHaveBeenCalled();
+
+    // A retry with the same id must not be dropped as a duplicate.
+    vi.mocked(recordStreamerEvent).mockResolvedValue(undefined);
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
   });
 
   it('ignores a second notification carrying the same redemption id', async () => {
@@ -867,12 +909,13 @@ describe('handleRedemption', () => {
 
     await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
 
-    // The dashboard/companion/pricing effects run ahead of the getVideosForReward call that
-    // failed the first time, so they fire once per attempt (twice total); the overlay trigger
-    // only ever completes on the successful second attempt.
+    // The dashboard/pricing effects run ahead of the getVideosForReward call that failed the
+    // first time, so they fire once per attempt (twice total). The companion push runs last —
+    // after the overlay lookup — so it never reaches the failed first attempt and fires only
+    // once, on the successful retry; the overlay trigger likewise only ever completes then.
     expect(recordStreamerEvent).toHaveBeenCalledTimes(2);
     expect(mockPushDashboardEvent).toHaveBeenCalledTimes(2);
-    expect(mockPushCompanionEvent).toHaveBeenCalledTimes(2);
+    expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
     expect(applyRedemptionPricing).toHaveBeenCalledTimes(2);
     expect(mockPushOverlayEvent).toHaveBeenCalledOnce();
     expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
