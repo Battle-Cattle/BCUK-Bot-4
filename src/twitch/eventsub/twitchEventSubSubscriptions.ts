@@ -29,6 +29,17 @@ export function clearAuthFailedSubs(login: string): void {
   for (const key of authFailedSubs) if (key.startsWith(prefix)) authFailedSubs.delete(key);
 }
 
+/** True if `condition` identifies `uid` as the broadcaster — every {@link SubSpec} in
+ *  `SUBSCRIPTION_GROUPS` sets one of these two fields to the target streamer's uid. Used to
+ *  filter `listEventSubSubscriptions`' result down to this streamer's own subscriptions: that
+ *  call is scoped by the streamer's *user token*, which Twitch also matches against subscriptions
+ *  where the token's user is a moderator (e.g. `channel.follow`'s `moderator_user_id`) rather than
+ *  the broadcaster — so without this filter, another broadcaster's subscription (on a channel this
+ *  streamer moderates) could be mistaken for this streamer's own and wrongly kept or deleted. */
+function isOwnSubscription(condition: Record<string, string>, uid: string): boolean {
+  return condition.broadcaster_user_id === uid || condition.to_broadcaster_user_id === uid;
+}
+
 /**
  * Deletes subscriptions that shouldn't be active any more: those whose type isn't in
  * `desired` at all (e.g. the streamer turned off raid alerts), and — for types that were
@@ -44,7 +55,9 @@ export function clearAuthFailedSubs(login: string): void {
  * calls) — in that rare case it's left untouched, since we can't tell which one Twitch considers
  * the live one without risking deleting the subscription actually receiving events.
  *
- * @param uid - Broadcaster's Twitch user ID, used only for error logging.
+ * @param uid - Broadcaster's Twitch user ID; also used to filter out another broadcaster's
+ *   subscription that Twitch included only because this streamer moderates that channel (see
+ *   {@link isOwnSubscription}) — never deleted, regardless of type or desired state.
  * @param desired - Subscription types that should exist after this call.
  * @param created - Type → subscription id for subscriptions freshly created this round (see
  *   {@link createSubscriptionsForStreamer}); a type present here has any other existing
@@ -55,7 +68,7 @@ async function deleteStaleSubscriptions(
   uid: string, desired: Set<string>, created: ReadonlyMap<string, string>, userToken: string | null,
 ): Promise<void> {
   if (!userToken) return;
-  let existing: Array<{ id: string; type: string }>;
+  let existing: Array<{ id: string; type: string; condition: Record<string, string> }>;
   try {
     existing = await listEventSubSubscriptions(userToken);
   } catch (err) {
@@ -67,6 +80,7 @@ async function deleteStaleSubscriptions(
   // of the cleanup — leaving a still-undeleted stale duplicate would keep delivering
   // notifications and double-firing the type's handler, the exact failure this cleanup targets.
   const staleSubs = existing.filter((sub) => {
+    if (!isOwnSubscription(sub.condition, uid)) return false;
     const keptId = created.get(sub.type);
     const isStaleDuplicate = keptId !== undefined && sub.id !== keptId;
     return !desired.has(sub.type) || isStaleDuplicate;
@@ -140,7 +154,7 @@ async function createSubscriptionsForStreamer(
   const created = new Map<string, string>();
   if (!token) return { desired, created };
 
-  const existingByType = await listExistingSubscriptionsByType(token, name);
+  const existingByType = await listExistingSubscriptionsByType(token, uid, name);
 
   for (const group of SUBSCRIPTION_GROUPS) {
     if (!isGroupEnabled(group, config, enabledAlerts)) continue;
@@ -154,14 +168,20 @@ async function createSubscriptionsForStreamer(
   return { desired, created };
 }
 
-/** Fetches existing EventSub subscriptions and indexes them by type. Returns an empty map (and
- *  logs) on failure — callers treat that the same as "nothing exists yet" and create fresh. */
+/** Fetches existing EventSub subscriptions, filters out any that Twitch returned only because
+ *  this streamer moderates a different broadcaster's channel (see {@link isOwnSubscription}), and
+ *  indexes the rest by type. Returns an empty map (and logs) on failure — callers treat that the
+ *  same as "nothing exists yet" and create fresh. */
 async function listExistingSubscriptionsByType(
-  token: string, name: string,
+  token: string, uid: string, name: string,
 ): Promise<Map<string, { id: string; sessionId?: string }>> {
   try {
     const existing = await listEventSubSubscriptions(token);
-    return new Map(existing.map((sub) => [sub.type, { id: sub.id, sessionId: sub.sessionId }]));
+    return new Map(
+      existing
+        .filter((sub) => isOwnSubscription(sub.condition, uid))
+        .map((sub) => [sub.type, { id: sub.id, sessionId: sub.sessionId }]),
+    );
   } catch (err) {
     log.error(`Failed to list existing EventSub subscriptions for ${name}:`, err);
     return new Map();
