@@ -38,10 +38,11 @@ export function clearAuthFailedSubs(login: string): void {
  * an orphaned WebSocket subscription on its own, but not instantaneously — until then it stays
  * "enabled" and delivers notifications alongside the new one, double-firing the type's handler
  * for every event (e.g. `handleRedemption` recording two dashboard entries for one redemption).
- * A type whose subscribe() returned null this round (409 — Twitch says an identical
- * type+condition subscription already exists) is left untouched: `created` has no entry for
- * it, so none of its existing subscriptions get pruned, since we can't tell which one Twitch
- * considers the live one without risking deleting the subscription actually receiving events.
+ * `createSubscriptionsForStreamer` now proactively deletes a stale subscription (bound to a
+ * session id other than the live one) before recreating it, so a type only ends up missing from
+ * `created` here on a genuine race (another process/tab recreated it between our list and create
+ * calls) — in that rare case it's left untouched, since we can't tell which one Twitch considers
+ * the live one without risking deleting the subscription actually receiving events.
  *
  * @param uid - Broadcaster's Twitch user ID, used only for error logging.
  * @param desired - Subscription types that should exist after this call.
@@ -114,11 +115,16 @@ interface SubscriptionResult {
 }
 
 /**
- * Creates all desired EventSub subscriptions for a single streamer.
- * @returns The desired-types set alongside a type → id map of subscriptions actually created
- *   this round (a type is absent from `created` if `subscribe` hit a 409 — Twitch already has
- *   an identical type+condition subscription active — so the caller has no id to prefer over
- *   whatever else `listEventSubSubscriptions` later reports for that type).
+ * Creates all desired EventSub subscriptions for a single streamer. Before creating each type,
+ * checks whether Twitch already has a subscription of that type: if it's bound to the live
+ * `sessionId`, it's kept as-is (no redundant create call); if it's bound to any other session id
+ * — a duplicate left over from a dead/prior connection (e.g. after `onError`/`forceReconnect`
+ * tore down a socket without a clean close, so Twitch hadn't yet revoked its subscriptions) —
+ * it's deleted first so the fresh create can't 409 against it and leave the *new* session with no
+ * working subscription of that type.
+ * @returns The desired-types set alongside a type → id map of subscriptions actually created (or
+ *   confirmed already-live on this session) this round (a type is absent from `created` only on a
+ *   genuine race — see {@link deleteStaleSubscriptions}).
  */
 async function createSubscriptionsForStreamer(
   sessionId: string, data: StreamerEventSubData,
@@ -134,10 +140,29 @@ async function createSubscriptionsForStreamer(
   const created = new Map<string, string>();
   if (!token) return { desired, created };
 
+  let existingByType = new Map<string, { id: string; sessionId?: string }>();
+  try {
+    const existing = await listEventSubSubscriptions(token);
+    existingByType = new Map(existing.map((sub) => [sub.type, { id: sub.id, sessionId: sub.sessionId }]));
+  } catch (err) {
+    log.error(`Failed to list existing EventSub subscriptions for ${name}:`, err);
+  }
+
   for (const group of SUBSCRIPTION_GROUPS) {
     if (!isGroupEnabled(group, config, enabledAlerts)) continue;
     for (const spec of group.specs(uid)) {
       desired.add(spec.type);
+      const existing = existingByType.get(spec.type);
+      if (existing && existing.sessionId === sessionId) {
+        created.set(spec.type, existing.id);
+        continue;
+      }
+      if (existing) {
+        log.warn(`Deleting stale ${spec.type} subscription (${existing.id}) for ${name} — bound to a different session`);
+        await deleteEventSubSubscription(existing.id, token).catch((err) => {
+          log.error(`Failed to delete stale ${spec.type} subscription for ${name}:`, err);
+        });
+      }
       const id = await subscribe(sessionId, spec, token, name);
       if (id !== null) created.set(spec.type, id);
     }

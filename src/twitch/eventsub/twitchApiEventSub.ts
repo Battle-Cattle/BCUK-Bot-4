@@ -144,21 +144,27 @@ export async function createEventSubSubscription(
 }
 
 /** Lists EventSub subscriptions. With a user token returns the broadcaster's subscriptions;
- *  with an app token and userId returns subscriptions matching that user in any condition. */
+ *  with an app token and userId returns subscriptions matching that user in any condition.
+ *  `sessionId` is the WebSocket session (if any) the subscription is currently bound to —
+ *  used to tell a subscription still live on the current connection apart from a stale
+ *  duplicate left over from a prior (possibly dead) session. */
 export async function listEventSubSubscriptions(
   token: string,
   userId?: string,
-): Promise<Array<{ id: string; type: string }>> {
+): Promise<Array<{ id: string; type: string; sessionId?: string }>> {
   const url = new URL('https://api.twitch.tv/helix/eventsub/subscriptions');
   if (userId) url.searchParams.set('user_id', userId);
-  const results: Array<{ id: string; type: string }> = [];
+  const results: Array<{ id: string; type: string; sessionId?: string }> = [];
   let cursor: string | undefined;
   do {
     if (cursor) url.searchParams.set('after', cursor);
     const res = await twitchFetch(url.toString(), { headers: authHeaders(token) });
     if (!res.ok) throw new Error(`[TwitchAPI] listEventSubSubscriptions failed: ${res.status}`);
-    const data = await res.json() as { data: Array<{ id: string; type: string }>; pagination?: { cursor?: string } };
-    results.push(...data.data);
+    const data = await res.json() as {
+      data: Array<{ id: string; type: string; transport?: { session_id?: string } }>;
+      pagination?: { cursor?: string };
+    };
+    results.push(...data.data.map((sub) => ({ id: sub.id, type: sub.type, sessionId: sub.transport?.session_id })));
     cursor = data.pagination?.cursor;
   } while (cursor);
   return results;
