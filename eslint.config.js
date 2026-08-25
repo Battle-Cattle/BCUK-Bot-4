@@ -42,7 +42,7 @@ module.exports = tseslint.config(
   },
   {
     // Not part of tsconfig.json's `include` (src/**/*), so lint it without type info.
-    files: ['vitest.config.ts'],
+    files: ['vitest.config.mts'],
     languageOptions: {
       parserOptions: {
         projectService: false,
