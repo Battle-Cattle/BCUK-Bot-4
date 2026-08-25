@@ -359,9 +359,12 @@ describe('subscribeForStreamer', () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new-follow');
     // The old, orphaned subscription (e.g. from a process that died without stop()) is still
-    // "enabled" and shows up alongside the one just created this round.
+    // "enabled" and shows up alongside the one already live on this round's session.
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([
-      { id: 'sub-new-follow', type: 'channel.follow', condition: { broadcaster_user_id: 'uid-dup', moderator_user_id: 'uid-dup' } },
+      {
+        id: 'sub-new-follow', type: 'channel.follow', sessionId: 'sess-dup',
+        condition: { broadcaster_user_id: 'uid-dup', moderator_user_id: 'uid-dup' },
+      },
       { id: 'sub-stale-follow', type: 'channel.follow', condition: { broadcaster_user_id: 'uid-dup', moderator_user_id: 'uid-dup' } },
     ] as any);
 
@@ -400,6 +403,37 @@ describe('subscribeForStreamer', () => {
     );
     expect(deleteEventSubSubscription).not.toHaveBeenCalledWith('sub-live-follow', 'tok-409');
     expect(count).toBeGreaterThan(0);
+  });
+
+  it('does not mistake a same-type, same-broadcaster subscription with a different condition for the desired one', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-fresh-follow-v2');
+    // Same broadcaster, same type, but missing moderator_user_id — e.g. a leftover channel.follow
+    // v1 subscription (broadcaster_user_id only) from before the app moved to v2's two-key
+    // condition. Bound to the live session, so type-only matching would wrongly treat this as
+    // already satisfying the v2 spec and skip creating it.
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      {
+        id: 'sub-v1-follow', type: 'channel.follow', sessionId: 'sess-condition-mismatch',
+        condition: { broadcaster_user_id: 'uid-condition-mismatch' },
+      },
+    ] as any);
+
+    await subscribeForStreamer('sess-condition-mismatch', {
+      uid: 'uid-condition-mismatch',
+      token: 'tok-condition-mismatch',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 23,
+    });
+
+    // Not recognized as satisfying the v2 spec — a fresh (correctly conditioned) subscription is
+    // created rather than being silently skipped.
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.follow', '2',
+      { broadcaster_user_id: 'uid-condition-mismatch', moderator_user_id: 'uid-condition-mismatch' },
+      'sess-condition-mismatch', 'tok-condition-mismatch',
+    );
   });
 
   it('deletes an existing subscription bound to a different (stale/dead) session before recreating it', async () => {

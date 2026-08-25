@@ -128,14 +128,24 @@ interface SubscriptionResult {
   created: Map<string, string>;
 }
 
+/** True if `a` and `b` have exactly the same keys and values — used to tell "the subscription
+ *  this spec wants" apart from a same-type subscription with a different condition (e.g. a
+ *  leftover from an older API version whose condition shape has since changed), which type-only
+ *  matching would otherwise mistake for it. */
+function conditionsEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  return aKeys.every((key) => a[key] === b[key]);
+}
+
 /**
- * Creates all desired EventSub subscriptions for a single streamer. Before creating each type,
- * checks whether Twitch already has a subscription of that type: if it's bound to the live
- * `sessionId`, it's kept as-is (no redundant create call); if it's bound to any other session id
- * — a duplicate left over from a dead/prior connection (e.g. after `onError`/`forceReconnect`
- * tore down a socket without a clean close, so Twitch hadn't yet revoked its subscriptions) —
- * it's deleted first so the fresh create can't 409 against it and leave the *new* session with no
- * working subscription of that type.
+ * Creates all desired EventSub subscriptions for a single streamer. Before creating each spec,
+ * checks whether Twitch already has a subscription matching both its type *and* condition
+ * exactly: if it's bound to the live `sessionId`, it's kept as-is (no redundant create call); if
+ * it's bound to any other session id — a duplicate left over from a dead/prior connection (e.g.
+ * after `onError`/`forceReconnect` tore down a socket without a clean close, so Twitch hadn't yet
+ * revoked its subscriptions) — it's deleted first so the fresh create can't 409 against it and
+ * leave the *new* session with no working subscription for that spec.
  * @returns The desired-types set alongside a type → id map of subscriptions actually created (or
  *   confirmed already-live on this session) this round (a type is absent from `created` only on a
  *   genuine race — see {@link deleteStaleSubscriptions}).
@@ -154,13 +164,16 @@ async function createSubscriptionsForStreamer(
   const created = new Map<string, string>();
   if (!token) return { desired, created };
 
-  const existingByType = await listExistingSubscriptionsByType(token, uid, name);
+  const ownSubscriptions = await listOwnSubscriptions(token, uid, name);
 
   for (const group of SUBSCRIPTION_GROUPS) {
     if (!isGroupEnabled(group, config, enabledAlerts)) continue;
     for (const spec of group.specs(uid)) {
       desired.add(spec.type);
-      const id = await ensureSubscription(sessionId, spec, token, name, existingByType.get(spec.type));
+      const match = ownSubscriptions.find(
+        (sub) => sub.type === spec.type && conditionsEqual(sub.condition, spec.condition),
+      );
+      const id = await ensureSubscription(sessionId, spec, token, name, match);
       if (id !== null) created.set(spec.type, id);
     }
   }
@@ -168,23 +181,19 @@ async function createSubscriptionsForStreamer(
   return { desired, created };
 }
 
-/** Fetches existing EventSub subscriptions, filters out any that Twitch returned only because
- *  this streamer moderates a different broadcaster's channel (see {@link isOwnSubscription}), and
- *  indexes the rest by type. Returns an empty map (and logs) on failure — callers treat that the
- *  same as "nothing exists yet" and create fresh. */
-async function listExistingSubscriptionsByType(
+/** Fetches existing EventSub subscriptions and filters out any that Twitch returned only because
+ *  this streamer moderates a different broadcaster's channel (see {@link isOwnSubscription}).
+ *  Returns an empty array (and logs) on failure — callers treat that the same as "nothing exists
+ *  yet" and create fresh. */
+async function listOwnSubscriptions(
   token: string, uid: string, name: string,
-): Promise<Map<string, { id: string; sessionId?: string }>> {
+): Promise<Array<{ id: string; type: string; condition: Record<string, string>; sessionId?: string }>> {
   try {
     const existing = await listEventSubSubscriptions(token);
-    return new Map(
-      existing
-        .filter((sub) => isOwnSubscription(sub.condition, uid))
-        .map((sub) => [sub.type, { id: sub.id, sessionId: sub.sessionId }]),
-    );
+    return existing.filter((sub) => isOwnSubscription(sub.condition, uid));
   } catch (err) {
     log.error(`Failed to list existing EventSub subscriptions for ${name}:`, err);
-    return new Map();
+    return [];
   }
 }
 
