@@ -50,12 +50,27 @@ export interface MembershipDeps {
   getClient: () => ChatClient | null;
   /** Whether the client is currently connected. */
   isConnected: () => boolean;
-  /** Whether `channel` is currently joined per the live Twurple client's own channel list. */
+  /**
+   * Whether `channel` is currently joined, per the caller's own application-owned bookkeeping
+   * (not Twurple's `ChatClient#currentChannels` — see `twitchChannelMembership.ts`'s
+   * `confirmedJoinedChannels` doc for why that can't be trusted across a reconnect).
+   */
   isChannelJoined: (channel: string) => boolean;
   /** Whether `channel` is currently desired to be joined (the source of truth for intent). */
   isDesiredJoined: (channel: string) => boolean;
   /** Runs `op` serialized per-channel, so it can't interleave with a concurrent operation on `channel`. */
   runExclusive: (channel: string, op: () => Promise<unknown>) => Promise<unknown>;
+  /**
+   * Records that `channel`'s membership actually changed (a `join()`/`part()` call genuinely
+   * settled), independent of whether the caller that issued it already gave up via a timeout.
+   * Needed because {@link isChannelJoined} is backed by the caller's own bookkeeping rather than
+   * a live query — without this, a call that lands late (after its caller's `withTimeout` already
+   * moved on without recording the outcome) would leave that bookkeeping never learning the real
+   * result.
+   */
+  markJoined: (channel: string) => void;
+  /** See {@link markJoined} — the corresponding part-side update. */
+  markParted: (channel: string) => void;
 }
 
 /**
@@ -83,8 +98,12 @@ export interface MembershipDeps {
 export function compensateIfStale(deps: MembershipDeps, channel: string, call: Promise<unknown>, kind: 'join' | 'part'): void {
   const startedAt = Date.now();
   call.then(() => {
+    // The call actually succeeded — sync bookkeeping to that real outcome regardless of whether
+    // the caller's own withTimeout already gave up on it (see markJoined/markParted's doc).
+    if (kind === 'join') deps.markJoined(channel); else deps.markParted(channel);
+
     // Settled within the normal window — the caller's own withTimeout race never gave up on
-    // this call, so there's nothing to reconcile.
+    // this call, so there's nothing further to reconcile.
     if (Date.now() - startedAt < JOIN_PART_TIMEOUT_MS) return;
     void deps.runExclusive(channel, async () => {
       const client = deps.getClient();

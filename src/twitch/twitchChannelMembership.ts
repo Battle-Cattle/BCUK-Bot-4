@@ -19,19 +19,77 @@ const membershipMutationQueue = createMutationQueue();
 let _onChannelJoined: ((channel: string) => void) | null = null;
 
 /**
+ * Channels this module has itself confirmed joined (a `client.join()` call actually succeeded)
+ * for the *current* connection. This is the source of truth for "is this channel actually joined
+ * right now" — {@link isChannelJoined} reads it instead of Twurple's own `ChatClient#currentChannels`.
+ *
+ * That's deliberate, not a style choice: `currentChannels` is backed by `ircv3`'s `IrcClient`,
+ * which only clears its internal joined-channel set from `IrcClient#connect()` — called once, at
+ * this bot's startup. An automatic reconnect (the common case: a dropped socket, e.g. a `1006`)
+ * happens entirely inside Twurple's `PersistentConnection`, which reconnects the underlying
+ * transport without ever calling `IrcClient#connect()` again — so `currentChannels` is never
+ * cleared by a reconnect and keeps reporting the *previous* connection's joined channels forever,
+ * even though the new connection isn't actually joined to any of them yet server-side. Trusting it
+ * after a reconnect made {@link reconcileJoinedChannels} believe every previously-joined channel
+ * was still joined and skip rejoining all of them — silently, with no join call and no error to
+ * log — leaving the bot's actual per-channel membership up to whatever Twitch's IRC servers
+ * happened to do with the old session (observed in production as some channels going dead after a
+ * reconnect and others not, with nothing in the logs to explain why).
+ *
+ * Cleared entirely on every disconnect (see {@link setConnected}), so a reconnect always starts
+ * from "nothing confirmed joined" and {@link reconcileJoinedChannels} actually rejoins everything.
+ */
+const confirmedJoinedChannels = new Set<string>();
+
+/**
+ * Increments every time {@link setConnected} transitions to disconnected — i.e. once per
+ * connection episode. Exists so a join/part call issued on one episode can't have its eventual
+ * outcome (however late) applied to {@link confirmedJoinedChannels} after a *later* episode has
+ * already started: `_connected` alone can't distinguish "still on the episode this call was
+ * issued during" from "reconnected since, coincidentally connected again" — only a monotonically
+ * increasing counter can. See {@link markJoinedIfCurrent}/{@link markPartedIfCurrent}.
+ */
+let connectionGeneration = 0;
+
+/**
+ * Records `channel` as confirmed joined, but only if `generation` still matches the current
+ * {@link connectionGeneration} — i.e. no disconnect has happened since the caller captured it.
+ * Without this, a join issued before a disconnect that only *settles* (successfully) after a
+ * subsequent reconnect would re-poison {@link confirmedJoinedChannels} with a join that actually
+ * happened (if at all) on the old, now-dead connection — reintroducing the exact "reconcile
+ * believes it's already joined and skips rejoining" bug {@link confirmedJoinedChannels} exists to
+ * prevent, just via this race instead of via Twurple's stale `currentChannels`.
+ * @param channel - The channel a join call resolved for.
+ * @param generation - The {@link connectionGeneration} captured when that join call was issued.
+ */
+function markJoinedIfCurrent(channel: string, generation: number): void {
+  if (generation === connectionGeneration) confirmedJoinedChannels.add(channel);
+}
+
+/** See {@link markJoinedIfCurrent} — the corresponding part-side update. */
+function markPartedIfCurrent(channel: string, generation: number): void {
+  if (generation === connectionGeneration) confirmedJoinedChannels.delete(channel);
+}
+
+/**
  * Bundles this module's live client/membership state for {@link compensateIfStale} — see
  * `twitchChannelNetworkOps.ts`'s {@link MembershipDeps}. Built fresh at each join/part call site
- * so `runExclusive` closes over the current `channel`, but its accessor functions still read
+ * so `runExclusive` closes over the current `channel`, and so `markJoined`/`markParted` close over
+ * the {@link connectionGeneration} at the moment the call was issued (see
+ * {@link markJoinedIfCurrent}) — but its other accessor functions still read
  * `_client`/`_connected`/`activeChannels` live, not a snapshot, since reconciliation can run long
  * after this bundle was built.
  */
 function membershipDeps(): MembershipDeps {
+  const generation = connectionGeneration;
   return {
     getClient: () => _client,
     isConnected: () => _connected,
     isChannelJoined,
     isDesiredJoined: (channel) => activeChannels.has(channel),
     runExclusive: (channel, op) => membershipMutationQueue.run(channel, op),
+    markJoined: (channel) => markJoinedIfCurrent(channel, generation),
+    markParted: (channel) => markPartedIfCurrent(channel, generation),
   };
 }
 
@@ -44,9 +102,19 @@ export function setChatClient(c: ChatClient | null): void {
   _client = c;
 }
 
-/** Updates the connected flag (called from twitchBot on connect/disconnect events). */
+/**
+ * Updates the connected flag (called from twitchBot on connect/disconnect events). Going
+ * disconnected also clears {@link confirmedJoinedChannels} and advances
+ * {@link connectionGeneration} — see their docs for why nothing can be trusted as still-joined
+ * across a reconnect, including a join/part call issued before this disconnect that only settles
+ * afterward.
+ */
 export function setConnected(v: boolean): void {
   _connected = v;
+  if (!v) {
+    confirmedJoinedChannels.clear();
+    connectionGeneration++;
+  }
 }
 
 /** Registers a callback fired each time the bot successfully joins a channel. */
@@ -54,9 +122,14 @@ export function setChannelJoinedHook(fn: (channel: string) => void): void {
   _onChannelJoined = fn;
 }
 
+/**
+ * Whether `channel` is currently joined: connected, and present in {@link confirmedJoinedChannels}.
+ * @param channel - The already-normalized channel name to check.
+ * @returns True if the client is connected and this module has itself confirmed `channel` joined.
+ */
 function isChannelJoined(channel: string): boolean {
   if (!_client || !_connected) return false;
-  return _client.currentChannels.some((ch) => normalizeTwitchChannelName(ch) === channel);
+  return confirmedJoinedChannels.has(channel);
 }
 
 function cacheChannelUserId(channel: string): void {
@@ -85,16 +158,28 @@ async function partStaleChannel(channel: string): Promise<void> {
     return;
   }
   if (!_client || !_connected || !isChannelJoined(channel)) {
+    confirmedJoinedChannels.delete(channel);
     setTwitchChannel(channel, false);
     return;
   }
+  const generation = connectionGeneration;
   const partCall = partAsync(_client, channel);
   compensateIfStale(membershipDeps(), channel, partCall, 'part');
   await withTimeout(partCall, JOIN_PART_TIMEOUT_MS, 'Twitch part');
+  markPartedIfCurrent(channel, generation);
   setTwitchChannel(channel, false);
   log.info(`Parted stale channel after reconnect: ${channel}`);
 }
 
+/**
+ * Joins `channel` if it's still desired (in `activeChannels`) but not yet confirmed joined —
+ * called from {@link reconcileJoinedChannels} for a channel that needs (re)joining on the current
+ * connection. A no-op if the channel is no longer desired, the client isn't connected, or it's
+ * already confirmed joined.
+ * @param channel - The already-normalized channel name to join if needed.
+ * @returns Resolves once the join has been attempted (or skipped) and local state synced.
+ *   Rejects if the underlying join call fails or times out.
+ */
 async function joinMissingChannel(channel: string): Promise<void> {
   if (!activeChannels.has(channel)) return;
   if (!_client || !_connected) {
@@ -106,23 +191,33 @@ async function joinMissingChannel(channel: string): Promise<void> {
     cacheChannelUserId(channel);
     return;
   }
+  const generation = connectionGeneration;
   await throttledJoin(_client, channel, (call) => compensateIfStale(membershipDeps(), channel, call, 'join'));
+  if (generation !== connectionGeneration) {
+    // The connection cycled while this join was in flight — its success no longer reflects the
+    // current connection's real membership. Applying it here (status/hook/cache) would be
+    // misleading; reconcileJoinedChannels() will retry this channel on its own on the current
+    // connection. compensateIfStale's own markJoined (also generation-guarded) already skips
+    // recording it in confirmedJoinedChannels.
+    return;
+  }
+  confirmedJoinedChannels.add(channel);
   setTwitchChannel(channel, true);
   cacheChannelUserId(channel);
   fireChannelJoinedHook(channel);
   log.info(`Joined queued channel after reconnect: ${channel}`);
 }
 
-/** Parts channels no longer in activeChannels and joins any queued but unjoined channels. */
+/**
+ * Parts channels no longer in activeChannels and (re)joins any active channel not currently in
+ * {@link confirmedJoinedChannels} — which, right after a reconnect, is *every* active channel,
+ * since {@link setConnected} clears it on every disconnect. See {@link confirmedJoinedChannels}'s
+ * doc for why this can't be driven off Twurple's own `currentChannels` instead.
+ */
 export async function reconcileJoinedChannels(): Promise<void> {
   if (!_client || !_connected) return;
 
-  const joinedChannels = _client.currentChannels
-    .map((channel) => normalizeTwitchChannelName(channel))
-    .filter((channel): channel is string => channel !== null);
-  const joinedChannelSet = new Set(joinedChannels);
-
-  for (const channel of joinedChannels) {
+  for (const channel of [...confirmedJoinedChannels]) {
     try {
       await membershipMutationQueue.run(channel, () => partStaleChannel(channel));
     } catch (err) {
@@ -131,7 +226,7 @@ export async function reconcileJoinedChannels(): Promise<void> {
   }
 
   for (const channel of activeChannels) {
-    if (joinedChannelSet.has(channel)) continue;
+    if (confirmedJoinedChannels.has(channel)) continue;
     try {
       await membershipMutationQueue.run(channel, () => joinMissingChannel(channel));
     } catch (err) {
@@ -198,10 +293,9 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
 
     activeChannels.add(normalized);
     setTwitchChannel(normalized, false);
+    const generation = connectionGeneration;
     try {
       await throttledJoin(_client, normalized, (call) => compensateIfStale(membershipDeps(), normalized, call, 'join'));
-      setTwitchChannel(normalized, true);
-      cacheChannelUserId(normalized);
     } catch (err) {
       // Roll back local state; reconnect reconciliation will retry via activeChannels.
       activeChannels.delete(normalized);
@@ -209,6 +303,15 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       log.error(`Failed to join channel ${normalized}:`, err);
       throw err;
     }
+    if (generation !== connectionGeneration) {
+      // The connection cycled while this join was in flight — see joinMissingChannel's identical
+      // guard for why applying it here would be misleading; reconcileJoinedChannels() will retry
+      // this still-desired channel on the current connection.
+      return;
+    }
+    confirmedJoinedChannels.add(normalized);
+    setTwitchChannel(normalized, true);
+    cacheChannelUserId(normalized);
     fireChannelJoinedHook(normalized);
   });
 }
@@ -242,9 +345,14 @@ export async function partTwitchChannel(channel: string): Promise<void> {
       activeChannelUserIds.delete(normalized);
       setTwitchChannel(normalized, false);
       if (isChannelJoined(normalized)) {
+        const generation = connectionGeneration;
         const partCall = partAsync(_client, normalized);
         compensateIfStale(membershipDeps(), normalized, partCall, 'part');
         await withTimeout(partCall, JOIN_PART_TIMEOUT_MS, 'Twitch part');
+        // Guarded, not an unconditional delete: if the connection cycled while this part was in
+        // flight and the channel has since been genuinely rejoined on the new connection, this
+        // stale part settling must not undo that real join.
+        markPartedIfCurrent(normalized, generation);
       }
     } catch (err) {
       // Keep desired membership removed so later reconciliation can retry
@@ -269,5 +377,16 @@ export function getActiveChannelUserIds(): ReadonlyMap<string, string> {
 export function clearMembershipState(): void {
   activeChannels.clear();
   activeChannelUserIds.clear();
+  confirmedJoinedChannels.clear();
   resetJoinGate();
+}
+
+/**
+ * Test-only: seeds {@link confirmedJoinedChannels} directly, standing in for a real `client.join()`
+ * having already succeeded — since it's no longer driven off the mock client's `currentChannels`
+ * (see {@link confirmedJoinedChannels}'s doc for why production code doesn't trust that either).
+ */
+export function __setConfirmedJoinedChannelsForTests(channels: Iterable<string>): void {
+  confirmedJoinedChannels.clear();
+  for (const c of channels) confirmedJoinedChannels.add(c);
 }
