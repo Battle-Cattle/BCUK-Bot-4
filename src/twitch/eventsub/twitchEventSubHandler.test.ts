@@ -788,16 +788,30 @@ describe('handleRedemption', () => {
     expect(mockPushCompanionEvent).not.toHaveBeenCalled();
   });
 
-  it('still triggers the overlay when the companion lookup throws', async () => {
+  it('still resolves successfully when the companion lookup throws, after the overlay has already triggered', async () => {
     vi.mocked(getStreamerById).mockRejectedValue(new Error('db unavailable'));
     const videos = [{ file: 'clip1.mp4', weight: 1 }] as any[];
     vi.mocked(getVideosForReward).mockResolvedValue(videos);
     vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
 
-    await handleRedemption('streamer', event, makeConfig(), streamerId);
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
 
     expect(mockPushCompanionEvent).not.toHaveBeenCalled();
     expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
+  });
+
+  it('delivers the companion event only once when a getVideosForReward failure is retried, since the best-effort companion push runs after the overlay lookup', async () => {
+    const videos = [{ file: 'clip1.mp4', weight: 1 }] as any[];
+    vi.mocked(getVideosForReward).mockRejectedValueOnce(new Error('transient db error'));
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('transient db error');
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+
+    vi.mocked(getVideosForReward).mockResolvedValue(videos);
+    vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
+
+    expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
   });
 
   it('applies dynamic pricing for the redeemed reward', async () => {
@@ -895,12 +909,13 @@ describe('handleRedemption', () => {
 
     await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
 
-    // The dashboard/companion/pricing effects run ahead of the getVideosForReward call that
-    // failed the first time, so they fire once per attempt (twice total); the overlay trigger
-    // only ever completes on the successful second attempt.
+    // The dashboard/pricing effects run ahead of the getVideosForReward call that failed the
+    // first time, so they fire once per attempt (twice total). The companion push runs last —
+    // after the overlay lookup — so it never reaches the failed first attempt and fires only
+    // once, on the successful retry; the overlay trigger likewise only ever completes then.
     expect(recordStreamerEvent).toHaveBeenCalledTimes(2);
     expect(mockPushDashboardEvent).toHaveBeenCalledTimes(2);
-    expect(mockPushCompanionEvent).toHaveBeenCalledTimes(2);
+    expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
     expect(applyRedemptionPricing).toHaveBeenCalledTimes(2);
     expect(mockPushOverlayEvent).toHaveBeenCalledOnce();
     expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');

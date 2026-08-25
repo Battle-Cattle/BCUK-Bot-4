@@ -356,15 +356,16 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
  * Records the redemption to the dashboard's "Recent Events" feed (via
  * {@link recordAndPushDashboardEventOrThrow}) and applies dynamic pricing for the redeemed reward
  * (a no-op if the reward doesn't have dynamic pricing enabled) — both are required: their
- * failures propagate so the redemption is retried rather than silently marked complete. Only
- * once both succeed does it forward the redemption to the streamer's companion app (if any
- * device is connected) — this isolates its own errors internally (try/catch) and is
- * intentionally best-effort, so a companion-push failure can't reject this function. It runs
- * last among these three (not first) precisely because it's best-effort and can't be un-sent: if
- * it ran before a required effect that then failed, a retry would re-deliver the same companion
- * notification. Finally it looks up videos configured for the redeemed reward and triggers an
- * overlay event if found; the overlay push still no-ops when no videos are configured for the
- * reward or no overlay runtime is registered.
+ * failures propagate so the redemption is retried rather than silently marked complete. It then
+ * looks up videos configured for the redeemed reward and triggers an overlay event if found (the
+ * overlay push still no-ops when no videos are configured for the reward or no overlay runtime
+ * is registered) — this is also part of the required chain, since `getVideosForReward` can throw.
+ * Only once all three of those have succeeded does it forward the redemption to the streamer's
+ * companion app (if any device is connected) — this isolates its own errors internally
+ * (try/catch) and is intentionally best-effort, so a companion-push failure can't reject this
+ * function. It runs last (not first, and not before the overlay lookup) precisely because it's
+ * best-effort and can't be un-sent: if it ran earlier and a later required step then failed, a
+ * retry would re-deliver the same companion notification.
  *
  * Deduplicates on Twitch's own redemption id ({@link isDuplicateRedemption}) before doing
  * anything else — a duplicate (or an id already being processed by another in-flight call) is
@@ -409,9 +410,18 @@ export async function handleRedemption(
     // marked complete. See the doc comment above.
     await applyRedemptionPricing(streamerId, event.reward.id);
 
-    // Deliberately runs after both required effects above (not before): the companion push is
-    // best-effort and can't be un-sent, so if it ran first and a required effect then failed, a
-    // retry would deliver the same companion notification twice for one redemption.
+    const videos = await getVideosForReward(event.reward.id, streamerId);
+    if (videos.length > 0) {
+      const filename = pickWeightedRandom(videos);
+      const videoPath = `/overlay/videos/${streamerId}/${filename}`;
+      overlayRuntimeRegistry.get()?.pushOverlayEvent(login, videoPath);
+      log.info(`Overlay triggered for ${login}: reward="${event.reward.title}" video=${filename}`);
+    }
+
+    // Deliberately runs last, after every required effect above (dashboard record, pricing,
+    // overlay lookup) has already succeeded: the companion push is best-effort and can't be
+    // un-sent, so if it ran earlier and a later required step then failed, a retry would
+    // deliver the same companion notification twice for one redemption.
     try {
       const streamer = await getStreamerById(streamerId);
       if (streamer) {
@@ -429,13 +439,6 @@ export async function handleRedemption(
       log.error('Failed to push companion event for redemption:', err);
     }
 
-    const videos = await getVideosForReward(event.reward.id, streamerId);
-    if (videos.length > 0) {
-      const filename = pickWeightedRandom(videos);
-      const videoPath = `/overlay/videos/${streamerId}/${filename}`;
-      overlayRuntimeRegistry.get()?.pushOverlayEvent(login, videoPath);
-      log.info(`Overlay triggered for ${login}: reward="${event.reward.title}" video=${filename}`);
-    }
     markRedemptionHandled(event.id);
     return true;
   } catch (err) {
