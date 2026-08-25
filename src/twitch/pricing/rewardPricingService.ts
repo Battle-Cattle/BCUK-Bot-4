@@ -190,10 +190,12 @@ async function syncRewardPrice(
     lastPushedCost = result.lastPushedCost;
   }
 
-  await recordPricingUpdate(
-    streamerId, twitchRewardId, newDemand, now, lastPushedCost,
-    applyIncrement ? redemptionId : row.last_redemption_id,
-  );
+  await recordPricingUpdate(streamerId, twitchRewardId, {
+    demand: newDemand,
+    demandUpdatedAtMs: now,
+    lastPushedCost,
+    lastRedemptionId: applyIncrement ? redemptionId : row.last_redemption_id,
+  });
 
   try {
     await recordPricingHistory(row.id, newCost, newDemand, now);

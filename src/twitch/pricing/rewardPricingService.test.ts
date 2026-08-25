@@ -93,7 +93,10 @@ describe('applyRedemptionPricing', () => {
     vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
     await applyRedemptionPricing(1, 'rwd1', 'redemption-1');
     expect(updateRewardCost).toHaveBeenCalledWith('bc1', 'rwd1', expect.any(Number), 'user-token');
-    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), expect.any(Number), 'redemption-1');
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
+      demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
+      lastPushedCost: expect.any(Number), lastRedemptionId: 'redemption-1',
+    });
   });
 
   it('marks the reward unsupported and disables it on a 403, without recording demand or history', async () => {
@@ -123,7 +126,10 @@ describe('applyRedemptionPricing', () => {
     vi.mocked(updateRewardCost).mockRejectedValueOnce(new TwitchRewardAuthError('401'));
     await applyRedemptionPricing(1, 'rwd1', 'redemption-1');
     expect(markPricingUnsupported).not.toHaveBeenCalled();
-    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), null, 'redemption-1');
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
+      demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
+      lastPushedCost: null, lastRedemptionId: 'redemption-1',
+    });
   });
 
   it('skips the Twitch call when the recomputed price equals last_pushed_cost', async () => {
@@ -133,14 +139,20 @@ describe('applyRedemptionPricing', () => {
     vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 1, demand_updated_at: String(Date.now()), last_pushed_cost: maxPrice }));
     await applyRedemptionPricing(1, 'rwd1', 'redemption-1');
     expect(updateRewardCost).not.toHaveBeenCalled();
-    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), maxPrice, 'redemption-1');
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
+      demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
+      lastPushedCost: maxPrice, lastRedemptionId: 'redemption-1',
+    });
   });
 
   it('swallows a Twitch push failure but still persists the recalculated demand', async () => {
     vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
     vi.mocked(updateRewardCost).mockRejectedValueOnce(new Error('Twitch down'));
     await expect(applyRedemptionPricing(1, 'rwd1', 'redemption-1')).resolves.toBeUndefined();
-    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), null, 'redemption-1');
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
+      demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
+      lastPushedCost: null, lastRedemptionId: 'redemption-1',
+    });
   });
 
   it('skips the push (but still persists demand) when no valid token is available', async () => {
@@ -148,7 +160,10 @@ describe('applyRedemptionPricing', () => {
     vi.mocked(getValidToken).mockResolvedValue(null);
     await applyRedemptionPricing(1, 'rwd1', 'redemption-1');
     expect(updateRewardCost).not.toHaveBeenCalled();
-    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), null, 'redemption-1');
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
+      demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
+      lastPushedCost: null, lastRedemptionId: 'redemption-1',
+    });
   });
 
   it('serializes two concurrent calls on the same reward key', async () => {
@@ -210,14 +225,23 @@ describe('redemption idempotency', () => {
 
     await applyRedemptionPricing(1, 'rwd1', 'redemption-2');
 
-    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), expect.any(Number), 'redemption-2');
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
+      demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
+      lastPushedCost: expect.any(Number), lastRedemptionId: 'redemption-2',
+    });
   });
 
   it('retrying the same redemption id after a first attempt succeeded is a no-op', async () => {
     let currentRow: any = makeRow({ demand: 0, last_pushed_cost: null });
     vi.mocked(getPricingForReward).mockImplementation(async () => currentRow);
-    vi.mocked(recordPricingUpdate).mockImplementation(async (_streamerId, _rewardId, demand, demandUpdatedAtMs, lastPushedCost, lastRedemptionId) => {
-      currentRow = { ...currentRow, demand, demand_updated_at: String(demandUpdatedAtMs), last_pushed_cost: lastPushedCost, last_redemption_id: lastRedemptionId };
+    vi.mocked(recordPricingUpdate).mockImplementation(async (_streamerId, _rewardId, fields) => {
+      currentRow = {
+        ...currentRow,
+        demand: fields.demand,
+        demand_updated_at: String(fields.demandUpdatedAtMs),
+        last_pushed_cost: fields.lastPushedCost,
+        last_redemption_id: fields.lastRedemptionId,
+      };
     });
 
     await applyRedemptionPricing(1, 'rwd1', 'redemption-1'); // first attempt succeeds
@@ -233,7 +257,10 @@ describe('redemption idempotency', () => {
 
     await applyDecayTick(1, 'rwd1');
 
-    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), expect.any(Number), 'redemption-1');
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
+      demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
+      lastPushedCost: expect.any(Number), lastRedemptionId: 'redemption-1',
+    });
   });
 });
 
@@ -245,7 +272,8 @@ describe('applyDecayTick', () => {
       last_pushed_cost: null,
     }));
     await applyDecayTick(1, 'rwd1');
-    const [, , demandArg] = vi.mocked(recordPricingUpdate).mock.calls[0];
+    const [, , fieldsArg] = vi.mocked(recordPricingUpdate).mock.calls[0];
+    const demandArg = fieldsArg.demand;
     // decay(0.5, ~300s elapsed, half_life=1800s) = 0.5 * 2^(-300/1800)
     expect(demandArg).toBeCloseTo(0.5 * Math.pow(2, -300 / 1800), 2);
   });
@@ -267,7 +295,8 @@ describe('applyDecayTick', () => {
     await applyDecayTick(1, 'rwd1', hintSettings);
 
     expect(getPricingSettingsForStreamer).not.toHaveBeenCalled();
-    const [, , demandArg] = vi.mocked(recordPricingUpdate).mock.calls[0];
+    const [, , fieldsArg] = vi.mocked(recordPricingUpdate).mock.calls[0];
+    const demandArg = fieldsArg.demand;
     // decay(0.5, ~300s elapsed, half_life=60s from the hint, not the default 1800s) ≈ 0
     expect(demandArg).toBeCloseTo(0.5 * Math.pow(2, -300 / 60), 4);
   });
@@ -283,7 +312,10 @@ describe('round_to_nearest', () => {
     // raw price at demand=0.5 (base_cost=200, max_multiplier=4, curve=1.5) is 482.84,
     // which rounds to 480 at round_to_nearest=10 (see rewardPricingMath.test.ts).
     expect(updateRewardCost).toHaveBeenCalledWith('bc1', 'rwd1', 480, 'user-token');
-    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), 480, null);
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
+      demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
+      lastPushedCost: 480, lastRedemptionId: null,
+    });
   });
 
   it('skips the Twitch push (but still persists demand) when the rounded price matches last_pushed_cost, even though the underlying demand has changed', async () => {
@@ -294,7 +326,10 @@ describe('round_to_nearest', () => {
     }));
     await applyDecayTick(1, 'rwd1');
     expect(updateRewardCost).not.toHaveBeenCalled();
-    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.any(Number), expect.any(Number), 500, null);
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
+      demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
+      lastPushedCost: 500, lastRedemptionId: null,
+    });
   });
 });
 

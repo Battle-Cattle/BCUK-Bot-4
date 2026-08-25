@@ -181,6 +181,22 @@ export async function markPricingUnsupported(streamerId: number, twitchRewardId:
   );
 }
 
+/** Fields persisted by {@link recordPricingUpdate}, bundled to keep its parameter count down. */
+export interface PricingUpdateFields {
+  /** The newly computed demand value. */
+  demand: number;
+  /** Epoch ms this demand value was computed as of. */
+  demandUpdatedAtMs: number;
+  /** The cost last pushed to Twitch, or null if none has been pushed yet. */
+  lastPushedCost: number | null;
+  /**
+   * The redemption id to record as `last_redemption_id`: the new redemption's id on a
+   * redemption-driven sync, or the row's existing (unchanged) value on a decay-only tick — see
+   * `syncRewardPrice`, which is the only caller and decides which to pass.
+   */
+  lastRedemptionId: string | null;
+}
+
 /**
  * Persist a recalculated demand value (and, if it changed, the last cost pushed to Twitch).
  * Shared by the redemption hook and the periodic decay scheduler — the only writer of
@@ -188,26 +204,18 @@ export async function markPricingUnsupported(streamerId: number, twitchRewardId:
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
- * @param demand - The newly computed demand value.
- * @param demandUpdatedAtMs - Epoch ms this demand value was computed as of.
- * @param lastPushedCost - The cost last pushed to Twitch, or null if none has been pushed yet.
- * @param lastRedemptionId - The redemption id to record as `last_redemption_id`: the new
- *   redemption's id on a redemption-driven sync, or the row's existing (unchanged) value on a
- *   decay-only tick — see `syncRewardPrice`, which is the only caller and decides which to pass.
+ * @param fields - The demand/cost/redemption-id fields to persist; see {@link PricingUpdateFields}.
  */
 export async function recordPricingUpdate(
   streamerId: number,
   twitchRewardId: string,
-  demand: number,
-  demandUpdatedAtMs: number,
-  lastPushedCost: number | null,
-  lastRedemptionId: string | null,
+  fields: PricingUpdateFields,
 ): Promise<void> {
   await getPool().execute(
     `UPDATE reward_pricing
      SET demand = ?, demand_updated_at = ?, last_pushed_cost = ?, last_redemption_id = ?
      WHERE streamer_id = ? AND twitch_reward_id = ?`,
-    [demand, demandUpdatedAtMs, lastPushedCost, lastRedemptionId, streamerId, twitchRewardId],
+    [fields.demand, fields.demandUpdatedAtMs, fields.lastPushedCost, fields.lastRedemptionId, streamerId, twitchRewardId],
   );
 }
 

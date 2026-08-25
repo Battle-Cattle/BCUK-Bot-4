@@ -528,7 +528,7 @@ export {
 
 // ─── Channel point pricing ───────────────────────────────────────────────────
 
-export type { RewardPricingRow, RewardPricingInput, StreamerPricingSettings } from './db/rewardPricing';
+export type { RewardPricingRow, RewardPricingInput, PricingUpdateFields, StreamerPricingSettings } from './db/rewardPricing';
 export {
   getPricingForReward, getPricingConfigsForStreamer, getAllEnabledPricingRows,
   upsertPricingConfig, recordPricingUpdate, deletePricingConfig, markPricingUnsupported,
