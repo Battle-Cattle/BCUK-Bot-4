@@ -140,35 +140,52 @@ async function createSubscriptionsForStreamer(
   const created = new Map<string, string>();
   if (!token) return { desired, created };
 
-  let existingByType = new Map<string, { id: string; sessionId?: string }>();
-  try {
-    const existing = await listEventSubSubscriptions(token);
-    existingByType = new Map(existing.map((sub) => [sub.type, { id: sub.id, sessionId: sub.sessionId }]));
-  } catch (err) {
-    log.error(`Failed to list existing EventSub subscriptions for ${name}:`, err);
-  }
+  const existingByType = await listExistingSubscriptionsByType(token, name);
 
   for (const group of SUBSCRIPTION_GROUPS) {
     if (!isGroupEnabled(group, config, enabledAlerts)) continue;
     for (const spec of group.specs(uid)) {
       desired.add(spec.type);
-      const existing = existingByType.get(spec.type);
-      if (existing && existing.sessionId === sessionId) {
-        created.set(spec.type, existing.id);
-        continue;
-      }
-      if (existing) {
-        log.warn(`Deleting stale ${spec.type} subscription (${existing.id}) for ${name} — bound to a different session`);
-        await deleteEventSubSubscription(existing.id, token).catch((err) => {
-          log.error(`Failed to delete stale ${spec.type} subscription for ${name}:`, err);
-        });
-      }
-      const id = await subscribe(sessionId, spec, token, name);
+      const id = await ensureSubscription(sessionId, spec, token, name, existingByType.get(spec.type));
       if (id !== null) created.set(spec.type, id);
     }
   }
 
   return { desired, created };
+}
+
+/** Fetches existing EventSub subscriptions and indexes them by type. Returns an empty map (and
+ *  logs) on failure — callers treat that the same as "nothing exists yet" and create fresh. */
+async function listExistingSubscriptionsByType(
+  token: string, name: string,
+): Promise<Map<string, { id: string; sessionId?: string }>> {
+  try {
+    const existing = await listEventSubSubscriptions(token);
+    return new Map(existing.map((sub) => [sub.type, { id: sub.id, sessionId: sub.sessionId }]));
+  } catch (err) {
+    log.error(`Failed to list existing EventSub subscriptions for ${name}:`, err);
+    return new Map();
+  }
+}
+
+/**
+ * Ensures a single subscription type is live on the given session: keeps an existing
+ * subscription that's already bound to `sessionId`, deletes one bound to any other (stale/dead)
+ * session before recreating it, or creates fresh if none exists.
+ * @returns The live subscription's id, or null if creation failed (see {@link subscribe}).
+ */
+async function ensureSubscription(
+  sessionId: string, spec: SubSpec, token: string, name: string,
+  existing: { id: string; sessionId?: string } | undefined,
+): Promise<string | null> {
+  if (existing && existing.sessionId === sessionId) return existing.id;
+  if (existing) {
+    log.warn(`Deleting stale ${spec.type} subscription (${existing.id}) for ${name} — bound to a different session`);
+    await deleteEventSubSubscription(existing.id, token).catch((err) => {
+      log.error(`Failed to delete stale ${spec.type} subscription for ${name}:`, err);
+    });
+  }
+  return subscribe(sessionId, spec, token, name);
 }
 
 /**
