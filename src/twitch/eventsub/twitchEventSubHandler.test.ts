@@ -819,7 +819,7 @@ describe('handleRedemption', () => {
 
     await handleRedemption('streamer', event, makeConfig(), streamerId);
 
-    expect(applyRedemptionPricing).toHaveBeenCalledWith(streamerId, 'reward-abc');
+    expect(applyRedemptionPricing).toHaveBeenCalledWith(streamerId, 'reward-abc', 'redemption-1');
   });
 
   it('records a dashboard event using the reward title as detail when there is no user input', async () => {

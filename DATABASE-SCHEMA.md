@@ -224,9 +224,10 @@ Dynamic Channel Point Pricing: per-reward config and demand state. Independent o
 | `demand` | `DECIMAL(9,6)` | Current demand, in `[0,1]` |
 | `demand_updated_at` | `BIGINT` | Epoch ms the `demand` value was last computed as of |
 | `last_pushed_cost` | `INT` NULL | Last cost actually pushed to Twitch; used to skip redundant Helix calls |
+| `last_redemption_id` | `VARCHAR(64)` NULL | Twitch's own id of the last redemption whose increment was applied to `demand` — the idempotency guard `syncRewardPrice` checks before applying another increment, so a retried redemption (see `handleRedemption`'s dedup pending/handled lifecycle) can't double-apply. Untouched by decay-only ticks. `NULL` until this reward's first redemption-driven sync |
 | `twitch_unsupported` | `TINYINT(1)` | Set (and `enabled` forced to 0) when Twitch returns 403 — the reward was created outside this app and can never be managed by it |
 
-Created by `migrations/reward_pricing.sql`. `round_to_nearest` added by `migrations/reward_pricing_round_to_nearest.sql`.
+Created by `migrations/reward_pricing.sql`. `round_to_nearest` added by `migrations/reward_pricing_round_to_nearest.sql`. `last_redemption_id` added by `migrations/reward_pricing_last_redemption_id.sql`.
 
 ## `reward_pricing_settings`
 

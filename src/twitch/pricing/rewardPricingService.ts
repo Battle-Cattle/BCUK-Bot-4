@@ -148,15 +148,22 @@ async function pushRewardCostUpdate(
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
  * @param applyIncrement - True for a redemption (decay + increment); false for a decay-only tick.
+ * @param redemptionId - The redemption's own id when `applyIncrement` is true, so the idempotency
+ *   guard can detect (and no-op on) a retry of the same redemption; null for a decay-only tick,
+ *   which doesn't correspond to any single redemption.
  * @param settingsHint - Optional pre-fetched settings, passed by the decay scheduler when it has
  *   already loaded a streamer's settings once for this tick — avoids re-querying the same row for
  *   every one of that streamer's enabled rewards. Fetched fresh when omitted.
  */
 async function syncRewardPrice(
-  streamerId: number, twitchRewardId: string, applyIncrement: boolean, settingsHint?: StreamerPricingSettings,
+  streamerId: number, twitchRewardId: string, applyIncrement: boolean, redemptionId: string | null, settingsHint?: StreamerPricingSettings,
 ): Promise<void> {
   const row = await getPricingForReward(streamerId, twitchRewardId);
   if (!row || !row.enabled) return;
+
+  // Idempotency guard: a retried redemption (see handleRedemption's dedup pending/handled
+  // lifecycle) must not double-apply its increment if this reward already processed it.
+  if (applyIncrement && redemptionId && row.last_redemption_id === redemptionId) return;
 
   const settings = settingsHint ?? await getPricingSettingsForStreamer(streamerId);
   const now = Date.now();
@@ -183,7 +190,12 @@ async function syncRewardPrice(
     lastPushedCost = result.lastPushedCost;
   }
 
-  await recordPricingUpdate(streamerId, twitchRewardId, newDemand, now, lastPushedCost);
+  await recordPricingUpdate(streamerId, twitchRewardId, {
+    demand: newDemand,
+    demandUpdatedAtMs: now,
+    lastPushedCost,
+    lastRedemptionId: applyIncrement ? redemptionId : row.last_redemption_id,
+  });
 
   try {
     await recordPricingHistory(row.id, newCost, newDemand, now);
@@ -201,13 +213,17 @@ async function syncRewardPrice(
 /**
  * Applies a single redemption to a reward's dynamic pricing: decays for elapsed time,
  * adds the global redemption increment, and pushes the new price to Twitch if it changed.
- * Called from the EventSub redemption handler.
+ * Called from the EventSub redemption handler. `redemptionId` is compared against the reward's
+ * `last_redemption_id` before doing anything else — a retry of the same redemption (e.g. after
+ * an unrelated later step in `handleRedemption` failed and the whole redemption was retried) is
+ * a no-op here, so it can't double-apply the increment.
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID that was redeemed.
+ * @param redemptionId - Twitch's own id of the redemption being applied.
  */
-export async function applyRedemptionPricing(streamerId: number, twitchRewardId: string): Promise<void> {
-  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, true));
+export async function applyRedemptionPricing(streamerId: number, twitchRewardId: string, redemptionId: string): Promise<void> {
+  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, true, redemptionId));
 }
 
 /**
@@ -220,7 +236,7 @@ export async function applyRedemptionPricing(streamerId: number, twitchRewardId:
  * @param settingsHint - Optional pre-fetched settings for this streamer; see {@link syncRewardPrice}.
  */
 export async function applyDecayTick(streamerId: number, twitchRewardId: string, settingsHint?: StreamerPricingSettings): Promise<void> {
-  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, false, settingsHint));
+  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, false, null, settingsHint));
 }
 
 /**
