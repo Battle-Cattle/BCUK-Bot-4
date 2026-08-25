@@ -423,7 +423,7 @@ export async function handleRedemption(
     // Awaited (unlike the other EventSub handlers' fire-and-forget pricing calls elsewhere):
     // a failed pricing update must propagate so the redemption is retried instead of silently
     // marked complete. See the doc comment above.
-    await applyRedemptionPricing(streamerId, event.reward.id);
+    await applyRedemptionPricing(streamerId, event.reward.id, event.id);
 
     const videos = await getVideosForReward(event.reward.id, streamerId);
     if (videos.length > 0) {

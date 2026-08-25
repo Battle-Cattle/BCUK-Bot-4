@@ -19,6 +19,13 @@ export interface RewardPricingRow {
   /** Epoch ms as a string — BIGINT column; never coerce with Number() at this layer. */
   demand_updated_at: string;
   last_pushed_cost: number | null;
+  /**
+   * Twitch's own id of the last redemption whose increment was applied to `demand` — the
+   * idempotency guard `syncRewardPrice` checks before applying another increment, so a retried
+   * redemption (see `handleRedemption`'s dedup pending/handled lifecycle) can't double-apply.
+   * Unaffected by decay-only ticks. NULL until this reward's first redemption-driven sync.
+   */
+  last_redemption_id: string | null;
   /** True once Twitch has returned 403 for this reward — it was created outside this app and can never be managed by it. */
   twitch_unsupported: boolean;
 }
@@ -64,13 +71,15 @@ function mapRow(r: mysql.RowDataPacket): RewardPricingRow {
     demand: Number(r.demand),
     demand_updated_at: String(r.demand_updated_at),
     last_pushed_cost: r.last_pushed_cost == null ? null : Number(r.last_pushed_cost),
+    last_redemption_id: r.last_redemption_id ?? null,
     twitch_unsupported: fromBit(r.twitch_unsupported),
   };
 }
 
 const REWARD_PRICING_SELECT = `
   id, streamer_id, twitch_reward_id, enabled, base_cost, cooldown_seconds,
-  max_multiplier, curve, round_to_nearest, demand, demand_updated_at, last_pushed_cost, twitch_unsupported`;
+  max_multiplier, curve, round_to_nearest, demand, demand_updated_at, last_pushed_cost,
+  last_redemption_id, twitch_unsupported`;
 
 /**
  * Look up a single reward's pricing config/demand row, or null if not configured.
@@ -182,6 +191,9 @@ export async function markPricingUnsupported(streamerId: number, twitchRewardId:
  * @param demand - The newly computed demand value.
  * @param demandUpdatedAtMs - Epoch ms this demand value was computed as of.
  * @param lastPushedCost - The cost last pushed to Twitch, or null if none has been pushed yet.
+ * @param lastRedemptionId - The redemption id to record as `last_redemption_id`: the new
+ *   redemption's id on a redemption-driven sync, or the row's existing (unchanged) value on a
+ *   decay-only tick — see `syncRewardPrice`, which is the only caller and decides which to pass.
  */
 export async function recordPricingUpdate(
   streamerId: number,
@@ -189,12 +201,13 @@ export async function recordPricingUpdate(
   demand: number,
   demandUpdatedAtMs: number,
   lastPushedCost: number | null,
+  lastRedemptionId: string | null,
 ): Promise<void> {
   await getPool().execute(
     `UPDATE reward_pricing
-     SET demand = ?, demand_updated_at = ?, last_pushed_cost = ?
+     SET demand = ?, demand_updated_at = ?, last_pushed_cost = ?, last_redemption_id = ?
      WHERE streamer_id = ? AND twitch_reward_id = ?`,
-    [demand, demandUpdatedAtMs, lastPushedCost, streamerId, twitchRewardId],
+    [demand, demandUpdatedAtMs, lastPushedCost, lastRedemptionId, streamerId, twitchRewardId],
   );
 }
 

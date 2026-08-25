@@ -42,6 +42,7 @@ const sampleRow = {
   demand: '0.500000',
   demand_updated_at: '1700000000000',
   last_pushed_cost: 400,
+  last_redemption_id: 'redemption-abc',
   twitch_unsupported: 0,
 };
 
@@ -67,8 +68,15 @@ describe('getPricingForReward', () => {
       demand: 0.5,
       demand_updated_at: '1700000000000',
       last_pushed_cost: 400,
+      last_redemption_id: 'redemption-abc',
       twitch_unsupported: false,
     });
+  });
+
+  it('maps a null last_redemption_id as null', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ ...sampleRow, last_redemption_id: null }]) as any);
+    const row = await getPricingForReward(7, 'rwd-abc');
+    expect(row!.last_redemption_id).toBeNull();
   });
 
   it('queries with streamerId and twitchRewardId', async () => {
@@ -181,20 +189,27 @@ describe('upsertPricingConfig', () => {
 });
 
 describe('recordPricingUpdate', () => {
-  it('updates exactly demand, demand_updated_at, and last_pushed_cost', async () => {
+  it('updates demand, demand_updated_at, last_pushed_cost, and last_redemption_id', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await recordPricingUpdate(7, 'rwd-abc', 0.75, 1700000000000, 350);
+    await recordPricingUpdate(7, 'rwd-abc', 0.75, 1700000000000, 350, 'redemption-abc');
     const sql: string = pool.execute.mock.calls[0][0];
-    expect(sql).toContain('SET demand = ?, demand_updated_at = ?, last_pushed_cost = ?');
-    expect(pool.execute.mock.calls[0][1]).toEqual([0.75, 1700000000000, 350, 7, 'rwd-abc']);
+    expect(sql).toContain('SET demand = ?, demand_updated_at = ?, last_pushed_cost = ?, last_redemption_id = ?');
+    expect(pool.execute.mock.calls[0][1]).toEqual([0.75, 1700000000000, 350, 'redemption-abc', 7, 'rwd-abc']);
   });
 
   it('accepts a null lastPushedCost', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await recordPricingUpdate(7, 'rwd-abc', 0.1, 1700000000000, null);
-    expect(pool.execute.mock.calls[0][1]).toEqual([0.1, 1700000000000, null, 7, 'rwd-abc']);
+    await recordPricingUpdate(7, 'rwd-abc', 0.1, 1700000000000, null, 'redemption-abc');
+    expect(pool.execute.mock.calls[0][1]).toEqual([0.1, 1700000000000, null, 'redemption-abc', 7, 'rwd-abc']);
+  });
+
+  it('accepts a null lastRedemptionId (a decay-only tick preserving the unchanged value)', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await recordPricingUpdate(7, 'rwd-abc', 0.1, 1700000000000, 350, null);
+    expect(pool.execute.mock.calls[0][1]).toEqual([0.1, 1700000000000, 350, null, 7, 'rwd-abc']);
   });
 });
 
