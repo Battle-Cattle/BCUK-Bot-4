@@ -244,14 +244,16 @@ function onConnected(): void {
 }
 
 /**
- * Twurple `onDisconnect` event handler: marks the bot disconnected, marks every active channel's
- * status as disconnected, and clears {@link privilegedChannels}. Unlike tmi.js, Twurple's
- * underlying IRC client resets its own joined-channel list on every (re)connect, so there's no
- * equivalent of tmi.js's manual internal-state reset to avoid double-joining on reconnect. Clearing
- * privilege state matters because Twurple reconnects within the same `ChatClient` instance (this
- * handler doesn't imply a new client, unlike {@link stopTwitchBot}) — without this, a channel that
- * revoked the bot's mod/VIP status while disconnected would keep the stale privileged rate-limit
- * ceiling until its next `USERSTATE`, rather than reverting to the conservative default immediately.
+ * Twurple `onDisconnect` event handler: marks the bot disconnected (via {@link setConnected},
+ * which also clears `twitchChannelMembership.ts`'s own `confirmedJoinedChannels` tracking — see
+ * its doc for why: Twurple's `ChatClient#currentChannels` is *not* reset by an automatic
+ * reconnect, only by this process's own one-time `connect()` call, so it can't be trusted as
+ * "still joined" across one), marks every active channel's status as disconnected, and clears
+ * {@link privilegedChannels}. Clearing privilege state matters because Twurple reconnects within
+ * the same `ChatClient` instance (this handler doesn't imply a new client, unlike
+ * {@link stopTwitchBot}) — without this, a channel that revoked the bot's mod/VIP status while
+ * disconnected would keep the stale privileged rate-limit ceiling until its next `USERSTATE`,
+ * rather than reverting to the conservative default immediately.
  * @param manually - Whether the disconnect was requested by this process (e.g. via {@link stopTwitchBot}).
  * @param reason - The error that caused the disconnect, if any.
  */

@@ -120,6 +120,22 @@ describe('dispatchNotification routes chat-alert and redemption events', () => {
     expect(handleFollow).not.toHaveBeenCalled();
   });
 
+  it('logs a warning and does nothing when the condition carries no broadcaster id', () => {
+    dispatchNotification('channel.follow', {}, {});
+    expect(logMock.warn).toHaveBeenCalledWith(
+      'EventSub notification (channel.follow) has no broadcaster_user_id/to_broadcaster_user_id in its condition — dropping',
+    );
+    expect(handleFollow).not.toHaveBeenCalled();
+  });
+
+  it('logs a warning and does nothing for a broadcaster id not in the dispatch map', () => {
+    dispatchNotification('channel.follow', {}, { broadcaster_user_id: 'uid-unknown' });
+    expect(logMock.warn).toHaveBeenCalledWith(
+      'EventSub notification (channel.follow) for unknown broadcaster uid-unknown — not in the dispatch map, dropping',
+    );
+    expect(handleFollow).not.toHaveBeenCalled();
+  });
+
   it('logs an error when the routed handler rejects', async () => {
     vi.mocked(handleFollow).mockRejectedValueOnce(new Error('handler exploded'));
 

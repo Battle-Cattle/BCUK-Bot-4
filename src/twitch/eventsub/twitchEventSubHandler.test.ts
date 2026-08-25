@@ -865,7 +865,7 @@ describe('handleRedemption', () => {
     vi.mocked(getVideosForReward).mockResolvedValue(videos);
     vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
 
-    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBeUndefined();
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
 
     // The dashboard/companion/pricing effects run ahead of the getVideosForReward call that
     // failed the first time, so they fire once per attempt (twice total); the overlay trigger
@@ -885,6 +885,13 @@ describe('handleRedemption', () => {
     await handleRedemption('streamer', { ...event, id: 'redemption-2' }, makeConfig(), streamerId);
 
     expect(recordStreamerEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves true when the redemption is actually processed, and false for a duplicate', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(false);
   });
 });
 

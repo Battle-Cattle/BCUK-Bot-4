@@ -2,6 +2,7 @@ import 'mediaplex'; // Must be imported first to register as Opus provider
 import { getPool, closePool } from './db';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
+import { startChannelReconciliationPoll, stopChannelReconciliationPoll } from './twitch/twitchChannelReconciliationPoll';
 import { startDiscordBot, stopDiscordBot } from './discord/discordBot';
 import { reloadGuildRegistry } from './discord/guildRegistry';
 import { resolveGuildIdForDiscordId } from './discord/voicePresence';
@@ -40,6 +41,7 @@ const log = createLogger('Bot');
 async function shutdown(signal: string): Promise<void> {
   log.info(`${signal} received — disconnecting from voice and shutting down.`);
   stopCounterScheduler();
+  stopChannelReconciliationPoll();
   await stopRewardPricingScheduler();
   await stopTimerCommandScheduler();
   await stopEventSubReconciliation();
@@ -137,6 +139,7 @@ async function main(): Promise<void> {
   setChannelJoinedHook(() => reloadEventSubSubscriptions());
   startDiscordBot();
   await startTwitchBot();
+  startChannelReconciliationPoll();
   startWebPanel();
   startCounterScheduler();
   startRewardPricingScheduler();

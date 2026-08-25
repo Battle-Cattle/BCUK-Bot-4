@@ -22,6 +22,8 @@ function makeDeps(overrides: Partial<MembershipDeps> = {}): MembershipDeps & { s
     isChannelJoined: (channel) => (client as any)?.getChannels().includes(channel) ?? false,
     isDesiredJoined: (channel) => desired.has(channel),
     runExclusive: (_channel, op) => op(),
+    markJoined: vi.fn(),
+    markParted: vi.fn(),
     ...overrides,
   };
   return {

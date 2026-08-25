@@ -41,7 +41,9 @@ const notificationHandlers = new Map<string, NotificationHandler>([
   ['channel.subscription.message',                     (l, e, c, sid) => handleResub(l, e as ResubEvent, c, sid)],
   ['channel.subscription.gift',                        (l, e, c, sid) => handleGiftSub(l, e as GiftSubEvent, c, sid)],
   ['channel.raid',                                     (l, e, c, sid) => handleRaid(l, e as RaidEvent, c, sid)],
-  ['channel.channel_points_custom_reward_redemption.add',  (l, e, c, sid) => handleRedemption(l, e as RedemptionEvent, c, sid)],
+  // handleRedemption resolves a processed/duplicate boolean (used by reconciliation); discarded
+  // here since this dispatch table's live-notification path only needs the side effects.
+  ['channel.channel_points_custom_reward_redemption.add',  async (l, e, c, sid) => { await handleRedemption(l, e as RedemptionEvent, c, sid); }],
   ['stream.online',                                    (l) => handleStreamOnline(l)],
   ['stream.offline',                                   (l) => handleStreamOffline(l)],
   ['channel.update',                                    (l) => handleChannelUpdate(l)],
@@ -58,10 +60,16 @@ const notificationHandlers = new Map<string, NotificationHandler>([
  */
 export function dispatchNotification(type: string, event: Record<string, unknown>, condition: Record<string, string>): void {
   const broadcasterId = condition.broadcaster_user_id ?? condition.to_broadcaster_user_id;
-  if (!broadcasterId) return;
+  if (!broadcasterId) {
+    log.warn(`EventSub notification (${type}) has no broadcaster_user_id/to_broadcaster_user_id in its condition — dropping`);
+    return;
+  }
 
   const info = streamerMap.get(broadcasterId);
-  if (!info) return;
+  if (!info) {
+    log.warn(`EventSub notification (${type}) for unknown broadcaster ${broadcasterId} — not in the dispatch map, dropping`);
+    return;
+  }
   const config = info.config ?? DEFAULT_EVENT_CONFIG;
 
   const handler = notificationHandlers.get(type);

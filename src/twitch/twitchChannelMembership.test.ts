@@ -22,13 +22,20 @@ import {
   getActiveChannels,
   getActiveChannelUserIds,
   clearMembershipState,
+  __setConfirmedJoinedChannelsForTests,
 } from './twitchChannelMembership';
 import { getTwitchEnabledChannels } from '../db';
 import { getUsers } from './twitchApi';
 import { setTwitchChannel } from '../shared/statusStore';
 
-/** Builds a minimal fake Twurple chat client, pre-seeded with the given already-joined channels. */
+/**
+ * Builds a minimal fake Twurple chat client, pre-seeded with the given already-joined channels.
+ * Also seeds {@link __setConfirmedJoinedChannelsForTests} with the same list — that's what
+ * `isChannelJoined` actually reads (see its doc for why `client.currentChannels` isn't trusted).
+ * `currentChannels` is kept on the mock only for shape-compatibility with the real `ChatClient`.
+ */
 function makeMockClient(channels: string[] = []) {
+  __setConfirmedJoinedChannelsForTests(channels);
   return {
     currentChannels: channels,
     join: vi.fn().mockResolvedValue(undefined),
@@ -123,6 +130,36 @@ describe('joinTwitchChannel', () => {
     expect(getActiveChannelUserIds().get('alice')).toBe('uid-alice');
   });
 
+  it('does not record a join as confirmed if the connection cycled while it was in flight, so a later reconcile still rejoins it', async () => {
+    const client = makeMockClient();
+    setChatClient(client as any);
+    setConnected(true);
+    const { promise: gate, resolve: openGate } = deferred();
+    client.join.mockImplementation(() => gate);
+
+    const joinPromise = joinTwitchChannel('alice');
+    await flushMicrotasks();
+    expect(client.join).toHaveBeenCalledWith('alice');
+
+    // The connection drops and comes back — a new connection generation — while the join above
+    // is still pending. Its eventual success belongs to the old, now-superseded connection.
+    setConnected(false);
+    setConnected(true);
+    openGate();
+    await joinPromise;
+
+    // Still desired (queued for retry) but not confirmed joined — otherwise reconcile would
+    // believe it's already there and silently skip rejoining it on the current connection.
+    expect(getActiveChannels().has('alice')).toBe(true);
+    client.join.mockClear();
+    client.join.mockResolvedValue(undefined);
+    await vi.advanceTimersByTimeAsync(600); // release the first join's JOIN_THROTTLE_MS gate
+
+    await reconcileJoinedChannels();
+
+    expect(client.join).toHaveBeenCalledWith('alice');
+  });
+
   it('logs and does not throw when the joined-channel hook itself throws', async () => {
     const client = makeMockClient();
     setChatClient(client as any);
@@ -200,10 +237,9 @@ describe('membershipMutationQueue serialization', () => {
     setConnected(true);
     const order: string[] = [];
     const { promise: gate, resolve: openGate } = deferred();
-    client.join.mockImplementation(async (channel: string) => {
+    client.join.mockImplementation(async () => {
       order.push('join-start');
       await gate;
-      client.currentChannels = [channel]; // simulate the join taking effect
       order.push('join-end');
     });
     client.part.mockImplementation(async () => { order.push('part'); });
@@ -332,14 +368,39 @@ describe('stale join/part compensation', () => {
     await assertion;
     expect(getActiveChannels().has('alice')).toBe(false);
 
-    // The real join now actually lands, out of band, well after the caller stopped waiting.
-    client.currentChannels = ['alice'];
+    // The real join now actually lands, out of band, well after the caller stopped waiting —
+    // compensateIfStale's own markJoined callback (not client.currentChannels) is what records it.
     resolveJoin();
     await flushMicrotasks();
 
     // Actual membership no longer matches desired state (not active) — compensateIfStale must
     // notice and part the channel again rather than leaving a stale, unwanted join in place.
     expect(client.part).toHaveBeenCalledWith('alice');
+  });
+
+  it('does not mark a stale join confirmed — and so does not attempt to revert it — if the connection cycled before it settled', async () => {
+    const client = makeMockClient();
+    setChatClient(client as any);
+    setConnected(true);
+    let resolveJoin!: () => void;
+    client.join.mockImplementation(() => new Promise<void>((resolve) => { resolveJoin = resolve; }));
+
+    const joinPromise = joinTwitchChannel('alice');
+    const assertion = expect(joinPromise).rejects.toThrow('Twitch join timed out after 10000ms');
+    await vi.advanceTimersByTimeAsync(10_000); // JOIN_PART_TIMEOUT_MS — the caller gives up and rolls back
+    await assertion;
+    expect(getActiveChannels().has('alice')).toBe(false);
+
+    // Unlike the "lands late" test above, the connection also cycles before the dangling join
+    // settles — its eventual success belongs to a now-superseded connection generation.
+    setConnected(false);
+    setConnected(true);
+    resolveJoin();
+    await flushMicrotasks();
+
+    // compensateIfStale's markJoined is generation-guarded, so this must not be recorded as
+    // confirmed joined — and therefore must not trigger a (wrong) revert-part on the new connection.
+    expect(client.part).not.toHaveBeenCalled();
   });
 
   // No equivalent "stale part lands late" scenario exists for Twurple: partAsync() wraps
