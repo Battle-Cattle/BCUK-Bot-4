@@ -72,9 +72,11 @@ async function fetchRedemptionsNewerThan(
  * Fetches recent redemptions for one reward (both UNFULFILLED — still in the queue — and
  * FULFILLED — including rewards with `should_redemptions_skip_request_queue` set, which never
  * appear as UNFULFILLED) and replays any redeemed after the reward's tracked cursor through
- * {@link handleRedemption}. `handleRedemption` itself dedupes on the redemption id, so a
- * redemption already delivered live via the WebSocket is a safe no-op here — this only ever
- * has an effect for a redemption the WebSocket never delivered at all.
+ * {@link handleRedemption}. `handleRedemption` itself dedupes on the redemption id and reports
+ * back whether it actually processed the redemption or dropped it as a duplicate — a redemption
+ * already delivered live via the WebSocket is a safe no-op here, and is not logged as a catch,
+ * since this poll's lookback window routinely re-fetches redemptions the WebSocket already
+ * handled fine.
  *
  * The cursor only advances past a redemption once `handleRedemption` has actually succeeded for
  * it; if any redemption in this tick fails to handle, the cursor is left exactly where it was
@@ -112,9 +114,14 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
   for (const r of redemptions) {
     const redeemedAt = Date.parse(r.redeemed_at);
     if (!Number.isFinite(redeemedAt)) continue;
-    log.warn(`Reconciliation caught a redemption missed by EventSub: "${r.reward.title}" (id=${r.id}) for ${info.login}`);
     try {
-      await handleRedemption(info.login, toRedemptionEvent(info.login, r), info.config ?? DEFAULT_EVENT_CONFIG, info.streamerId);
+      const processed = await handleRedemption(info.login, toRedemptionEvent(info.login, r), info.config ?? DEFAULT_EVENT_CONFIG, info.streamerId);
+      // Only log as a genuine catch when handleRedemption actually processed it — its own
+      // dedup means most redemptions in this window were already delivered live, and logging
+      // those as "missed" would be false (see the doc comment above).
+      if (processed) {
+        log.warn(`Reconciliation caught a redemption missed by EventSub: "${r.reward.title}" (id=${r.id}) for ${info.login}`);
+      }
       if (redeemedAt > maxSeen) maxSeen = redeemedAt;
     } catch (err) {
       log.error(`Reconciled-redemption handler error for redemption ${r.id} (${info.login}):`, err);

@@ -861,6 +861,13 @@ describe('handleRedemption', () => {
 
     expect(recordStreamerEvent).toHaveBeenCalledTimes(2);
   });
+
+  it('resolves true when the redemption is actually processed, and false for a duplicate', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -351,16 +351,19 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
  * @param event - Redemption event payload including reward ID and user details.
  * @param _config - Streamer event config (unused for redemptions; reserved for future use).
  * @param streamerId - DB row ID of the streamer, used to scope video lookups and resolve the owning Discord ID.
+ * @returns True if the redemption was actually processed; false if it was dropped as a duplicate
+ *   — callers (e.g. reconciliation) use this to tell a genuine catch from a redemption that was
+ *   already delivered live.
  */
 export async function handleRedemption(
   login: string,
   event: RedemptionEvent,
   _config: EventSubConfig,
   streamerId: number,
-): Promise<void> {
+): Promise<boolean> {
   if (isDuplicateRedemption(event.id)) {
     log.warn(`Duplicate redemption notification for "${event.reward.title}" (id=${event.id}) — ignoring`);
-    return;
+    return false;
   }
 
   try {
@@ -390,12 +393,13 @@ export async function handleRedemption(
   });
 
   const videos = await getVideosForReward(event.reward.id, streamerId);
-  if (videos.length === 0) return;
+  if (videos.length === 0) return true;
 
   const filename = pickWeightedRandom(videos);
   const videoPath = `/overlay/videos/${streamerId}/${filename}`;
   overlayRuntimeRegistry.get()?.pushOverlayEvent(login, videoPath);
   log.info(`Overlay triggered for ${login}: reward="${event.reward.title}" video=${filename}`);
+  return true;
 }
 
 /**
