@@ -21,7 +21,7 @@ describe('recordStreamerEvent', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    await recordStreamerEvent(5, 'follow', 'someviewer', null);
+    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(true);
 
     expect(pool.execute).toHaveBeenCalledTimes(2);
     const [insertSql, insertParams] = pool.execute.mock.calls[0];
@@ -60,7 +60,7 @@ describe('recordStreamerEvent', () => {
     };
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    await expect(recordStreamerEvent(5, 'redemption', 'someviewer', null, 'redemption-abc')).resolves.toBeUndefined();
+    await expect(recordStreamerEvent(5, 'redemption', 'someviewer', null, 'redemption-abc')).resolves.toBe(false);
 
     // No prune DELETE either — nothing new was inserted.
     expect(pool.execute).toHaveBeenCalledTimes(1);

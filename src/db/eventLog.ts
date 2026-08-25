@@ -40,6 +40,10 @@ const EVENTS_RETAINED_PER_STREAMER = 200;
  *   text the viewer entered), or null if there's none.
  * @param redemptionId - Twitch's own redemption id, for `eventType: 'redemption'` only; omit or
  *   pass null for every other event type.
+ * @returns True if this call actually inserted a new row; false if it collided with an
+ *   already-recorded `redemptionId` and was skipped. Callers that also push a live update (e.g.
+ *   the dashboard SSE feed) should only do so when this returns true, so a retry doesn't
+ *   re-deliver a live event for a redemption that was already recorded on an earlier attempt.
  */
 export async function recordStreamerEvent(
   streamerId: number,
@@ -47,14 +51,14 @@ export async function recordStreamerEvent(
   displayName: string,
   detail: string | null,
   redemptionId?: string | null,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await getPool().execute(
       `INSERT INTO streamer_event_log (streamer_id, event_type, display_name, detail, redemption_id) VALUES (?, ?, ?, ?, ?)`,
       [streamerId, eventType, displayName, detail, redemptionId ?? null],
     );
   } catch (err) {
-    if (redemptionId && isMysqlDuplicateEntryError(err)) return;
+    if (redemptionId && isMysqlDuplicateEntryError(err)) return false;
     throw err;
   }
 
@@ -69,6 +73,7 @@ export async function recordStreamerEvent(
      )`,
     [streamerId, streamerId],
   );
+  return true;
 }
 
 /**
