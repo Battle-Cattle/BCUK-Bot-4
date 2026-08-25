@@ -57,6 +57,7 @@ const DEFAULT_STREAMER_PRICING_SETTINGS: StreamerPricingSettings = {
 /** Fallback cooldown (seconds) used for a reward's pricing math when it has no Twitch-enforced cooldown. */
 export const DEFAULT_PRICING_COOLDOWN_SECONDS = 60;
 
+/** Maps a raw `reward_pricing` row into a {@link RewardPricingRow}, coercing numeric/bit columns. */
 function mapRow(r: mysql.RowDataPacket): RewardPricingRow {
   return {
     id: r.id,
