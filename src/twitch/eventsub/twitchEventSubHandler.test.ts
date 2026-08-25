@@ -827,15 +827,31 @@ describe('handleRedemption', () => {
     expect(recordStreamerEvent).toHaveBeenCalledWith(streamerId, 'redemption', 'Redeemer', 'Cool Reward: drink water!');
   });
 
-  it('still triggers the overlay lookup when applyRedemptionPricing throws', async () => {
+  it('rejects and skips the overlay lookup when applyRedemptionPricing throws, since pricing is a required effect', async () => {
     vi.mocked(applyRedemptionPricing).mockRejectedValueOnce(new Error('pricing failed'));
     const videos = [{ file: 'clip1.mp4', weight: 1 }] as any[];
     vi.mocked(getVideosForReward).mockResolvedValue(videos);
     vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
 
-    await handleRedemption('streamer', event, makeConfig(), streamerId);
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('pricing failed');
 
-    expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
+    expect(getVideosForReward).not.toHaveBeenCalled();
+    expect(mockPushOverlayEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects and is not marked handled when recordStreamerEvent throws, since dashboard recording is a required effect', async () => {
+    vi.mocked(recordStreamerEvent).mockRejectedValueOnce(new Error('db unavailable'));
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('db unavailable');
+
+    expect(applyRedemptionPricing).not.toHaveBeenCalled();
+    expect(mockPushDashboardEvent).not.toHaveBeenCalled();
+
+    // A retry with the same id must not be dropped as a duplicate.
+    vi.mocked(recordStreamerEvent).mockResolvedValue(undefined);
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
   });
 
   it('ignores a second notification carrying the same redemption id', async () => {

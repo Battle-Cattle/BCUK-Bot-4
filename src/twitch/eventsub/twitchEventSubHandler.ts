@@ -186,6 +186,30 @@ async function recordAndPushDashboardEvent(
 }
 
 /**
+ * Same as {@link recordAndPushDashboardEvent}, but lets a failure propagate to the caller instead
+ * of logging and swallowing it. Used only by {@link handleRedemption}, where a failed dashboard
+ * record must cause the whole redemption to be retried (via its dedup pending/handled lifecycle)
+ * rather than being silently lost — unlike the other five EventSub handlers, which treat the
+ * dashboard feed as best-effort and must never let its failure crash or reject them.
+ *
+ * @param streamerId - DB row ID of the streamer, used to scope the log entry and dashboard SSE channel.
+ * @param eventType - Kind of activity that occurred.
+ * @param displayName - The acting Twitch viewer's display name.
+ * @param detail - Short additional context, or null if there's none.
+ */
+async function recordAndPushDashboardEventOrThrow(
+  streamerId: number,
+  eventType: StreamerEventType,
+  displayName: string,
+  detail: string | null,
+): Promise<void> {
+  await recordStreamerEvent(streamerId, eventType, displayName, detail);
+  dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, {
+    eventType, displayName, detail, occurredAt: new Date().toISOString(),
+  });
+}
+
+/**
  * Handle a channel.follow EventSub notification.
  * Sends a chat message to the broadcaster's channel using the injected Twitch runtime when
  * `config.follow_enabled` is true, independently pushes a browser-source alert via
@@ -328,27 +352,27 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
 
 /**
  * Handle a channel.channel_points_custom_reward_redemption.add EventSub notification.
- * Unconditionally forwards the redemption to the streamer's companion app (if any device
- * is connected) and records it to the dashboard's "Recent Events" feed (via
- * {@link recordAndPushDashboardEvent}), fires off dynamic pricing for the redeemed reward
- * (a no-op if the reward doesn't have dynamic pricing enabled), then separately looks up
- * videos configured for the redeemed reward and triggers an overlay event if found. The
- * overlay push still no-ops when no videos are configured for the reward or no overlay
- * runtime is registered. The companion push and dashboard-event recording each isolate
- * their own errors internally (try/catch), so a failure in either can't reject this
- * function or crash the caller — but both are awaited before the overlay-video lookup
- * below, so their latency (e.g. a DB round-trip for the dashboard-event write) does
- * serialize ahead of it. Only the pricing update is genuinely fire-and-forget (errors
- * caught via `.catch` instead of awaited), so its network latency truly can't delay the
- * overlay-video logic below.
+ * Unconditionally forwards the redemption to the streamer's companion app (if any device is
+ * connected) — this isolates its own errors internally (try/catch) and is intentionally
+ * best-effort, so a companion-push failure can't reject this function or block the rest of the
+ * redemption. It then records the redemption to the dashboard's "Recent Events" feed (via
+ * {@link recordAndPushDashboardEventOrThrow}) and applies dynamic pricing for the redeemed reward
+ * (a no-op if the reward doesn't have dynamic pricing enabled) — unlike the companion push, both
+ * of these are required: their failures propagate so the redemption is retried rather than
+ * silently marked complete. Finally it looks up videos configured for the redeemed reward and
+ * triggers an overlay event if found; the overlay push still no-ops when no videos are configured
+ * for the reward or no overlay runtime is registered.
  *
  * Deduplicates on Twitch's own redemption id ({@link isDuplicateRedemption}) before doing
  * anything else — a duplicate (or an id already being processed by another in-flight call) is
  * dropped silently, since every effect below (companion push, dashboard record, pricing, overlay
  * trigger) would otherwise double-fire for one physical redemption. The id is only marked as
- * successfully handled ({@link markRedemptionHandled}) once every effect below has run without
- * throwing; a failure clears the in-flight claim ({@link clearPendingRedemption}) instead, so a
- * retry of the same redemption id is not misclassified as a duplicate.
+ * successfully handled ({@link markRedemptionHandled}) once the dashboard record, pricing update,
+ * and overlay lookup have all completed without throwing (the companion push is exempt, since
+ * it's intentionally best-effort). A failure clears the in-flight claim
+ * ({@link clearPendingRedemption}) instead, so a retry of the same redemption id (e.g.
+ * reconciliation's next poll tick) is not misclassified as a duplicate and re-runs the failed
+ * work from scratch.
  *
  * @param login - Broadcaster login name.
  * @param event - Redemption event payload including reward ID and user details.
@@ -392,13 +416,12 @@ export async function handleRedemption(
     }
 
     const detail = event.user_input ? `${event.reward.title}: ${event.user_input}` : event.reward.title;
-    await recordAndPushDashboardEvent(streamerId, 'redemption', event.user_name, detail);
+    await recordAndPushDashboardEventOrThrow(streamerId, 'redemption', event.user_name, detail);
 
-    // Not awaited: applyRedemptionPricing drives a queued Twitch Helix call, and there's no
-    // correctness reason to make the overlay-trigger path below wait on that network latency.
-    applyRedemptionPricing(streamerId, event.reward.id).catch((err) => {
-      log.error('Failed to apply dynamic pricing for redemption:', err);
-    });
+    // Awaited (unlike the other EventSub handlers' fire-and-forget pricing calls elsewhere):
+    // a failed pricing update must propagate so the redemption is retried instead of silently
+    // marked complete. See the doc comment above.
+    await applyRedemptionPricing(streamerId, event.reward.id);
 
     const videos = await getVideosForReward(event.reward.id, streamerId);
     if (videos.length > 0) {
