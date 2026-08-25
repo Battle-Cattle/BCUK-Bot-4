@@ -192,19 +192,34 @@ async function recordAndPushDashboardEvent(
  * rather than being silently lost — unlike the other five EventSub handlers, which treat the
  * dashboard feed as best-effort and must never let its failure crash or reject them.
  *
+ * Passes `redemptionId` (Twitch's own redemption id) through to `recordStreamerEvent` as an
+ * idempotency key: if a retry re-runs this after an earlier attempt already recorded the event
+ * but failed on a later required effect, the duplicate `INSERT` collides on
+ * `streamer_event_log`'s unique index and is silently skipped instead of creating a second row
+ * — see `recordStreamerEvent`'s doc comment. The live dashboard SSE push is skipped on that same
+ * retry path too, since `recordStreamerEvent` reports back whether it actually inserted a row —
+ * otherwise a retry would re-deliver a second live event for a redemption already shown once.
+ *
  * @param streamerId - DB row ID of the streamer, used to scope the log entry and dashboard SSE channel.
  * @param eventType - Kind of activity that occurred.
  * @param displayName - The acting Twitch viewer's display name.
  * @param detail - Short additional context, or null if there's none.
- * @returns A promise that resolves once the event is recorded and pushed to the dashboard.
+ * @param redemptionId - Twitch's own redemption id, used as the idempotency key.
+ * @returns A promise that resolves once the event is recorded, and pushed to the dashboard if
+ *   this call actually inserted a new row.
  */
 async function recordAndPushDashboardEventOrThrow(
   streamerId: number,
   eventType: StreamerEventType,
   displayName: string,
   detail: string | null,
+  redemptionId: string,
 ): Promise<void> {
-  await recordStreamerEvent(streamerId, eventType, displayName, detail);
+  const inserted = await recordStreamerEvent(streamerId, eventType, displayName, detail, redemptionId);
+  // Only push the live SSE update when a new row was actually inserted — if this redemption was
+  // already recorded on an earlier attempt (see recordStreamerEvent's doc comment), a retry must
+  // not re-deliver a second live dashboard event for the same physical redemption.
+  if (!inserted) return;
   dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, {
     eventType, displayName, detail, occurredAt: new Date().toISOString(),
   });
@@ -403,7 +418,7 @@ export async function handleRedemption(
   // redemption from scratch instead of being silently dropped as a duplicate.
   try {
     const detail = event.user_input ? `${event.reward.title}: ${event.user_input}` : event.reward.title;
-    await recordAndPushDashboardEventOrThrow(streamerId, 'redemption', event.user_name, detail);
+    await recordAndPushDashboardEventOrThrow(streamerId, 'redemption', event.user_name, detail, event.id);
 
     // Awaited (unlike the other EventSub handlers' fire-and-forget pricing calls elsewhere):
     // a failed pricing update must propagate so the redemption is retried instead of silently

@@ -190,6 +190,22 @@ Per-streamer EventSub notification message configuration. Applied once the strea
 
 Created by `migrations/twitch_eventsub.sql`. `raid_shoutout_enabled` added by `migrations/raid_shoutout.sql`.
 
+## `streamer_event_log`
+
+Live activity log for the dashboard's "Recent Events" feed: follows, subs, raids, and channel-point redemptions on a connected Twitch channel. Bounded to roughly the largest range the dashboard displays — `recordStreamerEvent()` prunes each streamer down to their most recent 200 rows on every insert, so this never grows unbounded.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK, auto-increment | |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `event_type` | `ENUM('follow','sub','resub','giftsub','raid','redemption')` | |
+| `display_name` | `VARCHAR(255)` | The acting Twitch viewer's display name |
+| `detail` | `VARCHAR(500)` NULL | Short additional context (e.g. raid viewer count, redeemed reward name) |
+| `redemption_id` | `VARCHAR(64)` NULL, UNIQUE | Twitch's own redemption id, set only for `redemption` rows. Lets a retried `INSERT` for the same physical redemption (see `handleRedemption`'s dedup pending/handled lifecycle) collide on the unique index instead of creating a duplicate row. `NULL` for the other five event types, which have no equivalent id — a `UNIQUE` index permits any number of `NULL`s |
+| `occurred_at` | `DATETIME` | Defaults to `CURRENT_TIMESTAMP` |
+
+Created by `migrations/streamer_event_log.sql`. `redemption_id` added by `migrations/streamer_event_log_redemption_id.sql`.
+
 ## `reward_pricing`
 
 Dynamic Channel Point Pricing: per-reward config and demand state. Independent of `overlay_reward` — a reward can have dynamic pricing without overlay videos and vice versa. Optional/opt-in per reward via `enabled`.

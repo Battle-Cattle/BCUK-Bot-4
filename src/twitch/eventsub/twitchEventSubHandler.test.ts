@@ -73,7 +73,7 @@ function makeConfig(overrides: Partial<{
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(findCachedAlertConfig).mockResolvedValue(null);
-  vi.mocked(recordStreamerEvent).mockResolvedValue(undefined);
+  vi.mocked(recordStreamerEvent).mockResolvedValue(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -827,7 +827,7 @@ describe('handleRedemption', () => {
 
     await handleRedemption('streamer', event, makeConfig(), streamerId);
 
-    expect(recordStreamerEvent).toHaveBeenCalledWith(streamerId, 'redemption', 'Redeemer', 'Cool Reward');
+    expect(recordStreamerEvent).toHaveBeenCalledWith(streamerId, 'redemption', 'Redeemer', 'Cool Reward', 'redemption-1');
     expect(mockPushDashboardEvent).toHaveBeenCalledWith(streamerId, expect.objectContaining({
       eventType: 'redemption', displayName: 'Redeemer', detail: 'Cool Reward',
     }));
@@ -838,7 +838,24 @@ describe('handleRedemption', () => {
 
     await handleRedemption('streamer', { ...event, user_input: 'drink water!' }, makeConfig(), streamerId);
 
-    expect(recordStreamerEvent).toHaveBeenCalledWith(streamerId, 'redemption', 'Redeemer', 'Cool Reward: drink water!');
+    expect(recordStreamerEvent).toHaveBeenCalledWith(streamerId, 'redemption', 'Redeemer', 'Cool Reward: drink water!', 'redemption-1');
+  });
+
+  it('passes the Twitch redemption id through to recordStreamerEvent as the idempotency key', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await handleRedemption('streamer', { ...event, id: 'redemption-xyz' }, makeConfig(), streamerId);
+
+    expect(recordStreamerEvent).toHaveBeenCalledWith(streamerId, 'redemption', 'Redeemer', 'Cool Reward', 'redemption-xyz');
+  });
+
+  it('does not push a live dashboard event when recordStreamerEvent reports the redemption was already recorded (a retry after collision)', async () => {
+    vi.mocked(recordStreamerEvent).mockResolvedValueOnce(false);
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await handleRedemption('streamer', event, makeConfig(), streamerId);
+
+    expect(mockPushDashboardEvent).not.toHaveBeenCalled();
   });
 
   it('rejects and skips the overlay lookup when applyRedemptionPricing throws, since pricing is a required effect', async () => {
@@ -875,7 +892,7 @@ describe('handleRedemption', () => {
     expect(mockPushDashboardEvent).not.toHaveBeenCalled();
 
     // A retry with the same id must not be dropped as a duplicate.
-    vi.mocked(recordStreamerEvent).mockResolvedValue(undefined);
+    vi.mocked(recordStreamerEvent).mockResolvedValue(true);
     vi.mocked(getVideosForReward).mockResolvedValue([]);
     await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
   });
