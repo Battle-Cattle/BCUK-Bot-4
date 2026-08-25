@@ -196,6 +196,7 @@ async function recordAndPushDashboardEvent(
  * @param eventType - Kind of activity that occurred.
  * @param displayName - The acting Twitch viewer's display name.
  * @param detail - Short additional context, or null if there's none.
+ * @returns A promise that resolves once the event is recorded and pushed to the dashboard.
  */
 async function recordAndPushDashboardEventOrThrow(
   streamerId: number,
@@ -352,16 +353,18 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
 
 /**
  * Handle a channel.channel_points_custom_reward_redemption.add EventSub notification.
- * Unconditionally forwards the redemption to the streamer's companion app (if any device is
- * connected) — this isolates its own errors internally (try/catch) and is intentionally
- * best-effort, so a companion-push failure can't reject this function or block the rest of the
- * redemption. It then records the redemption to the dashboard's "Recent Events" feed (via
+ * Records the redemption to the dashboard's "Recent Events" feed (via
  * {@link recordAndPushDashboardEventOrThrow}) and applies dynamic pricing for the redeemed reward
- * (a no-op if the reward doesn't have dynamic pricing enabled) — unlike the companion push, both
- * of these are required: their failures propagate so the redemption is retried rather than
- * silently marked complete. Finally it looks up videos configured for the redeemed reward and
- * triggers an overlay event if found; the overlay push still no-ops when no videos are configured
- * for the reward or no overlay runtime is registered.
+ * (a no-op if the reward doesn't have dynamic pricing enabled) — both are required: their
+ * failures propagate so the redemption is retried rather than silently marked complete. Only
+ * once both succeed does it forward the redemption to the streamer's companion app (if any
+ * device is connected) — this isolates its own errors internally (try/catch) and is
+ * intentionally best-effort, so a companion-push failure can't reject this function. It runs
+ * last among these three (not first) precisely because it's best-effort and can't be un-sent: if
+ * it ran before a required effect that then failed, a retry would re-deliver the same companion
+ * notification. Finally it looks up videos configured for the redeemed reward and triggers an
+ * overlay event if found; the overlay push still no-ops when no videos are configured for the
+ * reward or no overlay runtime is registered.
  *
  * Deduplicates on Twitch's own redemption id ({@link isDuplicateRedemption}) before doing
  * anything else — a duplicate (or an id already being processed by another in-flight call) is
@@ -398,6 +401,17 @@ export async function handleRedemption(
   // and the error is rethrown, so a retry (e.g. reconciliation's next poll tick) re-runs this
   // redemption from scratch instead of being silently dropped as a duplicate.
   try {
+    const detail = event.user_input ? `${event.reward.title}: ${event.user_input}` : event.reward.title;
+    await recordAndPushDashboardEventOrThrow(streamerId, 'redemption', event.user_name, detail);
+
+    // Awaited (unlike the other EventSub handlers' fire-and-forget pricing calls elsewhere):
+    // a failed pricing update must propagate so the redemption is retried instead of silently
+    // marked complete. See the doc comment above.
+    await applyRedemptionPricing(streamerId, event.reward.id);
+
+    // Deliberately runs after both required effects above (not before): the companion push is
+    // best-effort and can't be un-sent, so if it ran first and a required effect then failed, a
+    // retry would deliver the same companion notification twice for one redemption.
     try {
       const streamer = await getStreamerById(streamerId);
       if (streamer) {
@@ -414,14 +428,6 @@ export async function handleRedemption(
     } catch (err) {
       log.error('Failed to push companion event for redemption:', err);
     }
-
-    const detail = event.user_input ? `${event.reward.title}: ${event.user_input}` : event.reward.title;
-    await recordAndPushDashboardEventOrThrow(streamerId, 'redemption', event.user_name, detail);
-
-    // Awaited (unlike the other EventSub handlers' fire-and-forget pricing calls elsewhere):
-    // a failed pricing update must propagate so the redemption is retried instead of silently
-    // marked complete. See the doc comment above.
-    await applyRedemptionPricing(streamerId, event.reward.id);
 
     const videos = await getVideosForReward(event.reward.id, streamerId);
     if (videos.length > 0) {

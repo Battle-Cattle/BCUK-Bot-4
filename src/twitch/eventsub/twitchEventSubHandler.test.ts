@@ -837,6 +837,18 @@ describe('handleRedemption', () => {
 
     expect(getVideosForReward).not.toHaveBeenCalled();
     expect(mockPushOverlayEvent).not.toHaveBeenCalled();
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+  });
+
+  it('delivers the companion event only once when a pricing failure is retried, since the best-effort companion push runs after the required effects', async () => {
+    vi.mocked(applyRedemptionPricing).mockRejectedValueOnce(new Error('pricing failed'));
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('pricing failed');
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
+    expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
   });
 
   it('rejects and is not marked handled when recordStreamerEvent throws, since dashboard recording is a required effect', async () => {
