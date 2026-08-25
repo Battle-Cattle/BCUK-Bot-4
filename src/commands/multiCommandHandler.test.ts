@@ -143,6 +143,28 @@ describe('multi cooldown', () => {
     expect(mockRuntime.send).toHaveBeenCalledTimes(2);
   });
 
+  it('allows the same source channel to broadcast again once the cooldown has elapsed', async () => {
+    vi.mocked(getMultiTwitchDataForChannel).mockReturnValue({
+      url: 'multitwitch.tv/a/b',
+      participants: ['#a', '#b'],
+    } as any);
+    mockRuntime.getActiveChannels.mockReturnValue(new Set(['#a', '#b']));
+
+    await executeMultiCommandForTwitch('#a', '!multi', 'user1');
+    expect(mockRuntime.send).toHaveBeenCalledTimes(2);
+
+    // Still on cooldown.
+    await executeMultiCommandForTwitch('#a', '!multi', 'user1');
+    expect(mockRuntime.send).toHaveBeenCalledTimes(2);
+
+    // Once the cooldown window has elapsed, the channel can claim again. Advance the shared
+    // `mockNow` (not just a local offset) so later tests' beforeEach still clears this claim.
+    mockNow += COOLDOWN_MS + 1;
+    vi.spyOn(Date, 'now').mockReturnValue(mockNow);
+    await executeMultiCommandForTwitch('#a', '!multi', 'user1');
+    expect(mockRuntime.send).toHaveBeenCalledTimes(4);
+  });
+
   it("does not apply one source channel's cooldown to another", async () => {
     vi.mocked(getMultiTwitchDataForChannel).mockReturnValue({
       url: 'multitwitch.tv/a/b',
