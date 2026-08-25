@@ -26,7 +26,7 @@ describe('recordStreamerEvent', () => {
     expect(pool.execute).toHaveBeenCalledTimes(2);
     const [insertSql, insertParams] = pool.execute.mock.calls[0];
     expect(insertSql).toContain('INSERT INTO streamer_event_log');
-    expect(insertParams).toEqual([5, 'follow', 'someviewer', null]);
+    expect(insertParams).toEqual([5, 'follow', 'someviewer', null, null]);
 
     const [deleteSql, deleteParams] = pool.execute.mock.calls[1];
     expect(deleteSql).toContain('DELETE FROM streamer_event_log');
@@ -41,7 +41,45 @@ describe('recordStreamerEvent', () => {
     await recordStreamerEvent(5, 'redemption', 'someviewer', 'Redeemed Hydrate: drink water!');
 
     const [, insertParams] = pool.execute.mock.calls[0];
-    expect(insertParams).toEqual([5, 'redemption', 'someviewer', 'Redeemed Hydrate: drink water!']);
+    expect(insertParams).toEqual([5, 'redemption', 'someviewer', 'Redeemed Hydrate: drink water!', null]);
+  });
+
+  it('passes a given redemptionId through as the fifth INSERT param', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await recordStreamerEvent(5, 'redemption', 'someviewer', 'Redeemed Hydrate', 'redemption-abc');
+
+    const [, insertParams] = pool.execute.mock.calls[0];
+    expect(insertParams).toEqual([5, 'redemption', 'someviewer', 'Redeemed Hydrate', 'redemption-abc']);
+  });
+
+  it('silently no-ops on a duplicate-key INSERT when a redemptionId was given (retry of an already-recorded redemption)', async () => {
+    const pool = {
+      execute: vi.fn().mockRejectedValueOnce(Object.assign(new Error('dup'), { code: 'ER_DUP_ENTRY' })),
+    };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(recordStreamerEvent(5, 'redemption', 'someviewer', null, 'redemption-abc')).resolves.toBeUndefined();
+
+    // No prune DELETE either — nothing new was inserted.
+    expect(pool.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('rethrows a duplicate-key INSERT error when no redemptionId was given', async () => {
+    const dupError = Object.assign(new Error('dup'), { code: 'ER_DUP_ENTRY' });
+    const pool = { execute: vi.fn().mockRejectedValueOnce(dupError) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).rejects.toThrow('dup');
+  });
+
+  it('rethrows a non-duplicate-key INSERT error even when a redemptionId was given', async () => {
+    const otherError = Object.assign(new Error('connection lost'), { code: 'PROTOCOL_CONNECTION_LOST' });
+    const pool = { execute: vi.fn().mockRejectedValueOnce(otherError) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(recordStreamerEvent(5, 'redemption', 'someviewer', null, 'redemption-abc')).rejects.toThrow('connection lost');
   });
 
   it('does not run the prune DELETE until the INSERT has resolved', async () => {

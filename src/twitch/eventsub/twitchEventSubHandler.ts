@@ -192,10 +192,17 @@ async function recordAndPushDashboardEvent(
  * rather than being silently lost — unlike the other five EventSub handlers, which treat the
  * dashboard feed as best-effort and must never let its failure crash or reject them.
  *
+ * Passes `redemptionId` (Twitch's own redemption id) through to `recordStreamerEvent` as an
+ * idempotency key: if a retry re-runs this after an earlier attempt already recorded the event
+ * but failed on a later required effect, the duplicate `INSERT` collides on
+ * `streamer_event_log`'s unique index and is silently skipped instead of creating a second row
+ * — see `recordStreamerEvent`'s doc comment.
+ *
  * @param streamerId - DB row ID of the streamer, used to scope the log entry and dashboard SSE channel.
  * @param eventType - Kind of activity that occurred.
  * @param displayName - The acting Twitch viewer's display name.
  * @param detail - Short additional context, or null if there's none.
+ * @param redemptionId - Twitch's own redemption id, used as the idempotency key.
  * @returns A promise that resolves once the event is recorded and pushed to the dashboard.
  */
 async function recordAndPushDashboardEventOrThrow(
@@ -203,8 +210,9 @@ async function recordAndPushDashboardEventOrThrow(
   eventType: StreamerEventType,
   displayName: string,
   detail: string | null,
+  redemptionId: string,
 ): Promise<void> {
-  await recordStreamerEvent(streamerId, eventType, displayName, detail);
+  await recordStreamerEvent(streamerId, eventType, displayName, detail, redemptionId);
   dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, {
     eventType, displayName, detail, occurredAt: new Date().toISOString(),
   });
@@ -403,7 +411,7 @@ export async function handleRedemption(
   // redemption from scratch instead of being silently dropped as a duplicate.
   try {
     const detail = event.user_input ? `${event.reward.title}: ${event.user_input}` : event.reward.title;
-    await recordAndPushDashboardEventOrThrow(streamerId, 'redemption', event.user_name, detail);
+    await recordAndPushDashboardEventOrThrow(streamerId, 'redemption', event.user_name, detail, event.id);
 
     // Awaited (unlike the other EventSub handlers' fire-and-forget pricing calls elsewhere):
     // a failed pricing update must propagate so the redemption is retried instead of silently
