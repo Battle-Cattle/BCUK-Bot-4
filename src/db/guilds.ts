@@ -116,17 +116,3 @@ export async function upsertGuild(guildId: string, name: string): Promise<void> 
     [guildId, name],
   );
 }
-
-/**
- * Sets (or clears) the default voice channel for a guild.
- *
- * @param guildId BIGINT snowflake as a string.
- * @param voiceChannelId BIGINT snowflake as a string, or null to clear.
- * @returns Resolves when the update is complete.
- */
-export async function setGuildVoiceChannel(guildId: string, voiceChannelId: string | null): Promise<void> {
-  await getPool().execute(
-    'UPDATE guild SET voice_channel_id = ? WHERE guild_id = ?',
-    [voiceChannelId, guildId],
-  );
-}

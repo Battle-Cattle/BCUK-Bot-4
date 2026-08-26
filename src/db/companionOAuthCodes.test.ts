@@ -27,7 +27,7 @@ vi.mock('./pool', () => {
 vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
-import { createCode, consumeCode, exchangeCodeForToken } from './companionOAuthCodes';
+import { createCode, exchangeCodeForToken } from './companionOAuthCodes';
 import { createHash } from 'crypto';
 import { makeMockConnection } from '../test-utils/mockMysqlPool';
 
@@ -54,53 +54,6 @@ describe('createCode', () => {
     expect(params[0]).toBe(sha256hex(plain));
     expect(params[1]).toBe('123');
     expect(params[2]).toBe(60);
-  });
-});
-
-// ─── consumeCode ──────────────────────────────────────────────────────────────
-
-describe('consumeCode', () => {
-  it('returns null when the UPDATE affects no rows (invalid/expired/used code)', async () => {
-    const execute = vi.fn().mockResolvedValue([{ affectedRows: 0 }]);
-    vi.mocked(getPool).mockReturnValue({ execute } as any);
-    const result = await consumeCode('bad-code');
-    expect(result).toBeNull();
-    expect(execute).toHaveBeenCalledTimes(1); // no follow-up SELECT
-  });
-
-  it('returns the discord_id when the UPDATE succeeds and a row is found', async () => {
-    const execute = vi
-      .fn()
-      .mockResolvedValueOnce([{ affectedRows: 1 }])
-      .mockResolvedValueOnce([[{ discord_id: '42' }]]);
-    vi.mocked(getPool).mockReturnValue({ execute } as any);
-    const result = await consumeCode('good-code');
-    expect(result).toBe('42');
-    const [updateSql] = execute.mock.calls[0] as [string, unknown[]];
-    expect(updateSql).toContain('used_at IS NULL AND expires_at > NOW()');
-  });
-
-  it('returns null if the follow-up SELECT somehow finds no row', async () => {
-    const execute = vi
-      .fn()
-      .mockResolvedValueOnce([{ affectedRows: 1 }])
-      .mockResolvedValueOnce([[]]);
-    vi.mocked(getPool).mockReturnValue({ execute } as any);
-    const result = await consumeCode('good-code');
-    expect(result).toBeNull();
-  });
-
-  it('hashes the same code identically across calls, preventing double-spend via the affectedRows guard', async () => {
-    const execute = vi
-      .fn()
-      .mockResolvedValueOnce([{ affectedRows: 1 }])
-      .mockResolvedValueOnce([[{ discord_id: '1' }]])
-      .mockResolvedValueOnce([{ affectedRows: 0 }]); // second consume of the same code fails
-    vi.mocked(getPool).mockReturnValue({ execute } as any);
-    const first = await consumeCode('reused-code');
-    const second = await consumeCode('reused-code');
-    expect(first).toBe('1');
-    expect(second).toBeNull();
   });
 });
 

@@ -4,7 +4,7 @@ vi.mock('./pool', () => ({ getPool: vi.fn() }));
 vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
-import { getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember, upsertGuild, setGuildVoiceChannel } from './guilds';
+import { getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember, upsertGuild } from './guilds';
 import { makeMockPool, type MockPool } from '../test-utils/mockMysqlPool';
 
 let pool: MockPool;
@@ -110,20 +110,5 @@ describe('upsertGuild', () => {
     expect(sql).toContain('ON DUPLICATE KEY UPDATE name = new_guild.name');
     expect(sql).not.toContain('voice_channel_id =');
     expect(params).toEqual(['111', 'Alpha']);
-  });
-});
-
-describe('setGuildVoiceChannel', () => {
-  it('updates the voice channel for a guild', async () => {
-    await setGuildVoiceChannel('111', '222');
-    expect(pool.execute).toHaveBeenCalledWith(
-      expect.stringContaining('UPDATE guild SET voice_channel_id = ?'),
-      ['222', '111'],
-    );
-  });
-
-  it('clears the voice channel when passed null', async () => {
-    await setGuildVoiceChannel('111', null);
-    expect(pool.execute).toHaveBeenCalledWith(expect.any(String), [null, '111']);
   });
 });
