@@ -134,6 +134,35 @@ describe('counterScheduler', () => {
     expect(archiveAndResetYearlyCounters).toHaveBeenCalledTimes(1);
   });
 
+  it('a stop followed by a restart before the old tick resolves does not leak a duplicate chain', async () => {
+    vi.setSystemTime(new Date(2025, 0, 1)); // Jan 1, 2025
+
+    // Keep the first run's archive call pending so restart races it.
+    let resolveFirstArchive!: (count: number) => void;
+    archiveAndResetYearlyCounters.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveFirstArchive = resolve; }),
+    );
+
+    startCounterScheduler();
+    await Promise.resolve(); // let the first tick() start and reach the pending archive await
+
+    stopCounterScheduler(); // schedulerTimer is still null here — nothing to clear
+    startCounterScheduler(); // flips `started` back to true for a new run; its own tick
+    await flushAsync(); // resolves immediately (default mock) and arms one timer
+
+    resolveFirstArchive(0); // let the stale first-run tick resolve and attempt to reschedule
+    await flushAsync();
+
+    // Without the generation guard, the stale first-run tick would arm a second,
+    // independent timer here (overwriting `schedulerTimer` and leaking the new run's own
+    // timer) — leaving two hourly chains running instead of one.
+    expect(vi.getTimerCount()).toBe(1);
+
+    // A single stopCounterScheduler() call should still fully stop everything.
+    stopCounterScheduler();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('stopCounterScheduler prevents further ticks', async () => {
     vi.setSystemTime(new Date(2025, 5, 15)); // June 15 — no archive expected
     startCounterScheduler();
