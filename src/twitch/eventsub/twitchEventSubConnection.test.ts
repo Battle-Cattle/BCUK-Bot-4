@@ -449,6 +449,38 @@ describe('StreamerConnection lifecycle', () => {
     return vi.waitFor(() => expect(connectSpy).toHaveBeenCalled());
   });
 
+  it('reload() does not open a second WebSocket when a connect() is already in flight (session_welcome not yet received)', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstWs = (conn as any).ws;
+    expect(firstWs).toBeTruthy();
+    // this.ws is set (start()'s connect() already ran) but this.sessionId is still null —
+    // session_welcome hasn't arrived yet. Without the fix, doReload() would call connect()
+    // again here, opening a second live WebSocket alongside the first.
+    expect((conn as any).sessionId).toBeNull();
+    const connectSpy = vi.spyOn(conn, 'connect');
+
+    const updatedData = { ...makeStreamerData(), name: 'updated-streamer' };
+    conn.reload(updatedData);
+
+    // Flush the reload chain's microtasks — doReload() must take its early-return branch
+    // rather than calling connect() a second time.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(connectSpy).not.toHaveBeenCalled();
+    expect((conn as any).ws).toBe(firstWs);
+
+    // The still-pending connect's own session_welcome now arrives — it must subscribe using
+    // reload()'s updated data (currentData was already reassigned synchronously), proving
+    // nothing was lost by not opening a second connection. The subscribe itself runs via
+    // reloadChain's own .then() (not awaited by handleMessage), so it settles a tick later.
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-live'));
+    await vi.waitFor(() => {
+      expect(subscribeForStreamer).toHaveBeenCalledWith('sess-live', expect.objectContaining({ name: 'updated-streamer' }));
+    });
+  });
+
   it('reload() re-subscribes on the live session and stops when no subscriptions remain', async () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();

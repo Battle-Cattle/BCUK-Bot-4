@@ -116,14 +116,28 @@ export class StreamerConnection {
    * is in flight, this.sessionId still refers to the old, soon-to-be-invalidated session —
    * subscribing now would silently fail against Twitch, so the reload is deferred and picked
    * up by onSessionWelcome() once the new session's id is known.
+   *
+   * Likewise, if `this.ws` is already set but `this.sessionId` is still null, a connect() is
+   * already in flight — its `session_welcome` just hasn't arrived yet. Calling connect() again
+   * here would open a *second* live WebSocket alongside the first (connect() never closes the
+   * socket it replaces), and both would end up subscribing independently, each treating the
+   * other's fresh subscription as "stale" and deleting it — observed in production as every
+   * subscription type being deleted and recreated within seconds of startup, with a real gap
+   * where nothing was subscribed. Reload only needs to fall through and do nothing: the pending
+   * connect's own onSessionWelcome() will subscribe once it lands, using this.currentData —
+   * already updated by reload() above — so nothing is lost by waiting for it instead of racing
+   * a second connection. A reconnect is only actually needed when there's no socket at all.
    */
   private async doReload(): Promise<void> {
     if (this.isReconnecting) {
       this.reloadPendingAfterMigration = true;
       return;
     }
-    if (!this.ws || !this.sessionId) {
+    if (!this.ws) {
       if (!this.stopped && !this.reconnectTimer) { this.connect(); }
+      return;
+    }
+    if (!this.sessionId) {
       return;
     }
     await this.subscribeAndHandleEmpty(this.sessionId, 'No subscriptions after reload — disconnecting');
