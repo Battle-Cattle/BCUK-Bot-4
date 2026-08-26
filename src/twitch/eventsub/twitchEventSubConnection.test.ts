@@ -387,6 +387,34 @@ describe('StreamerConnection lifecycle', () => {
     expect((conn as any).ws).toBe(secondWs);
   });
 
+  it('ignores a stale open event from a socket already superseded by a force-reconnect', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstWs = (conn as any).ws as MockWebSocket;
+
+    // Socket A errors and forceReconnect() tears it down, scheduling a reconnect.
+    firstWs.listeners.get('error')!();
+    expect((conn as any).reconnectAttempts).toBe(1);
+
+    vi.advanceTimersByTime(1_000); // first reconnect attempt's backoff delay
+    const secondWs = (conn as any).ws as MockWebSocket;
+    expect(secondWs).not.toBe(firstWs);
+    expect((conn as any).connectTimer).not.toBeNull(); // B's own connect timeout is armed
+
+    // Socket A's 'open' now fires late — after it's already been superseded by B. Without the
+    // this.ws !== socket guard, this would incorrectly clear B's connect timer and reset
+    // reconnectAttempts/keepalive for a connection that hasn't actually opened yet.
+    firstWs.listeners.get('open')!();
+    expect((conn as any).reconnectAttempts).toBe(1);
+    expect((conn as any).connectTimer).not.toBeNull();
+    expect((conn as any).ws).toBe(secondWs);
+
+    // B's own open then arrives for real and correctly resets state.
+    secondWs.listeners.get('open')!();
+    expect((conn as any).reconnectAttempts).toBe(0);
+    expect((conn as any).connectTimer).toBeNull();
+  });
+
   it('reconnects if the WebSocket never leaves CONNECTING (no open/error/close ever fires)', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();

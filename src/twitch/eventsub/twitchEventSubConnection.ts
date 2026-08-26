@@ -180,7 +180,7 @@ export class StreamerConnection {
   connect(url: string = EVENTSUB_WS_URL): void {
     if (this.stopped) return;
     const socket = new WebSocket(url);
-    socket.addEventListener('open', () => this.onOpen());
+    socket.addEventListener('open', () => this.onOpen(socket));
     socket.addEventListener('message', (ev: MessageEvent) => this.onMessage(ev));
     socket.addEventListener('close', (ev: CloseEvent) => this.onClose(ev, socket));
     socket.addEventListener('error', () => this.onError(socket));
@@ -192,11 +192,22 @@ export class StreamerConnection {
     }, CONNECT_TIMEOUT_MS);
   }
 
+  /** Clears the pending connect-timeout timer (see {@link CONNECT_TIMEOUT_MS}), if one is armed. */
   private clearConnectTimer(): void {
     if (this.connectTimer) { clearTimeout(this.connectTimer); this.connectTimer = null; }
   }
 
-  private onOpen(): void {
+  /**
+   * Handles the socket's `'open'` event: ignores it if `socket` is no longer this connection's
+   * active socket (a stale, late-arriving event from a socket already superseded by a
+   * force-reconnect — the same staleness this file already guards against in {@link onClose},
+   * {@link onError}, and {@link forceReconnect} itself). Without this guard, a delayed `open`
+   * from an old socket would incorrectly clear the *current* socket's connect timer and reset
+   * {@link reconnectAttempts}/the keepalive timer for a connection that may not have opened yet.
+   * @param socket - The socket that emitted the event.
+   */
+  private onOpen(socket: WebSocket): void {
+    if (this.ws !== socket) return;
     log.info(`[${this.name}] WebSocket connected`);
     this.clearConnectTimer();
     this.reconnectAttempts = 0;
