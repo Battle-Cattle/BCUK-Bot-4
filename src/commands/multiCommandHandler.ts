@@ -6,8 +6,18 @@ import { resolveSharedChatSessionId } from './customCommandHandler';
 import { extractCommand } from './commandUtils';
 import { sendDedupedBySession } from './twitchBroadcast';
 import { createRuntimeRegistry, type TwitchBroadcastRuntime } from './twitchRuntime';
+import { createCooldownGate } from './cooldownGate';
 
 const MULTI_COMMAND = '!multi';
+
+// ─── Cooldown ─────────────────────────────────────────────────────────────────
+//
+// Otherwise unthrottled: any chat member (no permission needed) can spam `!multi`
+// as fast as they can send it, and each spam broadcasts to every participant
+// channel in the shared-chat group — the cost scales with group size. Gated per
+// source channel, mirroring counterHandler.ts's per-channel cooldown.
+
+const multiCooldown = createCooldownGate();
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
@@ -54,7 +64,9 @@ async function broadcastToGroupChannels(
 /**
  * Handles a Twitch chat `!multi` command: looks up the multitwitch group for
  * `channel` and — if the channel is part of an active group — broadcasts the
- * multitwitch URL to the group via {@link broadcastToGroupChannels}.
+ * multitwitch URL to the group via {@link broadcastToGroupChannels}. Throttled
+ * per source channel so repeated spam doesn't repeatedly broadcast to the whole
+ * group.
  *
  * @param channel - Twitch channel the command was sent in.
  * @param rawMessage - Raw chat message text.
@@ -75,6 +87,8 @@ export async function executeMultiCommandForTwitch(
 
   const runtime = multiTwitchRuntime.get();
   if (!runtime) return;
+
+  if (!multiCooldown.tryClaim(`twitch:${channel}`)) return;
 
   try {
     const sent = await broadcastToGroupChannels(channel, groupInfo.participants, groupInfo.url, runtime);
