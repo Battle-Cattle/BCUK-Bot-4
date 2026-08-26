@@ -161,7 +161,7 @@ describe('setupConnectionHandlers — disconnected handler', () => {
     expect(deps.scheduleReconnect).not.toHaveBeenCalled();
   });
 
-  it('logs and does not reject when cleanup (e.g. tearDown) throws', async () => {
+  it('logs and does not reject when cleanup (e.g. tearDown) throws, but still schedules a reconnect', async () => {
     vi.mocked(entersState).mockRejectedValue(new Error('timeout'));
     const conn = makeConnection();
     const tearDown = vi.fn(() => { throw new Error('listener blew up'); });
@@ -172,6 +172,24 @@ describe('setupConnectionHandlers — disconnected handler', () => {
 
     expect(mockLog.error).toHaveBeenCalledWith(
       'Error while cleaning up a lost voice connection:',
+      expect.any(Error),
+    );
+    // A cleanup failure must not strand the guild with no reconnect attempt scheduled.
+    expect(deps.scheduleReconnect).toHaveBeenCalledWith('disconnected');
+  });
+
+  it('logs and does not reject when scheduleReconnect itself throws', async () => {
+    vi.mocked(entersState).mockRejectedValue(new Error('timeout'));
+    const conn = makeConnection();
+    const scheduleReconnect = vi.fn(() => { throw new Error('timer setup blew up'); });
+    const deps = makeDeps({ getConnection: vi.fn(() => conn as any), scheduleReconnect });
+    setupConnectionHandlers(conn as any, 1, deps);
+
+    await expect(conn._handlers.get('disconnected')!()).resolves.toBeUndefined();
+
+    expect(deps.tearDown).toHaveBeenCalled();
+    expect(mockLog.error).toHaveBeenCalledWith(
+      'Error while scheduling a voice reconnect:',
       expect.any(Error),
     );
   });

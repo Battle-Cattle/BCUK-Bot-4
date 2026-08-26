@@ -66,15 +66,21 @@ async function handleDisconnected(
     // ESLint allows that only because it's expected to catch its own errors internally. A
     // throw here (e.g. from a future onStatusChanged listener called via deps.tearDown())
     // would otherwise become an unhandled rejection and crash the whole process over what
-    // should be an isolated per-guild voice hiccup.
+    // should be an isolated per-guild voice hiccup. scheduleReconnect runs in `finally` so a
+    // cleanup failure can't also strand the guild with no reconnect attempt scheduled.
     try {
       joinedConnection.destroy();
       if (deps.getConnection() === joinedConnection) deps.setConnection(null);
       deps.tearDown();
       log.warn('Voice connection lost.');
-      deps.scheduleReconnect('disconnected');
     } catch (cleanupErr) {
       log.error('Error while cleaning up a lost voice connection:', cleanupErr);
+    } finally {
+      try {
+        deps.scheduleReconnect('disconnected');
+      } catch (reconnectErr) {
+        log.error('Error while scheduling a voice reconnect:', reconnectErr);
+      }
     }
   }
 }
