@@ -6,6 +6,13 @@ const log = createLogger('EventSub');
 /** Default Twitch EventSub WebSocket URL. */
 export const EVENTSUB_WS_URL = 'wss://eventsub.wss.twitch.tv/ws';
 const RECONNECT_BACKOFF_MAX_MS = 30_000;
+/** Upper bound on how long a WebSocket may sit in CONNECTING before this connection gives up on
+ *  it and force-reconnects — see {@link StreamerConnection.connect}. Without this, a socket whose
+ *  underlying TCP handshake hangs (e.g. a connection silently dropped by a firewall/NAT) would
+ *  never fire 'open', 'error', or 'close', leaving this connection stuck with no live
+ *  subscription and nothing in the logs to explain why — unlike every other failure path here
+ *  (keepalive timeout, socket error, socket close), which already force-reconnects. */
+const CONNECT_TIMEOUT_MS = 30_000;
 /** How long a message ID is remembered for deduplication (ms). */
 export const MESSAGE_TTL_MS = 10 * 60 * 1000;
 /** Grace period before closing the old WebSocket during a session migration (Twitch-specified window). */
@@ -63,6 +70,7 @@ export class StreamerConnection {
   private sessionId: string | null = null;
   private keepaliveTimeoutSecs = 10;
   private keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private isReconnecting = false;
@@ -97,6 +105,7 @@ export class StreamerConnection {
     this.reloadPendingAfterMigration = false;
     this.sessionId = null;
     this.clearKeepaliveTimer();
+    this.clearConnectTimer();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.ws?.close(1000, 'shutdown');
     this.ws = null;
@@ -116,14 +125,28 @@ export class StreamerConnection {
    * is in flight, this.sessionId still refers to the old, soon-to-be-invalidated session —
    * subscribing now would silently fail against Twitch, so the reload is deferred and picked
    * up by onSessionWelcome() once the new session's id is known.
+   *
+   * Likewise, if `this.ws` is already set but `this.sessionId` is still null, a connect() is
+   * already in flight — its `session_welcome` just hasn't arrived yet. Calling connect() again
+   * here would open a *second* live WebSocket alongside the first (connect() never closes the
+   * socket it replaces), and both would end up subscribing independently, each treating the
+   * other's fresh subscription as "stale" and deleting it — observed in production as every
+   * subscription type being deleted and recreated within seconds of startup, with a real gap
+   * where nothing was subscribed. Reload only needs to fall through and do nothing: the pending
+   * connect's own onSessionWelcome() will subscribe once it lands, using this.currentData —
+   * already updated by reload() above — so nothing is lost by waiting for it instead of racing
+   * a second connection. A reconnect is only actually needed when there's no socket at all.
    */
   private async doReload(): Promise<void> {
     if (this.isReconnecting) {
       this.reloadPendingAfterMigration = true;
       return;
     }
-    if (!this.ws || !this.sessionId) {
+    if (!this.ws) {
       if (!this.stopped && !this.reconnectTimer) { this.connect(); }
+      return;
+    }
+    if (!this.sessionId) {
       return;
     }
     await this.subscribeAndHandleEmpty(this.sessionId, 'No subscriptions after reload — disconnecting');
@@ -149,19 +172,44 @@ export class StreamerConnection {
     }
   }
 
-  /** Opens a new WebSocket to the given URL (defaults to the standard EventSub URL). */
+  /**
+   * Opens a new WebSocket to the given URL (defaults to the standard EventSub URL). Bounded by
+   * {@link CONNECT_TIMEOUT_MS} — see its doc for why a socket stuck in CONNECTING would otherwise
+   * never trigger a reconnect on its own.
+   */
   connect(url: string = EVENTSUB_WS_URL): void {
     if (this.stopped) return;
     const socket = new WebSocket(url);
-    socket.addEventListener('open', () => this.onOpen());
+    socket.addEventListener('open', () => this.onOpen(socket));
     socket.addEventListener('message', (ev: MessageEvent) => this.onMessage(ev));
     socket.addEventListener('close', (ev: CloseEvent) => this.onClose(ev, socket));
     socket.addEventListener('error', () => this.onError(socket));
     this.ws = socket;
+    this.clearConnectTimer();
+    this.connectTimer = setTimeout(() => {
+      log.warn(`[${this.name}] Connect timeout — reconnecting`);
+      this.forceReconnect(socket);
+    }, CONNECT_TIMEOUT_MS);
   }
 
-  private onOpen(): void {
+  /** Clears the pending connect-timeout timer (see {@link CONNECT_TIMEOUT_MS}), if one is armed. */
+  private clearConnectTimer(): void {
+    if (this.connectTimer) { clearTimeout(this.connectTimer); this.connectTimer = null; }
+  }
+
+  /**
+   * Handles the socket's `'open'` event: ignores it if `socket` is no longer this connection's
+   * active socket (a stale, late-arriving event from a socket already superseded by a
+   * force-reconnect — the same staleness this file already guards against in {@link onClose},
+   * {@link onError}, and {@link forceReconnect} itself). Without this guard, a delayed `open`
+   * from an old socket would incorrectly clear the *current* socket's connect timer and reset
+   * {@link reconnectAttempts}/the keepalive timer for a connection that may not have opened yet.
+   * @param socket - The socket that emitted the event.
+   */
+  private onOpen(socket: WebSocket): void {
+    if (this.ws !== socket) return;
     log.info(`[${this.name}] WebSocket connected`);
+    this.clearConnectTimer();
     this.reconnectAttempts = 0;
     this.resetKeepaliveTimer();
   }
@@ -206,11 +254,13 @@ export class StreamerConnection {
    * Tears down `socket` as this connection's active WebSocket and schedules a reconnect,
    * without depending on the socket ever emitting its own `'close'` event. Shared by
    * {@link onClose} (a real close event did arrive), {@link onError} (a socket error arrived
-   * but its `'close'` may never follow), and the keepalive-timeout path in
+   * but its `'close'` may never follow), the keepalive-timeout path in
    * {@link resetKeepaliveTimer} (a close was requested but might never actually fire — a
    * half-dead TCP connection, e.g. after a silent NAT/load-balancer drop, can leave `close()`
    * pending forever with no `'close'` event ever following it, which would otherwise strand
-   * this connection permanently until the whole process restarts). No-ops if `socket` isn't
+   * this connection permanently until the whole process restarts), and the connect-timeout path
+   * in {@link connect} (the socket never left CONNECTING at all, so none of 'open'/'error'/
+   * 'close' ever fired to begin with). No-ops if `socket` isn't
    * this connection's current socket any more (e.g. a session migration or an earlier
    * force-reconnect already superseded it) — including the case where `socket`'s real
    * `'close'` event does eventually land after this already ran.
@@ -225,6 +275,7 @@ export class StreamerConnection {
     // We don't wait on it — the next connect() proceeds immediately regardless.
     socket?.close();
     this.clearKeepaliveTimer();
+    this.clearConnectTimer();
     this.ws = null;
     this.sessionId = null;
     if (!this.stopped) {

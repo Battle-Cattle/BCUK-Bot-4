@@ -387,6 +387,66 @@ describe('StreamerConnection lifecycle', () => {
     expect((conn as any).ws).toBe(secondWs);
   });
 
+  it('ignores a stale open event from a socket already superseded by a force-reconnect', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstWs = (conn as any).ws as MockWebSocket;
+
+    // Socket A errors and forceReconnect() tears it down, scheduling a reconnect.
+    firstWs.listeners.get('error')!();
+    expect((conn as any).reconnectAttempts).toBe(1);
+
+    vi.advanceTimersByTime(1_000); // first reconnect attempt's backoff delay
+    const secondWs = (conn as any).ws as MockWebSocket;
+    expect(secondWs).not.toBe(firstWs);
+    expect((conn as any).connectTimer).not.toBeNull(); // B's own connect timeout is armed
+
+    // Socket A's 'open' now fires late — after it's already been superseded by B. Without the
+    // this.ws !== socket guard, this would incorrectly clear B's connect timer and reset
+    // reconnectAttempts/keepalive for a connection that hasn't actually opened yet.
+    firstWs.listeners.get('open')!();
+    expect((conn as any).reconnectAttempts).toBe(1);
+    expect((conn as any).connectTimer).not.toBeNull();
+    expect((conn as any).ws).toBe(secondWs);
+
+    // B's own open then arrives for real and correctly resets state.
+    secondWs.listeners.get('open')!();
+    expect((conn as any).reconnectAttempts).toBe(0);
+    expect((conn as any).connectTimer).toBeNull();
+  });
+
+  it('reconnects if the WebSocket never leaves CONNECTING (no open/error/close ever fires)', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstWs = (conn as any).ws as MockWebSocket;
+
+    // Simulates a TCP handshake that hangs silently (e.g. a firewall/NAT drop) rather than
+    // failing outright — none of 'open', 'error', or 'close' ever fires on their own.
+    vi.advanceTimersByTime(30_000); // CONNECT_TIMEOUT_MS
+    expect(firstWs.close).toHaveBeenCalled();
+    expect((conn as any).ws).toBeNull();
+    expect((conn as any).reconnectAttempts).toBe(1);
+
+    vi.advanceTimersByTime(1_000); // first reconnect attempt's backoff delay
+    const secondWs = (conn as any).ws as MockWebSocket;
+    expect(secondWs).not.toBeNull();
+    expect(secondWs).not.toBe(firstWs);
+  });
+
+  it('clears the connect timeout once the socket has already opened, so it cannot fire later', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    expect((conn as any).connectTimer).not.toBeNull();
+
+    const ws = (conn as any).ws as MockWebSocket;
+    ws.listeners.get('open')!();
+
+    // If the connect timeout weren't cleared here, it would fire at 30s and force-reconnect
+    // a socket that's already open and working — this proves it can't, independent of the
+    // keepalive timer (which is a separate 20s mechanism also armed by open()).
+    expect((conn as any).connectTimer).toBeNull();
+  });
+
   /** Verifies the keepalive-timeout path force-reconnects without waiting on the socket's own 'close' event; returns void. */
   it('reconnects on a keepalive timeout even if the socket never fires its own close event', () => {
     const conn = new StreamerConnection(makeStreamerData());
@@ -447,6 +507,38 @@ describe('StreamerConnection lifecycle', () => {
     conn.reload(makeStreamerData());
 
     return vi.waitFor(() => expect(connectSpy).toHaveBeenCalled());
+  });
+
+  it('reload() does not open a second WebSocket when a connect() is already in flight (session_welcome not yet received)', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstWs = (conn as any).ws;
+    expect(firstWs).toBeTruthy();
+    // this.ws is set (start()'s connect() already ran) but this.sessionId is still null —
+    // session_welcome hasn't arrived yet. Without the fix, doReload() would call connect()
+    // again here, opening a second live WebSocket alongside the first.
+    expect((conn as any).sessionId).toBeNull();
+    const connectSpy = vi.spyOn(conn, 'connect');
+
+    const updatedData = { ...makeStreamerData(), name: 'updated-streamer' };
+    conn.reload(updatedData);
+
+    // Flush the reload chain's microtasks — doReload() must take its early-return branch
+    // rather than calling connect() a second time.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(connectSpy).not.toHaveBeenCalled();
+    expect((conn as any).ws).toBe(firstWs);
+
+    // The still-pending connect's own session_welcome now arrives — it must subscribe using
+    // reload()'s updated data (currentData was already reassigned synchronously), proving
+    // nothing was lost by not opening a second connection. The subscribe itself runs via
+    // reloadChain's own .then() (not awaited by handleMessage), so it settles a tick later.
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-live'));
+    await vi.waitFor(() => {
+      expect(subscribeForStreamer).toHaveBeenCalledWith('sess-live', expect.objectContaining({ name: 'updated-streamer' }));
+    });
   });
 
   it('reload() re-subscribes on the live session and stops when no subscriptions remain', async () => {
