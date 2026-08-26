@@ -161,6 +161,21 @@ describe('setupConnectionHandlers — disconnected handler', () => {
     expect(deps.scheduleReconnect).not.toHaveBeenCalled();
   });
 
+  it('logs and does not reject when cleanup (e.g. tearDown) throws', async () => {
+    vi.mocked(entersState).mockRejectedValue(new Error('timeout'));
+    const conn = makeConnection();
+    const tearDown = vi.fn(() => { throw new Error('listener blew up'); });
+    const deps = makeDeps({ getConnection: vi.fn(() => conn as any), tearDown });
+    setupConnectionHandlers(conn as any, 1, deps);
+
+    await expect(conn._handlers.get('disconnected')!()).resolves.toBeUndefined();
+
+    expect(mockLog.error).toHaveBeenCalledWith(
+      'Error while cleaning up a lost voice connection:',
+      expect.any(Error),
+    );
+  });
+
   it('re-checks staleness after the grace window before tearing down', async () => {
     vi.mocked(entersState).mockRejectedValue(new Error('timeout'));
     const conn = makeConnection();
