@@ -219,6 +219,11 @@ export class StreamerConnection {
    */
   private forceReconnect(socket: WebSocket | null): void {
     if (this.ws !== socket) return;
+    // Best-effort: request a close (harmless if already closing/closed) so Twitch has a
+    // better chance of revoking this session's EventSub subscriptions promptly, rather than
+    // leaving them "enabled" until Twitch's own delayed dead-connection detection catches up.
+    // We don't wait on it — the next connect() proceeds immediately regardless.
+    socket?.close();
     this.clearKeepaliveTimer();
     this.ws = null;
     this.sessionId = null;

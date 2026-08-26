@@ -287,6 +287,30 @@ describe('listEventSubSubscriptions', () => {
     expect(result).toEqual(subs);
   });
 
+  it('preserves each subscription\'s condition and transport session id in the mapped result', async () => {
+    const apiResponse = [
+      {
+        id: 's1', type: 'channel.follow',
+        condition: { broadcaster_user_id: 'uid-1', moderator_user_id: 'uid-1' },
+        transport: { method: 'websocket', session_id: 'sess-1' },
+      },
+      {
+        id: 's2', type: 'channel.raid',
+        condition: { to_broadcaster_user_id: 'uid-1' },
+        // No transport.session_id (e.g. webhook transport, or the field simply absent).
+        transport: { method: 'websocket' },
+      },
+    ];
+    vi.mocked(twitchFetch).mockResolvedValue(mockFetch(200, { data: apiResponse }));
+
+    const result = await listEventSubSubscriptions('token');
+
+    expect(result).toEqual([
+      { id: 's1', type: 'channel.follow', condition: { broadcaster_user_id: 'uid-1', moderator_user_id: 'uid-1' }, sessionId: 'sess-1' },
+      { id: 's2', type: 'channel.raid', condition: { to_broadcaster_user_id: 'uid-1' }, sessionId: undefined },
+    ]);
+  });
+
   it('paginates when a cursor is present', async () => {
     vi.mocked(twitchFetch)
       .mockResolvedValueOnce(mockFetch(200, { data: [{ id: 's1', type: 't1' }], pagination: { cursor: 'cursor1' } }))

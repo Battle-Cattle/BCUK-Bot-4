@@ -29,6 +29,17 @@ export function clearAuthFailedSubs(login: string): void {
   for (const key of authFailedSubs) if (key.startsWith(prefix)) authFailedSubs.delete(key);
 }
 
+/** True if `condition` identifies `uid` as the broadcaster — every {@link SubSpec} in
+ *  `SUBSCRIPTION_GROUPS` sets one of these two fields to the target streamer's uid. Used to
+ *  filter `listEventSubSubscriptions`' result down to this streamer's own subscriptions: that
+ *  call is scoped by the streamer's *user token*, which Twitch also matches against subscriptions
+ *  where the token's user is a moderator (e.g. `channel.follow`'s `moderator_user_id`) rather than
+ *  the broadcaster — so without this filter, another broadcaster's subscription (on a channel this
+ *  streamer moderates) could be mistaken for this streamer's own and wrongly kept or deleted. */
+function isOwnSubscription(condition: Record<string, string>, uid: string): boolean {
+  return condition.broadcaster_user_id === uid || condition.to_broadcaster_user_id === uid;
+}
+
 /**
  * Deletes subscriptions that shouldn't be active any more: those whose type isn't in
  * `desired` at all (e.g. the streamer turned off raid alerts), and — for types that were
@@ -38,12 +49,15 @@ export function clearAuthFailedSubs(login: string): void {
  * an orphaned WebSocket subscription on its own, but not instantaneously — until then it stays
  * "enabled" and delivers notifications alongside the new one, double-firing the type's handler
  * for every event (e.g. `handleRedemption` recording two dashboard entries for one redemption).
- * A type whose subscribe() returned null this round (409 — Twitch says an identical
- * type+condition subscription already exists) is left untouched: `created` has no entry for
- * it, so none of its existing subscriptions get pruned, since we can't tell which one Twitch
- * considers the live one without risking deleting the subscription actually receiving events.
+ * `createSubscriptionsForStreamer` now proactively deletes a stale subscription (bound to a
+ * session id other than the live one) before recreating it, so a type only ends up missing from
+ * `created` here on a genuine race (another process/tab recreated it between our list and create
+ * calls) — in that rare case it's left untouched, since we can't tell which one Twitch considers
+ * the live one without risking deleting the subscription actually receiving events.
  *
- * @param uid - Broadcaster's Twitch user ID, used only for error logging.
+ * @param uid - Broadcaster's Twitch user ID; also used to filter out another broadcaster's
+ *   subscription that Twitch included only because this streamer moderates that channel (see
+ *   {@link isOwnSubscription}) — never deleted, regardless of type or desired state.
  * @param desired - Subscription types that should exist after this call.
  * @param created - Type → subscription id for subscriptions freshly created this round (see
  *   {@link createSubscriptionsForStreamer}); a type present here has any other existing
@@ -54,7 +68,7 @@ async function deleteStaleSubscriptions(
   uid: string, desired: Set<string>, created: ReadonlyMap<string, string>, userToken: string | null,
 ): Promise<void> {
   if (!userToken) return;
-  let existing: Array<{ id: string; type: string }>;
+  let existing: Array<{ id: string; type: string; condition: Record<string, string> }>;
   try {
     existing = await listEventSubSubscriptions(userToken);
   } catch (err) {
@@ -66,6 +80,7 @@ async function deleteStaleSubscriptions(
   // of the cleanup — leaving a still-undeleted stale duplicate would keep delivering
   // notifications and double-firing the type's handler, the exact failure this cleanup targets.
   const staleSubs = existing.filter((sub) => {
+    if (!isOwnSubscription(sub.condition, uid)) return false;
     const keptId = created.get(sub.type);
     const isStaleDuplicate = keptId !== undefined && sub.id !== keptId;
     return !desired.has(sub.type) || isStaleDuplicate;
@@ -113,12 +128,27 @@ interface SubscriptionResult {
   created: Map<string, string>;
 }
 
+/** True if `a` and `b` have exactly the same keys and values — used to tell "the subscription
+ *  this spec wants" apart from a same-type subscription with a different condition (e.g. a
+ *  leftover from an older API version whose condition shape has since changed), which type-only
+ *  matching would otherwise mistake for it. */
+function conditionsEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  return aKeys.every((key) => a[key] === b[key]);
+}
+
 /**
- * Creates all desired EventSub subscriptions for a single streamer.
- * @returns The desired-types set alongside a type → id map of subscriptions actually created
- *   this round (a type is absent from `created` if `subscribe` hit a 409 — Twitch already has
- *   an identical type+condition subscription active — so the caller has no id to prefer over
- *   whatever else `listEventSubSubscriptions` later reports for that type).
+ * Creates all desired EventSub subscriptions for a single streamer. Before creating each spec,
+ * checks whether Twitch already has a subscription matching both its type *and* condition
+ * exactly: if it's bound to the live `sessionId`, it's kept as-is (no redundant create call); if
+ * it's bound to any other session id — a duplicate left over from a dead/prior connection (e.g.
+ * after `onError`/`forceReconnect` tore down a socket without a clean close, so Twitch hadn't yet
+ * revoked its subscriptions) — it's deleted first so the fresh create can't 409 against it and
+ * leave the *new* session with no working subscription for that spec.
+ * @returns The desired-types set alongside a type → id map of subscriptions actually created (or
+ *   confirmed already-live on this session) this round (a type is absent from `created` only on a
+ *   genuine race — see {@link deleteStaleSubscriptions}).
  */
 async function createSubscriptionsForStreamer(
   sessionId: string, data: StreamerEventSubData,
@@ -134,16 +164,57 @@ async function createSubscriptionsForStreamer(
   const created = new Map<string, string>();
   if (!token) return { desired, created };
 
+  const ownSubscriptions = await listOwnSubscriptions(token, uid, name);
+
   for (const group of SUBSCRIPTION_GROUPS) {
     if (!isGroupEnabled(group, config, enabledAlerts)) continue;
     for (const spec of group.specs(uid)) {
       desired.add(spec.type);
-      const id = await subscribe(sessionId, spec, token, name);
+      const match = ownSubscriptions.find(
+        (sub) => sub.type === spec.type && conditionsEqual(sub.condition, spec.condition),
+      );
+      const id = await ensureSubscription(sessionId, spec, token, name, match);
       if (id !== null) created.set(spec.type, id);
     }
   }
 
   return { desired, created };
+}
+
+/** Fetches existing EventSub subscriptions and filters out any that Twitch returned only because
+ *  this streamer moderates a different broadcaster's channel (see {@link isOwnSubscription}).
+ *  Returns an empty array (and logs) on failure — callers treat that the same as "nothing exists
+ *  yet" and create fresh. */
+async function listOwnSubscriptions(
+  token: string, uid: string, name: string,
+): Promise<Array<{ id: string; type: string; condition: Record<string, string>; sessionId?: string }>> {
+  try {
+    const existing = await listEventSubSubscriptions(token);
+    return existing.filter((sub) => isOwnSubscription(sub.condition, uid));
+  } catch (err) {
+    log.error(`Failed to list existing EventSub subscriptions for ${name}:`, err);
+    return [];
+  }
+}
+
+/**
+ * Ensures a single subscription type is live on the given session: keeps an existing
+ * subscription that's already bound to `sessionId`, deletes one bound to any other (stale/dead)
+ * session before recreating it, or creates fresh if none exists.
+ * @returns The live subscription's id, or null if creation failed (see {@link subscribe}).
+ */
+async function ensureSubscription(
+  sessionId: string, spec: SubSpec, token: string, name: string,
+  existing: { id: string; sessionId?: string } | undefined,
+): Promise<string | null> {
+  if (existing && existing.sessionId === sessionId) return existing.id;
+  if (existing) {
+    log.warn(`Deleting stale ${spec.type} subscription (${existing.id}) for ${name} — bound to a different session`);
+    await deleteEventSubSubscription(existing.id, token).catch((err) => {
+      log.error(`Failed to delete stale ${spec.type} subscription for ${name}:`, err);
+    });
+  }
+  return subscribe(sessionId, spec, token, name);
 }
 
 /**

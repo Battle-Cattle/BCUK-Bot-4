@@ -319,7 +319,7 @@ describe('subscribeForStreamer', () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([
-      { id: 'stale-sub', type: 'channel.subscribe' }, // not in desired set
+      { id: 'stale-sub', type: 'channel.subscribe', condition: { broadcaster_user_id: 'uid-z' } }, // not in desired set
     ] as any);
 
     await subscribeForStreamer('sess-z', {
@@ -333,14 +333,39 @@ describe('subscribeForStreamer', () => {
     expect(deleteEventSubSubscription).toHaveBeenCalledWith('stale-sub', 'tok-z');
   });
 
+  it('never deletes an undesired-type subscription belonging to a different broadcaster the streamer merely moderates', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
+    // Same reasoning as the create-side test above, but for the deleteStaleSubscriptions cleanup
+    // path: a type this streamer doesn't want (channel.subscribe, sub_enabled: false) must never
+    // be pruned just because it showed up in the list — it belongs to a broadcaster this streamer
+    // only moderates, not to this streamer's own channel.
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      { id: 'other-broadcaster-sub', type: 'channel.subscribe', condition: { broadcaster_user_id: 'uid-OTHER' } },
+    ] as any);
+
+    await subscribeForStreamer('sess-foreign', {
+      uid: 'uid-foreign',
+      token: 'tok-foreign',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 21,
+    });
+
+    expect(deleteEventSubSubscription).not.toHaveBeenCalledWith('other-broadcaster-sub', 'tok-foreign');
+  });
+
   it('prunes a duplicate subscription of a still-desired type left over from a prior session', async () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new-follow');
     // The old, orphaned subscription (e.g. from a process that died without stop()) is still
-    // "enabled" and shows up alongside the one just created this round.
+    // "enabled" and shows up alongside the one already live on this round's session.
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([
-      { id: 'sub-new-follow', type: 'channel.follow' },
-      { id: 'sub-stale-follow', type: 'channel.follow' },
+      {
+        id: 'sub-new-follow', type: 'channel.follow', sessionId: 'sess-dup',
+        condition: { broadcaster_user_id: 'uid-dup', moderator_user_id: 'uid-dup' },
+      },
+      { id: 'sub-stale-follow', type: 'channel.follow', condition: { broadcaster_user_id: 'uid-dup', moderator_user_id: 'uid-dup' } },
     ] as any);
 
     await subscribeForStreamer('sess-dup', {
@@ -355,15 +380,16 @@ describe('subscribeForStreamer', () => {
     expect(deleteEventSubSubscription).not.toHaveBeenCalledWith('sub-new-follow', 'tok-dup');
   });
 
-  it('does not prune any existing subscription of a type when creating it hit a 409 (already exists)', async () => {
+  it('keeps an existing subscription already bound to the live session without recreating it', async () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
-    // 409 -> createEventSubSubscription resolves null, so subscribe() has no fresh id for this type.
-    vi.mocked(createEventSubSubscription).mockResolvedValue(null);
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([
-      { id: 'sub-existing-follow', type: 'channel.follow' },
+      {
+        id: 'sub-live-follow', type: 'channel.follow', sessionId: 'sess-live-409',
+        condition: { broadcaster_user_id: 'uid-409', moderator_user_id: 'uid-409' },
+      },
     ] as any);
 
-    await subscribeForStreamer('sess-409', {
+    const count = await subscribeForStreamer('sess-live-409', {
       uid: 'uid-409',
       token: 'tok-409',
       name: 'botInChannel',
@@ -371,7 +397,104 @@ describe('subscribeForStreamer', () => {
       streamerId: 23,
     });
 
-    expect(deleteEventSubSubscription).not.toHaveBeenCalledWith('sub-existing-follow', 'tok-409');
+    // Already correctly bound to this session — no redundant create call, and definitely not deleted.
+    expect(createEventSubSubscription).not.toHaveBeenCalledWith(
+      'channel.follow', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+    );
+    expect(deleteEventSubSubscription).not.toHaveBeenCalledWith('sub-live-follow', 'tok-409');
+    expect(count).toBeGreaterThan(0);
+  });
+
+  it('does not mistake a same-type, same-broadcaster subscription with a different condition for the desired one', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-fresh-follow-v2');
+    // Same broadcaster, same type, but missing moderator_user_id — e.g. a leftover channel.follow
+    // v1 subscription (broadcaster_user_id only) from before the app moved to v2's two-key
+    // condition. Bound to the live session, so type-only matching would wrongly treat this as
+    // already satisfying the v2 spec and skip creating it.
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      {
+        id: 'sub-v1-follow', type: 'channel.follow', sessionId: 'sess-condition-mismatch',
+        condition: { broadcaster_user_id: 'uid-condition-mismatch' },
+      },
+    ] as any);
+
+    await subscribeForStreamer('sess-condition-mismatch', {
+      uid: 'uid-condition-mismatch',
+      token: 'tok-condition-mismatch',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 23,
+    });
+
+    // Not recognized as satisfying the v2 spec — a fresh (correctly conditioned) subscription is
+    // created rather than being silently skipped.
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.follow', '2',
+      { broadcaster_user_id: 'uid-condition-mismatch', moderator_user_id: 'uid-condition-mismatch' },
+      'sess-condition-mismatch', 'tok-condition-mismatch',
+    );
+  });
+
+  it('deletes an existing subscription bound to a different (stale/dead) session before recreating it', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-fresh-follow');
+    // Left over from a prior session that died without a clean close (e.g. onError/forceReconnect
+    // tearing down the socket) — Twitch hasn't revoked it yet, so it still shows up here bound to
+    // a session id that's no longer the live one.
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      {
+        id: 'sub-dead-follow', type: 'channel.follow', sessionId: 'sess-old-dead',
+        condition: { broadcaster_user_id: 'uid-stale-session', moderator_user_id: 'uid-stale-session' },
+      },
+    ] as any);
+
+    await subscribeForStreamer('sess-new-live', {
+      uid: 'uid-stale-session',
+      token: 'tok-stale-session',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 23,
+    });
+
+    // Deleted before the fresh create, so Twitch's 409 (identical type+condition still "enabled")
+    // can never leave the new session without a working subscription for this type.
+    expect(deleteEventSubSubscription).toHaveBeenCalledWith('sub-dead-follow', 'tok-stale-session');
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.follow', '2', { broadcaster_user_id: 'uid-stale-session', moderator_user_id: 'uid-stale-session' },
+      'sess-new-live', 'tok-stale-session',
+    );
+  });
+
+  it('ignores a same-type subscription belonging to a different broadcaster the streamer merely moderates, rather than keeping or deleting it', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-own-follow');
+    // listEventSubSubscriptions is scoped by this streamer's own user token, but Twitch also
+    // matches subscriptions where that user is the *moderator* rather than the broadcaster — so
+    // another broadcaster's channel.follow subscription (this streamer is just a mod there) can
+    // show up here too, with the same type but a condition that doesn't reference this uid at all.
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      {
+        id: 'sub-other-broadcaster-follow', type: 'channel.follow', sessionId: 'sess-new-mod',
+        condition: { broadcaster_user_id: 'uid-OTHER-broadcaster', moderator_user_id: 'uid-mod' },
+      },
+    ] as any);
+
+    await subscribeForStreamer('sess-new-mod', {
+      uid: 'uid-mod',
+      token: 'tok-mod',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 23,
+    });
+
+    // Not recognized as "this streamer's own" — never deleted, and a fresh subscription is
+    // created for this streamer's own channel.follow rather than being skipped as already-live.
+    expect(deleteEventSubSubscription).not.toHaveBeenCalledWith('sub-other-broadcaster-follow', 'tok-mod');
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.follow', '2', { broadcaster_user_id: 'uid-mod', moderator_user_id: 'uid-mod' },
+      'sess-new-mod', 'tok-mod',
+    );
   });
 
   it('subscribes to stream.online and stream.offline whenever config and token are present', async () => {
@@ -598,7 +721,7 @@ describe('error handling in subscription setup', () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['errstreamer']));
   });
 
-  it('logs and continues when listing existing subscriptions fails during cleanup', async () => {
+  it('logs and continues (treating no subscription as existing) when listing existing subscriptions fails before creation', async () => {
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
     vi.mocked(listEventSubSubscriptions).mockRejectedValueOnce(new Error('list failed'));
 
@@ -610,15 +733,37 @@ describe('error handling in subscription setup', () => {
       streamerId: 70,
     });
 
-    expect(logMock.error).toHaveBeenCalledWith('Subscription cleanup failed for uid uid-err:', expect.any(Error));
+    expect(logMock.error).toHaveBeenCalledWith(
+      'Failed to list existing EventSub subscriptions for errStreamer:', expect.any(Error),
+    );
+    expect(createEventSubSubscription).toHaveBeenCalled();
+    expect(count).toBeGreaterThan(0);
+  });
+
+  it('logs and continues when listing existing subscriptions fails during cleanup', async () => {
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
+    // First call (pre-create lookup) succeeds; second call (deleteStaleSubscriptions) fails.
+    vi.mocked(listEventSubSubscriptions)
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('list failed'));
+
+    const count = await subscribeForStreamer('sess-err2', {
+      uid: 'uid-err2',
+      token: 'tok-err2',
+      name: 'errStreamer',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 70,
+    });
+
+    expect(logMock.error).toHaveBeenCalledWith('Subscription cleanup failed for uid uid-err2:', expect.any(Error));
     expect(count).toBeGreaterThan(0);
   });
 
   it('continues deleting remaining stale subscriptions after one deletion fails', async () => {
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([
-      { id: 'stale-1', type: 'channel.subscribe' },
-      { id: 'stale-2', type: 'channel.raid' },
+      { id: 'stale-1', type: 'channel.subscribe', condition: { broadcaster_user_id: 'uid-delete-err' } },
+      { id: 'stale-2', type: 'channel.raid', condition: { to_broadcaster_user_id: 'uid-delete-err' } },
     ] as any);
     vi.mocked(deleteEventSubSubscription)
       .mockRejectedValueOnce(new Error('delete failed'))
@@ -642,8 +787,8 @@ describe('error handling in subscription setup', () => {
   it('deletes stale subscriptions concurrently, isolating one deletion failure from the other', async () => {
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([
-      { id: 'stale-1', type: 'channel.subscribe' },
-      { id: 'stale-2', type: 'channel.raid' },
+      { id: 'stale-1', type: 'channel.subscribe', condition: { broadcaster_user_id: 'uid-concurrent-delete' } },
+      { id: 'stale-2', type: 'channel.raid', condition: { to_broadcaster_user_id: 'uid-concurrent-delete' } },
     ] as any);
 
     let rejectFirst!: (err: Error) => void;
