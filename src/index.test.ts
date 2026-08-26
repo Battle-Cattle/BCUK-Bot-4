@@ -62,6 +62,7 @@ vi.mock('./twitch/eventsub/twitchEventSubRuntime', () => ({
   registerEventSubCompanionRuntime: vi.fn(),
   registerEventSubAlertRuntime: vi.fn(),
   registerEventSubDashboardRuntime: vi.fn(),
+  registerEventSubReloadRuntime: vi.fn(),
 }));
 vi.mock('./web/routes/overlaySource', () => ({ pushOverlayEvent: vi.fn() }));
 vi.mock('./web/routes/companionEvents', () => ({ pushCompanionEvent: vi.fn() }));
@@ -182,6 +183,15 @@ describe('startup — guild registry preload', () => {
     await runMain();
 
     expect(vi.mocked(registerEventSubDashboardRuntime)).toHaveBeenCalledWith({ pushDashboardEvent });
+  });
+
+  it('registers the EventSub reload runtime with reloadEventSubSubscriptions on a clean startup', async () => {
+    const { registerEventSubReloadRuntime } = await import('./twitch/eventsub/twitchEventSubRuntime.js');
+    const { reloadEventSubSubscriptions } = await import('./twitch/eventsub/twitchEventSub.js');
+
+    await runMain();
+
+    expect(vi.mocked(registerEventSubReloadRuntime)).toHaveBeenCalledWith({ triggerReload: reloadEventSubSubscriptions });
   });
 
   it('calls process.exit(1) and does not start the bot when reloadGuildRegistry rejects', async () => {

@@ -5,6 +5,7 @@ import {
   registerEventSubAlertRuntime, alertRuntimeRegistry,
   registerEventSubDashboardRuntime, dashboardEventRuntimeRegistry,
   registerEventSubTwitchRuntime, twitchRuntimeRegistry,
+  registerEventSubReloadRuntime, eventSubReloadRuntimeRegistry,
 } from './twitchEventSubRuntime';
 
 // createRuntimeRegistry's own register/get contract is covered by
@@ -48,5 +49,13 @@ describe('registerEventSubTwitchRuntime', () => {
     const runtime = { send: vi.fn().mockResolvedValue(undefined) };
     registerEventSubTwitchRuntime(runtime);
     expect(twitchRuntimeRegistry.get()).toBe(runtime);
+  });
+});
+
+describe('registerEventSubReloadRuntime', () => {
+  it('stores the runtime on eventSubReloadRuntimeRegistry', () => {
+    const runtime = { triggerReload: vi.fn() };
+    registerEventSubReloadRuntime(runtime);
+    expect(eventSubReloadRuntimeRegistry.get()).toBe(runtime);
   });
 });

@@ -19,7 +19,7 @@ import { registerShoutoutRuntime } from './commands/shoutoutHandler';
 import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
 import {
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
-  registerEventSubAlertRuntime, registerEventSubDashboardRuntime,
+  registerEventSubAlertRuntime, registerEventSubDashboardRuntime, registerEventSubReloadRuntime,
 } from './twitch/eventsub/twitchEventSubRuntime';
 import { pushOverlayEvent } from './web/routes/overlaySource';
 import { pushCompanionEvent } from './web/routes/companionEvents';
@@ -123,6 +123,7 @@ async function main(): Promise<void> {
   registerEventSubAlertRuntime({ pushAlertEvent });
   registerEventSubDashboardRuntime({ pushDashboardEvent });
   registerEventSubTwitchRuntime({ send: sayInChannel });
+  registerEventSubReloadRuntime({ triggerReload: reloadEventSubSubscriptions });
   registerRewardPricingRuntime({ pushPricingUpdate });
   registerTimerCommandsRuntime({ send: sayInChannel, getLoginUserIds: getActiveChannelUserIds });
   registerTwitchGuildResolutionRuntime({ resolveGuildIdForDiscordId });
