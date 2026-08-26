@@ -14,8 +14,14 @@ let lastArchivedYear: number | null = null;
 // used as the re-entrancy guard: two synchronous back-to-back start calls would both see it
 // as null and both kick off a tick() chain. This flag closes that gap.
 let started = false;
+// Incremented on every start, so a tick() begun by an earlier start (still awaiting
+// archiveAndResetYearlyCounters when that run was stopped) can tell it's no longer the
+// active run even after a subsequent start flips `started` back to true — a plain
+// `started` check alone can't distinguish "still my run" from "a newer run began".
+let runGeneration = 0;
 
-async function tick(): Promise<void> {
+/** Polls once for the yearly counter archive and reschedules itself hourly while its run is still active. */
+async function tick(myGeneration: number): Promise<void> {
   const now = new Date();
   const prevYear = now.getFullYear() - 1;
 
@@ -30,10 +36,16 @@ async function tick(): Promise<void> {
     }
   }
 
-  schedulerTimer = setTimeout(
-    () => tick().catch((err) => log.error('Unhandled error:', err)),
-    POLL_INTERVAL_MS,
-  );
+  // Only reschedule while still the active run — guards both a stop() that raced this
+  // tick's async work (schedulerTimer was still null when stop() ran, so it had nothing
+  // to clear) and a stop()-then-start() that raced it (started is true again, but from a
+  // newer run than the one this tick belongs to).
+  if (started && myGeneration === runGeneration) {
+    schedulerTimer = setTimeout(
+      () => tick(myGeneration).catch((err) => log.error('Unhandled error:', err)),
+      POLL_INTERVAL_MS,
+    );
+  }
 }
 
 /**
@@ -44,7 +56,8 @@ async function tick(): Promise<void> {
 export function startCounterScheduler(): void {
   if (started) return;
   started = true;
-  tick().catch((err) => log.error('Startup error:', err));
+  runGeneration += 1;
+  tick(runGeneration).catch((err) => log.error('Startup error:', err));
   const hoursUntil = Math.round(msUntilNextJan1() / 3_600_000);
   log.info(`Started — polling hourly, next yearly archive in ~${hoursUntil}h.`);
 }
