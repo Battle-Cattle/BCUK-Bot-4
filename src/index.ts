@@ -140,8 +140,8 @@ async function main(): Promise<void> {
   setChannelJoinedHook(() => reloadEventSubSubscriptions());
   startDiscordBot();
   await startTwitchBot();
-  startChannelReconciliationPoll();
   startWebPanel();
+  startChannelReconciliationPoll();
   startCounterScheduler();
   startRewardPricingScheduler();
   startTimerCommandScheduler();
