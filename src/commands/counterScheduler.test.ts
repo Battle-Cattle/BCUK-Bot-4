@@ -109,6 +109,31 @@ describe('counterScheduler', () => {
     expect(archiveAndResetYearlyCounters).toHaveBeenCalledTimes(1);
   });
 
+  it('stopping while a tick is still awaiting its archive call prevents the chain from resuming', async () => {
+    vi.setSystemTime(new Date(2025, 0, 1)); // Jan 1, 2025
+
+    // Keep the in-flight tick's archive call pending so stop() races it before
+    // schedulerTimer gets (re)assigned.
+    let resolveArchive!: (count: number) => void;
+    archiveAndResetYearlyCounters.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveArchive = resolve; }),
+    );
+
+    startCounterScheduler();
+    await Promise.resolve(); // let tick() start and reach the pending archive await
+
+    stopCounterScheduler(); // schedulerTimer is still null here — nothing to clear
+
+    resolveArchive(0);
+    await flushAsync(); // let the in-flight tick() finish and (attempt to) reschedule
+
+    // Without the `started` guard, tick() would have re-armed schedulerTimer here anyway.
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    await flushAsync();
+
+    expect(archiveAndResetYearlyCounters).toHaveBeenCalledTimes(1);
+  });
+
   it('stopCounterScheduler prevents further ticks', async () => {
     vi.setSystemTime(new Date(2025, 5, 15)); // June 15 — no archive expected
     startCounterScheduler();

@@ -30,10 +30,15 @@ async function tick(): Promise<void> {
     }
   }
 
-  schedulerTimer = setTimeout(
-    () => tick().catch((err) => log.error('Unhandled error:', err)),
-    POLL_INTERVAL_MS,
-  );
+  // Only reschedule while still started — otherwise a stop() that raced this tick's
+  // async work (schedulerTimer was still null when stop() ran, so it had nothing to
+  // clear) would have its cancellation silently undone here.
+  if (started) {
+    schedulerTimer = setTimeout(
+      () => tick().catch((err) => log.error('Unhandled error:', err)),
+      POLL_INTERVAL_MS,
+    );
+  }
 }
 
 /**
