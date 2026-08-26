@@ -105,7 +105,17 @@ export function handleRevocation(sub: { type: string; status: string; condition:
       const info = streamerMap.get(broadcasterId);
       if (info) {
         clearStreamerToken(info.streamerId)
-          .then(() => {
+          /**
+           * Handles a successful `clearStreamerToken` resolution: only when a row was actually
+           * updated (`cleared` true) does it log the clear and trigger a reload — a `false`
+           * resolution means no row matched `info.streamerId` (e.g. the streamer was deleted in
+           * the same race window), so there's nothing to log as cleared and no connection left to
+           * reload for.
+           * @param cleared - Whether `clearStreamerToken` actually updated a row.
+           * @returns void
+           */
+          .then((cleared) => {
+            if (!cleared) return;
             log.warn(`Cleared token for ${info.login} (${sub.status})`);
             eventSubReloadRuntimeRegistry.get()?.triggerReload();
           })

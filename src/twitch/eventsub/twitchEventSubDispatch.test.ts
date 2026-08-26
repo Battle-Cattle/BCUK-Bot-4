@@ -242,6 +242,16 @@ describe('handleRevocation', () => {
     expect(triggerReload).toHaveBeenCalledTimes(1);
   });
 
+  it('does not log a clear or trigger a reload when clearStreamerToken resolves false (no row matched)', async () => {
+    vi.mocked(clearStreamerToken).mockResolvedValueOnce(false);
+
+    handleRevocation({ type: 'channel.follow', status: 'authorization_revoked', condition: { broadcaster_user_id: 'uid-revoke' } });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(logMock.warn).not.toHaveBeenCalledWith('Cleared token for revokedStreamer (authorization_revoked)');
+    expect(triggerReload).not.toHaveBeenCalled();
+  });
+
   it('does not trigger a reload if clearing the token fails', async () => {
     vi.mocked(clearStreamerToken).mockRejectedValueOnce(new Error('db down'));
 
