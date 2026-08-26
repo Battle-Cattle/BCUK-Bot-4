@@ -387,6 +387,38 @@ describe('StreamerConnection lifecycle', () => {
     expect((conn as any).ws).toBe(secondWs);
   });
 
+  it('reconnects if the WebSocket never leaves CONNECTING (no open/error/close ever fires)', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstWs = (conn as any).ws as MockWebSocket;
+
+    // Simulates a TCP handshake that hangs silently (e.g. a firewall/NAT drop) rather than
+    // failing outright — none of 'open', 'error', or 'close' ever fires on their own.
+    vi.advanceTimersByTime(30_000); // CONNECT_TIMEOUT_MS
+    expect(firstWs.close).toHaveBeenCalled();
+    expect((conn as any).ws).toBeNull();
+    expect((conn as any).reconnectAttempts).toBe(1);
+
+    vi.advanceTimersByTime(1_000); // first reconnect attempt's backoff delay
+    const secondWs = (conn as any).ws as MockWebSocket;
+    expect(secondWs).not.toBeNull();
+    expect(secondWs).not.toBe(firstWs);
+  });
+
+  it('clears the connect timeout once the socket has already opened, so it cannot fire later', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    expect((conn as any).connectTimer).not.toBeNull();
+
+    const ws = (conn as any).ws as MockWebSocket;
+    ws.listeners.get('open')!();
+
+    // If the connect timeout weren't cleared here, it would fire at 30s and force-reconnect
+    // a socket that's already open and working — this proves it can't, independent of the
+    // keepalive timer (which is a separate 20s mechanism also armed by open()).
+    expect((conn as any).connectTimer).toBeNull();
+  });
+
   /** Verifies the keepalive-timeout path force-reconnects without waiting on the socket's own 'close' event; returns void. */
   it('reconnects on a keepalive timeout even if the socket never fires its own close event', () => {
     const conn = new StreamerConnection(makeStreamerData());
