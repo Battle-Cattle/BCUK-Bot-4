@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('./logger', () => ({ createLogger: () => ({ info: vi.fn(), error: vi.fn() }) }));
+vi.mock('../shared/config', () => ({ GLOBAL_COOLDOWN_MS: 3_000 }));
 
 import {
   executeCountdownForTwitch,
@@ -9,8 +10,16 @@ import {
 
 const mockRuntime = { send: vi.fn() };
 
+// Base time far in the future, advanced further each test so any cooldown claim left over
+// from a previous test (same channel key) has already expired — matches the pattern in
+// counterHandler.test.ts.
+const COOLDOWN_MS = 3_000;
+let mockNow = 1_000_000_000_000;
+
 beforeEach(() => {
+  mockNow += COOLDOWN_MS + 1_000;
   vi.useFakeTimers();
+  vi.setSystemTime(mockNow);
   vi.clearAllMocks();
   mockRuntime.send.mockResolvedValue(undefined);
   registerCountdownTwitchRuntime(mockRuntime);
@@ -66,5 +75,37 @@ describe('executeCountdownForTwitch', () => {
     registerCountdownTwitchRuntime(null as any);
     await executeCountdownForTwitch('#chan', '!321');
     expect(mockRuntime.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('countdown cooldown', () => {
+  it('blocks a second !321 in the same channel within the cooldown window', async () => {
+    // Both calls claim/check the cooldown synchronously before their first await, so issuing
+    // them back-to-back deterministically exercises the claim vs. blocked-claim paths.
+    const first = executeCountdownForTwitch('#chan', '!321');
+    const second = executeCountdownForTwitch('#chan', '!321');
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await Promise.all([first, second]);
+
+    // Only the first call's 4 steps were sent; the second was blocked by cooldown.
+    expect(mockRuntime.send).toHaveBeenCalledTimes(4);
+
+    // Once the cooldown window has elapsed, the channel can claim again.
+    await vi.advanceTimersByTimeAsync(COOLDOWN_MS + 1);
+    const retry = executeCountdownForTwitch('#chan', '!321');
+    await vi.advanceTimersByTimeAsync(3000);
+    await retry;
+    expect(mockRuntime.send).toHaveBeenCalledTimes(8);
+  });
+
+  it("does not apply one channel's cooldown to another channel", async () => {
+    const chanA = executeCountdownForTwitch('#chan-a', '!321');
+    const chanB = executeCountdownForTwitch('#chan-b', '!321');
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await Promise.all([chanA, chanB]);
+
+    expect(mockRuntime.send).toHaveBeenCalledTimes(8);
   });
 });
