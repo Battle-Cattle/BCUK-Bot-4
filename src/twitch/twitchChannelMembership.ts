@@ -297,7 +297,11 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
     try {
       await throttledJoin(_client, normalized, (call) => compensateIfStale(membershipDeps(), normalized, call, 'join'));
     } catch (err) {
-      // Roll back local state; reconnect reconciliation will retry via activeChannels.
+      // Roll back the optimistic add above so a failed join doesn't linger in activeChannels
+      // as if it were still desired. This also means reconcileJoinedChannels() — which only
+      // iterates activeChannels — will NOT retry this channel on its own; the rejection below
+      // propagates to the caller, who owns retrying (e.g. the admin panel surfacing an error
+      // for the user to try again).
       activeChannels.delete(normalized);
       setTwitchChannel(normalized, false);
       log.error(`Failed to join channel ${normalized}:`, err);

@@ -6,6 +6,7 @@ import {
   handleStreamOnline, handleStreamOffline, handleChannelUpdate,
   FollowEvent, SubEvent, ResubEvent, GiftSubEvent, RaidEvent, RedemptionEvent,
 } from './twitchEventSubHandler';
+import { eventSubReloadRuntimeRegistry } from './twitchEventSubRuntime';
 
 const log = createLogger('EventSub');
 
@@ -87,7 +88,14 @@ export function dispatchNotification(type: string, event: Record<string, unknown
     .catch((err) => log.error(`${type} handler error:`, err));
 }
 
-/** Handles a subscription revocation message, clearing the broadcaster's token if authorisation was revoked. */
+/**
+ * Handles a subscription revocation message, clearing the broadcaster's token if authorisation
+ * was revoked. Once the token is cleared, triggers a full EventSub reload (via
+ * {@link eventSubReloadRuntimeRegistry}) so the now-tokenless streamer's `StreamerConnection` is
+ * torn down promptly — `subscribeForStreamer` sees zero desired subscriptions without a token and
+ * self-stops the connection — rather than sitting open and idle until some unrelated admin action
+ * elsewhere happens to trigger the next reload.
+ */
 export function handleRevocation(sub: { type: string; status: string; condition: Record<string, string> }): void {
   log.warn(`Subscription revoked: type=${sub.type} status=${sub.status}`);
 
@@ -97,7 +105,20 @@ export function handleRevocation(sub: { type: string; status: string; condition:
       const info = streamerMap.get(broadcasterId);
       if (info) {
         clearStreamerToken(info.streamerId)
-          .then(() => log.warn(`Cleared token for ${info.login} (${sub.status})`))
+          /**
+           * Handles a successful `clearStreamerToken` resolution: only when a row was actually
+           * updated (`cleared` true) does it log the clear and trigger a reload — a `false`
+           * resolution means no row matched `info.streamerId` (e.g. the streamer was deleted in
+           * the same race window), so there's nothing to log as cleared and no connection left to
+           * reload for.
+           * @param cleared - Whether `clearStreamerToken` actually updated a row.
+           * @returns void
+           */
+          .then((cleared) => {
+            if (!cleared) return;
+            log.warn(`Cleared token for ${info.login} (${sub.status})`);
+            eventSubReloadRuntimeRegistry.get()?.triggerReload();
+          })
           .catch((err) => log.error('Clear token error:', err));
       }
     }

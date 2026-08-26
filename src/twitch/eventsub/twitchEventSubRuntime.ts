@@ -148,3 +148,24 @@ export const twitchRuntimeRegistry = createRuntimeRegistry<EventSubTwitchRuntime
 export function registerEventSubTwitchRuntime(runtime: EventSubTwitchRuntime): void {
   twitchRuntimeRegistry.register(runtime);
 }
+
+// Runtime injection for triggering a full EventSub subscription reload — avoids a circular
+// import back into twitchEventSub.ts, which itself imports (transitively, via
+// twitchEventSubSubscriptions.ts) this module's own dispatch code. Registered from index.ts,
+// same as every other runtime above.
+interface EventSubReloadRuntime {
+  /** Reloads every streamer's EventSub subscriptions from the DB, tearing down and recreating
+   *  connections as needed — see `reloadEventSubSubscriptions` in `twitchEventSub.ts`. */
+  triggerReload: () => void;
+}
+
+export const eventSubReloadRuntimeRegistry = createRuntimeRegistry<EventSubReloadRuntime>();
+
+/**
+ * Register the EventSub reload trigger. Called from index.ts.
+ * @param runtime - The {@link EventSubReloadRuntime} to store.
+ * @returns void
+ */
+export function registerEventSubReloadRuntime(runtime: EventSubReloadRuntime): void {
+  eventSubReloadRuntimeRegistry.register(runtime);
+}

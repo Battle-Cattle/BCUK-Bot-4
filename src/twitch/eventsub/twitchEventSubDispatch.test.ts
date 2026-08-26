@@ -37,6 +37,7 @@ import {
   handleStreamOnline, handleStreamOffline, handleChannelUpdate,
   handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
 } from './twitchEventSubHandler';
+import { registerEventSubReloadRuntime } from './twitchEventSubRuntime';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -184,12 +185,16 @@ describe('removeStreamerFromMap', () => {
 // handleRevocation
 // ---------------------------------------------------------------------------
 describe('handleRevocation', () => {
+  const triggerReload = vi.fn();
+
   beforeEach(() => {
     vi.mocked(clearStreamerToken).mockResolvedValue(true as any);
     setStreamerInfo('uid-revoke', {
       login: 'revokedStreamer', streamerId: 100,
       config: { follow_enabled: false, sub_enabled: false, raid_enabled: false } as any,
     });
+    triggerReload.mockClear();
+    registerEventSubReloadRuntime({ triggerReload });
   });
 
   it('logs the revocation but does not clear a token for an unknown broadcaster', () => {
@@ -228,6 +233,44 @@ describe('handleRevocation', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(logMock.error).toHaveBeenCalledWith('Clear token error:', expect.any(Error));
+  });
+
+  it('triggers an EventSub reload once the token is cleared, so the now-tokenless connection is torn down promptly', async () => {
+    handleRevocation({ type: 'channel.follow', status: 'authorization_revoked', condition: { broadcaster_user_id: 'uid-revoke' } });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(triggerReload).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not log a clear or trigger a reload when clearStreamerToken resolves false (no row matched)', async () => {
+    vi.mocked(clearStreamerToken).mockResolvedValueOnce(false);
+
+    handleRevocation({ type: 'channel.follow', status: 'authorization_revoked', condition: { broadcaster_user_id: 'uid-revoke' } });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(logMock.warn).not.toHaveBeenCalledWith('Cleared token for revokedStreamer (authorization_revoked)');
+    expect(triggerReload).not.toHaveBeenCalled();
+  });
+
+  it('does not trigger a reload if clearing the token fails', async () => {
+    vi.mocked(clearStreamerToken).mockRejectedValueOnce(new Error('db down'));
+
+    handleRevocation({ type: 'channel.follow', status: 'authorization_revoked', condition: { broadcaster_user_id: 'uid-revoke' } });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(triggerReload).not.toHaveBeenCalled();
+  });
+
+  it('does not throw when no reload runtime is registered', async () => {
+    // Simulates index.ts never having called registerEventSubReloadRuntime (e.g. app startup
+    // order) — eventSubReloadRuntimeRegistry.get() returns null and must be handled with
+    // optional chaining, not assumed non-null.
+    registerEventSubReloadRuntime(null as unknown as { triggerReload: () => void });
+
+    expect(() => {
+      handleRevocation({ type: 'channel.follow', status: 'authorization_revoked', condition: { broadcaster_user_id: 'uid-revoke' } });
+    }).not.toThrow();
+    await new Promise((resolve) => setImmediate(resolve));
   });
 });
 
