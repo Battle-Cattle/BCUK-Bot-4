@@ -143,7 +143,7 @@ describe('runReconciliationTick', () => {
     expect(fulfilledCalls[1][4]).toBe('page-2-cursor'); // second call passed the first page's cursor as `after`
   });
 
-  it('does not advance the cursor when a redemption fails to handle, so it is retried on the next tick', async () => {
+  it('does not advance the cursor past a redemption that fails to handle, so it is retried on the next tick', async () => {
     vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
     await runReconciliationTick(); // establishes the cursor at "now"
 
@@ -160,6 +160,33 @@ describe('runReconciliationTick', () => {
 
     expect(handleRedemption).toHaveBeenCalledTimes(2);
     expect(vi.mocked(handleRedemption).mock.calls[1][1]).toEqual(expect.objectContaining({ id: 'r1' }));
+  });
+
+  it('advances the cursor past redemptions that succeeded even when a later one in the same tick fails', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    await runReconciliationTick(); // establishes the cursor at "now"
+
+    const t1 = new Date(Date.now() + 1_000).toISOString();
+    const t2 = new Date(Date.now() + 2_000).toISOString();
+    const t3 = new Date(Date.now() + 3_000).toISOString();
+    mockFulfilledOnly({ redemptions: [redemption('r3', t3), redemption('r2', t2), redemption('r1', t1)], cursor: null });
+    vi.mocked(handleRedemption).mockImplementation(async (_login, event: any) => {
+      if (event.id === 'r3') throw new Error('handler boom');
+      return true;
+    });
+
+    await runReconciliationTick();
+    expect(handleRedemption).toHaveBeenCalledTimes(3);
+
+    // Next tick should only retry the failed redemption (r3), not the two that already succeeded.
+    vi.mocked(handleRedemption).mockClear();
+    vi.mocked(handleRedemption).mockResolvedValue(true);
+    mockFulfilledOnly({ redemptions: [redemption('r3', t3)], cursor: null });
+
+    await runReconciliationTick();
+
+    expect(handleRedemption).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(handleRedemption).mock.calls[0][1]).toEqual(expect.objectContaining({ id: 'r3' }));
   });
 
   it('logs a "caught" warning only when handleRedemption reports it actually processed the redemption', async () => {
