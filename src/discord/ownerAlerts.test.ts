@@ -121,6 +121,26 @@ describe('ownerAlerts', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('treats a successful lookup that returns no owner as authoritative — does not fall back to a stale cached id', async () => {
+    // First alert resolves normally and populates the cache.
+    healthStore.recordDbPing(false, 'boom');
+    await flush();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenLastCalledWith(OWNER_ID, expect.any(String));
+
+    // Recover, then fail again once findOwnerUser successfully resolves null (e.g. ownership
+    // was just removed) — the cached id must not be used.
+    healthStore.recordDbPing(true);
+    await flush();
+
+    vi.mocked(findOwnerUser).mockResolvedValue(null);
+    send.mockClear();
+    healthStore.recordDbPing(false, 'boom again');
+    await flush();
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('never throws when the runtime send itself rejects', async () => {
     send.mockRejectedValue(new Error('DM failed — user has DMs disabled'));
     healthStore.recordDbPing(false, 'boom');

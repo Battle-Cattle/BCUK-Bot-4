@@ -618,4 +618,11 @@ describe('pingDb', () => {
     vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
     expect(await pingDb()).toBe(false);
   });
+
+  it('still releases the connection back to the pool when the ping rejects', async () => {
+    const conn = { ping: vi.fn().mockRejectedValue(new Error('timeout')), release: vi.fn() };
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+    expect(await pingDb()).toBe(false);
+    expect(conn.release).toHaveBeenCalledOnce();
+  });
 });

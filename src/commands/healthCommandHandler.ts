@@ -11,6 +11,19 @@ const TRIGGER = '!health';
 /** Number of most-recent error entries shown in the `!health` summary (newest first). */
 const RECENT_ERROR_COUNT = 5;
 
+/**
+ * Discord's per-message character cap. {@link formatHealthSummary}'s output is truncated to
+ * stay comfortably under this, since both the owner DM and (if ever sent in-channel) a reply
+ * share the same limit.
+ */
+const DISCORD_MESSAGE_LIMIT = 2000;
+
+/** Length {@link formatHealthSummary}'s output is truncated to before appending the truncation marker, leaving headroom under {@link DISCORD_MESSAGE_LIMIT}. */
+const SUMMARY_TRUNCATE_LENGTH = 1900;
+
+/** Appended to a truncated `!health` summary (see {@link formatHealthSummary}). */
+const TRUNCATION_MARKER = '\n… (truncated)';
+
 /** Formats a `Date | null` for display, or `'—'` if absent. */
 function formatDate(date: Date | null): string {
   return date ? date.toLocaleString() : '—';
@@ -76,7 +89,7 @@ function formatRecentErrorLines(snapshot: HealthSnapshot): string[] {
  * @returns The formatted summary text.
  */
 function formatHealthSummary(snapshot: HealthSnapshot): string {
-  return [
+  const full = [
     '**Bot Health**',
     ...formatConnectivityLines(snapshot),
     ...formatEventSubLines(snapshot),
@@ -84,15 +97,21 @@ function formatHealthSummary(snapshot: HealthSnapshot): string {
     ...formatSchedulerLines(snapshot),
     ...formatRecentErrorLines(snapshot),
   ].join('\n');
+  if (full.length <= DISCORD_MESSAGE_LIMIT) return full;
+  return full.slice(0, SUMMARY_TRUNCATE_LENGTH) + TRUNCATION_MARKER;
 }
 
 /**
  * Handles the `!health` Discord command: matched as the literal first word of the message
  * (no prefix stripping — see `CLAUDE.md`'s command-matching convention), owner-only.
  * Silently no-ops for a non-match, a missing owner row, or an author who isn't the owner, so
- * the command's existence isn't revealed to anyone else. Owner match replies with a plain-text
- * summary of the current `healthStore` snapshot.
- * @param message - The Discord message to check and, if it's an owner-issued `!health`, reply to.
+ * the command's existence isn't revealed to anyone else. Owner match sends the full summary of
+ * the current `healthStore` snapshot via DM — never into the (possibly public) guild channel it
+ * was triggered from, since the summary includes DB/EventSub/scheduler/recent-error details.
+ * When triggered from a guild channel, also posts a minimal, non-sensitive acknowledgement reply
+ * there so the owner knows to check their DMs. If the DM itself fails (e.g. the owner has DMs
+ * closed), that's logged and swallowed rather than thrown.
+ * @param message - The Discord message to check and, if it's an owner-issued `!health`, respond to.
  */
 export async function executeHealthCommandForDiscord(message: Message): Promise<void> {
   if (extractCommand(message.content) !== TRIGGER) return;
@@ -106,5 +125,14 @@ export async function executeHealthCommandForDiscord(message: Message): Promise<
   }
   if (!owner || message.author.id !== owner.discord_id) return;
 
-  await message.reply(formatHealthSummary(getHealthSnapshot()));
+  try {
+    await message.author.send(formatHealthSummary(getHealthSnapshot()));
+  } catch (err) {
+    log.error('Failed to DM health summary to owner:', err);
+    return;
+  }
+
+  if (message.guild) {
+    await message.reply('📬 Sent you the health report via DM.');
+  }
 }

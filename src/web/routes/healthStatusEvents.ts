@@ -32,12 +32,16 @@ onHealthChanged(pushHealthUpdate);
 
 /**
  * GET /admin/health/events — SSE endpoint streaming live `getHealthSnapshot()` updates for the
- * owner health dashboard. Owner-only; not guild-scoped.
+ * owner health dashboard. Owner-only; not guild-scoped. On a successfully accepted connection,
+ * immediately pushes the current snapshot so the dashboard doesn't sit blank until the next
+ * health-changed event.
  * @param req - Express request; listened to for the 'close' event by `attachSseConnection`.
  * @param res - Express response; upgraded to a `text/event-stream` connection.
  */
 router.get('/events', requireOwner, (req, res) => {
-  attachSseConnection(req, res, { connections, key: HEALTH_CHANNEL_KEY, maxPerChannel: MAX_HEALTH_SSE_CONNECTIONS });
+  if (attachSseConnection(req, res, { connections, key: HEALTH_CHANNEL_KEY, maxPerChannel: MAX_HEALTH_SSE_CONNECTIONS })) {
+    pushHealthUpdate();
+  }
 });
 
 export default router;

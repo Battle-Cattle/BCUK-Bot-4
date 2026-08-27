@@ -53,6 +53,11 @@ export interface SchedulerHealth {
 /** The set of scheduler names tracked by {@link recordSchedulerRun}. */
 export type SchedulerName = 'counter' | 'rewardPricing' | 'timer';
 
+/** Clones a `Date | null` field so a snapshot's copy can never alias (and thus mutate) internal state. */
+function cloneDate(d: Date | null): Date | null {
+  return d ? new Date(d.getTime()) : null;
+}
+
 /** Returns a fresh, disconnected/no-history EventSub health record. */
 function defaultEventSubHealth(): EventSubHealth {
   return { connected: false, lastConnectedAt: null, lastDisconnectedAt: null, reconnectAttempts: 0, lastError: null };
@@ -220,23 +225,28 @@ export interface HealthSnapshot {
 
 /**
  * Returns a snapshot of the current health state: a deep-ish copy (own top-level objects
- * copied, Maps converted to plain records, the error list copied) so a caller mutating the
- * returned object can never affect internal state — same spirit as `statusStore.ts`'s
- * `getStatus()`.
+ * copied, Maps converted to plain records, the error list copied, and every `Date` field
+ * cloned via {@link cloneDate}) so a caller mutating the returned object — including calling a
+ * mutator method directly on one of its `Date` fields — can never affect internal state — same
+ * spirit as `statusStore.ts`'s `getStatus()`.
  */
 export function getHealthSnapshot(): HealthSnapshot {
   return {
     discordConnected: state.discordConnected,
     twitchChatConnected: state.twitchChatConnected,
-    db: { ...state.db },
+    db: { ...state.db, lastPingAt: cloneDate(state.db.lastPingAt) },
     eventsub: Object.fromEntries(
-      Array.from(state.eventsub, ([key, value]) => [key, { ...value }]),
+      Array.from(state.eventsub, ([key, value]) => [key, {
+        ...value,
+        lastConnectedAt: cloneDate(value.lastConnectedAt),
+        lastDisconnectedAt: cloneDate(value.lastDisconnectedAt),
+      }]),
     ) as Record<string, EventSubHealth>,
-    monitor: { ...state.monitor },
+    monitor: { ...state.monitor, lastPollAt: cloneDate(state.monitor.lastPollAt) },
     schedulers: Object.fromEntries(
-      Array.from(state.schedulers, ([key, value]) => [key, { ...value }]),
+      Array.from(state.schedulers, ([key, value]) => [key, { ...value, lastRunAt: cloneDate(value.lastRunAt) }]),
     ) as Partial<Record<SchedulerName, SchedulerHealth>>,
-    errors: state.errors.map((e) => ({ ...e })),
+    errors: state.errors.map((e) => ({ ...e, timestamp: cloneDate(e.timestamp) as Date })),
   };
 }
 

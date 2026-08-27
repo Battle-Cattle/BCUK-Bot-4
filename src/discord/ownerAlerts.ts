@@ -32,7 +32,12 @@ interface ComponentAlertState {
 
 const componentStates = new Map<string, ComponentAlertState>();
 
-/** Caches the last successfully resolved owner Discord ID, so a `findOwnerUser()` failure (e.g. the DB itself being down — the very case this watcher most needs to alert about) doesn't also prevent the alert from being sent. */
+/**
+ * Caches the last successfully resolved owner Discord ID, so a `findOwnerUser()` failure (e.g.
+ * the DB itself being down — the very case this watcher most needs to alert about) doesn't also
+ * prevent the alert from being sent. Cleared to `null` whenever a successful lookup confirms
+ * there's no owner row (rather than left stale) — see {@link resolveOwnerDiscordId}.
+ */
 let cachedOwnerDiscordId: string | null = null;
 
 let watcherStarted = false;
@@ -101,9 +106,12 @@ function deriveComponentOks(snapshot: HealthSnapshot): Map<string, ComponentOk> 
 
 /**
  * Resolves the Discord ID to DM: a fresh `findOwnerUser()` lookup when it succeeds (also
- * refreshing {@link cachedOwnerDiscordId}), falling back to the last cached ID if the lookup
- * itself throws (e.g. the DB is down — exactly the case this watcher needs to still be able to
- * alert about). Returns null (and logs) if there's no cached ID yet to fall back to.
+ * refreshing {@link cachedOwnerDiscordId}), falling back to the last cached ID only if the
+ * lookup itself throws (e.g. the DB is down — exactly the case this watcher needs to still be
+ * able to alert about). A successful lookup that finds no owner row is authoritative — it clears
+ * the cache and returns null, rather than falling back to a possibly-stale cached ID for an
+ * owner that may have just been removed. Returns null (and logs) if there's no cached ID yet to
+ * fall back to on a failed lookup.
  */
 async function resolveOwnerDiscordId(): Promise<string | null> {
   try {
@@ -112,7 +120,8 @@ async function resolveOwnerDiscordId(): Promise<string | null> {
       cachedOwnerDiscordId = owner.discord_id;
       return owner.discord_id;
     }
-    return cachedOwnerDiscordId;
+    cachedOwnerDiscordId = null;
+    return null;
   } catch (err) {
     log.error('Failed to resolve owner user — falling back to cached ID if any:', err);
     if (!cachedOwnerDiscordId) {

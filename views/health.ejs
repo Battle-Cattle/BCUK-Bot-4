@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/style.css">
   <%- include('partials/pwa-head') %>
 <%
+/** JSON-stringifies `value` and HTML-escapes the result so it's safe to embed inside a double-quoted HTML attribute; returns the escaped string. */
 function htmlAttrJson(value) {
   const replacements = { '&': '&amp;', '"': '&quot;', "'": '&#39;', '<': '&lt;', '>': '&gt;' };
   return JSON.stringify(value).replace(/[&"'<>]/g, function(char) { return replacements[char] || char; });

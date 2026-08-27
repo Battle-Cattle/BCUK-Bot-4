@@ -7,11 +7,16 @@ vi.mock('../../db', () => ({ getAllEnabledTimerCommandsWithChannel: vi.fn() }));
 vi.mock('../twitchChatActivity', () => ({ getMessageCount: vi.fn() }));
 vi.mock('../monitor/twitchMonitor', () => ({ isChannelLive: vi.fn() }));
 vi.mock('../../commands/customCommandHandler', () => ({ resolveSharedChatSessionId: vi.fn() }));
+vi.mock('../../shared/healthStore', () => ({
+  recordSchedulerRun: vi.fn(),
+  normalizeError: vi.fn((err: unknown) => (err instanceof Error ? err.message : String(err))),
+}));
 
 import { getAllEnabledTimerCommandsWithChannel } from '../../db';
 import { getMessageCount } from '../twitchChatActivity';
 import { isChannelLive } from '../monitor/twitchMonitor';
 import { resolveSharedChatSessionId } from '../../commands/customCommandHandler';
+import { recordSchedulerRun } from '../../shared/healthStore';
 import {
   runTimerCommandTick, startTimerCommandScheduler, stopTimerCommandScheduler, registerTimerCommandsRuntime,
 } from './timerCommandScheduler';
@@ -182,6 +187,18 @@ describe('runTimerCommandTick', () => {
   it('does not throw when loading rows fails', async () => {
     vi.mocked(getAllEnabledTimerCommandsWithChannel).mockRejectedValue(new Error('db down'));
     await expect(runTimerCommandTick()).resolves.toBeUndefined();
+  });
+
+  it('records a successful scheduler run on a successful tick', async () => {
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([timerRow()] as any);
+    await runTimerCommandTick();
+    expect(recordSchedulerRun).toHaveBeenCalledWith('timer', true);
+  });
+
+  it('records a failed scheduler run with the normalized error when the tick fails at the top level', async () => {
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockRejectedValue(new Error('db down'));
+    await runTimerCommandTick();
+    expect(recordSchedulerRun).toHaveBeenCalledWith('timer', false, 'db down');
   });
 
   it('a reentrancy guard prevents overlapping ticks', async () => {

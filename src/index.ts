@@ -40,6 +40,10 @@ const log = createLogger('Bot');
 const DB_HEALTH_CHECK_INTERVAL_MS = 60_000;
 
 let dbHealthCheckTimer: ReturnType<typeof setInterval> | null = null;
+// Guards against overlapping probes: pingDb()'s getConnection() has no timeout of its own, so
+// a pool that's exhausted/wedged could in principle keep a probe in flight past the next
+// interval tick — this flag makes an overlap a no-op instead of stacking probes.
+let dbHealthCheckInFlight = false;
 
 /**
  * Starts the periodic DB-connectivity health check: pings the pool every
@@ -50,9 +54,12 @@ let dbHealthCheckTimer: ReturnType<typeof setInterval> | null = null;
 function startDbHealthCheck(): void {
   if (dbHealthCheckTimer) return;
   dbHealthCheckTimer = setInterval(() => {
+    if (dbHealthCheckInFlight) return;
+    dbHealthCheckInFlight = true;
     pingDb()
       .then((ok) => recordDbPing(ok, ok ? undefined : 'DB ping failed'))
-      .catch((err: unknown) => log.error('Unexpected error during DB health check:', err));
+      .catch((err: unknown) => log.error('Unexpected error during DB health check:', err))
+      .finally(() => { dbHealthCheckInFlight = false; });
   }, DB_HEALTH_CHECK_INTERVAL_MS);
   // Doesn't keep the process alive on its own — same reasoning as this codebase's other
   // background-purge intervals (e.g. twitchEventSubConnection.ts's message-dedup sweep):

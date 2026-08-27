@@ -272,6 +272,39 @@ describe('startup — reward pricing scheduler', () => {
   });
 });
 
+describe('DB health check interval', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does not start a second probe while one is still in flight (overlap guard)', async () => {
+    // Only fake setInterval/clearInterval — runMain()'s own setImmediate-based settling wait
+    // (and anything else main() schedules) keeps running on real timers.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const { pingDb } = await import('./db.js');
+    let resolvePing!: (ok: boolean) => void;
+    vi.mocked(pingDb).mockImplementation(() => new Promise((resolve) => { resolvePing = resolve; }));
+
+    await runMain();
+    vi.mocked(pingDb).mockClear();
+
+    // First interval tick starts a probe that never resolves during this window.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(vi.mocked(pingDb)).toHaveBeenCalledOnce();
+
+    // A second interval tick fires while the first probe is still pending — the guard
+    // should skip it rather than stacking a second call.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(vi.mocked(pingDb)).toHaveBeenCalledOnce();
+
+    // Once the in-flight probe resolves, the next tick is free to start a new one.
+    resolvePing(true);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(vi.mocked(pingDb)).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('shutdown', () => {
   it('stops the reward pricing scheduler on SIGINT', async () => {
     const { stopRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');

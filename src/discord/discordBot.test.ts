@@ -390,6 +390,14 @@ describe('startDiscordBot — clientReady ready state', () => {
     await readyCb(mockInstance);
     expect(vi.mocked(status.setDiscordReady)).toHaveBeenCalledWith('Bot#1234');
   });
+
+  it('records the Discord connection as up on clientReady success', async () => {
+    const healthStore = await import('../shared/healthStore.js');
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(true);
+  });
 });
 
 // ─── startDiscordBot — error event ───────────────────────────────────────────
@@ -437,6 +445,14 @@ describe('startDiscordBot — gateway watchdog', () => {
     expect(mockInstance.login).toHaveBeenCalledTimes(2);
     expect(mod.getDiscordClient()).toBeNull();
   });
+
+  it('records the Discord connection as down when a shard disconnects permanently', async () => {
+    const healthStore = await import('../shared/healthStore.js');
+    mod.startDiscordBot();
+    const handler = findHandler('shardDisconnect');
+    handler({ code: 4004 }, 0);
+    expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(false);
+  });
 });
 
 // ─── stopDiscordBot ───────────────────────────────────────────────────────────
@@ -445,6 +461,17 @@ describe('stopDiscordBot', () => {
   it('does not throw when called before startDiscordBot (existing?.destroy is safe)', () => {
     expect(() => mod.stopDiscordBot()).not.toThrow();
     expect(mod.getDiscordClient()).toBeNull();
+  });
+
+  it('records the Discord connection as down', async () => {
+    const healthStore = await import('../shared/healthStore.js');
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    mod.stopDiscordBot();
+
+    expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(false);
   });
 
   it('calls destroy on the existing client and nulls the reference', async () => {

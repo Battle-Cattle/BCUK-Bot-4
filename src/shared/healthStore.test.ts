@@ -211,6 +211,15 @@ describe('getHealthSnapshot returns copies', () => {
     expect(mod.getHealthSnapshot().db.lastError).toBeNull();
   });
 
+  it('mutating a returned Date field (e.g. via setTime) does not affect internal state', () => {
+    mod.recordDbPing(true);
+    const snap = mod.getHealthSnapshot();
+    const originalTime = snap.db.lastPingAt!.getTime();
+    snap.db.lastPingAt!.setTime(0);
+    const refreshed = mod.getHealthSnapshot();
+    expect(refreshed.db.lastPingAt!.getTime()).toBe(originalTime);
+  });
+
   it('mutating a returned eventsub entry does not affect internal state', () => {
     mod.recordEventSubConnected('streamerA', true);
     const snap = mod.getHealthSnapshot();

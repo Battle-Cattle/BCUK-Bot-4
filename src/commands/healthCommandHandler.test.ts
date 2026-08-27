@@ -35,10 +35,11 @@ const EMPTY_SNAPSHOT = {
   errors: [],
 };
 
-function makeMockMessage(content: string, authorId: string) {
+function makeMockMessage(content: string, authorId: string, opts: { guild?: unknown } = {}) {
   return {
     content,
-    author: { id: authorId },
+    author: { id: authorId, send: vi.fn().mockResolvedValue(undefined) },
+    guild: opts.guild ?? null,
     reply: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -50,40 +51,64 @@ describe('executeHealthCommandForDiscord', () => {
     vi.mocked(findOwnerUser).mockResolvedValue(OWNER_ROW as any);
   });
 
-  it('does not reply for a message that is not !health', async () => {
+  it('does not DM for a message that is not !health', async () => {
     const message = makeMockMessage('!other', OWNER_ID);
     await executeHealthCommandForDiscord(message as any);
+    expect(message.author.send).not.toHaveBeenCalled();
     expect(message.reply).not.toHaveBeenCalled();
     expect(findOwnerUser).not.toHaveBeenCalled();
   });
 
-  it('does not reply when the author is not the owner', async () => {
+  it('does not DM when the author is not the owner', async () => {
     const message = makeMockMessage('!health', 'not-the-owner');
     await executeHealthCommandForDiscord(message as any);
+    expect(message.author.send).not.toHaveBeenCalled();
     expect(message.reply).not.toHaveBeenCalled();
   });
 
-  it('does not reply when there is no owner row', async () => {
+  it('does not DM when there is no owner row', async () => {
     vi.mocked(findOwnerUser).mockResolvedValue(null);
     const message = makeMockMessage('!health', OWNER_ID);
     await executeHealthCommandForDiscord(message as any);
+    expect(message.author.send).not.toHaveBeenCalled();
     expect(message.reply).not.toHaveBeenCalled();
   });
 
-  it('replies with a health summary for the owner', async () => {
+  it('DMs the owner a health summary, and does not reply in-channel outside a guild', async () => {
     const message = makeMockMessage('!health', OWNER_ID);
     await executeHealthCommandForDiscord(message as any);
+    expect(message.author.send).toHaveBeenCalledOnce();
+    const dmText = message.author.send.mock.calls[0][0] as string;
+    expect(dmText).toContain('Bot Health');
+    expect(dmText).toContain('Discord');
+    expect(dmText).toContain('Twitch chat');
+    expect(dmText).toContain('DB');
+    expect(message.reply).not.toHaveBeenCalled();
+  });
+
+  it('DMs the owner and posts a non-sensitive channel ack when triggered from a guild', async () => {
+    const message = makeMockMessage('!health', OWNER_ID, { guild: { id: 'guild-1' } });
+    await executeHealthCommandForDiscord(message as any);
+    expect(message.author.send).toHaveBeenCalledOnce();
+    const dmText = message.author.send.mock.calls[0][0] as string;
+    expect(dmText).toContain('Bot Health');
     expect(message.reply).toHaveBeenCalledOnce();
     const replyText = message.reply.mock.calls[0][0] as string;
-    expect(replyText).toContain('Bot Health');
-    expect(replyText).toContain('Discord');
-    expect(replyText).toContain('Twitch chat');
-    expect(replyText).toContain('DB');
+    expect(replyText).not.toContain('Bot Health');
+    expect(replyText).not.toContain('DB');
+  });
+
+  it('logs and swallows a failed DM (e.g. DMs closed) instead of throwing, without posting a channel ack', async () => {
+    const message = makeMockMessage('!health', OWNER_ID, { guild: { id: 'guild-1' } });
+    message.author.send.mockRejectedValue(new Error('Cannot send messages to this user'));
+    await expect(executeHealthCommandForDiscord(message as any)).resolves.toBeUndefined();
+    expect(message.reply).not.toHaveBeenCalled();
   });
 
   it('matches !health only as the first word, not as a substring of another command', async () => {
     const message = makeMockMessage('!healthcheck', OWNER_ID);
     await executeHealthCommandForDiscord(message as any);
+    expect(message.author.send).not.toHaveBeenCalled();
     expect(message.reply).not.toHaveBeenCalled();
   });
 
@@ -97,11 +122,26 @@ describe('executeHealthCommandForDiscord', () => {
     } as any);
     const message = makeMockMessage('!health', OWNER_ID);
     await executeHealthCommandForDiscord(message as any);
-    const replyText = message.reply.mock.calls[0][0] as string;
-    const firstIndex = replyText.indexOf('first');
-    const secondIndex = replyText.indexOf('second');
+    const dmText = message.author.send.mock.calls[0][0] as string;
+    const firstIndex = dmText.indexOf('first');
+    const secondIndex = dmText.indexOf('second');
     expect(secondIndex).toBeGreaterThan(-1);
     expect(firstIndex).toBeGreaterThan(secondIndex);
+  });
+
+  it('truncates a summary that would otherwise exceed the Discord message limit', async () => {
+    const manyEventSubEntries = Object.fromEntries(
+      Array.from({ length: 100 }, (_, i) => [
+        `streamer-with-a-fairly-long-name-${i}`,
+        { connected: true, lastConnectedAt: null, lastDisconnectedAt: null, reconnectAttempts: 0, lastError: null },
+      ]),
+    );
+    vi.mocked(getHealthSnapshot).mockReturnValue({ ...EMPTY_SNAPSHOT, eventsub: manyEventSubEntries } as any);
+    const message = makeMockMessage('!health', OWNER_ID);
+    await executeHealthCommandForDiscord(message as any);
+    const dmText = message.author.send.mock.calls[0][0] as string;
+    expect(dmText.length).toBeLessThanOrEqual(2000);
+    expect(dmText.endsWith('\n… (truncated)')).toBe(true);
   });
 
   it('does not throw when findOwnerUser rejects', async () => {

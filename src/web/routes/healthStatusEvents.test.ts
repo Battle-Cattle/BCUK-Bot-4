@@ -67,3 +67,38 @@ describe('pushHealthUpdate (registered onHealthChanged listener)', () => {
     expect(() => registeredListener()).not.toThrow();
   });
 });
+
+describe('GET /events — initial snapshot push', () => {
+  /**
+   * Opens an SSE connection and resolves once the first `data:` frame has been written,
+   * leaving the stream open.
+   * @returns The response status, the SSE body received so far, and a `close()` callback that
+   * emits `'close'` on the underlying request so the test can release the connection.
+   */
+  function connect(): Promise<{ status: number; body: string; close: () => void }> {
+    const req = supertest(buildApp(OWNER_SESSION_USER)).get('/events');
+    return new Promise((resolve) => {
+      let body = '';
+      req
+        .buffer(false)
+        .parse((res, _cb) => {
+          res.on('data', (chunk: Buffer) => {
+            body += chunk.toString();
+            if (body.includes('data:')) {
+              resolve({ status: res.statusCode ?? 0, body, close: () => (res as any).req.emit('close') });
+            }
+          });
+          (res as any).resume();
+        })
+        .end();
+    });
+  }
+
+  it('pushes the current snapshot immediately once a connection is accepted', async () => {
+    vi.mocked(getHealthSnapshot).mockReturnValue({ discordConnected: true, marker: 'initial-push' } as any);
+    const { status, body, close } = await connect();
+    expect(status).toBe(200);
+    expect(body).toContain('initial-push');
+    close();
+  });
+});
