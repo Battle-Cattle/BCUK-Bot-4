@@ -539,6 +539,34 @@ describe('subscribeForStreamer', () => {
     expect(deleteEventSubSubscription).toHaveBeenCalledTimes(1);
   });
 
+  it('retries a stale-session delete in the same round if the recreation delete attempt failed', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-fresh-follow-retry');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      {
+        id: 'sub-dead-follow-retry', type: 'channel.follow', sessionId: 'sess-old-dead', status: 'enabled',
+        condition: { broadcaster_user_id: 'uid-retry', moderator_user_id: 'uid-retry' },
+      },
+    ] as any);
+    // The delete attempted during recreation fails (e.g. a transient Twitch API error) — the
+    // subscription is still there, so it must remain eligible for deleteStaleSubscriptions to
+    // retry within this same round rather than being silently dropped from the snapshot.
+    vi.mocked(deleteEventSubSubscription).mockRejectedValueOnce(new Error('delete failed'));
+
+    await subscribeForStreamer('sess-new-live-retry', {
+      uid: 'uid-retry',
+      token: 'tok-retry',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 23,
+    });
+
+    // Retried: the failed attempt from ensureSubscription, then a second attempt from
+    // deleteStaleSubscriptions since the id was correctly kept in the reused snapshot.
+    expect(deleteEventSubSubscription).toHaveBeenCalledTimes(2);
+    expect(deleteEventSubSubscription).toHaveBeenCalledWith('sub-dead-follow-retry', 'tok-retry');
+  });
+
   it('ignores a same-type subscription belonging to a different broadcaster the streamer merely moderates, rather than keeping or deleting it', async () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-own-follow');
