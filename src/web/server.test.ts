@@ -41,6 +41,7 @@ vi.mock('./middleware', () => ({
   requireAuth: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
   requireGuildContext: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
   requireMod: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
+  requireOwner: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
 }));
 
 /** An empty router, standing in for a real route module whose internals aren't under test. */
@@ -112,6 +113,8 @@ vi.mock('./routes/companionEvents', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionRewards', () => ({ default: emptyRouter() }));
 vi.mock('./routes/companionKeys', () => ({ default: emptyRouter() }));
 vi.mock('./routes/serviceWorker', () => ({ default: emptyRouter() }));
+vi.mock('./routes/health', () => ({ default: markerRouter('health') }));
+vi.mock('./routes/healthStatusEvents', () => ({ default: emptyRouter() }));
 
 import { app, generalLimiter, sessionLimiter } from './server';
 import { requireAuth, requireGuildContext } from './middleware';
@@ -156,6 +159,14 @@ describe('server route wiring', () => {
     // we don't assert an exact call count that would depend on every earlier '/' mount.
     expect(requireAuth).toHaveBeenCalled();
     expect(requireGuildContext).toHaveBeenCalled();
+  });
+
+  it('mounts /admin/health behind requireAuth only, without requireGuildContext (health is not guild-scoped)', async () => {
+    const res = await request(app).get('/admin/health/__marker_health');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ label: 'health' });
+    expect(requireAuth).toHaveBeenCalled();
+    expect(requireGuildContext).not.toHaveBeenCalled();
   });
 
   it('mounts the dashboard root behind both requireAuth and requireGuildContext', async () => {

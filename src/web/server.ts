@@ -43,6 +43,8 @@ import timersRouter from './routes/timers';
 import privacyRouter from './routes/privacy';
 import tosRouter from './routes/tos';
 import serviceWorkerRouter from './routes/serviceWorker';
+import healthRouter from './routes/health';
+import healthStatusEventsRouter from './routes/healthStatusEvents';
 import { requireAuth, requireGuildContext } from './middleware';
 import { ensureSessionCsrfToken } from './csrf';
 import { renderView } from './routes/viewHelpers';
@@ -193,6 +195,15 @@ app.use('/api/companion', companionEventsRouter);
 app.use('/api/companion', companionRewardsRouter);
 app.use('/guild', requireAuth, guildRouter);
 app.use('/api', requireAuth, apiRouter);
+
+// Health isn't guild-scoped (unlike the '/admin'-mounted routers below), so it's mounted here,
+// ahead of the '/'-mounted routers' requireGuildContext gate — matching '/guild'/'/api' above —
+// rather than falling through the '/admin' prefix's adminGuildRouter, which would otherwise run
+// requireGuildContext for every '/admin/*' path regardless of which route actually matches.
+// requireOwner is applied per-route inside healthRouter/healthStatusEventsRouter (matching
+// admin.ts's per-route convention) rather than router-level here.
+app.use('/admin/health', requireAuth, healthRouter);
+app.use('/admin/health', requireAuth, healthStatusEventsRouter);
 
 // All of the routers below share the same '/' mount point, so registering each one
 // behind its own app.use(path, ...middleware, router) call made requireAuth (and, for

@@ -31,6 +31,9 @@
           <% if (user.accessLevel >= 3) { %>
           <a href="/admin/streamdeck-keys" class="nav-item">Streamdeck Keys</a>
           <% } %>
+          <% if (user.isOwner) { %>
+          <a href="/admin/health" class="nav-item">Health</a>
+          <% } %>
         </div>
       </div>
       <% } %>

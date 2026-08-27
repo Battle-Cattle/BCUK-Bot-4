@@ -13,10 +13,19 @@ vi.mock('./db', () => ({
     }),
   })),
   closePool: vi.fn().mockResolvedValue(undefined),
+  pingDb: vi.fn().mockResolvedValue(true),
+}));
+vi.mock('./shared/healthStore', () => ({
+  recordDbPing: vi.fn(),
+}));
+vi.mock('./discord/ownerAlerts', () => ({
+  registerOwnerAlertRuntime: vi.fn(),
+  startOwnerAlertWatcher: vi.fn(),
 }));
 vi.mock('./discord/discordBot', () => ({
   startDiscordBot: vi.fn(),
   stopDiscordBot: vi.fn(),
+  getDiscordClient: vi.fn(),
 }));
 vi.mock('./discord/guildRegistry', () => ({
   reloadGuildRegistry: vi.fn().mockResolvedValue(undefined),
@@ -203,6 +212,17 @@ describe('startup — guild registry preload', () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(vi.mocked(startDiscordBot)).not.toHaveBeenCalled();
+  });
+
+  it('records the startup DB ping and registers/starts the owner-alert runtime on a clean startup', async () => {
+    const { recordDbPing } = await import('./shared/healthStore.js');
+    const { registerOwnerAlertRuntime, startOwnerAlertWatcher } = await import('./discord/ownerAlerts.js');
+
+    await runMain();
+
+    expect(vi.mocked(recordDbPing)).toHaveBeenCalledWith(true);
+    expect(vi.mocked(registerOwnerAlertRuntime)).toHaveBeenCalledWith({ send: expect.any(Function) });
+    expect(vi.mocked(startOwnerAlertWatcher)).toHaveBeenCalledOnce();
   });
 
   it('calls process.exit(1) and does not start the bot when the DB connection ping fails', async () => {

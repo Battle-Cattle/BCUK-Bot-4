@@ -1,4 +1,5 @@
 import { createLogger } from '../../shared/logger';
+import { recordEventSubConnected, recordEventSubReconnectAttempt } from '../../shared/healthStore';
 import { subscribeForStreamer, removeStreamerFromMap, dispatchNotification, handleRevocation, StreamerEventSubData } from './twitchEventSubSubscriptions';
 
 const log = createLogger('EventSub');
@@ -109,6 +110,7 @@ export class StreamerConnection {
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.ws?.close(1000, 'shutdown');
     this.ws = null;
+    recordEventSubConnected(this.name, false, 'Stopped');
     removeStreamerFromMap(this.uid);
   }
 
@@ -212,6 +214,7 @@ export class StreamerConnection {
     this.clearConnectTimer();
     this.reconnectAttempts = 0;
     this.resetKeepaliveTimer();
+    recordEventSubConnected(this.name, true);
   }
 
   private onMessage(ev: MessageEvent): void {
@@ -233,6 +236,7 @@ export class StreamerConnection {
   private onClose(ev: CloseEvent, socket: WebSocket): void {
     if (this.ws !== socket) return; // old socket closed during session migration, or already force-reconnected — ignore
     log.warn(`[${this.name}] WebSocket closed: ${ev.code} ${ev.reason}`);
+    recordEventSubConnected(this.name, false, `Closed: ${ev.code} ${ev.reason}`);
     this.forceReconnect(socket);
   }
 
@@ -247,6 +251,7 @@ export class StreamerConnection {
   private onError(socket: WebSocket): void {
     if (this.ws !== socket) return;
     log.warn(`[${this.name}] WebSocket error`);
+    recordEventSubConnected(this.name, false, 'WebSocket error');
     this.forceReconnect(socket);
   }
 
@@ -354,6 +359,7 @@ export class StreamerConnection {
     const delay = Math.min(RECONNECT_BACKOFF_MAX_MS, 1_000 * Math.pow(2, this.reconnectAttempts));
     this.reconnectAttempts++;
     log.info(`[${this.name}] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    recordEventSubReconnectAttempt(this.name);
     this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.connect(); }, delay);
   }
 

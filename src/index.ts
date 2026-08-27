@@ -1,9 +1,11 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
-import { getPool, closePool } from './db';
+import { getPool, closePool, pingDb } from './db';
+import { recordDbPing } from './shared/healthStore';
+import { registerOwnerAlertRuntime, startOwnerAlertWatcher } from './discord/ownerAlerts';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startChannelReconciliationPoll, stopChannelReconciliationPoll } from './twitch/twitchChannelReconciliationPoll';
-import { startDiscordBot, stopDiscordBot } from './discord/discordBot';
+import { startDiscordBot, stopDiscordBot, getDiscordClient } from './discord/discordBot';
 import { reloadGuildRegistry } from './discord/guildRegistry';
 import { resolveGuildIdForDiscordId } from './discord/voicePresence';
 import { registerTwitchGuildResolutionRuntime } from './twitch/twitchGuildResolutionRuntime';
@@ -34,12 +36,43 @@ import { createLogger } from './shared/logger';
 
 const log = createLogger('Bot');
 
+/** How often the DB-connectivity health check pings the pool (see {@link startDbHealthCheck}). */
+const DB_HEALTH_CHECK_INTERVAL_MS = 60_000;
+
+let dbHealthCheckTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Starts the periodic DB-connectivity health check: pings the pool every
+ * {@link DB_HEALTH_CHECK_INTERVAL_MS} and records the outcome in `healthStore`, so the owner
+ * health dashboard/`!health` command/owner-alert watcher reflect live DB reachability, not just
+ * the one-off ping `main()` already does at startup. No-ops if already started.
+ */
+function startDbHealthCheck(): void {
+  if (dbHealthCheckTimer) return;
+  dbHealthCheckTimer = setInterval(() => {
+    pingDb()
+      .then((ok) => recordDbPing(ok, ok ? undefined : 'DB ping failed'))
+      .catch((err: unknown) => log.error('Unexpected error during DB health check:', err));
+  }, DB_HEALTH_CHECK_INTERVAL_MS);
+  // Doesn't keep the process alive on its own — same reasoning as this codebase's other
+  // background-purge intervals (e.g. twitchEventSubConnection.ts's message-dedup sweep):
+  // shutdown() always clears it explicitly, so unref only matters for a process that would
+  // otherwise exit cleanly (e.g. a test importing this module) with this timer still pending.
+  dbHealthCheckTimer.unref();
+}
+
+/** Stops the periodic DB-connectivity health check, if running. */
+function stopDbHealthCheck(): void {
+  if (dbHealthCheckTimer) { clearInterval(dbHealthCheckTimer); dbHealthCheckTimer = null; }
+}
+
 /**
  * Gracefully stops schedulers and bot connections, closes the DB pool, and exits the process.
  * @param signal - The name of the signal that triggered shutdown (e.g. `SIGINT`).
  */
 async function shutdown(signal: string): Promise<void> {
   log.info(`${signal} received — disconnecting from voice and shutting down.`);
+  stopDbHealthCheck();
   stopCounterScheduler();
   stopChannelReconciliationPoll();
   await stopRewardPricingScheduler();
@@ -101,6 +134,7 @@ async function main(): Promise<void> {
     await conn.ping();
     conn.release();
     log.info('Database connection OK');
+    recordDbPing(true);
   } catch (err) {
     log.error('Cannot connect to database:', err);
     process.exit(1);
@@ -139,12 +173,22 @@ async function main(): Promise<void> {
 
   setChannelJoinedHook(() => reloadEventSubSubscriptions());
   startDiscordBot();
+  registerOwnerAlertRuntime({
+    send: async (discordId, message) => {
+      const client = getDiscordClient();
+      if (!client) throw new Error('Discord client is not ready');
+      const user = await client.users.fetch(discordId);
+      await user.send(message);
+    },
+  });
+  startOwnerAlertWatcher();
   await startTwitchBot();
   startWebPanel();
   startChannelReconciliationPoll();
   startCounterScheduler();
   startRewardPricingScheduler();
   startTimerCommandScheduler();
+  startDbHealthCheck();
 
   startTwitchMonitor().catch((err) => log.error('TwitchMonitor startup error:', err));
   startEventSub();

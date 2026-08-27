@@ -1,5 +1,6 @@
 import { createLogger } from '../shared/logger';
 import { archiveAndResetYearlyCounters } from '../db';
+import { recordSchedulerRun, normalizeError } from '../shared/healthStore';
 
 const log = createLogger('CounterScheduler');
 
@@ -30,10 +31,14 @@ async function tick(myGeneration: number): Promise<void> {
       const count = await archiveAndResetYearlyCounters(prevYear);
       log.info(`Archived and reset ${count} counter(s) for year ${prevYear}.`);
       lastArchivedYear = prevYear;
+      recordSchedulerRun('counter', true);
     } catch (err) {
       log.error(`Failed to archive counters for year ${prevYear}:`, err);
+      recordSchedulerRun('counter', false, normalizeError(err));
       // lastArchivedYear is not set on failure, so the next hourly poll will retry.
     }
+  } else {
+    recordSchedulerRun('counter', true);
   }
 
   // Only reschedule while still the active run — guards both a stop() that raced this

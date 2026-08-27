@@ -1,9 +1,33 @@
 import { createLogger as winstonCreateLogger, format, transports } from 'winston';
+import Transport from 'winston-transport';
 import DailyRotateFile from 'winston-daily-rotate-file';
+import { recordError } from './healthStore';
 
 const LOG_LEVEL = process.env.LOG_LEVEL ?? (process.env.NODE_ENV === 'production' ? 'info' : 'debug');
 const LOG_DIR = 'logs';
 const IS_TEST = !!process.env.VITEST;
+
+/**
+ * Winston transport that forwards every `error`-level log entry into `healthStore`'s bounded
+ * error ring buffer, so the owner health dashboard/`!health` command surface the same
+ * failures that already show up in the logs, without every call site having to remember to
+ * call `recordError` itself. Only every level *at or above* the transport's configured
+ * `level` is forwarded — set to `'error'` below so warn/info/debug entries never reach it.
+ */
+class HealthStoreErrorTransport extends Transport {
+  /**
+   * Winston's transport contract: forwards `info.message` to `healthStore.recordError`
+   * under `info.label` (the module tag set via `createLogger(module)`), then signals
+   * completion via the `logged` event as required by every `winston-transport` subclass.
+   * @param info - The log entry; `label` is the module tag, `message` the formatted text.
+   * @param callback - Invoked once handling is done, per the `winston-transport` contract.
+   */
+  log(info: { label?: string; message?: string }, callback: () => void): void {
+    setImmediate(() => this.emit('logged', info));
+    recordError(info.label ?? 'unknown', info.message ?? '');
+    callback();
+  }
+}
 
 const fileFormat = format.combine(
   format.errors({ stack: true }),
@@ -53,6 +77,10 @@ const rootLogger = winstonCreateLogger({
     new transports.Console({
       format: consoleFormat,
     }),
+    // Error-capturing feeds healthStore's error ring buffer for the owner health
+    // dashboard/`!health` command — skipped in tests so a test asserting on error logs
+    // doesn't also mutate healthStore's shared module state as a side effect.
+    ...(!IS_TEST ? [new HealthStoreErrorTransport({ level: 'error' })] : []),
   ],
 });
 

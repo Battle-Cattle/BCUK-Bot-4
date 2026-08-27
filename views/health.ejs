@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Health</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+<%
+function htmlAttrJson(value) {
+  const replacements = { '&': '&amp;', '"': '&quot;', "'": '&#39;', '<': '&lt;', '>': '&gt;' };
+  return JSON.stringify(value).replace(/[&"'<>]/g, function(char) { return replacements[char] || char; });
+}
+%>
+</head>
+<body data-initial-health="<%- htmlAttrJson(health) %>">
+  <%- include('partials/nav') %>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Bot Health</h2>
+
+      <div class="table-scroll">
+        <table class="table" id="health-table" aria-label="Component health">
+          <thead>
+            <tr>
+              <th scope="col">Component</th>
+              <th scope="col">State</th>
+              <th scope="col">Last event</th>
+              <th scope="col">Last error</th>
+            </tr>
+          </thead>
+          <tbody id="health-table-body">
+            <!-- Populated by /health.js from the server-rendered snapshot and live SSE updates. -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header">
+          <span class="card-icon">&#9888;</span>
+          <span class="card-label">Recent Errors</span>
+        </div>
+        <div id="health-errors">
+          <p class="muted" id="health-errors-empty">No recent errors.</p>
+          <ul class="list-unstyled" id="health-errors-list"></ul>
+        </div>
+      </div>
+    </section>
+  </main>
+  <%- include('partials/pwa-register') %>
+  <%- include('partials/footer') %>
+  <script src="/health.js"></script>
+</body>
+</html>

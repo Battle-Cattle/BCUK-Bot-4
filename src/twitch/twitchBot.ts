@@ -10,6 +10,7 @@ import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { fireAndForget } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
+import { recordTwitchChatConnected } from '../shared/healthStore';
 import { normalizeTwitchChannelName } from './twitchChannelName';
 import { throttledTwitchSend, withTimeout } from './twitchSendQueue';
 import { createLogger } from '../shared/logger';
@@ -232,6 +233,7 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
 function onConnected(): void {
   connected = true;
   setConnected(true);
+  recordTwitchChatConnected(true);
   log.info('Connected to Twitch chat.');
   log.info(`Listening on: ${[...getActiveChannels()].join(', ') || '(none)'}`);
   // Reset every activeChannels entry via setTwitchChannel to a pessimistic
@@ -260,6 +262,7 @@ function onConnected(): void {
 function onDisconnected(manually: boolean, reason?: Error): void {
   connected = false;
   setConnected(false);
+  recordTwitchChatConnected(false);
   log.warn(`Disconnected${manually ? ' (manual)' : ''}: ${reason?.message ?? 'no reason given'}`);
   getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
   privilegedChannels.clear();

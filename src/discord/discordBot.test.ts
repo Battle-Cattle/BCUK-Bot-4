@@ -24,6 +24,8 @@ vi.mock('../commands/counterHandler', () => ({
   forgetGuildCounterCooldown: vi.fn(),
 }));
 vi.mock('../shared/statusStore', () => ({ setDiscordReady: vi.fn(), clearVoiceStatus: vi.fn() }));
+vi.mock('../shared/healthStore', () => ({ recordDiscordConnected: vi.fn() }));
+vi.mock('../commands/healthCommandHandler', () => ({ executeHealthCommandForDiscord: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../audio/audioPlayer', () => ({ forgetGuild: vi.fn() }));
 vi.mock('./guildRefreshState', () => ({ forgetGuildRefreshState: vi.fn() }));
 vi.mock('./guildRegistry', () => ({
@@ -173,6 +175,14 @@ describe('startDiscordBot — messageCreate handler', () => {
     cb(msg);
     expect(vi.mocked(commands.handleCommand)).toHaveBeenCalledWith('!test', 'discord', 'guild-id');
     expect(vi.mocked(customCmds.executeCustomCommandForDiscord)).toHaveBeenCalledWith(msg, 'Alice', 'guild-id');
+  });
+
+  it('dispatches to the health command handler for registered guild messages', async () => {
+    const health = await import('../commands/healthCommandHandler.js');
+    const cb = getMessageCreateCb();
+    const msg = { author: { bot: false, username: 'Alice' }, guildId: 'guild-id', content: '!health', member: { displayName: 'Alice' } };
+    cb(msg);
+    expect(vi.mocked(health.executeHealthCommandForDiscord)).toHaveBeenCalledWith(msg);
   });
 });
 

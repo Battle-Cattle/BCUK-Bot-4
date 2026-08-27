@@ -16,6 +16,7 @@ import {
 import { deleteAnnouncement } from './twitchMonitorAnnouncements';
 import { performStartupLiveCheck } from './twitchMonitorStartup';
 import { handlePollStreamer, dispatchStreamerPolls, withLoginLock } from './twitchMonitorPoll';
+import { recordMonitorPoll, normalizeError } from '../../shared/healthStore';
 
 const log = createLogger('TwitchMonitor');
 
@@ -48,8 +49,10 @@ async function pollStreams(): Promise<void> {
         liveStreams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
       );
       await dispatchStreamerPolls(liveStates, loginToUserId, streamersData, liveByUserId);
+      recordMonitorPoll(true);
     } catch (err) {
       log.error('Poll error:', err);
+      recordMonitorPoll(false, normalizeError(err));
     } finally {
       pollRunning = false;
     }
