@@ -151,25 +151,28 @@ export async function createEventSubSubscription(
  *  returns subscriptions matching that user in any condition.
  *  `sessionId` is the WebSocket session (if any) the subscription is currently bound to — used
  *  to tell a subscription still live on the current connection apart from a stale duplicate
- *  left over from a prior (possibly dead) session. */
+ *  left over from a prior (possibly dead) session. `status` is Twitch's own subscription state
+ *  (e.g. `enabled`, `authorization_revoked`, `notification_failures_exceeded`) — a subscription
+ *  bound to the live session isn't necessarily receiving notifications; callers must check
+ *  `status === 'enabled'` before treating it as such. */
 export async function listEventSubSubscriptions(
   token: string,
   userId?: string,
-): Promise<Array<{ id: string; type: string; condition: Record<string, string>; sessionId?: string }>> {
+): Promise<Array<{ id: string; type: string; condition: Record<string, string>; sessionId?: string; status?: string }>> {
   const url = new URL('https://api.twitch.tv/helix/eventsub/subscriptions');
   if (userId) url.searchParams.set('user_id', userId);
-  const results: Array<{ id: string; type: string; condition: Record<string, string>; sessionId?: string }> = [];
+  const results: Array<{ id: string; type: string; condition: Record<string, string>; sessionId?: string; status?: string }> = [];
   let cursor: string | undefined;
   do {
     if (cursor) url.searchParams.set('after', cursor);
     const res = await twitchFetch(url.toString(), { headers: authHeaders(token) });
     if (!res.ok) throw new Error(`[TwitchAPI] listEventSubSubscriptions failed: ${res.status}`);
     const data = await res.json() as {
-      data: Array<{ id: string; type: string; condition: Record<string, string>; transport?: { session_id?: string } }>;
+      data: Array<{ id: string; type: string; condition: Record<string, string>; transport?: { session_id?: string }; status?: string }>;
       pagination?: { cursor?: string };
     };
     results.push(...data.data.map((sub) => (
-      { id: sub.id, type: sub.type, condition: sub.condition, sessionId: sub.transport?.session_id }
+      { id: sub.id, type: sub.type, condition: sub.condition, sessionId: sub.transport?.session_id, status: sub.status }
     )));
     cursor = data.pagination?.cursor;
   } while (cursor);
