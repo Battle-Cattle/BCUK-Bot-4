@@ -225,10 +225,12 @@ async function ensureSubscription(
   let deleted = false;
   if (existing) {
     log.warn(`Deleting stale ${spec.type} subscription (${existing.id}) for ${name} — bound to a different session or not enabled (status=${existing.status})`);
-    deleted = await deleteEventSubSubscription(existing.id, token).then(() => true).catch((err) => {
+    try {
+      await deleteEventSubSubscription(existing.id, token);
+      deleted = true;
+    } catch (err) {
       log.error(`Failed to delete stale ${spec.type} subscription for ${name}:`, err);
-      return false;
-    });
+    }
   }
   const id = await subscribe(sessionId, spec, token, name);
   return { id, deleted };
