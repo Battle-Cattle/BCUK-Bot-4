@@ -178,10 +178,12 @@ describe('runReconciliationTick', () => {
     await runReconciliationTick();
     expect(handleRedemption).toHaveBeenCalledTimes(3);
 
-    // Next tick should only retry the failed redemption (r3), not the two that already succeeded.
+    // Next tick should only retry the failed redemption (r3), not the two that already succeeded —
+    // return the full page (as Twitch would) so this actually exercises the cursor's own cutoff
+    // filtering in fetchRedemptionsNewerThan, rather than passing merely because the mock omitted r1/r2.
     vi.mocked(handleRedemption).mockClear();
     vi.mocked(handleRedemption).mockResolvedValue(true);
-    mockFulfilledOnly({ redemptions: [redemption('r3', t3)], cursor: null });
+    mockFulfilledOnly({ redemptions: [redemption('r3', t3), redemption('r2', t2), redemption('r1', t1)], cursor: null });
 
     await runReconciliationTick();
 
