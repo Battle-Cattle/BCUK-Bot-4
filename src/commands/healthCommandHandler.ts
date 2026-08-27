@@ -16,6 +16,57 @@ function formatDate(date: Date | null): string {
   return date ? date.toLocaleString() : '—';
 }
 
+/** Formats the Discord/Twitch-chat/DB connectivity lines for the `!health` summary. */
+function formatConnectivityLines(snapshot: HealthSnapshot): string[] {
+  return [
+    `Discord: ${snapshot.discordConnected ? '🟢 connected' : '🔴 disconnected'}`,
+    `Twitch chat: ${snapshot.twitchChatConnected ? '🟢 connected' : '🔴 disconnected'}`,
+    `DB: ${snapshot.db.lastPingOk ? '🟢 ok' : '🔴 failing'} (last ping ${formatDate(snapshot.db.lastPingAt)}${
+      snapshot.db.lastError ? `, last error: ${snapshot.db.lastError}` : ''
+    })`,
+  ];
+}
+
+/** Formats one line per tracked EventSub streamer, or `[]` if none are tracked yet. */
+function formatEventSubLines(snapshot: HealthSnapshot): string[] {
+  const entries = Object.entries(snapshot.eventsub);
+  if (entries.length === 0) return [];
+  return [
+    'EventSub:',
+    ...entries.map(
+      ([streamer, health]) =>
+        `  ${streamer}: ${health.connected ? '🟢 connected' : '🔴 disconnected'} (reconnect attempts: ${health.reconnectAttempts})`,
+    ),
+  ];
+}
+
+/** Formats the Twitch stream-monitor's last-poll line for the `!health` summary. */
+function formatMonitorLine(snapshot: HealthSnapshot): string {
+  return `Monitor: ${snapshot.monitor.lastPollOk ? '🟢 ok' : '🔴 failing'} (last poll ${formatDate(snapshot.monitor.lastPollAt)}${
+    snapshot.monitor.lastError ? `, last error: ${snapshot.monitor.lastError}` : ''
+  })`;
+}
+
+/** Formats one line per tracked scheduler, or `[]` if none are tracked yet. */
+function formatSchedulerLines(snapshot: HealthSnapshot): string[] {
+  const entries = Object.entries(snapshot.schedulers).filter(([, health]) => health !== undefined);
+  if (entries.length === 0) return [];
+  return [
+    'Schedulers:',
+    ...entries.map(
+      ([name, health]) =>
+        `  ${name}: ${health!.lastRunOk ? '🟢 ok' : '🔴 failing'} (last run ${formatDate(health!.lastRunAt)})`,
+    ),
+  ];
+}
+
+/** Formats the most recent errors (newest first, capped at {@link RECENT_ERROR_COUNT}), or `[]` if none. */
+function formatRecentErrorLines(snapshot: HealthSnapshot): string[] {
+  if (snapshot.errors.length === 0) return [];
+  const recent = snapshot.errors.slice(-RECENT_ERROR_COUNT).reverse();
+  return ['Recent errors:', ...recent.map((err) => `  [${formatDate(err.timestamp)}] ${err.module}: ${err.message}`)];
+}
+
 /**
  * Builds the plain-text `!health` summary from a health snapshot: Discord/Twitch chat
  * connection state, the last DB ping, every tracked EventSub streamer's connection status,
@@ -25,50 +76,14 @@ function formatDate(date: Date | null): string {
  * @returns The formatted summary text.
  */
 function formatHealthSummary(snapshot: HealthSnapshot): string {
-  const lines: string[] = ['**Bot Health**'];
-
-  lines.push(`Discord: ${snapshot.discordConnected ? '🟢 connected' : '🔴 disconnected'}`);
-  lines.push(`Twitch chat: ${snapshot.twitchChatConnected ? '🟢 connected' : '🔴 disconnected'}`);
-  lines.push(
-    `DB: ${snapshot.db.lastPingOk ? '🟢 ok' : '🔴 failing'} (last ping ${formatDate(snapshot.db.lastPingAt)}${
-      snapshot.db.lastError ? `, last error: ${snapshot.db.lastError}` : ''
-    })`,
-  );
-
-  const eventsubEntries = Object.entries(snapshot.eventsub);
-  if (eventsubEntries.length > 0) {
-    lines.push('EventSub:');
-    for (const [streamer, health] of eventsubEntries) {
-      lines.push(
-        `  ${streamer}: ${health.connected ? '🟢 connected' : '🔴 disconnected'} (reconnect attempts: ${health.reconnectAttempts})`,
-      );
-    }
-  }
-
-  lines.push(
-    `Monitor: ${snapshot.monitor.lastPollOk ? '🟢 ok' : '🔴 failing'} (last poll ${formatDate(snapshot.monitor.lastPollAt)}${
-      snapshot.monitor.lastError ? `, last error: ${snapshot.monitor.lastError}` : ''
-    })`,
-  );
-
-  const schedulerEntries = Object.entries(snapshot.schedulers);
-  if (schedulerEntries.length > 0) {
-    lines.push('Schedulers:');
-    for (const [name, health] of schedulerEntries) {
-      if (!health) continue;
-      lines.push(`  ${name}: ${health.lastRunOk ? '🟢 ok' : '🔴 failing'} (last run ${formatDate(health.lastRunAt)})`);
-    }
-  }
-
-  if (snapshot.errors.length > 0) {
-    lines.push('Recent errors:');
-    const recent = snapshot.errors.slice(-RECENT_ERROR_COUNT).reverse();
-    for (const err of recent) {
-      lines.push(`  [${formatDate(err.timestamp)}] ${err.module}: ${err.message}`);
-    }
-  }
-
-  return lines.join('\n');
+  return [
+    '**Bot Health**',
+    ...formatConnectivityLines(snapshot),
+    ...formatEventSubLines(snapshot),
+    formatMonitorLine(snapshot),
+    ...formatSchedulerLines(snapshot),
+    ...formatRecentErrorLines(snapshot),
+  ].join('\n');
 }
 
 /**
