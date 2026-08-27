@@ -185,7 +185,9 @@ async function createSubscriptionsForStreamer(
 /** Fetches existing EventSub subscriptions and filters out any that Twitch returned only because
  *  this streamer moderates a different broadcaster's channel (see {@link isOwnSubscription}).
  *  Returns an empty array (and logs) on failure — callers treat that the same as "nothing exists
- *  yet" and create fresh. */
+ *  yet" and create fresh. Each returned subscription's `status` is Twitch's own subscription state
+ *  (see {@link ensureSubscription}) — callers must not assume a matching type/condition/session is
+ *  actually receiving notifications without also checking it. */
 async function listOwnSubscriptions(
   token: string, uid: string, name: string,
 ): Promise<Array<{ id: string; type: string; condition: Record<string, string>; sessionId?: string; status?: string }>> {
