@@ -298,6 +298,25 @@ describe('subscribeForStreamer', () => {
     expect(createEventSubSubscription).not.toHaveBeenCalled();
   });
 
+  it('returns 0 when every subscribe attempt fails with a missing scope, even though subscriptions are desired', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+    vi.mocked(createEventSubSubscription).mockRejectedValue(new TwitchAuthError('403'));
+
+    const count = await subscribeForStreamer('sess-noscope', {
+      uid: 'uid-noscope',
+      token: 'tok-noscope',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 20,
+    });
+
+    // Every desired type failed to subscribe (missing OAuth scope), so nothing is actually live —
+    // the count must reflect that, not the non-empty desired set, so a caller's zero-subscriptions
+    // self-stop check can detect this connection has no working subscriptions.
+    expect(count).toBe(0);
+  });
+
   it('calls createEventSubSubscription for enabled subscription types', async () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
