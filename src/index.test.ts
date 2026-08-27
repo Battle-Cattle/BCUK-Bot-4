@@ -236,6 +236,20 @@ describe('startup — reward pricing scheduler', () => {
     expect(vi.mocked(startChannelReconciliationPoll)).toHaveBeenCalledOnce();
     expect(exitSpy).not.toHaveBeenCalled();
   });
+
+  it('starts the web panel before the channel reconciliation poll, matching the documented startup sequence', async () => {
+    const { startWebPanel } = await import('./web/server.js');
+    const { startChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
+
+    await runMain();
+
+    expect(vi.mocked(startWebPanel)).toHaveBeenCalledOnce();
+    expect(vi.mocked(startChannelReconciliationPoll)).toHaveBeenCalledOnce();
+
+    const [webPanelCallOrder] = vi.mocked(startWebPanel).mock.invocationCallOrder;
+    const [reconciliationCallOrder] = vi.mocked(startChannelReconciliationPoll).mock.invocationCallOrder;
+    expect(webPanelCallOrder).toBeLessThan(reconciliationCallOrder);
+  });
 });
 
 describe('shutdown', () => {
