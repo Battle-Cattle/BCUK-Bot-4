@@ -352,6 +352,25 @@ describe('subscribeForStreamer', () => {
     expect(deleteEventSubSubscription).toHaveBeenCalledWith('stale-sub', 'tok-z');
   });
 
+  it('lists existing EventSub subscriptions only once per round, reusing it for both matching and stale cleanup', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      { id: 'stale-sub', type: 'channel.subscribe', condition: { broadcaster_user_id: 'uid-once' } },
+    ] as any);
+
+    await subscribeForStreamer('sess-once', {
+      uid: 'uid-once',
+      token: 'tok-once',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 21,
+    });
+
+    expect(listEventSubSubscriptions).toHaveBeenCalledTimes(1);
+    expect(deleteEventSubSubscription).toHaveBeenCalledWith('stale-sub', 'tok-once');
+  });
+
   it('never deletes an undesired-type subscription belonging to a different broadcaster the streamer merely moderates', async () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
@@ -450,6 +469,9 @@ describe('subscribeForStreamer', () => {
       'channel.follow', '2', { broadcaster_user_id: 'uid-revoked', moderator_user_id: 'uid-revoked' },
       'sess-revoked', 'tok-revoked',
     );
+    // Only deleted once — the shared own-subscriptions snapshot handed to the stale-cleanup pass
+    // must exclude this id too (not just session-mismatch deletions), or it would be deleted twice.
+    expect(deleteEventSubSubscription).toHaveBeenCalledTimes(1);
     expect(count).toBeGreaterThan(0);
   });
 
@@ -512,6 +534,9 @@ describe('subscribeForStreamer', () => {
       'channel.follow', '2', { broadcaster_user_id: 'uid-stale-session', moderator_user_id: 'uid-stale-session' },
       'sess-new-live', 'tok-stale-session',
     );
+    // Only deleted once — the reused own-subscriptions listing must not let the later stale-cleanup
+    // pass attempt to delete the same id a second time (it was already removed above).
+    expect(deleteEventSubSubscription).toHaveBeenCalledTimes(1);
   });
 
   it('ignores a same-type subscription belonging to a different broadcaster the streamer merely moderates, rather than keeping or deleting it', async () => {
@@ -788,12 +813,12 @@ describe('error handling in subscription setup', () => {
     expect(count).toBeGreaterThan(0);
   });
 
-  it('logs and continues when listing existing subscriptions fails during cleanup', async () => {
+  it('treats a failed listing as no existing subscriptions for both creation and cleanup, from a single fetch', async () => {
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
-    // First call (pre-create lookup) succeeds; second call (deleteStaleSubscriptions) fails.
-    vi.mocked(listEventSubSubscriptions)
-      .mockResolvedValueOnce([])
-      .mockRejectedValueOnce(new Error('list failed'));
+    // Only one Helix listing call is made per subscribeForStreamer round (shared between the
+    // create-side match lookup and the cleanup step) — its failure means both treat it as if
+    // nothing exists: creation proceeds fresh, and cleanup has nothing to delete.
+    vi.mocked(listEventSubSubscriptions).mockRejectedValueOnce(new Error('list failed'));
 
     const count = await subscribeForStreamer('sess-err2', {
       uid: 'uid-err2',
@@ -803,7 +828,11 @@ describe('error handling in subscription setup', () => {
       streamerId: 70,
     });
 
-    expect(logMock.error).toHaveBeenCalledWith('Subscription cleanup failed for uid uid-err2:', expect.any(Error));
+    expect(listEventSubSubscriptions).toHaveBeenCalledTimes(1);
+    expect(logMock.error).toHaveBeenCalledWith(
+      'Failed to list existing EventSub subscriptions for errStreamer:', expect.any(Error),
+    );
+    expect(deleteEventSubSubscription).not.toHaveBeenCalled();
     expect(count).toBeGreaterThan(0);
   });
 
