@@ -178,8 +178,8 @@ async function createSubscriptionsForStreamer(
       const match = ownSubscriptions.find(
         (sub) => sub.type === spec.type && conditionsEqual(sub.condition, spec.condition),
       );
-      if (match && (match.sessionId !== sessionId || match.status !== 'enabled')) deletedThisRound.add(match.id);
-      const id = await ensureSubscription(sessionId, spec, token, name, match);
+      const { id, deleted } = await ensureSubscription(sessionId, spec, token, name, match);
+      if (deleted && match) deletedThisRound.add(match.id);
       if (id !== null) created.set(spec.type, id);
     }
   }
@@ -212,20 +212,26 @@ async function listOwnSubscriptions(
  * in which case it isn't actually receiving notifications and must not be counted as live — deletes
  * one that's stale (bound to a different session, or not enabled) before recreating it, or creates
  * fresh if none exists.
- * @returns The live subscription's id, or null if creation failed (see {@link subscribe}).
+ * @returns The live subscription's id (or null if creation failed — see {@link subscribe}), and
+ *   whether a stale `existing` subscription was actually deleted here — `false` on a failed delete
+ *   attempt, so the caller knows not to treat that id as already gone (it must remain eligible for
+ *   {@link deleteStaleSubscriptions} to retry in the same round).
  */
 async function ensureSubscription(
   sessionId: string, spec: SubSpec, token: string, name: string,
   existing: { id: string; sessionId?: string; status?: string } | undefined,
-): Promise<string | null> {
-  if (existing && existing.sessionId === sessionId && existing.status === 'enabled') return existing.id;
+): Promise<{ id: string | null; deleted: boolean }> {
+  if (existing && existing.sessionId === sessionId && existing.status === 'enabled') return { id: existing.id, deleted: false };
+  let deleted = false;
   if (existing) {
     log.warn(`Deleting stale ${spec.type} subscription (${existing.id}) for ${name} — bound to a different session or not enabled (status=${existing.status})`);
-    await deleteEventSubSubscription(existing.id, token).catch((err) => {
+    deleted = await deleteEventSubSubscription(existing.id, token).then(() => true).catch((err) => {
       log.error(`Failed to delete stale ${spec.type} subscription for ${name}:`, err);
+      return false;
     });
   }
-  return subscribe(sessionId, spec, token, name);
+  const id = await subscribe(sessionId, spec, token, name);
+  return { id, deleted };
 }
 
 /**
