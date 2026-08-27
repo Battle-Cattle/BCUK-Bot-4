@@ -311,6 +311,19 @@ describe('listEventSubSubscriptions', () => {
     ]);
   });
 
+  it('preserves each subscription\'s Twitch status in the mapped result', async () => {
+    const apiResponse = [
+      { id: 's1', type: 'channel.follow', condition: {}, status: 'enabled' },
+      { id: 's2', type: 'channel.follow', condition: {}, status: 'authorization_revoked' },
+    ];
+    vi.mocked(twitchFetch).mockResolvedValue(mockFetch(200, { data: apiResponse }));
+
+    const result = await listEventSubSubscriptions('token');
+
+    expect(result[0].status).toBe('enabled');
+    expect(result[1].status).toBe('authorization_revoked');
+  });
+
   it('paginates when a cursor is present', async () => {
     vi.mocked(twitchFetch)
       .mockResolvedValueOnce(mockFetch(200, { data: [{ id: 's1', type: 't1' }], pagination: { cursor: 'cursor1' } }))
