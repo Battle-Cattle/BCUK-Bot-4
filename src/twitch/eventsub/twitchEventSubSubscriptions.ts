@@ -241,7 +241,11 @@ export async function loadStreamersForEventSub(): Promise<StreamerEventSubData[]
 
 /** Creates all subscriptions for one streamer on their dedicated session, updates the
  *  dispatch-side streamer map, and cleans up stale subscriptions. Returns the count of
- *  desired subscriptions. */
+ *  subscriptions actually created or confirmed already-live this round — not merely desired —
+ *  since callers (e.g. `StreamerConnection`'s zero-subscriptions self-stop check) rely on this
+ *  to detect a connection with no working subscriptions, which `desired`'s count alone can't:
+ *  every desired type could still fail to subscribe (e.g. a missing OAuth scope) while `desired`
+ *  stays non-empty. */
 export async function subscribeForStreamer(
   sessionId: string, data: StreamerEventSubData,
 ): Promise<number> {
@@ -249,7 +253,7 @@ export async function subscribeForStreamer(
   setStreamerInfo(uid, { login: name, streamerId, config });
   const { desired, created } = await createSubscriptionsForStreamer(sessionId, data);
   await deleteStaleSubscriptions(uid, desired, created, token);
-  return desired.size;
+  return created.size;
 }
 
 /** Creates a single EventSub subscription. Returns the created subscription's id, or null if
