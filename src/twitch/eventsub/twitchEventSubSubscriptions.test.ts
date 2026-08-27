@@ -298,6 +298,25 @@ describe('subscribeForStreamer', () => {
     expect(createEventSubSubscription).not.toHaveBeenCalled();
   });
 
+  it('returns 0 when every subscribe attempt fails with a missing scope, even though subscriptions are desired', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+    vi.mocked(createEventSubSubscription).mockRejectedValue(new TwitchAuthError('403'));
+
+    const count = await subscribeForStreamer('sess-noscope', {
+      uid: 'uid-noscope',
+      token: 'tok-noscope',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 20,
+    });
+
+    // Every desired type failed to subscribe (missing OAuth scope), so nothing is actually live —
+    // the count must reflect that, not the non-empty desired set, so a caller's zero-subscriptions
+    // self-stop check can detect this connection has no working subscriptions.
+    expect(count).toBe(0);
+  });
+
   it('calls createEventSubSubscription for enabled subscription types', async () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
@@ -362,7 +381,7 @@ describe('subscribeForStreamer', () => {
     // "enabled" and shows up alongside the one already live on this round's session.
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([
       {
-        id: 'sub-new-follow', type: 'channel.follow', sessionId: 'sess-dup',
+        id: 'sub-new-follow', type: 'channel.follow', sessionId: 'sess-dup', status: 'enabled',
         condition: { broadcaster_user_id: 'uid-dup', moderator_user_id: 'uid-dup' },
       },
       { id: 'sub-stale-follow', type: 'channel.follow', condition: { broadcaster_user_id: 'uid-dup', moderator_user_id: 'uid-dup' } },
@@ -384,7 +403,7 @@ describe('subscribeForStreamer', () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([
       {
-        id: 'sub-live-follow', type: 'channel.follow', sessionId: 'sess-live-409',
+        id: 'sub-live-follow', type: 'channel.follow', sessionId: 'sess-live-409', status: 'enabled',
         condition: { broadcaster_user_id: 'uid-409', moderator_user_id: 'uid-409' },
       },
     ] as any);
@@ -402,6 +421,35 @@ describe('subscribeForStreamer', () => {
       'channel.follow', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
     );
     expect(deleteEventSubSubscription).not.toHaveBeenCalledWith('sub-live-follow', 'tok-409');
+    expect(count).toBeGreaterThan(0);
+  });
+
+  it('recreates a subscription bound to the live session but not enabled, rather than counting it as live', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-fresh-follow-reenabled');
+    // Bound to our own live session, but Twitch has marked it non-enabled (e.g. the streamer
+    // briefly revoked and re-granted authorization) — it isn't actually receiving notifications,
+    // so it must not be mistaken for a working subscription just because the session id matches.
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      {
+        id: 'sub-revoked-follow', type: 'channel.follow', sessionId: 'sess-revoked', status: 'authorization_revoked',
+        condition: { broadcaster_user_id: 'uid-revoked', moderator_user_id: 'uid-revoked' },
+      },
+    ] as any);
+
+    const count = await subscribeForStreamer('sess-revoked', {
+      uid: 'uid-revoked',
+      token: 'tok-revoked',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 23,
+    });
+
+    expect(deleteEventSubSubscription).toHaveBeenCalledWith('sub-revoked-follow', 'tok-revoked');
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.follow', '2', { broadcaster_user_id: 'uid-revoked', moderator_user_id: 'uid-revoked' },
+      'sess-revoked', 'tok-revoked',
+    );
     expect(count).toBeGreaterThan(0);
   });
 
@@ -444,7 +492,7 @@ describe('subscribeForStreamer', () => {
     // a session id that's no longer the live one.
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([
       {
-        id: 'sub-dead-follow', type: 'channel.follow', sessionId: 'sess-old-dead',
+        id: 'sub-dead-follow', type: 'channel.follow', sessionId: 'sess-old-dead', status: 'enabled',
         condition: { broadcaster_user_id: 'uid-stale-session', moderator_user_id: 'uid-stale-session' },
       },
     ] as any);
