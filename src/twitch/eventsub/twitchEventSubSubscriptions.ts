@@ -141,10 +141,11 @@ function conditionsEqual(a: Record<string, string>, b: Record<string, string>): 
 /**
  * Creates all desired EventSub subscriptions for a single streamer. Before creating each spec,
  * checks whether Twitch already has a subscription matching both its type *and* condition
- * exactly: if it's bound to the live `sessionId`, it's kept as-is (no redundant create call); if
- * it's bound to any other session id — a duplicate left over from a dead/prior connection (e.g.
- * after `onError`/`forceReconnect` tore down a socket without a clean close, so Twitch hadn't yet
- * revoked its subscriptions) — it's deleted first so the fresh create can't 409 against it and
+ * exactly: if it's bound to the live `sessionId` and `enabled`, it's kept as-is (no redundant
+ * create call); otherwise — bound to any other session id (a duplicate left over from a dead/prior
+ * connection, e.g. after `onError`/`forceReconnect` tore down a socket without a clean close, so
+ * Twitch hadn't yet revoked its subscriptions) or bound to the live session but not `enabled`
+ * (e.g. `authorization_revoked`) — it's deleted first so the fresh create can't 409 against it and
  * leave the *new* session with no working subscription for that spec.
  * @returns The desired-types set alongside a type → id map of subscriptions actually created (or
  *   confirmed already-live on this session) this round (a type is absent from `created` only on a
@@ -187,7 +188,7 @@ async function createSubscriptionsForStreamer(
  *  yet" and create fresh. */
 async function listOwnSubscriptions(
   token: string, uid: string, name: string,
-): Promise<Array<{ id: string; type: string; condition: Record<string, string>; sessionId?: string }>> {
+): Promise<Array<{ id: string; type: string; condition: Record<string, string>; sessionId?: string; status?: string }>> {
   try {
     const existing = await listEventSubSubscriptions(token);
     return existing.filter((sub) => isOwnSubscription(sub.condition, uid));
@@ -199,17 +200,20 @@ async function listOwnSubscriptions(
 
 /**
  * Ensures a single subscription type is live on the given session: keeps an existing
- * subscription that's already bound to `sessionId`, deletes one bound to any other (stale/dead)
- * session before recreating it, or creates fresh if none exists.
+ * subscription that's already bound to `sessionId` *and* `enabled` — a subscription can be bound
+ * to the live session yet not `enabled` (e.g. `authorization_revoked`, `notification_failures_exceeded`),
+ * in which case it isn't actually receiving notifications and must not be counted as live — deletes
+ * one that's stale (bound to a different session, or not enabled) before recreating it, or creates
+ * fresh if none exists.
  * @returns The live subscription's id, or null if creation failed (see {@link subscribe}).
  */
 async function ensureSubscription(
   sessionId: string, spec: SubSpec, token: string, name: string,
-  existing: { id: string; sessionId?: string } | undefined,
+  existing: { id: string; sessionId?: string; status?: string } | undefined,
 ): Promise<string | null> {
-  if (existing && existing.sessionId === sessionId) return existing.id;
+  if (existing && existing.sessionId === sessionId && existing.status === 'enabled') return existing.id;
   if (existing) {
-    log.warn(`Deleting stale ${spec.type} subscription (${existing.id}) for ${name} — bound to a different session`);
+    log.warn(`Deleting stale ${spec.type} subscription (${existing.id}) for ${name} — bound to a different session or not enabled (status=${existing.status})`);
     await deleteEventSubSubscription(existing.id, token).catch((err) => {
       log.error(`Failed to delete stale ${spec.type} subscription for ${name}:`, err);
     });
