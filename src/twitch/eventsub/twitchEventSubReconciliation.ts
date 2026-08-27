@@ -78,12 +78,14 @@ async function fetchRedemptionsNewerThan(
  * since this poll's lookback window routinely re-fetches redemptions the WebSocket already
  * handled fine.
  *
- * The cursor only advances past a redemption once `handleRedemption` has actually succeeded for
- * it; if any redemption in this tick fails to handle, the cursor is left exactly where it was
- * before this tick, so every redemption fetched this tick (including ones that already
- * succeeded) is retried on the next tick. That reprocessing is safe: it lands well within
- * `handleRedemption`'s own redemption-id dedup TTL, so an already-handled redemption is a no-op
- * there rather than a real duplicate.
+ * The cursor advances independently per outcome: past every redemption that `handleRedemption`
+ * actually succeeded for, but never past a redemption that failed to handle. This matters when a
+ * tick has a mix of successes and failures (e.g. a transient failure partway through a batch) —
+ * only the failed (and anything newer) redemptions are retried on the next tick, rather than
+ * re-replaying already-succeeded ones. Re-replaying a success is not always a safe no-op: it's
+ * only deduped by `handleRedemption`'s redemption-id TTL, which a sustained run of failures could
+ * outlast, so keeping the cursor pinned in front of anything unhandled — instead of freezing it
+ * for the whole tick — bounds how far behind an already-succeeded redemption can fall.
  *
  * @param info - Dispatch info for the redemption's streamer (login/streamerId/config).
  * @param uid - Broadcaster's Twitch user ID.
@@ -109,8 +111,8 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
     return;
   }
 
-  let maxSeen = cutoff;
-  let hadFailure = false;
+  let succeededMax: number | null = null;
+  let failedMin: number | null = null;
   for (const r of redemptions) {
     const redeemedAt = Date.parse(r.redeemed_at);
     if (!Number.isFinite(redeemedAt)) continue;
@@ -122,13 +124,16 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
       if (processed) {
         log.warn(`Reconciliation caught a redemption missed by EventSub: "${r.reward.title}" (id=${r.id}) for ${info.login}`);
       }
-      if (redeemedAt > maxSeen) maxSeen = redeemedAt;
+      if (succeededMax === null || redeemedAt > succeededMax) succeededMax = redeemedAt;
     } catch (err) {
       log.error(`Reconciled-redemption handler error for redemption ${r.id} (${info.login}):`, err);
-      hadFailure = true;
+      if (failedMin === null || redeemedAt < failedMin) failedMin = redeemedAt;
     }
   }
-  if (!hadFailure) lastSeenRedeemedAt.set(key, maxSeen);
+  // Every redemption fetched this tick has redeemedAt > cutoff, so failedMin - 1 never moves the
+  // cursor backwards past where it already was.
+  const newCursor = failedMin !== null ? failedMin - 1 : (succeededMax ?? cutoff);
+  lastSeenRedeemedAt.set(key, newCursor);
 }
 
 /**
