@@ -269,3 +269,76 @@ export function createStreamerSseEventsHandler<K>(
     attachSseConnection(req, res, { connections, key: resolveKey(streamer), maxPerChannel });
   };
 }
+
+/** Options for {@link createOverlayStatusEventsHandler}. */
+export interface OverlayStatusEventsHandlerOptions {
+  /** In-memory map of active status-stream SSE connections, keyed by streamer ID. */
+  statusConnections: Map<number, Set<Response>>;
+  /** The overlay's own connections map (e.g. from `overlaySource.ts`/`alertsOverlaySource.ts`), keyed by lowercased Twitch login — polled to derive `connected`. */
+  overlayConnections: Map<string, Set<Response>>;
+  /** Maximum concurrent status-stream connections permitted per streamer. */
+  maxPerChannel: number;
+  /** How often (ms) to re-check `overlayConnections` for a state change. */
+  pollIntervalMs: number;
+  /** Logger used to report an unexpected streamer lookup failure. */
+  log: ReturnType<typeof createLogger>;
+}
+
+/**
+ * Builds a `/settings/events`-style SSE route handler streaming `{ connected: boolean }`
+ * snapshots of whether the logged-in user's own browser-source overlay currently has an open
+ * connection, so a settings page can show a live status dot instead of the user only finding out
+ * something's wrong when an overlay never fires. Shared by the reward-video and alerts overlay
+ * settings pages (`overlayAdmin.ts`/`alertsAdmin.ts`) — each keeps its own `statusConnections` and
+ * `overlayConnections` maps, since those differ, but the "resolve the session's streamer, then
+ * poll for a connection-count change" lifecycle is identical. Polls on an interval rather than
+ * reacting to a push event, since opening/closing an overlay's own SSE connection has no existing
+ * event to subscribe to.
+ * @param options - See {@link OverlayStatusEventsHandlerOptions}.
+ * @returns An Express route handler: replies 403 if the user isn't a monitored streamer with a
+ *   linked Twitch channel, 500 (logged) if the streamer lookup fails, 429 if `maxPerChannel` is
+ *   exceeded, otherwise upgrades to `text/event-stream` and tears down the poll interval (along
+ *   with the connection itself) on client disconnect.
+ */
+export function createOverlayStatusEventsHandler(
+  options: OverlayStatusEventsHandlerOptions,
+): (req: Request, res: Response) => Promise<void> {
+  const { statusConnections, overlayConnections, maxPerChannel, pollIntervalMs, log } = options;
+
+  return async (req, res) => {
+    let streamer: DbStreamerEventSub | null;
+    try {
+      streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
+    } catch (err) {
+      log.error('Failed to resolve streamer for overlay status SSE:', err);
+      res.status(500).end();
+      return;
+    }
+    if (!streamer || !streamer.twitch_name) {
+      res.status(403).end();
+      return;
+    }
+
+    const attached = attachSseConnection(req, res, {
+      connections: statusConnections,
+      key: streamer.id,
+      maxPerChannel,
+    });
+    if (!attached) return;
+
+    const streamerId = streamer.id;
+    const login = streamer.twitch_name.toLowerCase();
+    let lastConnected: boolean | null = null;
+
+    const check = (): void => {
+      const isConnected = (overlayConnections.get(login)?.size ?? 0) > 0;
+      if (isConnected === lastConnected) return;
+      lastConnected = isConnected;
+      broadcastToChannel(statusConnections, streamerId, { connected: isConnected });
+    };
+
+    check();
+    const interval = setInterval(check, pollIntervalMs);
+    req.on('close', () => clearInterval(interval));
+  };
+}

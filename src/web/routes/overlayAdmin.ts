@@ -14,7 +14,7 @@ import { renderError, renderView } from './viewHelpers';
 import { router as mutationsRouter, MAX_UPLOAD_MB } from './overlayAdminMutations';
 import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';
 import { connections as overlaySourceConnections } from './overlaySource';
-import { attachSseConnection, broadcastToChannel } from './sseChannel';
+import { createOverlayStatusEventsHandler } from './sseChannel';
 
 const log = createLogger('OverlayAdmin');
 const router = Router();
@@ -102,51 +102,22 @@ router.get('/controller/settings', requireAuth, csrfProtection, (req, res) => {
  * GET /overlay/settings/events — SSE endpoint streaming `{ connected: boolean }` snapshots of
  * whether the logged-in user's own reward-video browser source currently has an open connection,
  * so the settings page can show a live status dot instead of the user only finding out something's
- * wrong when a reward video never plays. Polls the shared `overlaySource` connections map on an
- * interval rather than reacting to a push event, since opening/closing that overlay's SSE
- * connection has no existing event to subscribe to.
+ * wrong when a reward video never plays. Connection lifecycle and status-polling logic (streamer
+ * resolution, SSE handshake, poll-and-broadcast-on-change, and interval cleanup) is shared with
+ * the alerts overlay via `createOverlayStatusEventsHandler`.
  * @param req - Express request; reads `req.session.user`.
  * @param res - Express response; upgrades to a `text/event-stream` connection kept alive with
  *   periodic pings and torn down (including the status-poll interval) on client disconnect;
  *   replies 403 if the user isn't a monitored streamer with a linked Twitch channel, 500 (logged)
  *   if the streamer lookup fails, or 429 if the connection limit is exceeded.
  */
-router.get('/settings/events', requireAuth, async (req, res) => {
-  let streamer: DbStreamerEventSub | null;
-  try {
-    streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
-  } catch (err) {
-    log.error('Failed to resolve streamer for overlay status SSE:', err);
-    res.status(500).end();
-    return;
-  }
-  if (!streamer || !streamer.twitch_name) {
-    res.status(403).end();
-    return;
-  }
-
-  const attached = attachSseConnection(req, res, {
-    connections: statusConnections,
-    key: streamer.id,
-    maxPerChannel: OVERLAY_STATUS_MAX_SSE_PER_STREAMER,
-  });
-  if (!attached) return;
-
-  const streamerId = streamer.id;
-  const login = streamer.twitch_name.toLowerCase();
-  let lastConnected: boolean | null = null;
-
-  const check = (): void => {
-    const isConnected = (overlaySourceConnections.get(login)?.size ?? 0) > 0;
-    if (isConnected === lastConnected) return;
-    lastConnected = isConnected;
-    broadcastToChannel(statusConnections, streamerId, { connected: isConnected });
-  };
-
-  check();
-  const interval = setInterval(check, STATUS_POLL_INTERVAL_MS);
-  req.on('close', () => clearInterval(interval));
-});
+router.get('/settings/events', requireAuth, createOverlayStatusEventsHandler({
+  statusConnections,
+  overlayConnections: overlaySourceConnections,
+  maxPerChannel: OVERLAY_STATUS_MAX_SSE_PER_STREAMER,
+  pollIntervalMs: STATUS_POLL_INTERVAL_MS,
+  log,
+}));
 
 router.use(mutationsRouter);
 router.use(rewardMutationsRouter);
