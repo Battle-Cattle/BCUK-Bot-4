@@ -10,6 +10,7 @@ vi.mock('./twitchEventSubSubscriptions', () => ({
 vi.mock('../../shared/healthStore', () => ({
   recordEventSubConnected: vi.fn(),
   recordEventSubReconnectAttempt: vi.fn(),
+  removeEventSubHealth: vi.fn(),
 }));
 
 import {
@@ -26,7 +27,7 @@ import {
   handleRevocation,
   removeStreamerFromMap,
 } from './twitchEventSubSubscriptions';
-import { recordEventSubConnected } from '../../shared/healthStore';
+import { recordEventSubConnected, removeEventSubHealth } from '../../shared/healthStore';
 
 // ---------------------------------------------------------------------------
 // buildReconnectUrl
@@ -340,6 +341,15 @@ describe('StreamerConnection lifecycle', () => {
     expect(ws.close).toHaveBeenCalledWith(1000, 'shutdown');
     expect((conn as any).ws).toBeNull();
     expect(removeStreamerFromMap).toHaveBeenCalledWith('uid-123');
+  });
+
+  it('stop() removes the streamer\'s health record entirely, rather than leaving it reported as disconnected', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+
+    conn.stop();
+
+    expect(removeEventSubHealth).toHaveBeenCalledWith('streamer');
   });
 
   it('does not reconnect after a close once stopped', () => {

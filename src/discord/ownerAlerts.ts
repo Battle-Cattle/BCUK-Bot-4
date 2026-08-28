@@ -191,8 +191,28 @@ function handleHealthChanged(): void {
 }
 
 /**
+ * Seeds this watcher's baseline component state and owner-ID cache from the current health
+ * snapshot, without sending any alerts. Call once from `index.ts`, after
+ * {@link registerOwnerAlertRuntime} and before {@link startOwnerAlertWatcher} — otherwise the
+ * watcher's first health-changed notification would compare against an empty baseline and fire
+ * false "down" alerts for components still mid-startup (e.g. Twitch chat, before
+ * `startTwitchBot()` has run). Also resolves and caches the owner's Discord ID up front (via
+ * {@link resolveOwnerDiscordId}) so the very first real failure — e.g. a DB outage — doesn't skip
+ * its alert because `cachedOwnerDiscordId` was never populated yet.
+ */
+export async function primeOwnerAlertBaseline(): Promise<void> {
+  const snapshot = getHealthSnapshot();
+  const componentOks = deriveComponentOks(snapshot);
+  const now = Date.now();
+  for (const [componentId, { ok }] of componentOks) {
+    componentStates.set(componentId, { failing: !ok, lastAlertAt: now });
+  }
+  await resolveOwnerDiscordId();
+}
+
+/**
  * Subscribes to `healthStore.onHealthChanged` and starts sending owner DM alerts on
- * component health transitions. Call once from `index.ts` after {@link registerOwnerAlertRuntime}.
+ * component health transitions. Call once from `index.ts`, after {@link primeOwnerAlertBaseline}.
  * Idempotent — a second call is a no-op, so it can never register a duplicate listener.
  */
 export function startOwnerAlertWatcher(): void {

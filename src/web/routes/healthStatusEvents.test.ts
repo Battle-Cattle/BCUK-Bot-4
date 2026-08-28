@@ -23,6 +23,38 @@ import router from './healthStatusEvents';
 import { onHealthChanged, getHealthSnapshot } from '../../shared/healthStore';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
+/** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely — mirrors `dashboardStatusEvents.test.ts`'s helper of the same name. */
+function getRouteHandler(routePath: string): (req: any, res: any, next: any) => void {
+  const layer = (router as any).stack.find((l: any) => l.route?.path === routePath);
+  return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+/** Builds a fake Express `res` covering the SSE-specific methods used by `attachSseConnection`. */
+function makeSseRes() {
+  return {
+    setHeader: vi.fn(),
+    flushHeaders: vi.fn(),
+    write: vi.fn(),
+    status: vi.fn().mockReturnThis(),
+    end: vi.fn(),
+    on: vi.fn(),
+  };
+}
+
+/** Builds a fake Express `req` with an owner session and a `close`-event hook, plus a `triggerClose()` helper to simulate the client disconnecting. */
+function makeSseReq() {
+  let closeCb: (() => void) | undefined;
+  return {
+    req: {
+      session: { user: OWNER_SESSION_USER },
+      on: (event: string, cb: () => void) => {
+        if (event === 'close') closeCb = cb;
+      },
+    },
+    triggerClose: () => closeCb?.(),
+  };
+}
+
 const OWNER_SESSION_USER = {
   discordId: '1',
   discordName: 'Owner',
@@ -68,37 +100,17 @@ describe('pushHealthUpdate (registered onHealthChanged listener)', () => {
   });
 });
 
-describe('GET /events — initial snapshot push', () => {
-  /**
-   * Opens an SSE connection and resolves once the first `data:` frame has been written,
-   * leaving the stream open.
-   * @returns The response status, the SSE body received so far, and a `close()` callback that
-   * emits `'close'` on the underlying request so the test can release the connection.
-   */
-  function connect(): Promise<{ status: number; body: string; close: () => void }> {
-    const req = supertest(buildApp(OWNER_SESSION_USER)).get('/events');
-    return new Promise((resolve) => {
-      let body = '';
-      req
-        .buffer(false)
-        .parse((res, _cb) => {
-          res.on('data', (chunk: Buffer) => {
-            body += chunk.toString();
-            if (body.includes('data:')) {
-              resolve({ status: res.statusCode ?? 0, body, close: () => (res as any).req.emit('close') });
-            }
-          });
-          (res as any).resume();
-        })
-        .end();
-    });
-  }
-
+describe('GET /events — initial snapshot push (direct handler invocation)', () => {
   it('pushes the current snapshot immediately once a connection is accepted', async () => {
     vi.mocked(getHealthSnapshot).mockReturnValue({ discordConnected: true, marker: 'initial-push' } as any);
-    const { status, body, close } = await connect();
-    expect(status).toBe(200);
-    expect(body).toContain('initial-push');
-    close();
+    const handler = getRouteHandler('/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq();
+
+    await handler(req, res, vi.fn());
+
+    expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ discordConnected: true, marker: 'initial-push' })}\n\n`);
+
+    triggerClose(); // clears the keepalive interval so it doesn't leak into other tests
   });
 });

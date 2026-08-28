@@ -160,6 +160,18 @@ export function recordEventSubConnected(streamer: string, connected: boolean, er
 }
 
 /**
+ * Removes a streamer's EventSub health record entirely, e.g. when its connection is stopped
+ * for good (no subscriptions left) rather than reconnecting — otherwise it would keep reporting
+ * as "disconnected" indefinitely for a streamer that was intentionally removed. No-ops if the
+ * streamer has no recorded health. Notifies registered listeners.
+ * @param streamer - Streamer key (matches the name used elsewhere for this connection).
+ */
+export function removeEventSubHealth(streamer: string): void {
+  if (!state.eventsub.delete(streamer)) return;
+  notifyHealthChanged();
+}
+
+/**
  * Increments a streamer's EventSub reconnect-attempt counter, creating its health record on
  * first use. Notifies registered listeners.
  * @param streamer - Streamer key (matches the name used elsewhere for this connection).

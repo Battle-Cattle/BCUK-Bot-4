@@ -72,6 +72,11 @@ describe('GET /admin/health', () => {
     expect(body.locals.health).toEqual(SNAPSHOT);
   });
 
+  it('sets Cache-Control: no-store so browsers/proxies never cache the owner health data', async () => {
+    const res = await supertest(buildApp(OWNER_SESSION_USER)).get('/');
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
   it('blocks a non-owner with a 403', async () => {
     const res = await supertest(buildApp(NON_OWNER_SESSION_USER)).get('/');
     expect(res.status).toBe(403);

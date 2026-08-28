@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { recordEventSubConnected, recordEventSubReconnectAttempt } from '../../shared/healthStore';
+import { recordEventSubConnected, recordEventSubReconnectAttempt, removeEventSubHealth } from '../../shared/healthStore';
 import { subscribeForStreamer, removeStreamerFromMap, dispatchNotification, handleRevocation, StreamerEventSubData } from './twitchEventSubSubscriptions';
 
 const log = createLogger('EventSub');
@@ -110,7 +110,7 @@ export class StreamerConnection {
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.ws?.close(1000, 'shutdown');
     this.ws = null;
-    recordEventSubConnected(this.name, false, 'Stopped');
+    removeEventSubHealth(this.name);
     removeStreamerFromMap(this.uid);
   }
 

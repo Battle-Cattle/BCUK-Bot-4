@@ -1,7 +1,7 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
 import { getPool, closePool, pingDb } from './db';
 import { recordDbPing } from './shared/healthStore';
-import { registerOwnerAlertRuntime, startOwnerAlertWatcher } from './discord/ownerAlerts';
+import { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatcher } from './discord/ownerAlerts';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startChannelReconciliationPoll, stopChannelReconciliationPoll } from './twitch/twitchChannelReconciliationPoll';
@@ -188,6 +188,7 @@ async function main(): Promise<void> {
       await user.send(message);
     },
   });
+  await primeOwnerAlertBaseline();
   startOwnerAlertWatcher();
   await startTwitchBot();
   startWebPanel();

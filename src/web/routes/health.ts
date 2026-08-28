@@ -18,6 +18,7 @@ const router = Router();
  *   page if building the response somehow throws.
  */
 router.get('/', requireOwner, csrfProtection, (req, res) => {
+  res.set('Cache-Control', 'no-store');
   try {
     renderView(res, 'health', {
       user: req.session.user,

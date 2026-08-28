@@ -102,6 +102,19 @@ describe('EventSub connections', () => {
     expect(snap.eventsub['streamerA'].connected).toBe(true);
     expect(snap.eventsub['streamerB'].connected).toBe(false);
   });
+
+  it('removeEventSubHealth deletes the record entirely, rather than leaving it reported as disconnected', () => {
+    mod.recordEventSubConnected('streamerA', true);
+    mod.removeEventSubHealth('streamerA');
+    expect(mod.getHealthSnapshot().eventsub['streamerA']).toBeUndefined();
+  });
+
+  it('removeEventSubHealth no-ops for a streamer with no recorded health', () => {
+    const listener = vi.fn();
+    mod.onHealthChanged(listener);
+    mod.removeEventSubHealth('never-seen');
+    expect(listener).not.toHaveBeenCalled();
+  });
 });
 
 describe('Monitor poll', () => {

@@ -11,6 +11,7 @@ import { findOwnerUser } from '../db';
 import * as healthStore from '../shared/healthStore';
 import {
   registerOwnerAlertRuntime,
+  primeOwnerAlertBaseline,
   startOwnerAlertWatcher,
   __resetOwnerAlertsForTests,
 } from './ownerAlerts';
@@ -145,5 +146,60 @@ describe('ownerAlerts', () => {
     send.mockRejectedValue(new Error('DM failed — user has DMs disabled'));
     healthStore.recordDbPing(false, 'boom');
     await expect(flush()).resolves.toBeUndefined();
+  });
+});
+
+describe('primeOwnerAlertBaseline', () => {
+  let send: ReturnType<typeof vi.fn<(discordId: string, message: string) => Promise<void>>>;
+
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __resetOwnerAlertsForTests();
+    send = vi.fn().mockResolvedValue(undefined);
+    registerOwnerAlertRuntime({ send });
+    vi.mocked(findOwnerUser).mockResolvedValue(OWNER_ROW as any);
+  });
+
+  it('seeds the baseline from a currently-unhealthy component without alerting', async () => {
+    // The watcher's listener is a single persistent function attached to the real, un-reset
+    // `healthStore` module for the lifetime of this test file (see the `ownerAlerts` describe
+    // block's beforeEach comment above) — so this setup mutation may itself be observed by a
+    // watcher instance left listening from an earlier test. Settle and clear it before
+    // asserting what THIS test cares about: that `primeOwnerAlertBaseline()` itself never alerts.
+    healthStore.recordTwitchChatConnected(false);
+    await flush();
+    send.mockClear();
+
+    await primeOwnerAlertBaseline();
+    startOwnerAlertWatcher();
+    await flush();
+    expect(send).not.toHaveBeenCalled();
+
+    // Later, once it actually connects, this is a real ok transition (a "recovered" message,
+    // not a false "down" alert during startup).
+    healthStore.recordTwitchChatConnected(true);
+    await flush();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('✅'));
+  });
+
+  it('warms the cached owner id up front, so the first real failure can still alert even if findOwnerUser then rejects', async () => {
+    healthStore.recordDbPing(true);
+    await flush();
+    send.mockClear();
+
+    await primeOwnerAlertBaseline();
+    startOwnerAlertWatcher();
+
+    vi.mocked(findOwnerUser).mockRejectedValue(new Error('db down'));
+    healthStore.recordDbPing(false, 'connection refused');
+    await flush();
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('connection refused'));
   });
 });

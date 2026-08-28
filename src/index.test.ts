@@ -20,6 +20,7 @@ vi.mock('./shared/healthStore', () => ({
 }));
 vi.mock('./discord/ownerAlerts', () => ({
   registerOwnerAlertRuntime: vi.fn(),
+  primeOwnerAlertBaseline: vi.fn(),
   startOwnerAlertWatcher: vi.fn(),
 }));
 vi.mock('./discord/discordBot', () => ({
@@ -214,15 +215,21 @@ describe('startup — guild registry preload', () => {
     expect(vi.mocked(startDiscordBot)).not.toHaveBeenCalled();
   });
 
-  it('records the startup DB ping and registers/starts the owner-alert runtime on a clean startup', async () => {
+  it('records the startup DB ping and registers/primes/starts the owner-alert runtime, in order, on a clean startup', async () => {
     const { recordDbPing } = await import('./shared/healthStore.js');
-    const { registerOwnerAlertRuntime, startOwnerAlertWatcher } = await import('./discord/ownerAlerts.js');
+    const { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatcher } = await import('./discord/ownerAlerts.js');
 
     await runMain();
 
     expect(vi.mocked(recordDbPing)).toHaveBeenCalledWith(true);
     expect(vi.mocked(registerOwnerAlertRuntime)).toHaveBeenCalledWith({ send: expect.any(Function) });
+    expect(vi.mocked(primeOwnerAlertBaseline)).toHaveBeenCalledOnce();
     expect(vi.mocked(startOwnerAlertWatcher)).toHaveBeenCalledOnce();
+    // primeOwnerAlertBaseline must run before the watcher starts listening — otherwise its
+    // first health-changed notification compares against an empty baseline (see
+    // ownerAlerts.ts's primeOwnerAlertBaseline JSDoc for why that causes false "down" alerts).
+    expect(vi.mocked(primeOwnerAlertBaseline).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(startOwnerAlertWatcher).mock.invocationCallOrder[0]);
   });
 
   it('calls process.exit(1) and does not start the bot when the DB connection ping fails', async () => {
