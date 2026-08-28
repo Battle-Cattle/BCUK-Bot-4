@@ -160,48 +160,71 @@ async function sendOwnerAlert(message: string): Promise<void> {
 }
 
 /**
+ * Records a component seen for the first time: stored (not alerted on) if it starts out healthy,
+ * matching the "nothing was wrong before" baseline, or alerted immediately if it starts out
+ * failing.
+ * @param componentId - The component's stable id (see {@link deriveComponentOks}).
+ * @param ok - Whether the component is currently healthy.
+ * @param error - The component's current error message, if failing.
+ */
+function handleFirstSeenComponent(componentId: string, ok: boolean, error: string | null): void {
+  const now = Date.now();
+  componentStates.set(componentId, { failing: !ok, lastAlertAt: ok ? 0 : now, downAlertSent: !ok });
+  if (!ok) {
+    void sendOwnerAlert(`🔴 ${componentId} is down: ${error ?? 'unknown error'}`);
+  }
+}
+
+/**
+ * Reacts to one component's latest ok/fail state against its previously tracked state: sends an
+ * edge-triggered DM alert on a fail→ok or ok→fail transition, or a "still down" DM once the
+ * {@link REALERT_COOLDOWN_MS} cooldown has elapsed for a component that's stayed failing.
+ * @param componentId - The component's stable id (see {@link deriveComponentOks}).
+ * @param ok - Whether the component is currently healthy.
+ * @param error - The component's current error message, if failing.
+ * @param existing - The component's previously tracked alert state, mutated in place.
+ */
+function handleTrackedComponent(componentId: string, ok: boolean, error: string | null, existing: ComponentAlertState): void {
+  const now = Date.now();
+
+  if (ok && existing.failing) {
+    existing.failing = false;
+    existing.lastAlertAt = now;
+    // Only announce a recovery if a "down" DM actually went out for this failure — otherwise
+    // this is a component that was merely seeded as failing at startup (e.g. twitchChat, before
+    // startTwitchBot() has run) finishing its normal startup, not a real recovery.
+    const wasAlerted = existing.downAlertSent;
+    existing.downAlertSent = false;
+    if (wasAlerted) {
+      void sendOwnerAlert(`✅ ${componentId} recovered`);
+    }
+  } else if (!ok && !existing.failing) {
+    existing.failing = true;
+    existing.lastAlertAt = now;
+    existing.downAlertSent = true;
+    void sendOwnerAlert(`🔴 ${componentId} is down: ${error ?? 'unknown error'}`);
+  } else if (!ok && existing.failing && now - existing.lastAlertAt > REALERT_COOLDOWN_MS) {
+    existing.lastAlertAt = now;
+    existing.downAlertSent = true;
+    void sendOwnerAlert(`🔴 ${componentId} is still down: ${error ?? 'unknown error'}`);
+  }
+}
+
+/**
  * Reacts to one health-changed notification: derives every tracked component's ok/fail state
- * from the latest snapshot, and for each one whose state transitioned since the last check —
- * or that's still failing after the {@link REALERT_COOLDOWN_MS} cooldown has elapsed — sends an
- * edge-triggered DM alert to the owner. A component seen for the first time is only recorded
- * (not alerted on) if it starts out healthy, matching the "nothing was wrong before" baseline.
+ * from the latest snapshot and dispatches each one to {@link handleFirstSeenComponent} or
+ * {@link handleTrackedComponent} depending on whether it's been seen before.
  */
 function handleHealthChanged(): void {
   const snapshot = getHealthSnapshot();
   const componentOks = deriveComponentOks(snapshot);
-  const now = Date.now();
 
   for (const [componentId, { ok, error }] of componentOks) {
     const existing = componentStates.get(componentId);
-
-    if (!existing) {
-      componentStates.set(componentId, { failing: !ok, lastAlertAt: ok ? 0 : now, downAlertSent: !ok });
-      if (!ok) {
-        void sendOwnerAlert(`🔴 ${componentId} is down: ${error ?? 'unknown error'}`);
-      }
-      continue;
-    }
-
-    if (ok && existing.failing) {
-      existing.failing = false;
-      existing.lastAlertAt = now;
-      // Only announce a recovery if a "down" DM actually went out for this failure — otherwise
-      // this is a component that was merely seeded as failing at startup (e.g. twitchChat, before
-      // startTwitchBot() has run) finishing its normal startup, not a real recovery.
-      const wasAlerted = existing.downAlertSent;
-      existing.downAlertSent = false;
-      if (wasAlerted) {
-        void sendOwnerAlert(`✅ ${componentId} recovered`);
-      }
-    } else if (!ok && !existing.failing) {
-      existing.failing = true;
-      existing.lastAlertAt = now;
-      existing.downAlertSent = true;
-      void sendOwnerAlert(`🔴 ${componentId} is down: ${error ?? 'unknown error'}`);
-    } else if (!ok && existing.failing && now - existing.lastAlertAt > REALERT_COOLDOWN_MS) {
-      existing.lastAlertAt = now;
-      existing.downAlertSent = true;
-      void sendOwnerAlert(`🔴 ${componentId} is still down: ${error ?? 'unknown error'}`);
+    if (existing) {
+      handleTrackedComponent(componentId, ok, error, existing);
+    } else {
+      handleFirstSeenComponent(componentId, ok, error);
     }
   }
 }
