@@ -163,6 +163,63 @@ describe('ownerAlerts', () => {
       await flush();
     }
   });
+
+  it('alerts on a scheduler run failing, naming the scheduler', async () => {
+    try {
+      healthStore.recordSchedulerRun('counter', false, 'archive failed');
+      await flush();
+
+      expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('scheduler:counter'));
+      expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('archive failed'));
+    } finally {
+      // healthStore's scheduler map has no removal operation (schedulers are always one of a
+      // fixed set of names, unlike EventSub streamers) — restore it to healthy so it doesn't
+      // linger as a permanently-failing component and pollute later tests' baselines.
+      healthStore.recordSchedulerRun('counter', true);
+      await flush();
+    }
+  });
+
+  it('re-alerts "still down" once the cooldown window has elapsed for a component that never recovered', async () => {
+    vi.useFakeTimers();
+    try {
+      healthStore.recordDbPing(false, 'boom');
+      await flush();
+      expect(send).toHaveBeenCalledTimes(1);
+
+      // Still failing, but re-notified with a distinct DB error — before the cooldown elapses
+      // this must NOT resend (covered by the existing "does not resend..." test); here we
+      // advance past the 30-minute cooldown so the "still down" branch fires instead.
+      await vi.advanceTimersByTimeAsync(31 * 60_000);
+      healthStore.recordDbPing(false, 'still boom');
+      await flush();
+
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(send).toHaveBeenLastCalledWith(OWNER_ID, expect.stringContaining('is still down'));
+    } finally {
+      vi.useRealTimers();
+      healthStore.recordDbPing(true);
+      await flush();
+    }
+  });
+});
+
+describe('sendOwnerAlert with no runtime registered', () => {
+  it('logs and returns without throwing when no runtime has ever been registered', async () => {
+    // Uses a fresh module instance (via vi.resetModules() + dynamic import) rather than the
+    // file's shared/top-level-imported one, so this test can exercise the "never registered"
+    // path without needing to un-register the runtime the other describe blocks depend on —
+    // there's no unregister API, and runtimeRegistry has no reset hook of its own.
+    vi.resetModules();
+    const freshHealthStore = await import('../shared/healthStore.js');
+    const fresh = await import('./ownerAlerts.js');
+
+    await fresh.primeOwnerAlertBaseline();
+    fresh.startOwnerAlertWatcher();
+
+    expect(() => freshHealthStore.recordDbPing(false, 'boom')).not.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 });
 
 describe('primeOwnerAlertBaseline', () => {
