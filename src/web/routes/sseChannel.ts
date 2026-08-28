@@ -351,9 +351,22 @@ export function createOverlayStatusEventsHandler(
     // attachSseConnection's own cleanup can be triggered by 'close'/'error' on either req or res
     // (an abrupt socket failure can fire res's events without req ever emitting 'close') — mirror
     // that here so this interval doesn't outlive the connection under those same paths.
+    /** Idempotent teardown for this handler's poll interval, wired to every path that can end the connection below. */
     const clearStatusInterval = (): void => clearInterval(interval);
     req.on('close', clearStatusInterval);
     res.on('close', clearStatusInterval);
     res.on('error', clearStatusInterval);
+
+    // A failed res.write() inside broadcastToChannel's own `check()` call above evicts this
+    // response via the same connectionCleanups entry attachSseConnection just registered for it —
+    // without emitting 'close'/'error' on either req or res, so the listeners above never fire for
+    // that path. Wrap that cleanup so it also stops this interval.
+    const attachCleanup = connectionCleanups.get(res);
+    if (attachCleanup) {
+      connectionCleanups.set(res, () => {
+        attachCleanup();
+        clearStatusInterval();
+      });
+    }
   };
 }

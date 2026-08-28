@@ -412,6 +412,34 @@ describe('createOverlayStatusEventsHandler', () => {
     }
   });
 
+  it('clears the poll interval when a broadcast write fails, with no close/error event ever emitted', async () => {
+    vi.useFakeTimers();
+    try {
+      const handler = buildOverlayStatusHandler();
+      const res = makeRes();
+      const { req } = makeReq('unused');
+
+      await handler(req as any, res as any);
+      expect(statusConnections.get(7)?.has(res as any)).toBe(true);
+
+      // Simulate broadcastToChannel's write failing on the next state-change push — this evicts
+      // the response via attachSseConnection's own cleanup, without ever firing 'close'/'error'.
+      res.write.mockImplementationOnce(() => { throw new Error('write failed'); });
+      overlayConnections.set('somestreamer', new Set([{} as any]));
+      vi.advanceTimersByTime(3000);
+
+      expect(statusConnections.has(7)).toBe(false);
+
+      res.write.mockClear();
+      overlayConnections.delete('somestreamer');
+      vi.advanceTimersByTime(10_000);
+
+      expect(res.write).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('clears the poll interval when the response errors without the request ever closing', async () => {
     vi.useFakeTimers();
     try {
