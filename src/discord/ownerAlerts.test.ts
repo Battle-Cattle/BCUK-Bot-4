@@ -148,6 +148,35 @@ describe('ownerAlerts', () => {
     await expect(flush()).resolves.toBeUndefined();
   });
 
+  it('does not send a false recovery DM when the down DM itself failed to deliver', async () => {
+    send.mockRejectedValue(new Error('DM failed — user has DMs disabled'));
+    healthStore.recordDbPing(false, 'boom');
+    await flush();
+    expect(send).toHaveBeenCalledTimes(1); // the (failed) down DM attempt
+
+    send.mockClear();
+    send.mockResolvedValue(undefined);
+    healthStore.recordDbPing(true);
+    await flush();
+
+    // No down DM was ever actually delivered, so recovery must stay silent.
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('does not send a false recovery DM when the down DM was skipped (no owner to notify)', async () => {
+    // findOwnerUser resolves with no owner row, and no ID is cached yet — sendOwnerAlert must
+    // skip the down DM for lack of a resolvable owner, which must not count as delivered.
+    vi.mocked(findOwnerUser).mockResolvedValue(null);
+    healthStore.recordDbPing(false, 'boom');
+    await flush();
+    expect(send).not.toHaveBeenCalled();
+
+    healthStore.recordDbPing(true);
+    await flush();
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('alerts on an EventSub streamer disconnecting, naming the streamer', async () => {
     try {
       healthStore.recordEventSubConnected('streamerX', false, 'socket closed');

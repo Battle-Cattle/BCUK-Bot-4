@@ -7,6 +7,12 @@ const log = createLogger('OwnerAlerts');
 
 /** Runtime hook injected from `index.ts`, mirroring every other `registerXRuntime` pattern in this codebase (see `twitchRuntime.ts`'s `createRuntimeRegistry`) — avoids a circular import back into `index.ts`/`discordBot.ts`. */
 interface OwnerAlertRuntime {
+  /**
+   * Sends `message` to the bot owner as a Discord DM.
+   * @param discordId - The owner's Discord user id to DM.
+   * @param message - The alert text to send.
+   * @returns Resolves once the DM has been sent; rejects if delivery fails.
+   */
   send: (discordId: string, message: string) => Promise<void>;
 }
 
@@ -16,6 +22,7 @@ const runtimeRegistry = createRuntimeRegistry<OwnerAlertRuntime>();
  * Registers the runtime used to DM the bot owner. Call once from `index.ts` after the
  * Discord bot is ready.
  * @param runtime - The {@link OwnerAlertRuntime} to store.
+ * @returns void.
  */
 export function registerOwnerAlertRuntime(runtime: OwnerAlertRuntime): void {
   runtimeRegistry.register(runtime);
@@ -35,6 +42,14 @@ interface ComponentAlertState {
    * a "recovered" DM with no matching prior "down" DM.
    */
   downAlertSent: boolean;
+  /**
+   * Bumped on every failing-episode boundary — a fresh ok→fail transition (or first seen already
+   * failing), and a fail→ok recovery. Lets {@link dispatchDownAlert}'s delayed delivery result
+   * detect that the component has since moved past the episode it was sent for (recovered, or
+   * recovered and failed again) and skip marking {@link downAlertSent} for one that's no longer
+   * current.
+   */
+  generation: number;
 }
 
 const componentStates = new Map<string, ComponentAlertState>();
@@ -52,14 +67,24 @@ let watcherStarted = false;
 /** One component's derived ok/fail state, plus an error message when it's failing. */
 type ComponentOk = { ok: boolean; error: string | null };
 
-/** Sets the `discord`/`twitchChat`/`db` connectivity entries into `result`. */
+/**
+ * Sets the `discord`/`twitchChat`/`db` connectivity entries into `result`.
+ * @param snapshot - The health snapshot to read connectivity state from.
+ * @param result - The map to add entries to, mutated in place.
+ * @returns void.
+ */
 function addConnectivityOks(snapshot: HealthSnapshot, result: Map<string, ComponentOk>): void {
   result.set('discord', { ok: snapshot.discordConnected, error: snapshot.discordConnected ? null : 'Discord gateway disconnected' });
   result.set('twitchChat', { ok: snapshot.twitchChatConnected, error: snapshot.twitchChatConnected ? null : 'Twitch chat disconnected' });
   result.set('db', { ok: snapshot.db.lastPingOk, error: snapshot.db.lastPingOk ? null : (snapshot.db.lastError ?? 'DB ping failed') });
 }
 
-/** Sets one `eventsub:<streamer>` entry per tracked streamer into `result`. */
+/**
+ * Sets one `eventsub:<streamer>` entry per tracked streamer into `result`.
+ * @param snapshot - The health snapshot to read EventSub state from.
+ * @param result - The map to add entries to, mutated in place.
+ * @returns void.
+ */
 function addEventSubOks(snapshot: HealthSnapshot, result: Map<string, ComponentOk>): void {
   for (const [streamer, health] of Object.entries(snapshot.eventsub)) {
     result.set(`eventsub:${streamer}`, {
@@ -69,7 +94,12 @@ function addEventSubOks(snapshot: HealthSnapshot, result: Map<string, ComponentO
   }
 }
 
-/** Sets the `monitor` entry into `result`, treating a poll older than {@link MONITOR_STALE_MS} as failing too. */
+/**
+ * Sets the `monitor` entry into `result`, treating a poll older than {@link MONITOR_STALE_MS} as failing too.
+ * @param snapshot - The health snapshot to read monitor state from.
+ * @param result - The map to add the entry to, mutated in place.
+ * @returns void.
+ */
 function addMonitorOk(snapshot: HealthSnapshot, result: Map<string, ComponentOk>): void {
   const now = Date.now();
   const stale = snapshot.monitor.lastPollAt !== null && now - snapshot.monitor.lastPollAt.getTime() > MONITOR_STALE_MS;
@@ -80,7 +110,12 @@ function addMonitorOk(snapshot: HealthSnapshot, result: Map<string, ComponentOk>
   });
 }
 
-/** Sets one `scheduler:<name>` entry per tracked scheduler into `result`, treating a run older than {@link SCHEDULER_STALE_MS} as failing too. */
+/**
+ * Sets one `scheduler:<name>` entry per tracked scheduler into `result`, treating a run older than {@link SCHEDULER_STALE_MS} as failing too.
+ * @param snapshot - The health snapshot to read scheduler state from.
+ * @param result - The map to add entries to, mutated in place.
+ * @returns void.
+ */
 function addSchedulerOks(snapshot: HealthSnapshot, result: Map<string, ComponentOk>): void {
   const now = Date.now();
   for (const [name, health] of Object.entries(snapshot.schedulers)) {
@@ -119,6 +154,7 @@ function deriveComponentOks(snapshot: HealthSnapshot): Map<string, ComponentOk> 
  * the cache and returns null, rather than falling back to a possibly-stale cached ID for an
  * owner that may have just been removed. Returns null (and logs) if there's no cached ID yet to
  * fall back to on a failed lookup.
+ * @returns The Discord id to DM, or null if none is available.
  */
 async function resolveOwnerDiscordId(): Promise<string | null> {
   try {
@@ -143,20 +179,47 @@ async function resolveOwnerDiscordId(): Promise<string | null> {
  * Sends a DM alert to the bot owner via the registered runtime. Never throws — a failed DM is
  * logged and swallowed so it can never crash the process (see {@link registerOwnerAlertRuntime}).
  * @param message - The alert text to send.
+ * @returns Whether the DM was actually delivered — false if no runtime is registered, the owner
+ *   ID couldn't be resolved, or the send itself failed.
  */
-async function sendOwnerAlert(message: string): Promise<void> {
+async function sendOwnerAlert(message: string): Promise<boolean> {
   const runtime = runtimeRegistry.get();
   if (!runtime) {
     log.warn('No owner-alert runtime registered — skipping alert:', message);
-    return;
+    return false;
   }
   const discordId = await resolveOwnerDiscordId();
-  if (!discordId) return;
+  if (!discordId) return false;
   try {
     await runtime.send(discordId, message);
+    return true;
   } catch (err) {
     log.error('Failed to send owner alert DM:', err);
+    return false;
   }
+}
+
+/**
+ * Sends a "down" (or, for a cooldown re-notification, "still down") DM for a component and, only
+ * once delivery is confirmed, marks {@link ComponentAlertState.downAlertSent} — so a component
+ * whose down DM never reached the owner (no runtime, owner lookup failure, or a rejected send)
+ * doesn't later fire a false "recovered" DM. Guards against a delayed delivery result from an
+ * earlier failure episode incorrectly marking a newer one, via {@link ComponentAlertState.generation}.
+ * @param componentId - The component's stable id (see {@link deriveComponentOks}).
+ * @param error - The component's current error message, if any.
+ * @param state - The component's tracked alert state, mutated in place once delivery resolves.
+ * @param stillDown - Whether this is a cooldown re-notification for an already-failing component,
+ *   rather than the initial down transition.
+ * @returns void — the alert send and any resulting state update happen asynchronously.
+ */
+function dispatchDownAlert(componentId: string, error: string | null, state: ComponentAlertState, stillDown: boolean): void {
+  const generation = state.generation;
+  const label = stillDown ? 'is still down' : 'is down';
+  void sendOwnerAlert(`🔴 ${componentId} ${label}: ${error ?? 'unknown error'}`).then((delivered) => {
+    if (delivered && state.generation === generation) {
+      state.downAlertSent = true;
+    }
+  });
 }
 
 /**
@@ -166,12 +229,14 @@ async function sendOwnerAlert(message: string): Promise<void> {
  * @param componentId - The component's stable id (see {@link deriveComponentOks}).
  * @param ok - Whether the component is currently healthy.
  * @param error - The component's current error message, if failing.
+ * @returns void.
  */
 function handleFirstSeenComponent(componentId: string, ok: boolean, error: string | null): void {
   const now = Date.now();
-  componentStates.set(componentId, { failing: !ok, lastAlertAt: ok ? 0 : now, downAlertSent: !ok });
+  const state: ComponentAlertState = { failing: !ok, lastAlertAt: ok ? 0 : now, downAlertSent: false, generation: 0 };
+  componentStates.set(componentId, state);
   if (!ok) {
-    void sendOwnerAlert(`🔴 ${componentId} is down: ${error ?? 'unknown error'}`);
+    dispatchDownAlert(componentId, error, state, false);
   }
 }
 
@@ -183,6 +248,7 @@ function handleFirstSeenComponent(componentId: string, ok: boolean, error: strin
  * @param ok - Whether the component is currently healthy.
  * @param error - The component's current error message, if failing.
  * @param existing - The component's previously tracked alert state, mutated in place.
+ * @returns void.
  */
 function handleTrackedComponent(componentId: string, ok: boolean, error: string | null, existing: ComponentAlertState): void {
   const now = Date.now();
@@ -190,23 +256,27 @@ function handleTrackedComponent(componentId: string, ok: boolean, error: string 
   if (ok && existing.failing) {
     existing.failing = false;
     existing.lastAlertAt = now;
-    // Only announce a recovery if a "down" DM actually went out for this failure — otherwise
+    // Only announce a recovery if a "down" DM was actually delivered for this failure — otherwise
     // this is a component that was merely seeded as failing at startup (e.g. twitchChat, before
-    // startTwitchBot() has run) finishing its normal startup, not a real recovery.
+    // startTwitchBot() has run), or whose down DM never reached the owner, finishing its normal
+    // startup rather than undergoing a real recovery.
     const wasAlerted = existing.downAlertSent;
     existing.downAlertSent = false;
+    // Bump the generation so a still-in-flight down-DM delivery from this now-ended episode can't
+    // resurrect downAlertSent (via dispatchDownAlert's delayed .then()) after this recovery.
+    existing.generation += 1;
     if (wasAlerted) {
       void sendOwnerAlert(`✅ ${componentId} recovered`);
     }
   } else if (!ok && !existing.failing) {
     existing.failing = true;
     existing.lastAlertAt = now;
-    existing.downAlertSent = true;
-    void sendOwnerAlert(`🔴 ${componentId} is down: ${error ?? 'unknown error'}`);
+    existing.downAlertSent = false;
+    existing.generation += 1;
+    dispatchDownAlert(componentId, error, existing, false);
   } else if (!ok && existing.failing && now - existing.lastAlertAt > REALERT_COOLDOWN_MS) {
     existing.lastAlertAt = now;
-    existing.downAlertSent = true;
-    void sendOwnerAlert(`🔴 ${componentId} is still down: ${error ?? 'unknown error'}`);
+    dispatchDownAlert(componentId, error, existing, true);
   }
 }
 
@@ -214,6 +284,7 @@ function handleTrackedComponent(componentId: string, ok: boolean, error: string 
  * Reacts to one health-changed notification: derives every tracked component's ok/fail state
  * from the latest snapshot and dispatches each one to {@link handleFirstSeenComponent} or
  * {@link handleTrackedComponent} depending on whether it's been seen before.
+ * @returns void.
  */
 function handleHealthChanged(): void {
   const snapshot = getHealthSnapshot();
@@ -253,7 +324,7 @@ export async function primeOwnerAlertBaseline(): Promise<void> {
     // downAlertSent starts false even for a component seeded as already-failing (e.g. twitchChat,
     // before startTwitchBot() has run) — no "down" DM was actually sent for this baseline state,
     // so its later recovery must not fire a "recovered" DM either. See handleHealthChanged.
-    componentStates.set(componentId, { failing: !ok, lastAlertAt: now, downAlertSent: false });
+    componentStates.set(componentId, { failing: !ok, lastAlertAt: now, downAlertSent: false, generation: 0 });
   }
 }
 
@@ -261,6 +332,7 @@ export async function primeOwnerAlertBaseline(): Promise<void> {
  * Subscribes to `healthStore.onHealthChanged` and starts sending owner DM alerts on
  * component health transitions. Call once from `index.ts`, after {@link primeOwnerAlertBaseline}.
  * Idempotent — a second call is a no-op, so it can never register a duplicate listener.
+ * @returns void.
  */
 export function startOwnerAlertWatcher(): void {
   if (watcherStarted) return;

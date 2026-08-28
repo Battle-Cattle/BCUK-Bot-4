@@ -112,6 +112,7 @@ function formatHealthSummary(snapshot: HealthSnapshot): string {
  * there so the owner knows to check their DMs. If the DM itself fails (e.g. the owner has DMs
  * closed), that's logged and swallowed rather than thrown.
  * @param message - The Discord message to check and, if it's an owner-issued `!health`, respond to.
+ * @returns Resolves once the command has been handled (or ignored as a non-match).
  */
 export async function executeHealthCommandForDiscord(message: Message): Promise<void> {
   if (extractCommand(message.content) !== TRIGGER) return;
