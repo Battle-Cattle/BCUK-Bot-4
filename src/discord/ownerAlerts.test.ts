@@ -252,8 +252,21 @@ describe('primeOwnerAlertBaseline', () => {
     await flush();
     expect(send).not.toHaveBeenCalled();
 
-    // Later, once it actually connects, this is a real ok transition (a "recovered" message,
-    // not a false "down" alert during startup).
+    // Later, once it actually connects — since no "down" DM was ever sent for this
+    // startup-seeded failure (e.g. twitchChat, still connecting when the watcher started), this
+    // must NOT fire a false "recovered" DM either.
+    healthStore.recordTwitchChatConnected(true);
+    await flush();
+    expect(send).not.toHaveBeenCalled();
+
+    // A genuine later failure, though, must still alert normally.
+    healthStore.recordTwitchChatConnected(false);
+    await flush();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('🔴'));
+
+    // ...and its recovery now alerts too, since a real "down" DM was sent this time.
+    send.mockClear();
     healthStore.recordTwitchChatConnected(true);
     await flush();
     expect(send).toHaveBeenCalledTimes(1);

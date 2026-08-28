@@ -477,6 +477,7 @@ function quitAndWait(c: ChatClient): Promise<void> {
 export async function stopTwitchBot(): Promise<void> {
   connected = false;
   setConnected(false);
+  recordTwitchChatConnected(false);
   if (client) {
     try {
       await withTimeout(quitAndWait(client), DISCONNECT_TIMEOUT_MS, 'Twitch disconnect');

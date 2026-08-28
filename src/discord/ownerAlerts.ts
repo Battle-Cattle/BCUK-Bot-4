@@ -28,6 +28,13 @@ const REALERT_COOLDOWN_MS = 30 * 60_000;
 interface ComponentAlertState {
   failing: boolean;
   lastAlertAt: number;
+  /**
+   * Whether a "down" DM has actually been sent for the current failure. A component seeded as
+   * failing at startup (e.g. `twitchChat`, before `startTwitchBot()` has run — see
+   * {@link primeOwnerAlertBaseline}) starts with this false, so its eventual recovery doesn't fire
+   * a "recovered" DM with no matching prior "down" DM.
+   */
+  downAlertSent: boolean;
 }
 
 const componentStates = new Map<string, ComponentAlertState>();
@@ -168,7 +175,7 @@ function handleHealthChanged(): void {
     const existing = componentStates.get(componentId);
 
     if (!existing) {
-      componentStates.set(componentId, { failing: !ok, lastAlertAt: ok ? 0 : now });
+      componentStates.set(componentId, { failing: !ok, lastAlertAt: ok ? 0 : now, downAlertSent: !ok });
       if (!ok) {
         void sendOwnerAlert(`🔴 ${componentId} is down: ${error ?? 'unknown error'}`);
       }
@@ -178,13 +185,22 @@ function handleHealthChanged(): void {
     if (ok && existing.failing) {
       existing.failing = false;
       existing.lastAlertAt = now;
-      void sendOwnerAlert(`✅ ${componentId} recovered`);
+      // Only announce a recovery if a "down" DM actually went out for this failure — otherwise
+      // this is a component that was merely seeded as failing at startup (e.g. twitchChat, before
+      // startTwitchBot() has run) finishing its normal startup, not a real recovery.
+      const wasAlerted = existing.downAlertSent;
+      existing.downAlertSent = false;
+      if (wasAlerted) {
+        void sendOwnerAlert(`✅ ${componentId} recovered`);
+      }
     } else if (!ok && !existing.failing) {
       existing.failing = true;
       existing.lastAlertAt = now;
+      existing.downAlertSent = true;
       void sendOwnerAlert(`🔴 ${componentId} is down: ${error ?? 'unknown error'}`);
     } else if (!ok && existing.failing && now - existing.lastAlertAt > REALERT_COOLDOWN_MS) {
       existing.lastAlertAt = now;
+      existing.downAlertSent = true;
       void sendOwnerAlert(`🔴 ${componentId} is still down: ${error ?? 'unknown error'}`);
     }
   }
@@ -211,7 +227,10 @@ export async function primeOwnerAlertBaseline(): Promise<void> {
   const componentOks = deriveComponentOks(snapshot);
   const now = Date.now();
   for (const [componentId, { ok }] of componentOks) {
-    componentStates.set(componentId, { failing: !ok, lastAlertAt: now });
+    // downAlertSent starts false even for a component seeded as already-failing (e.g. twitchChat,
+    // before startTwitchBot() has run) — no "down" DM was actually sent for this baseline state,
+    // so its later recovery must not fire a "recovered" DM either. See handleHealthChanged.
+    componentStates.set(componentId, { failing: !ok, lastAlertAt: now, downAlertSent: false });
   }
 }
 

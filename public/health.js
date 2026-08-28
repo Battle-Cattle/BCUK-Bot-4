@@ -23,11 +23,11 @@ function buildHealthRow(component, ok, lastEvent, lastError) {
   const tr = document.createElement('tr');
   const dot = ok ? '🟢' : '🔴';
   const state = ok ? 'OK' : 'Down';
-  tr.innerHTML =
-    '<td>' + component + '</td>' +
-    '<td>' + dot + ' ' + state + '</td>' +
-    '<td>' + (lastEvent || '—') + '</td>' +
-    '<td>' + (lastError || '—') + '</td>';
+  [component, dot + ' ' + state, lastEvent || '—', lastError || '—'].forEach(function (text) {
+    const td = document.createElement('td');
+    td.textContent = text;
+    tr.appendChild(td);
+  });
   return tr;
 }
 

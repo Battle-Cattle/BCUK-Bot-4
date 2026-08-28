@@ -21,7 +21,13 @@ let started = false;
 // `started` check alone can't distinguish "still my run" from "a newer run began".
 let runGeneration = 0;
 
-/** Polls once for the yearly counter archive and reschedules itself hourly while its run is still active. */
+/**
+ * Polls once for the yearly counter archive and reschedules itself hourly while its run is
+ * still active, recording the outcome (archive attempted or skipped) into `healthStore`.
+ * @param myGeneration - This run's generation number (see {@link runGeneration}), used to detect
+ *   a stale reschedule from an earlier, since-stopped run.
+ * @returns Resolves once this tick (and its reschedule, if still the active run) completes.
+ */
 async function tick(myGeneration: number): Promise<void> {
   const now = new Date();
   const prevYear = now.getFullYear() - 1;
