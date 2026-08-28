@@ -14,7 +14,7 @@ const IS_TEST = !!process.env.VITEST;
  * call `recordError` itself. Only every level *at or above* the transport's configured
  * `level` is forwarded — set to `'error'` below so warn/info/debug entries never reach it.
  */
-class HealthStoreErrorTransport extends Transport {
+export class HealthStoreErrorTransport extends Transport {
   /**
    * Winston's transport contract: forwards `info.message` to `healthStore.recordError`
    * under `info.label` (the module tag set via `createLogger(module)`), then signals

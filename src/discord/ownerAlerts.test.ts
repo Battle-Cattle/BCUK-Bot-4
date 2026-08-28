@@ -147,6 +147,22 @@ describe('ownerAlerts', () => {
     healthStore.recordDbPing(false, 'boom');
     await expect(flush()).resolves.toBeUndefined();
   });
+
+  it('alerts on an EventSub streamer disconnecting, naming the streamer', async () => {
+    try {
+      healthStore.recordEventSubConnected('streamerX', false, 'socket closed');
+      await flush();
+
+      expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('eventsub:streamerX'));
+      expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('socket closed'));
+    } finally {
+      // healthStore is a real, un-reset module singleton across this file's tests (see the
+      // beforeEach comment above) — remove this streamer's entry so it doesn't linger as a
+      // permanently-failing component and pollute later tests' baselines/assertions.
+      healthStore.removeEventSubHealth('streamerX');
+      await flush();
+    }
+  });
 });
 
 describe('primeOwnerAlertBaseline', () => {

@@ -9,7 +9,12 @@ vi.mock('../../shared/healthStore', () => ({
   getHealthSnapshot: vi.fn(),
 }));
 
-vi.mock('../../shared/logger', () => ({ createLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }) }));
+// Captures the single logger instance createLogger('Web') produces, so tests can assert on
+// log.error calls — the module under test keeps its own reference, otherwise unreachable here.
+// Built inside vi.hoisted() since vi.mock's factory can run before a plain top-level const
+// (referenced by closure) has initialized.
+const { webLogger } = vi.hoisted(() => ({ webLogger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
+vi.mock('../../shared/logger', () => ({ createLogger: () => webLogger }));
 
 vi.mock('../middleware', () => ({
   requireOwner: (req: any, res: any, next: any) => {
@@ -97,6 +102,16 @@ describe('pushHealthUpdate (registered onHealthChanged listener)', () => {
 
   it('does not throw when there are no connected clients', () => {
     expect(() => registeredListener()).not.toThrow();
+  });
+
+  it('logs and swallows an error instead of throwing if building/broadcasting the snapshot fails', () => {
+    vi.mocked(getHealthSnapshot).mockImplementationOnce(() => {
+      throw new Error('snapshot boom');
+    });
+    webLogger.error.mockClear();
+
+    expect(() => registeredListener()).not.toThrow();
+    expect(webLogger.error).toHaveBeenCalledWith('Failed to push health update:', expect.any(Error));
   });
 });
 

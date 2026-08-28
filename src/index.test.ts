@@ -310,6 +310,55 @@ describe('DB health check interval', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(vi.mocked(pingDb)).toHaveBeenCalledTimes(2);
   });
+
+  it('logs and recovers (does not get stuck in-flight) when pingDb itself rejects', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const { pingDb } = await import('./db.js');
+    vi.mocked(pingDb).mockRejectedValueOnce(new Error('connection refused'));
+
+    await runMain();
+    vi.mocked(pingDb).mockClear();
+    lastBotLogger!.error.mockClear();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(lastBotLogger!.error).toHaveBeenCalledWith('Unexpected error during DB health check:', expect.any(Error));
+
+    // The in-flight guard must have been released in .finally() despite the rejection, or this
+    // next tick's probe would be silently skipped.
+    vi.mocked(pingDb).mockClear();
+    vi.mocked(pingDb).mockResolvedValueOnce(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(vi.mocked(pingDb)).toHaveBeenCalledOnce();
+  });
+});
+
+describe('owner-alert DM send callback', () => {
+  it('throws when the Discord client is not ready', async () => {
+    const { registerOwnerAlertRuntime } = await import('./discord/ownerAlerts.js');
+    const { getDiscordClient } = await import('./discord/discordBot.js');
+    vi.mocked(getDiscordClient).mockReturnValue(undefined as any);
+
+    await runMain();
+
+    const send = vi.mocked(registerOwnerAlertRuntime).mock.calls[0][0].send;
+    await expect(send('123', 'hi')).rejects.toThrow('Discord client is not ready');
+  });
+
+  it('fetches the user and DMs them when the client is ready', async () => {
+    const { registerOwnerAlertRuntime } = await import('./discord/ownerAlerts.js');
+    const { getDiscordClient } = await import('./discord/discordBot.js');
+    const userSend = vi.fn().mockResolvedValue(undefined);
+    const fetch = vi.fn().mockResolvedValue({ send: userSend });
+    vi.mocked(getDiscordClient).mockReturnValue({ users: { fetch } } as any);
+
+    await runMain();
+
+    const send = vi.mocked(registerOwnerAlertRuntime).mock.calls[0][0].send;
+    await send('123', 'hi');
+
+    expect(fetch).toHaveBeenCalledWith('123');
+    expect(userSend).toHaveBeenCalledWith('hi');
+  });
 });
 
 describe('shutdown', () => {

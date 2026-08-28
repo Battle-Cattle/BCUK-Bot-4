@@ -129,6 +129,27 @@ describe('executeHealthCommandForDiscord', () => {
     expect(firstIndex).toBeGreaterThan(secondIndex);
   });
 
+  it('includes an EventSub section and a Schedulers section when either is populated', async () => {
+    vi.mocked(getHealthSnapshot).mockReturnValue({
+      ...EMPTY_SNAPSHOT,
+      eventsub: {
+        streamerA: { connected: true, lastConnectedAt: null, lastDisconnectedAt: null, reconnectAttempts: 0, lastError: null },
+      },
+      schedulers: {
+        counter: { lastRunAt: new Date('2026-01-01T00:00:00Z'), lastRunOk: true, lastError: null },
+        timer: { lastRunAt: new Date('2026-01-01T00:00:00Z'), lastRunOk: false, lastError: 'boom' },
+      },
+    } as any);
+    const message = makeMockMessage('!health', OWNER_ID);
+    await executeHealthCommandForDiscord(message as any);
+    const dmText = message.author.send.mock.calls[0][0] as string;
+    expect(dmText).toContain('EventSub:');
+    expect(dmText).toContain('streamerA');
+    expect(dmText).toContain('Schedulers:');
+    expect(dmText).toContain('counter: 🟢 ok');
+    expect(dmText).toContain('timer: 🔴 failing');
+  });
+
   it('truncates a summary that would otherwise exceed the Discord message limit', async () => {
     const manyEventSubEntries = Object.fromEntries(
       Array.from({ length: 100 }, (_, i) => [

@@ -77,6 +77,19 @@ describe('GET /admin/health', () => {
     expect(res.headers['cache-control']).toBe('no-store');
   });
 
+  it('renders a 500 error page if building the health snapshot response throws', async () => {
+    vi.mocked(getHealthSnapshot).mockImplementation(() => {
+      throw new Error('snapshot boom');
+    });
+
+    const res = await supertest(buildApp(OWNER_SESSION_USER)).get('/');
+
+    expect(res.status).toBe(500);
+    const body = res.body as any;
+    expect(body.view).toBe('error');
+    expect(body.locals.message).toBe('Failed to load health dashboard.');
+  });
+
   it('blocks a non-owner with a 403', async () => {
     const res = await supertest(buildApp(NON_OWNER_SESSION_USER)).get('/');
     expect(res.status).toBe(403);
