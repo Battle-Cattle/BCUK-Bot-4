@@ -45,6 +45,8 @@ export const ALERT_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.ALERT_M
 export const CHANNEL_POINTS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.CHANNEL_POINTS_MAX_SSE_PER_STREAMER, 5);
 export const DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER, 5);
 export const DASHBOARD_STATUS_MAX_SSE_PER_GUILD = parsePositiveIntEnv(process.env.DASHBOARD_STATUS_MAX_SSE_PER_GUILD, 10);
+export const OVERLAY_STATUS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.OVERLAY_STATUS_MAX_SSE_PER_STREAMER, 3);
+export const ALERT_STATUS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.ALERT_STATUS_MAX_SSE_PER_STREAMER, 3);
 export const SSE_MAX_TOTAL_CONNECTIONS = parsePositiveIntEnv(process.env.SSE_MAX_TOTAL_CONNECTIONS, 500);
 const _COOLDOWN = parseInt(process.env.GLOBAL_COOLDOWN_MS ?? '3000', 10);
 if (Number.isNaN(_COOLDOWN)) throw new Error('Invalid GLOBAL_COOLDOWN_MS: must be a number');

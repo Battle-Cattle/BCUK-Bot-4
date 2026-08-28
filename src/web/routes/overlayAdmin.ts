@@ -1,21 +1,29 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import { getVideosForStreamer, getRewardsForStreamer } from '../../db';
-import { PUBLIC_URL } from '../../shared/config';
+import { PUBLIC_URL, OVERLAY_STATUS_MAX_SSE_PER_STREAMER } from '../../shared/config';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { router as mutationsRouter, MAX_UPLOAD_MB } from './overlayAdminMutations';
 import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';
+import { connections as overlaySourceConnections } from './overlaySource';
+import { createOverlayStatusEventsHandler } from './sseChannel';
 
 const log = createLogger('OverlayAdmin');
 const router = Router();
+
+// How often the settings-page SSE stream re-checks whether the overlay browser source is open.
+const STATUS_POLL_INTERVAL_MS = 3000;
+
+// In-memory map of active `/settings/events` SSE connections, keyed by streamer ID.
+export const statusConnections = new Map<number, Set<Response>>();
 
 const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_file', 'upload_failed', 'delete_failed',
@@ -89,6 +97,27 @@ router.get('/controller/settings', requireAuth, csrfProtection, (req, res) => {
     baseUrl: PUBLIC_URL,
   });
 });
+
+/**
+ * GET /overlay/settings/events — SSE endpoint streaming `{ connected: boolean }` snapshots of
+ * whether the logged-in user's own reward-video browser source currently has an open connection,
+ * so the settings page can show a live status dot instead of the user only finding out something's
+ * wrong when a reward video never plays. Connection lifecycle and status-polling logic (streamer
+ * resolution, SSE handshake, poll-and-broadcast-on-change, and interval cleanup) is shared with
+ * the alerts overlay via `createOverlayStatusEventsHandler`.
+ * @param req - Express request; reads `req.session.user`.
+ * @param res - Express response; upgrades to a `text/event-stream` connection kept alive with
+ *   periodic pings and torn down (including the status-poll interval) on client disconnect;
+ *   replies 403 if the user isn't a monitored streamer with a linked Twitch channel, 500 (logged)
+ *   if the streamer lookup fails, or 429 if the connection limit is exceeded.
+ */
+router.get('/settings/events', requireAuth, createOverlayStatusEventsHandler({
+  statusConnections,
+  overlayConnections: overlaySourceConnections,
+  maxPerChannel: OVERLAY_STATUS_MAX_SSE_PER_STREAMER,
+  pollIntervalMs: STATUS_POLL_INTERVAL_MS,
+  log,
+}));
 
 router.use(mutationsRouter);
 router.use(rewardMutationsRouter);

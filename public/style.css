@@ -128,6 +128,7 @@ a:hover { text-decoration: underline; }
 .dot--offline { background: var(--danger); }
 .dot--playing { background: var(--warning); box-shadow: 0 0 6px var(--warning); animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
+.overlay-status { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; font-size: .85rem; color: var(--muted); }
 
 /* ── Channel list (inside card-body) ──────────────────── */
 .channel-item { display: flex; justify-content: space-between; align-items: center; padding: .45rem 0; border-bottom: 1px solid var(--border); }

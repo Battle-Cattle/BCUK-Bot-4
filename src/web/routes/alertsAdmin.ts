@@ -1,17 +1,25 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { getStreamerByDiscordId, getAlertConfigsForStreamer, ALERT_EVENT_TYPES, ALERT_TEXT_ANIMATIONS } from '../../db';
-import { PUBLIC_URL } from '../../shared/config';
+import { PUBLIC_URL, ALERT_STATUS_MAX_SSE_PER_STREAMER } from '../../shared/config';
 import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { router as mutationsRouter } from './alertsAdminMutations';
 import { router as assetMutationsRouter, MAX_IMAGE_MB, MAX_SOUND_MB } from './alertsAssetMutations';
+import { connections as alertsSourceConnections } from './alertsOverlaySource';
+import { createOverlayStatusEventsHandler } from './sseChannel';
 
 const log = createLogger('AlertsAdmin');
 const router = Router();
+
+// How often the settings-page SSE stream re-checks whether the overlay browser source is open.
+const STATUS_POLL_INTERVAL_MS = 3000;
+
+// In-memory map of active `/settings/events` SSE connections, keyed by streamer ID.
+export const statusConnections = new Map<number, Set<Response>>();
 
 const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_event_type', 'invalid_file', 'invalid_message',
@@ -53,6 +61,27 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
     renderError(res, 500, 'Failed to load alerts settings.', req.session.user);
   }
 });
+
+/**
+ * GET /alerts/settings/events — SSE endpoint streaming `{ connected: boolean }` snapshots of
+ * whether the logged-in user's own alerts browser source currently has an open connection, so the
+ * settings page can show a live status dot instead of the user only finding out something's wrong
+ * when an alert never fires. Connection lifecycle and status-polling logic (streamer resolution,
+ * SSE handshake, poll-and-broadcast-on-change, and interval cleanup) is shared with the
+ * reward-video overlay via `createOverlayStatusEventsHandler`.
+ * @param req - Express request; reads `req.session.user`.
+ * @param res - Express response; upgrades to a `text/event-stream` connection kept alive with
+ *   periodic pings and torn down (including the status-poll interval) on client disconnect;
+ *   replies 403 if the user isn't a monitored streamer with a linked Twitch channel, 500 (logged)
+ *   if the streamer lookup fails, or 429 if the connection limit is exceeded.
+ */
+router.get('/settings/events', requireAuth, createOverlayStatusEventsHandler({
+  statusConnections,
+  overlayConnections: alertsSourceConnections,
+  maxPerChannel: ALERT_STATUS_MAX_SSE_PER_STREAMER,
+  pollIntervalMs: STATUS_POLL_INTERVAL_MS,
+  log,
+}));
 
 router.use(mutationsRouter);
 router.use(assetMutationsRouter);

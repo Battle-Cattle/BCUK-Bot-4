@@ -60,9 +60,18 @@
           <% const login = streamer.twitch_name ? streamer.twitch_name.toLowerCase() : ''; %>
           <code class="mono overlay-url-display"><%= baseUrl %>/overlay/<%= login %></code>
           <p class="hint mt-05">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the URL above.</p>
+          <div class="overlay-status">
+            <span class="dot dot--offline" id="overlay-status-dot"></span>
+            <span id="overlay-status-text"><%= login ? 'Checking…' : 'Not connected' %></span>
+          </div>
         </div>
       </div>
     </section>
+
+    <% if (login) { %>
+    <script src="/sseClient.js"></script>
+    <script src="/overlayConnectionStatus.js" data-events-url="/overlay/settings/events"></script>
+    <% } %>
 
     <!-- ── Video Library ──────────────────────────────────────────── -->
     <section class="section">

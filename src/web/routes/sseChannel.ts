@@ -64,7 +64,9 @@ export function broadcastToChannel<K>(connections: Map<K, Set<Response>>, key: K
 /** Writes the SSE handshake headers and the initial `: connected` comment. */
 function sendSseHandshake(res: Response): void {
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  // no-store (not the weaker no-cache) so no intermediary ever stores or replays a stream —
+  // several of these carry per-streamer status that must not be cached or reused across clients.
+  res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // disable Nginx buffering if behind proxy
   res.flushHeaders();
@@ -267,5 +269,112 @@ export function createStreamerSseEventsHandler<K>(
     }
 
     attachSseConnection(req, res, { connections, key: resolveKey(streamer), maxPerChannel });
+  };
+}
+
+/** Options for {@link createOverlayStatusEventsHandler}. */
+export interface OverlayStatusEventsHandlerOptions {
+  /** In-memory map of active status-stream SSE connections, keyed by streamer ID. */
+  statusConnections: Map<number, Set<Response>>;
+  /** The overlay's own connections map (e.g. from `overlaySource.ts`/`alertsOverlaySource.ts`), keyed by lowercased Twitch login — polled to derive `connected`. */
+  overlayConnections: Map<string, Set<Response>>;
+  /** Maximum concurrent status-stream connections permitted per streamer. */
+  maxPerChannel: number;
+  /** How often (ms) to re-check `overlayConnections` for a state change. */
+  pollIntervalMs: number;
+  /** Logger used to report an unexpected streamer lookup failure. */
+  log: ReturnType<typeof createLogger>;
+}
+
+/**
+ * Builds a `/settings/events`-style SSE route handler streaming `{ connected: boolean }`
+ * snapshots of whether the logged-in user's own browser-source overlay currently has an open
+ * connection, so a settings page can show a live status dot instead of the user only finding out
+ * something's wrong when an overlay never fires. Shared by the reward-video and alerts overlay
+ * settings pages (`overlayAdmin.ts`/`alertsAdmin.ts`) — each keeps its own `statusConnections` and
+ * `overlayConnections` maps, since those differ, but the "resolve the session's streamer, then
+ * poll for a connection-count change" lifecycle is identical. Polls on an interval rather than
+ * reacting to a push event, since opening/closing an overlay's own SSE connection has no existing
+ * event to subscribe to.
+ * @param options - See {@link OverlayStatusEventsHandlerOptions}.
+ * @returns An Express route handler: replies 403 if the user isn't a monitored streamer with a
+ *   linked Twitch channel, 500 (logged) if the streamer lookup fails, 429 if `maxPerChannel` is
+ *   exceeded, otherwise upgrades to `text/event-stream` and tears down the poll interval (along
+ *   with the connection itself) on client disconnect.
+ */
+export function createOverlayStatusEventsHandler(
+  options: OverlayStatusEventsHandlerOptions,
+): (req: Request, res: Response) => Promise<void> {
+  const { statusConnections, overlayConnections, maxPerChannel, pollIntervalMs, log } = options;
+
+  /**
+   * Route handler for one settings page's status stream: resolves the session's streamer, attaches
+   * the SSE connection, then polls `overlayConnections` for that streamer's login on an interval.
+   * @param req - Express request; reads `req.session.user`.
+   * @param res - Express response; see {@link createOverlayStatusEventsHandler}'s `@returns`.
+   */
+  return async (req, res) => {
+    let streamer: DbStreamerEventSub | null;
+    try {
+      streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
+    } catch (err) {
+      log.error('Failed to resolve streamer for overlay status SSE:', err);
+      res.status(500).end();
+      return;
+    }
+    if (!streamer || !streamer.twitch_name) {
+      res.status(403).end();
+      return;
+    }
+
+    const attached = attachSseConnection(req, res, {
+      connections: statusConnections,
+      key: streamer.id,
+      maxPerChannel,
+    });
+    if (!attached) return;
+
+    const streamerId = streamer.id;
+    const login = streamer.twitch_name.toLowerCase();
+    let lastConnected: boolean | null = null;
+
+    /** Re-checks whether `login`'s overlay has any open connection, broadcasting only on a change. */
+    const check = (): void => {
+      const isConnected = (overlayConnections.get(login)?.size ?? 0) > 0;
+      if (isConnected === lastConnected) return;
+      lastConnected = isConnected;
+      broadcastToChannel(statusConnections, streamerId, { connected: isConnected });
+    };
+
+    const interval = setInterval(check, pollIntervalMs);
+    // attachSseConnection's own cleanup can be triggered by 'close'/'error' on either req or res
+    // (an abrupt socket failure can fire res's events without req ever emitting 'close') — mirror
+    // that here so this interval doesn't outlive the connection under those same paths.
+    /** Idempotent teardown for this handler's poll interval, wired to every path that can end the connection below. */
+    const clearStatusInterval = (): void => clearInterval(interval);
+    req.on('close', clearStatusInterval);
+    res.on('close', clearStatusInterval);
+    res.on('error', clearStatusInterval);
+
+    // A failed res.write() inside broadcastToChannel's own `check()` call evicts this response via
+    // the same connectionCleanups entry attachSseConnection just registered for it — without
+    // emitting 'close'/'error' on either req or res, so the listeners above never fire for that
+    // path. Wrap that cleanup so it also stops this interval; this must happen BEFORE the first
+    // check() below runs, otherwise a failure on that very first write would find no cleanup
+    // entry left to wrap (attachSseConnection's own cleanup already deleted it) and leak the
+    // interval with nothing left to own its teardown.
+    const attachCleanup = connectionCleanups.get(res);
+    if (!attachCleanup) {
+      // attachSseConnection's connection was already torn down before we got here — nothing left
+      // to poll for.
+      clearInterval(interval);
+      return;
+    }
+    connectionCleanups.set(res, () => {
+      attachCleanup();
+      clearStatusInterval();
+    });
+
+    check();
   };
 }
