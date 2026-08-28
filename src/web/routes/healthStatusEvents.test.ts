@@ -109,8 +109,10 @@ describe('GET /events — initial snapshot push (direct handler invocation)', ()
 
     await handler(req, res, vi.fn());
 
-    expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ discordConnected: true, marker: 'initial-push' })}\n\n`);
-
-    triggerClose(); // clears the keepalive interval so it doesn't leak into other tests
+    try {
+      expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ discordConnected: true, marker: 'initial-push' })}\n\n`);
+    } finally {
+      triggerClose(); // clears the keepalive interval so it doesn't leak into other tests, even if the assertion above fails
+    }
   });
 });
