@@ -202,4 +202,42 @@ describe('primeOwnerAlertBaseline', () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('connection refused'));
   });
+
+  it('seeds the baseline from the state as of when owner resolution finishes, not from a stale snapshot taken before it', async () => {
+    // Settle db healthy too — a prior test in this file may have left it failing, which would
+    // make this test's own recordDbPing(false, ...) transition a no-op (already-failing state)
+    // instead of the fresh ok→fail edge it's meant to exercise.
+    healthStore.recordDiscordConnected(false);
+    healthStore.recordDbPing(true);
+    await flush();
+    send.mockClear();
+
+    let resolveLookup!: () => void;
+    const lookupGate = new Promise<void>((resolve) => { resolveLookup = resolve; });
+    vi.mocked(findOwnerUser).mockImplementation(async () => {
+      await lookupGate;
+      return OWNER_ROW as any;
+    });
+
+    const primePromise = primeOwnerAlertBaseline();
+
+    // Discord finishes connecting while owner resolution is still pending — if the baseline
+    // snapshot were taken up front (before this await), it would capture the old
+    // discordConnected: false state and treat it as the primed baseline.
+    healthStore.recordDiscordConnected(true);
+    resolveLookup();
+    await primePromise;
+    startOwnerAlertWatcher();
+    await flush();
+    send.mockClear();
+
+    // An unrelated transition must not trigger a false "discord recovered" alert from a stale
+    // (pre-connect) baseline.
+    healthStore.recordDbPing(false, 'boom');
+    await flush();
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('db is down'));
+    expect(send).not.toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('discord'));
+  });
 });

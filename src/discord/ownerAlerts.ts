@@ -199,15 +199,19 @@ function handleHealthChanged(): void {
  * `startTwitchBot()` has run). Also resolves and caches the owner's Discord ID up front (via
  * {@link resolveOwnerDiscordId}) so the very first real failure — e.g. a DB outage — doesn't skip
  * its alert because `cachedOwnerDiscordId` was never populated yet.
+ * Resolves the owner ID *before* taking the health snapshot — the watcher isn't listening yet
+ * at this point, so nothing here reacts to concurrent health changes, but a snapshot taken
+ * before that await could still go stale (e.g. Discord finishing its connect) by the time this
+ * function returns and the caller starts the watcher, seeding a baseline that's already wrong.
  */
 export async function primeOwnerAlertBaseline(): Promise<void> {
+  await resolveOwnerDiscordId();
   const snapshot = getHealthSnapshot();
   const componentOks = deriveComponentOks(snapshot);
   const now = Date.now();
   for (const [componentId, { ok }] of componentOks) {
     componentStates.set(componentId, { failing: !ok, lastAlertAt: now });
   }
-  await resolveOwnerDiscordId();
 }
 
 /**

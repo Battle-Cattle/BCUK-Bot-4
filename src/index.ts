@@ -56,7 +56,7 @@ function startDbHealthCheck(): void {
   dbHealthCheckTimer = setInterval(() => {
     if (dbHealthCheckInFlight) return;
     dbHealthCheckInFlight = true;
-    pingDb()
+    void pingDb()
       .then((ok) => recordDbPing(ok, ok ? undefined : 'DB ping failed'))
       .catch((err: unknown) => log.error('Unexpected error during DB health check:', err))
       .finally(() => { dbHealthCheckInFlight = false; });
