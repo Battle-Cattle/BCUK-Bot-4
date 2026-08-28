@@ -64,14 +64,16 @@
           <p class="hint mt-05">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the URL above.</p>
           <div class="overlay-status">
             <span class="dot dot--offline" id="overlay-status-dot"></span>
-            <span id="overlay-status-text">Checking…</span>
+            <span id="overlay-status-text"><%= login ? 'Checking…' : 'Not connected' %></span>
           </div>
         </div>
       </div>
     </section>
 
+    <% if (login) { %>
     <script src="/sseClient.js"></script>
     <script src="/overlayConnectionStatus.js" data-events-url="/alerts/settings/events"></script>
+    <% } %>
 
     <!-- ── Per-event-type alert configuration ─────────────────────── -->
     <% const labels = { follow: 'Follow', sub: 'Sub', resub: 'Resub', giftsub: 'Gift Sub', raid: 'Raid' };

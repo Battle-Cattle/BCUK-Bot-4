@@ -7,7 +7,7 @@ vi.mock('../session', () => ({ getSessionUser: vi.fn() }));
 
 import {
   createSseEventsHandler, createLoginValidator, attachSseConnection, broadcastToChannel,
-  createStreamerSseEventsHandler,
+  createStreamerSseEventsHandler, createOverlayStatusEventsHandler,
 } from './sseChannel';
 import { getStreamerByDiscordId } from '../../db';
 import { getSessionUser } from '../session';
@@ -17,30 +17,34 @@ const log = mockLogger() as any;
 const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
 const RESERVED_LOGINS = new Set(['settings']);
 
+// Mirrors real EventEmitter semantics (multiple listeners per event, all fired in registration
+// order) rather than keeping only the last one — attachSseConnection and a caller built on top of
+// it (e.g. createOverlayStatusEventsHandler) can each register their own 'close'/'error' listener
+// on the same req/res, and both must still fire.
 function makeRes() {
-  const handlers: Record<string, () => void> = {};
+  const handlers: Record<string, Array<() => void>> = {};
   return {
     setHeader: vi.fn(),
     flushHeaders: vi.fn(),
     write: vi.fn(),
     status: vi.fn().mockReturnThis(),
     end: vi.fn(),
-    on: vi.fn((event: string, cb: () => void) => { handlers[event] = cb; }),
-    triggerResClose: () => handlers['close']?.(),
-    triggerResError: () => handlers['error']?.(),
+    on: vi.fn((event: string, cb: () => void) => { (handlers[event] ??= []).push(cb); }),
+    triggerResClose: () => handlers['close']?.forEach((cb) => cb()),
+    triggerResError: () => handlers['error']?.forEach((cb) => cb()),
   };
 }
 
 function makeReq(login: string) {
-  let closeCb: (() => void) | undefined;
+  const closeCbs: Array<() => void> = [];
   return {
     req: {
       params: { login },
       on: (event: string, cb: () => void) => {
-        if (event === 'close') closeCb = cb;
+        if (event === 'close') closeCbs.push(cb);
       },
     },
-    triggerClose: () => closeCb?.(),
+    triggerClose: () => closeCbs.forEach((cb) => cb()),
   };
 }
 
@@ -98,6 +102,7 @@ describe('createSseEventsHandler', () => {
 
     expect(connections.get('freshchannel')?.has(res as any)).toBe(true);
     expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream');
+    expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
     expect(res.write).toHaveBeenCalledWith(': connected\n\n');
 
     triggerClose();
@@ -353,6 +358,78 @@ describe('createStreamerSseEventsHandler', () => {
     await handler(req as any, res as any);
 
     expect(res.status).toHaveBeenCalledWith(429);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createOverlayStatusEventsHandler
+// ---------------------------------------------------------------------------
+describe('createOverlayStatusEventsHandler', () => {
+  const statusConnections = new Map<number, Set<any>>();
+  const overlayConnections = new Map<string, Set<any>>();
+
+  beforeEach(() => {
+    statusConnections.clear();
+    overlayConnections.clear();
+    vi.mocked(getSessionUser).mockReturnValue({ discordId: 'discord1' } as any);
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 7, twitch_name: 'somestreamer' } as any);
+  });
+
+  function buildOverlayStatusHandler(pollIntervalMs = 3000, maxPerChannel = 10) {
+    return createOverlayStatusEventsHandler({
+      statusConnections, overlayConnections, maxPerChannel, pollIntervalMs, log,
+    });
+  }
+
+  it('returns 403 when the streamer has no linked Twitch channel', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 7, twitch_name: null } as any);
+    const handler = buildOverlayStatusHandler();
+    const res = makeRes();
+    const { req } = makeReq('unused');
+
+    await handler(req as any, res as any);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  it('clears the poll interval when the response closes without the request ever closing', async () => {
+    vi.useFakeTimers();
+    try {
+      const handler = buildOverlayStatusHandler();
+      const res = makeRes();
+      const { req } = makeReq('unused');
+
+      await handler(req as any, res as any);
+      res.write.mockClear();
+      res.triggerResClose(); // an abrupt socket failure — req never fires 'close'
+
+      overlayConnections.set('somestreamer', new Set([{} as any]));
+      vi.advanceTimersByTime(10_000);
+
+      expect(res.write).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears the poll interval when the response errors without the request ever closing', async () => {
+    vi.useFakeTimers();
+    try {
+      const handler = buildOverlayStatusHandler();
+      const res = makeRes();
+      const { req } = makeReq('unused');
+
+      await handler(req as any, res as any);
+      res.write.mockClear();
+      res.triggerResError();
+
+      overlayConnections.set('somestreamer', new Set([{} as any]));
+      vi.advanceTimersByTime(10_000);
+
+      expect(res.write).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

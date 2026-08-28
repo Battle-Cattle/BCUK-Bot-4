@@ -64,7 +64,9 @@ export function broadcastToChannel<K>(connections: Map<K, Set<Response>>, key: K
 /** Writes the SSE handshake headers and the initial `: connected` comment. */
 function sendSseHandshake(res: Response): void {
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  // no-store (not the weaker no-cache) so no intermediary ever stores or replays a stream —
+  // several of these carry per-streamer status that must not be cached or reused across clients.
+  res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // disable Nginx buffering if behind proxy
   res.flushHeaders();
@@ -305,6 +307,12 @@ export function createOverlayStatusEventsHandler(
 ): (req: Request, res: Response) => Promise<void> {
   const { statusConnections, overlayConnections, maxPerChannel, pollIntervalMs, log } = options;
 
+  /**
+   * Route handler for one settings page's status stream: resolves the session's streamer, attaches
+   * the SSE connection, then polls `overlayConnections` for that streamer's login on an interval.
+   * @param req - Express request; reads `req.session.user`.
+   * @param res - Express response; see {@link createOverlayStatusEventsHandler}'s `@returns`.
+   */
   return async (req, res) => {
     let streamer: DbStreamerEventSub | null;
     try {
@@ -330,6 +338,7 @@ export function createOverlayStatusEventsHandler(
     const login = streamer.twitch_name.toLowerCase();
     let lastConnected: boolean | null = null;
 
+    /** Re-checks whether `login`'s overlay has any open connection, broadcasting only on a change. */
     const check = (): void => {
       const isConnected = (overlayConnections.get(login)?.size ?? 0) > 0;
       if (isConnected === lastConnected) return;
@@ -339,6 +348,12 @@ export function createOverlayStatusEventsHandler(
 
     check();
     const interval = setInterval(check, pollIntervalMs);
-    req.on('close', () => clearInterval(interval));
+    // attachSseConnection's own cleanup can be triggered by 'close'/'error' on either req or res
+    // (an abrupt socket failure can fire res's events without req ever emitting 'close') — mirror
+    // that here so this interval doesn't outlive the connection under those same paths.
+    const clearStatusInterval = (): void => clearInterval(interval);
+    req.on('close', clearStatusInterval);
+    res.on('close', clearStatusInterval);
+    res.on('error', clearStatusInterval);
   };
 }
