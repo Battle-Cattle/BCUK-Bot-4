@@ -5,6 +5,7 @@ import { resolveSharedChatSessionId } from '../../commands/customCommandHandler'
 import { createRuntimeRegistry, type TwitchSendRuntime } from '../../commands/twitchRuntime';
 import { shouldFire, type TimerRuntimeState } from './timerCommandFireGate';
 import { pickRowsToFire, releaseReservations, pruneStaleCooldowns, clearCooldowns } from './timerCommandCooldowns';
+import { recordSchedulerRun, normalizeError } from '../../shared/healthStore';
 
 const log = createLogger('TimerCommandScheduler');
 
@@ -148,8 +149,10 @@ export async function runTimerCommandTick(): Promise<void> {
       const toFire = pickRowsToFire(eligibleRows, sessionIdByChannel, now, lastFiredAtOf);
 
       await Promise.allSettled(toFire.map(({ row, sessionKey }) => sendTimerRow(row, now, sessionKey)));
+      recordSchedulerRun('timer', true);
     } catch (err) {
       log.error('Failed to load enabled timer commands:', err);
+      recordSchedulerRun('timer', false, normalizeError(err));
     } finally {
       tickRunning = false;
     }

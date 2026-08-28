@@ -5,6 +5,33 @@ export {
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
 } from './db/lookupCache';
 export { getPool, closePool } from './db/pool';
+import { getPool as getDbPool } from './db/pool';
+
+/**
+ * Verifies DB connectivity by acquiring a pooled connection and pinging it, mirroring the
+ * check `index.ts`'s startup sequence already performs. Deliberately doesn't touch
+ * `healthStore` itself — callers (e.g. the periodic health-check interval in `index.ts`)
+ * record the outcome, keeping this module free of any dependency on `shared/healthStore`.
+ * The connection is always released back to the pool once acquired, even if the ping itself
+ * throws — otherwise a failing ping would leak a pooled connection on every failure.
+ * @returns true if the ping succeeded, false if acquiring a connection or pinging it failed.
+ */
+export async function pingDb(): Promise<boolean> {
+  let conn;
+  try {
+    conn = await getDbPool().getConnection();
+  } catch {
+    return false;
+  }
+  try {
+    await conn.ping();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    conn.release();
+  }
+}
 
 // ─── Guilds ──────────────────────────────────────────────────────────────────
 
@@ -72,7 +99,7 @@ export async function removeOverride(guildId: string, commandId: number): Promis
 
 export {
   AccessLevel, ACCESS_LEVEL_LABELS,
-  findUser, findUsersByIds, findUserByTwitchName, getAllUsers, getGuildMemberUsers,
+  findUser, findUsersByIds, findUserByTwitchName, findOwnerUser, getAllUsers, getGuildMemberUsers,
   updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers,
 } from './db/users';
 export type { AccessLevelValue, DbUser, TwitchLinkedUser } from './db/users';

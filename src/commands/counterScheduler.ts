@@ -1,5 +1,6 @@
 import { createLogger } from '../shared/logger';
 import { archiveAndResetYearlyCounters } from '../db';
+import { recordSchedulerRun, normalizeError } from '../shared/healthStore';
 
 const log = createLogger('CounterScheduler');
 
@@ -20,7 +21,13 @@ let started = false;
 // `started` check alone can't distinguish "still my run" from "a newer run began".
 let runGeneration = 0;
 
-/** Polls once for the yearly counter archive and reschedules itself hourly while its run is still active. */
+/**
+ * Polls once for the yearly counter archive and reschedules itself hourly while its run is
+ * still active, recording the outcome (archive attempted or skipped) into `healthStore`.
+ * @param myGeneration - This run's generation number (see {@link runGeneration}), used to detect
+ *   a stale reschedule from an earlier, since-stopped run.
+ * @returns Resolves once this tick (and its reschedule, if still the active run) completes.
+ */
 async function tick(myGeneration: number): Promise<void> {
   const now = new Date();
   const prevYear = now.getFullYear() - 1;
@@ -30,10 +37,14 @@ async function tick(myGeneration: number): Promise<void> {
       const count = await archiveAndResetYearlyCounters(prevYear);
       log.info(`Archived and reset ${count} counter(s) for year ${prevYear}.`);
       lastArchivedYear = prevYear;
+      recordSchedulerRun('counter', true);
     } catch (err) {
       log.error(`Failed to archive counters for year ${prevYear}:`, err);
+      recordSchedulerRun('counter', false, normalizeError(err));
       // lastArchivedYear is not set on failure, so the next hourly poll will retry.
     }
+  } else {
+    recordSchedulerRun('counter', true);
   }
 
   // Only reschedule while still the active run — guards both a stop() that raced this

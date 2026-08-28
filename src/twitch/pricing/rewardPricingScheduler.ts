@@ -1,6 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { getAllEnabledPricingRows, getPricingSettingsForStreamers, type StreamerPricingSettings } from '../../db';
 import { applyDecayTick } from './rewardPricingService';
+import { recordSchedulerRun, normalizeError } from '../../shared/healthStore';
 
 const log = createLogger('RewardPricingScheduler');
 
@@ -99,12 +100,15 @@ export async function runDecayTick(): Promise<void> {
           }),
         ),
       );
+      recordSchedulerRun('rewardPricing', true);
     } catch (err) {
       if (isServerShutdownError(err)) {
         log.warn('Database is shutting down — pausing decay tick polling until it recovers.');
+        recordSchedulerRun('rewardPricing', false, normalizeError(err));
         pauseForDbShutdown();
       } else {
         log.error('Failed to load enabled pricing rows:', err);
+        recordSchedulerRun('rewardPricing', false, normalizeError(err));
         // A recovery probe can fail with something other than the shutdown error it was
         // triggered by (e.g. a transient network blip) — without this, that probe's own
         // cleanup would already have cleared dbShutdownRetryTimer, leaving the scheduler

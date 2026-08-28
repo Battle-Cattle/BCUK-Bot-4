@@ -103,6 +103,10 @@ vi.mock('../shared/statusStore', () => ({
   setTwitchChannel: vi.fn(),
 }));
 
+vi.mock('../shared/healthStore', () => ({
+  recordTwitchChatConnected: vi.fn(),
+}));
+
 vi.mock('../commands/commandRouter', () => ({
   handleCommand: vi.fn(),
 }));
@@ -156,6 +160,7 @@ import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName
 import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
 import { getUsers } from './twitchApi';
 import { setTwitchChannel } from '../shared/statusStore';
+import { recordTwitchChatConnected } from '../shared/healthStore';
 import { executeCustomCommandForTwitch } from '../commands/customCommandHandler';
 import { executeCounterCommandForTwitch } from '../commands/counterHandler';
 import { executeMultiCommandForTwitch } from '../commands/multiCommandHandler';
@@ -898,6 +903,23 @@ describe('stopTwitchBot', () => {
     await stopTwitchBot();
 
     expect(mockClient.quit).toHaveBeenCalledOnce();
+  });
+
+  it('records the health store as disconnected immediately, even before quit() settles', async () => {
+    await connectBot();
+    vi.mocked(recordTwitchChatConnected).mockClear();
+    mockClient.quit.mockImplementation(() => {}); // never fires onDisconnect
+
+    try {
+      const stopped = stopTwitchBot();
+      expect(recordTwitchChatConnected).toHaveBeenCalledWith(false);
+      await vi.advanceTimersByTimeAsync(DISCONNECT_TIMEOUT_MS);
+      await stopped;
+    } finally {
+      mockClient.quit.mockImplementation(() => {
+        queueMicrotask(() => fireDisconnect(true));
+      });
+    }
   });
 
   it('is a no-op when the client was never started', async () => {

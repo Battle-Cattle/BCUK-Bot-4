@@ -14,6 +14,7 @@ vi.mock('./db/users', () => ({
   ACCESS_LEVEL_LABELS: {},
   findUser: vi.fn(),
   findUserByTwitchName: vi.fn(),
+  findOwnerUser: vi.fn(),
   getAllUsers: vi.fn(),
   updateDiscordName: vi.fn(),
   getTwitchEnabledChannels: vi.fn(),
@@ -219,7 +220,9 @@ import {
   initAlertConfigs, saveAlertConfig, setAlertImage, setAlertSound,
   createSfxTrigger, updateSfxTrigger, deleteSfxTrigger,
   addSfxFile, updateSfxFile, deleteSfxFile,
+  pingDb,
 } from './db';
+import { getPool } from './db/pool';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -593,5 +596,33 @@ describe('deleteSfxFile', () => {
     const result = await deleteSfxFile(999);
     expect(result).toBeNull();
     expect(invalidateSfxLookupCache).not.toHaveBeenCalled();
+  });
+});
+
+describe('pingDb', () => {
+  it('returns true when a connection can be acquired and pinged', async () => {
+    const conn = { ping: vi.fn().mockResolvedValue(undefined), release: vi.fn() };
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+    expect(await pingDb()).toBe(true);
+    expect(conn.ping).toHaveBeenCalledOnce();
+    expect(conn.release).toHaveBeenCalledOnce();
+  });
+
+  it('returns false when acquiring a connection fails', async () => {
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockRejectedValue(new Error('down')) } as any);
+    expect(await pingDb()).toBe(false);
+  });
+
+  it('returns false when the ping itself fails', async () => {
+    const conn = { ping: vi.fn().mockRejectedValue(new Error('timeout')), release: vi.fn() };
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+    expect(await pingDb()).toBe(false);
+  });
+
+  it('still releases the connection back to the pool when the ping rejects', async () => {
+    const conn = { ping: vi.fn().mockRejectedValue(new Error('timeout')), release: vi.fn() };
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+    expect(await pingDb()).toBe(false);
+    expect(conn.release).toHaveBeenCalledOnce();
   });
 });

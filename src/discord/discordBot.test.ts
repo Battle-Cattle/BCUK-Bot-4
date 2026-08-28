@@ -24,6 +24,8 @@ vi.mock('../commands/counterHandler', () => ({
   forgetGuildCounterCooldown: vi.fn(),
 }));
 vi.mock('../shared/statusStore', () => ({ setDiscordReady: vi.fn(), clearVoiceStatus: vi.fn() }));
+vi.mock('../shared/healthStore', () => ({ recordDiscordConnected: vi.fn() }));
+vi.mock('../commands/healthCommandHandler', () => ({ executeHealthCommandForDiscord: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../audio/audioPlayer', () => ({ forgetGuild: vi.fn() }));
 vi.mock('./guildRefreshState', () => ({ forgetGuildRefreshState: vi.fn() }));
 vi.mock('./guildRegistry', () => ({
@@ -173,6 +175,14 @@ describe('startDiscordBot — messageCreate handler', () => {
     cb(msg);
     expect(vi.mocked(commands.handleCommand)).toHaveBeenCalledWith('!test', 'discord', 'guild-id');
     expect(vi.mocked(customCmds.executeCustomCommandForDiscord)).toHaveBeenCalledWith(msg, 'Alice', 'guild-id');
+  });
+
+  it('dispatches to the health command handler for registered guild messages', async () => {
+    const health = await import('../commands/healthCommandHandler.js');
+    const cb = getMessageCreateCb();
+    const msg = { author: { bot: false, username: 'Alice' }, guildId: 'guild-id', content: '!health', member: { displayName: 'Alice' } };
+    cb(msg);
+    expect(vi.mocked(health.executeHealthCommandForDiscord)).toHaveBeenCalledWith(msg);
   });
 });
 
@@ -380,6 +390,14 @@ describe('startDiscordBot — clientReady ready state', () => {
     await readyCb(mockInstance);
     expect(vi.mocked(status.setDiscordReady)).toHaveBeenCalledWith('Bot#1234');
   });
+
+  it('records the Discord connection as up on clientReady success', async () => {
+    const healthStore = await import('../shared/healthStore.js');
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(true);
+  });
 });
 
 // ─── startDiscordBot — error event ───────────────────────────────────────────
@@ -427,6 +445,14 @@ describe('startDiscordBot — gateway watchdog', () => {
     expect(mockInstance.login).toHaveBeenCalledTimes(2);
     expect(mod.getDiscordClient()).toBeNull();
   });
+
+  it('records the Discord connection as down when a shard disconnects permanently', async () => {
+    const healthStore = await import('../shared/healthStore.js');
+    mod.startDiscordBot();
+    const handler = findHandler('shardDisconnect');
+    handler({ code: 4004 }, 0);
+    expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(false);
+  });
 });
 
 // ─── stopDiscordBot ───────────────────────────────────────────────────────────
@@ -435,6 +461,17 @@ describe('stopDiscordBot', () => {
   it('does not throw when called before startDiscordBot (existing?.destroy is safe)', () => {
     expect(() => mod.stopDiscordBot()).not.toThrow();
     expect(mod.getDiscordClient()).toBeNull();
+  });
+
+  it('records the Discord connection as down', async () => {
+    const healthStore = await import('../shared/healthStore.js');
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    mod.stopDiscordBot();
+
+    expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(false);
   });
 
   it('calls destroy on the existing client and nulls the reference', async () => {

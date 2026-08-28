@@ -1,4 +1,5 @@
 import { createLogger } from '../../shared/logger';
+import { recordEventSubConnected, recordEventSubReconnectAttempt, removeEventSubHealth } from '../../shared/healthStore';
 import { subscribeForStreamer, removeStreamerFromMap, dispatchNotification, handleRevocation, StreamerEventSubData } from './twitchEventSubSubscriptions';
 
 const log = createLogger('EventSub');
@@ -109,6 +110,7 @@ export class StreamerConnection {
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.ws?.close(1000, 'shutdown');
     this.ws = null;
+    removeEventSubHealth(this.name);
     removeStreamerFromMap(this.uid);
   }
 
@@ -212,6 +214,7 @@ export class StreamerConnection {
     this.clearConnectTimer();
     this.reconnectAttempts = 0;
     this.resetKeepaliveTimer();
+    recordEventSubConnected(this.name, true);
   }
 
   private onMessage(ev: MessageEvent): void {
@@ -233,6 +236,7 @@ export class StreamerConnection {
   private onClose(ev: CloseEvent, socket: WebSocket): void {
     if (this.ws !== socket) return; // old socket closed during session migration, or already force-reconnected — ignore
     log.warn(`[${this.name}] WebSocket closed: ${ev.code} ${ev.reason}`);
+    recordEventSubConnected(this.name, false, `Closed: ${ev.code} ${ev.reason}`);
     this.forceReconnect(socket);
   }
 
@@ -247,6 +251,7 @@ export class StreamerConnection {
   private onError(socket: WebSocket): void {
     if (this.ws !== socket) return;
     log.warn(`[${this.name}] WebSocket error`);
+    recordEventSubConnected(this.name, false, 'WebSocket error');
     this.forceReconnect(socket);
   }
 
@@ -264,11 +269,18 @@ export class StreamerConnection {
    * this connection's current socket any more (e.g. a session migration or an earlier
    * force-reconnect already superseded it) — including the case where `socket`'s real
    * `'close'` event does eventually land after this already ran.
+   * Always records this connection as disconnected in `healthStore` before doing any of the
+   * above — most callers here (`onClose`/`onError`) already record it themselves first, but a
+   * watchdog-triggered call (the connect-timeout and keepalive-timeout paths) does not, and
+   * without this, `healthStore` would keep reporting `connected: true` while the connection is
+   * actually being torn down and retried. A second `recordEventSubConnected(false)` call from
+   * an already-recording caller is harmless.
    * @param socket - The socket to tear down, or `null` (always a no-op in that case).
    * @returns Nothing.
    */
   private forceReconnect(socket: WebSocket | null): void {
     if (this.ws !== socket) return;
+    recordEventSubConnected(this.name, false);
     // Best-effort: request a close (harmless if already closing/closed) so Twitch has a
     // better chance of revoking this session's EventSub subscriptions promptly, rather than
     // leaving them "enabled" until Twitch's own delayed dead-connection detection catches up.
@@ -349,11 +361,17 @@ export class StreamerConnection {
     setTimeout(() => { oldSocket?.close(1000, 'reconnect'); }, SESSION_MIGRATION_CLOSE_DELAY_MS);
   }
 
+  /**
+   * Schedules a reconnect attempt after an exponential backoff delay (capped at
+   * {@link RECONNECT_BACKOFF_MAX_MS}), replacing any already-pending attempt. Records the
+   * attempt in `healthStore` before scheduling.
+   */
   private scheduleReconnect(): void {
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); }
     const delay = Math.min(RECONNECT_BACKOFF_MAX_MS, 1_000 * Math.pow(2, this.reconnectAttempts));
     this.reconnectAttempts++;
     log.info(`[${this.name}] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    recordEventSubReconnectAttempt(this.name);
     this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.connect(); }, delay);
   }
 

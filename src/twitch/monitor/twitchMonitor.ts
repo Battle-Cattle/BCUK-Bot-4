@@ -16,6 +16,7 @@ import {
 import { deleteAnnouncement } from './twitchMonitorAnnouncements';
 import { performStartupLiveCheck } from './twitchMonitorStartup';
 import { handlePollStreamer, dispatchStreamerPolls, withLoginLock } from './twitchMonitorPoll';
+import { recordMonitorPoll, normalizeError } from '../../shared/healthStore';
 
 const log = createLogger('TwitchMonitor');
 
@@ -34,7 +35,12 @@ let currentPollPromise: Promise<void> = Promise.resolve();
 
 // ─── Polling ───────────────────────────────────────────────────────────────
 
-/** Polls the Twitch API for all monitored streamers' live status and dispatches the results. No-ops if a poll is already in flight or there are no streamers configured. */
+/**
+ * Polls the Twitch API for all monitored streamers' live status, dispatches the results, and
+ * records the poll's success/failure into `healthStore`. No-ops if a poll is already in flight
+ * or there are no streamers configured.
+ * @returns Resolves once the poll (and its dispatch) completes.
+ */
 async function pollStreams(): Promise<void> {
   if (pollRunning || streamersData.length === 0) return;
   pollRunning = true;
@@ -48,8 +54,10 @@ async function pollStreams(): Promise<void> {
         liveStreams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
       );
       await dispatchStreamerPolls(liveStates, loginToUserId, streamersData, liveByUserId);
+      recordMonitorPoll(true);
     } catch (err) {
       log.error('Poll error:', err);
+      recordMonitorPoll(false, normalizeError(err));
     } finally {
       pollRunning = false;
     }

@@ -5,10 +5,12 @@ import { mockLogger } from '../test-utils/loggerMock';
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../db', () => ({ archiveAndResetYearlyCounters: vi.fn() }));
+vi.mock('../shared/healthStore', () => ({ recordSchedulerRun: vi.fn(), normalizeError: vi.fn((err: unknown) => (err instanceof Error ? err.message : String(err))) }));
 
 let startCounterScheduler: () => void;
 let stopCounterScheduler: () => void;
 let archiveAndResetYearlyCounters: ReturnType<typeof vi.fn>;
+let recordSchedulerRun: ReturnType<typeof vi.fn>;
 
 async function flushAsync(): Promise<void> {
   // Multiple rounds of microtask flushing to let async tick() complete
@@ -28,6 +30,9 @@ beforeEach(async () => {
   const db = await import('../db.js');
   archiveAndResetYearlyCounters = vi.mocked(db.archiveAndResetYearlyCounters);
   archiveAndResetYearlyCounters.mockResolvedValue(0);
+
+  const healthStore = await import('../shared/healthStore.js');
+  recordSchedulerRun = vi.mocked(healthStore.recordSchedulerRun);
 });
 
 afterEach(() => {
@@ -161,6 +166,31 @@ describe('counterScheduler', () => {
     // A single stopCounterScheduler() call should still fully stop everything.
     stopCounterScheduler();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('records a successful scheduler run on the non-archive poll path', async () => {
+    vi.setSystemTime(new Date(2025, 1, 15)); // Feb 15, 2025 — not Jan 1
+    startCounterScheduler();
+    await flushAsync();
+
+    expect(recordSchedulerRun).toHaveBeenCalledWith('counter', true);
+  });
+
+  it('records a successful scheduler run when the yearly archive succeeds', async () => {
+    vi.setSystemTime(new Date(2025, 0, 1)); // Jan 1, 2025
+    startCounterScheduler();
+    await flushAsync();
+
+    expect(recordSchedulerRun).toHaveBeenCalledWith('counter', true);
+  });
+
+  it('records a failed scheduler run with the normalized error when the yearly archive throws', async () => {
+    vi.setSystemTime(new Date(2025, 0, 1)); // Jan 1, 2025
+    archiveAndResetYearlyCounters.mockRejectedValueOnce(new Error('DB down'));
+    startCounterScheduler();
+    await flushAsync();
+
+    expect(recordSchedulerRun).toHaveBeenCalledWith('counter', false, 'DB down');
   });
 
   it('stopCounterScheduler prevents further ticks', async () => {

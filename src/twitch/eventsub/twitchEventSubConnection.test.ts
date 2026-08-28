@@ -7,6 +7,11 @@ vi.mock('./twitchEventSubSubscriptions', () => ({
   dispatchNotification: vi.fn(),
   handleRevocation: vi.fn(),
 }));
+vi.mock('../../shared/healthStore', () => ({
+  recordEventSubConnected: vi.fn(),
+  recordEventSubReconnectAttempt: vi.fn(),
+  removeEventSubHealth: vi.fn(),
+}));
 
 import {
   buildReconnectUrl,
@@ -22,6 +27,7 @@ import {
   handleRevocation,
   removeStreamerFromMap,
 } from './twitchEventSubSubscriptions';
+import { recordEventSubConnected, removeEventSubHealth } from '../../shared/healthStore';
 
 // ---------------------------------------------------------------------------
 // buildReconnectUrl
@@ -337,6 +343,15 @@ describe('StreamerConnection lifecycle', () => {
     expect(removeStreamerFromMap).toHaveBeenCalledWith('uid-123');
   });
 
+  it('stop() removes the streamer\'s health record entirely, rather than leaving it reported as disconnected', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+
+    conn.stop();
+
+    expect(removeEventSubHealth).toHaveBeenCalledWith('streamer');
+  });
+
   it('does not reconnect after a close once stopped', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
@@ -445,6 +460,19 @@ describe('StreamerConnection lifecycle', () => {
     // a socket that's already open and working — this proves it can't, independent of the
     // keepalive timer (which is a separate 20s mechanism also armed by open()).
     expect((conn as any).connectTimer).toBeNull();
+  });
+
+  /** Verifies a watchdog-triggered (keepalive-timeout) forceReconnect records the connection as disconnected, not just the error/close handlers. */
+  it('records disconnected health state on a keepalive-timeout-triggered reconnect', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstWs = (conn as any).ws as MockWebSocket;
+    firstWs.listeners.get('open')!();
+    vi.mocked(recordEventSubConnected).mockClear(); // clear the onOpen(true) call above
+
+    vi.advanceTimersByTime(20_000); // keepalive timeout fires, triggering forceReconnect directly
+
+    expect(recordEventSubConnected).toHaveBeenCalledWith('streamer', false);
   });
 
   /** Verifies the keepalive-timeout path force-reconnects without waiting on the socket's own 'close' event; returns void. */

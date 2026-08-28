@@ -5,6 +5,8 @@ import { fireAndForget } from '../commands/commandUtils';
 import { executeCustomCommandForDiscord, forgetGuildCustomCommandCooldown } from '../commands/customCommandHandler';
 import { executeCounterCommandForDiscord, forgetGuildCounterCooldown } from '../commands/counterHandler';
 import { setDiscordReady, clearVoiceStatus } from '../shared/statusStore';
+import { recordDiscordConnected } from '../shared/healthStore';
+import { executeHealthCommandForDiscord } from '../commands/healthCommandHandler';
 import { forgetGuild as forgetGuildVoiceState } from '../audio/audioPlayer';
 import { forgetGuildRefreshState } from './guildRefreshState';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
@@ -126,6 +128,9 @@ export function startDiscordBot(): void {
   });
   bootingClient = localClient;
 
+  // Dispatches every non-bot message from a registered guild to each command handler in turn
+  // (fire-and-forget — a failure in one handler must not block the others). `message` is the
+  // triggering Discord message; returns void.
   localClient.on('messageCreate', (message) => {
     if (message.author.bot) return;
     if (!message.guildId || !isRegisteredGuild(message.guildId)) return;
@@ -136,6 +141,7 @@ export function startDiscordBot(): void {
     fireAndForget(executeCustomCommandForDiscord(message, displayName, guildId), 'Custom command error', log);
     fireAndForget(executeCounterCommandForDiscord(message, displayName), 'Counter command error', log);
     fireAndForget(handleCommand(message.content, 'discord', guildId), 'Command handler error', log);
+    fireAndForget(executeHealthCommandForDiscord(message), 'Health command error', log);
   });
 
   // Bootstrap: when the bot is added to a server for the first time, record the
@@ -186,6 +192,7 @@ export function startDiscordBot(): void {
     setDiscordClient(c);
     log.info(`Logged in as ${c.user.tag}`);
     setDiscordReady(c.user.tag);
+    recordDiscordConnected(true);
   });
 
   localClient.on('error', (err) => {
@@ -212,6 +219,7 @@ export function startDiscordBot(): void {
   // of sitting alive-but-dead until someone notices and restarts it manually.
   localClient.on('shardDisconnect', (event, shardId) => {
     log.error(`Shard ${shardId} disconnected permanently (code ${event.code}) — reconnecting client.`);
+    recordDiscordConnected(false);
     stopDiscordBot();
     startDiscordBot();
   });
@@ -226,12 +234,14 @@ export function startDiscordBot(): void {
  * Disconnect and destroy the Discord client, including any client that is
  * still connecting. Idempotent — safe to call before {@link startDiscordBot}.
  * `destroy()` rejections are caught and logged rather than left unhandled.
+ * Records the Discord connection as down in `healthStore` before tearing down.
  */
 export function stopDiscordBot(): void {
   const existingReady = getDiscordClient();
   const existingBooting = bootingClient;
   setDiscordClient(null);
   bootingClient = null;
+  recordDiscordConnected(false);
   existingReady?.destroy().catch((err: unknown) => log.error('Error destroying client:', err));
   existingBooting?.destroy().catch((err: unknown) => log.error('Error destroying booting client:', err));
   log.info('Client destroyed.');
