@@ -346,7 +346,6 @@ export function createOverlayStatusEventsHandler(
       broadcastToChannel(statusConnections, streamerId, { connected: isConnected });
     };
 
-    check();
     const interval = setInterval(check, pollIntervalMs);
     // attachSseConnection's own cleanup can be triggered by 'close'/'error' on either req or res
     // (an abrupt socket failure can fire res's events without req ever emitting 'close') — mirror
@@ -357,16 +356,25 @@ export function createOverlayStatusEventsHandler(
     res.on('close', clearStatusInterval);
     res.on('error', clearStatusInterval);
 
-    // A failed res.write() inside broadcastToChannel's own `check()` call above evicts this
-    // response via the same connectionCleanups entry attachSseConnection just registered for it —
-    // without emitting 'close'/'error' on either req or res, so the listeners above never fire for
-    // that path. Wrap that cleanup so it also stops this interval.
+    // A failed res.write() inside broadcastToChannel's own `check()` call evicts this response via
+    // the same connectionCleanups entry attachSseConnection just registered for it — without
+    // emitting 'close'/'error' on either req or res, so the listeners above never fire for that
+    // path. Wrap that cleanup so it also stops this interval; this must happen BEFORE the first
+    // check() below runs, otherwise a failure on that very first write would find no cleanup
+    // entry left to wrap (attachSseConnection's own cleanup already deleted it) and leak the
+    // interval with nothing left to own its teardown.
     const attachCleanup = connectionCleanups.get(res);
-    if (attachCleanup) {
-      connectionCleanups.set(res, () => {
-        attachCleanup();
-        clearStatusInterval();
-      });
+    if (!attachCleanup) {
+      // attachSseConnection's connection was already torn down before we got here — nothing left
+      // to poll for.
+      clearInterval(interval);
+      return;
     }
+    connectionCleanups.set(res, () => {
+      attachCleanup();
+      clearStatusInterval();
+    });
+
+    check();
   };
 }

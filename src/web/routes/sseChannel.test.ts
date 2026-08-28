@@ -412,6 +412,35 @@ describe('createOverlayStatusEventsHandler', () => {
     }
   });
 
+  it('clears the poll interval when the very first status write fails, before any state change', async () => {
+    vi.useFakeTimers();
+    try {
+      const handler = buildOverlayStatusHandler();
+      const res = makeRes();
+      let writeCount = 0;
+      res.write.mockImplementation(() => {
+        writeCount++;
+        // 1st write is the SSE handshake (': connected\n\n'); 2nd is the initial check()'s
+        // broadcast, fired synchronously inside the handler before the interval/wrapper race
+        // could otherwise leave nothing owning this interval's cleanup.
+        if (writeCount === 2) throw new Error('write failed');
+      });
+      const { req } = makeReq('unused');
+
+      await handler(req as any, res as any);
+
+      expect(statusConnections.has(7)).toBe(false);
+
+      res.write.mockClear();
+      overlayConnections.set('somestreamer', new Set([{} as any]));
+      vi.advanceTimersByTime(10_000);
+
+      expect(res.write).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('clears the poll interval when a broadcast write fails, with no close/error event ever emitted', async () => {
     vi.useFakeTimers();
     try {
