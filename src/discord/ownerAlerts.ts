@@ -203,6 +203,7 @@ function handleHealthChanged(): void {
  * at this point, so nothing here reacts to concurrent health changes, but a snapshot taken
  * before that await could still go stale (e.g. Discord finishing its connect) by the time this
  * function returns and the caller starts the watcher, seeding a baseline that's already wrong.
+ * @returns Resolves once both owner-ID resolution and baseline seeding have completed.
  */
 export async function primeOwnerAlertBaseline(): Promise<void> {
   await resolveOwnerDiscordId();
