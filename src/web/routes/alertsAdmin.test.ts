@@ -22,6 +22,10 @@ vi.mock('../middleware', () => ({
 
 vi.mock('../../shared/config', () => ({
   PUBLIC_URL: 'http://localhost:3000',
+  ALERT_STATUS_MAX_SSE_PER_STREAMER: 3,
+  ALERT_MAX_SSE_PER_CHANNEL: 10,
+  ALERT_ASSETS_FOLDER: './alert-assets',
+  SSE_MAX_TOTAL_CONNECTIONS: 1000,
 }));
 
 const { logMock } = vi.hoisted(() => ({
@@ -42,14 +46,47 @@ vi.mock('./alertsAssetMutations', async () => {
 });
 
 import supertest from 'supertest';
-import router from './alertsAdmin';
+import router, { statusConnections } from './alertsAdmin';
 import { getStreamerByDiscordId, getAlertConfigsForStreamer } from '../../db';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
+import { connections as alertsSourceConnections } from './alertsOverlaySource';
 
 type SessionUser = SessionUserFixture;
 const USER: SessionUser = makeSessionUser({ accessLevel: AccessLevel.MOD });
+
+/** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely — needed to control the request's 'close' event deterministically and to await the async handler before assertions. */
+function getRouteHandler(routePath: string): (req: any, res: any, next: any) => Promise<void> | void {
+  const layer = (router as any).stack.find((l: any) => l.route?.path === routePath);
+  return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+/** Builds a fake Express `res` covering the SSE-specific methods used by the events route handler. */
+function makeSseRes() {
+  return {
+    setHeader: vi.fn(),
+    flushHeaders: vi.fn(),
+    write: vi.fn(),
+    status: vi.fn().mockReturnThis(),
+    end: vi.fn(),
+    on: vi.fn(),
+  };
+}
+
+/** Builds a fake Express `req` with a session for `discordId`, and a `close`-event hook. */
+function makeSseReq(discordId: string) {
+  let closeCb: (() => void) | undefined;
+  return {
+    req: {
+      session: { user: { discordId } },
+      on: (event: string, cb: () => void) => {
+        if (event === 'close') closeCb = cb;
+      },
+    },
+    triggerClose: () => closeCb?.(),
+  };
+}
 
 /** Builds a supertest-ready app: the alerts admin router with a stubbed session and a render mock that flattens locals into the JSON body. */
 function buildApp(sessionUser: SessionUser = USER) {
@@ -60,6 +97,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
   vi.mocked(getAlertConfigsForStreamer).mockResolvedValue([]);
+  statusConnections.clear();
+  alertsSourceConnections.clear();
 });
 
 describe('GET /settings — query param filtering', () => {
@@ -134,5 +173,107 @@ describe('GET /settings — streamer and alert config loading', () => {
     const res = await supertest(buildApp()).get('/settings');
     expect(res.status).toBe(200);
     expect(res.body.textAnimations).toEqual(['none', 'wave', 'pulse', 'glitch', 'shake', 'rainbow', 'flicker', 'tilt', 'bounce-in', 'typewriter']);
+  });
+});
+
+describe('GET /settings/events', () => {
+  function makeStreamer(overrides: Record<string, unknown> = {}) {
+    return { id: 7, discord_id: 'discord1', twitch_name: 'somestreamer', ...overrides };
+  }
+
+  it('returns 403 when the user is not a monitored streamer', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+    const res = await supertest(buildApp()).get('/settings/events');
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 403 when the streamer has no linked Twitch channel', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer({ twitch_name: null }) as any);
+    const res = await supertest(buildApp()).get('/settings/events');
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 500 when the streamer lookup throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockRejectedValue(new Error('DB down'));
+    const res = await supertest(buildApp()).get('/settings/events');
+    expect(res.status).toBe(500);
+  });
+
+  it('attaches the connection and reports disconnected when the overlay has no open connections', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer() as any);
+    const handler = getRouteHandler('/settings/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('discord1');
+
+    await handler(req, res, vi.fn());
+
+    expect(statusConnections.get(7)?.has(res as any)).toBe(true);
+    expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ connected: false })}\n\n`);
+
+    triggerClose(); // clears the status-poll interval so it doesn't leak into other tests
+  });
+
+  it('reports connected when the overlay already has an open connection', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer() as any);
+    alertsSourceConnections.set('somestreamer', new Set([{} as any]));
+    const handler = getRouteHandler('/settings/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('discord1');
+
+    await handler(req, res, vi.fn());
+
+    expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ connected: true })}\n\n`);
+
+    triggerClose();
+  });
+
+  it('pushes an update only when the overlay connection state actually changes on a poll tick', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer() as any);
+      const handler = getRouteHandler('/settings/events');
+      const res = makeSseRes();
+      const { req, triggerClose } = makeSseReq('discord1');
+
+      await handler(req, res, vi.fn());
+      expect(res.write).toHaveBeenCalledTimes(2); // handshake + initial disconnected state
+      res.write.mockClear();
+
+      vi.advanceTimersByTime(3000); // no change yet — still disconnected
+      expect(res.write).not.toHaveBeenCalled();
+
+      alertsSourceConnections.set('somestreamer', new Set([{} as any]));
+      vi.advanceTimersByTime(3000);
+      expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ connected: true })}\n\n`);
+      res.write.mockClear();
+
+      vi.advanceTimersByTime(3000); // still connected — no repeat push
+      expect(res.write).not.toHaveBeenCalled();
+
+      triggerClose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops polling once the request closes', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer() as any);
+      const handler = getRouteHandler('/settings/events');
+      const res = makeSseRes();
+      const { req, triggerClose } = makeSseReq('discord1');
+
+      await handler(req, res, vi.fn());
+      triggerClose();
+      res.write.mockClear();
+
+      alertsSourceConnections.set('somestreamer', new Set([{} as any]));
+      vi.advanceTimersByTime(10_000);
+
+      expect(res.write).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

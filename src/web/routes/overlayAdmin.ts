@@ -1,21 +1,29 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { getStreamerByDiscordId } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
 import { getVideosForStreamer, getRewardsForStreamer } from '../../db';
-import { PUBLIC_URL } from '../../shared/config';
+import { PUBLIC_URL, OVERLAY_STATUS_MAX_SSE_PER_STREAMER } from '../../shared/config';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { router as mutationsRouter, MAX_UPLOAD_MB } from './overlayAdminMutations';
 import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';
+import { connections as overlaySourceConnections } from './overlaySource';
+import { attachSseConnection, broadcastToChannel } from './sseChannel';
 
 const log = createLogger('OverlayAdmin');
 const router = Router();
+
+// How often the settings-page SSE stream re-checks whether the overlay browser source is open.
+const STATUS_POLL_INTERVAL_MS = 3000;
+
+// In-memory map of active `/settings/events` SSE connections, keyed by streamer ID.
+export const statusConnections = new Map<number, Set<Response>>();
 
 const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_file', 'upload_failed', 'delete_failed',
@@ -88,6 +96,56 @@ router.get('/controller/settings', requireAuth, csrfProtection, (req, res) => {
     csrfToken: req.csrfToken(),
     baseUrl: PUBLIC_URL,
   });
+});
+
+/**
+ * GET /overlay/settings/events — SSE endpoint streaming `{ connected: boolean }` snapshots of
+ * whether the logged-in user's own reward-video browser source currently has an open connection,
+ * so the settings page can show a live status dot instead of the user only finding out something's
+ * wrong when a reward video never plays. Polls the shared `overlaySource` connections map on an
+ * interval rather than reacting to a push event, since opening/closing that overlay's SSE
+ * connection has no existing event to subscribe to.
+ * @param req - Express request; reads `req.session.user`.
+ * @param res - Express response; upgrades to a `text/event-stream` connection kept alive with
+ *   periodic pings and torn down (including the status-poll interval) on client disconnect;
+ *   replies 403 if the user isn't a monitored streamer with a linked Twitch channel, 500 (logged)
+ *   if the streamer lookup fails, or 429 if the connection limit is exceeded.
+ */
+router.get('/settings/events', requireAuth, async (req, res) => {
+  let streamer: DbStreamerEventSub | null;
+  try {
+    streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
+  } catch (err) {
+    log.error('Failed to resolve streamer for overlay status SSE:', err);
+    res.status(500).end();
+    return;
+  }
+  if (!streamer || !streamer.twitch_name) {
+    res.status(403).end();
+    return;
+  }
+
+  const attached = attachSseConnection(req, res, {
+    connections: statusConnections,
+    key: streamer.id,
+    maxPerChannel: OVERLAY_STATUS_MAX_SSE_PER_STREAMER,
+  });
+  if (!attached) return;
+
+  const streamerId = streamer.id;
+  const login = streamer.twitch_name.toLowerCase();
+  let lastConnected: boolean | null = null;
+
+  const check = (): void => {
+    const isConnected = (overlaySourceConnections.get(login)?.size ?? 0) > 0;
+    if (isConnected === lastConnected) return;
+    lastConnected = isConnected;
+    broadcastToChannel(statusConnections, streamerId, { connected: isConnected });
+  };
+
+  check();
+  const interval = setInterval(check, STATUS_POLL_INTERVAL_MS);
+  req.on('close', () => clearInterval(interval));
 });
 
 router.use(mutationsRouter);
