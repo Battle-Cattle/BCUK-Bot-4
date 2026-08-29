@@ -31,6 +31,13 @@ export function registerOwnerAlertRuntime(runtime: OwnerAlertRuntime): void {
 /** How long a component may keep re-alerting while it stays in the failing state, before this watcher sends another notification. */
 const REALERT_COOLDOWN_MS = 30 * 60_000;
 
+/**
+ * How long a component must stay failing before this watcher sends a "down" DM at all — a
+ * quick reconnect (e.g. a brief EventSub WebSocket blip) that resolves within this window never
+ * generates a "down"/"recovered" DM pair.
+ */
+export const DOWN_ALERT_GRACE_MS = 60_000;
+
 /** Per-component edge-trigger state tracked across health-changed notifications. */
 interface ComponentAlertState {
   failing: boolean;
@@ -50,6 +57,13 @@ interface ComponentAlertState {
    * current.
    */
   generation: number;
+  /**
+   * Handle for the pending {@link DOWN_ALERT_GRACE_MS} grace-period timer started on an ok→fail
+   * transition, or null once it has fired or been cancelled by a recovery within the window. Kept
+   * so a fail→ok transition during the grace window can cancel it — suppressing the "down" DM
+   * entirely for a quick reconnect.
+   */
+  pendingDownTimer: NodeJS.Timeout | null;
 }
 
 const componentStates = new Map<string, ComponentAlertState>();
@@ -233,7 +247,13 @@ function dispatchDownAlert(componentId: string, error: string | null, state: Com
  */
 function handleFirstSeenComponent(componentId: string, ok: boolean, error: string | null): void {
   const now = Date.now();
-  const state: ComponentAlertState = { failing: !ok, lastAlertAt: ok ? 0 : now, downAlertSent: false, generation: 0 };
+  const state: ComponentAlertState = {
+    failing: !ok,
+    lastAlertAt: ok ? 0 : now,
+    downAlertSent: false,
+    generation: 0,
+    pendingDownTimer: null,
+  };
   componentStates.set(componentId, state);
   if (!ok) {
     dispatchDownAlert(componentId, error, state, false);
@@ -241,9 +261,77 @@ function handleFirstSeenComponent(componentId: string, ok: boolean, error: strin
 }
 
 /**
+ * Handles a fail→ok transition: cancels a still-pending grace-period timer (the component
+ * recovered before it ever fired, so this was a quick reconnect — no "down" DM was sent, and
+ * none will be now), then announces the recovery only if a "down" DM was actually delivered for
+ * this failure — otherwise this is a component that was merely seeded as failing at startup
+ * (e.g. twitchChat, before startTwitchBot() has run), whose down DM never reached the owner, or
+ * that recovered within the grace period, finishing its normal startup/blip rather than
+ * undergoing a real recovery.
+ * @param componentId - The component's stable id (see {@link deriveComponentOks}).
+ * @param existing - The component's tracked alert state, mutated in place.
+ * @param now - The current timestamp, as already read by the caller.
+ * @returns void.
+ */
+function handleRecovery(componentId: string, existing: ComponentAlertState, now: number): void {
+  existing.failing = false;
+  existing.lastAlertAt = now;
+  if (existing.pendingDownTimer) {
+    clearTimeout(existing.pendingDownTimer);
+    existing.pendingDownTimer = null;
+  }
+  const wasAlerted = existing.downAlertSent;
+  existing.downAlertSent = false;
+  // Bump the generation so a still-in-flight down-DM delivery from this now-ended episode can't
+  // resurrect downAlertSent (via dispatchDownAlert's delayed .then()) after this recovery.
+  existing.generation += 1;
+  if (wasAlerted) {
+    void sendOwnerAlert(`✅ ${componentId} recovered`);
+  }
+}
+
+/**
+ * Handles an ok→fail transition: marks the component failing and schedules its "down" DM after
+ * {@link DOWN_ALERT_GRACE_MS} rather than sending immediately — a component that recovers before
+ * this timer fires (see {@link handleRecovery}, which cancels it) was just a quick reconnect, and
+ * gets no DM at all. Re-derives the error message from a fresh health snapshot when the timer
+ * fires, in case it changed during the grace window.
+ * @param componentId - The component's stable id (see {@link deriveComponentOks}).
+ * @param error - The component's error message as of this transition, used as a fallback if a
+ *   fresh snapshot read (once the timer fires) no longer has one for this component.
+ * @param existing - The component's tracked alert state, mutated in place.
+ * @param now - The current timestamp, as already read by the caller.
+ * @returns void.
+ */
+function handleNewFailure(componentId: string, error: string | null, existing: ComponentAlertState, now: number): void {
+  existing.failing = true;
+  existing.lastAlertAt = now;
+  existing.downAlertSent = false;
+  existing.generation += 1;
+  const generation = existing.generation;
+  /**
+   * Fires once {@link DOWN_ALERT_GRACE_MS} elapses: no-ops if the component's tracked state is
+   * gone or has moved past this failure episode (recovered, or recovered and failed again — see
+   * {@link ComponentAlertState.generation}), otherwise re-derives the error from a fresh health
+   * snapshot (falling back to `error` as read at transition time, in case the snapshot no longer
+   * has one for this component) and dispatches the "down" DM via {@link dispatchDownAlert}.
+   * @returns void.
+   */
+  const dispatchDelayedDownAlert = (): void => {
+    const current = componentStates.get(componentId);
+    if (!current || current.generation !== generation) return;
+    current.pendingDownTimer = null;
+    const latestError = deriveComponentOks(getHealthSnapshot()).get(componentId)?.error ?? error;
+    dispatchDownAlert(componentId, latestError, current, false);
+  };
+  existing.pendingDownTimer = setTimeout(dispatchDelayedDownAlert, DOWN_ALERT_GRACE_MS);
+}
+
+/**
  * Reacts to one component's latest ok/fail state against its previously tracked state: sends an
- * edge-triggered DM alert on a fail→ok or ok→fail transition, or a "still down" DM once the
- * {@link REALERT_COOLDOWN_MS} cooldown has elapsed for a component that's stayed failing.
+ * edge-triggered DM alert on a fail→ok or ok→fail transition (see {@link handleRecovery} and
+ * {@link handleNewFailure}), or a "still down" DM once the {@link REALERT_COOLDOWN_MS} cooldown
+ * has elapsed for a component that's stayed failing.
  * @param componentId - The component's stable id (see {@link deriveComponentOks}).
  * @param ok - Whether the component is currently healthy.
  * @param error - The component's current error message, if failing.
@@ -254,26 +342,9 @@ function handleTrackedComponent(componentId: string, ok: boolean, error: string 
   const now = Date.now();
 
   if (ok && existing.failing) {
-    existing.failing = false;
-    existing.lastAlertAt = now;
-    // Only announce a recovery if a "down" DM was actually delivered for this failure — otherwise
-    // this is a component that was merely seeded as failing at startup (e.g. twitchChat, before
-    // startTwitchBot() has run), or whose down DM never reached the owner, finishing its normal
-    // startup rather than undergoing a real recovery.
-    const wasAlerted = existing.downAlertSent;
-    existing.downAlertSent = false;
-    // Bump the generation so a still-in-flight down-DM delivery from this now-ended episode can't
-    // resurrect downAlertSent (via dispatchDownAlert's delayed .then()) after this recovery.
-    existing.generation += 1;
-    if (wasAlerted) {
-      void sendOwnerAlert(`✅ ${componentId} recovered`);
-    }
+    handleRecovery(componentId, existing, now);
   } else if (!ok && !existing.failing) {
-    existing.failing = true;
-    existing.lastAlertAt = now;
-    existing.downAlertSent = false;
-    existing.generation += 1;
-    dispatchDownAlert(componentId, error, existing, false);
+    handleNewFailure(componentId, error, existing, now);
   } else if (!ok && existing.failing && now - existing.lastAlertAt > REALERT_COOLDOWN_MS) {
     existing.lastAlertAt = now;
     dispatchDownAlert(componentId, error, existing, true);
@@ -324,7 +395,7 @@ export async function primeOwnerAlertBaseline(): Promise<void> {
     // downAlertSent starts false even for a component seeded as already-failing (e.g. twitchChat,
     // before startTwitchBot() has run) — no "down" DM was actually sent for this baseline state,
     // so its later recovery must not fire a "recovered" DM either. See handleHealthChanged.
-    componentStates.set(componentId, { failing: !ok, lastAlertAt: now, downAlertSent: false, generation: 0 });
+    componentStates.set(componentId, { failing: !ok, lastAlertAt: now, downAlertSent: false, generation: 0, pendingDownTimer: null });
   }
 }
 
@@ -342,6 +413,9 @@ export function startOwnerAlertWatcher(): void {
 
 /** Test-only: resets all module state so each test starts from a clean slate. */
 export function __resetOwnerAlertsForTests(): void {
+  for (const state of componentStates.values()) {
+    if (state.pendingDownTimer) clearTimeout(state.pendingDownTimer);
+  }
   componentStates.clear();
   cachedOwnerDiscordId = null;
   watcherStarted = false;

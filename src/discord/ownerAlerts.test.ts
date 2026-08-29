@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockLogger } from '../test-utils/loggerMock';
 
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
@@ -14,6 +14,7 @@ import {
   primeOwnerAlertBaseline,
   startOwnerAlertWatcher,
   __resetOwnerAlertsForTests,
+  DOWN_ALERT_GRACE_MS,
 } from './ownerAlerts';
 
 const OWNER_ID = '111222333444555666';
@@ -35,10 +36,18 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 10; i++) await Promise.resolve();
 }
 
+/** Advances the fake clock past the "down" DM's grace-period delay (see `DOWN_ALERT_GRACE_MS`
+ *  in `ownerAlerts.ts`) and flushes microtasks, so a pending down alert actually fires. */
+async function advanceGrace(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(DOWN_ALERT_GRACE_MS);
+  await flush();
+}
+
 describe('ownerAlerts', () => {
   let send: ReturnType<typeof vi.fn<(discordId: string, message: string) => Promise<void>>>;
 
   beforeEach(async () => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
     __resetOwnerAlertsForTests();
     send = vi.fn().mockResolvedValue(undefined);
@@ -62,9 +71,28 @@ describe('ownerAlerts', () => {
     startOwnerAlertWatcher();
   });
 
-  it('sends exactly one alert on an ok→fail transition', async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does not alert at all on a quick reconnect that recovers within the grace period', async () => {
+    // Ensures 'db' is already a *tracked* component (as it always is in production, where
+    // primeOwnerAlertBaseline() seeds every component before the watcher ever starts) rather
+    // than one this call would see for the first time — a first-seen failing component alerts
+    // immediately (see handleFirstSeenComponent) and isn't subject to the grace period, which
+    // only debounces a transition on an already-tracked component.
+    await primeOwnerAlertBaseline();
+
     healthStore.recordDbPing(false, 'connection refused');
-    await flush();
+    await vi.advanceTimersByTimeAsync(DOWN_ALERT_GRACE_MS / 2);
+    healthStore.recordDbPing(true);
+    await advanceGrace();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('sends exactly one alert on an ok→fail transition that outlasts the grace period', async () => {
+    healthStore.recordDbPing(false, 'connection refused');
+    await advanceGrace();
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('🔴'));
     expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('connection refused'));
@@ -72,7 +100,7 @@ describe('ownerAlerts', () => {
 
   it('does not resend while still failing within the cooldown window', async () => {
     healthStore.recordDbPing(false, 'boom');
-    await flush();
+    await advanceGrace();
     expect(send).toHaveBeenCalledTimes(1);
 
     healthStore.recordDbPing(false, 'boom again');
@@ -82,7 +110,7 @@ describe('ownerAlerts', () => {
 
   it('sends a recovery alert on a fail→ok transition', async () => {
     healthStore.recordDbPing(false, 'boom');
-    await flush();
+    await advanceGrace();
     expect(send).toHaveBeenCalledTimes(1);
 
     healthStore.recordDbPing(true);
@@ -94,7 +122,7 @@ describe('ownerAlerts', () => {
   it('falls back to the last cached owner ID when findOwnerUser rejects', async () => {
     // First alert resolves normally and populates the cache.
     healthStore.recordDbPing(false, 'boom');
-    await flush();
+    await advanceGrace();
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenLastCalledWith(OWNER_ID, expect.any(String));
 
@@ -104,7 +132,7 @@ describe('ownerAlerts', () => {
 
     vi.mocked(findOwnerUser).mockRejectedValue(new Error('db down'));
     healthStore.recordDbPing(false, 'boom again');
-    await flush();
+    await advanceGrace();
 
     expect(send).toHaveBeenCalledTimes(3);
     expect(send).toHaveBeenLastCalledWith(OWNER_ID, expect.any(String));
@@ -118,14 +146,14 @@ describe('ownerAlerts', () => {
     __resetOwnerAlertsForTests();
     vi.mocked(findOwnerUser).mockRejectedValue(new Error('db down'));
     healthStore.recordDbPing(false, 'boom');
-    await flush();
+    await advanceGrace();
     expect(send).not.toHaveBeenCalled();
   });
 
   it('treats a successful lookup that returns no owner as authoritative — does not fall back to a stale cached id', async () => {
     // First alert resolves normally and populates the cache.
     healthStore.recordDbPing(false, 'boom');
-    await flush();
+    await advanceGrace();
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenLastCalledWith(OWNER_ID, expect.any(String));
 
@@ -137,7 +165,7 @@ describe('ownerAlerts', () => {
     vi.mocked(findOwnerUser).mockResolvedValue(null);
     send.mockClear();
     healthStore.recordDbPing(false, 'boom again');
-    await flush();
+    await advanceGrace();
 
     expect(send).not.toHaveBeenCalled();
   });
@@ -145,13 +173,13 @@ describe('ownerAlerts', () => {
   it('never throws when the runtime send itself rejects', async () => {
     send.mockRejectedValue(new Error('DM failed — user has DMs disabled'));
     healthStore.recordDbPing(false, 'boom');
-    await expect(flush()).resolves.toBeUndefined();
+    await expect(advanceGrace()).resolves.toBeUndefined();
   });
 
   it('does not send a false recovery DM when the down DM itself failed to deliver', async () => {
     send.mockRejectedValue(new Error('DM failed — user has DMs disabled'));
     healthStore.recordDbPing(false, 'boom');
-    await flush();
+    await advanceGrace();
     expect(send).toHaveBeenCalledTimes(1); // the (failed) down DM attempt
 
     send.mockClear();
@@ -168,7 +196,7 @@ describe('ownerAlerts', () => {
     // skip the down DM for lack of a resolvable owner, which must not count as delivered.
     vi.mocked(findOwnerUser).mockResolvedValue(null);
     healthStore.recordDbPing(false, 'boom');
-    await flush();
+    await advanceGrace();
     expect(send).not.toHaveBeenCalled();
 
     healthStore.recordDbPing(true);
@@ -180,7 +208,7 @@ describe('ownerAlerts', () => {
   it('alerts on an EventSub streamer disconnecting, naming the streamer', async () => {
     try {
       healthStore.recordEventSubConnected('streamerX', false, 'socket closed');
-      await flush();
+      await advanceGrace();
 
       expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('eventsub:streamerX'));
       expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('socket closed'));
@@ -196,7 +224,7 @@ describe('ownerAlerts', () => {
   it('alerts on a scheduler run failing, naming the scheduler', async () => {
     try {
       healthStore.recordSchedulerRun('counter', false, 'archive failed');
-      await flush();
+      await advanceGrace();
 
       expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('scheduler:counter'));
       expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('archive failed'));
@@ -210,10 +238,9 @@ describe('ownerAlerts', () => {
   });
 
   it('re-alerts "still down" once the cooldown window has elapsed for a component that never recovered', async () => {
-    vi.useFakeTimers();
     try {
       healthStore.recordDbPing(false, 'boom');
-      await flush();
+      await advanceGrace();
       expect(send).toHaveBeenCalledTimes(1);
 
       // Still failing, but re-notified with a distinct DB error — before the cooldown elapses
@@ -226,7 +253,6 @@ describe('ownerAlerts', () => {
       expect(send).toHaveBeenCalledTimes(2);
       expect(send).toHaveBeenLastCalledWith(OWNER_ID, expect.stringContaining('is still down'));
     } finally {
-      vi.useRealTimers();
       healthStore.recordDbPing(true);
       await flush();
     }
@@ -258,12 +284,22 @@ describe('primeOwnerAlertBaseline', () => {
     for (let i = 0; i < 10; i++) await Promise.resolve();
   }
 
+  async function advanceGrace(): Promise<void> {
+    await vi.advanceTimersByTimeAsync(DOWN_ALERT_GRACE_MS);
+    await flush();
+  }
+
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
     __resetOwnerAlertsForTests();
     send = vi.fn().mockResolvedValue(undefined);
     registerOwnerAlertRuntime({ send });
     vi.mocked(findOwnerUser).mockResolvedValue(OWNER_ROW as any);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('seeds the baseline from a currently-unhealthy component without alerting', async () => {
@@ -290,7 +326,7 @@ describe('primeOwnerAlertBaseline', () => {
 
     // A genuine later failure, though, must still alert normally.
     healthStore.recordTwitchChatConnected(false);
-    await flush();
+    await advanceGrace();
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('🔴'));
 
@@ -312,7 +348,7 @@ describe('primeOwnerAlertBaseline', () => {
 
     vi.mocked(findOwnerUser).mockRejectedValue(new Error('db down'));
     healthStore.recordDbPing(false, 'connection refused');
-    await flush();
+    await advanceGrace();
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('connection refused'));
@@ -349,7 +385,7 @@ describe('primeOwnerAlertBaseline', () => {
     // An unrelated transition must not trigger a false "discord recovered" alert from a stale
     // (pre-connect) baseline.
     healthStore.recordDbPing(false, 'boom');
-    await flush();
+    await advanceGrace();
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('db is down'));
