@@ -52,7 +52,7 @@ Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → wir
 
 ## Web Server (`src/web/server.ts`)
 
-Middleware order: `helmet` (custom CSP) → EJS views → static → rate limiters (general/streamdeck/session) → body parsers → `trust proxy: 1` → session (`express-mysql-session`, backed by the `sessions` MySQL table) → `res.locals.user`/csrfToken.
+Middleware order: `helmet` (custom CSP) → EJS views → static → body parsers → `trust proxy: 1` → session (`express-mysql-session`, backed by the `sessions` MySQL table) → rate limiters (general/session; `streamdeckLimiter` is applied per-route instead) → `res.locals.user`/csrfToken. The general/session rate limiters run after session middleware deliberately — `sessionLimiter`'s key generator needs `req.session` populated.
 
 Auth middleware (`src/web/middleware.ts`), applied in this order:
 1. **`requireAuth`** — session check.
