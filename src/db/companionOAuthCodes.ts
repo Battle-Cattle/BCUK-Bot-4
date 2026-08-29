@@ -10,7 +10,7 @@ const CODE_TTL_SECONDS = 60;
  * Creates a short-lived, single-use authorization code for the companion app's
  * loopback OAuth login flow. Only the SHA-256 hash is persisted. The expiry is
  * computed by the DB server (`DATE_ADD(NOW(), ...)`) rather than the app clock,
- * so it stays consistent with `consumeCode`'s `expires_at > NOW()` check even if
+ * so it stays consistent with `consumeCodeOnConnection`'s `expires_at > NOW()` check even if
  * the app and DB clocks drift.
  *
  * @param discordId - Discord snowflake the code will resolve to once consumed.
@@ -30,7 +30,7 @@ export async function createCode(discordId: string): Promise<string> {
  * Marks a companion OAuth code hash used (if it exists, hasn't expired, and hasn't
  * already been consumed) and returns the Discord ID it was issued for. The UPDATE's
  * `used_at IS NULL AND expires_at > NOW()` guard makes this safe against the same code
- * being redeemed twice concurrently. Shared by `consumeCode` (standalone) and
+ * being redeemed twice concurrently. Shared by `createCode`'s expiry check and
  * `exchangeCodeForToken` (within a transaction), so both run identical mark-used-then-lookup SQL.
  *
  * @param executor - Pool or transaction connection to run the query on.

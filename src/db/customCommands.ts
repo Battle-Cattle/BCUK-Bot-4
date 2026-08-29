@@ -221,7 +221,9 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
     }
     await connection.commit();
   } catch (error) {
-    await connection.rollback();
+    // Swallow a rollback failure so the original error still propagates (matches
+    // withTransaction in pool.ts).
+    await connection.rollback().catch(() => {});
     throw error;
   } finally {
     await releaseNamedLock(connection, lockName);
