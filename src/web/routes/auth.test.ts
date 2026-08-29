@@ -112,6 +112,13 @@ describe('GET /discord/callback', () => {
     expect((res.body as any).view).toBe('error');
   });
 
+  it('renders error 400 when state is the same length as the stored value but does not match', async () => {
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
+      .get('/discord/callback?code=abc&state=state999');
+    expect(res.status).toBe(400);
+    expect((res.body as any).view).toBe('error');
+  });
+
   it('renders error 400 when code is missing', async () => {
     const res = await supertest(buildApp({ oauthState: { value: 'abc', expiresAt: Date.now() + 60_000 } }))
       .get('/discord/callback?state=abc');

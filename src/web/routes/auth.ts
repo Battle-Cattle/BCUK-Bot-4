@@ -26,6 +26,18 @@ const router = Router();
 /** Error codes `GET /auth/login` accepts via `?error=`, both originating from `POST /guild/select`. */
 const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds']);
 
+/**
+ * Constant-time comparison of the submitted OAuth `state` against the session's stored value
+ * (see `GET /discord` below, which generates it as a fixed-length hex string), mirroring
+ * `csrf.ts`'s `timingSafeEqual` comparison for CSRF tokens. The length check up front doesn't
+ * leak anything — the expected length is public — it just guarantees the buffers passed to
+ * `timingSafeEqual` are the same size, which it requires.
+ */
+function oauthStateMatches(submitted: string, stored: string): boolean {
+  if (submitted.length !== stored.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(submitted, 'utf8'), Buffer.from(stored, 'utf8'));
+}
+
 // ─── Redirect to Discord OAuth2 ─────────────────────────────────────────────
 
 /**
@@ -81,7 +93,7 @@ router.get('/discord/callback', async (req, res) => {
 
   const storedOAuth = req.session.oauthState;
   delete req.session.oauthState;
-  const stateValid = !!storedOAuth && state === storedOAuth.value && Date.now() <= storedOAuth.expiresAt;
+  const stateValid = !!storedOAuth && !!state && oauthStateMatches(state, storedOAuth.value) && Date.now() <= storedOAuth.expiresAt;
   if (!code || !state || !stateValid) {
     return renderError(res, 400, 'Invalid OAuth2 state — please try logging in again.', undefined);
   }
