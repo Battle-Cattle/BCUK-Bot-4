@@ -488,7 +488,9 @@ function quitAndWait(c: ChatClient): { promise: Promise<void>; unbind: () => voi
     listener = c.onDisconnect(() => { listener.unbind(); resolve(); });
     c.quit();
   });
-  return { promise, unbind: () => listener.unbind() };
+  /** Removes the `onDisconnect` listener registered above without waiting for it to fire. */
+  const unbind = (): void => { listener.unbind(); };
+  return { promise, unbind };
 }
 
 /**
