@@ -1,14 +1,14 @@
 {
   "repo_notes": [
     {
-      "content": "A multi-platform community bot connecting Twitch, Discord, and TikTok Live. Features custom commands, soundboard effects, counters, and a web control panel.",
+      "content": "A multi-platform community bot connecting Twitch and Discord (TikTok Live support has been removed). Features per-guild custom commands and counters, soundboard effects, EventSub-driven alerts and dynamic channel-point pricing, scheduled timer commands, a companion app for redemption events, and a web control panel. Discord is now multi-guild: access levels, counters, and command overrides are scoped per guild rather than global.",
       "author": null
     }
   ],
   "pages": [
     {
       "title": "BCUK Bot — Project Overview",
-      "purpose": "High-level introduction to BCUK Bot 4: what it does, its multi-platform architecture (Twitch, Discord, TikTok Live), key subsystems, and how the major components relate to each other. Links to all child sections for deeper reading.",
+      "purpose": "High-level introduction to BCUK Bot 4: what it does, its multi-platform architecture (multi-guild Discord + Twitch), key subsystems (SFX, EventSub/alerts, dynamic channel-point pricing, timers, companion app, web panel), and how the major components relate to each other. Links to all child sections for deeper reading.",
       "parent": null,
       "page_notes": [
         {
@@ -19,7 +19,7 @@
     },
     {
       "title": "Getting Started — Setup and Configuration",
-      "purpose": "Step-by-step guide for setting up the bot: cloning the repo, installing dependencies, configuring environment variables via .env, setting up the MySQL database, and running in development vs. production mode.",
+      "purpose": "Step-by-step guide for setting up the bot: cloning the repo, installing dependencies, configuring environment variables via .env, setting up the MySQL database (DATABASE-SCHEMA.md is the reference, the DB itself is managed outside this repo), and running in development (npm run dev / ts-node) vs. production (npm run build + tsc) mode.",
       "parent": "BCUK Bot — Project Overview",
       "page_notes": [
         {
@@ -30,7 +30,7 @@
     },
     {
       "title": "Project Structure and Build System",
-      "purpose": "Explains the repository layout (src/, public/, views/, sfx/), the TypeScript compilation pipeline (tsconfig.json, ts-node for dev, tsc for prod), and the npm scripts available.",
+      "purpose": "Explains the repository layout under src/ (audio, commands, db, discord, twitch, web, shared, types, test-utils), the TypeScript compilation pipeline (strict mode, ES2024, NodeNext, tsconfig.build.json for prod), and the npm scripts (dev, test, build, lint, check:circular).",
       "parent": "BCUK Bot — Project Overview",
       "page_notes": [
         {
@@ -41,7 +41,7 @@
     },
     {
       "title": "Core Bot Architecture",
-      "purpose": "Overview of how the bot's core runtime is structured: the main entry point, startup sequence, graceful shutdown, and how the platform bots (Discord, Twitch, TikTok) and the web panel are wired together. Links to child pages for each subsystem.",
+      "purpose": "Overview of how the bot's core runtime is structured: the main entry point (src/index.ts), the startup sequence (DB ping → Twitch/EventSub runtime wiring → guild registry reload → Discord → Twitch → web panel → schedulers → monitor/EventSub fire-and-forget), graceful shutdown, and how the platform bots and the web panel are wired together via runtime-injection registries to avoid circular imports. Links to child pages for each subsystem.",
       "parent": null,
       "page_notes": [
         {
@@ -52,7 +52,7 @@
     },
     {
       "title": "SFX Command Pipeline",
-      "purpose": "Deep dive into how sound effect commands are processed: the commandRouter receiving raw chat messages from any platform, trigger lookup in the database, weighted-random file selection via soundSelector, and playback via audioPlayer using the Opus codec through mediaplex.",
+      "purpose": "Deep dive into how sound effect commands are processed: commandRouter.ts receiving raw chat messages from either platform, cached trigger lookup (sfxCache.ts), weighted-random file selection via soundSelector.ts, per-guild cooldown/in-flight tracking, and playback via audioPlayer.ts/sfxPlayer.ts using the Opus codec through mediaplex.",
       "parent": "Core Bot Architecture",
       "page_notes": [
         {
@@ -62,8 +62,8 @@
       ]
     },
     {
-      "title": "Discord Bot and Voice Audio",
-      "purpose": "Covers the Discord.js client setup, gateway intents, message handling, voice channel connection lifecycle (Signalling → Connecting → Ready), audio playback via ffmpeg and mediaplex (Opus codec), exponential backoff reconnection logic, and the custom voice adapter.",
+      "title": "Command Routing and Handlers",
+      "purpose": "Documents src/commands/: the generic reusable cooldown gate (cooldownGate.ts), custom-command execution shared by Discord and Twitch (customCommandHandler.ts), per-guild counters (counterHandler.ts/counterScheduler.ts), Shared-Chat broadcast via !multi (multiCommandHandler.ts), !so shoutouts backed by the Helix API (shoutoutHandler.ts), the health command, and the twitchRuntime.ts/twitchBroadcast.ts runtime-injection pattern used to send/broadcast Twitch chat messages without circular imports.",
       "parent": "Core Bot Architecture",
       "page_notes": [
         {
@@ -73,19 +73,8 @@
       ]
     },
     {
-      "title": "Twitch Chat Bot",
-      "purpose": "Explains the tmi.js-based Twitch IRC client: connecting to enabled channels from the database, handling chat messages, join/part lifecycle, per-channel mutation locking to prevent race conditions, and reconnect reconciliation. Also covers the custom command, counter, multi-command (!multi), and shoutout (!so) handlers that process Twitch messages, including shared-chat session deduplication for multi-twitch broadcasts.",
-      "parent": "Core Bot Architecture",
-      "page_notes": [
-        {
-          "content": "",
-          "author": null
-        }
-      ]
-    },
-    {
-      "title": "TikTok Live Bot",
-      "purpose": "Describes the TikTok Live connector integration: connecting to configured TikTok channels, handling CHAT events, stream-end and disconnect reconnection with 30-second delay, and optional Euler sign API key configuration.",
+      "title": "Discord Bot, Voice Audio, and Multi-Guild Registry",
+      "purpose": "Covers the Discord.js client setup, gateway intents, message/command dispatch, and first-join provisioning (guild owner granted Admin only on brand-new join). Explains voice channel connection lifecycle, playback via ffmpeg/mediaplex, the custom voice adapter (voiceAdapter.ts, since guild.voiceAdapterCreator is unused for a discord.js v14 incompatibility), and voicePresence.ts resolving which registered guild a Discord user's live voice connection belongs to (used to route Twitch-chat-triggered SFX into the right guild). Also documents guildRegistry.ts: the in-memory map of provisioned guilds (≥1 guild_member row), reloaded via reloadGuildRegistry() at startup, on guildCreate, and after admin provisioning changes, fail-safe on DB error.",
       "parent": "Core Bot Architecture",
       "page_notes": [
         {
@@ -96,7 +85,7 @@
     },
     {
       "title": "Status Store",
-      "purpose": "Documents the centralized in-memory status store (statusStore.ts): what state it tracks (Discord readiness, voice connection, playing state, Twitch/TikTok channel maps), the setter/getter API, and how the web dashboard polls it.",
+      "purpose": "Documents the centralized in-memory status store (statusStore.ts): what state it tracks (Discord readiness, per-guild voice connection/playing state, Twitch channel map), the setter/getter API, and how the web dashboard's SSE endpoints and /api/status poll it.",
       "parent": "Core Bot Architecture",
       "page_notes": [
         {
@@ -106,8 +95,8 @@
       ]
     },
     {
-      "title": "Twitch Stream Monitor",
-      "purpose": "Overview of the stream announcement subsystem: polling the Twitch Helix API, detecting go-live/game-change/offline events, posting Discord embeds, and the monitor enable/disable toggle. Links to child pages for the API client and settings persistence.",
+      "title": "Twitch Integrations",
+      "purpose": "Overview of everything under src/twitch/: the tmi.js chat bot, the Helix API client, EventSub real-time events, the legacy live/offline polling monitor, the dynamic channel-point pricing engine, and scheduled timer commands. Links to child pages for each subsystem.",
       "parent": null,
       "page_notes": [
         {
@@ -117,9 +106,9 @@
       ]
     },
     {
-      "title": "Twitch Helix API Client",
-      "purpose": "Documents twitchApi.ts: client-credentials OAuth token caching, getUsers(), getStreams(), getChannelInfo(), and getSharedChatSession() with batching in chunks of 100, timeout handling, rate-limit retry logic, and 401 token invalidation. Also covers how getSharedChatSession is used for shared-chat deduplication in multi-twitch broadcasts.",
-      "parent": "Twitch Stream Monitor",
+      "title": "Twitch Chat Bot",
+      "purpose": "Explains the tmi.js-based Twitch IRC client: joined-channel set management and periodic reconciliation against the DB (twitchChannelMembership.ts/twitchChannelReconciliationPoll.ts), per-channel chat-activity rate tracking used to gate timer commands (twitchChatActivity.ts), the outbound send queue/rate limiter (twitchSendQueue.ts), and Twitch-chat-to-Discord-guild resolution for routing chat-triggered commands into the correct guild's voice channel.",
+      "parent": "Twitch Integrations",
       "page_notes": [
         {
           "content": "",
@@ -128,19 +117,85 @@
       ]
     },
     {
-      "title": "Monitor Settings and Persistence",
-      "purpose": "Explains how the monitor enabled/disabled state is persisted to monitor-settings.json (gitignored, local to the host) using atomic file writes (write-then-rename), the in-memory cache, and how the web panel toggles this setting and triggers catch-up Discord posts.",
-      "parent": "Twitch Stream Monitor",
+      "title": "Twitch Helix API Client",
+      "purpose": "Documents twitchApi.ts: client-credentials OAuth token caching, getUsers(), getStreams(), getChannelInfo(), and getSharedChatSession() with batching, timeout handling, rate-limit retry logic, and 401 token invalidation. Also covers broadcaster-token refresh (getValidToken in twitchApiEventSub.ts) and how getSharedChatSession is used for shared-chat deduplication in multi-twitch broadcasts and timer cooldown grouping.",
+      "parent": "Twitch Integrations",
       "page_notes": [
         {
           "content": "",
+          "author": null
+        }
+      ]
+    },
+    {
+      "title": "Twitch EventSub — Real-Time Events",
+      "purpose": "Covers src/twitch/eventsub/: webhook subscription setup and management (twitchEventSubSubscriptions.ts/twitchEventSubSubscriptionGroups.ts), periodic reconciliation against Twitch's live subscription list, redemption dedup, and the runtime-injected hook registry (twitchEventSubRuntime.ts) that fans out follow/sub/resub/giftsub/raid/redemption/stream-status events to the monitor, alerts overlay, channel-point pricing engine, and companion app without circular imports. twitchEventSubDispatch.ts maintains the in-memory streamer map and routes notifications to handlers in twitchEventSubHandler.ts; the webhook receiver itself lives in web/routes/eventsubCallback.ts.",
+      "parent": "Twitch Integrations",
+      "page_notes": [
+        {
+          "content": "",
+          "author": null
+        }
+      ]
+    },
+    {
+      "title": "Twitch Stream Monitor — Go-Live Announcements",
+      "purpose": "Overview of the legacy polling-based announcement subsystem (src/twitch/monitor/): 60-second polling of the Twitch Helix API across all monitored streamers, Discord embed construction, multi-streamer (\"multitwitch\") announcement grouping, editing/deleting stale announcement posts, and the startup live-check, all independent of EventSub.",
+      "parent": "Twitch Integrations",
+      "page_notes": [
+        {
+          "content": "",
+          "author": null
+        }
+      ]
+    },
+    {
+      "title": "Dynamic Channel Point Pricing",
+      "purpose": "Documents src/twitch/pricing/: rewardPricingService.ts orchestrating redemption-driven price/demand updates (serialized per reward via mutationQueue) and pushing live updates to the web dashboard, rewardPricingMath.ts's pure demand/decay/price-curve math, rewardPricingScheduler.ts's periodic decay ticks, and rewardPricingSimulation.ts backing the admin-panel pricing preview. Driven by EventSub redemption events; state persists in reward_pricing/reward_pricing_settings with a bounded reward_pricing_history time series for the price graph.",
+      "parent": "Twitch Integrations",
+      "page_notes": [
+        {
+          "content": "",
+          "author": null
+        }
+      ]
+    },
+    {
+      "title": "Timer Commands — Scheduled Chat Messages",
+      "purpose": "Documents src/twitch/timers/: Twitch-only auto-posted chat messages assigned from a global catalog to Twitch-linked streamer channels (like custom commands, via an assignment table). timerCommandScheduler.ts runs a 15s tick evaluating each (timer, channel) pair independently against interval/require-live/min-chat-messages gates, with a Shared Chat group cooldown to avoid flooding merged chats; timerCommandFireGate.ts holds the fire decision logic and timerCommandCooldowns.ts the per-row cooldown state. Firing state is in-memory only — a restart re-seeds each pair's clock without a burst of catch-up posts.",
+      "parent": "Twitch Integrations",
+      "page_notes": [
+        {
+          "content": "",
+          "author": null
+        }
+      ]
+    },
+    {
+      "title": "Alerts Overlay",
+      "purpose": "Documents the customizable alerts overlay: a browser-source SSE overlay (distinct from the older channel-points video overlay) that plays a message/image/sound with a text animation (wave, pulse, glitch, shake, rainbow, flicker, tilt, bounce-in, typewriter) when a follow/sub/resub/giftsub/raid EventSub event fires. Backed by alert_config (one row per streamer per event type), served by web/routes/alertsOverlaySource.ts to OBS via SSE, and configured through the alerts admin pages (asset upload, message templates via fillTemplate, per-event enable/duration).",
+      "parent": null,
+      "page_notes": [
+        {
+          "content": "",
+          "author": null
+        }
+      ]
+    },
+    {
+      "title": "Companion App",
+      "purpose": "Documents the companion-app integration: a secondary client/device that authenticates via a long-lived bearer token (\"companion key\") instead of a browser session, so a streamer can receive their own channel-point redemption events off-dashboard. Covers token issuance/revocation (companionKeys.ts/companionTokens.ts), the loopback OAuth login flow used by the app (companionAuth.ts, validated redirect_uri, one-time code exchange via companionOAuthCodes.ts), the SSE redemption-event stream (companionEvents.ts), and exposing the user's known Twitch custom rewards (companionRewards.ts).",
+      "parent": null,
+      "page_notes": [
+        {
+          "content": "the companion_app_tokens and companion_oauth_codes tables exist per migrations but are not yet documented in DATABASE-SCHEMA.md",
           "author": null
         }
       ]
     },
     {
       "title": "Database Layer",
-      "purpose": "Overview of the MySQL persistence layer: connection pool management, the full schema contract, and the major query patterns used across the application. Links to the schema reference child page.",
+      "purpose": "Overview of the MySQL persistence layer: connection pool management (pool.ts, withTransaction), the full schema contract, and the major query/caching patterns used across the application. Links to the schema reference child page.",
       "parent": null,
       "page_notes": [
         {
@@ -151,7 +206,7 @@
     },
     {
       "title": "Database Schema Reference",
-      "purpose": "Complete reference for all database tables: sfxtrigger, sfx, sfxcategory, user, stream_group, streamer, custom_command, twitch_user_commands, streamdeck_api_keys, and sessions. Includes column types, constraints, and important notes on BIGINT snowflake handling and utf8mb4 collation.",
+      "purpose": "Complete reference for all database tables: sfxtrigger, sfx, sfxcategory, guild, guild_member, user, stream_group, streamer, streamer_event_config, streamer_event_log, reward_pricing, reward_pricing_settings, reward_pricing_history, custom_command, guild_command_override, alert_config, timer_command, timer_command_streamer, streamdeck_api_keys, twitch_user_commands, counter, and sessions. Includes column types, constraints, and important notes on BIGINT snowflake handling, utf8mb4 collation, and the per-guild access-level model (guild_member replacing the old global user.access_level; user.is_owner as the separate cross-guild super-admin flag).",
       "parent": "Database Layer",
       "page_notes": [
         {
@@ -162,7 +217,7 @@
     },
     {
       "title": "Data Access Patterns",
-      "purpose": "Documents the key query patterns in db.ts: singleton pool with getPool()/closePool(), the SFX aggregate join pattern (one query for triggers+files), transactional command removal, streamer state machine (setStreamerLive/clearStreamerLive), the AccessLevel permission hierarchy, and the managed lookup cache with exponential backoff used for custom commands.",
+      "purpose": "Documents the one-module-per-domain layout in src/db/ (users, guilds, guildMembers, guildCommandOverrides, customCommands, counters, sfx, alertConfig, eventLog, eventSub, rewardPricing, rewardPricingHistory, overlayVideos, timerCommands, streamMonitor, streamdeckKeys, companionTokens, companionOAuthCodes), the shared lookupCache.ts invalidation pattern behind the various *Cache.ts modules, the singleton pool with getPool()/closePool(), the SFX aggregate join pattern, transactional command removal, the streamer live/offline state machine, and the AccessLevel permission hierarchy resolved per guild.",
       "parent": "Database Layer",
       "page_notes": [
         {
@@ -173,7 +228,7 @@
     },
     {
       "title": "Web Management Panel",
-      "purpose": "Overview of the Express-based admin web panel: server setup, session management, routing structure, authentication flow, and the Progressive Web App shell. Links to child pages for each major section.",
+      "purpose": "Overview of the Express-based admin web panel: server setup (helmet CSP, EJS views, rate limiters, express-mysql-session), routing structure, authentication flow, and the Progressive Web App shell. Links to child pages for each major section.",
       "parent": null,
       "page_notes": [
         {
@@ -183,8 +238,8 @@
       ]
     },
     {
-      "title": "Authentication — Discord OAuth2",
-      "purpose": "Explains the Discord OAuth2 login flow: redirect to Discord, callback code exchange, user whitelist check against the database, session creation with discordId/accessLevel, and logout. Also covers the CSRF protection middleware.",
+      "title": "Authentication — Discord OAuth2 and Guild Selection",
+      "purpose": "Explains the Discord OAuth2 login flow: redirect to Discord, callback code exchange, user whitelist check against the database, session creation, and logout. Covers guild.ts's multi-guild picker for users with access to more than one Discord guild, requireGuildContext auto-selecting for single-guild users, and the CSRF protection middleware.",
       "parent": "Web Management Panel",
       "page_notes": [
         {
@@ -195,7 +250,7 @@
     },
     {
       "title": "Access Control Middleware",
-      "purpose": "Documents the five Express middleware guards (requireAuth, requireMod, requireManager, requireAdmin, requireApiKey) and how they map to the AccessLevel integer (0=USER, 1=MOD, 2=MANAGER, 3=ADMIN). Covers the session user type, CSRF token injection, and the Bearer-token API key middleware used by the Streamdeck API.",
+      "purpose": "Documents the Express middleware guards (requireAuth, requireGuildContext, requireMod/Manager/Admin via requireAccessLevel, requireOwner, and the Bearer-token requireApiKey/requireCompanionKey) and how they map to the AccessLevel integer (0=USER, 1=MOD, 2=MANAGER, 3=ADMIN), now resolved per active guild on every request (src/web/guildAccess.ts's resolveAccessLevelForGuild) rather than from a single global column. Covers requireOwner's separate is_owner super-admin check, CSRF token injection, and the Bearer-token API key middleware used by Streamdeck and the companion app.",
       "parent": "Web Management Panel",
       "page_notes": [
         {
@@ -205,8 +260,8 @@
       ]
     },
     {
-      "title": "Dashboard — Bot Status and SFX Listing",
-      "purpose": "Covers the main dashboard page: real-time status polling via /api/status every 5 seconds, the status card grid (Discord bot, voice channel, last played), Twitch/TikTok channel status display, SFX command table with client-side search and file expansion, and the Rejoin/Leave Voice button.",
+      "title": "Dashboard — Bot Status and Live Activity",
+      "purpose": "Covers the main dashboard page: SSE-driven live status and activity feeds (dashboardEvents.ts/dashboardStatusEvents.ts/healthStatusEvents.ts) replacing simple polling, the status card grid (Discord bot, per-guild voice channel, last played), Twitch channel status display, SFX command table with client-side search, and the Rejoin/Leave Voice button.",
       "parent": "Web Management Panel",
       "page_notes": [
         {
@@ -216,8 +271,8 @@
       ]
     },
     {
-      "title": "Admin Panel — User Management",
-      "purpose": "Documents the user management interface: adding/updating/removing users, linking Discord IDs to Twitch names, toggling the Twitch bot per user, the per-user mutation lock to prevent race conditions, Discord name refresh background task, and rollback-on-failure logic.",
+      "title": "Admin Panel — User and Guild Management",
+      "purpose": "Documents the user and guild provisioning interface: adding/updating/removing users, linking Discord IDs to Twitch names, provisioning/de-provisioning guild members (triggers reloadGuildRegistry), the serialized adminUserMutationQueue for concurrent-unsafe writes, Discord name refresh, and rollback-on-failure logic.",
       "parent": "Web Management Panel",
       "page_notes": [
         {
@@ -228,7 +283,7 @@
     },
     {
       "title": "Admin Panel — Stream Monitor Management",
-      "purpose": "Covers the streams admin page: creating/editing/removing stream groups and streamers, toggling Discord announcements, the Live Now table with real-time polling every 15 seconds, Discord embed preview rendering, and the fire-and-forget monitor restart chain.",
+      "purpose": "Covers the streams admin page: creating/editing/removing stream groups and streamers, toggling Discord announcements, the Live Now table with real-time polling, Discord embed preview rendering, and the fire-and-forget monitor restart chain.",
       "parent": "Web Management Panel",
       "page_notes": [
         {
@@ -238,8 +293,8 @@
       ]
     },
     {
-      "title": "Admin Panel — Custom Commands",
-      "purpose": "Documents the custom commands management interface: CRUD operations for trigger/output pairs, user assignment via the twitch_user_commands join table, input normalization (lowercase single-token trigger_string), and the inline edit panel UI.",
+      "title": "Admin Panel — Custom Commands and Guild Overrides",
+      "purpose": "Documents the custom commands management interface: CRUD for the global trigger/output catalog, user assignment via twitch_user_commands, input normalization (lowercase single-token trigger_string, no prefix stripping), and per-guild enable/disable/output overrides on the shared catalog via guild_command_override.",
       "parent": "Web Management Panel",
       "page_notes": [
         {
@@ -250,7 +305,7 @@
     },
     {
       "title": "Admin Panel — Counters",
-      "purpose": "Documents the counter commands management interface: CRUD operations for trigger/check command pairs, the %d placeholder for current value in messages, optional yearly reset, manual value reset, conflict checking against custom commands, and the inline edit panel UI.",
+      "purpose": "Documents the per-guild counter commands management interface: CRUD for trigger/check command pairs, the %d placeholder for current value, optional yearly reset with archived value history (counterHistory.ts), manual value reset, conflict checking against custom commands, and the inline edit panel UI.",
       "parent": "Web Management Panel",
       "page_notes": [
         {
@@ -260,8 +315,8 @@
       ]
     },
     {
-      "title": "Admin Panel — Command Monitor",
-      "purpose": "Explains the command monitor page: the in-memory CommandMonitorStore (up to 30 entries), how executeCustomCommandForDiscord and executeCustomCommandForTwitch record matched commands after sending live replies, the auto-refreshing table (every 5 seconds), and the distinction between the monitor display and the actual command execution.",
+      "title": "Admin Panel — Timer Commands",
+      "purpose": "Documents the timer-command admin pages: CRUD for the global timer catalog (interval, min-messages gate, require-live flag, Manager-gated), and assigning timers from that catalog to specific Twitch-linked streamer channels via timerAssignments.ts.",
       "parent": "Web Management Panel",
       "page_notes": [
         {
@@ -271,8 +326,30 @@
       ]
     },
     {
-      "title": "Progressive Web App (PWA) Shell",
-      "purpose": "Explains the PWA configuration: manifest.json with BCUK branding, service worker for offline support, pwa-head and pwa-register EJS partials, and the icons set (192px and 512px SVG/PNG).",
+      "title": "Admin Panel — Channel Points (Pricing & Video Overlay)",
+      "purpose": "Covers two related but independent web surfaces: the Dynamic Channel Point Pricing config (base cost, max multiplier, decay half-life, cooldown, live price/demand SSE updates via channelPointsEvents.ts, and the pricing-preview simulation), and the older per-reward video overlay (overlayAdmin*.ts, mapping a channel-point reward to a video file served to OBS via overlaySource.ts's SSE push).",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": "",
+          "author": null
+        }
+      ]
+    },
+    {
+      "title": "Admin Panel — Alerts Overlay",
+      "purpose": "Documents the alerts admin pages: per-streamer, per-event-type (follow/sub/resub/giftsub/raid) configuration of the browser-source alert — enable toggle, message template, image/sound asset upload, on-screen duration, and text animation — plus the reserved-word login validation used by the OBS browser-source endpoint.",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": "",
+          "author": null
+        }
+      ]
+    },
+    {
+      "title": "Companion App — Keys and Loopback Auth",
+      "purpose": "Documents the web surface for the companion app: issuing/viewing/revoking a user's companion bearer token, the loopback OAuth login flow the app performs against the web panel, and the SSE endpoint and reward listing the app consumes to show a streamer their own live channel-point redemptions off-dashboard.",
       "parent": "Web Management Panel",
       "page_notes": [
         {
@@ -283,7 +360,18 @@
     },
     {
       "title": "Streamdeck Integration",
-      "purpose": "Documents the Elgato Streamdeck plugin integration: the API key lifecycle (request → pending/auto-approve → approved → revoked/denied), the Bearer-token-authenticated REST API endpoints (GET /api/streamdeck/sfx and POST /api/streamdeck/sfx) that bypass chat cooldown, the user-facing key management page, and the admin key approval dashboard.",
+      "purpose": "Documents the Elgato Streamdeck plugin integration: the API key lifecycle (request → pending/auto-approve → approved → revoked/denied), the Bearer-token-authenticated REST endpoints for triggering SFX and connecting/disconnecting voice (bypassing chat cooldown), guild resolution for a given key, the user-facing key management page, and the admin key approval dashboard.",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": "",
+          "author": null
+        }
+      ]
+    },
+    {
+      "title": "Progressive Web App (PWA) Shell",
+      "purpose": "Explains the PWA configuration: manifest.json with BCUK branding, the service worker for offline support, pwa-head and pwa-register EJS partials, and the icon set.",
       "parent": "Web Management Panel",
       "page_notes": [
         {
@@ -294,7 +382,7 @@
     },
     {
       "title": "Glossary",
-      "purpose": "Definitions of all codebase-specific terms, abbreviations, and domain concepts that an onboarding engineer needs to know, with code pointers to relevant files and functions.",
+      "purpose": "Definitions of all codebase-specific terms, abbreviations, and domain concepts that an onboarding engineer needs to know (e.g. guild registry, EventSub, Shared Chat, companion key, reward pricing demand curve, alert vs. overlay), with code pointers to relevant files and functions.",
       "parent": null,
       "page_notes": [
         {
