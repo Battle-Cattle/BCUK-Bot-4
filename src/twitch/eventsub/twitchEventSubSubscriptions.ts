@@ -224,7 +224,11 @@ async function ensureSubscription(
   if (existing && existing.sessionId === sessionId && existing.status === 'enabled') return { id: existing.id, deleted: false };
   let deleted = false;
   if (existing) {
-    log.warn(`Deleting stale ${spec.type} subscription (${existing.id}) for ${name} — bound to a different session or not enabled (status=${existing.status})`);
+    // INFO, not WARN: every non-graceful reconnect (see forceReconnect in
+    // twitchEventSubConnection.ts) starts a brand-new session, so *all* of the previous
+    // session's subscriptions are legitimately "stale" here — this fires routinely on every
+    // such reconnect, not just on an actual anomaly.
+    log.info(`Deleting stale ${spec.type} subscription (${existing.id}) for ${name} — bound to a different session or not enabled (status=${existing.status})`);
     try {
       await deleteEventSubSubscription(existing.id, token);
       deleted = true;
