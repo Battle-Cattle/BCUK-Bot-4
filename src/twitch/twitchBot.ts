@@ -37,15 +37,20 @@ const log = createLogger('Twitch');
 let client: ChatClient | null = null;
 let connected = false;
 /**
- * The `onDisconnect` listener registered on `client` in {@link startTwitchBot} for the bot's own
- * lifetime — kept at module scope (unlike `messageListener`/`authSuccessListener`, which never
- * need unbinding outside their own function) so {@link stopTwitchBot} can also unbind it, not just
- * `quitAndWait`'s own temporary listener. Without this, a real disconnect event arriving late on a
- * client `stopTwitchBot` has already given up waiting on (or even one that fires after `quit()`
- * settles normally) would still call `onDisconnected()` against whatever client/module state is
- * current by then — e.g. after a restart's `startTwitchBot()` has already begun.
+ * The four listeners registered on `client` in {@link startTwitchBot} for the bot's own
+ * lifetime — kept at module scope (unlike `connectAndWait`'s own temporary listeners, which are
+ * always torn down within that same function) so {@link stopTwitchBot} can unbind them too, not
+ * just `quitAndWait`'s own temporary disconnect listener. `ChatClient#quit()` does not itself
+ * remove them — without this, a late event on the discarded client (a message, a reconnect's
+ * authentication success, a disconnect, or a raw USERSTATE) could still run its handler against
+ * whatever client/module state is current by then, e.g. after a restart's `startTwitchBot()` has
+ * already begun — duplicating message handling, wrongly marking the new session (dis)connected,
+ * or corrupting its privilege state.
  */
+let messageListener: { unbind: () => void } | null = null;
+let authSuccessListener: { unbind: () => void } | null = null;
 let disconnectListener: { unbind: () => void } | null = null;
+let userStateListenerId: string | null = null;
 
 /**
  * Upper bound on how long {@link stopTwitchBot} waits for the `onDisconnect` event to fire after
@@ -342,11 +347,11 @@ export async function startTwitchBot(): Promise<void> {
   client = newClient;
   setChatClient(client);
 
-  const messageListener = newClient.onMessage(handleTwitchMessage);
-  const authSuccessListener = newClient.onAuthenticationSuccess(onConnected);
+  messageListener = newClient.onMessage(handleTwitchMessage);
+  authSuccessListener = newClient.onAuthenticationSuccess(onConnected);
   disconnectListener = newClient.onDisconnect(onDisconnected);
   // USERSTATE isn't exposed by ChatClient itself — only via the underlying ircv3 client.
-  const userStateListenerId = newClient.irc.onTypedMessage(UserState, onOwnUserState);
+  userStateListenerId = newClient.irc.onTypedMessage(UserState, onOwnUserState);
 
   try {
     await withTimeout(connectAndWait(newClient), CONNECT_TIMEOUT_MS, 'Twitch connect');
@@ -359,8 +364,11 @@ export async function startTwitchBot(): Promise<void> {
     messageListener.unbind();
     authSuccessListener.unbind();
     disconnectListener.unbind();
-    disconnectListener = null;
     newClient.irc.removeMessageListener(userStateListenerId);
+    messageListener = null;
+    authSuccessListener = null;
+    disconnectListener = null;
+    userStateListenerId = null;
     try {
       newClient.quit();
     } catch (quitErr) {
@@ -505,10 +513,16 @@ export async function stopTwitchBot(): Promise<void> {
       unbind();
       getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
     }
-    // Unbind the original disconnectListener from startTwitchBot() too — see its declaration for
-    // why a late or post-settlement disconnect event on this discarded client must not reach it.
+    // Unbind every listener startTwitchBot() registered on this client too — see their shared
+    // declaration for why a late event on this discarded client must not reach any of them.
+    messageListener?.unbind();
+    authSuccessListener?.unbind();
     disconnectListener?.unbind();
+    if (userStateListenerId) { client.irc.removeMessageListener(userStateListenerId); }
+    messageListener = null;
+    authSuccessListener = null;
     disconnectListener = null;
+    userStateListenerId = null;
     client = null;
     setChatClient(null);
   }

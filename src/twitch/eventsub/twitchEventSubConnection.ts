@@ -106,7 +106,13 @@ export class StreamerConnection {
     this.connect();
   }
 
-  /** Closes the connection and removes this streamer from the subscription map. */
+  /**
+   * Closes the connection and removes this streamer from the subscription map: cancels every
+   * pending timer (keepalive, connect, reconnect, and any in-flight migration close — the socket
+   * that timer was waiting to close is closed immediately instead, with a `'shutdown'` reason),
+   * then closes the live socket, if any.
+   * @returns void.
+   */
   stop(): void {
     this.stopped = true;
     this.isReconnecting = false;
@@ -364,6 +370,16 @@ export class StreamerConnection {
       .catch((err) => { log.error(`[${this.name}] Subscribe error:`, err); });
   }
 
+  /**
+   * Handles a Twitch-initiated session migration: connects to the new session at `reconnectUrl`
+   * while leaving the old socket open, then closes that old socket after
+   * {@link SESSION_MIGRATION_CLOSE_DELAY_MS} (Twitch's specified grace window) rather than
+   * immediately — see {@link pendingMigrationOldSocket} for how a second migration arriving
+   * before that delay elapses is handled.
+   * @param reconnectUrl - The `reconnect_url` Twitch supplied in the `session_reconnect` message,
+   *   validated by {@link buildReconnectUrl} before use.
+   * @returns void.
+   */
   private handleSessionReconnect(reconnectUrl: string): void {
     const safeUrl = buildReconnectUrl(reconnectUrl);
     if (!safeUrl) { log.error(`[${this.name}] Invalid reconnect URL — reconnecting`); this.scheduleReconnect(); return; }

@@ -979,7 +979,7 @@ describe('stopTwitchBot', () => {
     expect(mockClient.quit).not.toHaveBeenCalled();
   });
 
-  it('unbinds the original onDisconnected handler (not just quitAndWait\'s temporary one) when the disconnect wait times out', async () => {
+  it('unbinds every listener startTwitchBot() registered (not just quitAndWait\'s temporary one) when stopping', async () => {
     await connectBot();
     mockClient.quit.mockImplementation(() => {}); // never fires onDisconnect
 
@@ -988,21 +988,27 @@ describe('stopTwitchBot', () => {
       await vi.advanceTimersByTimeAsync(DISCONNECT_TIMEOUT_MS);
       await stopped;
 
-      // Both the temporary quitAndWait listener and the persistent onDisconnected handler
-      // registered by startTwitchBot() must be gone — otherwise a disconnect event arriving late
-      // on this discarded client could still fire onDisconnected() against whatever module state
-      // is current by then, e.g. after a restart.
+      // The temporary quitAndWait listener and all four persistent listeners registered by
+      // startTwitchBot() must be gone — otherwise a late event on this discarded client (a
+      // message, an authentication success, a disconnect, or a raw USERSTATE) could still run
+      // its handler against whatever module state is current by then, e.g. after a restart.
       expect(handlers.disconnectHandlers).toHaveLength(0);
+      expect(handlers.messageHandlers).toHaveLength(0);
+      expect(handlers.authSuccessHandlers).toHaveLength(0);
+      expect(handlers.userStateHandlers).toHaveLength(0);
     } finally {
       mockClient.quit.mockImplementation(() => {
         queueMicrotask(() => fireDisconnect(true));
       });
     }
 
-    // Restart: only the new client's own onDisconnected handler should be registered, confirming
-    // nothing from the old, timed-out client survived to interfere with the new session.
+    // Restart: only the new client's own listeners should be registered, confirming nothing from
+    // the old, timed-out client survived to interfere with the new session.
     await connectBot();
     expect(handlers.disconnectHandlers).toHaveLength(1);
+    expect(handlers.messageHandlers).toHaveLength(1);
+    expect(handlers.authSuccessHandlers).toHaveLength(1);
+    expect(handlers.userStateHandlers).toHaveLength(1);
   });
 });
 
