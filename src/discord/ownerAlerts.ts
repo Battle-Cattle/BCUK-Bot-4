@@ -261,9 +261,68 @@ function handleFirstSeenComponent(componentId: string, ok: boolean, error: strin
 }
 
 /**
+ * Handles a fail→ok transition: cancels a still-pending grace-period timer (the component
+ * recovered before it ever fired, so this was a quick reconnect — no "down" DM was sent, and
+ * none will be now), then announces the recovery only if a "down" DM was actually delivered for
+ * this failure — otherwise this is a component that was merely seeded as failing at startup
+ * (e.g. twitchChat, before startTwitchBot() has run), whose down DM never reached the owner, or
+ * that recovered within the grace period, finishing its normal startup/blip rather than
+ * undergoing a real recovery.
+ * @param componentId - The component's stable id (see {@link deriveComponentOks}).
+ * @param existing - The component's tracked alert state, mutated in place.
+ * @param now - The current timestamp, as already read by the caller.
+ * @returns void.
+ */
+function handleRecovery(componentId: string, existing: ComponentAlertState, now: number): void {
+  existing.failing = false;
+  existing.lastAlertAt = now;
+  if (existing.pendingDownTimer) {
+    clearTimeout(existing.pendingDownTimer);
+    existing.pendingDownTimer = null;
+  }
+  const wasAlerted = existing.downAlertSent;
+  existing.downAlertSent = false;
+  // Bump the generation so a still-in-flight down-DM delivery from this now-ended episode can't
+  // resurrect downAlertSent (via dispatchDownAlert's delayed .then()) after this recovery.
+  existing.generation += 1;
+  if (wasAlerted) {
+    void sendOwnerAlert(`✅ ${componentId} recovered`);
+  }
+}
+
+/**
+ * Handles an ok→fail transition: marks the component failing and schedules its "down" DM after
+ * {@link DOWN_ALERT_GRACE_MS} rather than sending immediately — a component that recovers before
+ * this timer fires (see {@link handleRecovery}, which cancels it) was just a quick reconnect, and
+ * gets no DM at all. Re-derives the error message from a fresh health snapshot when the timer
+ * fires, in case it changed during the grace window.
+ * @param componentId - The component's stable id (see {@link deriveComponentOks}).
+ * @param error - The component's error message as of this transition, used as a fallback if a
+ *   fresh snapshot read (once the timer fires) no longer has one for this component.
+ * @param existing - The component's tracked alert state, mutated in place.
+ * @param now - The current timestamp, as already read by the caller.
+ * @returns void.
+ */
+function handleNewFailure(componentId: string, error: string | null, existing: ComponentAlertState, now: number): void {
+  existing.failing = true;
+  existing.lastAlertAt = now;
+  existing.downAlertSent = false;
+  existing.generation += 1;
+  const generation = existing.generation;
+  existing.pendingDownTimer = setTimeout(() => {
+    const current = componentStates.get(componentId);
+    if (!current || current.generation !== generation) return;
+    current.pendingDownTimer = null;
+    const latestError = deriveComponentOks(getHealthSnapshot()).get(componentId)?.error ?? error;
+    dispatchDownAlert(componentId, latestError, current, false);
+  }, DOWN_ALERT_GRACE_MS);
+}
+
+/**
  * Reacts to one component's latest ok/fail state against its previously tracked state: sends an
- * edge-triggered DM alert on a fail→ok or ok→fail transition, or a "still down" DM once the
- * {@link REALERT_COOLDOWN_MS} cooldown has elapsed for a component that's stayed failing.
+ * edge-triggered DM alert on a fail→ok or ok→fail transition (see {@link handleRecovery} and
+ * {@link handleNewFailure}), or a "still down" DM once the {@link REALERT_COOLDOWN_MS} cooldown
+ * has elapsed for a component that's stayed failing.
  * @param componentId - The component's stable id (see {@link deriveComponentOks}).
  * @param ok - Whether the component is currently healthy.
  * @param error - The component's current error message, if failing.
@@ -274,42 +333,9 @@ function handleTrackedComponent(componentId: string, ok: boolean, error: string 
   const now = Date.now();
 
   if (ok && existing.failing) {
-    existing.failing = false;
-    existing.lastAlertAt = now;
-    // Cancel a still-pending grace-period timer — the component recovered before it ever fired,
-    // so this was a quick reconnect: no "down" DM was sent, and none will be now.
-    if (existing.pendingDownTimer) {
-      clearTimeout(existing.pendingDownTimer);
-      existing.pendingDownTimer = null;
-    }
-    // Only announce a recovery if a "down" DM was actually delivered for this failure — otherwise
-    // this is a component that was merely seeded as failing at startup (e.g. twitchChat, before
-    // startTwitchBot() has run), whose down DM never reached the owner, or that recovered within
-    // the grace period, finishing its normal startup/blip rather than undergoing a real recovery.
-    const wasAlerted = existing.downAlertSent;
-    existing.downAlertSent = false;
-    // Bump the generation so a still-in-flight down-DM delivery from this now-ended episode can't
-    // resurrect downAlertSent (via dispatchDownAlert's delayed .then()) after this recovery.
-    existing.generation += 1;
-    if (wasAlerted) {
-      void sendOwnerAlert(`✅ ${componentId} recovered`);
-    }
+    handleRecovery(componentId, existing, now);
   } else if (!ok && !existing.failing) {
-    existing.failing = true;
-    existing.lastAlertAt = now;
-    existing.downAlertSent = false;
-    existing.generation += 1;
-    const generation = existing.generation;
-    // Delay the "down" DM by the grace period rather than sending immediately — a component that
-    // recovers before this fires (see the `ok && existing.failing` branch above, which cancels
-    // this timer) was just a quick reconnect, and gets no DM at all.
-    existing.pendingDownTimer = setTimeout(() => {
-      const current = componentStates.get(componentId);
-      if (!current || current.generation !== generation) return;
-      current.pendingDownTimer = null;
-      const latestError = deriveComponentOks(getHealthSnapshot()).get(componentId)?.error ?? error;
-      dispatchDownAlert(componentId, latestError, current, false);
-    }, DOWN_ALERT_GRACE_MS);
+    handleNewFailure(componentId, error, existing, now);
   } else if (!ok && existing.failing && now - existing.lastAlertAt > REALERT_COOLDOWN_MS) {
     existing.lastAlertAt = now;
     dispatchDownAlert(componentId, error, existing, true);
