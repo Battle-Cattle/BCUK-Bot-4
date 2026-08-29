@@ -119,6 +119,17 @@ describe('GET /discord/callback', () => {
     expect((res.body as any).view).toBe('error');
   });
 
+  it('renders error 400 (not a 500 crash) when state has the same JS string length as the stored value but a different UTF-8 byte length', async () => {
+    // 'staté123' has 8 UTF-16 code units (same as the 8-char stored value below), but 9 UTF-8
+    // bytes since 'é' is 2 bytes — this used to make timingSafeEqual throw instead of returning false.
+    const submitted = 'staté123';
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } })).get(
+      `/discord/callback?code=abc&state=${encodeURIComponent(submitted)}`,
+    );
+    expect(res.status).toBe(400);
+    expect((res.body as any).view).toBe('error');
+  });
+
   it('renders error 400 when code is missing', async () => {
     const res = await supertest(buildApp({ oauthState: { value: 'abc', expiresAt: Date.now() + 60_000 } }))
       .get('/discord/callback?state=abc');

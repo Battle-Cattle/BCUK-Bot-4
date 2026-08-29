@@ -29,13 +29,18 @@ const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds']);
 /**
  * Constant-time comparison of the submitted OAuth `state` against the session's stored value
  * (see `GET /discord` below, which generates it as a fixed-length hex string), mirroring
- * `csrf.ts`'s `timingSafeEqual` comparison for CSRF tokens. The length check up front doesn't
- * leak anything — the expected length is public — it just guarantees the buffers passed to
- * `timingSafeEqual` are the same size, which it requires.
+ * `csrf.ts`'s `timingSafeEqual` comparison for CSRF tokens. Compares UTF-8 byte length rather
+ * than JS string length before calling `timingSafeEqual` — it requires equal-length buffers,
+ * and a submitted value containing multi-byte characters can have the same string length as
+ * `stored` while its UTF-8 byte length differs, which would otherwise throw instead of
+ * returning false. The length check up front doesn't leak anything — the expected length is
+ * public.
  */
 function oauthStateMatches(submitted: string, stored: string): boolean {
-  if (submitted.length !== stored.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(submitted, 'utf8'), Buffer.from(stored, 'utf8'));
+  const submittedBuf = Buffer.from(submitted, 'utf8');
+  const storedBuf = Buffer.from(stored, 'utf8');
+  if (submittedBuf.length !== storedBuf.length) return false;
+  return crypto.timingSafeEqual(submittedBuf, storedBuf);
 }
 
 // ─── Redirect to Discord OAuth2 ─────────────────────────────────────────────
