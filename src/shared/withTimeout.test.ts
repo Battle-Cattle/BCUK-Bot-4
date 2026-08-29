@@ -27,4 +27,17 @@ describe('withTimeout', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     await assertion;
   });
+
+  it('unrefs its internal timer so a long-lived timeout cannot keep the event loop alive on its own', () => {
+    const unref = vi.fn();
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+      .mockReturnValue({ unref, ref: vi.fn() } as unknown as NodeJS.Timeout);
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout').mockImplementation(() => {});
+
+    void withTimeout(new Promise(() => {}), 1_000, 'test op').catch(() => {});
+    expect(unref).toHaveBeenCalledOnce();
+
+    setTimeoutSpy.mockRestore();
+    clearTimeoutSpy.mockRestore();
+  });
 });

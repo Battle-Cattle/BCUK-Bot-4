@@ -11,6 +11,9 @@
 export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    // Always cleared by promise settling above, but unref so a long-lived `ms` can't keep the
+    // event loop alive on its own if the process would otherwise be idle.
+    timer.unref();
     promise.then(
       (value) => { clearTimeout(timer); resolve(value); },
       (err) => { clearTimeout(timer); reject(err); },
