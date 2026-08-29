@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mockLogger } from '../test-utils/loggerMock';
 
-vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
+// A stable logger instance (unlike `mockLogger()`, which returns a fresh object per call) so
+// tests can assert on the same `log.error` spy the module-scoped `log` in healthCommandHandler.ts
+// was created with.
+const { log } = vi.hoisted(() => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+vi.mock('../shared/logger', () => ({ createLogger: () => log }));
 
 vi.mock('../db', () => ({
   findOwnerUser: vi.fn(),
@@ -11,9 +16,14 @@ vi.mock('../shared/healthStore', () => ({
   getHealthSnapshot: vi.fn(),
 }));
 
+vi.mock('../discord/discordUtils', () => ({
+  isDiscordNotFoundError: vi.fn().mockReturnValue(false),
+}));
+
 import { executeHealthCommandForDiscord } from './healthCommandHandler';
 import { findOwnerUser } from '../db';
 import { getHealthSnapshot } from '../shared/healthStore';
+import { isDiscordNotFoundError } from '../discord/discordUtils';
 
 const OWNER_ID = '111222333444555666';
 const OWNER_ROW = {
@@ -96,6 +106,26 @@ describe('executeHealthCommandForDiscord', () => {
     const replyText = message.reply.mock.calls[0][0] as string;
     expect(replyText).not.toContain('Bot Health');
     expect(replyText).not.toContain('DB');
+  });
+
+  it('swallows a Discord not-found error on the channel ack without throwing', async () => {
+    vi.mocked(isDiscordNotFoundError).mockReturnValue(true);
+    const message = makeMockMessage('!health', OWNER_ID, { guild: { id: 'guild-1' } });
+    message.reply.mockRejectedValue(new Error('Unknown message'));
+
+    await expect(executeHealthCommandForDiscord(message as any)).resolves.toBeUndefined();
+    expect(message.author.send).toHaveBeenCalledOnce();
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it('logs (but does not throw) when the channel ack fails with a non-not-found error', async () => {
+    vi.mocked(isDiscordNotFoundError).mockReturnValue(false);
+    const message = makeMockMessage('!health', OWNER_ID, { guild: { id: 'guild-1' } });
+    message.reply.mockRejectedValue(new Error('Missing Permissions'));
+
+    await expect(executeHealthCommandForDiscord(message as any)).resolves.toBeUndefined();
+    expect(message.author.send).toHaveBeenCalledOnce();
+    expect(log.error).toHaveBeenCalledWith('Failed to acknowledge !health command in channel:', expect.any(Error));
   });
 
   it('logs and swallows a failed DM (e.g. DMs closed) instead of throwing, without posting a channel ack', async () => {
