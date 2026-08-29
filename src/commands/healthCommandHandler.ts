@@ -3,6 +3,7 @@ import { createLogger } from '../shared/logger';
 import { extractCommand } from './commandUtils';
 import { findOwnerUser } from '../db';
 import { getHealthSnapshot, type HealthSnapshot } from '../shared/healthStore';
+import { isDiscordNotFoundError } from '../discord/discordUtils';
 
 const log = createLogger('HealthCommand');
 
@@ -110,7 +111,8 @@ function formatHealthSummary(snapshot: HealthSnapshot): string {
  * was triggered from, since the summary includes DB/EventSub/scheduler/recent-error details.
  * When triggered from a guild channel, also posts a minimal, non-sensitive acknowledgement reply
  * there so the owner knows to check their DMs. If the DM itself fails (e.g. the owner has DMs
- * closed), that's logged and swallowed rather than thrown.
+ * closed), that's logged and swallowed rather than thrown. The acknowledgement reply is likewise
+ * swallowed on failure (e.g. the triggering message was deleted before it could be sent).
  * @param message - The Discord message to check and, if it's an owner-issued `!health`, respond to.
  * @returns Resolves once the command has been handled (or ignored as a non-match).
  */
@@ -134,6 +136,12 @@ export async function executeHealthCommandForDiscord(message: Message): Promise<
   }
 
   if (message.guild) {
-    await message.reply('📬 Sent you the health report via DM.');
+    try {
+      await message.reply('📬 Sent you the health report via DM.');
+    } catch (err) {
+      if (!isDiscordNotFoundError(err)) {
+        log.error('Failed to acknowledge !health command in channel:', err);
+      }
+    }
   }
 }
