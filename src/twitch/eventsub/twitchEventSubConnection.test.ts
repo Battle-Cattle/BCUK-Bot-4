@@ -581,6 +581,87 @@ describe('StreamerConnection lifecycle', () => {
     expect(subscribeForStreamer).toHaveBeenCalledWith('sess-live', expect.objectContaining({ uid: 'uid-123' }));
   });
 
+  it('closes the old socket once the migration-close delay elapses after a session reconnect', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const oldWs = (conn as any).ws as MockWebSocket;
+
+    const reconnectMsg = makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-old', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=new' } },
+    });
+    (conn as any).handleMessage(reconnectMsg);
+    expect((conn as any).migrationCloseTimer).not.toBeNull();
+    expect(oldWs.close).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(5_000);
+
+    expect(oldWs.close).toHaveBeenCalledWith(1000, 'reconnect');
+    expect((conn as any).migrationCloseTimer).toBeNull();
+  });
+
+  it('cancels the pending migration-close timer on stop() and closes the old socket with a shutdown reason instead', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const oldWs = (conn as any).ws as MockWebSocket;
+
+    const reconnectMsg = makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-old', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=new' } },
+    });
+    (conn as any).handleMessage(reconnectMsg);
+    expect((conn as any).migrationCloseTimer).not.toBeNull();
+
+    conn.stop();
+    expect((conn as any).migrationCloseTimer).toBeNull();
+    expect(oldWs.close).toHaveBeenCalledWith(1000, 'shutdown');
+    expect(oldWs.close).not.toHaveBeenCalledWith(1000, 'reconnect');
+
+    oldWs.close.mockClear();
+    vi.advanceTimersByTime(5_000);
+    // The timer stop() cancelled must not fire later and close the socket a second time.
+    expect(oldWs.close).not.toHaveBeenCalled();
+  });
+
+  it('closes the previous pending old socket immediately when a second session_reconnect arrives before the first delay elapses', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstOldWs = (conn as any).ws as MockWebSocket;
+
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      message_id: 'reconnect-1',
+      payload: { session: { id: 'sess-old', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=new1' } },
+    }));
+    const secondOldWs = (conn as any).ws as MockWebSocket;
+    expect(secondOldWs).not.toBe(firstOldWs);
+    const firstTimer = (conn as any).migrationCloseTimer;
+
+    vi.advanceTimersByTime(2_000);
+
+    // A second, distinct session_reconnect arrives before the first migration-close timer fires.
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      message_id: 'reconnect-2',
+      payload: { session: { id: 'sess-old', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=new2' } },
+    }));
+
+    // The first old socket is closed immediately rather than left on an orphaned timer.
+    expect(firstOldWs.close).toHaveBeenCalledWith(1000, 'reconnect');
+    const secondTimer = (conn as any).migrationCloseTimer;
+    expect(secondTimer).not.toBe(firstTimer);
+
+    // Advancing past the first timer's original 5s deadline must not fire the orphaned timer
+    // (which would otherwise null out migrationCloseTimer and close secondOldWs early/twice).
+    vi.advanceTimersByTime(3_000); // t=5s from reconnect-1
+    expect(secondOldWs.close).not.toHaveBeenCalled();
+    expect((conn as any).migrationCloseTimer).toBe(secondTimer);
+
+    vi.advanceTimersByTime(2_000); // t=5s from reconnect-2
+    expect(secondOldWs.close).toHaveBeenCalledWith(1000, 'reconnect');
+    expect((conn as any).migrationCloseTimer).toBeNull();
+  });
+
   it('defers a reload() issued mid-session-migration and applies it once the new session welcomes', async () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
