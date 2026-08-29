@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mockLogger } from '../test-utils/loggerMock';
 
-vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
+// A stable logger instance (unlike `mockLogger()`, which returns a fresh object per call) so
+// tests can assert on the same `log.error` spy the module-scoped `log` in healthCommandHandler.ts
+// was created with.
+const { log } = vi.hoisted(() => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+vi.mock('../shared/logger', () => ({ createLogger: () => log }));
 
 vi.mock('../db', () => ({
   findOwnerUser: vi.fn(),
@@ -110,6 +115,7 @@ describe('executeHealthCommandForDiscord', () => {
 
     await expect(executeHealthCommandForDiscord(message as any)).resolves.toBeUndefined();
     expect(message.author.send).toHaveBeenCalledOnce();
+    expect(log.error).not.toHaveBeenCalled();
   });
 
   it('logs (but does not throw) when the channel ack fails with a non-not-found error', async () => {
@@ -119,6 +125,7 @@ describe('executeHealthCommandForDiscord', () => {
 
     await expect(executeHealthCommandForDiscord(message as any)).resolves.toBeUndefined();
     expect(message.author.send).toHaveBeenCalledOnce();
+    expect(log.error).toHaveBeenCalledWith('Failed to acknowledge !health command in channel:', expect.any(Error));
   });
 
   it('logs and swallows a failed DM (e.g. DMs closed) instead of throwing, without posting a channel ack', async () => {
