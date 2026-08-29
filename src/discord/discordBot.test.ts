@@ -44,7 +44,8 @@ vi.mock('../db', () => ({
 vi.mock('../shared/logger', () => ({ createLogger: vi.fn(mockLogger) }));
 vi.mock('discord.js', () => ({
   Client: vi.fn(),
-  GatewayIntentBits: { Guilds: 1, GuildMessages: 2, MessageContent: 4, GuildVoiceStates: 8 },
+  GatewayIntentBits: { Guilds: 1, GuildMessages: 2, MessageContent: 4, GuildVoiceStates: 8, DirectMessages: 16 },
+  Partials: { Channel: 1 },
 }));
 
 type DiscordBotModule = typeof import('./discordBot');
@@ -163,10 +164,19 @@ describe('startDiscordBot — messageCreate handler', () => {
     expect(vi.mocked(commands.handleCommand)).not.toHaveBeenCalled();
   });
 
-  it('skips DMs (no guildId)', () => {
+  it('skips guild-gated handlers for DMs (no guildId)', () => {
     const cb = getMessageCreateCb();
     cb({ author: { bot: false, username: 'Alice' }, guildId: null, content: '!test', member: null });
     expect(vi.mocked(commands.handleCommand)).not.toHaveBeenCalled();
+    expect(vi.mocked(customCmds.executeCustomCommandForDiscord)).not.toHaveBeenCalled();
+  });
+
+  it('still dispatches DMs to the health command handler', async () => {
+    const health = await import('../commands/healthCommandHandler.js');
+    const cb = getMessageCreateCb();
+    const msg = { author: { bot: false, username: 'Alice' }, guildId: null, content: '!health', member: null };
+    cb(msg);
+    expect(vi.mocked(health.executeHealthCommandForDiscord)).toHaveBeenCalledWith(msg);
   });
 
   it('dispatches to command handlers for registered guild messages', () => {
