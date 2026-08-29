@@ -125,6 +125,20 @@ describe('GET /discord/callback', () => {
     expect(res.status).toBe(400);
   });
 
+  it('renders error 400 (not a 500 crash) when state is tampered into an array', async () => {
+    const res = await supertest(buildApp({ oauthState: { value: 'abc', expiresAt: Date.now() + 60_000 } }))
+      .get('/discord/callback?code=code&state=abc&state=def');
+    expect(res.status).toBe(400);
+    expect((res.body as any).view).toBe('error');
+  });
+
+  it('renders error 400 (not a 500 crash) when code is tampered into an array', async () => {
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
+      .get('/discord/callback?code=a&code=b&state=state123');
+    expect(res.status).toBe(400);
+    expect((res.body as any).view).toBe('error');
+  });
+
   it('renders error 400 when OAuth state has expired', async () => {
     const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() - 1 } }))
       .get('/discord/callback?code=code&state=state123');

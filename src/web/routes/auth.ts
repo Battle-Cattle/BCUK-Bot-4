@@ -89,12 +89,19 @@ router.get('/discord', (req, res) => {
  *   page if any step of the exchange/profile-fetch/session-save fails.
  */
 router.get('/discord/callback', async (req, res) => {
-  const { code, state } = req.query as { code?: string; state?: string };
+  // req.query values are `string | string[] | ParsedQs | ParsedQs[] | undefined` at runtime
+  // (e.g. `?state=a&state=b` parses to an array) — narrow with typeof rather than an unchecked
+  // `as` cast, so a tampered array/object param is rejected here instead of reaching
+  // oauthStateMatches (which requires a string) or the token-exchange request body below.
+  const { code, state } = req.query;
+  if (typeof code !== 'string' || typeof state !== 'string') {
+    return renderError(res, 400, 'Invalid OAuth2 state — please try logging in again.', undefined);
+  }
 
   const storedOAuth = req.session.oauthState;
   delete req.session.oauthState;
-  const stateValid = !!storedOAuth && !!state && oauthStateMatches(state, storedOAuth.value) && Date.now() <= storedOAuth.expiresAt;
-  if (!code || !state || !stateValid) {
+  const stateValid = !!storedOAuth && oauthStateMatches(state, storedOAuth.value) && Date.now() <= storedOAuth.expiresAt;
+  if (!code || !stateValid) {
     return renderError(res, 400, 'Invalid OAuth2 state — please try logging in again.', undefined);
   }
 
