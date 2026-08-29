@@ -157,25 +157,27 @@ function dispatchDownAlert(componentId: string, error: string | null, state: Com
 
 /**
  * Records a component seen for the first time: stored (not alerted on) if it starts out healthy,
- * matching the "nothing was wrong before" baseline, or alerted immediately if it starts out
- * failing.
+ * matching the "nothing was wrong before" baseline. A component that starts out failing is
+ * handed to {@link handleNewFailure} so it goes through the same {@link DOWN_ALERT_GRACE_MS}
+ * grace period as any other ok→fail transition — otherwise a brief blip on a newly-added
+ * component (e.g. a streamer's EventSub connection right after setup) would DM the owner
+ * immediately while the identical blip on a pre-existing component would be suppressed.
  * @param componentId - The component's stable id (see {@link deriveComponentOks}).
  * @param ok - Whether the component is currently healthy.
  * @param error - The component's current error message, if failing.
  * @returns void.
  */
 function handleFirstSeenComponent(componentId: string, ok: boolean, error: string | null): void {
-  const now = Date.now();
   const state: ComponentAlertState = {
-    failing: !ok,
-    lastAlertAt: ok ? 0 : now,
+    failing: false,
+    lastAlertAt: 0,
     downAlertSent: false,
     generation: 0,
     pendingDownTimer: null,
   };
   componentStates.set(componentId, state);
   if (!ok) {
-    dispatchDownAlert(componentId, error, state, false);
+    handleNewFailure(componentId, error, state, Date.now());
   }
 }
 

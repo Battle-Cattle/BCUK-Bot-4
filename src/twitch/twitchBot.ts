@@ -456,15 +456,20 @@ export async function sayInChannel(channel: string, message: string): Promise<vo
 
 /**
  * Calls `client.quit()` — which itself returns `void` and reports completion only via the
- * `onDisconnect` event — wrapped in a promise that resolves once that event fires.
+ * `onDisconnect` event — wrapped in a promise that resolves once that event fires. Also returns
+ * `unbind` so a caller that gives up waiting (e.g. on a timeout) can remove the listener itself —
+ * mirroring `connectAndWait`'s equivalent timeout-cleanup path in `startTwitchBot`.
  * @param c - The Twurple chat client to disconnect.
- * @returns Resolves once `onDisconnect` has fired.
+ * @returns `promise`, resolved once `onDisconnect` has fired, and `unbind` to remove the
+ *   `onDisconnect` listener without waiting for it to fire.
  */
-function quitAndWait(c: ChatClient): Promise<void> {
-  return new Promise((resolve) => {
-    const listener = c.onDisconnect(() => { listener.unbind(); resolve(); });
+function quitAndWait(c: ChatClient): { promise: Promise<void>; unbind: () => void } {
+  let listener: { unbind: () => void };
+  const promise = new Promise<void>((resolve) => {
+    listener = c.onDisconnect(() => { listener.unbind(); resolve(); });
     c.quit();
   });
+  return { promise, unbind: () => listener.unbind() };
 }
 
 /**
@@ -479,10 +484,14 @@ export async function stopTwitchBot(): Promise<void> {
   setConnected(false);
   recordTwitchChatConnected(false);
   if (client) {
+    const { promise, unbind } = quitAndWait(client);
     try {
-      await withTimeout(quitAndWait(client), DISCONNECT_TIMEOUT_MS, 'Twitch disconnect');
+      await withTimeout(promise, DISCONNECT_TIMEOUT_MS, 'Twitch disconnect');
     } catch (err) {
       log.warn('Error during disconnect:', err);
+      // withTimeout() abandons the promise rather than cancelling it — its onDisconnect
+      // listener would otherwise stay live on the (about-to-be-discarded) client.
+      unbind();
       getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
     }
     client = null;

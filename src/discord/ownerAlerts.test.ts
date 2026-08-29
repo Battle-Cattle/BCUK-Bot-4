@@ -77,12 +77,31 @@ describe('ownerAlerts', () => {
 
   it('does not alert at all on a quick reconnect that recovers within the grace period', async () => {
     // Ensures 'db' is already a *tracked* component (as it always is in production, where
-    // primeOwnerAlertBaseline() seeds every component before the watcher ever starts) rather
-    // than one this call would see for the first time — a first-seen failing component alerts
-    // immediately (see handleFirstSeenComponent) and isn't subject to the grace period, which
-    // only debounces a transition on an already-tracked component.
+    // primeOwnerAlertBaseline() seeds every component before the watcher ever starts). A
+    // first-seen failing component goes through the same grace period (see
+    // handleFirstSeenComponent), so this priming isn't strictly required for this test, but
+    // it matches the production sequencing this scenario is meant to exercise.
     await primeOwnerAlertBaseline();
 
+    healthStore.recordDbPing(false, 'connection refused');
+    await vi.advanceTimersByTimeAsync(DOWN_ALERT_GRACE_MS / 2);
+    healthStore.recordDbPing(true);
+    await advanceGrace();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('applies the grace period to a component seen failing for the first time, not an immediate alert', async () => {
+    // 'db' hasn't gone through handleHealthChanged yet at this point (the outer beforeEach's
+    // recordDbPing(true) ran before startOwnerAlertWatcher() was listening), so this is a
+    // genuinely first-seen component.
+    healthStore.recordDbPing(false, 'connection refused');
+    await flush();
+    expect(send).not.toHaveBeenCalled();
+    await advanceGrace();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends no alert when a first-seen failing component recovers within the grace period', async () => {
     healthStore.recordDbPing(false, 'connection refused');
     await vi.advanceTimersByTimeAsync(DOWN_ALERT_GRACE_MS / 2);
     healthStore.recordDbPing(true);

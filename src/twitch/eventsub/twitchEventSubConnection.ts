@@ -73,6 +73,7 @@ export class StreamerConnection {
   private keepaliveTimer: ReturnType<typeof setTimeout> | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private migrationCloseTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private isReconnecting = false;
   // Set when reload() runs while isReconnecting is true — at that point this.sessionId is
@@ -108,6 +109,7 @@ export class StreamerConnection {
     this.clearKeepaliveTimer();
     this.clearConnectTimer();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.migrationCloseTimer) { clearTimeout(this.migrationCloseTimer); this.migrationCloseTimer = null; }
     this.ws?.close(1000, 'shutdown');
     this.ws = null;
     removeEventSubHealth(this.name);
@@ -358,7 +360,10 @@ export class StreamerConnection {
     this.isReconnecting = true;
     log.info(`[${this.name}] Session reconnect — connecting to new session`);
     this.connect(safeUrl);
-    setTimeout(() => { oldSocket?.close(1000, 'reconnect'); }, SESSION_MIGRATION_CLOSE_DELAY_MS);
+    this.migrationCloseTimer = setTimeout(() => {
+      this.migrationCloseTimer = null;
+      oldSocket?.close(1000, 'reconnect');
+    }, SESSION_MIGRATION_CLOSE_DELAY_MS);
   }
 
   /**
