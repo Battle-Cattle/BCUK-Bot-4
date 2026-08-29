@@ -211,7 +211,9 @@ async function listOwnSubscriptions(
  * to the live session yet not `enabled` (e.g. `authorization_revoked`, `notification_failures_exceeded`),
  * in which case it isn't actually receiving notifications and must not be counted as live — deletes
  * one that's stale (bound to a different session, or not enabled) before recreating it, or creates
- * fresh if none exists.
+ * fresh if none exists. Logs the deletion at WARN when it's still bound to the live session (a
+ * genuine anomaly), or at INFO when it's bound to a different session (routine post-reconnect
+ * cleanup — see {@link deleteStaleSubscriptions}).
  * @returns The live subscription's id (or null if creation failed — see {@link subscribe}), and
  *   whether a stale `existing` subscription was actually deleted here — `false` on a failed delete
  *   attempt, so the caller knows not to treat that id as already gone (it must remain eligible for
@@ -224,11 +226,17 @@ async function ensureSubscription(
   if (existing && existing.sessionId === sessionId && existing.status === 'enabled') return { id: existing.id, deleted: false };
   let deleted = false;
   if (existing) {
-    // INFO, not WARN: every non-graceful reconnect (see forceReconnect in
-    // twitchEventSubConnection.ts) starts a brand-new session, so *all* of the previous
-    // session's subscriptions are legitimately "stale" here — this fires routinely on every
-    // such reconnect, not just on an actual anomaly.
-    log.info(`Deleting stale ${spec.type} subscription (${existing.id}) for ${name} — bound to a different session or not enabled (status=${existing.status})`);
+    if (existing.sessionId === sessionId) {
+      // WARN: still bound to the *live* session yet not enabled (e.g. `authorization_revoked`,
+      // `notification_failures_exceeded`) — a genuine anomaly, not something a reconnect explains.
+      log.warn(`Deleting ${spec.type} subscription (${existing.id}) for ${name} — bound to the live session but not enabled (status=${existing.status})`);
+    } else {
+      // INFO, not WARN: every non-graceful reconnect (see forceReconnect in
+      // twitchEventSubConnection.ts) starts a brand-new session, so *all* of the previous
+      // session's subscriptions are legitimately "stale" here — this fires routinely on every
+      // such reconnect, not just on an actual anomaly.
+      log.info(`Deleting stale ${spec.type} subscription (${existing.id}) for ${name} — bound to a different session (status=${existing.status})`);
+    }
     try {
       await deleteEventSubSubscription(existing.id, token);
       deleted = true;

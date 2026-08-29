@@ -473,6 +473,10 @@ describe('subscribeForStreamer', () => {
     // must exclude this id too (not just session-mismatch deletions), or it would be deleted twice.
     expect(deleteEventSubSubscription).toHaveBeenCalledTimes(1);
     expect(count).toBeGreaterThan(0);
+    // Still bound to the *live* session but not enabled — a genuine anomaly, not something a
+    // reconnect explains, so this must be logged at WARN rather than the routine-cleanup INFO.
+    expect(logMock.warn).toHaveBeenCalledWith(expect.stringContaining('sub-revoked-follow'));
+    expect(logMock.info).not.toHaveBeenCalledWith(expect.stringContaining('sub-revoked-follow'));
   });
 
   it('does not mistake a same-type, same-broadcaster subscription with a different condition for the desired one', async () => {
@@ -537,6 +541,9 @@ describe('subscribeForStreamer', () => {
     // Only deleted once — the reused own-subscriptions listing must not let the later stale-cleanup
     // pass attempt to delete the same id a second time (it was already removed above).
     expect(deleteEventSubSubscription).toHaveBeenCalledTimes(1);
+    // Bound to a different (prior) session — routine post-reconnect cleanup, not an anomaly.
+    expect(logMock.info).toHaveBeenCalledWith(expect.stringContaining('sub-dead-follow'));
+    expect(logMock.warn).not.toHaveBeenCalledWith(expect.stringContaining('sub-dead-follow'));
   });
 
   it('retries a stale-session delete in the same round if the recreation delete attempt failed', async () => {

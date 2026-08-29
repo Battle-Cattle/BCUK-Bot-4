@@ -309,13 +309,22 @@ function handleNewFailure(componentId: string, error: string | null, existing: C
   existing.downAlertSent = false;
   existing.generation += 1;
   const generation = existing.generation;
-  existing.pendingDownTimer = setTimeout(() => {
+  /**
+   * Fires once {@link DOWN_ALERT_GRACE_MS} elapses: no-ops if the component's tracked state is
+   * gone or has moved past this failure episode (recovered, or recovered and failed again — see
+   * {@link ComponentAlertState.generation}), otherwise re-derives the error from a fresh health
+   * snapshot (falling back to `error` as read at transition time, in case the snapshot no longer
+   * has one for this component) and dispatches the "down" DM via {@link dispatchDownAlert}.
+   * @returns void.
+   */
+  const dispatchDelayedDownAlert = (): void => {
     const current = componentStates.get(componentId);
     if (!current || current.generation !== generation) return;
     current.pendingDownTimer = null;
     const latestError = deriveComponentOks(getHealthSnapshot()).get(componentId)?.error ?? error;
     dispatchDownAlert(componentId, latestError, current, false);
-  }, DOWN_ALERT_GRACE_MS);
+  };
+  existing.pendingDownTimer = setTimeout(dispatchDelayedDownAlert, DOWN_ALERT_GRACE_MS);
 }
 
 /**
