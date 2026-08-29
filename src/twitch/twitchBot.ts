@@ -36,6 +36,16 @@ const log = createLogger('Twitch');
 
 let client: ChatClient | null = null;
 let connected = false;
+/**
+ * The `onDisconnect` listener registered on `client` in {@link startTwitchBot} for the bot's own
+ * lifetime — kept at module scope (unlike `messageListener`/`authSuccessListener`, which never
+ * need unbinding outside their own function) so {@link stopTwitchBot} can also unbind it, not just
+ * `quitAndWait`'s own temporary listener. Without this, a real disconnect event arriving late on a
+ * client `stopTwitchBot` has already given up waiting on (or even one that fires after `quit()`
+ * settles normally) would still call `onDisconnected()` against whatever client/module state is
+ * current by then — e.g. after a restart's `startTwitchBot()` has already begun.
+ */
+let disconnectListener: { unbind: () => void } | null = null;
 
 /**
  * Upper bound on how long {@link stopTwitchBot} waits for the `onDisconnect` event to fire after
@@ -334,7 +344,7 @@ export async function startTwitchBot(): Promise<void> {
 
   const messageListener = newClient.onMessage(handleTwitchMessage);
   const authSuccessListener = newClient.onAuthenticationSuccess(onConnected);
-  const disconnectListener = newClient.onDisconnect(onDisconnected);
+  disconnectListener = newClient.onDisconnect(onDisconnected);
   // USERSTATE isn't exposed by ChatClient itself — only via the underlying ircv3 client.
   const userStateListenerId = newClient.irc.onTypedMessage(UserState, onOwnUserState);
 
@@ -349,6 +359,7 @@ export async function startTwitchBot(): Promise<void> {
     messageListener.unbind();
     authSuccessListener.unbind();
     disconnectListener.unbind();
+    disconnectListener = null;
     newClient.irc.removeMessageListener(userStateListenerId);
     try {
       newClient.quit();
@@ -494,6 +505,10 @@ export async function stopTwitchBot(): Promise<void> {
       unbind();
       getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
     }
+    // Unbind the original disconnectListener from startTwitchBot() too — see its declaration for
+    // why a late or post-settlement disconnect event on this discarded client must not reach it.
+    disconnectListener?.unbind();
+    disconnectListener = null;
     client = null;
     setChatClient(null);
   }

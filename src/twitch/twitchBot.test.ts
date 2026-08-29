@@ -978,6 +978,32 @@ describe('stopTwitchBot', () => {
     await stopTwitchBot();
     expect(mockClient.quit).not.toHaveBeenCalled();
   });
+
+  it('unbinds the original onDisconnected handler (not just quitAndWait\'s temporary one) when the disconnect wait times out', async () => {
+    await connectBot();
+    mockClient.quit.mockImplementation(() => {}); // never fires onDisconnect
+
+    try {
+      const stopped = stopTwitchBot();
+      await vi.advanceTimersByTimeAsync(DISCONNECT_TIMEOUT_MS);
+      await stopped;
+
+      // Both the temporary quitAndWait listener and the persistent onDisconnected handler
+      // registered by startTwitchBot() must be gone — otherwise a disconnect event arriving late
+      // on this discarded client could still fire onDisconnected() against whatever module state
+      // is current by then, e.g. after a restart.
+      expect(handlers.disconnectHandlers).toHaveLength(0);
+    } finally {
+      mockClient.quit.mockImplementation(() => {
+        queueMicrotask(() => fireDisconnect(true));
+      });
+    }
+
+    // Restart: only the new client's own onDisconnected handler should be registered, confirming
+    // nothing from the old, timed-out client survived to interfere with the new session.
+    await connectBot();
+    expect(handlers.disconnectHandlers).toHaveLength(1);
+  });
 });
 
 // ─── reconcileJoinedChannels (via onConnected) ────────────────────────────────

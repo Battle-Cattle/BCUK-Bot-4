@@ -74,6 +74,12 @@ export class StreamerConnection {
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private migrationCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  // The socket handleSessionReconnect's pending migrationCloseTimer will close once it fires.
+  // Tracked alongside the timer (rather than only in its setTimeout closure) so a second
+  // session_reconnect arriving before the first's delay elapses can close this immediately and
+  // replace both, instead of leaving a still-running native timer that migrationCloseTimer no
+  // longer references — see handleSessionReconnect.
+  private pendingMigrationOldSocket: WebSocket | null = null;
   private reconnectAttempts = 0;
   private isReconnecting = false;
   // Set when reload() runs while isReconnecting is true — at that point this.sessionId is
@@ -109,7 +115,12 @@ export class StreamerConnection {
     this.clearKeepaliveTimer();
     this.clearConnectTimer();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
-    if (this.migrationCloseTimer) { clearTimeout(this.migrationCloseTimer); this.migrationCloseTimer = null; }
+    if (this.migrationCloseTimer) {
+      clearTimeout(this.migrationCloseTimer);
+      this.migrationCloseTimer = null;
+      this.pendingMigrationOldSocket?.close(1000, 'shutdown');
+      this.pendingMigrationOldSocket = null;
+    }
     this.ws?.close(1000, 'shutdown');
     this.ws = null;
     removeEventSubHealth(this.name);
@@ -360,9 +371,21 @@ export class StreamerConnection {
     this.isReconnecting = true;
     log.info(`[${this.name}] Session reconnect — connecting to new session`);
     this.connect(safeUrl);
+    // A second session_reconnect arriving before the first's delay elapses would otherwise
+    // overwrite migrationCloseTimer without clearing the still-running native timer underneath
+    // it — that orphaned timer would still fire later, nulling migrationCloseTimer out from under
+    // the second timer (still pending) and letting it survive a stop() that should have cancelled
+    // it. Close any already-pending old socket immediately and replace it instead, so there's only
+    // ever one migration close in flight for stop() to cancel.
+    if (this.migrationCloseTimer) {
+      clearTimeout(this.migrationCloseTimer);
+      this.pendingMigrationOldSocket?.close(1000, 'reconnect');
+    }
+    this.pendingMigrationOldSocket = oldSocket;
     this.migrationCloseTimer = setTimeout(() => {
       this.migrationCloseTimer = null;
-      oldSocket?.close(1000, 'reconnect');
+      this.pendingMigrationOldSocket?.close(1000, 'reconnect');
+      this.pendingMigrationOldSocket = null;
     }, SESSION_MIGRATION_CLOSE_DELAY_MS);
   }
 
