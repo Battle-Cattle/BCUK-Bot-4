@@ -581,6 +581,25 @@ describe('StreamerConnection lifecycle', () => {
     expect(subscribeForStreamer).toHaveBeenCalledWith('sess-live', expect.objectContaining({ uid: 'uid-123' }));
   });
 
+  it('closes the old socket once the migration-close delay elapses after a session reconnect', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const oldWs = (conn as any).ws as MockWebSocket;
+
+    const reconnectMsg = makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-old', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=new' } },
+    });
+    (conn as any).handleMessage(reconnectMsg);
+    expect((conn as any).migrationCloseTimer).not.toBeNull();
+    expect(oldWs.close).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(5_000);
+
+    expect(oldWs.close).toHaveBeenCalledWith(1000, 'reconnect');
+    expect((conn as any).migrationCloseTimer).toBeNull();
+  });
+
   it('defers a reload() issued mid-session-migration and applies it once the new session welcomes', async () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
