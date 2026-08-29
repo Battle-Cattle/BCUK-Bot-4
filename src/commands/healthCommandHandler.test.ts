@@ -112,6 +112,15 @@ describe('executeHealthCommandForDiscord', () => {
     expect(message.author.send).toHaveBeenCalledOnce();
   });
 
+  it('logs (but does not throw) when the channel ack fails with a non-not-found error', async () => {
+    vi.mocked(isDiscordNotFoundError).mockReturnValue(false);
+    const message = makeMockMessage('!health', OWNER_ID, { guild: { id: 'guild-1' } });
+    message.reply.mockRejectedValue(new Error('Missing Permissions'));
+
+    await expect(executeHealthCommandForDiscord(message as any)).resolves.toBeUndefined();
+    expect(message.author.send).toHaveBeenCalledOnce();
+  });
+
   it('logs and swallows a failed DM (e.g. DMs closed) instead of throwing, without posting a channel ack', async () => {
     const message = makeMockMessage('!health', OWNER_ID, { guild: { id: 'guild-1' } });
     message.author.send.mockRejectedValue(new Error('Cannot send messages to this user'));
