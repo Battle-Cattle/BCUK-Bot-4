@@ -130,11 +130,14 @@ export function startDiscordBot(): void {
   });
   bootingClient = localClient;
 
-  // Dispatches every non-bot message from a registered guild to each command handler in turn
-  // (fire-and-forget — a failure in one handler must not block the others). A DM (no guildId)
-  // skips the guild-gated handlers entirely and only reaches the owner-only `!health` command,
-  // which is designed to be triggered from a DM (see its own docstring). `message` is the
-  // triggering Discord message; returns void.
+  /**
+   * Dispatches every non-bot message from a registered guild to each command handler in turn
+   * (fire-and-forget — a failure in one handler must not block the others). A DM (no guildId)
+   * skips the guild-gated handlers entirely and only reaches the owner-only `!health` command,
+   * which is designed to be triggered from a DM (see its own docstring).
+   * @param message - The triggering Discord message.
+   * @returns void.
+   */
   localClient.on('messageCreate', (message) => {
     if (message.author.bot) return;
 

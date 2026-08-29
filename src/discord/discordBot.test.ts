@@ -164,11 +164,13 @@ describe('startDiscordBot — messageCreate handler', () => {
     expect(vi.mocked(commands.handleCommand)).not.toHaveBeenCalled();
   });
 
-  it('skips guild-gated handlers for DMs (no guildId)', () => {
+  it('skips guild-gated handlers for DMs (no guildId)', async () => {
+    const counters = await import('../commands/counterHandler.js');
     const cb = getMessageCreateCb();
     cb({ author: { bot: false, username: 'Alice' }, guildId: null, content: '!test', member: null });
     expect(vi.mocked(commands.handleCommand)).not.toHaveBeenCalled();
     expect(vi.mocked(customCmds.executeCustomCommandForDiscord)).not.toHaveBeenCalled();
+    expect(vi.mocked(counters.executeCounterCommandForDiscord)).not.toHaveBeenCalled();
   });
 
   it('still dispatches DMs to the health command handler', async () => {
