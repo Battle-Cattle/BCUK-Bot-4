@@ -4,8 +4,11 @@ vi.mock('./pool', () => ({ getPool: vi.fn() }));
 vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
-import { recordStreamerEvent, getRecentStreamerEvents } from './eventLog';
+import { recordStreamerEvent, getRecentStreamerEvents, __resetEventLogPruneCountersForTests } from './eventLog';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
+
+// Matches PRUNE_EVERY_N_INSERTS in eventLog.ts — the prune DELETE only runs on every Nth insert.
+const PRUNE_EVERY_N_INSERTS = 10;
 
 /** Builds a fake mysql pool whose `execute`/`query` resolve to the given rows/meta. */
 function makePool(rows: unknown[] = [], meta: unknown = {}) {
@@ -14,24 +17,53 @@ function makePool(rows: unknown[] = [], meta: unknown = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  __resetEventLogPruneCountersForTests();
 });
 
 describe('recordStreamerEvent', () => {
-  it('inserts the event and prunes the streamer down to the retention cap', async () => {
+  it('inserts the event without pruning while under the prune-cadence threshold', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(true);
 
-    expect(pool.execute).toHaveBeenCalledTimes(2);
+    expect(pool.execute).toHaveBeenCalledTimes(1);
     const [insertSql, insertParams] = pool.execute.mock.calls[0];
     expect(insertSql).toContain('INSERT INTO streamer_event_log');
     expect(insertParams).toEqual([5, 'follow', 'someviewer', null, null]);
+  });
 
+  it('prunes the streamer down to the retention cap once the prune-cadence threshold is reached', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    for (let i = 0; i < PRUNE_EVERY_N_INSERTS - 1; i++) {
+      await recordStreamerEvent(5, 'follow', 'someviewer', null);
+    }
+    pool.execute.mockClear();
+
+    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(true);
+
+    expect(pool.execute).toHaveBeenCalledTimes(2);
     const [deleteSql, deleteParams] = pool.execute.mock.calls[1];
     expect(deleteSql).toContain('DELETE FROM streamer_event_log');
     expect(deleteSql).toContain('LIMIT 200');
     expect(deleteParams).toEqual([5, 5]);
+  });
+
+  it('tracks the prune-cadence counter independently per streamer', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    for (let i = 0; i < PRUNE_EVERY_N_INSERTS - 1; i++) {
+      await recordStreamerEvent(5, 'follow', 'someviewer', null);
+    }
+    pool.execute.mockClear();
+
+    // A different streamer's first insert should not inherit streamer 5's near-threshold count.
+    await recordStreamerEvent(7, 'follow', 'otherviewer', null);
+
+    expect(pool.execute).toHaveBeenCalledTimes(1);
   });
 
   it('passes through a non-null detail string', async () => {
@@ -83,16 +115,22 @@ describe('recordStreamerEvent', () => {
   });
 
   it('does not run the prune DELETE until the INSERT has resolved', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    // Bring streamer 5 to one insert short of the prune-cadence threshold.
+    for (let i = 0; i < PRUNE_EVERY_N_INSERTS - 1; i++) {
+      await recordStreamerEvent(5, 'follow', 'someviewer', null);
+    }
+    pool.execute.mockClear();
+
     let resolveInsert: (() => void) | undefined;
     const insertPromise = new Promise<[unknown, unknown]>((resolve) => {
       resolveInsert = () => resolve([{ affectedRows: 1 }, []]);
     });
-    const pool = {
-      execute: vi.fn()
-        .mockImplementationOnce(() => insertPromise)
-        .mockImplementationOnce(async () => [{ affectedRows: 0 }, []]),
-    };
-    vi.mocked(getPool).mockReturnValue(pool as any);
+    pool.execute
+      .mockImplementationOnce(() => insertPromise)
+      .mockImplementationOnce(async () => [{ affectedRows: 0 }, []]);
 
     const recordPromise = recordStreamerEvent(5, 'follow', 'someviewer', null);
 
