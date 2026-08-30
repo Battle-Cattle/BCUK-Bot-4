@@ -108,6 +108,31 @@ describe('runReconciliationTick', () => {
     );
   });
 
+  it('drops the cursor for a streamer no longer returned by getAllStreamerInfo, so it re-establishes on reconnect', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    await runReconciliationTick(); // establishes the cursor at "now"
+
+    // uid1 is absent this tick (e.g. streamer disconnected) — its cursor should be pruned.
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map());
+    await runReconciliationTick();
+
+    // uid1 reconnects; a redemption just past the cursor established above would normally be
+    // skipped, but since the cursor was pruned this tick re-establishes a fresh one-poll-interval
+    // lookback instead, so a redemption within that fresh window is replayed.
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const withinFreshLookback = new Date(Date.now() - 1_000).toISOString();
+    mockFulfilledOnly({ redemptions: [redemption('r1', withinFreshLookback)], cursor: null });
+    await runReconciliationTick();
+
+    expect(handleRedemption).toHaveBeenCalledTimes(1);
+    expect(handleRedemption).toHaveBeenCalledWith(
+      'streamerA',
+      expect.objectContaining({ id: 'r1' }),
+      config,
+      1,
+    );
+  });
+
   it('does not replay a redemption older than or equal to the cursor', async () => {
     vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
     await runReconciliationTick(); // cursor lands at "now"

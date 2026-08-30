@@ -137,6 +137,20 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
 }
 
 /**
+ * Drops `lastSeenRedeemedAt` entries whose broadcaster user id is no longer present in
+ * `currentUids` — e.g. a streamer removed from monitoring or disconnected since the last tick.
+ * Without this, the map grows by one entry per reward for every streamer that ever connected,
+ * even after they stop being reconciled.
+ * @param currentUids - Broadcaster user ids from this tick's {@link getAllStreamerInfo} snapshot.
+ */
+function pruneStaleReconciliationCursors(currentUids: ReadonlySet<string>): void {
+  for (const key of lastSeenRedeemedAt.keys()) {
+    const uid = key.slice(0, key.indexOf(':'));
+    if (!currentUids.has(uid)) lastSeenRedeemedAt.delete(key);
+  }
+}
+
+/**
  * Reconciles one streamer: resolves their broadcaster token, lists their custom rewards, and
  * reconciles each one via {@link reconcileReward}. No-ops silently if the streamer has no
  * usable token (nothing to authenticate the Helix calls with — the same condition that would
@@ -173,7 +187,9 @@ export async function runReconciliationTick(): Promise<void> {
   tickRunning = true;
   currentTickPromise = (async () => {
     try {
-      const entries = [...getAllStreamerInfo()].filter(([, info]) => info.config !== null);
+      const allStreamerInfo = [...getAllStreamerInfo()];
+      pruneStaleReconciliationCursors(new Set(allStreamerInfo.map(([uid]) => uid)));
+      const entries = allStreamerInfo.filter(([, info]) => info.config !== null);
       await Promise.allSettled(entries.map(([uid, info]) => reconcileStreamer(uid, info)));
     } finally {
       tickRunning = false;
