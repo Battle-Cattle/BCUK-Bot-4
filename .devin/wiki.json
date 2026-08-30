@@ -188,7 +188,7 @@
       "parent": null,
       "page_notes": [
         {
-          "content": "the companion_app_tokens and companion_oauth_codes tables exist per migrations but are not yet documented in DATABASE-SCHEMA.md",
+          "content": "",
           "author": null
         }
       ]
@@ -206,7 +206,7 @@
     },
     {
       "title": "Database Schema Reference",
-      "purpose": "Reference for every table documented in DATABASE-SCHEMA.md: sfxtrigger, sfx, sfxcategory, guild, guild_member, user, stream_group, streamer, streamer_event_config, streamer_event_log, reward_pricing, reward_pricing_settings, reward_pricing_history, custom_command, guild_command_override, alert_config, timer_command, timer_command_streamer, streamdeck_api_keys, twitch_user_commands, counter, and sessions. Includes column types, constraints, and important notes on BIGINT snowflake handling, utf8mb4 collation, and the per-guild access-level model (guild_member replacing the old global user.access_level; user.is_owner as the separate cross-guild super-admin flag). The companion_app_tokens and companion_oauth_codes tables exist per migrations but are not yet added to DATABASE-SCHEMA.md, so they are out of scope for this page until that gap is closed — see the Companion App page.",
+      "purpose": "Complete reference for all database tables: sfxtrigger, sfx, sfxcategory, guild, guild_member, user, stream_group, streamer, streamer_event_config, streamer_event_log, reward_pricing, reward_pricing_settings, reward_pricing_history, custom_command, guild_command_override, alert_config, timer_command, timer_command_streamer, streamdeck_api_keys, twitch_user_commands, counter, companion_app_tokens, companion_oauth_codes, and sessions. Includes column types, constraints, and important notes on BIGINT snowflake handling, utf8mb4 collation, and the per-guild access-level model (guild_member replacing the old global user.access_level; user.is_owner as the separate cross-guild super-admin flag).",
       "parent": "Database Layer",
       "page_notes": [
         {
