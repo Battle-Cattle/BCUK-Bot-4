@@ -34,10 +34,12 @@ describe('withTimeout', () => {
       .mockReturnValue({ unref, ref: vi.fn() } as unknown as NodeJS.Timeout);
     const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout').mockImplementation(() => {});
 
-    void withTimeout(new Promise(() => {}), 1_000, 'test op').catch(() => {});
-    expect(unref).toHaveBeenCalledOnce();
-
-    setTimeoutSpy.mockRestore();
-    clearTimeoutSpy.mockRestore();
+    try {
+      void withTimeout(new Promise(() => {}), 1_000, 'test op').catch(() => {});
+      expect(unref).toHaveBeenCalledOnce();
+    } finally {
+      setTimeoutSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+    }
   });
 });
