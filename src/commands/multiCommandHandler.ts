@@ -3,7 +3,7 @@ import { getMultiTwitchDataForChannel } from '../twitch/monitor/twitchMonitor';
 
 const log = createLogger('MultiCmd');
 import { resolveSharedChatSessionId } from './customCommandHandler';
-import { extractCommand } from './commandUtils';
+import { resolveCommand } from './commandUtils';
 import { sendDedupedBySession } from './twitchBroadcast';
 import { createRuntimeRegistry, type TwitchBroadcastRuntime } from './twitchRuntime';
 import { createCooldownGate } from './cooldownGate';
@@ -71,14 +71,17 @@ async function broadcastToGroupChannels(
  * @param channel - Twitch channel the command was sent in.
  * @param rawMessage - Raw chat message text.
  * @param username - Twitch login of the sender (unused).
+ * @param precomputedCommand - Already-parsed command token from the caller's single
+ *   `extractCommand` call for this message, or omit to parse `rawMessage` here.
  * @returns Resolves once the broadcast (or a no-op) has completed.
  */
 export async function executeMultiCommandForTwitch(
   channel: string,
   rawMessage: string,
   username?: string | null,
+  precomputedCommand?: string | null,
 ): Promise<void> {
-  const command = extractCommand(rawMessage);
+  const command = resolveCommand(rawMessage, precomputedCommand);
   if (command !== MULTI_COMMAND) return;
 
   const groupInfo = getMultiTwitchDataForChannel(channel);

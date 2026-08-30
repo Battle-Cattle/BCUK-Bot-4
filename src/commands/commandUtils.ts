@@ -30,6 +30,22 @@ export function extractCommand(rawMessage: string): string | null {
 }
 
 /**
+ * Resolves the command token for a message, reusing an already-parsed value when the caller
+ * (`handleTwitchMessage`/Discord's `messageCreate`) parsed it once up front for every handler
+ * dispatched off the same message, instead of each handler re-parsing independently via
+ * {@link extractCommand}.
+ *
+ * @param rawMessage - Raw message text, used to parse the command if `precomputed` is `undefined`.
+ * @param precomputed - The already-parsed command (possibly `null`, if the message had none), or
+ *   `undefined` to parse `rawMessage` fresh — the latter keeps every direct/test call to a
+ *   handler working exactly as before, without having to pass this through.
+ * @returns The resolved command token, or null if there is none.
+ */
+export function resolveCommand(rawMessage: string, precomputed?: string | null): string | null {
+  return precomputed !== undefined ? precomputed : extractCommand(rawMessage);
+}
+
+/**
  * Extracts the argument text that follows the first token of a raw message.
  * Leading/trailing whitespace is trimmed; the result preserves the original
  * casing and internal spacing of the remaining text.

@@ -2,7 +2,7 @@ import { createLogger } from '../shared/logger';
 import { getUsers, getChannelInfo, getStreams, TwitchChannelInfo, TwitchStream } from '../twitch/twitchApi';
 
 const log = createLogger('Shoutout');
-import { extractCommand } from './commandUtils';
+import { resolveCommand } from './commandUtils';
 import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
 
 const SO_COMMAND = '!so';
@@ -107,6 +107,8 @@ export async function buildShoutoutMessage(target: string): Promise<string | nul
  * @param rawMessage - Raw chat message text, e.g. `!so @someuser`.
  * @param username - Twitch login of the command invoker (unused).
  * @param isModerator - Whether the invoker has moderator privileges; required to run.
+ * @param precomputedCommand - Already-parsed command token from the caller's single
+ *   `extractCommand` call for this message, or omit to parse `rawMessage` here.
  * @returns Resolves once the shoutout (or no-op) has completed.
  */
 export async function executeShoutoutForTwitch(
@@ -114,8 +116,9 @@ export async function executeShoutoutForTwitch(
   rawMessage: string,
   username: string | null,
   isModerator: boolean,
+  precomputedCommand?: string | null,
 ): Promise<void> {
-  if (extractCommand(rawMessage) !== SO_COMMAND || !isModerator) return;
+  if (resolveCommand(rawMessage, precomputedCommand) !== SO_COMMAND || !isModerator) return;
 
   const rawTarget = rawMessage.trim().split(/\s+/)[1];
   const target = rawTarget?.replace(/^@/, '').toLowerCase();

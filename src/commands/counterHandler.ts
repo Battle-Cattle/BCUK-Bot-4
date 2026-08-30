@@ -3,7 +3,7 @@ import type { Message } from 'discord.js';
 import { findCounterByCommand, incrementCounter } from '../db';
 
 const log = createLogger('Counter');
-import { extractCommand } from './commandUtils';
+import { resolveCommand } from './commandUtils';
 import { isDiscordNotFoundError, NO_MENTIONS } from '../discord/discordUtils';
 import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
 import { createCooldownGate } from './cooldownGate';
@@ -125,13 +125,16 @@ async function _buildCounterResponse(
  *
  * @param message - The Discord message to check for a counter command.
  * @param username - Display name of the sender (unused; kept for call-site symmetry with the Twitch handler).
+ * @param precomputedCommand - Already-parsed command token from the caller's single
+ *   `extractCommand` call for this message, or omit to parse `message.content` here.
  * @returns Resolves once the reply (or a no-op) has completed.
  */
 export async function executeCounterCommandForDiscord(
   message: Message,
   username?: string | null,
+  precomputedCommand?: string | null,
 ): Promise<void> {
-  const command = extractCommand(message.content);
+  const command = resolveCommand(message.content, precomputedCommand);
   if (!command) return;
 
   const result = await _buildCounterResponse(command, '[Discord]', discordCooldownKey(message));
@@ -158,14 +161,17 @@ export async function executeCounterCommandForDiscord(
  * @param channel - Twitch channel the message was sent in (also the send target).
  * @param rawMessage - Raw chat message text.
  * @param username - Twitch login of the sender (unused; kept for call-site symmetry with the Discord handler).
+ * @param precomputedCommand - Already-parsed command token from the caller's single
+ *   `extractCommand` call for this message, or omit to parse `rawMessage` here.
  * @returns Resolves once the send (or a no-op) has completed.
  */
 export async function executeCounterCommandForTwitch(
   channel: string,
   rawMessage: string,
   username?: string | null,
+  precomputedCommand?: string | null,
 ): Promise<void> {
-  const command = extractCommand(rawMessage);
+  const command = resolveCommand(rawMessage, precomputedCommand);
   if (!command) return;
 
   const result = await _buildCounterResponse(command, `[Twitch:${channel}]`, `twitch:${channel}`);
