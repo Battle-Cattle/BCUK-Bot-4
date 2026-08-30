@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Guild } from 'discord.js';
+import { Client, GatewayIntentBits, Guild, Partials } from 'discord.js';
 import { DISCORD_TOKEN } from '../shared/config';
 import { handleCommand, forgetGuildCommandState } from '../commands/commandRouter';
 import { fireAndForget } from '../commands/commandUtils';
@@ -124,16 +124,28 @@ export function startDiscordBot(): void {
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
       GatewayIntentBits.GuildVoiceStates,
+      GatewayIntentBits.DirectMessages,
     ],
+    partials: [Partials.Channel],
   });
   bootingClient = localClient;
 
-  // Dispatches every non-bot message from a registered guild to each command handler in turn
-  // (fire-and-forget — a failure in one handler must not block the others). `message` is the
-  // triggering Discord message; returns void.
+  /**
+   * Dispatches every non-bot message from a registered guild to each command handler in turn
+   * (fire-and-forget — a failure in one handler must not block the others). A DM (no guildId)
+   * skips the guild-gated handlers entirely and only reaches the owner-only `!health` command,
+   * which is designed to be triggered from a DM (see its own docstring).
+   * @param message - The triggering Discord message.
+   * @returns void.
+   */
   localClient.on('messageCreate', (message) => {
     if (message.author.bot) return;
-    if (!message.guildId || !isRegisteredGuild(message.guildId)) return;
+
+    if (!message.guildId) {
+      fireAndForget(executeHealthCommandForDiscord(message), 'Health command error', log);
+      return;
+    }
+    if (!isRegisteredGuild(message.guildId)) return;
 
     const displayName = message.member?.displayName ?? message.author.username;
     const guildId = message.guildId;

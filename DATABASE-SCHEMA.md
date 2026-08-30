@@ -443,6 +443,39 @@ Deployment note:
 
 For now, the recommended migration is the two separate UNIQUE constraints above; the application-layer atomic checks provide sufficient protection for typical operations.
 
+## `companion_app_tokens`
+
+Self-service bearer tokens for the companion app: one active token per user, no approval queue, used only for read-only delivery of the user's own Twitch channel-point redemption events. Created by `migrations/companion_app_tokens.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `discord_id` | `BIGINT` PK | Token owner; FK to `user.discord_id` ON DELETE CASCADE |
+| `key_hash` | `VARCHAR(64)` | SHA-256 hash of the plaintext token; unique |
+| `created_at` | `DATETIME` | When the current token was issued |
+| `revoked_at` | `DATETIME` nullable | When the token was revoked; `NULL` while active |
+
+Expected constraints and behavior:
+
+- `UNIQUE KEY uq_companion_app_tokens_key_hash (key_hash)`.
+- Issuing a new token for a user replaces any existing row (upsert on `discord_id`) and clears `revoked_at` — a user has at most one active token at a time.
+- Lookup by hash (`findDiscordIdByTokenHash` in `src/db/companionTokens.ts`) only matches rows where `revoked_at IS NULL`, then re-verifies with a timing-safe comparison since the table's collation is case-insensitive.
+
+## `companion_oauth_codes`
+
+Short-lived, single-use authorization codes for the companion app's loopback OAuth login flow (exchanged for a `companion_app_tokens` row). Created by `migrations/companion_app_tokens.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `code_hash` | `VARCHAR(64)` PK | SHA-256 hash of the plaintext code |
+| `discord_id` | `BIGINT` | FK to `user.discord_id` ON DELETE CASCADE; the user the code resolves to once consumed |
+| `expires_at` | `DATETIME` | Computed DB-side as `NOW() + 60 seconds` at creation, so it stays consistent with the consuming query even if the app and DB clocks drift |
+| `used_at` | `DATETIME` nullable | Set when the code is consumed; `NULL` while still redeemable |
+
+Expected constraints and behavior:
+
+- Consuming a code (`consumeCodeOnConnection` in `src/db/companionOAuthCodes.ts`) is a single `UPDATE ... WHERE used_at IS NULL AND expires_at > NOW()`, so concurrent redemption attempts of the same code cannot both succeed.
+- `exchangeCodeForToken()` marks the code used and issues the companion token in one DB transaction, so a failure issuing the token rolls back the "used" mark instead of permanently burning the code.
+
 ## `sessions`
 
 Managed automatically by `express-mysql-session`.

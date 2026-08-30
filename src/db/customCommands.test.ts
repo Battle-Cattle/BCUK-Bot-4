@@ -311,6 +311,18 @@ describe('removeCustomCommand', () => {
     expect(conn.rollback).toHaveBeenCalled();
   });
 
+  it('still rejects with the original error when rollback itself fails', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])  // DELETE twitch_user_commands
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]);  // DELETE custom_command — not found
+    conn.rollback.mockRejectedValue(new Error('rollback failed'));
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(removeCustomCommand(99)).rejects.toThrow('Command not found: 99');
+    expect(conn.rollback).toHaveBeenCalled();
+  });
+
   it('releases connection even when an error is thrown', async () => {
     const pool = makePool();
     const conn = pool._conn;

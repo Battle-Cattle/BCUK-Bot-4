@@ -36,6 +36,21 @@ const log = createLogger('Twitch');
 
 let client: ChatClient | null = null;
 let connected = false;
+/**
+ * The four listeners registered on `client` in {@link startTwitchBot} for the bot's own
+ * lifetime — kept at module scope (unlike `connectAndWait`'s own temporary listeners, which are
+ * always torn down within that same function) so {@link stopTwitchBot} can unbind them too, not
+ * just `quitAndWait`'s own temporary disconnect listener. `ChatClient#quit()` does not itself
+ * remove them — without this, a late event on the discarded client (a message, a reconnect's
+ * authentication success, a disconnect, or a raw USERSTATE) could still run its handler against
+ * whatever client/module state is current by then, e.g. after a restart's `startTwitchBot()` has
+ * already begun — duplicating message handling, wrongly marking the new session (dis)connected,
+ * or corrupting its privilege state.
+ */
+let messageListener: { unbind: () => void } | null = null;
+let authSuccessListener: { unbind: () => void } | null = null;
+let disconnectListener: { unbind: () => void } | null = null;
+let userStateListenerId: string | null = null;
 
 /**
  * Upper bound on how long {@link stopTwitchBot} waits for the `onDisconnect` event to fire after
@@ -332,11 +347,11 @@ export async function startTwitchBot(): Promise<void> {
   client = newClient;
   setChatClient(client);
 
-  const messageListener = newClient.onMessage(handleTwitchMessage);
-  const authSuccessListener = newClient.onAuthenticationSuccess(onConnected);
-  const disconnectListener = newClient.onDisconnect(onDisconnected);
+  messageListener = newClient.onMessage(handleTwitchMessage);
+  authSuccessListener = newClient.onAuthenticationSuccess(onConnected);
+  disconnectListener = newClient.onDisconnect(onDisconnected);
   // USERSTATE isn't exposed by ChatClient itself — only via the underlying ircv3 client.
-  const userStateListenerId = newClient.irc.onTypedMessage(UserState, onOwnUserState);
+  userStateListenerId = newClient.irc.onTypedMessage(UserState, onOwnUserState);
 
   try {
     await withTimeout(connectAndWait(newClient), CONNECT_TIMEOUT_MS, 'Twitch connect');
@@ -350,6 +365,10 @@ export async function startTwitchBot(): Promise<void> {
     authSuccessListener.unbind();
     disconnectListener.unbind();
     newClient.irc.removeMessageListener(userStateListenerId);
+    messageListener = null;
+    authSuccessListener = null;
+    disconnectListener = null;
+    userStateListenerId = null;
     try {
       newClient.quit();
     } catch (quitErr) {
@@ -456,15 +475,22 @@ export async function sayInChannel(channel: string, message: string): Promise<vo
 
 /**
  * Calls `client.quit()` — which itself returns `void` and reports completion only via the
- * `onDisconnect` event — wrapped in a promise that resolves once that event fires.
+ * `onDisconnect` event — wrapped in a promise that resolves once that event fires. Also returns
+ * `unbind` so a caller that gives up waiting (e.g. on a timeout) can remove the listener itself —
+ * mirroring `connectAndWait`'s equivalent timeout-cleanup path in `startTwitchBot`.
  * @param c - The Twurple chat client to disconnect.
- * @returns Resolves once `onDisconnect` has fired.
+ * @returns `promise`, resolved once `onDisconnect` has fired, and `unbind` to remove the
+ *   `onDisconnect` listener without waiting for it to fire.
  */
-function quitAndWait(c: ChatClient): Promise<void> {
-  return new Promise((resolve) => {
-    const listener = c.onDisconnect(() => { listener.unbind(); resolve(); });
+function quitAndWait(c: ChatClient): { promise: Promise<void>; unbind: () => void } {
+  let listener: { unbind: () => void };
+  const promise = new Promise<void>((resolve) => {
+    listener = c.onDisconnect(() => { listener.unbind(); resolve(); });
     c.quit();
   });
+  /** Removes the `onDisconnect` listener registered above without waiting for it to fire. */
+  const unbind = (): void => { listener.unbind(); };
+  return { promise, unbind };
 }
 
 /**
@@ -479,12 +505,26 @@ export async function stopTwitchBot(): Promise<void> {
   setConnected(false);
   recordTwitchChatConnected(false);
   if (client) {
+    const { promise, unbind } = quitAndWait(client);
     try {
-      await withTimeout(quitAndWait(client), DISCONNECT_TIMEOUT_MS, 'Twitch disconnect');
+      await withTimeout(promise, DISCONNECT_TIMEOUT_MS, 'Twitch disconnect');
     } catch (err) {
       log.warn('Error during disconnect:', err);
+      // withTimeout() abandons the promise rather than cancelling it — its onDisconnect
+      // listener would otherwise stay live on the (about-to-be-discarded) client.
+      unbind();
       getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
     }
+    // Unbind every listener startTwitchBot() registered on this client too — see their shared
+    // declaration for why a late event on this discarded client must not reach any of them.
+    messageListener?.unbind();
+    authSuccessListener?.unbind();
+    disconnectListener?.unbind();
+    if (userStateListenerId) { client.irc.removeMessageListener(userStateListenerId); }
+    messageListener = null;
+    authSuccessListener = null;
+    disconnectListener = null;
+    userStateListenerId = null;
     client = null;
     setChatClient(null);
   }
