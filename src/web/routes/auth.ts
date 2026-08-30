@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import crypto from 'crypto';
 import { DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_CALLBACK_URL } from '../../shared/config';
 import {
@@ -11,6 +11,7 @@ import {
   createCode,
   AccessLevel,
   type DbGuild,
+  type DbUser,
 } from '../../db';
 import { fetchMemberDisplayName } from '../../discord/discordBot';
 import { csrfProtection } from '../csrf';
@@ -19,9 +20,17 @@ import { filterQueryParam, isLoopbackRedirectUri } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { fetchWithRetry } from '../../shared/fetchWithRetry';
 import { runUserMutation } from './adminUserMutationQueue';
+import type { SessionUser } from '../../types/express';
 
 const log = createLogger('Web');
 const router = Router();
+
+/** Discord's minimal `@me` profile shape used by the OAuth2 callback. */
+interface DiscordProfile {
+  id: string;
+  username: string;
+  avatar: string | null;
+}
 
 /** Error codes `GET /auth/login` accepts via `?error=`, both originating from `POST /guild/select`. */
 const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds']);
@@ -93,6 +102,178 @@ router.get('/discord', (req, res) => {
  *   when the user is not whitelisted or has no accessible guild, or a 500 error
  *   page if any step of the exchange/profile-fetch/session-save fails.
  */
+/**
+ * Exchanges an OAuth2 `code` for a Discord access token, via `fetchWithRetry`
+ * (retries transient 502/503/504 responses from Discord's API).
+ * @param code - The authorization code from Discord's OAuth2 redirect.
+ * @returns The access token.
+ * @throws If the token endpoint responds with a non-OK status.
+ */
+async function exchangeCodeForToken(code: string): Promise<string> {
+  const tokenRes = await fetchWithRetry('https://discord.com/api/oauth2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: DISCORD_CLIENT_ID,
+      client_secret: DISCORD_CLIENT_SECRET,
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: DISCORD_CALLBACK_URL,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  }, log);
+  if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
+  const { access_token } = (await tokenRes.json()) as { access_token: string };
+  return access_token;
+}
+
+/**
+ * Fetches the authenticated user's Discord profile with the given access token,
+ * via `fetchWithRetry`.
+ * @param accessToken - Bearer token from `exchangeCodeForToken`.
+ * @returns The Discord `@me` profile (id, username, avatar hash).
+ * @throws If the profile endpoint responds with a non-OK status.
+ */
+async function fetchDiscordProfile(accessToken: string): Promise<DiscordProfile> {
+  const profileRes = await fetchWithRetry('https://discord.com/api/users/@me', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(10_000),
+  }, log);
+  if (!profileRes.ok) throw new Error(`Profile fetch failed: ${profileRes.status}`);
+  return (await profileRes.json()) as DiscordProfile;
+}
+
+/**
+ * Resolves the guilds a whitelisted user may act in. Owners get every guild;
+ * everyone else gets the guilds they have a membership row in.
+ * @param dbUser - The whitelisted user row from `findUser`.
+ * @returns The user's accessible guilds (empty if not provisioned anywhere).
+ */
+async function resolveAccessibleGuilds(dbUser: DbUser): Promise<DbGuild[]> {
+  return dbUser.is_owner ? getAllGuilds() : getGuildsForMember(dbUser.discord_id);
+}
+
+/**
+ * Completes the companion app's loopback OAuth flow, if one is pending on the
+ * session: hands back a one-time code via the app's `redirectUri` instead of
+ * creating a dashboard session. Re-validates `redirectUri` at point of use
+ * (defense-in-depth against session tampering) before minting the code.
+ * @param req - Express request; reads and clears `session.companionOAuth`.
+ * @param res - Express response; redirected on success, or rendered as a 400
+ *   error page if `redirectUri` fails the loopback check.
+ * @param discordId - The authenticated user's Discord ID.
+ * @returns True if a companion login was pending and the response was already
+ *   sent (redirect or error) — the caller must stop. False if there was no
+ *   pending companion login and normal dashboard-session creation should proceed.
+ */
+async function tryCompleteCompanionLogin(req: Request, res: Response, discordId: string): Promise<boolean> {
+  const companionOAuth = req.session.companionOAuth;
+  if (!companionOAuth || Date.now() > companionOAuth.expiresAt) return false;
+
+  delete req.session.companionOAuth;
+  if (!isLoopbackRedirectUri(companionOAuth.redirectUri)) {
+    renderError(res, 400, 'Invalid companion redirect URI.', undefined);
+    return true;
+  }
+  const authCode = await createCode(discordId);
+  const redirectUrl = new URL(companionOAuth.redirectUri);
+  redirectUrl.searchParams.set('code', authCode);
+  redirectUrl.searchParams.set('state', companionOAuth.appState);
+  res.redirect(redirectUrl.toString());
+  return true;
+}
+
+/**
+ * Best-effort sync of the user's display name from Discord (display names are
+ * per-guild; this looks up one guild at login time), persisting the change
+ * through `runUserMutation` if it differs from the stored name. Never throws —
+ * a failed lookup or write just falls back to the previously stored name.
+ * @param profile - The Discord profile from `fetchDiscordProfile`.
+ * @param dbUser - The whitelisted user row from `findUser`.
+ * @param lookupGuildId - Guild ID to resolve the per-guild display name against.
+ * @returns The synced (or unchanged) display name.
+ */
+async function syncDiscordName(profile: DiscordProfile, dbUser: DbUser, lookupGuildId: string): Promise<string> {
+  let syncedDiscordName = dbUser.discord_name?.trim() || profile.username;
+  try {
+    const displayName = await fetchMemberDisplayName(profile.id, lookupGuildId, true);
+    const trimmedDisplayName = displayName?.trim();
+    if (trimmedDisplayName) {
+      syncedDiscordName = trimmedDisplayName;
+    }
+    if (syncedDiscordName !== dbUser.discord_name) {
+      await runUserMutation(profile.id, () => updateDiscordName(profile.id, syncedDiscordName));
+    }
+  } catch (syncErr) {
+    log.warn('Non-blocking discord_name sync failed:', syncErr);
+  }
+  return syncedDiscordName;
+}
+
+/**
+ * Resolves the initial guild/access-level pair for a freshly logged-in session.
+ * Auto-selects when there is only one accessible guild; otherwise leaves the
+ * guild unpicked (forcing the guild picker) with access level defaulted to User.
+ * @param accessibleGuilds - Guilds resolved by `resolveAccessibleGuilds`.
+ * @param dbUser - The whitelisted user row from `findUser`.
+ * @returns The guild to activate (or null) and the matching access level.
+ */
+async function resolveInitialGuildAndAccessLevel(
+  accessibleGuilds: DbGuild[],
+  dbUser: DbUser,
+): Promise<{ currentGuildId: string | null; accessLevel: SessionUser['accessLevel'] }> {
+  const currentGuildId = accessibleGuilds.length === 1 ? accessibleGuilds[0].guild_id : null;
+  const accessLevel = currentGuildId
+    ? ((await getEffectiveAccessLevelForUser(currentGuildId, dbUser)) as SessionUser['accessLevel'])
+    : AccessLevel.USER;
+  return { currentGuildId, accessLevel };
+}
+
+/**
+ * Builds the dashboard session's `user` payload from the resolved login data.
+ * @param profile - The Discord profile from `fetchDiscordProfile`.
+ * @param dbUser - The whitelisted user row from `findUser`.
+ * @param syncedDiscordName - Display name from `syncDiscordName`.
+ * @param accessibleGuilds - Guilds resolved by `resolveAccessibleGuilds`.
+ * @param guildAndAccessLevel - Result of `resolveInitialGuildAndAccessLevel`.
+ * @returns The `SessionUser` to store on `req.session.user`.
+ */
+function buildSessionUser(
+  profile: DiscordProfile,
+  dbUser: DbUser,
+  syncedDiscordName: string,
+  accessibleGuilds: DbGuild[],
+  guildAndAccessLevel: { currentGuildId: string | null; accessLevel: SessionUser['accessLevel'] },
+): SessionUser {
+  const rawAvatar = profile.avatar
+    ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
+    : null;
+  return {
+    discordId: profile.id,
+    discordName: syncedDiscordName,
+    discordAvatar: rawAvatar?.startsWith('https://cdn.discordapp.com/') ? rawAvatar : null,
+    isOwner: dbUser.is_owner,
+    ...guildAndAccessLevel,
+    guilds: accessibleGuilds.map((g) => ({ guildId: g.guild_id, name: g.name })),
+  };
+}
+
+/**
+ * Regenerates the session ID (to prevent session fixation) and saves the
+ * given user payload onto the fresh session.
+ * @param req - Express request whose session is regenerated and saved.
+ * @param userData - The `SessionUser` payload to store.
+ */
+function saveSessionUser(req: Request, userData: SessionUser): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    req.session.regenerate((err) => {
+      if (err) return reject(err);
+      req.session.user = userData;
+      req.session.save((saveErr) => (saveErr ? reject(saveErr) : resolve()));
+    });
+  });
+}
+
 router.get('/discord/callback', async (req, res) => {
   // req.query values are `string | string[] | ParsedQs | ParsedQs[] | undefined` at runtime
   // (e.g. `?state=a&state=b` parses to an array) — narrow with typeof rather than an unchecked
@@ -111,47 +292,15 @@ router.get('/discord/callback', async (req, res) => {
   }
 
   try {
-    // 1. Exchange code for access token
-    const tokenRes = await fetchWithRetry('https://discord.com/api/oauth2/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: DISCORD_CLIENT_ID,
-        client_secret: DISCORD_CLIENT_SECRET,
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: DISCORD_CALLBACK_URL,
-      }),
-      signal: AbortSignal.timeout(10_000),
-    }, log);
-    if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
-    const { access_token } = (await tokenRes.json()) as { access_token: string };
+    const accessToken = await exchangeCodeForToken(code);
+    const profile = await fetchDiscordProfile(accessToken);
 
-    // 2. Fetch Discord user profile
-    const profileRes = await fetchWithRetry('https://discord.com/api/users/@me', {
-      headers: { Authorization: `Bearer ${access_token}` },
-      signal: AbortSignal.timeout(10_000),
-    }, log);
-    if (!profileRes.ok) throw new Error(`Profile fetch failed: ${profileRes.status}`);
-    const profile = (await profileRes.json()) as {
-      id: string;
-      username: string;
-      avatar: string | null;
-    };
-
-    // 3. Check the user table whitelist
     const dbUser = await findUser(profile.id);
     if (!dbUser) {
       return renderError(res, 403, 'You are not on the whitelist. Contact an admin to be added.', undefined);
     }
 
-    // 4. Resolve the guilds this user may act in. Owners get every guild; everyone
-    //    else gets the guilds they have a membership row in. No accessible guild
-    //    means they have not been provisioned anywhere — deny rather than show an
-    //    empty panel.
-    const accessibleGuilds: DbGuild[] = dbUser.is_owner
-      ? await getAllGuilds()
-      : await getGuildsForMember(profile.id);
+    const accessibleGuilds = await resolveAccessibleGuilds(dbUser);
     if (accessibleGuilds.length === 0) {
       return renderError(
         res,
@@ -161,68 +310,13 @@ router.get('/discord/callback', async (req, res) => {
       );
     }
 
-    // 4b. If this login was initiated by the companion app's loopback OAuth flow,
-    // skip dashboard session creation entirely — hand back a one-time code via the
-    // app's redirect_uri instead, which it exchanges server-side for a long-lived token.
-    const companionOAuth = req.session.companionOAuth;
-    if (companionOAuth && Date.now() <= companionOAuth.expiresAt) {
-      delete req.session.companionOAuth;
-      // Re-validate at point of use: defense-in-depth against session tampering.
-      if (!isLoopbackRedirectUri(companionOAuth.redirectUri)) {
-        return renderError(res, 400, 'Invalid companion redirect URI.', undefined);
-      }
-      const authCode = await createCode(profile.id);
-      const redirectUrl = new URL(companionOAuth.redirectUri);
-      redirectUrl.searchParams.set('code', authCode);
-      redirectUrl.searchParams.set('state', companionOAuth.appState);
-      return res.redirect(redirectUrl.toString());
-    }
+    if (await tryCompleteCompanionLogin(req, res, profile.id)) return;
     delete req.session.companionOAuth;
 
-    // Sync display name using the first accessible guild (display names are per-guild
-    // in Discord; we use a best-effort lookup against one guild at login time).
-    let syncedDiscordName = dbUser.discord_name?.trim() || profile.username;
-    try {
-      const displayName = await fetchMemberDisplayName(profile.id, accessibleGuilds[0].guild_id, true);
-      const trimmedDisplayName = displayName?.trim();
-      if (trimmedDisplayName) {
-        syncedDiscordName = trimmedDisplayName;
-      }
-      if (syncedDiscordName !== dbUser.discord_name) {
-        await runUserMutation(profile.id, () => updateDiscordName(profile.id, syncedDiscordName));
-      }
-    } catch (syncErr) {
-      log.warn('Non-blocking discord_name sync failed:', syncErr);
-    }
-
-    // Auto-select when there is only one choice; otherwise force the guild picker
-    // by leaving currentGuildId null (accessLevel stays 0 until a guild is chosen).
-    const currentGuildId = accessibleGuilds.length === 1 ? accessibleGuilds[0].guild_id : null;
-    const accessLevel = currentGuildId
-      ? ((await getEffectiveAccessLevelForUser(currentGuildId, dbUser)) as (typeof AccessLevel)[keyof typeof AccessLevel])
-      : AccessLevel.USER;
-
-    // 5. Save to session — regenerate the session ID first to prevent session fixation.
-    const rawAvatar = profile.avatar
-      ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
-      : null;
-    const userData = {
-      discordId: profile.id,
-      discordName: syncedDiscordName,
-      discordAvatar: rawAvatar?.startsWith('https://cdn.discordapp.com/') ? rawAvatar : null,
-      isOwner: dbUser.is_owner,
-      accessLevel,
-      currentGuildId,
-      guilds: accessibleGuilds.map((g) => ({ guildId: g.guild_id, name: g.name })),
-    };
-
-    await new Promise<void>((resolve, reject) => {
-      req.session.regenerate((err) => {
-        if (err) return reject(err);
-        req.session.user = userData;
-        req.session.save((saveErr) => (saveErr ? reject(saveErr) : resolve()));
-      });
-    });
+    const syncedDiscordName = await syncDiscordName(profile, dbUser, accessibleGuilds[0].guild_id);
+    const guildAndAccessLevel = await resolveInitialGuildAndAccessLevel(accessibleGuilds, dbUser);
+    const userData = buildSessionUser(profile, dbUser, syncedDiscordName, accessibleGuilds, guildAndAccessLevel);
+    await saveSessionUser(req, userData);
 
     res.redirect('/');
   } catch (err) {
