@@ -78,6 +78,48 @@ describe('recordStreamerEvent', () => {
     expect(deleteSql).toContain('DELETE FROM streamer_event_log');
   });
 
+  it('shares one prune DELETE when a concurrent event lands for the same streamer while the first prune is still in flight', async () => {
+    let resolveDelete!: () => void;
+    const deletePromise = new Promise<[unknown, unknown]>((resolve) => {
+      resolveDelete = () => resolve([{ affectedRows: 5 }, []]);
+    });
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    for (let i = 0; i < PRUNE_EVERY_N_INSERTS - 1; i++) {
+      await recordStreamerEvent(5, 'follow', 'someviewer', null);
+    }
+    pool.execute.mockClear();
+
+    // Call A's insert reaches the prune threshold; its DELETE is held pending.
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]) // call A's INSERT
+      .mockImplementationOnce(() => deletePromise); // call A's DELETE, held pending
+    const callA = recordStreamerEvent(5, 'follow', 'someviewer', null);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Since dispatchNotification fires EventSub handlers without awaiting them (see
+    // eventLog.ts's pruneInFlight doc comment), a second event for the same streamer can land
+    // while call A's DELETE is still pending — the in-memory counter isn't reset until that
+    // DELETE succeeds, so a naive implementation would compute a second threshold-reaching
+    // count and start its own redundant DELETE.
+    pool.execute.mockResolvedValueOnce([{ affectedRows: 1 }, []]); // call B's INSERT
+    const callB = recordStreamerEvent(5, 'follow', 'someviewer', null);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    resolveDelete();
+    await expect(callA).resolves.toBe(true);
+    await expect(callB).resolves.toBe(true);
+
+    // Only 3 execute calls total (A's INSERT, A's DELETE, B's INSERT) — B piggybacks on A's
+    // in-flight prune instead of issuing a second DELETE.
+    expect(pool.execute).toHaveBeenCalledTimes(3);
+    const deleteCalls = pool.execute.mock.calls.filter(([sql]) => String(sql).includes('DELETE FROM streamer_event_log'));
+    expect(deleteCalls).toHaveLength(1);
+  });
+
   it('tracks the prune-cadence counter independently per streamer', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);

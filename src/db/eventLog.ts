@@ -29,6 +29,16 @@ const PRUNE_EVERY_N_INSERTS = 10;
 const insertsSincePrune = new Map<number, number>();
 
 /**
+ * Per-streamer prune already in flight. `dispatchNotification` fires EventSub handlers without
+ * awaiting them, so multiple `recordStreamerEvent` calls for the same streamer can run
+ * concurrently — e.g. a redemption burst, or a follow and a raid landing together. Without this,
+ * every one of them that observes the threshold before the first prune's `insertsSincePrune`
+ * reset lands would start its own redundant `DELETE`. Concurrent callers that hit the threshold
+ * while a prune is already running piggyback on it instead.
+ */
+const pruneInFlight = new Map<number, Promise<void>>();
+
+/**
  * Records a streamer activity event, then — only once every {@link PRUNE_EVERY_N_INSERTS}
  * inserts for that streamer — prunes that streamer's rows down to the most recent
  * {@link EVENTS_RETAINED_PER_STREAMER}, so the table stays bounded (with a small, bounded
@@ -80,22 +90,38 @@ export async function recordStreamerEvent(
     return true;
   }
 
-  // mysql2's prepared statements (execute()) can't bind LIMIT as a placeholder, so the
-  // retention count — a fixed internal constant, never user input — is inlined directly.
-  await getPool().execute(
-    `DELETE FROM streamer_event_log WHERE streamer_id = ? AND id NOT IN (
-       SELECT id FROM (
-         SELECT id FROM streamer_event_log WHERE streamer_id = ?
-         ORDER BY occurred_at DESC, id DESC LIMIT ${EVENTS_RETAINED_PER_STREAMER}
-       ) AS keep
-     )`,
-    [streamerId, streamerId],
-  );
-  // Only clear the counter once the prune actually succeeds — if the DELETE throws, the
-  // counter stays at/above the threshold, so the very next insert retries pruning instead of
-  // waiting another PRUNE_EVERY_N_INSERTS (which could leave the table over cap indefinitely
-  // for a streamer who goes quiet right after a failed prune).
-  insertsSincePrune.set(streamerId, 0);
+  // Another concurrent call already reached the threshold and is pruning this streamer —
+  // await that instead of racing it with a second DELETE (see pruneInFlight's doc comment).
+  const existingPrune = pruneInFlight.get(streamerId);
+  if (existingPrune) {
+    await existingPrune;
+    return true;
+  }
+
+  const prune = (async () => {
+    try {
+      // mysql2's prepared statements (execute()) can't bind LIMIT as a placeholder, so the
+      // retention count — a fixed internal constant, never user input — is inlined directly.
+      await getPool().execute(
+        `DELETE FROM streamer_event_log WHERE streamer_id = ? AND id NOT IN (
+           SELECT id FROM (
+             SELECT id FROM streamer_event_log WHERE streamer_id = ?
+             ORDER BY occurred_at DESC, id DESC LIMIT ${EVENTS_RETAINED_PER_STREAMER}
+           ) AS keep
+         )`,
+        [streamerId, streamerId],
+      );
+      // Only clear the counter once the prune actually succeeds — if the DELETE throws, the
+      // counter stays at/above the threshold, so the very next insert retries pruning instead
+      // of waiting another PRUNE_EVERY_N_INSERTS (which could leave the table over cap
+      // indefinitely for a streamer who goes quiet right after a failed prune).
+      insertsSincePrune.set(streamerId, 0);
+    } finally {
+      pruneInFlight.delete(streamerId);
+    }
+  })();
+  pruneInFlight.set(streamerId, prune);
+  await prune;
   return true;
 }
 
@@ -128,4 +154,5 @@ export async function getRecentStreamerEvents(streamerId: number, limit: number)
 /** Test-only: clears the in-memory per-streamer prune-cadence counters so each test starts from a clean slate. */
 export function __resetEventLogPruneCountersForTests(): void {
   insertsSincePrune.clear();
+  pruneInFlight.clear();
 }
