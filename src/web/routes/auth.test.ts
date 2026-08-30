@@ -305,6 +305,23 @@ describe('GET /discord/callback', () => {
     expect(updateDiscordName).toHaveBeenCalledWith('111', 'NewDisplayName');
   });
 
+  it('still logs the user in when the display-name sync lookup throws (non-blocking)', async () => {
+    mockFetch([
+      { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
+      { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
+    ]);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'OldName', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER, is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: '555', name: 'Guild', voice_channel_id: null }] as any);
+    vi.mocked(fetchMemberDisplayName).mockRejectedValue(new Error('discord API unavailable'));
+
+    const res = await supertest(buildApp({ oauthState: { value: 'state123', expiresAt: Date.now() + 60_000 } }))
+      .get('/discord/callback?code=code&state=state123');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/');
+    expect(updateDiscordName).not.toHaveBeenCalled();
+  });
+
   it('serializes the discord_name update through userMutationQueue', async () => {
     mockFetch([
       { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
