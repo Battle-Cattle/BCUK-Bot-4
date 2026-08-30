@@ -120,6 +120,49 @@ describe('recordStreamerEvent', () => {
     expect(deleteCalls).toHaveLength(1);
   });
 
+  it('counts inserts that land during an in-flight prune, and immediately runs a follow-up prune if they reach the threshold again', async () => {
+    let resolveDelete!: () => void;
+    const deletePromise = new Promise<[unknown, unknown]>((resolve) => {
+      resolveDelete = () => resolve([{ affectedRows: 5 }, []]);
+    });
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    for (let i = 0; i < PRUNE_EVERY_N_INSERTS - 1; i++) {
+      await recordStreamerEvent(5, 'follow', 'someviewer', null);
+    }
+    pool.execute.mockClear();
+
+    // Call A's insert reaches the threshold; its DELETE is held pending.
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]) // A's INSERT
+      .mockImplementationOnce(() => deletePromise); // A's DELETE, held pending
+    const callA = recordStreamerEvent(5, 'follow', 'someviewer', null);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // A full batch of concurrent inserts lands while A's DELETE is still pending. Each must
+    // still be counted (not silently dropped just because it piggybacks on A's in-flight prune
+    // instead of starting its own) — otherwise a burst could push the table further over the
+    // retention cap than the documented bounded overshoot.
+    pool.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
+    const concurrentCalls = Array.from(
+      { length: PRUNE_EVERY_N_INSERTS },
+      () => recordStreamerEvent(5, 'follow', 'someviewer', null),
+    );
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    resolveDelete();
+    await expect(Promise.all([callA, ...concurrentCalls])).resolves.toEqual(new Array(PRUNE_EVERY_N_INSERTS + 1).fill(true));
+
+    // A's INSERT + A's DELETE + 10 concurrent INSERTs + one follow-up DELETE. The follow-up
+    // DELETE runs automatically once the counted concurrent inserts reached the threshold
+    // again — without waiting for a further insert to trigger it.
+    expect(pool.execute).toHaveBeenCalledTimes(13);
+    const deleteCalls = pool.execute.mock.calls.filter(([sql]) => String(sql).includes('DELETE FROM streamer_event_log'));
+    expect(deleteCalls).toHaveLength(2);
+  });
+
   it('tracks the prune-cadence counter independently per streamer', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);

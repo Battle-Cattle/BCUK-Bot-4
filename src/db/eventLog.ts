@@ -84,18 +84,38 @@ export async function recordStreamerEvent(
     throw err;
   }
 
+  // Recorded unconditionally, even while a prune for this streamer is already in flight (see
+  // ensurePruned's doc comment for why that matters): every successful insert must count, or a
+  // burst landing during one DELETE would go untracked and the next prune would wait a full
+  // PRUNE_EVERY_N_INSERTS longer than intended.
   const count = (insertsSincePrune.get(streamerId) ?? 0) + 1;
-  if (count < PRUNE_EVERY_N_INSERTS) {
-    insertsSincePrune.set(streamerId, count);
-    return true;
-  }
+  insertsSincePrune.set(streamerId, count);
+  if (count >= PRUNE_EVERY_N_INSERTS) await ensurePruned(streamerId);
+  return true;
+}
 
+/**
+ * Ensures `streamerId`'s rows are pruned once its `insertsSincePrune` counter has reached
+ * {@link PRUNE_EVERY_N_INSERTS}, coalescing concurrent callers onto a single in-flight `DELETE`
+ * per streamer instead of racing separate ones — `dispatchNotification` fires EventSub handlers
+ * without awaiting them, so multiple `recordStreamerEvent` calls for the same streamer can run
+ * concurrently (e.g. a redemption burst, or a follow and a raid landing together).
+ *
+ * A successful prune subtracts {@link PRUNE_EVERY_N_INSERTS} from the counter rather than
+ * resetting it to zero, so inserts that landed (and were counted) while this `DELETE` was
+ * in flight aren't lost. If enough of them accumulated to reach the threshold again, this loops
+ * immediately rather than waiting for a future insert that might not come for a while.
+ *
+ * @param streamerId - Primary key of the `streamer` row whose rows may need pruning.
+ * @returns Resolves once no further prune is currently needed for this streamer.
+ */
+async function ensurePruned(streamerId: number): Promise<void> {
   // Another concurrent call already reached the threshold and is pruning this streamer —
   // await that instead of racing it with a second DELETE (see pruneInFlight's doc comment).
   const existingPrune = pruneInFlight.get(streamerId);
   if (existingPrune) {
     await existingPrune;
-    return true;
+    return;
   }
 
   const prune = (async () => {
@@ -111,18 +131,22 @@ export async function recordStreamerEvent(
          )`,
         [streamerId, streamerId],
       );
-      // Only clear the counter once the prune actually succeeds — if the DELETE throws, the
+      // Only adjust the counter once the prune actually succeeds — if the DELETE throws, the
       // counter stays at/above the threshold, so the very next insert retries pruning instead
       // of waiting another PRUNE_EVERY_N_INSERTS (which could leave the table over cap
       // indefinitely for a streamer who goes quiet right after a failed prune).
-      insertsSincePrune.set(streamerId, 0);
+      const remaining = (insertsSincePrune.get(streamerId) ?? 0) - PRUNE_EVERY_N_INSERTS;
+      insertsSincePrune.set(streamerId, Math.max(remaining, 0));
     } finally {
       pruneInFlight.delete(streamerId);
     }
   })();
   pruneInFlight.set(streamerId, prune);
   await prune;
-  return true;
+
+  if ((insertsSincePrune.get(streamerId) ?? 0) >= PRUNE_EVERY_N_INSERTS) {
+    await ensurePruned(streamerId);
+  }
 }
 
 /**
