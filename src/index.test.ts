@@ -30,6 +30,7 @@ vi.mock('./discord/discordBot', () => ({
   startDiscordBot: vi.fn(),
   stopDiscordBot: vi.fn(),
   getDiscordClient: vi.fn(),
+  onceDiscordReady: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./discord/guildRegistry', () => ({
   reloadGuildRegistry: vi.fn().mockResolvedValue(undefined),
@@ -279,6 +280,42 @@ describe('startup — reward pricing scheduler', () => {
     const [webPanelCallOrder] = vi.mocked(startWebPanel).mock.invocationCallOrder;
     const [reconciliationCallOrder] = vi.mocked(startChannelReconciliationPoll).mock.invocationCallOrder;
     expect(webPanelCallOrder).toBeLessThan(reconciliationCallOrder);
+  });
+});
+
+// ─── Owner "back online" startup DM ────────────────────────────────────────────
+
+describe('startup — owner back-online DM', () => {
+  it('waits for Discord readiness before sending the announceStartup DM', async () => {
+    const { onceDiscordReady } = await import('./discord/discordBot.js');
+    const { announceStartup } = await import('./discord/ownerAlerts.js');
+
+    await runMain();
+
+    expect(vi.mocked(onceDiscordReady)).toHaveBeenCalledOnce();
+    expect(vi.mocked(announceStartup)).toHaveBeenCalledOnce();
+    const [readyCallOrder] = vi.mocked(onceDiscordReady).mock.invocationCallOrder;
+    const [announceCallOrder] = vi.mocked(announceStartup).mock.invocationCallOrder;
+    expect(readyCallOrder).toBeLessThan(announceCallOrder);
+  });
+
+  it('skips the DM (without crashing the process) when Discord never becomes ready in time', async () => {
+    const { onceDiscordReady } = await import('./discord/discordBot.js');
+    const { announceStartup } = await import('./discord/ownerAlerts.js');
+    vi.mocked(onceDiscordReady).mockReturnValueOnce(new Promise(() => { /* never resolves */ }));
+
+    vi.useFakeTimers();
+    try {
+      const mainPromise = import('./index.js');
+      await vi.advanceTimersByTimeAsync(30_000);
+      await mainPromise;
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(vi.mocked(announceStartup)).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 });
 

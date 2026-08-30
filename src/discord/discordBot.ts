@@ -21,6 +21,23 @@ let bootingClient: Client | null = null;
 
 export { getDiscordClient };
 
+/** Resolve callbacks awaiting the next `clientReady` — see {@link onceDiscordReady}. */
+let readyWaiters: Array<() => void> = [];
+
+/**
+ * Resolves once the Discord client has fired `clientReady` (immediately, if it already has by
+ * the time this is called). Lets a caller that needs the client to actually be usable — e.g.
+ * `index.ts`'s `announceStartup()`, which sends a DM through it — wait for that without
+ * `startDiscordBot()` itself becoming blocking (it stays fire-and-forget, matching the rest of
+ * the boot sequence). Never resolves if the client fails to connect and is never retried; pair
+ * with `withTimeout` at the call site if that matters there.
+ * @returns Resolves with no value once the client is ready.
+ */
+export function onceDiscordReady(): Promise<void> {
+  if (getDiscordClient()) return Promise.resolve();
+  return new Promise((resolve) => { readyWaiters.push(resolve); });
+}
+
 /**
  * Resolve a guild by ID from the discord.js cache, falling back to a fetch.
  * @throws if the client is not ready.
@@ -205,6 +222,9 @@ export function startDiscordBot(): void {
     log.info(`Logged in as ${c.user.tag}`);
     setDiscordReady(c.user.tag);
     recordDiscordConnected(true);
+    const waiters = readyWaiters;
+    readyWaiters = [];
+    waiters.forEach((resolve) => { resolve(); });
   });
 
   localClient.on('error', (err) => {
