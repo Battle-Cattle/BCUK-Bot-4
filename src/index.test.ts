@@ -22,11 +22,15 @@ vi.mock('./discord/ownerAlerts', () => ({
   registerOwnerAlertRuntime: vi.fn(),
   primeOwnerAlertBaseline: vi.fn(),
   startOwnerAlertWatcher: vi.fn(),
+  stopOwnerAlertWatcher: vi.fn(),
+  announceShutdown: vi.fn().mockResolvedValue(undefined),
+  announceStartup: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./discord/discordBot', () => ({
   startDiscordBot: vi.fn(),
   stopDiscordBot: vi.fn(),
   getDiscordClient: vi.fn(),
+  onceDiscordReady: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./discord/guildRegistry', () => ({
   reloadGuildRegistry: vi.fn().mockResolvedValue(undefined),
@@ -279,6 +283,42 @@ describe('startup — reward pricing scheduler', () => {
   });
 });
 
+// ─── Owner "back online" startup DM ────────────────────────────────────────────
+
+describe('startup — owner back-online DM', () => {
+  it('waits for Discord readiness before sending the announceStartup DM', async () => {
+    const { onceDiscordReady } = await import('./discord/discordBot.js');
+    const { announceStartup } = await import('./discord/ownerAlerts.js');
+
+    await runMain();
+
+    expect(vi.mocked(onceDiscordReady)).toHaveBeenCalledOnce();
+    expect(vi.mocked(announceStartup)).toHaveBeenCalledOnce();
+    const [readyCallOrder] = vi.mocked(onceDiscordReady).mock.invocationCallOrder;
+    const [announceCallOrder] = vi.mocked(announceStartup).mock.invocationCallOrder;
+    expect(readyCallOrder).toBeLessThan(announceCallOrder);
+  });
+
+  it('skips the DM (without crashing the process) when Discord never becomes ready in time', async () => {
+    const { onceDiscordReady } = await import('./discord/discordBot.js');
+    const { announceStartup } = await import('./discord/ownerAlerts.js');
+    vi.mocked(onceDiscordReady).mockReturnValueOnce(new Promise(() => { /* never resolves */ }));
+
+    vi.useFakeTimers();
+    try {
+      const mainPromise = import('./index.js');
+      await vi.advanceTimersByTimeAsync(30_000);
+      await mainPromise;
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(vi.mocked(announceStartup)).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe('DB health check interval', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -374,6 +414,30 @@ describe('shutdown', () => {
     expect(vi.mocked(stopRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopEventSubReconciliation)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopChannelReconciliationPoll)).toHaveBeenCalledOnce();
+  });
+
+  it('turns off owner-alert reporting and announces the shutdown before any component disconnects', async () => {
+    const { stopOwnerAlertWatcher, announceShutdown } = await import('./discord/ownerAlerts.js');
+    const { stopDiscordBot } = await import('./discord/discordBot.js');
+    const { stopTwitchBot } = await import('./twitch/twitchBot.js');
+
+    await runMain();
+    process.emit('SIGINT');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(stopOwnerAlertWatcher)).toHaveBeenCalledOnce();
+    expect(vi.mocked(announceShutdown)).toHaveBeenCalledOnce();
+    expect(vi.mocked(stopDiscordBot)).toHaveBeenCalledOnce();
+    expect(vi.mocked(stopTwitchBot)).toHaveBeenCalledOnce();
+
+    const [stopWatcherOrder] = vi.mocked(stopOwnerAlertWatcher).mock.invocationCallOrder;
+    const [announceOrder] = vi.mocked(announceShutdown).mock.invocationCallOrder;
+    const [stopDiscordOrder] = vi.mocked(stopDiscordBot).mock.invocationCallOrder;
+    const [stopTwitchOrder] = vi.mocked(stopTwitchBot).mock.invocationCallOrder;
+
+    expect(stopWatcherOrder).toBeLessThan(announceOrder);
+    expect(announceOrder).toBeLessThan(stopDiscordOrder);
+    expect(announceOrder).toBeLessThan(stopTwitchOrder);
   });
 });
 

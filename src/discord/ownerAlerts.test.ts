@@ -13,6 +13,9 @@ import {
   registerOwnerAlertRuntime,
   primeOwnerAlertBaseline,
   startOwnerAlertWatcher,
+  stopOwnerAlertWatcher,
+  announceShutdown,
+  announceStartup,
   __resetOwnerAlertsForTests,
   DOWN_ALERT_GRACE_MS,
 } from './ownerAlerts';
@@ -276,6 +279,31 @@ describe('ownerAlerts', () => {
       await flush();
     }
   });
+
+  it('ignores every disconnect once stopOwnerAlertWatcher() is called, even outlasting the grace period', async () => {
+    try {
+      stopOwnerAlertWatcher();
+      healthStore.recordDbPing(false, 'shutting down');
+      await advanceGrace();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      healthStore.recordDbPing(true);
+      await flush();
+    }
+  });
+
+  it('cancels a grace-period timer already pending when stopOwnerAlertWatcher() is called', async () => {
+    try {
+      healthStore.recordDbPing(false, 'boom');
+      await vi.advanceTimersByTimeAsync(DOWN_ALERT_GRACE_MS / 2);
+      stopOwnerAlertWatcher();
+      await advanceGrace();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      healthStore.recordDbPing(true);
+      await flush();
+    }
+  });
 });
 
 describe('sendOwnerAlert with no runtime registered', () => {
@@ -409,5 +437,32 @@ describe('primeOwnerAlertBaseline', () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('db is down'));
     expect(send).not.toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('discord'));
+  });
+});
+
+describe('announceShutdown / announceStartup', () => {
+  let send: ReturnType<typeof vi.fn<(discordId: string, message: string) => Promise<void>>>;
+
+  beforeEach(() => {
+    __resetOwnerAlertsForTests();
+    send = vi.fn().mockResolvedValue(undefined);
+    registerOwnerAlertRuntime({ send });
+    vi.mocked(findOwnerUser).mockResolvedValue(OWNER_ROW as any);
+  });
+
+  it('sends an explicit shutdown DM', async () => {
+    await announceShutdown();
+    expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('Shutting down'));
+  });
+
+  it('sends an explicit back-online DM', async () => {
+    await announceStartup();
+    expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('Back online'));
+  });
+
+  it('never throws when the runtime send itself rejects', async () => {
+    send.mockRejectedValue(new Error('DM failed — user has DMs disabled'));
+    await expect(announceShutdown()).resolves.toBeUndefined();
+    await expect(announceStartup()).resolves.toBeUndefined();
   });
 });

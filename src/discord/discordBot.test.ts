@@ -117,6 +117,43 @@ describe('getDiscordClient', () => {
   });
 });
 
+// ─── onceDiscordReady ───────────────────────────────────────────────────────────
+
+describe('onceDiscordReady', () => {
+  it('resolves immediately when the client is already ready', async () => {
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    await expect(mod.onceDiscordReady()).resolves.toBeUndefined();
+  });
+
+  it('resolves once clientReady fires, not before', async () => {
+    mod.startDiscordBot();
+    let resolved = false;
+    const waiter = mod.onceDiscordReady().then(() => { resolved = true; });
+
+    await flushMicrotasks();
+    expect(resolved).toBe(false);
+
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    await waiter;
+    expect(resolved).toBe(true);
+  });
+
+  it('resolves every waiter registered before clientReady fires', async () => {
+    mod.startDiscordBot();
+    const waiterA = mod.onceDiscordReady();
+    const waiterB = mod.onceDiscordReady();
+
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    await expect(Promise.all([waiterA, waiterB])).resolves.toEqual([undefined, undefined]);
+  });
+});
+
 // ─── fetchMemberDisplayName ───────────────────────────────────────────────────
 
 describe('fetchMemberDisplayName', () => {
