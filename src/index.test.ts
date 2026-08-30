@@ -415,6 +415,30 @@ describe('shutdown', () => {
     expect(vi.mocked(stopEventSubReconciliation)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopChannelReconciliationPoll)).toHaveBeenCalledOnce();
   });
+
+  it('turns off owner-alert reporting and announces the shutdown before any component disconnects', async () => {
+    const { stopOwnerAlertWatcher, announceShutdown } = await import('./discord/ownerAlerts.js');
+    const { stopDiscordBot } = await import('./discord/discordBot.js');
+    const { stopTwitchBot } = await import('./twitch/twitchBot.js');
+
+    await runMain();
+    process.emit('SIGINT');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(stopOwnerAlertWatcher)).toHaveBeenCalledOnce();
+    expect(vi.mocked(announceShutdown)).toHaveBeenCalledOnce();
+    expect(vi.mocked(stopDiscordBot)).toHaveBeenCalledOnce();
+    expect(vi.mocked(stopTwitchBot)).toHaveBeenCalledOnce();
+
+    const [stopWatcherOrder] = vi.mocked(stopOwnerAlertWatcher).mock.invocationCallOrder;
+    const [announceOrder] = vi.mocked(announceShutdown).mock.invocationCallOrder;
+    const [stopDiscordOrder] = vi.mocked(stopDiscordBot).mock.invocationCallOrder;
+    const [stopTwitchOrder] = vi.mocked(stopTwitchBot).mock.invocationCallOrder;
+
+    expect(stopWatcherOrder).toBeLessThan(announceOrder);
+    expect(announceOrder).toBeLessThan(stopDiscordOrder);
+    expect(announceOrder).toBeLessThan(stopTwitchOrder);
+  });
 });
 
 // ─── Global unhandled error handlers ──────────────────────────────────────────
