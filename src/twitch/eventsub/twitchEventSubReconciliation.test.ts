@@ -109,19 +109,27 @@ describe('runReconciliationTick', () => {
   });
 
   it('drops the cursor for a streamer no longer returned by getAllStreamerInfo, so it re-establishes on reconnect', async () => {
+    // Seed tick 1 with a redemption so the cursor advances to ~"now" (not the initial
+    // one-poll-interval-ago default) — this is what makes the later assertion actually
+    // depend on pruning: without pruning, this recent cursor would still be in effect on
+    // tick 3 and would reject the older "reconnect" redemption below on its own.
     vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
-    await runReconciliationTick(); // establishes the cursor at "now"
+    const seedRedeemedAt = new Date(Date.now() - 100).toISOString();
+    mockFulfilledOnly({ redemptions: [redemption('seed', seedRedeemedAt)], cursor: null });
+    await runReconciliationTick(); // cursor lands at seedRedeemedAt (~"now")
+    vi.mocked(handleRedemption).mockClear();
 
     // uid1 is absent this tick (e.g. streamer disconnected) — its cursor should be pruned.
     vi.mocked(getAllStreamerInfo).mockReturnValue(new Map());
     await runReconciliationTick();
 
-    // uid1 reconnects; a redemption just past the cursor established above would normally be
-    // skipped, but since the cursor was pruned this tick re-establishes a fresh one-poll-interval
-    // lookback instead, so a redemption within that fresh window is replayed.
+    // uid1 reconnects; this redemption is older than the tick-1 cursor (seedRedeemedAt) but
+    // within a fresh one-poll-interval lookback, so it's only replayed if the cursor was
+    // actually pruned in between — without pruning, the stale seedRedeemedAt cursor would
+    // still reject it as older-than-cutoff.
     vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
-    const withinFreshLookback = new Date(Date.now() - 1_000).toISOString();
-    mockFulfilledOnly({ redemptions: [redemption('r1', withinFreshLookback)], cursor: null });
+    const reconnectRedeemedAt = new Date(Date.now() - 1_000).toISOString();
+    mockFulfilledOnly({ redemptions: [redemption('r1', reconnectRedeemedAt)], cursor: null });
     await runReconciliationTick();
 
     expect(handleRedemption).toHaveBeenCalledTimes(1);

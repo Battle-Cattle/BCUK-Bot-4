@@ -142,6 +142,7 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
  * Without this, the map grows by one entry per reward for every streamer that ever connected,
  * even after they stop being reconciled.
  * @param currentUids - Broadcaster user ids from this tick's {@link getAllStreamerInfo} snapshot.
+ * @returns Nothing — mutates {@link lastSeenRedeemedAt} in place.
  */
 function pruneStaleReconciliationCursors(currentUids: ReadonlySet<string>): void {
   for (const key of lastSeenRedeemedAt.keys()) {
