@@ -6,78 +6,9 @@ import {
   findKeyByHash,
   findDiscordIdByTokenHash,
   findUser,
-  type DbUser,
 } from '../db';
 import { renderView } from './routes/viewHelpers';
-import { fetchLiveGuildsForUser, resolveAccessLevelForGuild, type LiveGuildsResult } from './guildAccess';
-
-/** How long a user's DB row + live guild/access-level list is cached before being re-fetched. */
-const GUILD_CONTEXT_CACHE_TTL_MS = 20_000;
-
-interface CachedGuildContext {
-  dbUser: DbUser | null;
-  liveGuilds: LiveGuildsResult;
-  fetchedAt: number;
-}
-
-/**
- * `requireGuildContext` runs on every guild-scoped request and always re-derives membership
- * and access level from the DB (see its doc comment for why), which costs a `findUser` plus a
- * `getAllGuilds`/`getGuildsForMember` round trip per request. Membership and owner status only
- * change on an admin action, so — mirroring `guildScopedStatus.ts`'s identical tradeoff — this
- * caches that pair per user for a short TTL instead of paying it on every request. Deliberately
- * TTL-only (not invalidated on every membership write): a few seconds of staleness before a
- * revoked membership takes effect is an acceptable tradeoff against touching every such write path.
- */
-const guildContextCache = new Map<string, CachedGuildContext>();
-
-/**
- * Users with a fetch already in flight — coalesces concurrent cache misses (e.g. several tabs
- * loading guild-scoped pages for the same user before the first fetch resolves) onto a single
- * `findUser`/`fetchLiveGuildsForUser` pair, instead of each request firing its own.
- */
-const guildContextInFlight = new Map<string, Promise<CachedGuildContext>>();
-
-/** Test-only: clears the guild-context cache so DB mocks aren't shadowed across test cases. */
-export function clearGuildContextCache(): void {
-  guildContextCache.clear();
-  guildContextInFlight.clear();
-}
-
-/**
- * Returns `discordId`'s cached DB user + live guild/access-level list, refreshing it (via
- * `findUser`/`fetchLiveGuildsForUser`) when missing or past `GUILD_CONTEXT_CACHE_TTL_MS`.
- * Concurrent calls for the same stale/missing user share one in-flight fetch instead of each
- * firing their own.
- * @param discordId - Discord snowflake of the session user to look up.
- * @returns The cached (or freshly fetched) DB user and live guild/access-level list.
- */
-async function getCachedGuildContext(discordId: string): Promise<CachedGuildContext> {
-  const cached = guildContextCache.get(discordId);
-  const now = Date.now();
-  if (cached && now - cached.fetchedAt < GUILD_CONTEXT_CACHE_TTL_MS) {
-    return cached;
-  }
-
-  const inFlight = guildContextInFlight.get(discordId);
-  if (inFlight) return inFlight;
-
-  const load = (async (): Promise<CachedGuildContext> => {
-    try {
-      const dbUser = await findUser(discordId);
-      const liveGuilds = dbUser
-        ? await fetchLiveGuildsForUser(dbUser)
-        : { guilds: [], accessLevelByGuildId: null };
-      const context: CachedGuildContext = { dbUser, liveGuilds, fetchedAt: Date.now() };
-      guildContextCache.set(discordId, context);
-      return context;
-    } finally {
-      guildContextInFlight.delete(discordId);
-    }
-  })();
-  guildContextInFlight.set(discordId, load);
-  return load;
-}
+import { fetchLiveGuildsForUser, resolveAccessLevelForGuild } from './guildAccess';
 
 /**
  * Ensures the request has a logged-in session user, redirecting to login otherwise.
@@ -121,12 +52,13 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
     return;
   }
 
-  const { dbUser, liveGuilds: { guilds: liveGuilds, accessLevelByGuildId } } = await getCachedGuildContext(user.discordId);
+  const dbUser = await findUser(user.discordId);
   if (!dbUser) {
     res.redirect('/auth/login');
     return;
   }
 
+  const { guilds: liveGuilds, accessLevelByGuildId } = await fetchLiveGuildsForUser(dbUser);
   user.isOwner = dbUser.is_owner;
   user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
 

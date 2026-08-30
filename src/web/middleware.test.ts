@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ACCESS_LEVEL_MOCK } from '../test-utils/accessLevelMock';
 
 vi.mock('../db', () => ({
@@ -15,7 +15,7 @@ vi.mock('./csrf', () => ({
 }));
 
 import { createHash } from 'crypto';
-import { requireAuth, requireManager, requireMod, requireAdmin, requireOwner, requireOwnerJson, requireModJson, requireManagerJson, requireAdminJson, requireApiKey, requireCompanionKey, requireGuildContext, clearGuildContextCache } from './middleware';
+import { requireAuth, requireManager, requireMod, requireAdmin, requireOwner, requireOwnerJson, requireModJson, requireManagerJson, requireAdminJson, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
 import { findKeyByHash, findDiscordIdByTokenHash, getEffectiveAccessLevelForUser, findUser, getAllGuilds, getGuildsForMember, AccessLevel } from '../db';
 
 function makeReq(overrides: object = {}): any {
@@ -40,7 +40,6 @@ const next = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
-  clearGuildContextCache();
 });
 
 // ─── requireAuth ─────────────────────────────────────────────────────────────
@@ -573,60 +572,5 @@ describe('requireGuildContext', () => {
     await requireGuildContext(req, res, next);
     expect(res.redirect).toHaveBeenCalledWith('/auth/login');
     expect(next).not.toHaveBeenCalled();
-  });
-});
-
-// ─── requireGuildContext — guild-context caching ──────────────────────────────
-
-describe('requireGuildContext — guild-context caching', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
-    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: 'g1', name: 'A', voice_channel_id: null, access_level: AccessLevel.ADMIN }] as any);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  function makeUser() {
-    return { discordId: 'u1', currentGuildId: 'g1', accessLevel: AccessLevel.USER, guilds: [{ guildId: 'g1', name: 'A' }] };
-  }
-
-  it('reuses the cached findUser/fetchLiveGuildsForUser lookup for a second request within the TTL', async () => {
-    await requireGuildContext(makeReq({ session: { user: makeUser() } }), makeRes(), next);
-    await requireGuildContext(makeReq({ session: { user: makeUser() } }), makeRes(), next);
-    expect(findUser).toHaveBeenCalledTimes(1);
-    expect(getGuildsForMember).toHaveBeenCalledTimes(1);
-  });
-
-  it('re-fetches once the TTL has elapsed', async () => {
-    await requireGuildContext(makeReq({ session: { user: makeUser() } }), makeRes(), next);
-    vi.advanceTimersByTime(20_001);
-    await requireGuildContext(makeReq({ session: { user: makeUser() } }), makeRes(), next);
-    expect(findUser).toHaveBeenCalledTimes(2);
-    expect(getGuildsForMember).toHaveBeenCalledTimes(2);
-  });
-
-  it('caches independently per user', async () => {
-    await requireGuildContext(makeReq({ session: { user: makeUser() } }), makeRes(), next);
-    await requireGuildContext(makeReq({ session: { user: { ...makeUser(), discordId: 'u2' } } }), makeRes(), next);
-    expect(findUser).toHaveBeenCalledTimes(2);
-    expect(findUser).toHaveBeenNthCalledWith(1, 'u1');
-    expect(findUser).toHaveBeenNthCalledWith(2, 'u2');
-  });
-
-  it('coalesces concurrent cache misses for the same user onto a single DB fetch', async () => {
-    let resolveUser!: (value: { discord_id: string; is_owner: boolean }) => void;
-    vi.mocked(findUser).mockReturnValue(new Promise((resolve) => { resolveUser = resolve; }) as any);
-
-    const first = requireGuildContext(makeReq({ session: { user: makeUser() } }), makeRes(), next);
-    const second = requireGuildContext(makeReq({ session: { user: makeUser() } }), makeRes(), next);
-
-    resolveUser({ discord_id: 'u1', is_owner: false });
-    await Promise.all([first, second]);
-
-    expect(findUser).toHaveBeenCalledTimes(1);
-    expect(getGuildsForMember).toHaveBeenCalledTimes(1);
   });
 });
