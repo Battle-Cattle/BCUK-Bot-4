@@ -51,6 +51,33 @@ describe('recordStreamerEvent', () => {
     expect(deleteParams).toEqual([5, 5]);
   });
 
+  it('retries pruning on the very next insert when the prune DELETE fails, instead of waiting another full cadence', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    for (let i = 0; i < PRUNE_EVERY_N_INSERTS - 1; i++) {
+      await recordStreamerEvent(5, 'follow', 'someviewer', null);
+    }
+    pool.execute.mockClear();
+    // The threshold-reaching insert's DELETE fails.
+    pool.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]) // INSERT
+      .mockRejectedValueOnce(new Error('DB down')); // DELETE
+
+    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).rejects.toThrow('DB down');
+    pool.execute.mockClear();
+    pool.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
+
+    // The counter must not have been cleared by the failed prune — this next insert (the first
+    // of a "quiet" streak) should retry the prune immediately rather than needing
+    // PRUNE_EVERY_N_INSERTS more successful inserts first.
+    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(true);
+
+    expect(pool.execute).toHaveBeenCalledTimes(2);
+    const [deleteSql] = pool.execute.mock.calls[1];
+    expect(deleteSql).toContain('DELETE FROM streamer_event_log');
+  });
+
   it('tracks the prune-cadence counter independently per streamer', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);

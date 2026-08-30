@@ -79,7 +79,6 @@ export async function recordStreamerEvent(
     insertsSincePrune.set(streamerId, count);
     return true;
   }
-  insertsSincePrune.set(streamerId, 0);
 
   // mysql2's prepared statements (execute()) can't bind LIMIT as a placeholder, so the
   // retention count — a fixed internal constant, never user input — is inlined directly.
@@ -92,6 +91,11 @@ export async function recordStreamerEvent(
      )`,
     [streamerId, streamerId],
   );
+  // Only clear the counter once the prune actually succeeds — if the DELETE throws, the
+  // counter stays at/above the threshold, so the very next insert retries pruning instead of
+  // waiting another PRUNE_EVERY_N_INSERTS (which could leave the table over cap indefinitely
+  // for a streamer who goes quiet right after a failed prune).
+  insertsSincePrune.set(streamerId, 0);
   return true;
 }
 

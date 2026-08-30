@@ -343,15 +343,15 @@ describe('handleTwitchMessage', () => {
 
     sendMessage('#streamer', 'alice', '!cmd', { displayName: 'Alice' });
 
-    expect(executeCustomCommandForTwitch).toHaveBeenCalledOnce();
-    expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce();
-    expect(executeMultiCommandForTwitch).toHaveBeenCalledOnce();
-    expect(executeShoutoutForTwitch).toHaveBeenCalledOnce();
+    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', '!cmd');
+    expect(executeCounterCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', '!cmd');
+    expect(executeMultiCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', '!cmd');
+    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', false, '!cmd');
     // Guild resolution (Twitch-channel → discord_id → active voice guild) runs
     // asynchronously before handleCommand is invoked.
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', 'guild-A', '!cmd');
-    expect(executeCountdownForTwitch).toHaveBeenCalledOnce();
+    expect(executeCountdownForTwitch).toHaveBeenCalledWith('streamer', '!cmd', '!cmd');
   });
 
   it('resolves the target guild via the linked streamer\'s active voice presence', async () => {
