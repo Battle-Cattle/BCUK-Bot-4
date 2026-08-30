@@ -80,6 +80,15 @@ let cachedOwnerDiscordId: string | null = null;
 let watcherStarted = false;
 
 /**
+ * Set by {@link stopOwnerAlertWatcher} once this process has started its own deliberate shutdown.
+ * Checked at the top of {@link handleHealthChanged} so the disconnects that shutdown itself
+ * causes (Twitch chat, Discord, EventSub, etc. all going down as components are stopped in turn)
+ * are never mistaken for real outages — there's nothing useful to alert the owner about "the bot
+ * is disconnecting because it's being restarted".
+ */
+let shuttingDown = false;
+
+/**
  * Resolves the Discord ID to DM: a fresh `findOwnerUser()` lookup when it succeeds (also
  * refreshing {@link cachedOwnerDiscordId}), falling back to the last cached ID only if the
  * lookup itself throws (e.g. the DB is down — exactly the case this watcher needs to still be
@@ -130,6 +139,29 @@ async function sendOwnerAlert(message: string): Promise<boolean> {
     log.error('Failed to send owner alert DM:', err);
     return false;
   }
+}
+
+/**
+ * Sends a "shutting down" DM to the owner. Call as the first thing `index.ts`'s `shutdown()`
+ * does once alerting itself has been turned off (see {@link stopOwnerAlertWatcher}) but before
+ * any component — including the Discord client this DM itself needs — actually disconnects.
+ * Pairs with {@link announceStartup}, sent once the next boot finishes: together they give an
+ * explicit before/after pair for a deliberate restart, rather than leaving the owner to
+ * reconstruct one from the edge-triggered component alerts above, which lose all memory of a
+ * "down" DM the instant the process that sent it exits.
+ * @returns Resolves once the DM attempt has settled, whether delivered or not — never throws.
+ */
+export async function announceShutdown(): Promise<void> {
+  await sendOwnerAlert('🟡 Shutting down for a restart.');
+}
+
+/**
+ * Sends a "back online" DM to the owner. Call once every step of `index.ts`'s `main()` has
+ * completed. Pairs with {@link announceShutdown}.
+ * @returns Resolves once the DM attempt has settled, whether delivered or not — never throws.
+ */
+export async function announceStartup(): Promise<void> {
+  await sendOwnerAlert('🟢 Back online.');
 }
 
 /**
@@ -279,6 +311,7 @@ function handleTrackedComponent(componentId: string, ok: boolean, error: string 
  * @returns void.
  */
 function handleHealthChanged(): void {
+  if (shuttingDown) return;
   const snapshot = getHealthSnapshot();
   const componentOks = deriveComponentOks(snapshot);
 
@@ -332,6 +365,29 @@ export function startOwnerAlertWatcher(): void {
   onHealthChanged(handleHealthChanged);
 }
 
+/**
+ * Marks this process as deliberately shutting down, so every disconnect that follows (Twitch
+ * chat, Discord, EventSub, etc. going down as `index.ts`'s `shutdown()` stops each component in
+ * turn) is ignored by {@link handleHealthChanged} instead of being treated as a real outage.
+ * Call once, as the very first step of `shutdown()` — before any component is actually stopped —
+ * so no disconnect it causes can start a grace-period timer (see {@link DOWN_ALERT_GRACE_MS})
+ * that might otherwise still be pending when the process exits, or (on a slow shutdown) fire
+ * before it does. There's no matching "resume" — a process that's shutting down never un-shuts-down;
+ * the next process boots with its own fresh module state instead.
+ * Also cancels any grace-period timer already pending for a component that failed moments before
+ * shutdown began, for the same reason — that alert is about to become moot.
+ * @returns void.
+ */
+export function stopOwnerAlertWatcher(): void {
+  shuttingDown = true;
+  for (const state of componentStates.values()) {
+    if (state.pendingDownTimer) {
+      clearTimeout(state.pendingDownTimer);
+      state.pendingDownTimer = null;
+    }
+  }
+}
+
 /** Test-only: resets all module state so each test starts from a clean slate. */
 export function __resetOwnerAlertsForTests(): void {
   for (const state of componentStates.values()) {
@@ -340,4 +396,5 @@ export function __resetOwnerAlertsForTests(): void {
   componentStates.clear();
   cachedOwnerDiscordId = null;
   watcherStarted = false;
+  shuttingDown = false;
 }

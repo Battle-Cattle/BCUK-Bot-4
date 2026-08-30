@@ -22,6 +22,9 @@ vi.mock('./discord/ownerAlerts', () => ({
   registerOwnerAlertRuntime: vi.fn(),
   primeOwnerAlertBaseline: vi.fn(),
   startOwnerAlertWatcher: vi.fn(),
+  stopOwnerAlertWatcher: vi.fn(),
+  announceShutdown: vi.fn().mockResolvedValue(undefined),
+  announceStartup: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./discord/discordBot', () => ({
   startDiscordBot: vi.fn(),

@@ -1,7 +1,7 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
 import { getPool, closePool, pingDb } from './db';
 import { recordDbPing } from './shared/healthStore';
-import { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatcher } from './discord/ownerAlerts';
+import { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatcher, stopOwnerAlertWatcher, announceShutdown, announceStartup } from './discord/ownerAlerts';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startChannelReconciliationPoll, stopChannelReconciliationPoll } from './twitch/twitchChannelReconciliationPoll';
@@ -75,10 +75,19 @@ function stopDbHealthCheck(): void {
 
 /**
  * Gracefully stops schedulers and bot connections, closes the DB pool, and exits the process.
+ * Turns off owner-alert status reporting first and sends the owner a "shutting down" DM (see
+ * `ownerAlerts.ts`'s `stopOwnerAlertWatcher`/`announceShutdown`) before anything actually
+ * disconnects.
  * @param signal - The name of the signal that triggered shutdown (e.g. `SIGINT`).
  */
 async function shutdown(signal: string): Promise<void> {
   log.info(`${signal} received — disconnecting from voice and shutting down.`);
+  // Before anything else — every stop* call below disconnects a component (Twitch chat, EventSub,
+  // etc.), and none of that is a real outage the owner needs a DM about.
+  stopOwnerAlertWatcher();
+  // ...then announce the shutdown itself, while the Discord client this DM needs is still up —
+  // stopDiscordBot() below tears it down.
+  await announceShutdown();
   stopDbHealthCheck();
   stopCounterScheduler();
   stopChannelReconciliationPoll();
@@ -127,7 +136,9 @@ process.on('uncaughtException', (err) => {
 /**
  * Boots the bot: verifies DB connectivity, wires every Twitch/EventSub runtime callback,
  * loads the guild registry, then starts the Discord bot, Twitch bot, web panel, and
- * schedulers, in that order (see the Startup Sequence section of `CLAUDE.md`).
+ * schedulers, in that order (see the Startup Sequence section of `CLAUDE.md`), finishing with
+ * an owner DM (see `ownerAlerts.ts`'s `announceStartup`) confirming the bot is back online —
+ * paired with `shutdown()`'s `announceShutdown` DM.
  * @returns Resolves once every component has started; rejects (and exits the process,
  *   via the `.catch` below) if DB connectivity or the guild registry load fails.
  */
@@ -201,6 +212,7 @@ async function main(): Promise<void> {
   startTwitchMonitor().catch((err) => log.error('TwitchMonitor startup error:', err));
   startEventSub();
   startEventSubReconciliation();
+  await announceStartup();
 }
 
 main().catch((err) => {
