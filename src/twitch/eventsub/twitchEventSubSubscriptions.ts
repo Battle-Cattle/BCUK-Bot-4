@@ -10,7 +10,8 @@ import { setStreamerInfo } from './twitchEventSubDispatch';
 
 const log = createLogger('EventSub');
 
-export { dispatchNotification, handleRevocation, removeStreamerFromMap } from './twitchEventSubDispatch';
+export { dispatchNotification, handleRevocation, removeStreamerFromMap, getAllStreamerInfo } from './twitchEventSubDispatch';
+export { getAlertTypesCoveredBySubscriptionGroups } from './twitchEventSubSubscriptionGroups';
 
 // Tracks "login:type:token" triples that failed with 403 — skipped until bot restarts or token changes
 const authFailedSubs = new Set<string>();
