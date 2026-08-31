@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { extractCommand, extractArgs, fireAndForget } from './commandUtils';
+import { extractCommand, extractArgs, fireAndForget, resolveCommand } from './commandUtils';
 
 describe('extractCommand', () => {
   it('returns null for an empty string', () => {
@@ -24,6 +24,20 @@ describe('extractCommand', () => {
 
   it('returns the full string lowercased when there is only one token', () => {
     expect(extractCommand('!321')).toBe('!321');
+  });
+});
+
+describe('resolveCommand', () => {
+  it('parses rawMessage fresh when precomputed is undefined', () => {
+    expect(resolveCommand('!Ding extra')).toBe('!ding');
+  });
+
+  it('reuses a precomputed command without re-parsing rawMessage', () => {
+    expect(resolveCommand('!ignored raw text', '!precomputed')).toBe('!precomputed');
+  });
+
+  it('reuses a precomputed null instead of re-parsing rawMessage', () => {
+    expect(resolveCommand('!would-parse-to-something', null)).toBeNull();
   });
 });
 

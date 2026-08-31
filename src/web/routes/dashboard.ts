@@ -21,8 +21,8 @@ const router = Router();
  */
 router.get('/', csrfProtection, async (req, res) => {
   try {
-    const status = await getGuildScopedStatus(req.session.user?.currentGuildId ?? null);
-    const [sfxCount, commandCount, counterCount, streamer] = await Promise.all([
+    const [status, sfxCount, commandCount, counterCount, streamer] = await Promise.all([
+      getGuildScopedStatus(req.session.user?.currentGuildId ?? null),
       getSfxTriggerCount(), getCustomCommandCount(), getCounterCount(),
       req.session.user ? getStreamerByDiscordId(req.session.user.discordId) : Promise.resolve(null),
     ]);

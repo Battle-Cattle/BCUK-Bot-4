@@ -324,7 +324,7 @@ describe('handleTwitchMessage', () => {
   it('processes messages when sourceChannelId matches channelId', () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     sendMessage('#streamer', 'alice', 'hello', { channelId: '111', sourceChannelId: '111' });
-    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', 'hello', 'alice');
+    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', 'hello', 'alice', 'hello');
     expect(recordChatMessage).toHaveBeenCalledWith('streamer');
   });
 
@@ -343,15 +343,15 @@ describe('handleTwitchMessage', () => {
 
     sendMessage('#streamer', 'alice', '!cmd', { displayName: 'Alice' });
 
-    expect(executeCustomCommandForTwitch).toHaveBeenCalledOnce();
-    expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce();
-    expect(executeMultiCommandForTwitch).toHaveBeenCalledOnce();
-    expect(executeShoutoutForTwitch).toHaveBeenCalledOnce();
+    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', '!cmd');
+    expect(executeCounterCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', '!cmd');
+    expect(executeMultiCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', '!cmd');
+    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', false, '!cmd');
     // Guild resolution (Twitch-channel → discord_id → active voice guild) runs
     // asynchronously before handleCommand is invoked.
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
-    expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', 'guild-A');
-    expect(executeCountdownForTwitch).toHaveBeenCalledOnce();
+    expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', 'guild-A', '!cmd');
+    expect(executeCountdownForTwitch).toHaveBeenCalledWith('streamer', '!cmd', '!cmd');
   });
 
   it('resolves the target guild via the linked streamer\'s active voice presence', async () => {
@@ -372,7 +372,7 @@ describe('handleTwitchMessage', () => {
     sendMessage('#streamer', 'alice', '!cmd');
 
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
-    expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', null);
+    expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', null, '!cmd');
     expect(resolveGuildIdForDiscordId).not.toHaveBeenCalled();
   });
 
@@ -425,31 +425,31 @@ describe('handleTwitchMessage', () => {
   it('passes the normalized channel and message to executors', () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     sendMessage('#STREAMER', 'alice', '!clap', { displayName: 'Alice' });
-    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!clap', 'Alice');
+    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!clap', 'Alice', '!clap');
   });
 
   it('falls back to the login username when userInfo.displayName is absent', () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     sendMessage('#streamer', 'alice', '!hi');
-    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!hi', 'alice');
+    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!hi', 'alice', '!hi');
   });
 
   it('detects isMod=true from userInfo.isMod', () => {
     vi.mocked(executeShoutoutForTwitch).mockResolvedValue(undefined);
     sendMessage('#streamer', 'alice', '!so alice', { isMod: true });
-    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', 'alice', true);
+    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', 'alice', true, '!so');
   });
 
   it('detects isMod=true from userInfo.isBroadcaster', () => {
     vi.mocked(executeShoutoutForTwitch).mockResolvedValue(undefined);
     sendMessage('#streamer', 'alice', '!so alice', { isBroadcaster: true });
-    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', 'alice', true);
+    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', 'alice', true, '!so');
   });
 
   it('passes isMod=false when neither isMod nor isBroadcaster is set', () => {
     vi.mocked(executeShoutoutForTwitch).mockResolvedValue(undefined);
     sendMessage('#streamer', 'alice', '!so alice');
-    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', 'alice', false);
+    expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', 'alice', false, '!so');
   });
 });
 

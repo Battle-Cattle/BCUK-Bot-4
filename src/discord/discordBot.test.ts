@@ -222,8 +222,8 @@ describe('startDiscordBot — messageCreate handler', () => {
     const cb = getMessageCreateCb();
     const msg = { author: { bot: false, username: 'Alice' }, guildId: 'guild-id', content: '!test', member: { displayName: 'Alice' } };
     cb(msg);
-    expect(vi.mocked(commands.handleCommand)).toHaveBeenCalledWith('!test', 'discord', 'guild-id');
-    expect(vi.mocked(customCmds.executeCustomCommandForDiscord)).toHaveBeenCalledWith(msg, 'Alice', 'guild-id');
+    expect(vi.mocked(commands.handleCommand)).toHaveBeenCalledWith('!test', 'discord', 'guild-id', '!test');
+    expect(vi.mocked(customCmds.executeCustomCommandForDiscord)).toHaveBeenCalledWith(msg, 'Alice', 'guild-id', '!test');
   });
 
   it('dispatches to the health command handler for registered guild messages', async () => {
@@ -231,7 +231,7 @@ describe('startDiscordBot — messageCreate handler', () => {
     const cb = getMessageCreateCb();
     const msg = { author: { bot: false, username: 'Alice' }, guildId: 'guild-id', content: '!health', member: { displayName: 'Alice' } };
     cb(msg);
-    expect(vi.mocked(health.executeHealthCommandForDiscord)).toHaveBeenCalledWith(msg);
+    expect(vi.mocked(health.executeHealthCommandForDiscord)).toHaveBeenCalledWith(msg, '!health');
   });
 });
 

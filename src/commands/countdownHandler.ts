@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { extractCommand } from './commandUtils';
+import { resolveCommand } from './commandUtils';
 import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
 import { createCooldownGate } from './cooldownGate';
 
@@ -41,9 +41,15 @@ export function registerCountdownTwitchRuntime(runtime: CountdownTwitchRuntime):
  *
  * @param channel - Twitch channel to send the countdown steps to.
  * @param rawMessage - Raw chat message text.
+ * @param precomputedCommand - Already-parsed command token from the caller's single
+ *   `extractCommand` call for this message, or omit to parse `rawMessage` here.
  */
-export async function executeCountdownForTwitch(channel: string, rawMessage: string): Promise<void> {
-  if (extractCommand(rawMessage) !== COUNTDOWN_COMMAND) return;
+export async function executeCountdownForTwitch(
+  channel: string,
+  rawMessage: string,
+  precomputedCommand?: string | null,
+): Promise<void> {
+  if (resolveCommand(rawMessage, precomputedCommand) !== COUNTDOWN_COMMAND) return;
   const runtime = countdownRuntime.get();
   if (!runtime) return;
   if (!countdownCooldown.tryClaim(`twitch:${channel}`)) return;

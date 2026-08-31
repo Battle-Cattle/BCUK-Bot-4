@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, Guild, Partials } from 'discord.js';
 import { DISCORD_TOKEN } from '../shared/config';
 import { handleCommand, forgetGuildCommandState } from '../commands/commandRouter';
-import { fireAndForget } from '../commands/commandUtils';
+import { fireAndForget, extractCommand } from '../commands/commandUtils';
 import { executeCustomCommandForDiscord, forgetGuildCustomCommandCooldown } from '../commands/customCommandHandler';
 import { executeCounterCommandForDiscord, forgetGuildCounterCooldown } from '../commands/counterHandler';
 import { setDiscordReady, clearVoiceStatus } from '../shared/statusStore';
@@ -166,11 +166,14 @@ export function startDiscordBot(): void {
 
     const displayName = message.member?.displayName ?? message.author.username;
     const guildId = message.guildId;
+    // Parsed once and threaded into every handler below instead of each one re-parsing
+    // the same message independently.
+    const command = extractCommand(message.content);
 
-    fireAndForget(executeCustomCommandForDiscord(message, displayName, guildId), 'Custom command error', log);
-    fireAndForget(executeCounterCommandForDiscord(message, displayName), 'Counter command error', log);
-    fireAndForget(handleCommand(message.content, 'discord', guildId), 'Command handler error', log);
-    fireAndForget(executeHealthCommandForDiscord(message), 'Health command error', log);
+    fireAndForget(executeCustomCommandForDiscord(message, displayName, guildId, command), 'Custom command error', log);
+    fireAndForget(executeCounterCommandForDiscord(message, displayName, command), 'Counter command error', log);
+    fireAndForget(handleCommand(message.content, 'discord', guildId, command), 'Command handler error', log);
+    fireAndForget(executeHealthCommandForDiscord(message, command), 'Health command error', log);
   });
 
   // Bootstrap: when the bot is added to a server for the first time, record the

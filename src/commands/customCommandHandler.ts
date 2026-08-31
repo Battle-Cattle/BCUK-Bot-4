@@ -4,7 +4,7 @@ import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from '..
 
 const log = createLogger('CustomCmd');
 import { getSharedChatSession } from '../twitch/twitchApi';
-import { extractCommand, extractArgs } from './commandUtils';
+import { extractArgs, resolveCommand } from './commandUtils';
 import { isDiscordNotFoundError, NO_MENTIONS } from '../discord/discordUtils';
 import type { MultiTwitchGroupInfo } from '../twitch/monitor/twitchMonitorTypes';
 import { fillTemplate } from '../shared/textTemplate';
@@ -211,14 +211,17 @@ async function broadcastToActiveChannels(sourceChannel: string, command: string,
  * @param message - The Discord message to inspect and, if matched, reply to.
  * @param username - Display name for `{user}` substitution; null or omitted if unknown.
  * @param guildId - Explicit guild ID for override-aware lookup; falls back to message.guildId.
+ * @param precomputedCommand - Already-parsed command token from the caller's single
+ *   `extractCommand` call for this message, or omit to parse `message.content` here.
  * @returns Resolves when the command is handled (or skipped).
  */
 export async function executeCustomCommandForDiscord(
   message: Message,
   username?: string | null,
   guildId?: string,
+  precomputedCommand?: string | null,
 ): Promise<void> {
-  const command = extractCommand(message.content);
+  const command = resolveCommand(message.content, precomputedCommand);
   if (!command) return;
 
   // Prefer the explicitly threaded guildId; fall back to the message's own guild.
@@ -263,14 +266,17 @@ export async function executeCustomCommandForDiscord(
  * @param channel - Twitch channel login the message was received on.
  * @param rawMessage - Raw chat message text.
  * @param username - Display name for `{user}` substitution; null or omitted if unknown.
+ * @param precomputedCommand - Already-parsed command token from the caller's single
+ *   `extractCommand` call for this message, or omit to parse `rawMessage` here.
  * @returns Resolves when the command is handled (or skipped).
  */
 export async function executeCustomCommandForTwitch(
   channel: string,
   rawMessage: string,
   username?: string | null,
+  precomputedCommand?: string | null,
 ): Promise<void> {
-  const command = extractCommand(rawMessage);
+  const command = resolveCommand(rawMessage, precomputedCommand);
   if (!command) return;
 
   const result = await lookupCommand(command, (cmd) => getCustomCommandForTwitchChannel(channel, cmd));

@@ -1,6 +1,6 @@
 import type { Message } from 'discord.js';
 import { createLogger } from '../shared/logger';
-import { extractCommand } from './commandUtils';
+import { resolveCommand } from './commandUtils';
 import { findOwnerUser } from '../db';
 import { getHealthSnapshot, type HealthSnapshot } from '../shared/healthStore';
 import { isDiscordNotFoundError } from '../discord/discordUtils';
@@ -114,10 +114,12 @@ function formatHealthSummary(snapshot: HealthSnapshot): string {
  * closed), that's logged and swallowed rather than thrown. The acknowledgement reply is likewise
  * swallowed on failure (e.g. the triggering message was deleted before it could be sent).
  * @param message - The Discord message to check and, if it's an owner-issued `!health`, respond to.
+ * @param precomputedCommand - Already-parsed command token from the caller's single
+ *   `extractCommand` call for this message, or omit to parse `message.content` here.
  * @returns Resolves once the command has been handled (or ignored as a non-match).
  */
-export async function executeHealthCommandForDiscord(message: Message): Promise<void> {
-  if (extractCommand(message.content) !== TRIGGER) return;
+export async function executeHealthCommandForDiscord(message: Message, precomputedCommand?: string | null): Promise<void> {
+  if (resolveCommand(message.content, precomputedCommand) !== TRIGGER) return;
 
   let owner;
   try {

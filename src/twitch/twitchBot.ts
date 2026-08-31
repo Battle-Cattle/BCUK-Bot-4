@@ -7,7 +7,7 @@ import { executeCounterCommandForTwitch } from '../commands/counterHandler';
 import { executeMultiCommandForTwitch } from '../commands/multiCommandHandler';
 import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
-import { fireAndForget } from '../commands/commandUtils';
+import { fireAndForget, extractCommand } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
 import { recordTwitchChatConnected } from '../shared/healthStore';
@@ -222,17 +222,20 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
 
     const displayName = msg.userInfo.displayName ?? user ?? null;
     const isMod = msg.userInfo.isMod || msg.userInfo.isBroadcaster;
+    // Parsed once and threaded into every handler below instead of each one re-parsing
+    // the same message independently.
+    const command = extractCommand(message);
 
-    fireAndForget(executeCustomCommandForTwitch(normalizedChannel, message, displayName), 'Custom command error', log);
-    fireAndForget(executeCounterCommandForTwitch(normalizedChannel, message, displayName), 'Counter command error', log);
-    fireAndForget(executeMultiCommandForTwitch(normalizedChannel, message, displayName), 'Multi command error', log);
-    fireAndForget(executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod), 'Shoutout error', log);
+    fireAndForget(executeCustomCommandForTwitch(normalizedChannel, message, displayName, command), 'Custom command error', log);
+    fireAndForget(executeCounterCommandForTwitch(normalizedChannel, message, displayName, command), 'Counter command error', log);
+    fireAndForget(executeMultiCommandForTwitch(normalizedChannel, message, displayName, command), 'Multi command error', log);
+    fireAndForget(executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod, command), 'Shoutout error', log);
     fireAndForget(
-      resolveGuildIdForTwitchCommand(normalizedChannel).then((guildId) => handleCommand(message, 'twitch', guildId)),
+      resolveGuildIdForTwitchCommand(normalizedChannel).then((guildId) => handleCommand(message, 'twitch', guildId, command)),
       'Command handler error',
       log,
     );
-    fireAndForget(executeCountdownForTwitch(normalizedChannel, message), 'Countdown error', log);
+    fireAndForget(executeCountdownForTwitch(normalizedChannel, message, command), 'Countdown error', log);
   } catch (err) {
     log.error('Unexpected error in message handler:', err);
   }

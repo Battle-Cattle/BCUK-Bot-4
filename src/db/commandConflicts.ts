@@ -147,7 +147,7 @@ async function hasSingleTwitchAssignmentOverlap(
          OR (
            other_u.twitch_name IS NOT NULL
            AND other_u.is_twitch_bot_enabled = 1
-           AND LOWER(other_u.twitch_name) = LOWER(current_u.twitch_name)
+           AND other_u.twitch_name = current_u.twitch_name
          )
        )
      LIMIT 1`,
@@ -278,7 +278,7 @@ async function hasTwitchChannelTriggerConflict(
          OR (
            u.twitch_name IS NOT NULL
            AND u.is_twitch_bot_enabled = 1
-           AND LOWER(u.twitch_name) = ?
+           AND u.twitch_name = ?
          )
        )
      LIMIT 1`,
@@ -483,7 +483,7 @@ async function hasAnyTwitchChannelTriggerConflict(
          OR (
            u.twitch_name IS NOT NULL
            AND u.is_twitch_bot_enabled = 1
-           AND LOWER(u.twitch_name) IN (${buildInClausePlaceholders(normalizedTwitchNames.length)})
+           AND u.twitch_name IN (${buildInClausePlaceholders(normalizedTwitchNames.length)})
          )
        )
      LIMIT 1`,

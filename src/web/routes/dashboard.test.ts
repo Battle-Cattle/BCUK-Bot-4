@@ -135,6 +135,33 @@ describe('GET /', () => {
     expect(res.status).toBe(500);
   });
 
+  it('starts getGuildScopedStatus concurrently with the usage-stat and streamer queries, not sequentially before them', async () => {
+    let resolveStatus!: (value: typeof STATUS) => void;
+    vi.mocked(getGuildScopedStatus).mockReturnValue(new Promise((resolve) => { resolveStatus = resolve; }) as any);
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+
+    const responsePromise = supertest(buildApp({ discordId: '100' })).get('/');
+    // supertest's Test is a lazy thenable — the request isn't actually dispatched until it's
+    // awaited/`.then()`ed, so attach a no-op handler now to kick it off without consuming the
+    // promise this test still awaits below.
+    responsePromise.catch(() => {});
+
+    // If getGuildScopedStatus were awaited before the Promise.all batch (rather than inside
+    // it), these wouldn't have been called yet — they'd still be waiting on that await. Give
+    // the request time to reach the route handler and start every call in the batch, then
+    // assert they've all started even though getGuildScopedStatus's own promise is still
+    // unresolved.
+    await vi.waitFor(() => expect(getStreamerByDiscordId).toHaveBeenCalled());
+    expect(getSfxTriggerCount).toHaveBeenCalled();
+    expect(getCustomCommandCount).toHaveBeenCalled();
+    expect(getCounterCount).toHaveBeenCalled();
+
+    resolveStatus(STATUS);
+    const res = await responsePromise;
+    expect(res.status).toBe(200);
+    expect(res.body.status).toEqual(STATUS);
+  });
+
   it('loads and maps recent events when a streamer exists', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 42, eventsub_access_token: null, twitch_name: null } as any);
     const occurredAt = new Date('2026-07-17T12:00:00Z');

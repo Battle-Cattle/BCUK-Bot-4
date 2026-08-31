@@ -7,7 +7,7 @@ import { SFX_FOLDER, GLOBAL_COOLDOWN_MS } from '../shared/config';
 import { setVoicePlaying } from '../shared/statusStore';
 import { safeResolve } from '../shared/pathUtils';
 import { getOrCreate } from '../shared/mapUtils';
-import { extractCommand } from './commandUtils';
+import { resolveCommand } from './commandUtils';
 
 const log = createLogger('CommandRouter');
 
@@ -128,15 +128,18 @@ function tryClaimGuildSlot(
  *   connected to voice anywhere) — the command is skipped, with a warning
  *   logged only if the message actually matches a known trigger (most chat
  *   messages don't, and would otherwise spam this warning on every message).
+ * @param precomputedCommand - Already-parsed command token from the caller's single
+ *   `extractCommand` call for this message, or omit to parse `rawMessage` here.
  */
 export async function handleCommand(
   rawMessage: string,
   source: 'twitch' | 'discord',
   guildId: string | null,
+  precomputedCommand?: string | null,
 ): Promise<void> {
   // Extract the first word of the message — this is matched directly against
   // trigger_command in the DB, which already includes whatever prefix is used
-  const command = extractCommand(rawMessage);
+  const command = resolveCommand(rawMessage, precomputedCommand);
   if (!command) return;
 
   if (guildId === null) {
