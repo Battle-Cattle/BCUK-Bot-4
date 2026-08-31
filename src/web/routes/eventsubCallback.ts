@@ -6,6 +6,7 @@ import { TWITCH_EVENTSUB_REDIRECT_URI } from '../../shared/config';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { clearAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 import { logAndRedirectError } from './errorHandling';
+import { oauthStateMatches } from '../csrf';
 
 const log = createLogger('Web');
 const router = Router();
@@ -49,7 +50,7 @@ router.get('/twitch/eventsub/callback', async (req, res) => {
   if (!code || !state || !storedOAuth || !streamerId) {
     return res.redirect('/user/settings?error=eventsub_oauth_state_mismatch');
   }
-  if (state !== storedOAuth.value || Date.now() > storedOAuth.expiresAt) {
+  if (!oauthStateMatches(state, storedOAuth.value) || Date.now() > storedOAuth.expiresAt) {
     return res.redirect('/user/settings?error=eventsub_oauth_state_mismatch');
   }
 

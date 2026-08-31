@@ -21,6 +21,7 @@ vi.mock('../../discord/discordBot', () => ({
 }));
 vi.mock('../csrf', () => ({
   csrfProtection: (_req: any, _res: any, next: any) => next(),
+  oauthStateMatches: (submitted: string, stored: string) => submitted === stored,
 }));
 vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),

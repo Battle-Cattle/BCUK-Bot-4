@@ -14,7 +14,7 @@ import {
   type DbUser,
 } from '../../db';
 import { fetchMemberDisplayName } from '../../discord/discordBot';
-import { csrfProtection } from '../csrf';
+import { csrfProtection, oauthStateMatches } from '../csrf';
 import { requireAuth } from '../middleware';
 import { filterQueryParam, isLoopbackRedirectUri } from './validation';
 import { renderError, renderView } from './viewHelpers';
@@ -34,23 +34,6 @@ interface DiscordProfile {
 
 /** Error codes `GET /auth/login` accepts via `?error=`, both originating from `POST /guild/select`. */
 const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds']);
-
-/**
- * Constant-time comparison of the submitted OAuth `state` against the session's stored value
- * (see `GET /discord` below, which generates it as a fixed-length hex string), mirroring
- * `csrf.ts`'s `timingSafeEqual` comparison for CSRF tokens. Compares UTF-8 byte length rather
- * than JS string length before calling `timingSafeEqual` — it requires equal-length buffers,
- * and a submitted value containing multi-byte characters can have the same string length as
- * `stored` while its UTF-8 byte length differs, which would otherwise throw instead of
- * returning false. The length check up front doesn't leak anything — the expected length is
- * public.
- */
-function oauthStateMatches(submitted: string, stored: string): boolean {
-  const submittedBuf = Buffer.from(submitted, 'utf8');
-  const storedBuf = Buffer.from(stored, 'utf8');
-  if (submittedBuf.length !== storedBuf.length) return false;
-  return crypto.timingSafeEqual(submittedBuf, storedBuf);
-}
 
 // ─── Redirect to Discord OAuth2 ─────────────────────────────────────────────
 

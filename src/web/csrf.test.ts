@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { csrfProtection } from './csrf';
+import { csrfProtection, oauthStateMatches } from './csrf';
 
 const SESSION_TOKEN = 'a'.repeat(64); // 32 hex bytes
 
@@ -133,5 +133,19 @@ describe('csrfProtection — query string token is ignored', () => {
       .post(`/test?_csrf=${SESSION_TOKEN}`);
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('EBADCSRFTOKEN');
+  });
+});
+
+describe('oauthStateMatches', () => {
+  it('returns true when submitted equals stored', () => {
+    expect(oauthStateMatches('abc123', 'abc123')).toBe(true);
+  });
+
+  it('returns false when submitted differs from stored', () => {
+    expect(oauthStateMatches('abc123', 'xyz789')).toBe(false);
+  });
+
+  it('returns false without throwing when byte lengths differ (multi-byte input)', () => {
+    expect(oauthStateMatches('é', 'e')).toBe(false);
   });
 });

@@ -17,6 +17,24 @@ function csrfTokenBuffer(token: string): Buffer | null {
   return CSRF_TOKEN_HEX_PATTERN.test(token) ? Buffer.from(token, 'hex') : null;
 }
 
+/**
+ * Constant-time comparison of a submitted OAuth `state` against the session's stored value.
+ * Compares UTF-8 byte length rather than JS string length before calling `timingSafeEqual` — it
+ * requires equal-length buffers, and a submitted value containing multi-byte characters can have
+ * the same string length as `stored` while its UTF-8 byte length differs, which would otherwise
+ * throw instead of returning false. The length check up front doesn't leak anything — the
+ * expected length is public.
+ *
+ * Shared by the OAuth callback routes (`auth.ts`, `eventsubCallback.ts`) — import this rather
+ * than duplicating it.
+ */
+export function oauthStateMatches(submitted: string, stored: string): boolean {
+  const submittedBuf = Buffer.from(submitted, 'utf8');
+  const storedBuf = Buffer.from(stored, 'utf8');
+  if (submittedBuf.length !== storedBuf.length) return false;
+  return crypto.timingSafeEqual(submittedBuf, storedBuf);
+}
+
 function createCsrfError(): Error & { code: string } {
   const error = new Error('Invalid CSRF token') as Error & { code: string };
   error.code = 'EBADCSRFTOKEN';
