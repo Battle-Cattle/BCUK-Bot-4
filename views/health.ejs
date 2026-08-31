@@ -14,6 +14,7 @@ function htmlAttrJson(value) {
 }
 %>
 </head>
+<!-- Unescaped EJS output here is intentional: htmlAttrJson() already HTML-escapes its result via manual character replacement, so the escaping EJS tag would double-escape the attribute value. -->
 <body data-initial-health="<%- htmlAttrJson(health) %>">
   <%- include('partials/nav') %>
 
