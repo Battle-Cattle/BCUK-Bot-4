@@ -79,30 +79,6 @@ router.get('/discord', (req, res) => {
 // ─── OAuth2 callback ─────────────────────────────────────────────────────────
 
 /**
- * GET /auth/discord/callback — completes the Discord OAuth2 flow. Validates the
- * `state` param against the session, exchanges the `code` for an access token,
- * fetches the Discord profile, and checks the user whitelist. The token-exchange
- * and profile-fetch requests go through `fetchWithRetry`, which retries transient
- * 502/503/504 responses from Discord's API instead of failing the login outright.
- * Then either:
- * creates/refreshes the dashboard session as usual (resolving accessible guilds,
- * syncing the display name, regenerating the session), or — if this login was
- * initiated via the companion app's loopback flow (`req.session.companionOAuth`
- * set by companionAuth.ts) — skips session creation entirely and redirects to
- * the companion app's `redirectUri` with a one-time code instead. The
- * `discord_name` sync is serialized per Discord ID through `runUserMutation`,
- * so it can't race a concurrent admin edit or the name-refresh job on the same
- * user row.
- * @param req - Express request; reads `code`/`state` query params and the stored
- *   `oauthState` session value.
- * @param res - Express response; redirects to `/` on success, or to the
- *   companion app's `redirectUri` for the loopback flow. Renders a 400 error
- *   page when the OAuth state is invalid/missing or the companion redirectUri
- *   fails the loopback re-validation check (defense-in-depth), a 403 error page
- *   when the user is not whitelisted or has no accessible guild, or a 500 error
- *   page if any step of the exchange/profile-fetch/session-save fails.
- */
-/**
  * Exchanges an OAuth2 `code` for a Discord access token, via `fetchWithRetry`
  * (retries transient 502/503/504 responses from Discord's API).
  * @param code - The authorization code from Discord's OAuth2 redirect.
@@ -187,27 +163,27 @@ async function tryCompleteCompanionLogin(req: Request, res: Response, discordId:
  * Best-effort sync of the user's display name from Discord (display names are
  * per-guild; this looks up one guild at login time), persisting the change
  * through `runUserMutation` if it differs from the stored name. Never throws —
- * a failed lookup or write just falls back to the previously stored name.
+ * a failed lookup or write just falls back to the previously stored name, so
+ * the session never shows a name that didn't actually get persisted.
  * @param profile - The Discord profile from `fetchDiscordProfile`.
  * @param dbUser - The whitelisted user row from `findUser`.
  * @param lookupGuildId - Guild ID to resolve the per-guild display name against.
  * @returns The synced (or unchanged) display name.
  */
 async function syncDiscordName(profile: DiscordProfile, dbUser: DbUser, lookupGuildId: string): Promise<string> {
-  let syncedDiscordName = dbUser.discord_name?.trim() || profile.username;
+  const storedDiscordName = dbUser.discord_name?.trim() || profile.username;
   try {
     const displayName = await fetchMemberDisplayName(profile.id, lookupGuildId, true);
     const trimmedDisplayName = displayName?.trim();
-    if (trimmedDisplayName) {
-      syncedDiscordName = trimmedDisplayName;
+    const candidateName = trimmedDisplayName || storedDiscordName;
+    if (candidateName !== dbUser.discord_name) {
+      await runUserMutation(profile.id, () => updateDiscordName(profile.id, candidateName));
     }
-    if (syncedDiscordName !== dbUser.discord_name) {
-      await runUserMutation(profile.id, () => updateDiscordName(profile.id, syncedDiscordName));
-    }
+    return candidateName;
   } catch (syncErr) {
     log.warn('Non-blocking discord_name sync failed:', syncErr);
+    return storedDiscordName;
   }
-  return syncedDiscordName;
 }
 
 /**
@@ -263,6 +239,7 @@ function buildSessionUser(
  * given user payload onto the fresh session.
  * @param req - Express request whose session is regenerated and saved.
  * @param userData - The `SessionUser` payload to store.
+ * @returns Resolves once the regenerated session has been saved.
  */
 function saveSessionUser(req: Request, userData: SessionUser): Promise<void> {
   return new Promise<void>((resolve, reject) => {
@@ -274,6 +251,30 @@ function saveSessionUser(req: Request, userData: SessionUser): Promise<void> {
   });
 }
 
+/**
+ * GET /auth/discord/callback — completes the Discord OAuth2 flow. Validates the
+ * `state` param against the session, exchanges the `code` for an access token,
+ * fetches the Discord profile, and checks the user whitelist. The token-exchange
+ * and profile-fetch requests go through `fetchWithRetry`, which retries transient
+ * 502/503/504 responses from Discord's API instead of failing the login outright.
+ * Then either:
+ * creates/refreshes the dashboard session as usual (resolving accessible guilds,
+ * syncing the display name, regenerating the session), or — if this login was
+ * initiated via the companion app's loopback flow (`req.session.companionOAuth`
+ * set by companionAuth.ts) — skips session creation entirely and redirects to
+ * the companion app's `redirectUri` with a one-time code instead. The
+ * `discord_name` sync is serialized per Discord ID through `runUserMutation`,
+ * so it can't race a concurrent admin edit or the name-refresh job on the same
+ * user row.
+ * @param req - Express request; reads `code`/`state` query params and the stored
+ *   `oauthState` session value.
+ * @param res - Express response; redirects to `/` on success, or to the
+ *   companion app's `redirectUri` for the loopback flow. Renders a 400 error
+ *   page when the OAuth state is invalid/missing or the companion redirectUri
+ *   fails the loopback re-validation check (defense-in-depth), a 403 error page
+ *   when the user is not whitelisted or has no accessible guild, or a 500 error
+ *   page if any step of the exchange/profile-fetch/session-save fails.
+ */
 router.get('/discord/callback', async (req, res) => {
   // req.query values are `string | string[] | ParsedQs | ParsedQs[] | undefined` at runtime
   // (e.g. `?state=a&state=b` parses to an array) — narrow with typeof rather than an unchecked
