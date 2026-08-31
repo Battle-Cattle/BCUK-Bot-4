@@ -146,6 +146,6 @@ describe('oauthStateMatches', () => {
   });
 
   it('returns false without throwing when byte lengths differ (multi-byte input)', () => {
-    expect(oauthStateMatches('é', 'ee')).toBe(false);
+    expect(oauthStateMatches('é', 'e')).toBe(false);
   });
 });
