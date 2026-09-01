@@ -72,6 +72,28 @@ function markPartedIfCurrent(channel: string, generation: number): void {
 }
 
 /**
+ * Captures the current {@link connectionGeneration}, for a later staleness check via
+ * {@link isGenerationStale} once an async join/part call issued now has settled. Purely a naming
+ * aid over reading `connectionGeneration` directly — see {@link connectionGeneration}'s doc for
+ * why this snapshot-and-recheck exists at all.
+ * @returns The connection generation at the moment of the call.
+ */
+function captureGeneration(): number {
+  return connectionGeneration;
+}
+
+/**
+ * True if `generation` — captured earlier via {@link captureGeneration} — no longer matches the
+ * current {@link connectionGeneration}, i.e. a disconnect happened while the caller's async call
+ * was in flight and its outcome should be treated as no longer reflecting the current connection.
+ * @param generation - The connection generation captured before the async call was issued.
+ * @returns True if a disconnect has happened since `generation` was captured.
+ */
+function isGenerationStale(generation: number): boolean {
+  return generation !== connectionGeneration;
+}
+
+/**
  * Bundles this module's live client/membership state for {@link compensateIfStale} — see
  * `twitchChannelNetworkOps.ts`'s {@link MembershipDeps}. Built fresh at each join/part call site
  * so `runExclusive` closes over the current `channel`, and so `markJoined`/`markParted` close over
@@ -162,7 +184,7 @@ async function partStaleChannel(channel: string): Promise<void> {
     setTwitchChannel(channel, false);
     return;
   }
-  const generation = connectionGeneration;
+  const generation = captureGeneration();
   const partCall = partAsync(_client, channel);
   compensateIfStale(membershipDeps(), channel, partCall, 'part');
   await withTimeout(partCall, JOIN_PART_TIMEOUT_MS, 'Twitch part');
@@ -191,9 +213,9 @@ async function joinMissingChannel(channel: string): Promise<void> {
     cacheChannelUserId(channel);
     return;
   }
-  const generation = connectionGeneration;
+  const generation = captureGeneration();
   await throttledJoin(_client, channel, (call) => compensateIfStale(membershipDeps(), channel, call, 'join'));
-  if (generation !== connectionGeneration) {
+  if (isGenerationStale(generation)) {
     // The connection cycled while this join was in flight — its success no longer reflects the
     // current connection's real membership. Applying it here (status/hook/cache) would be
     // misleading; reconcileJoinedChannels() will retry this channel on its own on the current
@@ -293,7 +315,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
 
     activeChannels.add(normalized);
     setTwitchChannel(normalized, false);
-    const generation = connectionGeneration;
+    const generation = captureGeneration();
     try {
       await throttledJoin(_client, normalized, (call) => compensateIfStale(membershipDeps(), normalized, call, 'join'));
     } catch (err) {
@@ -307,7 +329,7 @@ export async function joinTwitchChannel(channel: string): Promise<void> {
       log.error(`Failed to join channel ${normalized}:`, err);
       throw err;
     }
-    if (generation !== connectionGeneration) {
+    if (isGenerationStale(generation)) {
       // The connection cycled while this join was in flight — see joinMissingChannel's identical
       // guard for why applying it here would be misleading; reconcileJoinedChannels() will retry
       // this still-desired channel on the current connection.
@@ -349,7 +371,7 @@ export async function partTwitchChannel(channel: string): Promise<void> {
       activeChannelUserIds.delete(normalized);
       setTwitchChannel(normalized, false);
       if (isChannelJoined(normalized)) {
-        const generation = connectionGeneration;
+        const generation = captureGeneration();
         const partCall = partAsync(_client, normalized);
         compensateIfStale(membershipDeps(), normalized, partCall, 'part');
         await withTimeout(partCall, JOIN_PART_TIMEOUT_MS, 'Twitch part');
