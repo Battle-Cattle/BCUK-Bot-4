@@ -1,4 +1,4 @@
-export type { RefreshingLookupCache, ManagedLookupCacheOptions, ManagedLookupCache } from './db/lookupCache';
+export type { RefreshingLookupCache } from './db/lookupCache';
 export {
   createManagedLookupCache,
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
@@ -38,15 +38,14 @@ export async function pingDb(): Promise<boolean> {
 export {
   getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember, upsertGuild,
 } from './db/guilds';
-export type { DbGuild, DbGuildMembership } from './db/guilds';
+export type { DbGuild } from './db/guilds';
 
 export {
   getMemberAccessLevel, setMemberAccessLevel,
   removeGuildMember, getEffectiveAccessLevelForUser,
 } from './db/guildMembers';
-export type { DbGuildMember } from './db/guildMembers';
 
-export { getOverridesForGuild, getAllOverrides } from './db/guildCommandOverrides';
+export { getOverridesForGuild } from './db/guildCommandOverrides';
 export type { DbGuildCommandOverride } from './db/guildCommandOverrides';
 
 import {
@@ -104,7 +103,7 @@ export {
   findUser, findUsersByIds, findUserByTwitchName, findOwnerUser, getAllUsers, getGuildMemberUsers,
   updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers,
 } from './db/users';
-export type { AccessLevelValue, DbUser, TwitchLinkedUser } from './db/users';
+export type { AccessLevelValue, DbUser } from './db/users';
 
 import { upsertUserRecord, setTwitchBotEnabledRecord } from './db/users';
 
@@ -249,14 +248,12 @@ export {
   CommandNotFoundError, CommandConflictError, isMysqlDuplicateEntryError,
   isCustomCommandTriggerTaken,
 } from './db/commandLocks';
-export { ReservedCommandError, RESERVED_BUILT_IN_COMMANDS } from './db/reservedCommands';
-export type { SqlExecutor } from './db/commandLocks';
+export { ReservedCommandError } from './db/reservedCommands';
 
 // ─── Counter commands ───────────────────────────────────────────────────────
 
 export { CounterNotFoundError, getAllCounters, getCounterCount, getCounterHistory } from './db/counters';
-export type { DbCounter, CounterMatchType, DbMatchedCounter, UpdateCounterInput, CounterHistoryEntry } from './db/counters';
-export { invalidateCounterLookupCache, findCounterByCommand, isCounterCommandTaken } from './db/counterCache';
+export { findCounterByCommand, isCounterCommandTaken } from './db/counterCache';
 
 import {
   addCounter as addCounterRecord,
@@ -360,7 +357,7 @@ export type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 
 // ─── Alerts overlay ─────────────────────────────────────────────────────────
 
-export type { AlertConfig, AlertEventType, TextAnimation } from './db/alertConfig';
+export type { AlertEventType, TextAnimation } from './db/alertConfig';
 export { ALERT_EVENT_TYPES, ALERT_TEXT_ANIMATIONS } from './db/alertConfig';
 export { getAlertConfigsForStreamer, getAlertConfig, getEnabledAlertEventTypesBatch } from './db/alertConfig';
 export { findCachedAlertConfig } from './db/alertConfigCache';
@@ -445,7 +442,7 @@ export { recordStreamerEvent, getRecentStreamerEvents } from './db/eventLog';
 
 // ─── SFX ────────────────────────────────────────────────────────────────────
 
-export type { SfxTrigger, SfxFile, SfxTriggerRow, PublicSfxTrigger, SfxCategory } from './db/sfx';
+export type { SfxTrigger, SfxFile, PublicSfxTrigger } from './db/sfx';
 export {
   findTrigger, findSoundFiles, getAllSfxTriggers, getSfxTriggerCount, getPublicSfxTriggers,
   getAllCategories, createCategory, renameCategory, deleteCategory, getSfxFileById,
@@ -552,7 +549,6 @@ export async function deleteSfxFile(id: number): Promise<string | null> {
 
 // ─── Overlay videos ─────────────────────────────────────────────────────────
 
-export type { OverlayVideo, OverlayReward, OverlayRewardWithVideos, OverlayWeightedVideo } from './db/overlayVideos';
 export {
   getVideosForStreamer, addVideo, getVideoById, deleteVideo,
   getRewardsForStreamer, upsertReward, setRewardVideos, deleteReward,
@@ -561,7 +557,7 @@ export {
 
 // ─── Channel point pricing ───────────────────────────────────────────────────
 
-export type { RewardPricingRow, RewardPricingInput, PricingUpdateFields, StreamerPricingSettings } from './db/rewardPricing';
+export type { RewardPricingRow, StreamerPricingSettings } from './db/rewardPricing';
 export {
   getPricingForReward, getPricingConfigsForStreamer, getAllEnabledPricingRows,
   upsertPricingConfig, recordPricingUpdate, deletePricingConfig, markPricingUnsupported,
@@ -569,7 +565,6 @@ export {
   DEFAULT_PRICING_COOLDOWN_SECONDS,
 } from './db/rewardPricing';
 
-export type { RewardPricingHistoryPoint } from './db/rewardPricingHistory';
 export { recordPricingHistory, getPricingHistoryForRewards } from './db/rewardPricingHistory';
 
 // ─── Timer commands ─────────────────────────────────────────────────────────
@@ -606,7 +601,6 @@ export {
 
 // ─── Companion App ───────────────────────────────────────────────────────────
 
-export type { CompanionTokenStatus } from './db/companionTokens';
 export {
   issueToken,
   findDiscordIdByTokenHash,
