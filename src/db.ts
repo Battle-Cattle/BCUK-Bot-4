@@ -55,15 +55,17 @@ import {
 } from './db/guildCommandOverrides';
 
 /**
- * Runs `operation`, then unconditionally invalidates the custom-command lookup cache.
- * Shared by the facade wrappers below that always need a post-write invalidation —
- * `users.ts`/`guildCommandOverrides.ts` are pure DB layers with no cache knowledge.
+ * Runs `operation`, then unconditionally calls `invalidate`. Shared by the facade wrappers
+ * below that always need a post-write cache invalidation — the underlying DB modules
+ * (`users.ts`, `guildCommandOverrides.ts`, `customCommands.ts`, `counters.ts`, `alertConfig.ts`,
+ * `sfx.ts`) are pure DB layers with no cache knowledge of their own.
  * @param operation - The DB write to perform.
+ * @param invalidate - The cache-invalidation callback to run once `operation` succeeds.
  * @returns The value returned by `operation`.
  */
-async function withInvalidation<T>(operation: () => Promise<T>): Promise<T> {
+async function withInvalidation<T>(operation: () => Promise<T>, invalidate: () => void): Promise<T> {
   const result = await operation();
-  invalidateCustomCommandLookupCache();
+  invalidate();
   return result;
 }
 
@@ -81,7 +83,7 @@ export async function upsertOverride(
   commandId: number,
   override: { isDisabled: boolean; output: string | null },
 ): Promise<void> {
-  await withInvalidation(() => upsertOverrideRecord(guildId, commandId, override));
+  await withInvalidation(() => upsertOverrideRecord(guildId, commandId, override), invalidateCustomCommandLookupCache);
 }
 
 /**
@@ -92,7 +94,7 @@ export async function upsertOverride(
  * @returns Resolves once the deletion (and cache invalidation) completes.
  */
 export async function removeOverride(guildId: string, commandId: number): Promise<void> {
-  await withInvalidation(() => removeOverrideRecord(guildId, commandId));
+  await withInvalidation(() => removeOverrideRecord(guildId, commandId), invalidateCustomCommandLookupCache);
 }
 
 // ─── User / access-level ────────────────────────────────────────────────────
@@ -137,7 +139,7 @@ export async function upsertUser(
  * @returns Resolves once the update (and cache invalidation) completes.
  */
 export async function updateTwitchBotEnabled(discordId: string, enabled: boolean): Promise<void> {
-  await withInvalidation(() => setTwitchBotEnabledRecord(discordId, enabled));
+  await withInvalidation(() => setTwitchBotEnabledRecord(discordId, enabled), invalidateCustomCommandLookupCache);
 }
 
 // ─── Custom commands ────────────────────────────────────────────────────────
@@ -176,7 +178,10 @@ export {
 export async function addCustomCommand(
   triggerString: string, output: string, isDiscordEnabled: boolean, isMultiTwitch: boolean,
 ): Promise<number> {
-  return withInvalidation(() => addCustomCommandRecord(triggerString, output, isDiscordEnabled, isMultiTwitch));
+  return withInvalidation(
+    () => addCustomCommandRecord(triggerString, output, isDiscordEnabled, isMultiTwitch),
+    invalidateCustomCommandLookupCache,
+  );
 }
 
 /**
@@ -193,6 +198,7 @@ export async function updateCustomCommand(
 ): Promise<void> {
   return withInvalidation(
     () => updateCustomCommandRecord(commandId, triggerString, output, isDiscordEnabled, isMultiTwitch),
+    invalidateCustomCommandLookupCache,
   );
 }
 
@@ -202,7 +208,7 @@ export async function updateCustomCommand(
  * @returns Resolves once the deletion (and cache invalidation) completes.
  */
 export async function removeCustomCommand(commandId: number): Promise<void> {
-  return withInvalidation(() => removeCustomCommandRecord(commandId));
+  return withInvalidation(() => removeCustomCommandRecord(commandId), invalidateCustomCommandLookupCache);
 }
 
 /**
@@ -212,7 +218,7 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
  * @returns Resolves once the assignment (and cache invalidation) completes.
  */
 export async function assignUserToCommand(commandId: number, discordId: string): Promise<void> {
-  return withInvalidation(() => assignUserToCommandRecord(commandId, discordId));
+  return withInvalidation(() => assignUserToCommandRecord(commandId, discordId), invalidateCustomCommandLookupCache);
 }
 
 /**
@@ -223,7 +229,7 @@ export async function assignUserToCommand(commandId: number, discordId: string):
  * @returns Resolves once the assignment (and cache invalidation) completes.
  */
 export async function assignUsersToCommand(commandId: number, discordIds: string[]): Promise<void> {
-  return withInvalidation(() => assignUsersToCommandRecord(commandId, discordIds));
+  return withInvalidation(() => assignUsersToCommandRecord(commandId, discordIds), invalidateCustomCommandLookupCache);
 }
 
 /**
@@ -234,7 +240,10 @@ export async function assignUsersToCommand(commandId: number, discordIds: string
  * @returns Resolves once the removal (and cache invalidation) completes.
  */
 export async function unassignUserFromCommand(commandId: number, discordId: string): Promise<void> {
-  return withInvalidation(() => unassignUserFromCommandRecord(commandId, discordId));
+  return withInvalidation(
+    () => unassignUserFromCommandRecord(commandId, discordId),
+    invalidateCustomCommandLookupCache,
+  );
 }
 export {
   CommandNotFoundError, CommandConflictError, isMysqlDuplicateEntryError,
@@ -275,8 +284,10 @@ import { invalidateCounterLookupCache } from './db/counterCache';
 export async function addCounter(
   triggerCommand: string, checkCommand: string, message: string, incrementMessage: string, resetYearly: boolean,
 ): Promise<void> {
-  await addCounterRecord(triggerCommand, checkCommand, message, incrementMessage, resetYearly);
-  invalidateCounterLookupCache();
+  await withInvalidation(
+    () => addCounterRecord(triggerCommand, checkCommand, message, incrementMessage, resetYearly),
+    invalidateCounterLookupCache,
+  );
 }
 
 /**
@@ -285,8 +296,7 @@ export async function addCounter(
  * @returns Resolves once the update (and cache invalidation) completes.
  */
 export async function updateCounter(input: UpdateCounterInput): Promise<void> {
-  await updateCounterRecord(input);
-  invalidateCounterLookupCache();
+  await withInvalidation(() => updateCounterRecord(input), invalidateCounterLookupCache);
 }
 
 /**
@@ -295,8 +305,7 @@ export async function updateCounter(input: UpdateCounterInput): Promise<void> {
  * @returns Resolves once the deletion (and cache invalidation) completes.
  */
 export async function removeCounter(id: number): Promise<void> {
-  await removeCounterRecord(id);
-  invalidateCounterLookupCache();
+  await withInvalidation(() => removeCounterRecord(id), invalidateCounterLookupCache);
 }
 
 /**
@@ -305,8 +314,7 @@ export async function removeCounter(id: number): Promise<void> {
  * @returns Resolves once the update (and cache invalidation) completes.
  */
 export async function resetCounterCurrentValue(id: number): Promise<void> {
-  await resetCounterCurrentValueRecord(id);
-  invalidateCounterLookupCache();
+  await withInvalidation(() => resetCounterCurrentValueRecord(id), invalidateCounterLookupCache);
 }
 
 /**
@@ -315,9 +323,7 @@ export async function resetCounterCurrentValue(id: number): Promise<void> {
  * @returns The counter's current value after the increment.
  */
 export async function incrementCounter(id: number): Promise<number> {
-  const newValue = await incrementCounterRecord(id);
-  invalidateCounterLookupCache();
-  return newValue;
+  return withInvalidation(() => incrementCounterRecord(id), invalidateCounterLookupCache);
 }
 
 /**
@@ -327,9 +333,7 @@ export async function incrementCounter(id: number): Promise<number> {
  * @returns The number of counters archived and reset.
  */
 export async function archiveAndResetYearlyCounters(year: number): Promise<number> {
-  const affectedRows = await archiveAndResetYearlyCountersRecord(year);
-  invalidateCounterLookupCache();
-  return affectedRows;
+  return withInvalidation(() => archiveAndResetYearlyCountersRecord(year), invalidateCounterLookupCache);
 }
 
 // ─── Stream monitor ──────────────────────────────────────────────────────────
@@ -380,8 +384,7 @@ import { invalidateAlertConfigLookupCache } from './db/alertConfigCache';
  * @returns Resolves once the insert (and cache invalidation) completes.
  */
 export async function initAlertConfigs(streamerId: number): Promise<void> {
-  await initAlertConfigsRecord(streamerId);
-  invalidateAlertConfigLookupCache();
+  await withInvalidation(() => initAlertConfigsRecord(streamerId), invalidateAlertConfigLookupCache);
 }
 
 /**
@@ -397,8 +400,10 @@ export async function saveAlertConfig(
   eventType: AlertEventType,
   config: { enabled: boolean; message_template: string; duration_ms: number; text_animation: TextAnimation },
 ): Promise<void> {
-  await saveAlertConfigRecord(streamerId, eventType, config);
-  invalidateAlertConfigLookupCache();
+  await withInvalidation(
+    () => saveAlertConfigRecord(streamerId, eventType, config),
+    invalidateAlertConfigLookupCache,
+  );
 }
 
 /**
@@ -411,9 +416,10 @@ export async function saveAlertConfig(
 export async function setAlertImage(
   streamerId: number, eventType: AlertEventType, filename: string | null,
 ): Promise<string | null> {
-  const previous = await setAlertImageRecord(streamerId, eventType, filename);
-  invalidateAlertConfigLookupCache();
-  return previous;
+  return withInvalidation(
+    () => setAlertImageRecord(streamerId, eventType, filename),
+    invalidateAlertConfigLookupCache,
+  );
 }
 
 /**
@@ -426,9 +432,10 @@ export async function setAlertImage(
 export async function setAlertSound(
   streamerId: number, eventType: AlertEventType, filename: string | null,
 ): Promise<string | null> {
-  const previous = await setAlertSoundRecord(streamerId, eventType, filename);
-  invalidateAlertConfigLookupCache();
-  return previous;
+  return withInvalidation(
+    () => setAlertSoundRecord(streamerId, eventType, filename),
+    invalidateAlertConfigLookupCache,
+  );
 }
 
 // ─── Streamer event log ──────────────────────────────────────────────────────
@@ -470,9 +477,10 @@ import { invalidateSfxLookupCache } from './db/sfxCache';
 export async function createSfxTrigger(
   command: string, categoryId: number | null, description: string | null, hidden: boolean,
 ): Promise<bigint> {
-  const id = await createSfxTriggerRecord(command, categoryId, description, hidden);
-  invalidateSfxLookupCache();
-  return id;
+  return withInvalidation(
+    () => createSfxTriggerRecord(command, categoryId, description, hidden),
+    invalidateSfxLookupCache,
+  );
 }
 
 /**
@@ -515,9 +523,7 @@ export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } 
 export async function addSfxFile(
   triggerId: bigint, file: string, weight: number, hidden: boolean,
 ): Promise<number> {
-  const id = await addSfxFileRecord(triggerId, file, weight, hidden);
-  invalidateSfxLookupCache();
-  return id;
+  return withInvalidation(() => addSfxFileRecord(triggerId, file, weight, hidden), invalidateSfxLookupCache);
 }
 
 /**
