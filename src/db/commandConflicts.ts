@@ -253,18 +253,23 @@ export async function getUserTwitchEligibilityBatch(
 
 /**
  * Checks whether `triggerString` is already used by another command that is either
- * multi-Twitch or assigned to a user with the same normalized Twitch channel name.
+ * multi-Twitch or assigned to a user whose normalized Twitch channel name is in
+ * `normalizedTwitchNames`. Shared by the single-name check ({@link assertNoTwitchChannelTriggerConflict},
+ * called with a one-element array) and the batched multi-user check
+ * ({@link assertAllUsersAssignable}) — the underlying query differs only in how many names it
+ * matches against.
  * @param executor Pool or transaction connection to query with.
  * @param commandId Command id to exclude from the conflict check.
  * @param triggerString Trigger string to check for conflicts.
- * @param normalizedTwitchName Normalized (lowercased) Twitch channel name to match against.
- * @returns True if a conflicting command exists.
+ * @param normalizedTwitchNames Normalized (lowercased) Twitch channel names to match against.
+ *   Must be non-empty.
+ * @returns True if a conflicting command exists for any of the given names.
  */
-async function hasTwitchChannelTriggerConflict(
+async function hasTriggerConflictForTwitchNames(
   executor: SqlExecutor,
   commandId: number,
   triggerString: string,
-  normalizedTwitchName: string,
+  normalizedTwitchNames: string[],
 ): Promise<boolean> {
   const [conflictRows] = await executor.execute<mysql.RowDataPacket[]>(
     `SELECT c.command_id
@@ -278,11 +283,11 @@ async function hasTwitchChannelTriggerConflict(
          OR (
            u.twitch_name IS NOT NULL
            AND u.is_twitch_bot_enabled = 1
-           AND u.twitch_name = ?
+           AND u.twitch_name IN (${buildInClausePlaceholders(normalizedTwitchNames.length)})
          )
        )
      LIMIT 1`,
-    [commandId, triggerString, normalizedTwitchName],
+    [commandId, triggerString, ...normalizedTwitchNames],
   );
 
   return conflictRows.length > 0;
@@ -303,7 +308,8 @@ export async function assertNoTwitchChannelTriggerConflict(
   triggerString: string,
   normalizedTwitchName: string,
 ): Promise<void> {
-  await assertConflictFree(triggerString, () => hasTwitchChannelTriggerConflict(executor, commandId, triggerString, normalizedTwitchName));
+  await assertConflictFree(triggerString, () =>
+    hasTriggerConflictForTwitchNames(executor, commandId, triggerString, [normalizedTwitchName]));
 }
 
 /**
@@ -454,49 +460,9 @@ export async function insertUserCommandAssignments(
 }
 
 /**
- * Batched form of {@link hasTwitchChannelTriggerConflict}: checks whether `triggerString` is
- * already used by another command that is either multi-Twitch or assigned to a user whose
- * normalized Twitch channel name is in `normalizedTwitchNames` — one query covering every
- * eligible user in a bulk assignment, instead of one query per user.
- * @param executor Pool or transaction connection to query with.
- * @param commandId Command id to exclude from the conflict check.
- * @param triggerString Trigger string to check for conflicts.
- * @param normalizedTwitchNames Normalized (lowercased) Twitch channel names to match against.
- *   Must be non-empty.
- * @returns True if a conflicting command exists for any of the given names.
- */
-async function hasAnyTwitchChannelTriggerConflict(
-  executor: SqlExecutor,
-  commandId: number,
-  triggerString: string,
-  normalizedTwitchNames: string[],
-): Promise<boolean> {
-  const [conflictRows] = await executor.execute<mysql.RowDataPacket[]>(
-    `SELECT c.command_id
-     FROM custom_command c
-     LEFT JOIN twitch_user_commands tuc ON tuc.command_id = c.command_id
-     LEFT JOIN \`user\` u ON u.discord_id = tuc.discord_id
-     WHERE c.command_id <> ?
-       AND c.trigger_string = ?
-       AND (
-         c.is_multi_twitch = 1
-         OR (
-           u.twitch_name IS NOT NULL
-           AND u.is_twitch_bot_enabled = 1
-           AND u.twitch_name IN (${buildInClausePlaceholders(normalizedTwitchNames.length)})
-         )
-       )
-     LIMIT 1`,
-    [commandId, triggerString, ...normalizedTwitchNames],
-  );
-
-  return conflictRows.length > 0;
-}
-
-/**
  * Throws if any `discordId` has no matching eligibility entry, or if any Twitch-eligible user's
  * channel would create a trigger conflict — checked in a single batched query across every
- * eligible user (see {@link hasAnyTwitchChannelTriggerConflict}) rather than one query per user.
+ * eligible user (see {@link hasTriggerConflictForTwitchNames}) rather than one query per user.
  * @param connection Transaction-capable pool connection to query with.
  * @param commandId Command id being assigned.
  * @param discordIds Discord snowflakes of the users being checked.
@@ -526,7 +492,7 @@ async function assertAllUsersAssignable(
   if (eligibleNames.length === 0) return;
 
   await assertConflictFree(normalizedTriggerString, () =>
-    hasAnyTwitchChannelTriggerConflict(connection, commandId, normalizedTriggerString, eligibleNames));
+    hasTriggerConflictForTwitchNames(connection, commandId, normalizedTriggerString, eligibleNames));
 }
 
 /**
