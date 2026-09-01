@@ -51,7 +51,10 @@ module.exports = tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['**/db/*'],
+          // Relative paths only (one or more leading ./ or ../ segments) — a glob group like
+          // '**/db/*' would also match an unrelated third-party package with its own "db"
+          // subpath (e.g. 'some-pkg/db/foo'), which isn't what this rule is meant to catch.
+          regex: '^(\\.\\.?/)+db/.+$',
           message: 'Import DB functions from src/db.ts only, not directly from src/db/* modules — see CLAUDE.md Critical Invariants.',
         }],
       }],
