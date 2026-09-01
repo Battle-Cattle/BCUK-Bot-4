@@ -1,4 +1,5 @@
 import { ChatClient, type ChatMessage, UserState } from '@twurple/chat';
+import { onOwnUserState, isPrivilegedInChannel, clearPrivilegeState } from './twitchChannelPrivilege';
 import { StaticAuthProvider } from '@twurple/auth';
 import { TWITCH_OAUTH_TOKEN, TWITCH_CLIENT_ID } from '../shared/config';
 import { handleCommand } from '../commands/commandRouter';
@@ -67,21 +68,6 @@ export const DISCONNECT_TIMEOUT_MS = 5_000;
  */
 export const CONNECT_TIMEOUT_MS = 30_000;
 
-/**
- * Per-channel badge status (moderator/VIP/broadcaster) for the bot's own account, refreshed from
- * the raw IRC `USERSTATE` message Twitch sends after joining a channel and after every send in it
- * (see {@link onOwnUserState}) — Twurple's `ChatClient` has no higher-level "am I currently
- * privileged here" query. Missing until the bot has received a `USERSTATE` for a channel — e.g.
- * right after joining — which safely defaults {@link isPrivilegedInChannel} to the more
- * conservative non-privileged rate.
- */
-const privilegedChannels = new Set<string>();
-
-/** Test-only: clears {@link privilegedChannels} so each test starts from a clean slate. */
-export function __resetTwitchPrivilegedChannelsForTests(): void {
-  privilegedChannels.clear();
-}
-
 // Bulk-loads every twitch_name → discord_id mapping in one query (like
 // getTwitchEnabledChannels()) instead of a lazy per-channel lookup, so a
 // chat message never blocks on an individual DB round trip. Bounded by a TTL
@@ -130,63 +116,15 @@ export function __resetTwitchChannelDiscordIdCacheForTests(): void {
   twitchChannelDiscordIdLookupCache.invalidate();
 }
 
+// Re-exported so existing importers of the privilege-tracking test reset keep working unchanged
+// after it moved to twitchChannelPrivilege.ts.
+export { __resetTwitchPrivilegedChannelsForTests } from './twitchChannelPrivilege';
+
 /** Resolves which guild a Twitch chat command should target: the linked streamer's active voice guild. */
 async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promise<string | null> {
   const discordId = await resolveDiscordIdForTwitchChannel(normalizedChannel);
   if (!discordId) return null;
   return resolveGuildIdForDiscordId(discordId);
-}
-
-/**
- * Parses a raw IRC `badges` tag value (e.g. `"moderator/1,subscriber/12"`) into a set of badge names.
- * @param rawBadges - The raw `badges` tag value, or `undefined` if the tag was absent.
- * @returns The badge names present (e.g. `{'moderator', 'subscriber'}`), or an empty set if `rawBadges` was `undefined`.
- */
-function parseBadgeNames(rawBadges: string | undefined): Set<string> {
-  if (!rawBadges) return new Set();
-  return new Set(rawBadges.split(',').map((entry) => entry.split('/')[0]));
-}
-
-/**
- * Records the bot's own moderator/VIP/broadcaster badge status for `channel` in
- * {@link privilegedChannels}, so {@link isPrivilegedInChannel} can answer live without a per-send
- * API call.
- * @param channel - Normalized Twitch channel name the badges were observed in.
- * @param badgeNames - Badge names parsed from the `USERSTATE`'s `badges` tag (see {@link parseBadgeNames}).
- * @returns Nothing — mutates {@link privilegedChannels} in place.
- */
-function updateOwnPrivilegeStatus(channel: string, badgeNames: Set<string>): void {
-  const privileged = badgeNames.has('moderator') || badgeNames.has('vip') || badgeNames.has('broadcaster');
-  if (privileged) privilegedChannels.add(channel);
-  else privilegedChannels.delete(channel);
-}
-
-/**
- * Raw IRC `USERSTATE` handler, registered directly on the underlying `ircv3` client (see
- * {@link startTwitchBot}) since Twurple's `ChatClient` doesn't expose this event itself. Twitch
- * sends `USERSTATE` after the bot joins a channel and after every message it sends there, carrying
- * the bot's own current badges in that channel — the only reliable live source for this, since
- * Twitch does not echo the bot's own `PRIVMSG`s back through `onMessage`.
- * @param msg - The raw `USERSTATE` message, including the channel (`#channel`) and IRC tags.
- * @returns Nothing — updates {@link privilegedChannels} via {@link updateOwnPrivilegeStatus}.
- */
-function onOwnUserState(msg: UserState): void {
-  const normalizedChannel = normalizeTwitchChannelName(msg.channel);
-  if (!normalizedChannel) return;
-  updateOwnPrivilegeStatus(normalizedChannel, parseBadgeNames(msg.tags.get('badges')));
-}
-
-/**
- * Resolves whether the bot currently holds moderator/VIP/broadcaster status in `channel`, from
- * {@link privilegedChannels} (see {@link updateOwnPrivilegeStatus} for how it's populated).
- * Under-detecting privilege here only makes a send unnecessarily conservative (throttled at the
- * stricter non-privileged rate) rather than unsafe, so a channel the bot hasn't been observed
- * chatting in yet — e.g. right after joining — safely resolves to false.
- * @param channel - Normalized Twitch channel name (without a leading `#`).
- * @returns True if the bot's last-observed status in `channel` was moderator, VIP, or broadcaster.
- */
-function isPrivilegedInChannel(channel: string): boolean {
-  return privilegedChannels.has(channel);
 }
 
 /**
@@ -269,11 +207,11 @@ function onConnected(): void {
  * its doc for why: Twurple's `ChatClient#currentChannels` is *not* reset by an automatic
  * reconnect, only by this process's own one-time `connect()` call, so it can't be trusted as
  * "still joined" across one), marks every active channel's status as disconnected, and clears
- * {@link privilegedChannels}. Clearing privilege state matters because Twurple reconnects within
- * the same `ChatClient` instance (this handler doesn't imply a new client, unlike
- * {@link stopTwitchBot}) — without this, a channel that revoked the bot's mod/VIP status while
- * disconnected would keep the stale privileged rate-limit ceiling until its next `USERSTATE`,
- * rather than reverting to the conservative default immediately.
+ * `twitchChannelPrivilege.ts`'s tracked privilege state via {@link clearPrivilegeState}. Clearing
+ * privilege state matters because Twurple reconnects within the same `ChatClient` instance (this
+ * handler doesn't imply a new client, unlike {@link stopTwitchBot}) — without this, a channel that
+ * revoked the bot's mod/VIP status while disconnected would keep the stale privileged rate-limit
+ * ceiling until its next `USERSTATE`, rather than reverting to the conservative default immediately.
  * @param manually - Whether the disconnect was requested by this process (e.g. via {@link stopTwitchBot}).
  * @param reason - The error that caused the disconnect, if any.
  */
@@ -283,7 +221,7 @@ function onDisconnected(manually: boolean, reason?: Error): void {
   recordTwitchChatConnected(false);
   log.warn(`Disconnected${manually ? ' (manual)' : ''}: ${reason?.message ?? 'no reason given'}`);
   getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
-  privilegedChannels.clear();
+  clearPrivilegeState();
 }
 
 /**
@@ -532,6 +470,6 @@ export async function stopTwitchBot(): Promise<void> {
     setChatClient(null);
   }
   clearMembershipState();
-  privilegedChannels.clear();
+  clearPrivilegeState();
   log.info('Disconnected.');
 }
