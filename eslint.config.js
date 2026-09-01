@@ -41,6 +41,23 @@ module.exports = tseslint.config(
     },
   },
   {
+    // CLAUDE.md's "Import DB functions from src/db.ts only, never src/db/* directly" is
+    // otherwise enforced only by convention/comment — db.ts wraps some src/db/* write
+    // functions with withInvalidation() for cache-invalidation side effects, and a direct
+    // import bypasses that silently. src/db/** itself is exempt (submodules import each
+    // other internally) and test files keep their existing documented exception.
+    files: ['src/**/*.ts'],
+    ignores: ['src/db.ts', 'src/db/**', 'src/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['**/db/*'],
+          message: 'Import DB functions from src/db.ts only, not directly from src/db/* modules — see CLAUDE.md Critical Invariants.',
+        }],
+      }],
+    },
+  },
+  {
     // Not part of tsconfig.json's `include` (src/**/*), so lint it without type info.
     files: ['vitest.config.mts'],
     languageOptions: {
