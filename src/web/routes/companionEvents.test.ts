@@ -235,6 +235,13 @@ describe('GET /events/recent', () => {
     expect(getRecentStreamerEvents).not.toHaveBeenCalled();
   });
 
+  it('sends Cache-Control: no-store, since the response is identity-scoped activity data', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 123 } as any);
+    vi.mocked(getRecentStreamerEvents).mockResolvedValue([]);
+    const res = await supertest(buildApp()).get('/events/recent').set('x-test-discord-id', 'user1');
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
   it('returns 500 (and logs) when getStreamerByDiscordId rejects', async () => {
     vi.mocked(getStreamerByDiscordId).mockRejectedValue(new Error('db down'));
     const res = await supertest(buildApp()).get('/events/recent').set('x-test-discord-id', 'user1');

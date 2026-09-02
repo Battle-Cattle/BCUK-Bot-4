@@ -68,11 +68,16 @@ router.get('/events', requireCompanionKey, (req, res) => {
  * them, not the richer fields (`rewardId`, `userInput`, etc.) the live
  * `channel_points_redemption` push carries, so replaying them would require a third, degraded
  * shape distinct from the live one.
+ * Always sends `Cache-Control: no-store`, since the response is identity-scoped activity data.
  * @param req - Express request; `req.companionDiscordId` is set by `requireCompanionKey`.
  * @param res - Express response; JSON `{ ok: true, events }` (empty if the Discord user has no
  *   linked streamer) on success, or 500 (logged) if the streamer or recent-events lookup fails.
  */
 router.get('/events/recent', requireCompanionKey, async (req, res) => {
+  // Identity-scoped activity data — never let a shared/browser cache reuse one user's response
+  // for another (or for the same user after they revoke/reissue their companion token).
+  res.set('Cache-Control', 'no-store');
+
   const discordId = req.companionDiscordId!;
   let streamer;
   try {
