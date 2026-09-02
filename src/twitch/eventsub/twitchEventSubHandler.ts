@@ -1,4 +1,5 @@
 import type { EventSubConfig, AlertEventType, StreamerEventType } from '../../db';
+import type { CompanionActivityEventType } from '../../web/routes/companionEvents';
 import { getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
@@ -163,6 +164,11 @@ async function maybePushAlert(
  * DB write or push is logged and swallowed rather than rejecting, so it can't surface as a
  * failure of the EventSub handler that called it.
  *
+ * Also best-effort forwards the event to the streamer's companion app (see
+ * {@link pushCompanionActivityEvent}) — this handler is only ever called with a non-redemption
+ * `eventType` (redemptions go through {@link recordAndPushDashboardEventOrThrow} instead), so
+ * every event it records is a valid {@link CompanionActivityEventType}.
+ *
  * @param streamerId - DB row ID of the streamer, used to scope the log entry and dashboard SSE channel.
  * @param eventType - Kind of activity that occurred.
  * @param displayName - The acting Twitch viewer's display name (follower, raider, redeemer, etc.).
@@ -177,11 +183,40 @@ async function recordAndPushDashboardEvent(
 ): Promise<void> {
   try {
     await recordStreamerEvent(streamerId, eventType, displayName, detail);
-    dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, {
-      eventType, displayName, detail, occurredAt: new Date().toISOString(),
-    });
+    const occurredAt = new Date().toISOString();
+    dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, { eventType, displayName, detail, occurredAt });
+    await pushCompanionActivityEvent(streamerId, eventType as CompanionActivityEventType, displayName, detail, occurredAt);
   } catch (err) {
     log.error(`Failed to record ${eventType} dashboard event for streamer ${streamerId}:`, err);
+  }
+}
+
+/**
+ * Best-effort forwards a follow/sub/resub/giftsub/raid activity event to the owning streamer's
+ * companion app, if any device is connected. Isolates its own errors (try/catch) so a
+ * companion-push failure can never affect the dashboard record/push that triggered it — mirrors
+ * the same best-effort isolation {@link handleRedemption} uses for its own companion push.
+ *
+ * @param streamerId - DB row ID of the streamer, used to resolve the owning Discord ID.
+ * @param eventType - Kind of activity that occurred.
+ * @param displayName - The acting Twitch viewer's display name.
+ * @param detail - Short additional context, or null if there's none.
+ * @param occurredAt - ISO timestamp of when the event was recorded.
+ */
+async function pushCompanionActivityEvent(
+  streamerId: number,
+  eventType: CompanionActivityEventType,
+  displayName: string,
+  detail: string | null,
+  occurredAt: string,
+): Promise<void> {
+  try {
+    const streamer = await getStreamerById(streamerId);
+    if (streamer) {
+      companionRuntimeRegistry.get()?.pushCompanionEvent(streamer.discord_id, { type: eventType, displayName, detail, occurredAt });
+    }
+  } catch (err) {
+    log.error(`Failed to push companion event for ${eventType}:`, err);
   }
 }
 

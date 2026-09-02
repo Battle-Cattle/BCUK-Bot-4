@@ -9,6 +9,9 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../shared/config', () => ({
   COMPANION_MAX_SSE_PER_TOKEN: 3,
   SSE_MAX_TOTAL_CONNECTIONS: 1000,
+  // dashboardEvents.ts (imported here only for its RECENT_EVENTS_LIMIT constant) reads this
+  // at module load time too.
+  DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER: 5,
 }));
 
 vi.mock('../middleware', () => ({
@@ -23,8 +26,15 @@ vi.mock('../middleware', () => ({
   },
 }));
 
+vi.mock('../../db', () => ({
+  getStreamerByDiscordId: vi.fn(),
+  getRecentStreamerEvents: vi.fn(),
+}));
+
 import supertest from 'supertest';
 import router, { pushCompanionEvent, MAX_SSE_CONNECTIONS_PER_TOKEN, connections, type CompanionEvent } from './companionEvents';
+import { RECENT_EVENTS_LIMIT } from './dashboardEvents';
+import { getStreamerByDiscordId, getRecentStreamerEvents } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a supertest-ready app: the companion events router with no body parser or session stub (auth is driven via a test header, see requireCompanionKey mock above). */
@@ -208,5 +218,53 @@ describe('pushCompanionEvent', () => {
 
   it('is a no-op when no clients are connected for the discord ID', () => {
     expect(() => pushCompanionEvent('nobody', sampleEvent)).not.toThrow();
+  });
+});
+
+describe('GET /events/recent', () => {
+  it('returns 401 when no token-derived discord ID is present', async () => {
+    const res = await supertest(buildApp()).get('/events/recent');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns an empty events array when the discord ID has no linked streamer', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+    const res = await supertest(buildApp()).get('/events/recent').set('x-test-discord-id', 'user1');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, events: [] });
+    expect(getRecentStreamerEvents).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 (and logs) when getStreamerByDiscordId rejects', async () => {
+    vi.mocked(getStreamerByDiscordId).mockRejectedValue(new Error('db down'));
+    const res = await supertest(buildApp()).get('/events/recent').set('x-test-discord-id', 'user1');
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ ok: false });
+  });
+
+  it('returns 500 (and logs) when getRecentStreamerEvents rejects', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 123 } as any);
+    vi.mocked(getRecentStreamerEvents).mockRejectedValue(new Error('db down'));
+    const res = await supertest(buildApp()).get('/events/recent').set('x-test-discord-id', 'user1');
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ ok: false });
+  });
+
+  it('returns activity events mapped to the companion shape, filtering out redemption rows', async () => {
+    const occurredAt = new Date('2026-07-17T12:00:00Z');
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 123 } as any);
+    vi.mocked(getRecentStreamerEvents).mockResolvedValue([
+      { eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt },
+      { eventType: 'redemption', displayName: 'redeemer1', detail: 'Cool Reward', occurredAt },
+    ]);
+
+    const res = await supertest(buildApp()).get('/events/recent').set('x-test-discord-id', 'user1');
+
+    expect(res.status).toBe(200);
+    expect(getRecentStreamerEvents).toHaveBeenCalledWith(123, RECENT_EVENTS_LIMIT);
+    expect(res.body).toEqual({
+      ok: true,
+      events: [{ type: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt: occurredAt.toISOString() }],
+    });
   });
 });
