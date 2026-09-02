@@ -35,12 +35,16 @@ router.get('/companion-key', csrfProtection, async (req, res) => {
  * to the OAuth login flow. Only this section's failure can burn the user's one
  * chance to see the new plaintext token, so the follow-up status refresh runs in
  * its own try/catch with a locally-derived fallback rather than risking the
- * already-issued token being lost behind a `request_failed` redirect.
+ * already-issued token being lost behind a `request_failed` redirect. Issuing a
+ * token replaces (invalidates) any prior one for this Discord ID, so this also ends
+ * any companion SSE connection still open under the token just replaced.
  */
 router.post('/companion-key/request', csrfProtection, async (req, res) => {
+  const discordId = getSessionUser(req).discordId;
   let plain: string;
   try {
-    plain = await issueToken(getSessionUser(req).discordId);
+    plain = await issueToken(discordId);
+    disconnectCompanionConnections(discordId);
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Companion key request error:', err, basePath: '/companion-key', errorCode: 'request_failed' });
     return;
@@ -48,7 +52,7 @@ router.post('/companion-key/request', csrfProtection, async (req, res) => {
 
   let tokenStatus;
   try {
-    tokenStatus = await getTokenStatus(getSessionUser(req).discordId);
+    tokenStatus = await getTokenStatus(discordId);
   } catch (err) {
     log.error('Companion key status refresh after issue failed:', err);
     tokenStatus = { hasToken: true, createdAt: new Date() };

@@ -95,6 +95,21 @@ describe('POST /companion-key/request', () => {
     const res = await supertest(buildApp()).post('/companion-key/request');
     expect(res.headers.location).toBe('/companion-key?error=request_failed');
   });
+
+  it('ends any open companion SSE connections for the user after issuing a new token', async () => {
+    vi.mocked(issueToken).mockResolvedValue('plain-token-value');
+    vi.mocked(getTokenStatus).mockResolvedValue({ hasToken: true, createdAt: new Date() } as any);
+    await supertest(buildApp()).post('/companion-key/request');
+    // A new token invalidates any prior one, so a connection still open under the old token
+    // must be disconnected — otherwise it would keep streaming under a now-replaced credential.
+    expect(disconnectCompanionConnections).toHaveBeenCalledWith(SESSION_USER.discordId);
+  });
+
+  it('does not disconnect connections when issuing the token itself fails', async () => {
+    vi.mocked(issueToken).mockRejectedValueOnce(new Error('denied'));
+    await supertest(buildApp()).post('/companion-key/request');
+    expect(disconnectCompanionConnections).not.toHaveBeenCalled();
+  });
 });
 
 // ─── POST /companion-key/revoke ───────────────────────────────────────────────

@@ -13,11 +13,13 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../rateLimits', () => ({
   authLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
+vi.mock('./companionEvents', () => ({ disconnectCompanionConnections: vi.fn() }));
 
 import express from 'express';
 import supertest from 'supertest';
 import router from './companionAuth';
 import { exchangeCodeForToken } from '../../db';
+import { disconnectCompanionConnections } from './companionEvents';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a supertest-ready app: the companion-auth router with a customizable raw session and a render mock that returns the view/locals as JSON. */
@@ -108,11 +110,25 @@ describe('POST /api/companion/oauth/token', () => {
   });
 
   it('returns a token when the code is valid', async () => {
-    vi.mocked(exchangeCodeForToken).mockResolvedValue('plain-token-value');
+    vi.mocked(exchangeCodeForToken).mockResolvedValue({ token: 'plain-token-value', discordId: 'user1' });
     const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good' });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ token: 'plain-token-value' });
     expect(exchangeCodeForToken).toHaveBeenCalledWith('good');
+  });
+
+  it('ends any open companion SSE connections for the user after issuing a new token', async () => {
+    // A new token invalidates any prior one, so a connection still open under the old token
+    // must be disconnected — otherwise it would keep streaming under a now-replaced credential.
+    vi.mocked(exchangeCodeForToken).mockResolvedValue({ token: 'plain-token-value', discordId: 'user1' });
+    await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good' });
+    expect(disconnectCompanionConnections).toHaveBeenCalledWith('user1');
+  });
+
+  it('does not disconnect connections when the code is invalid/expired/used', async () => {
+    vi.mocked(exchangeCodeForToken).mockResolvedValue(null);
+    await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'bad' });
+    expect(disconnectCompanionConnections).not.toHaveBeenCalled();
   });
 
   it('returns 500 when exchangeCodeForToken throws', async () => {
