@@ -6,6 +6,7 @@ import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { getSessionUser } from '../session';
+import { disconnectCompanionConnections } from './companionEvents';
 
 const log = createLogger('Web');
 const router = Router();
@@ -62,10 +63,17 @@ router.post('/companion-key/request', csrfProtection, async (req, res) => {
   });
 });
 
-/** Revokes the current user's companion app token. */
+/**
+ * Revokes the current user's companion app token, and immediately ends any of their companion
+ * app's open SSE connections (see `disconnectCompanionConnections`) — otherwise a connection
+ * opened before the revoke would keep receiving events until it happened to disconnect on its
+ * own, since `requireCompanionKey` only checks the token once, at connect time.
+ */
 router.post('/companion-key/revoke', csrfProtection, async (req, res) => {
   try {
-    await revokeToken(getSessionUser(req).discordId);
+    const discordId = getSessionUser(req).discordId;
+    await revokeToken(discordId);
+    disconnectCompanionConnections(discordId);
     res.redirect('/companion-key');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Companion key revoke error:', err, basePath: '/companion-key', errorCode: 'revoke_failed' });

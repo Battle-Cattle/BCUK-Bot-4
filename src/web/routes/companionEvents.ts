@@ -47,6 +47,29 @@ export function pushCompanionEvent(discordId: string, event: CompanionEvent): vo
 }
 
 /**
+ * Ends every open companion SSE connection for a Discord user, so a just-revoked token stops
+ * receiving events immediately instead of continuing to stream to a connection that was
+ * authenticated (via `requireCompanionKey`) before the revoke — auth is only checked once, at
+ * connect time, so without this an already-open stream would otherwise keep delivering events
+ * until the client happens to disconnect on its own. `res.end()` triggers the same `close`-event
+ * cleanup path `attachSseConnection` already wires up (clearing the keepalive, releasing the
+ * global connection slot, evicting the entry from `connections`), so no separate bookkeeping is
+ * needed here. Called from the `/companion-key/revoke` route after the DB revoke succeeds.
+ * @param discordId - Discord snowflake whose companion connections should be torn down.
+ */
+export function disconnectCompanionConnections(discordId: string): void {
+  const clients = connections.get(discordId);
+  if (!clients) return;
+  for (const res of Array.from(clients)) {
+    try {
+      res.end();
+    } catch (err) {
+      log.error(`Failed to close a companion connection for discord ${discordId}:`, err);
+    }
+  }
+}
+
+/**
  * GET /api/companion/events — SSE endpoint, bearer-token authenticated via
  * `requireCompanionKey`. Streams companion events for the authenticated Discord
  * user until the client disconnects, sending a keepalive ping every 25s and

@@ -16,12 +16,14 @@ vi.mock('../csrf', () => ({
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../shared/config', () => ({ WEB_PORT: 3000 }));
+vi.mock('./companionEvents', () => ({ disconnectCompanionConnections: vi.fn() }));
 
 import express from 'express';
 import supertest from 'supertest';
 import router from './companionKeys';
 import { issueToken, getTokenStatus, revokeToken } from '../../db';
 import { AccessLevel } from '../../db';
+import { disconnectCompanionConnections } from './companionEvents';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const GUILD_ID = '900000000000000001';
@@ -104,9 +106,20 @@ describe('POST /companion-key/revoke', () => {
     expect(revokeToken).toHaveBeenCalledWith(SESSION_USER.discordId);
   });
 
+  it('ends any open companion SSE connections for the user after a successful revoke', async () => {
+    await supertest(buildApp()).post('/companion-key/revoke');
+    expect(disconnectCompanionConnections).toHaveBeenCalledWith(SESSION_USER.discordId);
+  });
+
   it('redirects to ?error=revoke_failed on error', async () => {
     vi.mocked(revokeToken).mockRejectedValueOnce(new Error('DB error'));
     const res = await supertest(buildApp()).post('/companion-key/revoke');
     expect(res.headers.location).toBe('/companion-key?error=revoke_failed');
+  });
+
+  it('does not disconnect connections when the revoke itself fails', async () => {
+    vi.mocked(revokeToken).mockRejectedValueOnce(new Error('DB error'));
+    await supertest(buildApp()).post('/companion-key/revoke');
+    expect(disconnectCompanionConnections).not.toHaveBeenCalled();
   });
 });

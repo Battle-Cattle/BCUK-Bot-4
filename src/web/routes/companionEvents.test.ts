@@ -32,7 +32,9 @@ vi.mock('../../db', () => ({
 }));
 
 import supertest from 'supertest';
-import router, { pushCompanionEvent, MAX_SSE_CONNECTIONS_PER_TOKEN, connections, type CompanionEvent } from './companionEvents';
+import router, {
+  pushCompanionEvent, disconnectCompanionConnections, MAX_SSE_CONNECTIONS_PER_TOKEN, connections, type CompanionEvent,
+} from './companionEvents';
 import { RECENT_EVENTS_LIMIT } from './dashboardEvents';
 import { getStreamerByDiscordId, getRecentStreamerEvents } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -218,6 +220,46 @@ describe('pushCompanionEvent', () => {
 
   it('is a no-op when no clients are connected for the discord ID', () => {
     expect(() => pushCompanionEvent('nobody', sampleEvent)).not.toThrow();
+  });
+});
+
+describe('disconnectCompanionConnections', () => {
+  it('ends every open connection for the given discord ID', () => {
+    const resA = { end: vi.fn() } as any;
+    const resB = { end: vi.fn() } as any;
+    connections.set('user1', new Set([resA, resB]));
+
+    disconnectCompanionConnections('user1');
+
+    expect(resA.end).toHaveBeenCalled();
+    expect(resB.end).toHaveBeenCalled();
+  });
+
+  it('does not end connections for a different discord ID', () => {
+    const resA = { end: vi.fn() } as any;
+    const resB = { end: vi.fn() } as any;
+    connections.set('userA', new Set([resA]));
+    connections.set('userB', new Set([resB]));
+
+    disconnectCompanionConnections('userA');
+
+    expect(resA.end).toHaveBeenCalled();
+    expect(resB.end).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when no clients are connected for the discord ID', () => {
+    expect(() => disconnectCompanionConnections('nobody')).not.toThrow();
+  });
+
+  it('logs and continues when one connection throws on end()', () => {
+    const throwing = { end: vi.fn(() => { throw new Error('already destroyed'); }) } as any;
+    const live = { end: vi.fn() } as any;
+    connections.set('user1', new Set([throwing, live]));
+
+    expect(() => disconnectCompanionConnections('user1')).not.toThrow();
+
+    expect(throwing.end).toHaveBeenCalled();
+    expect(live.end).toHaveBeenCalled();
   });
 });
 
