@@ -515,6 +515,77 @@ describe('dashboard events push', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Companion app push — best-effort, mirrors the dashboard record for the same event
+// ---------------------------------------------------------------------------
+describe('companion events push', () => {
+  beforeEach(() => {
+    vi.mocked(getStreamerById).mockResolvedValue({ discord_id: '999888777' } as any);
+  });
+
+  it('handleFollow pushes a companion activity event keyed by the streamer discord_id', async () => {
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig({ follow_enabled: false }), STREAMER_ID);
+
+    expect(getStreamerById).toHaveBeenCalledWith(STREAMER_ID);
+    expect(mockPushCompanionEvent).toHaveBeenCalledWith('999888777', {
+      type: 'follow', displayName: 'TestUser', detail: null, occurredAt: expect.any(String),
+    });
+  });
+
+  it('handleRaid pushes a companion activity event with viewer count as detail', async () => {
+    await handleRaid('streamer', {
+      from_broadcaster_user_login: 'raider', from_broadcaster_user_name: 'RaiderDisplay',
+      to_broadcaster_user_login: 'streamer', viewers: 42,
+    }, makeConfig({ raid_enabled: false, raid_shoutout_enabled: false }), STREAMER_ID);
+
+    expect(mockPushCompanionEvent).toHaveBeenCalledWith('999888777', {
+      type: 'raid', displayName: 'RaiderDisplay', detail: '42 viewers', occurredAt: expect.any(String),
+    });
+  });
+
+  it('handleSub does not push a companion event for gift subs — handled by handleGiftSub instead', async () => {
+    await handleSub('streamer', {
+      user_login: 'subuser', user_name: 'SubUser', broadcaster_user_login: 'streamer', tier: '1000', is_gift: true,
+    }, makeConfig({ sub_enabled: true }), STREAMER_ID);
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not push a companion event when the streamer cannot be found', async () => {
+    vi.mocked(getStreamerById).mockResolvedValue(null);
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig({ follow_enabled: false }), STREAMER_ID);
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+  });
+
+  it('still records and pushes the dashboard event when the companion lookup throws', async () => {
+    vi.mocked(getStreamerById).mockRejectedValue(new Error('db unavailable'));
+
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig({ follow_enabled: false }), STREAMER_ID);
+
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+    expect(mockPushDashboardEvent).toHaveBeenCalledWith(STREAMER_ID, {
+      eventType: 'follow', displayName: 'TestUser', detail: null, occurredAt: expect.any(String),
+    });
+  });
+
+  it('still records and pushes the dashboard event when the companion push itself throws', async () => {
+    mockPushCompanionEvent.mockImplementation(() => { throw new Error('sse write failed'); });
+
+    await handleFollow('streamer', {
+      user_login: 'testuser', user_name: 'TestUser', broadcaster_user_login: 'streamer',
+    }, makeConfig({ follow_enabled: false }), STREAMER_ID);
+
+    expect(mockPushDashboardEvent).toHaveBeenCalledWith(STREAMER_ID, {
+      eventType: 'follow', displayName: 'TestUser', detail: null, occurredAt: expect.any(String),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // TEST_ALERT_VARS (alertsAdminMutations.ts's "Send Test Alert" preview) must stay in sync with
 // the real vars each handler below actually builds — otherwise a renamed/removed real variable
 // silently leaves a stale `{placeholder}` in the live preview while the real handler works fine.

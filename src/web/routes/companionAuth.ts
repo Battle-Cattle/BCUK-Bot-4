@@ -4,6 +4,7 @@ import { exchangeCodeForToken } from '../../db';
 import { isLoopbackRedirectUri } from './validation';
 import { renderError } from './viewHelpers';
 import { authLimiter } from '../rateLimits';
+import { disconnectCompanionConnections } from './companionEvents';
 
 const log = createLogger('CompanionAuth');
 const router = Router();
@@ -38,7 +39,10 @@ router.get('/companion/login', authLimiter, (req, res) => {
  * POST /api/companion/oauth/token — exchanges a one-time authorization code (issued
  * by the /auth/discord/callback companion branch) for a long-lived companion token.
  * The exchange runs in a single DB transaction (see `exchangeCodeForToken`), so a
- * failure issuing the token doesn't permanently burn the one-time code.
+ * failure issuing the token doesn't permanently burn the one-time code. Since issuing
+ * a token replaces (invalidates) any prior one for the same Discord ID, this also ends
+ * any companion SSE connection still open under the token just replaced — otherwise it
+ * would keep streaming under a token that's no longer valid for new connections.
  * @param req.body.code - Plaintext one-time code from the loopback redirect.
  * @returns `{ token }` on success, or a 400/429/500 JSON error response —
  *   429 comes from `authLimiter` and short-circuits before this handler runs.
@@ -51,12 +55,13 @@ router.post('/api/companion/oauth/token', authLimiter, async (req, res) => {
   }
 
   try {
-    const token = await exchangeCodeForToken(code);
-    if (!token) {
+    const result = await exchangeCodeForToken(code);
+    if (!result) {
       res.status(400).json({ ok: false, error: 'Invalid or expired code' });
       return;
     }
-    res.json({ token });
+    disconnectCompanionConnections(result.discordId);
+    res.json({ token: result.token });
   } catch (err) {
     log.error('Companion token exchange failed:', err);
     res.status(500).json({ ok: false, error: 'Internal server error' });

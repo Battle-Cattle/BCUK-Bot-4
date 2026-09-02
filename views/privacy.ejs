@@ -47,11 +47,16 @@
               never stored in plain text.</li>
             <li>If you generate a Streamdeck API key: only a one-way hash of it, never the key itself.</li>
             <li>If you request a companion app token: only a one-way hash of it, never the token itself.</li>
-            <li>If a connected Twitch channel gets a follow, subscription, raid, or channel-point
-              redemption: the event type, the viewer's Twitch display name, and a short detail (for
-              example a raid's viewer count, or a redeemed reward's name). This is shown on the dashboard's
-              live "Recent Events" feed and is the only data we store about Twitch viewers who aren't
-              signed-in users of this site.</li>
+            <li>If a connected Twitch channel gets a follow, subscription, resub, gift sub, raid, or
+              channel-point redemption: the event type, the viewer's Twitch display name, and a short
+              detail (for example a raid's viewer count, or a redeemed reward's name). This is shown on
+              the dashboard's live "Recent Events" feed and is the only data we store about Twitch viewers
+              who aren't signed-in users of this site. If you have an active companion app token, the same
+              events for your own channel are also delivered live to your companion app; a redemption's
+              live push additionally includes the reward ID, the redeemer's Twitch login, and any text
+              they entered, none of which we store. Your companion app can also fetch a short history of
+              recent follow/sub/resub/giftsub/raid activity (not redemptions) to catch up after
+              reconnecting, drawn from the same "Recent Events" data described above.</li>
           </ul>
           <p>We do not record or transcribe voice channel audio, and we do not store the content of Discord
             messages or chat logs. A short list of the most recent bot command executions is kept in

@@ -88,7 +88,7 @@ describe('exchangeCodeForToken', () => {
     expect(conn.rollback).toHaveBeenCalledTimes(1);
   });
 
-  it('commits and returns a plaintext token when the code is valid', async () => {
+  it('commits and returns a plaintext token and its owning discord ID when the code is valid', async () => {
     const execute = vi
       .fn()
       .mockResolvedValueOnce([{ affectedRows: 1 }])
@@ -97,9 +97,10 @@ describe('exchangeCodeForToken', () => {
     const conn = buildConn({ execute });
     vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
 
-    const token = await exchangeCodeForToken('good-code');
+    const result = await exchangeCodeForToken('good-code');
 
-    expect(token).toMatch(/^[0-9a-f]{64}$/); // 32 bytes as hex
+    expect(result?.token).toMatch(/^[0-9a-f]{64}$/); // 32 bytes as hex
+    expect(result?.discordId).toBe('42');
     expect(conn.commit).toHaveBeenCalledTimes(1);
     expect(conn.rollback).not.toHaveBeenCalled();
     expect(conn.release).toHaveBeenCalledTimes(1);

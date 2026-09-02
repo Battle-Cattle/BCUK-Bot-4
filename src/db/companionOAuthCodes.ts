@@ -53,6 +53,12 @@ async function consumeCodeOnConnection(executor: mysql.Pool | mysql.PoolConnecti
   return rows.length === 0 ? null : String(rows[0].discord_id);
 }
 
+/** A newly-issued companion app token, plaintext, plus who it belongs to. */
+export interface CompanionTokenExchange {
+  token: string;
+  discordId: string;
+}
+
 /**
  * Atomically exchanges a companion OAuth code for a companion app token: marks
  * the code used and issues the token in a single DB transaction, so a failure
@@ -61,9 +67,11 @@ async function consumeCodeOnConnection(executor: mysql.Pool | mysql.PoolConnecti
  * entire Discord OAuth login).
  *
  * @param code - Plaintext code presented by the companion app.
- * @returns The plaintext companion app token, or null if the code is invalid/expired/already used.
+ * @returns The plaintext companion app token and its owning Discord ID (the caller needs the
+ *   latter to disconnect any SSE connection still open under a token this issue just replaced),
+ *   or null if the code is invalid/expired/already used.
  */
-export async function exchangeCodeForToken(code: string): Promise<string | null> {
+export async function exchangeCodeForToken(code: string): Promise<CompanionTokenExchange | null> {
   const hash = createHash('sha256').update(code).digest('hex');
   class CodeNotFoundError extends Error {}
   try {
@@ -74,7 +82,8 @@ export async function exchangeCodeForToken(code: string): Promise<string | null>
       // edge case where the row vanishes between the UPDATE and the follow-up SELECT —
       // doesn't permanently burn the code with no token to show for it.
       if (!discordId) throw new CodeNotFoundError();
-      return issueTokenOnConnection(conn, discordId);
+      const token = await issueTokenOnConnection(conn, discordId);
+      return { token, discordId };
     });
   } catch (err) {
     if (err instanceof CodeNotFoundError) return null;

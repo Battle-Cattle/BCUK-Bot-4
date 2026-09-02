@@ -438,6 +438,13 @@ describe('requireCompanionKey', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
+  it('also sets req.companionTokenHash to the hash of the presented token', async () => {
+    vi.mocked(findDiscordIdByTokenHash).mockResolvedValue('user42');
+    const req = makeReq({ headers: { authorization: 'Bearer validtoken' } });
+    await requireCompanionKey(req, makeRes(), next);
+    expect(req.companionTokenHash).toBe(createHash('sha256').update('validtoken').digest('hex'));
+  });
+
   it('hashes the token before looking it up', async () => {
     vi.mocked(findDiscordIdByTokenHash).mockResolvedValue('u1');
     const req = makeReq({ headers: { authorization: 'Bearer mytoken' } });

@@ -6,6 +6,7 @@ import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { getSessionUser } from '../session';
+import { disconnectCompanionConnections } from './companionEvents';
 
 const log = createLogger('Web');
 const router = Router();
@@ -34,12 +35,16 @@ router.get('/companion-key', csrfProtection, async (req, res) => {
  * to the OAuth login flow. Only this section's failure can burn the user's one
  * chance to see the new plaintext token, so the follow-up status refresh runs in
  * its own try/catch with a locally-derived fallback rather than risking the
- * already-issued token being lost behind a `request_failed` redirect.
+ * already-issued token being lost behind a `request_failed` redirect. Issuing a
+ * token replaces (invalidates) any prior one for this Discord ID, so this also ends
+ * any companion SSE connection still open under the token just replaced.
  */
 router.post('/companion-key/request', csrfProtection, async (req, res) => {
+  const discordId = getSessionUser(req).discordId;
   let plain: string;
   try {
-    plain = await issueToken(getSessionUser(req).discordId);
+    plain = await issueToken(discordId);
+    disconnectCompanionConnections(discordId);
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Companion key request error:', err, basePath: '/companion-key', errorCode: 'request_failed' });
     return;
@@ -47,7 +52,7 @@ router.post('/companion-key/request', csrfProtection, async (req, res) => {
 
   let tokenStatus;
   try {
-    tokenStatus = await getTokenStatus(getSessionUser(req).discordId);
+    tokenStatus = await getTokenStatus(discordId);
   } catch (err) {
     log.error('Companion key status refresh after issue failed:', err);
     tokenStatus = { hasToken: true, createdAt: new Date() };
@@ -62,10 +67,17 @@ router.post('/companion-key/request', csrfProtection, async (req, res) => {
   });
 });
 
-/** Revokes the current user's companion app token. */
+/**
+ * Revokes the current user's companion app token, and immediately ends any of their companion
+ * app's open SSE connections (see `disconnectCompanionConnections`) — otherwise a connection
+ * opened before the revoke would keep receiving events until it happened to disconnect on its
+ * own, since `requireCompanionKey` only checks the token once, at connect time.
+ */
 router.post('/companion-key/revoke', csrfProtection, async (req, res) => {
   try {
-    await revokeToken(getSessionUser(req).discordId);
+    const discordId = getSessionUser(req).discordId;
+    await revokeToken(discordId);
+    disconnectCompanionConnections(discordId);
     res.redirect('/companion-key');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Companion key revoke error:', err, basePath: '/companion-key', errorCode: 'revoke_failed' });
