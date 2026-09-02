@@ -44,6 +44,10 @@ declare module 'express-serve-static-core' {
     apiKeyOwner?: string;
     /** Discord ID owning the companion app token, set by requireCompanionKey. */
     companionDiscordId?: string;
+    /** SHA-256 hex hash of the companion app bearer token presented in this request, set by
+     *  requireCompanionKey — lets a handler re-verify the exact credential later, not just
+     *  whether the Discord ID has some active token. */
+    companionTokenHash?: string;
   }
 }
 

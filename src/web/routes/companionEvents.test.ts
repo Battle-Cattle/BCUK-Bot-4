@@ -22,6 +22,7 @@ vi.mock('../middleware', () => ({
       return;
     }
     req.companionDiscordId = id;
+    req.companionTokenHash = `hash-${id}`;
     next();
   },
 }));
@@ -29,7 +30,7 @@ vi.mock('../middleware', () => ({
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   getRecentStreamerEvents: vi.fn(),
-  getTokenStatus: vi.fn(),
+  findDiscordIdByTokenHash: vi.fn(),
 }));
 
 import supertest from 'supertest';
@@ -37,7 +38,7 @@ import router, {
   pushCompanionEvent, disconnectCompanionConnections, MAX_SSE_CONNECTIONS_PER_TOKEN, connections, type CompanionEvent,
 } from './companionEvents';
 import { RECENT_EVENTS_LIMIT } from './dashboardEvents';
-import { getStreamerByDiscordId, getRecentStreamerEvents, getTokenStatus } from '../../db';
+import { getStreamerByDiscordId, getRecentStreamerEvents, findDiscordIdByTokenHash } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a supertest-ready app: the companion events router with no body parser or session stub (auth is driven via a test header, see requireCompanionKey mock above). */
@@ -58,7 +59,7 @@ const sampleEvent: CompanionEvent = {
 beforeEach(() => {
   connections.clear();
   vi.clearAllMocks();
-  vi.mocked(getTokenStatus).mockResolvedValue({ hasToken: true, createdAt: new Date() });
+  vi.mocked(findDiscordIdByTokenHash).mockResolvedValue('some-discord-id');
 });
 
 describe('GET /events — auth', () => {
@@ -182,7 +183,7 @@ describe('GET /events — post-connect token re-check', () => {
   /**
    * Extracts the `/events` route's actual handler (the last middleware in its stack, after
    * `requireCompanionKey`) so it can be invoked directly with fully-controlled mock req/res —
-   * avoids real-socket timing around the async post-connect `getTokenStatus` re-check.
+   * avoids real-socket timing around the async post-connect `findDiscordIdByTokenHash` re-check.
    */
   function getEventsHandler(): (req: any, res: any) => Promise<void> {
     const layer = (router as any).stack.find((l: any) => l.route?.path === '/events');
@@ -203,11 +204,12 @@ describe('GET /events — post-connect token re-check', () => {
   }
 
   /** Builds a fake Express `req` with a `close`-event hook, plus a `triggerClose()` helper. */
-  function makeSseReq(discordId: string) {
+  function makeSseReq(discordId: string, tokenHash: string) {
     let closeCb: (() => void) | undefined;
     return {
       req: {
         companionDiscordId: discordId,
+        companionTokenHash: tokenHash,
         on: (event: string, cb: () => void) => {
           if (event === 'close') closeCb = cb;
         },
@@ -216,15 +218,15 @@ describe('GET /events — post-connect token re-check', () => {
     };
   }
 
-  it('leaves the connection open when the token is still active', async () => {
-    vi.mocked(getTokenStatus).mockResolvedValue({ hasToken: true, createdAt: new Date() });
+  it('leaves the connection open when the exact presented token is still active', async () => {
+    vi.mocked(findDiscordIdByTokenHash).mockResolvedValue('user1');
     const handler = getEventsHandler();
     const res = makeSseRes();
-    const { req, triggerClose } = makeSseReq('user1');
+    const { req, triggerClose } = makeSseReq('user1', 'hash-a');
 
     await handler(req, res);
 
-    expect(getTokenStatus).toHaveBeenCalledWith('user1');
+    expect(findDiscordIdByTokenHash).toHaveBeenCalledWith('hash-a');
     expect(res.end).not.toHaveBeenCalled();
     expect(connections.get('user1')?.has(res as any)).toBe(true);
 
@@ -232,10 +234,10 @@ describe('GET /events — post-connect token re-check', () => {
   });
 
   it('ends the connection when the token was revoked in the gap between auth and admission', async () => {
-    vi.mocked(getTokenStatus).mockResolvedValue({ hasToken: false, createdAt: new Date() });
+    vi.mocked(findDiscordIdByTokenHash).mockResolvedValue(null);
     const handler = getEventsHandler();
     const res = makeSseRes();
-    const { req, triggerClose } = makeSseReq('user1');
+    const { req, triggerClose } = makeSseReq('user1', 'hash-a');
 
     await handler(req, res);
 
@@ -243,27 +245,32 @@ describe('GET /events — post-connect token re-check', () => {
     triggerClose(); // clears the 25s keepalive interval so it doesn't leak into other tests — res.end() is mocked here, so it doesn't itself emit 'close'
   });
 
-  it('ends the connection when the token has been deleted entirely', async () => {
-    vi.mocked(getTokenStatus).mockResolvedValue(null);
+  it('ends the connection when the old token was revoked even though the user has since issued a new one', async () => {
+    // The connection was authenticated with hash-old. By the time this re-check runs, hash-old
+    // has been revoked and a *different* token (hash-new) is now the user's active one —
+    // findDiscordIdByTokenHash('hash-old') correctly returns null rather than "yes, this
+    // discord ID has some active token."
+    vi.mocked(findDiscordIdByTokenHash).mockResolvedValue(null);
     const handler = getEventsHandler();
     const res = makeSseRes();
-    const { req, triggerClose } = makeSseReq('user1');
+    const { req, triggerClose } = makeSseReq('user1', 'hash-old');
 
     await handler(req, res);
 
+    expect(findDiscordIdByTokenHash).toHaveBeenCalledWith('hash-old');
     expect(res.end).toHaveBeenCalled();
     triggerClose();
   });
 
-  it('leaves the connection open (logged, not fatal) when the re-check itself fails', async () => {
-    vi.mocked(getTokenStatus).mockRejectedValue(new Error('db down'));
+  it('fails closed (ends the connection) when the re-check itself errors', async () => {
+    vi.mocked(findDiscordIdByTokenHash).mockRejectedValue(new Error('db down'));
     const handler = getEventsHandler();
     const res = makeSseRes();
-    const { req, triggerClose } = makeSseReq('user1');
+    const { req, triggerClose } = makeSseReq('user1', 'hash-a');
 
     await expect(handler(req, res)).resolves.toBeUndefined();
 
-    expect(res.end).not.toHaveBeenCalled();
+    expect(res.end).toHaveBeenCalled();
     triggerClose();
   });
 });

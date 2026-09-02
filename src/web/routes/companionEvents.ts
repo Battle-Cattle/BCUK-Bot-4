@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
 import { COMPANION_MAX_SSE_PER_TOKEN } from '../../shared/config';
 import type { StreamerEventType } from '../../db';
-import { getStreamerByDiscordId, getRecentStreamerEvents, getTokenStatus } from '../../db';
+import { getStreamerByDiscordId, getRecentStreamerEvents, findDiscordIdByTokenHash } from '../../db';
 import { RECENT_EVENTS_LIMIT } from './dashboardEvents';
 import { attachSseConnection, broadcastToChannel } from './sseChannel';
 
@@ -79,23 +79,30 @@ export function disconnectCompanionConnections(discordId: string): void {
  * a revoke landing in that gap (e.g. via `/companion-key/revoke`, which only closes connections
  * already registered at the moment it runs) would otherwise leave a newly-admitted connection
  * open indefinitely, since nothing re-checks the token afterward. Closes that race by
- * re-verifying the token immediately after attaching, and ending the connection if it was
- * revoked in that window; best-effort (a failed re-check is logged, not fatal to the connection),
- * since it narrows an already-narrow race rather than guarding a required invariant.
- * @param req - Express request; `req.companionDiscordId` is set by `requireCompanionKey`.
+ * re-verifying immediately after attaching that the *exact* presented token (`req.companionTokenHash`,
+ * not just "some active token for this Discord ID") is still active, and ending the connection if
+ * not — binding to the specific credential, rather than the Discord ID alone, also covers the
+ * revoke-then-reissue case: a connection authenticated by an old, now-dead token must not be
+ * allowed to keep streaming just because the same user has since issued a new one. Fails closed
+ * (ends the connection) if the re-check itself errors, since an unconfirmed credential shouldn't
+ * default to trusted for a security check.
+ * @param req - Express request; `req.companionDiscordId`/`req.companionTokenHash` are set by
+ *   `requireCompanionKey`.
  * @param res - Express response; upgraded to a `text/event-stream` connection by
  *   `attachSseConnection`, kept alive with periodic pings and torn down on client disconnect.
  */
 router.get('/events', requireCompanionKey, async (req, res) => {
   const discordId = req.companionDiscordId!;
+  const tokenHash = req.companionTokenHash!;
   const attached = attachSseConnection(req, res, { connections, key: discordId, maxPerChannel: MAX_SSE_CONNECTIONS_PER_TOKEN });
   if (!attached) return;
 
   try {
-    const status = await getTokenStatus(discordId);
-    if (!status?.hasToken) res.end();
+    const stillActive = await findDiscordIdByTokenHash(tokenHash);
+    if (stillActive === null) res.end();
   } catch (err) {
     log.error(`Failed to re-verify companion token for discord ${discordId} after connecting:`, err);
+    res.end();
   }
 });
 

@@ -146,12 +146,13 @@ export const requireManagerJson = requireAccessLevelJson(AccessLevel.MANAGER);
  * on success. Responds 401 when the header is missing/empty or `lookup` finds no match, and
  * 500 on any other lookup failure. Shared factory behind `requireApiKey`/`requireCompanionKey`.
  * @param lookup - Resolves a SHA-256 hex hash to the authenticated identity, or null if no match.
- * @param assign - Stores the resolved identity on `req` for downstream handlers.
+ * @param assign - Stores the resolved identity (and the token's own hash, for a caller that
+ *   needs to re-verify the exact presented credential later, not just the identity) on `req`.
  * @returns An Express middleware.
  */
 function authenticateBearerToken<T>(
   lookup: (hash: string) => Promise<T | null>,
-  assign: (req: Request, value: T) => void,
+  assign: (req: Request, value: T, hash: string) => void,
 ): (req: Request, res: Response, next: NextFunction) => Promise<void> {
   return async (req, res, next) => {
     const authHeader = req.headers['authorization'];
@@ -167,7 +168,7 @@ function authenticateBearerToken<T>(
         res.status(401).json({ ok: false, error: 'Unauthorized' });
         return;
       }
-      assign(req, value);
+      assign(req, value, hash);
       next();
     } catch {
       res.status(500).json({ ok: false, error: 'Internal server error' });
@@ -189,11 +190,17 @@ export const requireApiKey = authenticateBearerToken(
 /**
  * Authenticates a companion app request via a `Bearer` token, hashing it and looking it
  * up against active (non-revoked) companion tokens. On success, attaches the token
- * owner's Discord ID to the request.
+ * owner's Discord ID and the token's own hash to the request — the hash lets a long-lived
+ * handler (the SSE stream) re-verify this exact credential is still active later, rather than
+ * just whether the Discord ID has *some* active token (which a revoke-then-reissue could pass
+ * even for a connection authenticated by the now-dead token).
  */
 export const requireCompanionKey = authenticateBearerToken(
   findDiscordIdByTokenHash,
-  (req, discordId: string) => { req.companionDiscordId = discordId; },
+  (req, discordId: string, hash: string) => {
+    req.companionDiscordId = discordId;
+    req.companionTokenHash = hash;
+  },
 );
 
 /** Ensures the current-guild access level is Admin, otherwise renders a 403. */
