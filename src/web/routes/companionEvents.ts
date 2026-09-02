@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
 import { COMPANION_MAX_SSE_PER_TOKEN } from '../../shared/config';
 import type { StreamerEventType } from '../../db';
-import { getStreamerByDiscordId, getRecentStreamerEvents } from '../../db';
+import { getStreamerByDiscordId, getRecentStreamerEvents, getTokenStatus } from '../../db';
 import { RECENT_EVENTS_LIMIT } from './dashboardEvents';
 import { attachSseConnection, broadcastToChannel } from './sseChannel';
 
@@ -74,13 +74,29 @@ export function disconnectCompanionConnections(discordId: string): void {
  * `requireCompanionKey`. Streams companion events for the authenticated Discord
  * user until the client disconnects, sending a keepalive ping every 25s and
  * capping concurrent connections per user at `MAX_SSE_CONNECTIONS_PER_TOKEN`.
+ *
+ * `requireCompanionKey`'s token check and this handler's connection admission aren't atomic —
+ * a revoke landing in that gap (e.g. via `/companion-key/revoke`, which only closes connections
+ * already registered at the moment it runs) would otherwise leave a newly-admitted connection
+ * open indefinitely, since nothing re-checks the token afterward. Closes that race by
+ * re-verifying the token immediately after attaching, and ending the connection if it was
+ * revoked in that window; best-effort (a failed re-check is logged, not fatal to the connection),
+ * since it narrows an already-narrow race rather than guarding a required invariant.
  * @param req - Express request; `req.companionDiscordId` is set by `requireCompanionKey`.
  * @param res - Express response; upgraded to a `text/event-stream` connection by
  *   `attachSseConnection`, kept alive with periodic pings and torn down on client disconnect.
  */
-router.get('/events', requireCompanionKey, (req, res) => {
+router.get('/events', requireCompanionKey, async (req, res) => {
   const discordId = req.companionDiscordId!;
-  attachSseConnection(req, res, { connections, key: discordId, maxPerChannel: MAX_SSE_CONNECTIONS_PER_TOKEN });
+  const attached = attachSseConnection(req, res, { connections, key: discordId, maxPerChannel: MAX_SSE_CONNECTIONS_PER_TOKEN });
+  if (!attached) return;
+
+  try {
+    const status = await getTokenStatus(discordId);
+    if (!status?.hasToken) res.end();
+  } catch (err) {
+    log.error(`Failed to re-verify companion token for discord ${discordId} after connecting:`, err);
+  }
 });
 
 /**

@@ -29,6 +29,7 @@ vi.mock('../middleware', () => ({
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   getRecentStreamerEvents: vi.fn(),
+  getTokenStatus: vi.fn(),
 }));
 
 import supertest from 'supertest';
@@ -36,7 +37,7 @@ import router, {
   pushCompanionEvent, disconnectCompanionConnections, MAX_SSE_CONNECTIONS_PER_TOKEN, connections, type CompanionEvent,
 } from './companionEvents';
 import { RECENT_EVENTS_LIMIT } from './dashboardEvents';
-import { getStreamerByDiscordId, getRecentStreamerEvents } from '../../db';
+import { getStreamerByDiscordId, getRecentStreamerEvents, getTokenStatus } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a supertest-ready app: the companion events router with no body parser or session stub (auth is driven via a test header, see requireCompanionKey mock above). */
@@ -57,6 +58,7 @@ const sampleEvent: CompanionEvent = {
 beforeEach(() => {
   connections.clear();
   vi.clearAllMocks();
+  vi.mocked(getTokenStatus).mockResolvedValue({ hasToken: true, createdAt: new Date() });
 });
 
 describe('GET /events — auth', () => {
@@ -173,6 +175,96 @@ describe('GET /events — keepalive ping and connection close cleanup', () => {
 
     expect(() => (res.req as any).emit('close')).not.toThrow();
     expect(connections.has('user1')).toBe(false);
+  });
+});
+
+describe('GET /events — post-connect token re-check', () => {
+  /**
+   * Extracts the `/events` route's actual handler (the last middleware in its stack, after
+   * `requireCompanionKey`) so it can be invoked directly with fully-controlled mock req/res —
+   * avoids real-socket timing around the async post-connect `getTokenStatus` re-check.
+   */
+  function getEventsHandler(): (req: any, res: any) => Promise<void> {
+    const layer = (router as any).stack.find((l: any) => l.route?.path === '/events');
+    const handlers = layer.route.stack;
+    return handlers[handlers.length - 1].handle;
+  }
+
+  /** Builds a fake Express `res` covering the SSE-specific methods the route handler uses. */
+  function makeSseRes() {
+    return {
+      setHeader: vi.fn(),
+      flushHeaders: vi.fn(),
+      write: vi.fn(),
+      end: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      on: vi.fn(),
+    };
+  }
+
+  /** Builds a fake Express `req` with a `close`-event hook, plus a `triggerClose()` helper. */
+  function makeSseReq(discordId: string) {
+    let closeCb: (() => void) | undefined;
+    return {
+      req: {
+        companionDiscordId: discordId,
+        on: (event: string, cb: () => void) => {
+          if (event === 'close') closeCb = cb;
+        },
+      },
+      triggerClose: () => closeCb?.(),
+    };
+  }
+
+  it('leaves the connection open when the token is still active', async () => {
+    vi.mocked(getTokenStatus).mockResolvedValue({ hasToken: true, createdAt: new Date() });
+    const handler = getEventsHandler();
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('user1');
+
+    await handler(req, res);
+
+    expect(getTokenStatus).toHaveBeenCalledWith('user1');
+    expect(res.end).not.toHaveBeenCalled();
+    expect(connections.get('user1')?.has(res as any)).toBe(true);
+
+    triggerClose();
+  });
+
+  it('ends the connection when the token was revoked in the gap between auth and admission', async () => {
+    vi.mocked(getTokenStatus).mockResolvedValue({ hasToken: false, createdAt: new Date() });
+    const handler = getEventsHandler();
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('user1');
+
+    await handler(req, res);
+
+    expect(res.end).toHaveBeenCalled();
+    triggerClose(); // clears the 25s keepalive interval so it doesn't leak into other tests — res.end() is mocked here, so it doesn't itself emit 'close'
+  });
+
+  it('ends the connection when the token has been deleted entirely', async () => {
+    vi.mocked(getTokenStatus).mockResolvedValue(null);
+    const handler = getEventsHandler();
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('user1');
+
+    await handler(req, res);
+
+    expect(res.end).toHaveBeenCalled();
+    triggerClose();
+  });
+
+  it('leaves the connection open (logged, not fatal) when the re-check itself fails', async () => {
+    vi.mocked(getTokenStatus).mockRejectedValue(new Error('db down'));
+    const handler = getEventsHandler();
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('user1');
+
+    await expect(handler(req, res)).resolves.toBeUndefined();
+
+    expect(res.end).not.toHaveBeenCalled();
+    triggerClose();
   });
 });
 
