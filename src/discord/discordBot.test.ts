@@ -474,12 +474,12 @@ describe('startDiscordBot — gateway watchdog', () => {
     expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('0'));
   });
 
-  it('logs an error with the shard id and error when a shard reports a gateway connection error, without throwing', () => {
+  it('logs a warning with the shard id and error when a shard reports a gateway connection error, without throwing', () => {
     mod.startDiscordBot();
     const handler = findHandler('shardError');
     const gatewayError = new Error('gateway socket error');
     expect(() => handler(gatewayError, 0)).not.toThrow();
-    expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('0'), gatewayError);
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('0'), gatewayError);
   });
 
   it('forces a fresh login when a shard disconnects permanently', () => {

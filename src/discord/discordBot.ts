@@ -236,6 +236,12 @@ function registerClientReadyHandler(client: Client): void {
  * this bot running a single (unsharded) client, that means every guild silently
  * stops receiving events. Force a fresh login so the process self-heals instead
  * of sitting alive-but-dead until someone notices and restarts it manually.
+ *
+ * 'shardError' is logged at `warn`, not `error`: Discord's gateway routinely
+ * bounces connection attempts with transient failures (e.g. `Unexpected server
+ * response: 503`) during its own hiccups, and discord.js's automatic retry
+ * handles every one without our intervention. Logging those at `error` just
+ * spams error-level logs/alerts for something that isn't actionable.
  * @param client - The Discord client to register the handlers on.
  */
 function registerConnectionHandlers(client: Client): void {
@@ -246,7 +252,7 @@ function registerConnectionHandlers(client: Client): void {
     log.warn(`Shard ${shardId} lost its connection and is reconnecting...`);
   });
   client.on('shardError', (err, shardId) => {
-    log.error(`Shard ${shardId} gateway connection error:`, err);
+    log.warn(`Shard ${shardId} gateway connection error:`, err);
   });
   client.on('shardDisconnect', (event, shardId) => {
     log.error(`Shard ${shardId} disconnected permanently (code ${event.code}) — reconnecting client.`);
