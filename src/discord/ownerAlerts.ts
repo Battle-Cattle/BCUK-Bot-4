@@ -124,7 +124,7 @@ async function resolveOwnerDiscordId(): Promise<string | null> {
  * @returns Whether the DM was actually delivered — false if no runtime is registered, the owner
  *   ID couldn't be resolved, or the send itself failed.
  */
-async function sendOwnerAlert(message: string): Promise<boolean> {
+export async function sendOwnerAlert(message: string): Promise<boolean> {
   const runtime = runtimeRegistry.get();
   if (!runtime) {
     log.warn('No owner-alert runtime registered — skipping alert:', message);

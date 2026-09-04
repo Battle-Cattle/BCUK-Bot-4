@@ -28,6 +28,7 @@ vi.mock('../shared/healthStore', () => ({ recordDiscordConnected: vi.fn() }));
 vi.mock('../commands/healthCommandHandler', () => ({ executeHealthCommandForDiscord: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../audio/audioPlayer', () => ({ forgetGuild: vi.fn() }));
 vi.mock('./guildRefreshState', () => ({ forgetGuildRefreshState: vi.fn() }));
+vi.mock('./ownerAlerts', () => ({ sendOwnerAlert: vi.fn().mockResolvedValue(true) }));
 vi.mock('./guildRegistry', () => ({
   // Only the legacy configured guild is registered in these tests.
   isRegisteredGuild: vi.fn((id: string) => id === 'guild-id'),
@@ -474,12 +475,49 @@ describe('startDiscordBot — gateway watchdog', () => {
     expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('0'));
   });
 
-  it('logs a warning with the shard id and error when a shard reports a gateway connection error, without throwing', () => {
+  it('logs an error with the shard id and error the first time a shard reports a gateway connection error, and DMs the owner, without throwing', async () => {
+    const ownerAlerts = await import('./ownerAlerts.js');
     mod.startDiscordBot();
     const handler = findHandler('shardError');
     const gatewayError = new Error('gateway socket error');
     expect(() => handler(gatewayError, 0)).not.toThrow();
-    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('0'), gatewayError);
+    expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('0'), gatewayError);
+    expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('Shard 0'));
+  });
+
+  it('throttles repeated shardError logs/owner DMs for the same shard to one per interval, folding in a suppressed count', async () => {
+    const ownerAlerts = await import('./ownerAlerts.js');
+    vi.useFakeTimers();
+    try {
+      mod.startDiscordBot();
+      const handler = findHandler('shardError');
+      const gatewayError = new Error('gateway socket error');
+
+      handler(gatewayError, 0);
+      handler(gatewayError, 0);
+      handler(gatewayError, 0);
+      expect(mockLog.error).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(60_000);
+      handler(gatewayError, 0);
+      expect(mockLog.error).toHaveBeenCalledTimes(2);
+      expect(mockLog.error).toHaveBeenLastCalledWith(expect.stringContaining('2 more suppressed'), gatewayError);
+      expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenLastCalledWith(expect.stringContaining('2 more suppressed'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('logs shardError independently per shard, without one shard throttling another', () => {
+    mod.startDiscordBot();
+    const handler = findHandler('shardError');
+    const gatewayError = new Error('gateway socket error');
+
+    handler(gatewayError, 0);
+    handler(gatewayError, 1);
+    expect(mockLog.error).toHaveBeenCalledTimes(2);
   });
 
   it('forces a fresh login when a shard disconnects permanently', () => {
