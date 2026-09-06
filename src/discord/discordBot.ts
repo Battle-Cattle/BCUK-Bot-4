@@ -10,6 +10,7 @@ import { executeHealthCommandForDiscord } from '../commands/healthCommandHandler
 import { forgetGuild as forgetGuildVoiceState } from '../audio/audioPlayer';
 import { forgetGuildRefreshState } from './guildRefreshState';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
+import { sendOwnerAlert } from './ownerAlerts';
 import { upsertGuild, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
 import { runUserMutation } from '../web/routes/adminUserMutationQueue';
 import { createLogger } from '../shared/logger';
@@ -20,6 +21,40 @@ const log = createLogger('Discord');
 let bootingClient: Client | null = null;
 
 export { getDiscordClient };
+
+/** How often a given shard's gateway connection errors are actually logged — see {@link logShardError}. */
+const SHARD_ERROR_LOG_INTERVAL_MS = 60_000;
+
+/** Per-shard state for {@link logShardError}: when it last actually logged, and how many errors it has swallowed since. */
+const shardErrorLogState = new Map<number, { lastLoggedAt: number; suppressedCount: number }>();
+
+/**
+ * Logs a `shardError` at `error` and DMs the owner, throttled to at most one line/DM per
+ * shard per {@link SHARD_ERROR_LOG_INTERVAL_MS}. During a Discord-side gateway hiccup (e.g.
+ * repeated `Unexpected server response: 503`), discord.js's automatic reconnect can retry —
+ * and this event can fire — many times a second; logging (and alerting on) every one of those
+ * verbatim has filled multiple log files in a single incident without adding any information
+ * discord.js's own retry wasn't already handling. Errors swallowed during the throttle window
+ * are counted and folded into the next line/DM that does get sent. Still worth surfacing as an
+ * error (unlike 'shardReconnecting') because a shard that keeps erroring is a real, ongoing
+ * connectivity problem worth a human looking at, even though discord.js itself will keep
+ * retrying without help.
+ * @param shardId - The shard that reported the error.
+ * @param err - The gateway connection error.
+ */
+function logShardError(shardId: number, err: Error): void {
+  const now = Date.now();
+  const state = shardErrorLogState.get(shardId);
+  if (state && now - state.lastLoggedAt < SHARD_ERROR_LOG_INTERVAL_MS) {
+    state.suppressedCount++;
+    return;
+  }
+  const suppressed = state?.suppressedCount ?? 0;
+  const suffix = suppressed > 0 ? ` (${suppressed} more suppressed in the last ${SHARD_ERROR_LOG_INTERVAL_MS / 1000}s)` : '';
+  log.error(`Shard ${shardId} gateway connection error:${suffix}`, err);
+  shardErrorLogState.set(shardId, { lastLoggedAt: now, suppressedCount: 0 });
+  void sendOwnerAlert(`🔴 Shard ${shardId} gateway connection error${suffix}: ${err.message}`);
+}
 
 /** Resolve callbacks awaiting the next `clientReady` — see {@link onceDiscordReady}. */
 let readyWaiters: Array<() => void> = [];
@@ -229,7 +264,9 @@ function registerClientReadyHandler(client: Client): void {
  * visibility logging — without them, a reconnect cycle produces zero log output,
  * making post-incident diagnosis impossible. 'shardError' is a connection-level
  * error on the gateway socket itself (distinct from the generic 'error' handler);
- * the manager keeps retrying after it, so it's also log-only.
+ * the manager keeps retrying after it, so it doesn't need any recovery action here —
+ * but it's still worth an error-level log and an owner DM, throttled (see
+ * {@link logShardError}) so a burst of retries during an outage doesn't flood either.
  *
  * 'shardDisconnect' fires only for an unrecoverable close code — the one case
  * where discord.js gives up and will *not* reconnect that shard on its own. With
@@ -246,7 +283,7 @@ function registerConnectionHandlers(client: Client): void {
     log.warn(`Shard ${shardId} lost its connection and is reconnecting...`);
   });
   client.on('shardError', (err, shardId) => {
-    log.error(`Shard ${shardId} gateway connection error:`, err);
+    logShardError(shardId, err);
   });
   client.on('shardDisconnect', (event, shardId) => {
     log.error(`Shard ${shardId} disconnected permanently (code ${event.code}) — reconnecting client.`);
