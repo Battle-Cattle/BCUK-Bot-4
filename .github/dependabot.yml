@@ -10,3 +10,8 @@ updates:
     schedule:
       interval: "daily"
     open-pull-requests-limit: 50
+    groups:
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
