@@ -10,7 +10,7 @@ vi.mock('../shared/config', () => ({
   DB_NAME: 'test-db',
 }));
 
-import { getPool, closePool, withTransaction } from './pool';
+import { getPool, closePool, withTransaction, withTransactionOrNotFound } from './pool';
 
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -134,5 +134,68 @@ describe('withTransaction', () => {
 
     expect(conn.rollback).toHaveBeenCalledOnce();
     expect(conn.release).toHaveBeenCalledOnce();
+  });
+});
+
+describe('withTransactionOrNotFound', () => {
+  /** Builds a fake pool connection whose lifecycle methods resolve successfully. */
+  function makeConn() {
+    return {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+  }
+
+  it('returns the work result on success, committing like withTransaction', async () => {
+    const conn = makeConn();
+    createPool.mockReturnValue({ end: vi.fn(), getConnection: vi.fn().mockResolvedValue(conn) });
+
+    const result = await withTransactionOrNotFound(async () => 'the-result');
+
+    expect(result).toBe('the-result');
+    expect(conn.commit).toHaveBeenCalledOnce();
+    expect(conn.rollback).not.toHaveBeenCalled();
+  });
+
+  it('rolls back and resolves to null when work calls notFound()', async () => {
+    const conn = makeConn();
+    createPool.mockReturnValue({ end: vi.fn(), getConnection: vi.fn().mockResolvedValue(conn) });
+
+    const result = await withTransactionOrNotFound(async (_conn, notFound) => {
+      notFound();
+    });
+
+    expect(result).toBeNull();
+    expect(conn.rollback).toHaveBeenCalledOnce();
+    expect(conn.commit).not.toHaveBeenCalled();
+  });
+
+  it('rolls back and rethrows any other error, without treating it as not-found', async () => {
+    const conn = makeConn();
+    createPool.mockReturnValue({ end: vi.fn(), getConnection: vi.fn().mockResolvedValue(conn) });
+    const boom = new Error('boom');
+
+    await expect(withTransactionOrNotFound(async () => { throw boom; })).rejects.toBe(boom);
+
+    expect(conn.rollback).toHaveBeenCalledOnce();
+  });
+
+  it('does not confuse two concurrent calls not-found signals with each other', async () => {
+    const connA = makeConn();
+    const connB = makeConn();
+    const getConnection = vi.fn()
+      .mockResolvedValueOnce(connA)
+      .mockResolvedValueOnce(connB);
+    createPool.mockReturnValue({ end: vi.fn(), getConnection });
+
+    const [resultA, resultB] = await Promise.all([
+      withTransactionOrNotFound(async (_conn, notFound) => { notFound(); }),
+      withTransactionOrNotFound(async () => 'found-it'),
+    ]);
+
+    expect(resultA).toBeNull();
+    expect(resultB).toBe('found-it');
   });
 });

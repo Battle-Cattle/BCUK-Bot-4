@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import { getPool, withTransaction } from './pool';
+import { getPool, withTransactionOrNotFound } from './pool';
 
 export interface OverlayVideo {
   id: number;
@@ -89,29 +89,23 @@ export async function getVideoById(videoId: number, streamerId: number): Promise
  * @returns The deleted row's filename (for filesystem cleanup), or null if no matching row existed.
  */
 export async function deleteVideo(videoId: number, streamerId: number): Promise<string | null> {
-  class VideoNotFoundError extends Error {}
-  try {
-    return await withTransaction(async (conn) => {
-      const [rows] = await conn.execute<mysql.RowDataPacket[]>(
-        `SELECT filename FROM overlay_video WHERE id = ? AND streamer_id = ?`,
-        [videoId, streamerId],
-      );
-      if (rows.length === 0) {
-        throw new VideoNotFoundError();
-      }
-      const filename: string = rows[0].filename;
-      const [del] = await conn.execute<mysql.ResultSetHeader>(
-        `DELETE FROM overlay_video WHERE id = ? AND streamer_id = ?`, [videoId, streamerId],
-      );
-      if (del.affectedRows === 0) {
-        throw new VideoNotFoundError();
-      }
-      return filename;
-    });
-  } catch (err) {
-    if (err instanceof VideoNotFoundError) return null;
-    throw err;
-  }
+  return withTransactionOrNotFound(async (conn, notFound) => {
+    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+      `SELECT filename FROM overlay_video WHERE id = ? AND streamer_id = ?`,
+      [videoId, streamerId],
+    );
+    if (rows.length === 0) {
+      notFound();
+    }
+    const filename: string = rows[0].filename;
+    const [del] = await conn.execute<mysql.ResultSetHeader>(
+      `DELETE FROM overlay_video WHERE id = ? AND streamer_id = ?`, [videoId, streamerId],
+    );
+    if (del.affectedRows === 0) {
+      notFound();
+    }
+    return filename;
+  });
 }
 
 /**
@@ -182,41 +176,35 @@ export async function setRewardVideos(
   streamerId: number,
   videos: Array<{ videoId: number; weight: number }>,
 ): Promise<void> {
-  class RewardNotFoundError extends Error {}
-  try {
-    await withTransaction(async (conn) => {
-      // Verify reward belongs to this streamer
-      const [check] = await conn.execute<mysql.RowDataPacket[]>(
-        `SELECT id FROM overlay_reward WHERE id = ? AND streamer_id = ?`,
-        [rewardId, streamerId],
-      );
-      if (check.length === 0) {
-        throw new RewardNotFoundError();
-      }
-      await conn.execute(`DELETE FROM overlay_reward_video WHERE reward_id = ?`, [rewardId]);
-      if (videos.length === 0) return;
+  await withTransactionOrNotFound(async (conn, notFound) => {
+    // Verify reward belongs to this streamer
+    const [check] = await conn.execute<mysql.RowDataPacket[]>(
+      `SELECT id FROM overlay_reward WHERE id = ? AND streamer_id = ?`,
+      [rewardId, streamerId],
+    );
+    if (check.length === 0) {
+      notFound();
+    }
+    await conn.execute(`DELETE FROM overlay_reward_video WHERE reward_id = ?`, [rewardId]);
+    if (videos.length === 0) return;
 
-      const [ownedRows] = await conn.execute<mysql.RowDataPacket[]>(
-        `SELECT id FROM overlay_video WHERE streamer_id = ? AND id IN (${videos.map(() => '?').join(', ')})`,
-        [streamerId, ...videos.map((v) => v.videoId)],
-      );
-      const ownedIds = new Set<number>(ownedRows.map((r) => r.id));
-      const invalid = videos.find((v) => !ownedIds.has(v.videoId));
-      if (invalid) {
-        throw new Error(`Video ${invalid.videoId} does not belong to streamer ${streamerId}`);
-      }
+    const [ownedRows] = await conn.execute<mysql.RowDataPacket[]>(
+      `SELECT id FROM overlay_video WHERE streamer_id = ? AND id IN (${videos.map(() => '?').join(', ')})`,
+      [streamerId, ...videos.map((v) => v.videoId)],
+    );
+    const ownedIds = new Set<number>(ownedRows.map((r) => r.id));
+    const invalid = videos.find((v) => !ownedIds.has(v.videoId));
+    if (invalid) {
+      throw new Error(`Video ${invalid.videoId} does not belong to streamer ${streamerId}`);
+    }
 
-      const placeholders = videos.map(() => '(?, ?, ?)').join(', ');
-      const params = videos.flatMap((v) => [rewardId, v.videoId, Math.max(1, v.weight)]);
-      await conn.execute(
-        `INSERT INTO overlay_reward_video (reward_id, video_id, weight) VALUES ${placeholders}`,
-        params,
-      );
-    });
-  } catch (err) {
-    if (err instanceof RewardNotFoundError) return;
-    throw err;
-  }
+    const placeholders = videos.map(() => '(?, ?, ?)').join(', ');
+    const params = videos.flatMap((v) => [rewardId, v.videoId, Math.max(1, v.weight)]);
+    await conn.execute(
+      `INSERT INTO overlay_reward_video (reward_id, video_id, weight) VALUES ${placeholders}`,
+      params,
+    );
+  });
 }
 
 /**
