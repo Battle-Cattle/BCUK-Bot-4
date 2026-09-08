@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import { getPool } from './pool';
+import { getPool, runInTransaction } from './pool';
 import { fromBit, getRowCount } from './utils';
 import { AccessLevel } from './users';
 import type { AccessLevelValue } from './users';
@@ -207,24 +207,19 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
 
   try {
     await acquireNamedLock(connection, lockName);
-    await connection.beginTransaction();
-    await connection.execute(
-      'DELETE FROM twitch_user_commands WHERE command_id = ?',
-      [commandId],
-    );
-    const [result] = await connection.execute<mysql.ResultSetHeader>(
-      'DELETE FROM custom_command WHERE command_id = ?',
-      [commandId],
-    );
-    if (result.affectedRows === 0) {
-      throw new CommandNotFoundError(commandId);
-    }
-    await connection.commit();
-  } catch (error) {
-    // Swallow a rollback failure so the original error still propagates (matches
-    // withTransaction in pool.ts).
-    await connection.rollback().catch(() => {});
-    throw error;
+    await runInTransaction(connection, async () => {
+      await connection.execute(
+        'DELETE FROM twitch_user_commands WHERE command_id = ?',
+        [commandId],
+      );
+      const [result] = await connection.execute<mysql.ResultSetHeader>(
+        'DELETE FROM custom_command WHERE command_id = ?',
+        [commandId],
+      );
+      if (result.affectedRows === 0) {
+        throw new CommandNotFoundError(commandId);
+      }
+    });
   } finally {
     await releaseNamedLock(connection, lockName);
     connection.release();

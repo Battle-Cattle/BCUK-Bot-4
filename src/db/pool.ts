@@ -41,6 +41,29 @@ export async function closePool(): Promise<void> {
 }
 
 /**
+ * Runs `work` inside a transaction on an already-acquired `conn`: begins the transaction,
+ * invokes `work`, and commits once it resolves. If `work` throws, the transaction is rolled
+ * back — rollback failures are swallowed so the original error still propagates — and the
+ * error is rethrown. Does not acquire or release `conn`; the caller owns its lifecycle, which
+ * is what lets a caller like `removeCustomCommand` (in `customCommands.ts`) hold the same
+ * connection across a named-lock acquire/release that must wrap the transaction.
+ * @param conn Pool connection to run the transaction on.
+ * @param work Callback that performs the transactional work.
+ * @returns The value returned by `work`, once the transaction has committed.
+ */
+export async function runInTransaction<T>(conn: PoolConnection, work: () => Promise<T>): Promise<T> {
+  try {
+    await conn.beginTransaction();
+    const result = await work();
+    await conn.commit();
+    return result;
+  } catch (err) {
+    await conn.rollback().catch(() => {});
+    throw err;
+  }
+}
+
+/**
  * Runs `work` inside a database transaction: acquires a connection, begins the
  * transaction, invokes `work(conn)`, and commits once it resolves. If `work`
  * throws (including a caller-defined sentinel error used to signal an early
@@ -54,13 +77,7 @@ export async function closePool(): Promise<void> {
 export async function withTransaction<T>(work: (conn: PoolConnection) => Promise<T>): Promise<T> {
   const conn = await getPool().getConnection();
   try {
-    await conn.beginTransaction();
-    const result = await work(conn);
-    await conn.commit();
-    return result;
-  } catch (err) {
-    await conn.rollback().catch(() => {});
-    throw err;
+    return await runInTransaction(conn, () => work(conn));
   } finally {
     conn.release();
   }

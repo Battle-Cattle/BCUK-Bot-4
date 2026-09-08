@@ -10,7 +10,7 @@ vi.mock('../shared/config', () => ({
   DB_NAME: 'test-db',
 }));
 
-import { getPool, closePool, withTransaction, withTransactionOrNotFound } from './pool';
+import { getPool, closePool, withTransaction, withTransactionOrNotFound, runInTransaction } from './pool';
 
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -134,6 +134,51 @@ describe('withTransaction', () => {
 
     expect(conn.rollback).toHaveBeenCalledOnce();
     expect(conn.release).toHaveBeenCalledOnce();
+  });
+});
+
+describe('runInTransaction', () => {
+  /** Builds a fake pool connection whose lifecycle methods resolve successfully. */
+  function makeConn() {
+    return {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+    };
+  }
+
+  it('begins, runs work, commits, and returns the work result, without touching release', async () => {
+    const conn = makeConn();
+    const work = vi.fn().mockResolvedValue('the-result');
+
+    const result = await runInTransaction(conn as any, work);
+
+    expect(result).toBe('the-result');
+    expect(conn.beginTransaction).toHaveBeenCalledOnce();
+    expect(work).toHaveBeenCalledOnce();
+    expect(conn.commit).toHaveBeenCalledOnce();
+    expect(conn.rollback).not.toHaveBeenCalled();
+    expect(conn.release).not.toHaveBeenCalled();
+  });
+
+  it('rolls back and rethrows when work throws, without releasing the connection', async () => {
+    const conn = makeConn();
+    const boom = new Error('boom');
+
+    await expect(runInTransaction(conn as any, async () => { throw boom; })).rejects.toBe(boom);
+
+    expect(conn.rollback).toHaveBeenCalledOnce();
+    expect(conn.commit).not.toHaveBeenCalled();
+    expect(conn.release).not.toHaveBeenCalled();
+  });
+
+  it('swallows a rollback failure and still rethrows the original error', async () => {
+    const conn = makeConn();
+    conn.rollback.mockRejectedValue(new Error('rollback failed'));
+    const original = new Error('original failure');
+
+    await expect(runInTransaction(conn as any, async () => { throw original; })).rejects.toBe(original);
   });
 });
 
