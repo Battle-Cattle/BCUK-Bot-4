@@ -30,6 +30,9 @@ function createEmptyAlertConfigLookupCache(): AlertConfigLookupCache {
 
 /**
  * Builds an alert config lookup cache keyed by `streamerId:eventType` from every `alert_config` row.
+ * Unlike the custom-command/counter/SFX lookup caches, this doesn't need first-wins collision
+ * handling: `alert_config` has a DB-level `UNIQUE KEY (streamer_id, event_type)`, so two rows can
+ * never produce the same cache key.
  * @param rows Every alert config row across all streamers.
  * @returns The populated `AlertConfigLookupCache`.
  */
