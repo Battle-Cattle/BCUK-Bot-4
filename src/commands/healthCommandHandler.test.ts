@@ -16,9 +16,21 @@ vi.mock('../shared/healthStore', () => ({
   getHealthSnapshot: vi.fn(),
 }));
 
-vi.mock('../discord/discordUtils', () => ({
-  isDiscordNotFoundError: vi.fn().mockReturnValue(false),
-}));
+vi.mock('../discord/discordUtils', () => {
+  const isDiscordNotFoundError = vi.fn().mockReturnValue(false);
+  return {
+    isDiscordNotFoundError,
+    trySendDiscordReply: async (message: { reply: (payload: unknown) => Promise<unknown> }, payload: unknown, onError: (err: unknown) => void) => {
+      try {
+        await message.reply(payload);
+        return true;
+      } catch (err) {
+        if (!isDiscordNotFoundError(err)) onError(err);
+        return false;
+      }
+    },
+  };
+});
 
 import { executeHealthCommandForDiscord } from './healthCommandHandler';
 import { findOwnerUser } from '../db';

@@ -10,10 +10,22 @@ vi.mock('../db', () => ({
   incrementCounter: vi.fn(),
 }));
 
-vi.mock('../discord/discordUtils', () => ({
-  isDiscordNotFoundError: vi.fn().mockReturnValue(false),
-  NO_MENTIONS: { parse: [] },
-}));
+vi.mock('../discord/discordUtils', () => {
+  const isDiscordNotFoundError = vi.fn().mockReturnValue(false);
+  return {
+    isDiscordNotFoundError,
+    NO_MENTIONS: { parse: [] },
+    trySendDiscordReply: async (message: { reply: (payload: unknown) => Promise<unknown> }, payload: unknown, onError: (err: unknown) => void) => {
+      try {
+        await message.reply(payload);
+        return true;
+      } catch (err) {
+        if (!isDiscordNotFoundError(err)) onError(err);
+        return false;
+      }
+    },
+  };
+});
 
 import {
   executeCounterCommandForDiscord,
