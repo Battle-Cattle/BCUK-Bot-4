@@ -115,7 +115,9 @@ export function renderError(
  * @returns The friendly message for `key`, or a generic fallback if `key` isn't in `messages`.
  */
 export function getFriendlyErrorMessage(messages: Record<string, string>, key: string): string {
-  return messages[key] ?? `An error occurred (${key}).`;
+  return Object.prototype.hasOwnProperty.call(messages, key)
+    ? messages[key]
+    : `An error occurred (${key}).`;
 }
 
 /**

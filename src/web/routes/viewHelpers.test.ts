@@ -21,6 +21,13 @@ describe('getFriendlyErrorMessage', () => {
   it('returns a generic fallback for an unrecognized key', () => {
     expect(getFriendlyErrorMessage(messages, 'unknown_key')).toBe('An error occurred (unknown_key).');
   });
+
+  it.each(['toString', 'constructor', '__proto__', 'hasOwnProperty'])(
+    'returns the generic fallback for the inherited key %s rather than an Object.prototype value',
+    (key) => {
+      expect(getFriendlyErrorMessage(messages, key)).toBe(`An error occurred (${key}).`);
+    },
+  );
 });
 
 describe('renderView', () => {
