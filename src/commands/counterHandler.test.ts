@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mockLogger } from '../test-utils/loggerMock';
 
-vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
+// A stable logger instance (unlike `mockLogger()`, which returns a fresh object per call) so
+// tests can assert on the same `log.error` spy the module-scoped `log` in counterHandler.ts
+// was created with.
+const { log } = vi.hoisted(() => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+vi.mock('../shared/logger', () => ({ createLogger: () => log }));
 
 vi.mock('../shared/config', () => ({ GLOBAL_COOLDOWN_MS: 3_000 }));
 
@@ -146,6 +151,22 @@ describe('executeCounterCommandForDiscord', () => {
     msg.reply.mockRejectedValue(new Error('Unknown message'));
 
     await expect(executeCounterCommandForDiscord(msg as any)).resolves.toBeUndefined();
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it('logs (but does not throw) when the Discord reply fails with a non-not-found error', async () => {
+    const { isDiscordNotFoundError } = await import('../discord/discordUtils.js');
+    vi.mocked(isDiscordNotFoundError).mockReturnValue(false);
+    vi.mocked(findCounterByCommand).mockResolvedValue(CHECK_COUNTER as any);
+    const msg = makeMockMessage('!count');
+    const boom = new Error('Missing Permissions');
+    msg.reply.mockRejectedValue(boom);
+
+    await expect(executeCounterCommandForDiscord(msg as any)).resolves.toBeUndefined();
+    expect(log.error).toHaveBeenCalledWith(
+      `[Discord] Failed to reply to message ${msg.id} for counter check '!count':`,
+      boom,
+    );
   });
 });
 
