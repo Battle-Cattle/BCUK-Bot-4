@@ -76,7 +76,7 @@ interface CounterResult {
  * @param cooldownKey - Cooldown-gate key for the invoking guild/channel.
  * @returns The response text, display label, and whether it's safe to send it; null if no counter matches `command`, or if the match is on cooldown.
  */
-async function _buildCounterResponse(
+async function buildCounterResponse(
   command: string,
   errorPrefix: string,
   cooldownKey: string,
@@ -137,7 +137,7 @@ export async function executeCounterCommandForDiscord(
   const command = resolveCommand(message.content, precomputedCommand);
   if (!command) return;
 
-  const result = await _buildCounterResponse(command, '[Discord]', discordCooldownKey(message));
+  const result = await buildCounterResponse(command, '[Discord]', discordCooldownKey(message));
   if (!result) return;
 
   if (!result.canReply) return;
@@ -174,7 +174,7 @@ export async function executeCounterCommandForTwitch(
   const command = resolveCommand(rawMessage, precomputedCommand);
   if (!command) return;
 
-  const result = await _buildCounterResponse(command, `[Twitch:${channel}]`, `twitch:${channel}`);
+  const result = await buildCounterResponse(command, `[Twitch:${channel}]`, `twitch:${channel}`);
   if (!result) return;
 
   if (!result.canReply) return;
