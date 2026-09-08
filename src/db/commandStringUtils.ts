@@ -62,6 +62,7 @@ export function buildInClausePlaceholders(count: number): string {
 
 // ─── Error types ─────────────────────────────────────────────────────────────
 
+/** Thrown when a custom-command lookup/mutation matches no row. */
 export class CommandNotFoundError extends Error {
   constructor(id: number) {
     super(`Command not found: ${id}`);
@@ -69,7 +70,9 @@ export class CommandNotFoundError extends Error {
   }
 }
 
+/** Thrown when one or more command strings are already taken by another command/counter. */
 export class CommandConflictError extends Error {
+  /** The command string(s) that caused the conflict. */
   readonly commands: string[];
 
   constructor(commands: string[]) {

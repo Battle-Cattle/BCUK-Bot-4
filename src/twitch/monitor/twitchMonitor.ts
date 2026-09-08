@@ -112,6 +112,12 @@ async function teardown(): Promise<void> {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/**
+ * Starts the Twitch live/offline poller: loads streamer/group config, resolves Twitch user
+ * IDs, reconciles live state against anything that changed while the bot was down, then
+ * begins the recurring poll loop.
+ * @returns Resolves once the initial state sync has completed and polling has started.
+ */
 export async function startTwitchMonitor(): Promise<void> {
   streamersData = await getAllStreamersWithGroups();
   if (streamersData.length === 0) {

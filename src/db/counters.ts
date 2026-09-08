@@ -48,6 +48,7 @@ export interface UpdateCounterInput {
   resetYearly: boolean;
 }
 
+/** Thrown when a counter lookup/mutation matches no row. */
 export class CounterNotFoundError extends Error {
   constructor(id: number) {
     super(`Counter not found: ${id}`);

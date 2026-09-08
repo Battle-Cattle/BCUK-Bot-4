@@ -7,6 +7,13 @@ import { saveStreamerToken, clearStreamerToken } from '../../db';
 const log = createLogger('TwitchToken');
 const TOKEN_BUFFER_MS = 5 * 60 * 1000;
 
+/**
+ * Returns a usable EventSub access token for `streamer`. Returns null if no access token is
+ * stored; otherwise, refreshes it if it is expired or within {@link TOKEN_BUFFER_MS} of expiring.
+ * Persists a successful refresh to the DB via `saveStreamerToken`.
+ * @param streamer Streamer row carrying the current EventSub token/refresh-token pair.
+ * @returns A valid access token, or null if none is available (no token stored, or refresh failed/impossible).
+ */
 export async function getValidToken(streamer: DbStreamerEventSub): Promise<string | null> {
   if (!streamer.eventsub_access_token) return null;
   // eventsub_token_expiry is BIGINT epoch ms — safe to coerce, won't exceed MAX_SAFE_INTEGER until year 275760.

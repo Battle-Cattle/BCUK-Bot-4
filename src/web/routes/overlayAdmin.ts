@@ -34,6 +34,13 @@ const KNOWN_SUCCESSES = new Set([
   'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted',
 ]);
 
+/**
+ * Fetches a streamer's live Twitch custom (channel-point) rewards, for display alongside the
+ * overlay reward-to-video assignment UI. Returns an empty list rather than throwing if the
+ * streamer has no linked Twitch account, no valid token, or the Helix call fails.
+ * @param streamer Streamer whose custom rewards to fetch.
+ * @returns The streamer's Twitch custom rewards, or an empty array if unavailable.
+ */
 async function fetchTwitchRewards(streamer: DbStreamerEventSub): Promise<TwitchCustomReward[]> {
   if (!streamer.twitch_user_id) return [];
   const token = await getValidToken(streamer);
