@@ -3,7 +3,7 @@ import { createLogger } from '../shared/logger';
 import { resolveCommand } from './commandUtils';
 import { findOwnerUser } from '../db';
 import { getHealthSnapshot, type HealthSnapshot } from '../shared/healthStore';
-import { isDiscordNotFoundError } from '../discord/discordUtils';
+import { trySendDiscordReply } from '../discord/discordUtils';
 
 const log = createLogger('HealthCommand');
 
@@ -138,12 +138,10 @@ export async function executeHealthCommandForDiscord(message: Message, precomput
   }
 
   if (message.guild) {
-    try {
-      await message.reply('📬 Sent you the health report via DM.');
-    } catch (err) {
-      if (!isDiscordNotFoundError(err)) {
-        log.error('Failed to acknowledge !health command in channel:', err);
-      }
-    }
+    await trySendDiscordReply(
+      message,
+      '📬 Sent you the health report via DM.',
+      (err) => log.error('Failed to acknowledge !health command in channel:', err),
+    );
   }
 }

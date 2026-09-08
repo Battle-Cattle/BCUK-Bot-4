@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { DiscordAPIError, HTTPError, RESTJSONErrorCodes, ChannelType, type Client, type MessageEditOptions, type MessageMentionOptions, type TextBasedChannel } from 'discord.js';
+import { DiscordAPIError, HTTPError, RESTJSONErrorCodes, ChannelType, type Client, type Message, type MessageEditOptions, type MessageMentionOptions, type MessagePayload, type MessageReplyOptions, type TextBasedChannel } from 'discord.js';
 import { getDiscordClient } from './discordClientStore';
 
 const log = createLogger('Discord');
@@ -159,6 +159,34 @@ export async function tryEditDiscordMessage(
     if (isDiscordNotFoundError(err)) return false;
     log.error(`Failed to edit Discord message ${messageId} in channel ${channelId}:`, err);
     throw err;
+  }
+}
+
+/**
+ * Replies to `message`, swallowing a Discord not-found error (message/channel already gone
+ * by the time the reply is sent) rather than logging it — the same not-found handling as
+ * {@link tryDeleteDiscordMessage}/{@link tryEditDiscordMessage}. Any other error is passed to
+ * `onError` and swallowed, since a command handler's reply is best-effort and should never
+ * throw back into the message-handling loop.
+ *
+ * @param message - Discord message to reply to.
+ * @param payload - Reply content/options, forwarded to `message.reply` unchanged.
+ * @param onError - Called with the error when the reply fails for a reason other than not-found.
+ * @returns True if the reply was sent; false if it failed (not-found or otherwise).
+ */
+export async function trySendDiscordReply(
+  message: Message,
+  payload: string | MessagePayload | MessageReplyOptions,
+  onError: (err: unknown) => void,
+): Promise<boolean> {
+  try {
+    await message.reply(payload);
+    return true;
+  } catch (err) {
+    if (!isDiscordNotFoundError(err)) {
+      onError(err);
+    }
+    return false;
   }
 }
 

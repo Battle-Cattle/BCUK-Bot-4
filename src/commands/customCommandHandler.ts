@@ -5,7 +5,7 @@ import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from '..
 const log = createLogger('CustomCmd');
 import { getSharedChatSession } from '../twitch/twitchApi';
 import { extractArgs, resolveCommand } from './commandUtils';
-import { isDiscordNotFoundError, NO_MENTIONS } from '../discord/discordUtils';
+import { NO_MENTIONS, trySendDiscordReply } from '../discord/discordUtils';
 import type { MultiTwitchGroupInfo } from '../twitch/monitor/twitchMonitorTypes';
 import { fillTemplate } from '../shared/textTemplate';
 import { sendDedupedBySession } from './twitchBroadcast';
@@ -239,13 +239,13 @@ export async function executeCustomCommandForDiscord(
 
   const filledResponse = buildFilledResponse(result.response, message.content, username);
 
-  try {
-    await message.reply({ content: filledResponse, allowedMentions: NO_MENTIONS });
+  const sent = await trySendDiscordReply(
+    message,
+    { content: filledResponse, allowedMentions: NO_MENTIONS },
+    (err) => log.error(`[Discord] Failed to reply to message ${message.id} for command '${command}':`, err),
+  );
+  if (sent) {
     log.info(`[Discord] Sent custom command '${command}'.`);
-  } catch (err) {
-    if (!isDiscordNotFoundError(err)) {
-      log.error(`[Discord] Failed to reply to message ${message.id} for command '${command}':`, err);
-    }
   }
 }
 
