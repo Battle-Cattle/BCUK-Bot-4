@@ -6,7 +6,7 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { trimField, filterQueryParam } from './validation';
-import { renderError, renderView } from './viewHelpers';
+import { renderError, renderView, getFriendlyErrorMessage } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
@@ -42,8 +42,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_id:                    'Invalid request — please try again.',
 };
 
+/** Looks up a `userSettings` page error code in {@link ERROR_MESSAGES}, for use as an EJS template helper. */
 function getFriendlyError(key: string): string {
-  return ERROR_MESSAGES[key] ?? `An error occurred (${key}).`;
+  return getFriendlyErrorMessage(ERROR_MESSAGES, key);
 }
 
 // GET /user/settings

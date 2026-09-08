@@ -107,6 +107,20 @@ export function renderError(
 }
 
 /**
+ * Looks up `key` in a page's `error`-code-to-message map, falling back to a generic
+ * "An error occurred (<key>)" message for an unrecognized code (e.g. a stale bookmark or a
+ * code from a since-removed error path) rather than showing nothing.
+ * @param messages The page's `error` query-param code-to-message map.
+ * @param key The `error` query-param value to look up.
+ * @returns The friendly message for `key`, or a generic fallback if `key` isn't in `messages`.
+ */
+export function getFriendlyErrorMessage(messages: Record<string, string>, key: string): string {
+  return Object.prototype.hasOwnProperty.call(messages, key)
+    ? messages[key]
+    : `An error occurred (${key}).`;
+}
+
+/**
  * Loads the requesting user's streamer record, redirecting to `notAStreamerRedirectPath`
  * if they aren't one. Shared by every streamer-scoped admin page (channel points, overlay
  * settings), each of which passes its own not-a-streamer error redirect so the pages stay
