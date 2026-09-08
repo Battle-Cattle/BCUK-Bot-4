@@ -6,7 +6,8 @@ import { csrfProtection } from '../csrf';
 import { SFX_FOLDER, SFX_MAX_FILE_MB, OPENAI_API_KEY } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
 import { filterQueryParam, parsePositiveIntId } from './validation';
-import { renderError, renderView } from './viewHelpers';
+import { renderView } from './viewHelpers';
+import { renderOrError } from './errorHandling';
 
 const log = createLogger('Web');
 const router = Router();
@@ -46,7 +47,7 @@ const KNOWN_SUCCESS = new Set([
  * matching the server-side requireOwnerJson guard on its route.
  */
 router.get('/sfx', csrfProtection, async (req, res) => {
-  try {
+  await renderOrError({ res, log, logLabel: 'SFX error:', sessionUser: req.session.user, errorMessage: 'Failed to load SFX data.' }, async () => {
     const [triggers, categories] = await Promise.all([getAllSfxTriggers(), getAllCategories()]);
     const canManage = (req.session.user?.accessLevel ?? 0) >= AccessLevel.MOD;
     const canSuggestDescriptions = !!req.session.user?.isOwner && OPENAI_API_KEY !== '';
@@ -61,10 +62,7 @@ router.get('/sfx', csrfProtection, async (req, res) => {
       error: filterQueryParam(req.query.error, KNOWN_ERRORS),
       success: filterQueryParam(req.query.success, KNOWN_SUCCESS),
     });
-  } catch (err) {
-    log.error('SFX error:', err);
-    renderError(res, 500, 'Failed to load SFX data.', req.session.user);
-  }
+  });
 });
 
 /**

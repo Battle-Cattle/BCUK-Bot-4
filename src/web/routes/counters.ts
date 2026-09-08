@@ -12,8 +12,8 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireAuth, requireGuildContext, requireMod, requireManager } from '../middleware';
 import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parseCheckboxField, filterQueryParam } from './validation';
-import { renderError, renderView } from './viewHelpers';
-import { logAndRedirectError, handleReservedOrConflictCommandError } from './errorHandling';
+import { renderView } from './viewHelpers';
+import { logAndRedirectError, handleReservedOrConflictCommandError, renderOrError } from './errorHandling';
 
 const log = createLogger('Web');
 const router = Router();
@@ -88,7 +88,7 @@ function validateAndNormalizeCounterForm(
  *   if loading counters fails.
  */
 router.get('/counters', requireAuth, csrfProtection, async (req, res) => {
-  try {
+  await renderOrError({ res, log, logLabel: 'Counters page error:', sessionUser: req.session.user, errorMessage: 'Failed to load counters page.' }, async () => {
     const counters = await getAllCounters();
 
     renderView(res, 'counters', {
@@ -98,10 +98,7 @@ router.get('/counters', requireAuth, csrfProtection, async (req, res) => {
       error: filterQueryParam(req.query.error, KNOWN_ERRORS),
       reset: req.query.reset === '1',
     });
-  } catch (err) {
-    log.error('Counters page error:', err);
-    renderError(res, 500, 'Failed to load counters page.', req.session.user);
-  }
+  });
 });
 
 /**

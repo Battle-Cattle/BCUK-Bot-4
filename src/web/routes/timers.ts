@@ -4,7 +4,8 @@ import { DbTimerCommandWithAssignments, DbUser, getAllTimerCommandsWithAssignmen
 import { csrfProtection } from '../csrf';
 import { requireGuildContext, requireManager } from '../middleware';
 import { filterQueryParam } from './validation';
-import { renderError, renderView } from './viewHelpers';
+import { renderView } from './viewHelpers';
+import { renderOrError } from './errorHandling';
 import timersMutationsRouter from './timersMutations';
 import timerAssignmentsRouter from './timerAssignments';
 
@@ -28,7 +29,7 @@ interface TimerViewModel extends DbTimerCommandWithAssignments {
  * assignments, so authentication alone isn't enough (mutations additionally require Mod+).
  */
 router.get('/timers', requireGuildContext, requireManager, csrfProtection, async (req, res) => {
-  try {
+  await renderOrError({ res, log, logLabel: 'Timers page error:', sessionUser: req.session.user, errorMessage: 'Failed to load timers page.' }, async () => {
     const [timers, users] = await Promise.all([
       getAllTimerCommandsWithAssignments(),
       getAllUsers(),
@@ -49,10 +50,7 @@ router.get('/timers', requireGuildContext, requireManager, csrfProtection, async
       csrfToken: req.csrfToken(),
       error: filterQueryParam(req.query.error, KNOWN_ERRORS),
     });
-  } catch (err) {
-    log.error('Timers page error:', err);
-    renderError(res, 500, 'Failed to load timers page.', req.session.user);
-  }
+  });
 });
 
 router.use(timersMutationsRouter);

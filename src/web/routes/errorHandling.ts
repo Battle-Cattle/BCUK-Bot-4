@@ -1,10 +1,12 @@
 import type { Response } from 'express';
 import type { Logger } from 'winston';
+import type { SessionUser } from '../../types/express';
 import {
   ReservedCommandError,
   CommandConflictError,
   isMysqlDuplicateEntryError,
 } from '../../db';
+import { renderError } from './viewHelpers';
 
 /** Arguments for {@link logAndRedirectError}. */
 export interface LogAndRedirectErrorOptions {
@@ -38,6 +40,36 @@ export function logAndRedirectError({
 }: LogAndRedirectErrorOptions): void {
   log.error(logLabel, err);
   res.redirect(`${basePath}?error=${errorCode}`);
+}
+
+/** Arguments for {@link renderOrError}. */
+export interface RenderOrErrorOptions {
+  /** Express response object. */
+  res: Response;
+  /** Logger to record the error on (module-scoped `createLogger` instance). */
+  log: Logger;
+  /** Message prefix passed to `log.error`, matching the handler's existing wording. */
+  logLabel: string;
+  /** Current session user, forwarded to `renderError` so the error page still shows a logged-in nav. */
+  sessionUser: SessionUser | undefined;
+  /** Human-readable message shown on the 500 error page. */
+  errorMessage: string;
+}
+
+/**
+ * Runs `render`, and on failure logs the error and renders a generic 500 error page instead.
+ * Standardizes the generic `try { ...renderView(...) } catch (err) { log.error(...);
+ * renderError(...) }` tail repeated across GET route handlers.
+ * @param options - See {@link RenderOrErrorOptions}.
+ * @param render - Async work that loads data and calls `renderView` on success.
+ */
+export async function renderOrError(options: RenderOrErrorOptions, render: () => Promise<void>): Promise<void> {
+  try {
+    await render();
+  } catch (err) {
+    options.log.error(options.logLabel, err);
+    renderError(options.res, 500, options.errorMessage, options.sessionUser);
+  }
 }
 
 /** Arguments for {@link handleReservedOrConflictCommandError}. */
