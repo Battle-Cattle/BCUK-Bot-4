@@ -4,7 +4,7 @@ import { findCounterByCommand, incrementCounter } from '../db';
 
 const log = createLogger('Counter');
 import { resolveCommand } from './commandUtils';
-import { isDiscordNotFoundError, NO_MENTIONS } from '../discord/discordUtils';
+import { NO_MENTIONS, trySendDiscordReply } from '../discord/discordUtils';
 import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
 import { createCooldownGate } from './cooldownGate';
 
@@ -142,13 +142,13 @@ export async function executeCounterCommandForDiscord(
 
   if (!result.canReply) return;
 
-  try {
-    await message.reply({ content: result.response, allowedMentions: NO_MENTIONS });
+  const sent = await trySendDiscordReply(
+    message,
+    { content: result.response, allowedMentions: NO_MENTIONS },
+    (err) => log.error(`[Discord] Failed to reply to message ${message.id} for ${result.label} '${command}':`, err),
+  );
+  if (sent) {
     log.info(`[Discord] Sent ${result.label} '${command}'.`);
-  } catch (err) {
-    if (!isDiscordNotFoundError(err)) {
-      log.error(`[Discord] Failed to reply to message ${message.id} for ${result.label} '${command}':`, err);
-    }
   }
 }
 

@@ -47,6 +47,7 @@ import {
   getAvailableVoiceChannels,
   getTextChannel,
   tryEditDiscordMessage,
+  trySendDiscordReply,
 } from './discordUtils';
 import { DiscordAPIError, HTTPError } from 'discord.js';
 import { getDiscordClient } from './discordClientStore';
@@ -295,6 +296,38 @@ describe('tryEditDiscordMessage', () => {
     const client = { channels: { fetch: channelsFetch } } as any;
 
     await expect(tryEditDiscordMessage(client, 'chan1', 'msg1', { content: 'hi' })).rejects.toThrow('network blip');
+  });
+});
+
+describe('trySendDiscordReply', () => {
+  it('replies with the given payload and returns true on success', async () => {
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const message = { id: 'msg1', reply } as any;
+    const onError = vi.fn();
+
+    await expect(trySendDiscordReply(message, { content: 'hi' }, onError)).resolves.toBe(true);
+    expect(reply).toHaveBeenCalledWith({ content: 'hi' });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('returns false without calling onError on a not-found error', async () => {
+    const notFoundErr = new MockedDiscordAPIError({ code: UNKNOWN_MESSAGE, status: 200 });
+    const reply = vi.fn().mockRejectedValue(notFoundErr);
+    const message = { id: 'msg1', reply } as any;
+    const onError = vi.fn();
+
+    await expect(trySendDiscordReply(message, 'hi', onError)).resolves.toBe(false);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('calls onError and returns false, without throwing, on any other error', async () => {
+    const otherErr = new Error('network blip');
+    const reply = vi.fn().mockRejectedValue(otherErr);
+    const message = { id: 'msg1', reply } as any;
+    const onError = vi.fn();
+
+    await expect(trySendDiscordReply(message, 'hi', onError)).resolves.toBe(false);
+    expect(onError).toHaveBeenCalledWith(otherErr);
   });
 });
 
