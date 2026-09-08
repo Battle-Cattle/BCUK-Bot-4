@@ -3,7 +3,24 @@ import { mockLogger } from '../test-utils/loggerMock';
 
 /** Mocks the shared logger so this module's log calls don't produce real output during tests. */
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
-vi.mock('./pool', () => ({ getPool: vi.fn() }));
+// `runInTransaction` is reimplemented here (rather than via `importOriginal`) so this test
+// doesn't pull in pool.ts's real `../shared/config` import chain, which throws in a test
+// environment with no DISCORD_TOKEN etc. set. The logic mirrors pool.ts's real implementation
+// exactly, driven by the connection `removeCustomCommand` acquires from the mocked `getPool()`.
+vi.mock('./pool', () => ({
+  getPool: vi.fn(),
+  runInTransaction: async (conn: { beginTransaction: () => Promise<void>; commit: () => Promise<void>; rollback: () => Promise<void> }, work: () => Promise<unknown>) => {
+    try {
+      await conn.beginTransaction();
+      const result = await work();
+      await conn.commit();
+      return result;
+    } catch (err) {
+      await conn.rollback().catch(() => {});
+      throw err;
+    }
+  },
+}));
 vi.mock('mysql2/promise', () => ({ default: {} }));
 vi.mock('./commandLocks', () => ({
   acquireNamedLock: vi.fn().mockResolvedValue(undefined),
