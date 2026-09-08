@@ -28,24 +28,26 @@ const router = Router();
 /**
  * Renders the current user's Streamdeck key status page, shared by
  * GET /streamdeck-key and the success paths of the request/rotate POST
- * handlers below (they only differ in what `keyRow`/`newKey` they pass in).
+ * handlers below (they only differ in what `keyRow`/`newKey`/`error` they pass in).
  * @param req - Express request; reads `req.session.user` and `req.csrfToken()`.
  * @param res - Express response.
  * @param keyRow - The current (possibly just-created/rotated) guild-status row, or null.
  * @param newKey - Freshly generated plaintext key to display once, or null if none.
+ * @param error - Known `error` query-param code to show a banner for, or null.
  */
 function renderKeyStatus(
   req: Request,
   res: Response,
   keyRow: StreamdeckKeyGuildStatusRow | null,
   newKey: string | null,
+  error: string | null = null,
 ): void {
   renderView(res, 'streamdeck-keys', {
     user: req.session.user,
     csrfToken: req.csrfToken(),
     keyRow,
     newKey,
-    error: null,
+    error,
     webPort: WEB_PORT,
   });
 }
@@ -63,14 +65,7 @@ const USER_KNOWN_ERRORS = new Set(['request_failed', 'rotate_failed', 'revoke_fa
 router.get('/streamdeck-key', csrfProtection, async (req, res) => {
   try {
     const keyRow = await getGuildStatusForKey(getSessionUser(req).discordId, getCurrentGuildId(req));
-    renderView(res, 'streamdeck-keys', {
-      user: req.session.user,
-      csrfToken: req.csrfToken(),
-      keyRow,
-      newKey: null,
-      error: filterQueryParam(req.query.error, USER_KNOWN_ERRORS),
-      webPort: WEB_PORT,
-    });
+    renderKeyStatus(req, res, keyRow, null, filterQueryParam(req.query.error, USER_KNOWN_ERRORS));
   } catch (err) {
     log.error('Streamdeck key page error:', err);
     renderError(res, 500, 'Failed to load Streamdeck key status.', req.session.user);
