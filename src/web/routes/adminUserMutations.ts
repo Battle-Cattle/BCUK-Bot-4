@@ -19,12 +19,22 @@ export class DuplicateTwitchNameError extends Error {
   }
 }
 
+/**
+ * Checks whether `error` is a MySQL lock-wait-timeout error (`ER_LOCK_WAIT_TIMEOUT` / errno 1205).
+ * @param error Value to check, typically a caught error.
+ * @returns True if `error` represents a lock-wait timeout.
+ */
 export function isLockWaitTimeoutDbError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const dbError = error as { errno?: number; code?: string };
   return dbError.errno === 1205 || dbError.code === 'ER_LOCK_WAIT_TIMEOUT';
 }
 
+/**
+ * Checks whether `error` is a MySQL duplicate-entry error on the `user.twitch_name` unique index.
+ * @param error Value to check, typically a caught error.
+ * @returns True if `error` represents a duplicate Twitch name.
+ */
 export function isDuplicateTwitchNameDbError(error: unknown): boolean {
   if (!error || typeof error !== 'object') {
     return false;
@@ -34,6 +44,17 @@ export function isDuplicateTwitchNameDbError(error: unknown): boolean {
     && (dbError.message?.includes('ux_user_twitch_name') ?? false);
 }
 
+/**
+ * Handles a user edit that clears their Twitch channel: disables the Twitch bot for them and
+ * parts the previous channel if no other enabled user still needs it. On failure, rolls the
+ * user's DB row and bot-enabled flag back to their pre-edit values.
+ * @param discordId Discord snowflake of the user being edited.
+ * @param discordName Discord display name to restore on rollback.
+ * @param level Access level to restore on rollback.
+ * @param previousChannel The user's Twitch channel before this edit, or null.
+ * @param wasBotEnabled Whether the Twitch bot was enabled for this user before this edit.
+ * @returns Resolves once the channel part (if any) completes; rejects (after best-effort rollback) if either step fails.
+ */
 async function handleClearTwitchChannel(
   discordId: string,
   discordName: string,
@@ -68,6 +89,14 @@ interface ChangeTwitchChannelParams {
   wasBotEnabled: boolean;
 }
 
+/**
+ * Handles a user edit that changes their Twitch channel: joins the new channel (if it should
+ * be joined) and parts the old one (if no other enabled user still needs it). On failure,
+ * rolls the user's DB row and bot-enabled flag back to their pre-edit values, then reconciles
+ * channel membership against that restored state.
+ * @param params Before/after channel and user state needed to perform and, if necessary, roll back the change.
+ * @returns Resolves once membership changes complete; rejects (after best-effort rollback) if either step fails.
+ */
 async function handleChangeTwitchChannel({
   discordId,
   discordName,
@@ -121,6 +150,14 @@ export interface AddOrUpdateParams {
   shouldClearTwitchName: boolean;
 }
 
+/**
+ * Creates or updates a user's DB row and reconciles their Twitch channel membership with the
+ * change: joins/parts channels as needed when their Twitch name is added, changed, or cleared.
+ * A no-op for channel membership if the bot wasn't enabled for them, or their channel didn't change.
+ * @param params The submitted user fields.
+ * @returns Resolves once the DB write and any channel membership changes complete.
+ * @throws {@link DuplicateTwitchNameError} if `normalizedTwitchName` is already assigned to another user.
+ */
 export async function addOrUpdateUserMutation({
   discordId,
   discordName,
@@ -162,6 +199,14 @@ export async function addOrUpdateUserMutation({
   await handleChangeTwitchChannel({ discordId, discordName, level, previousChannel, committedChannel, wasBotEnabled: existingUser?.is_twitch_bot_enabled ?? false });
 }
 
+/**
+ * Toggles a user's Twitch bot enabled flag and joins/parts their channel to match. On failure
+ * to join/part, rolls the enabled flag back to its previous value.
+ * @param discordId Discord snowflake of the user to toggle.
+ * @param nextEnabled The desired enabled state.
+ * @returns Resolves once the DB flag and channel membership are updated; a no-op if already in the desired state.
+ * @throws If the user doesn't exist, has no Twitch channel, or has an invalid Twitch channel name.
+ */
 export async function toggleTwitchMutation(discordId: string, nextEnabled: boolean): Promise<void> {
   const user = await findUser(discordId);
   if (!user || !user.twitch_name) {

@@ -329,6 +329,7 @@ export { app };
 // entire app to reach the 100/600 thresholds via every other mounted route.
 export { generalLimiter, sessionLimiter };
 
+/** Starts the Express app listening on {@link WEB_PORT}. */
 export function startWebPanel(): void {
   app.listen(WEB_PORT, () => {
     log.info(`Panel available at http://localhost:${WEB_PORT}`);

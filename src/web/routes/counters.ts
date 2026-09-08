@@ -47,6 +47,12 @@ type CounterFormValidationResult =
       error: 'missing_fields' | 'same_commands';
     };
 
+/**
+ * Validates and normalizes a counter add/edit form submission.
+ * @param rawForm Raw `req.body` fields.
+ * @returns The normalized fields on success, or an `error` code (`missing_fields` if any
+ *   required field is blank, `same_commands` if the trigger and check commands match).
+ */
 function validateAndNormalizeCounterForm(
   rawForm: Record<string, string | undefined>,
 ): CounterFormValidationResult {

@@ -5,6 +5,12 @@ const log = createLogger('TwitchAPI');
 
 const FETCH_TIMEOUT_MS = 10_000;
 
+/**
+ * Fetches `url`, aborting if the request takes longer than {@link FETCH_TIMEOUT_MS}.
+ * @param url URL to fetch.
+ * @param init Standard `fetch` options; its `signal` (if any) is overridden by the timeout signal.
+ * @returns The fetch response.
+ */
 export function twitchFetch(url: string, init?: RequestInit): Promise<Response> {
   return fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 }
@@ -35,6 +41,12 @@ async function fetchNewAppToken(): Promise<string> {
   return cachedAppToken;
 }
 
+/**
+ * Returns a valid Twitch app access token, reusing the cached one if it hasn't expired yet.
+ * Concurrent calls during a refresh share the same in-flight request rather than each
+ * triggering their own token fetch.
+ * @returns A valid app access token.
+ */
 export async function getAppToken(): Promise<string> {
   if (cachedAppToken && Date.now() < appTokenExpiry) return cachedAppToken;
   if (!tokenRefreshPromise) {
@@ -43,6 +55,11 @@ export async function getAppToken(): Promise<string> {
   return tokenRefreshPromise;
 }
 
+/**
+ * Builds the standard Twitch Helix authorization headers for `token`.
+ * @param token Access token (app or user) to authenticate with.
+ * @returns The `Authorization`/`Client-Id` headers to attach to a Helix request.
+ */
 export function authHeaders(token: string): Record<string, string> {
   return {
     Authorization: `Bearer ${token}`,

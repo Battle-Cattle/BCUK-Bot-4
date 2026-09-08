@@ -1,5 +1,12 @@
 export interface WeightedFile { file: string; weight: number }
 
+/**
+ * Picks one file at random from `files`, weighted by each file's `weight` (non-positive
+ * weights are treated as 1).
+ * @param files Candidate files with their selection weights.
+ * @returns The chosen file's path.
+ * @throws If `files` is empty.
+ */
 export function pickWeightedRandom(files: WeightedFile[]): string {
   if (files.length === 0) throw new Error('No files to pick from');
   if (files.length === 1) return files[0].file;

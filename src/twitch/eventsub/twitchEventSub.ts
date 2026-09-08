@@ -8,6 +8,11 @@ const connections = new Map<string, StreamerConnection>();
 let globalStopped = false;
 let topReloadChain: Promise<void> = Promise.resolve();
 
+/**
+ * Starts EventSub: loads every streamer configured for EventSub and opens a connection for
+ * each one not already connected. Queued behind {@link topReloadChain} so it never races a
+ * concurrent {@link reloadEventSubSubscriptions} call.
+ */
 export function startEventSub(): void {
   globalStopped = false;
   topReloadChain = topReloadChain
@@ -26,12 +31,19 @@ export function startEventSub(): void {
     .catch((err) => { log.error('EventSub start error:', err); });
 }
 
+/** Stops and discards every active EventSub connection, and blocks any queued/future reload from starting new ones. */
 export function stopEventSub(): void {
   globalStopped = true;
   for (const conn of connections.values()) conn.stop();
   connections.clear();
 }
 
+/**
+ * Re-syncs EventSub connections with the current streamer config: stops connections for
+ * streamers no longer configured, reloads existing ones whose config changed, and starts new
+ * connections for newly configured streamers. No-ops after {@link stopEventSub}. Queued behind
+ * {@link topReloadChain} so overlapping reloads run one at a time.
+ */
 export function reloadEventSubSubscriptions(): void {
   if (globalStopped) return;
   topReloadChain = topReloadChain

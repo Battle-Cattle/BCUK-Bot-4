@@ -26,6 +26,7 @@ if (ffmpegPath) {
 const sfxRoot = path.posix.resolve(SFX_FOLDER);
 let realSfxRoot: string | null = null;
 
+/** Returns the SFX folder's canonical (symlink-resolved) real path, resolving and caching it on first call. */
 function getRealSfxRoot(): string {
   if (!realSfxRoot) {
     realSfxRoot = fs.realpathSync(sfxRoot);

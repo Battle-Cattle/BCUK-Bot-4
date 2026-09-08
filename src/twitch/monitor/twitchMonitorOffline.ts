@@ -8,6 +8,12 @@ import { setTwitchChannelLive } from '../../shared/statusStore';
 
 const OFFLINE_GRACE_MS = 5 * 60 * 1000;
 
+/**
+ * Cancels and clears any pending offline-grace timers for every `liveStates` entry
+ * belonging to `loginKey` (e.g. because the streamer was confirmed live again).
+ * @param liveStates Live-state map keyed by group-scoped state key.
+ * @param loginKey Normalized Twitch login whose timers should be cancelled.
+ */
 export function cancelOfflineTimersForLogin(liveStates: Map<string, LiveState>, loginKey: string): void {
   for (const state of liveStates.values()) {
     if (state.login === loginKey && state.offlineTimer) {
@@ -23,6 +29,16 @@ export function cancelOfflineTimersForLogin(liveStates: Map<string, LiveState>, 
 // teardown() clears all offlineTimers on restart, so this is not restart
 // protection — it is a consistency guard. The finally block ensures
 // offlineTimer is nulled on every exit path, including early returns and errors.
+/**
+ * Fires at the end of a streamer's offline grace period: re-checks Helix directly, and if
+ * still offline, marks the channel offline and removes its live announcement.
+ * @param liveStates Live-state map keyed by group-scoped state key.
+ * @param loginToUserId Map of normalized login to Twitch user id.
+ * @param stateKey Group-scoped state key for the entry that scheduled this check.
+ * @param key Normalized Twitch login.
+ * @param login Original (non-normalized) login, used only for log messages.
+ * @returns Resolves once the check (and any resulting announcement cleanup) completes.
+ */
 export async function runOfflineCheck(
   liveStates: Map<string, LiveState>,
   loginToUserId: Map<string, string>,
@@ -47,6 +63,15 @@ export async function runOfflineCheck(
   }
 }
 
+/**
+ * Starts the offline grace period for every `liveStates` entry belonging to `login`: after
+ * {@link OFFLINE_GRACE_MS}, {@link runOfflineCheck} re-confirms the streamer is actually
+ * offline before tearing down its announcement.
+ * @param liveStates Live-state map keyed by group-scoped state key.
+ * @param loginToUserId Map of normalized login to Twitch user id.
+ * @param login Twitch login that went offline.
+ * @returns Resolves once the grace-period timers have been (re)scheduled.
+ */
 export async function handleStreamOffline(
   liveStates: Map<string, LiveState>,
   loginToUserId: Map<string, string>,

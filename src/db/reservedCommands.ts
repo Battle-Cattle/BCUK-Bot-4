@@ -17,6 +17,7 @@ export const BUILT_IN_COMMANDS: Readonly<Record<string, BuiltInCommandMeta>> = {
 
 export const RESERVED_BUILT_IN_COMMANDS: ReadonlySet<string> = new Set(Object.keys(BUILT_IN_COMMANDS));
 
+/** Thrown when a trigger string collides with a reserved built-in command (see {@link BUILT_IN_COMMANDS}). */
 export class ReservedCommandError extends Error {
   constructor(trigger: string) {
     super(`'${trigger}' is a reserved built-in command and cannot be used as a custom command trigger.`);
