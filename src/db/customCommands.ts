@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import { getPool, runInTransaction } from './pool';
 import { fromBit, getRowCount } from './utils';
+import { getOrCreate } from '../shared/mapUtils';
 import { AccessLevel } from './users';
 import type { AccessLevelValue } from './users';
 import { assertNotReservedCommand } from './reservedCommands';
@@ -72,15 +73,13 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
   const commandMap = new Map<number, DbCustomCommandWithAssignments>();
 
   for (const row of rows) {
-    if (!commandMap.has(row.command_id)) {
-      commandMap.set(row.command_id, {
-        ...mapCustomCommand(row),
-        assigned_users: [],
-      });
-    }
+    const commandEntry = getOrCreate(commandMap, row.command_id, () => ({
+      ...mapCustomCommand(row),
+      assigned_users: [],
+    }));
 
     if (row.assigned_discord_id !== null && row.assigned_discord_id !== undefined) {
-      commandMap.get(row.command_id)!.assigned_users.push({
+      commandEntry.assigned_users.push({
         discord_id: String(row.assigned_discord_id),
         discord_name: row.discord_name ?? null,
         twitch_name: row.twitch_name ?? null,
