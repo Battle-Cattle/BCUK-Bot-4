@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   createManagedLookupCache,
+  registerFirstWinsWithWarning,
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
 } from './lookupCache';
@@ -11,6 +12,29 @@ describe('default backoff constants', () => {
     expect(DEFAULT_REFRESH_FAILURE_BACKOFF_MS).toBe(5_000);
     expect(DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS).toBe(60_000);
     expect(DEFAULT_REFRESH_FAILURE_BACKOFF_MS).toBeLessThan(DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS);
+  });
+});
+
+describe('registerFirstWinsWithWarning', () => {
+  it('registers the value under the key when the key is not already taken', () => {
+    const map = new Map<string, number>();
+    const describeCollision = vi.fn();
+
+    registerFirstWinsWithWarning(map, 'a', 1, describeCollision);
+
+    expect(map.get('a')).toBe(1);
+    expect(describeCollision).not.toHaveBeenCalled();
+  });
+
+  it('keeps the existing entry and calls describeCollision on a key collision', () => {
+    const map = new Map<string, number>();
+    map.set('a', 1);
+    const describeCollision = vi.fn().mockReturnValue('collision message');
+
+    registerFirstWinsWithWarning(map, 'a', 2, describeCollision);
+
+    expect(map.get('a')).toBe(1);
+    expect(describeCollision).toHaveBeenCalledWith(1);
   });
 });
 

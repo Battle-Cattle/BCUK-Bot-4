@@ -9,6 +9,14 @@ vi.mock('./lookupCache', () => ({
     getCache: () => loadCache(),
     invalidate: vi.fn(),
   })),
+  registerFirstWinsWithWarning: <K, V>(map: Map<K, V>, key: K, value: V, describeCollision: (existing: V) => string) => {
+    const existing = map.get(key);
+    if (existing !== undefined) {
+      describeCollision(existing);
+      return;
+    }
+    map.set(key, value);
+  },
   DEFAULT_CACHE_TTL_MS: 300_000,
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS: 5_000,
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60_000,

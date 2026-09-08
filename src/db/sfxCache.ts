@@ -1,6 +1,6 @@
-import { createLogger } from '../shared/logger';
 import {
   createManagedLookupCache,
+  registerFirstWinsWithWarning,
   type RefreshingLookupCache,
   DEFAULT_CACHE_TTL_MS,
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
@@ -8,8 +8,6 @@ import {
 } from './lookupCache';
 import { normalizeCommand } from './commandStringUtils';
 import { getAllSfxTriggers, type SfxTrigger, type SfxFile } from './sfx';
-
-const log = createLogger('DB');
 
 /** An SFX trigger paired with its playable sound files, as served from the lookup cache. */
 export interface SfxLookupResult {
@@ -57,12 +55,6 @@ function buildSfxLookupCache(triggers: Awaited<ReturnType<typeof getAllSfxTrigge
     const normalizedTriggerCommand = normalizeCommand(row.triggerCommand);
     if (!normalizedTriggerCommand) continue;
 
-    const existing = byTrigger.get(normalizedTriggerCommand);
-    if (existing) {
-      log.warn(`SFX trigger collision: '${normalizedTriggerCommand}' is already registered (trigger id=${existing.trigger.id}); ignoring duplicate from trigger id=${row.triggerId}.`);
-      continue;
-    }
-
     // Frozen once here (not copied per-lookup in findCachedSfxTrigger) since callers only ever
     // read these objects; freezing turns any future accidental mutation into a loud failure
     // instead of silently corrupting the shared cache entry. Cast back to the mutable interface
@@ -85,7 +77,13 @@ function buildSfxLookupCache(triggers: Awaited<ReturnType<typeof getAllSfxTrigge
         category_id: row.categoryId,
       }))) as SfxFile[],
     };
-    byTrigger.set(normalizedTriggerCommand, Object.freeze(result));
+
+    registerFirstWinsWithWarning(
+      byTrigger,
+      normalizedTriggerCommand,
+      Object.freeze(result),
+      (existing) => `SFX trigger collision: '${normalizedTriggerCommand}' is already registered (trigger id=${existing.trigger.id}); ignoring duplicate from trigger id=${row.triggerId}.`,
+    );
   }
 
   return { loadedAt: Date.now(), byTrigger };

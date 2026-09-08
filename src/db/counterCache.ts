@@ -1,6 +1,6 @@
-import { createLogger } from '../shared/logger';
 import {
   createManagedLookupCache,
+  registerFirstWinsWithWarning,
   type RefreshingLookupCache,
   DEFAULT_CACHE_TTL_MS,
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
@@ -9,8 +9,6 @@ import {
 import { normalizeCommandList, normalizeCommand } from './commandStringUtils';
 import { isAnyCommandTakenAcrossTables } from './commandLocks';
 import { getAllCounters, type DbCounter, type DbMatchedCounter, type CounterMatchType } from './counters';
-
-const log = createLogger('DB');
 
 // ─── Cache interface ──────────────────────────────────────────────────────────
 
@@ -52,13 +50,12 @@ function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
   ): void => {
     if (!normalizedCommand) return;
 
-    const existingCounter = byCommand.get(normalizedCommand);
-    if (existingCounter) {
-      log.warn(`Counter ${commandFieldLabel} collision: '${normalizedCommand}' is already registered (counter id=${existingCounter.id}); ignoring duplicate from counter id=${counter.id}.`);
-      return;
-    }
-
-    byCommand.set(normalizedCommand, { ...counter, matchType });
+    registerFirstWinsWithWarning(
+      byCommand,
+      normalizedCommand,
+      { ...counter, matchType },
+      (existingCounter) => `Counter ${commandFieldLabel} collision: '${normalizedCommand}' is already registered (counter id=${existingCounter.id}); ignoring duplicate from counter id=${counter.id}.`,
+    );
   };
 
   for (const counter of sortedCounters) {

@@ -15,6 +15,31 @@ export interface RefreshingLookupCache {
   loadedAt: number;
 }
 
+/**
+ * Registers `value` under `key` in `map`, unless `key` is already taken — in which case the
+ * existing entry is left in place and `describeCollision` (given that existing entry) is logged
+ * as a warning instead. Callers are expected to process their source rows in a fixed,
+ * deterministic order (e.g. ascending id) so which entry "wins" a collision stays stable across
+ * cache rebuilds.
+ * @param map The map being built.
+ * @param key The key to register `value` under.
+ * @param value The candidate value to register.
+ * @param describeCollision Builds the warning message from the entry already registered under `key`.
+ */
+export function registerFirstWinsWithWarning<K, V>(
+  map: Map<K, V>,
+  key: K,
+  value: V,
+  describeCollision: (existing: V) => string,
+): void {
+  const existing = map.get(key);
+  if (existing) {
+    log.warn(describeCollision(existing));
+    return;
+  }
+  map.set(key, value);
+}
+
 export interface ManagedLookupCacheOptions<TCache extends RefreshingLookupCache> {
   cacheName: string;
   ttlMs: number;

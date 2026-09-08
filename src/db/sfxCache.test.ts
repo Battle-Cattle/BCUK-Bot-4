@@ -5,6 +5,14 @@ vi.mock('./lookupCache', () => ({
     getCache: () => loadCache(),
     invalidate: vi.fn(),
   })),
+  registerFirstWinsWithWarning: vi.fn(<K, V>(map: Map<K, V>, key: K, value: V, describeCollision: (existing: V) => string) => {
+    const existing = map.get(key);
+    if (existing !== undefined) {
+      describeCollision(existing);
+      return;
+    }
+    map.set(key, value);
+  }),
   DEFAULT_CACHE_TTL_MS: 300_000,
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS: 5_000,
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60_000,
@@ -17,7 +25,7 @@ vi.mock('../shared/logger', () => ({
 }));
 
 import { findCachedSfxTrigger, invalidateSfxLookupCache } from './sfxCache';
-import { createManagedLookupCache } from './lookupCache';
+import { createManagedLookupCache, registerFirstWinsWithWarning } from './lookupCache';
 import { getAllSfxTriggers } from './sfx';
 import type { SfxTriggerRow } from './sfx';
 
@@ -135,6 +143,21 @@ describe('findCachedSfxTrigger', () => {
 
     expect(result).not.toBeNull();
     expect(result!.trigger.id).toBe(1n);
+  });
+
+  it('builds a descriptive collision message naming both trigger ids', async () => {
+    const winner = makeTriggerRow('1', '!bang');
+    const loser = makeTriggerRow('2', '!BANG');
+    vi.mocked(getAllSfxTriggers).mockResolvedValue([winner, loser]);
+
+    await findCachedSfxTrigger('!bang');
+
+    const bangCalls = vi.mocked(registerFirstWinsWithWarning).mock.calls.filter((call) => call[1] === '!bang');
+    expect(bangCalls).toHaveLength(2);
+    const describeCollision = bangCalls[1][3] as (existing: unknown) => string;
+    expect(describeCollision({ trigger: { id: 1n } })).toBe(
+      "SFX trigger collision: '!bang' is already registered (trigger id=1); ignoring duplicate from trigger id=2.",
+    );
   });
 
   it('sorts by id before processing so lower id still wins even when given in reverse order', async () => {

@@ -2,6 +2,7 @@ import { createLogger } from '../shared/logger';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import {
   createManagedLookupCache,
+  registerFirstWinsWithWarning,
   type RefreshingLookupCache,
   DEFAULT_CACHE_TTL_MS,
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
@@ -144,16 +145,14 @@ function registerDiscordCommand(
     return;
   }
 
-  const existingCommand = discordByTrigger.get(triggerString);
-  if (existingCommand) {
-    log.warn(
+  registerFirstWinsWithWarning(
+    discordByTrigger,
+    triggerString,
+    command,
+    (existingCommand) =>
       `Custom command Discord trigger collision: '${triggerString}' is already registered ` +
       `(command_id=${existingCommand.command_id}); ignoring duplicate from command_id=${command.command_id}.`,
-    );
-    return;
-  }
-
-  discordByTrigger.set(triggerString, command);
+  );
 }
 
 /**
