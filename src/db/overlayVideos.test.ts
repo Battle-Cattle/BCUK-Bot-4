@@ -1,28 +1,37 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// `withTransaction` is reimplemented here (rather than via `importOriginal`) so this
-// test doesn't pull in pool.ts's real `../shared/config` import chain, which throws
-// in a test environment with no DISCORD_TOKEN etc. set. The logic mirrors pool.ts's
-// real implementation exactly, driven by the same mocked `getPool()`.
+// `withTransaction`/`withTransactionOrNotFound` are reimplemented here (rather than via
+// `importOriginal`) so this test doesn't pull in pool.ts's real `../shared/config` import
+// chain, which throws in a test environment with no DISCORD_TOKEN etc. set. The logic
+// mirrors pool.ts's real implementation exactly, driven by the same mocked `getPool()`.
 vi.mock('./pool', () => {
   const getPool = vi.fn();
-  return {
-    getPool,
-    withTransaction: async (work: (conn: unknown) => Promise<unknown>) => {
-      const conn = await getPool().getConnection();
-      try {
-        await conn.beginTransaction();
-        const result = await work(conn);
-        await conn.commit();
-        return result;
-      } catch (err) {
-        await conn.rollback().catch(() => {});
-        throw err;
-      } finally {
-        conn.release();
-      }
-    },
+  const withTransaction = async (work: (conn: unknown) => Promise<unknown>) => {
+    const conn = await getPool().getConnection();
+    try {
+      await conn.beginTransaction();
+      const result = await work(conn);
+      await conn.commit();
+      return result;
+    } catch (err) {
+      await conn.rollback().catch(() => {});
+      throw err;
+    } finally {
+      conn.release();
+    }
   };
+  const withTransactionOrNotFound = async (
+    work: (conn: unknown, notFound: () => never) => Promise<unknown>,
+  ) => {
+    const notFoundSignal = new Error('withTransactionOrNotFound: not found');
+    try {
+      return await withTransaction((conn) => work(conn, () => { throw notFoundSignal; }));
+    } catch (err) {
+      if (err === notFoundSignal) return null;
+      throw err;
+    }
+  };
+  return { getPool, withTransaction, withTransactionOrNotFound };
 });
 vi.mock('mysql2/promise', () => ({ default: {} }));
 

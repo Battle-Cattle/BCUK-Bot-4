@@ -65,3 +65,25 @@ export async function withTransaction<T>(work: (conn: PoolConnection) => Promise
     conn.release();
   }
 }
+
+/**
+ * Like {@link withTransaction}, but for the common "load a row, maybe mutate it,
+ * bail out if it doesn't exist" shape: `work` is passed a `notFound()` function
+ * that rolls back the transaction and resolves this call to `null`, instead of
+ * every call site declaring its own throwaway sentinel error class to get the
+ * same effect. Any other thrown error still propagates and rejects as usual.
+ * @param work Callback that receives the transaction's connection and a
+ *   `notFound()` escape hatch to call (and `return`) when the target row is missing.
+ * @returns The value returned by `work`, or null if `work` called `notFound()`.
+ */
+export async function withTransactionOrNotFound<T>(
+  work: (conn: PoolConnection, notFound: () => never) => Promise<T>,
+): Promise<T | null> {
+  const notFoundSignal = new Error('withTransactionOrNotFound: not found');
+  try {
+    return await withTransaction((conn) => work(conn, () => { throw notFoundSignal; }));
+  } catch (err) {
+    if (err === notFoundSignal) return null;
+    throw err;
+  }
+}
