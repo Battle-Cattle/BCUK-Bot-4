@@ -4,6 +4,7 @@ import { fromBit, affectedOrExists, rowExists } from './utils';
 import { AccessLevel } from './users';
 import type { AccessLevelValue } from './users';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
+import { getOrCreate } from '../shared/mapUtils';
 
 /** A timer command row from the database. */
 export interface DbTimerCommand {
@@ -91,15 +92,13 @@ export async function getAllTimerCommandsWithAssignments(): Promise<DbTimerComma
   const timerMap = new Map<number, DbTimerCommandWithAssignments>();
 
   for (const row of rows) {
-    if (!timerMap.has(row.id)) {
-      timerMap.set(row.id, {
-        ...mapRow(row),
-        assigned_users: [],
-      });
-    }
+    const timerEntry = getOrCreate(timerMap, row.id, () => ({
+      ...mapRow(row),
+      assigned_users: [],
+    }));
 
     if (row.assigned_discord_id !== null && row.assigned_discord_id !== undefined) {
-      timerMap.get(row.id)!.assigned_users.push({
+      timerEntry.assigned_users.push({
         discord_id: String(row.assigned_discord_id),
         discord_name: row.discord_name ?? null,
         twitch_name: row.twitch_name ?? null,
