@@ -9,7 +9,19 @@ vi.mock('../../db', () => ({
 }));
 
 import { AccessLevel, getStreamerByDiscordId } from '../../db';
-import { renderView, renderError, requireStreamer } from './viewHelpers';
+import { renderView, renderError, requireStreamer, getFriendlyErrorMessage } from './viewHelpers';
+
+describe('getFriendlyErrorMessage', () => {
+  const messages = { some_error: 'Something went wrong.' };
+
+  it('returns the mapped message for a known key', () => {
+    expect(getFriendlyErrorMessage(messages, 'some_error')).toBe('Something went wrong.');
+  });
+
+  it('returns a generic fallback for an unrecognized key', () => {
+    expect(getFriendlyErrorMessage(messages, 'unknown_key')).toBe('An error occurred (unknown_key).');
+  });
+});
 
 describe('renderView', () => {
   function mockRes() {

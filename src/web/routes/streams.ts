@@ -7,7 +7,7 @@ import { getCurrentGuildId } from '../session';
 import { getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db';
 import { filterQueryParam } from './validation';
-import { renderView, renderError } from './viewHelpers';
+import { renderView, renderError, getFriendlyErrorMessage } from './viewHelpers';
 import { STREAMS_ERROR_CODES, STREAMS_ERROR_MESSAGES, type StreamsErrorCode } from './streamsErrors';
 import groupsRouter from './streamGroups';
 import streamersRouter from './streamStreamers';
@@ -20,8 +20,9 @@ const KNOWN_SUCCESSES = new Set<string>([]);
 
 export const ERROR_MESSAGES = STREAMS_ERROR_MESSAGES;
 
+/** Looks up a `streams` page error code in {@link ERROR_MESSAGES}, for use as an EJS template helper. */
 function getFriendlyError(key: string): string {
-  return (ERROR_MESSAGES as Record<string, string>)[key] ?? `An error occurred (${key}).`;
+  return getFriendlyErrorMessage(ERROR_MESSAGES, key);
 }
 
 // ─── View ─────────────────────────────────────────────────────────────────────
