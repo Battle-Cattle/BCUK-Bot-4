@@ -5,9 +5,14 @@ vi.mock('./lookupCache', () => ({
     getCache: () => loadCache(),
     invalidate: vi.fn(),
   })),
-  registerFirstWinsWithWarning: <K, V>(map: Map<K, V>, key: K, value: V) => {
-    if (!map.has(key)) map.set(key, value);
-  },
+  registerFirstWinsWithWarning: vi.fn(<K, V>(map: Map<K, V>, key: K, value: V, describeCollision: (existing: V) => string) => {
+    const existing = map.get(key);
+    if (existing !== undefined) {
+      describeCollision(existing);
+      return;
+    }
+    map.set(key, value);
+  }),
   DEFAULT_CACHE_TTL_MS: 300_000,
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS: 5_000,
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60_000,
@@ -144,6 +149,22 @@ describe('buildCounterLookupCache (via findCounterByCommand)', () => {
 
     expect(result).not.toBeNull();
     expect(result!.id).toBe(1);
+  });
+
+  it('builds a descriptive collision message naming both counter ids', async () => {
+    const { registerFirstWinsWithWarning } = await import('./lookupCache.js');
+    const winner = makeCounter(1, '!hits', '!checkhits1');
+    const loser = makeCounter(2, '!hits', '!checkhits2');
+    vi.mocked(getAllCounters).mockResolvedValue([winner, loser]);
+
+    await findCounterByCommand('!hits');
+
+    const hitsCalls = vi.mocked(registerFirstWinsWithWarning).mock.calls.filter((call) => call[1] === '!hits');
+    expect(hitsCalls).toHaveLength(2);
+    const describeCollision = hitsCalls[1][3] as (existing: unknown) => string;
+    expect(describeCollision({ ...winner, matchType: 'trigger' })).toBe(
+      "Counter trigger_command collision: '!hits' is already registered (counter id=1); ignoring duplicate from counter id=2.",
+    );
   });
 
   it('sorts by id before processing so lower id still wins even when given in reverse order', async () => {
