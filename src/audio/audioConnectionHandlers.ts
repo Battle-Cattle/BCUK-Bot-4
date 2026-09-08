@@ -44,7 +44,7 @@ async function handleDisconnected(
   deps: ConnectionHandlerDeps,
 ): Promise<void> {
   // Stale once a newer connection attempt has started, or another handler already
-  // swapped in a different (or no) connection for this guild.
+  // swapped in a different (non-null) connection for this guild.
   const isStale = (): boolean => {
     const c = deps.getConnection();
     return attemptId !== deps.getAttemptId() || (c !== null && c !== joinedConnection);
