@@ -403,14 +403,14 @@ describe('unassignUserFromCommand', () => {
 
 describe('addCounter', () => {
   it('calls the record function and invalidates the cache on success', async () => {
-    await addCounter('!hits', '!checkhits', 'msg', 'inc', false);
-    expect(addCounterRecord).toHaveBeenCalledWith('!hits', '!checkhits', 'msg', 'inc', false);
+    await addCounter('guild-1', '!hits', '!checkhits', 'msg', 'inc', false);
+    expect(addCounterRecord).toHaveBeenCalledWith('guild-1', '!hits', '!checkhits', 'msg', 'inc', false);
     expect(invalidateCounterLookupCache).toHaveBeenCalledOnce();
   });
 
   it('propagates errors without calling invalidate', async () => {
     vi.mocked(addCounterRecord).mockRejectedValue(new Error('DB error'));
-    await expect(addCounter('!hits', '!checkhits', 'msg', 'inc', false)).rejects.toThrow('DB error');
+    await expect(addCounter('guild-1', '!hits', '!checkhits', 'msg', 'inc', false)).rejects.toThrow('DB error');
     expect(invalidateCounterLookupCache).not.toHaveBeenCalled();
   });
 });
@@ -418,24 +418,24 @@ describe('addCounter', () => {
 describe('updateCounter', () => {
   it('calls the record function and invalidates the cache on success', async () => {
     const input = { id: 1, triggerCommand: '!hits', checkCommand: '!checkhits', message: 'm', incrementMessage: 'i', resetYearly: false };
-    await updateCounter(input);
-    expect(updateCounterRecord).toHaveBeenCalledWith(input);
+    await updateCounter('guild-1', input);
+    expect(updateCounterRecord).toHaveBeenCalledWith('guild-1', input);
     expect(invalidateCounterLookupCache).toHaveBeenCalledOnce();
   });
 });
 
 describe('removeCounter', () => {
   it('calls the record function and invalidates the cache on success', async () => {
-    await removeCounter(1);
-    expect(removeCounterRecord).toHaveBeenCalledWith(1);
+    await removeCounter('guild-1', 1);
+    expect(removeCounterRecord).toHaveBeenCalledWith('guild-1', 1);
     expect(invalidateCounterLookupCache).toHaveBeenCalledOnce();
   });
 });
 
 describe('resetCounterCurrentValue', () => {
   it('calls the record function and invalidates the cache on success', async () => {
-    await resetCounterCurrentValue(1);
-    expect(resetCounterCurrentValueRecord).toHaveBeenCalledWith(1);
+    await resetCounterCurrentValue('guild-1', 1);
+    expect(resetCounterCurrentValueRecord).toHaveBeenCalledWith('guild-1', 1);
     expect(invalidateCounterLookupCache).toHaveBeenCalledOnce();
   });
 });

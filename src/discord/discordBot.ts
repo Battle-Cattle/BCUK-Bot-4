@@ -179,7 +179,7 @@ function registerMessageCreateHandler(client: Client): void {
     const command = extractCommand(message.content);
 
     fireAndForget(executeCustomCommandForDiscord(message, displayName, guildId, command), 'Custom command error', log);
-    fireAndForget(executeCounterCommandForDiscord(message, displayName, command), 'Counter command error', log);
+    fireAndForget(executeCounterCommandForDiscord(message, displayName, guildId, command), 'Counter command error', log);
     fireAndForget(handleCommand(message.content, 'discord', guildId, command), 'Command handler error', log);
     fireAndForget(executeHealthCommandForDiscord(message, command), 'Health command error', log);
   });

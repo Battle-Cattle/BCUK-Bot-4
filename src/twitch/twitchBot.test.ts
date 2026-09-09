@@ -344,13 +344,14 @@ describe('handleTwitchMessage', () => {
     sendMessage('#streamer', 'alice', '!cmd', { displayName: 'Alice' });
 
     expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', '!cmd');
-    expect(executeCounterCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', '!cmd');
     expect(executeMultiCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', '!cmd');
     expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', false, '!cmd');
-    // Guild resolution (Twitch-channel → discord_id → active voice guild) runs
-    // asynchronously before handleCommand is invoked.
+    // Guild resolution (Twitch-channel → discord_id → active voice guild) runs asynchronously
+    // before handleCommand and executeCounterCommandForTwitch are invoked.
     await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', 'guild-A', '!cmd');
+    await vi.waitFor(() => expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce());
+    expect(executeCounterCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', 'guild-A', '!cmd');
     expect(executeCountdownForTwitch).toHaveBeenCalledWith('streamer', '!cmd', '!cmd');
   });
 

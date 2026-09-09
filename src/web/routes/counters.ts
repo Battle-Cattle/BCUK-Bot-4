@@ -3,14 +3,15 @@ import { Router } from 'express';
 import {
   addCounter,
   CounterNotFoundError,
-  getAllCounters,
+  getCountersForGuild,
   isCounterCommandTaken,
   removeCounter,
   resetCounterCurrentValue,
   updateCounter,
 } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireAuth, requireGuildContext, requireMod, requireManager } from '../middleware';
+import { requireGuildContext, requireMod, requireManager } from '../middleware';
+import { getCurrentGuildId } from '../session';
 import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parseCheckboxField, filterQueryParam } from './validation';
 import { renderView } from './viewHelpers';
 import { logAndRedirectError, handleReservedOrConflictCommandError, renderOrError } from './errorHandling';
@@ -81,15 +82,15 @@ function validateAndNormalizeCounterForm(
 }
 
 /**
- * GET /counters — renders the counters page listing every counter.
+ * GET /counters — renders the counters page listing the current guild's counters.
  * @param req - Express request; reads `req.session.user`, `error`, and `reset`
- *   query params.
+ *   query params, and the current guild from session.
  * @param res - Express response; renders the `counters` view, or a 500 error page
  *   if loading counters fails.
  */
-router.get('/counters', requireAuth, csrfProtection, async (req, res) => {
+router.get('/counters', requireGuildContext, csrfProtection, async (req, res) => {
   await renderOrError({ res, log, logLabel: 'Counters page error:', sessionUser: req.session.user, errorMessage: 'Failed to load counters page.' }, async () => {
-    const counters = await getAllCounters();
+    const counters = await getCountersForGuild(getCurrentGuildId(req));
 
     renderView(res, 'counters', {
       user: req.session.user,
@@ -103,7 +104,7 @@ router.get('/counters', requireAuth, csrfProtection, async (req, res) => {
 
 /**
  * POST /counters/add — creates a new counter with a trigger command, check command,
- * increment/check messages, and yearly-reset flag.
+ * increment/check messages, and yearly-reset flag, in the current guild.
  * @param req - Express request; reads `trigger_command`, `check_command`, `message`,
  *   `increment_message`, and `reset_yearly` from `req.body`.
  * @param res - Express response; redirects to `/counters` on success, or to
@@ -112,13 +113,14 @@ router.get('/counters', requireAuth, csrfProtection, async (req, res) => {
  *   (`add_failed`).
  */
 router.post('/counters/add', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
+  const guildId = getCurrentGuildId(req);
   const form = validateAndNormalizeCounterForm(req.body as Record<string, string | undefined>);
   if (form.error) {
     return res.redirect(`/counters?error=${form.error}`);
   }
 
   try {
-    const hasDuplicateCommand = await isCounterCommandTaken([
+    const hasDuplicateCommand = await isCounterCommandTaken(guildId, [
       form.triggerCommand,
       form.checkCommand,
     ]);
@@ -127,6 +129,7 @@ router.post('/counters/add', requireGuildContext, requireMod, csrfProtection, as
     }
 
     await addCounter(
+      guildId,
       form.triggerCommand,
       form.checkCommand,
       form.message,
@@ -143,16 +146,17 @@ router.post('/counters/add', requireGuildContext, requireMod, csrfProtection, as
 
 /**
  * POST /counters/update — updates an existing counter's commands, messages, and
- * yearly-reset flag.
+ * yearly-reset flag. The counter must belong to the current guild.
  * @param req - Express request; reads `id`, `trigger_command`, `check_command`,
  *   `message`, `increment_message`, and `reset_yearly` from `req.body`.
  * @param res - Express response; redirects to `/counters` on success, or to
  *   `/counters?error=<code>` for validation failures (`missing_fields`,
  *   `same_commands`, `invalid_id`, `duplicate_command`, `reserved_command`), if the
- *   counter no longer exists (`counter_not_found`), or the update fails
+ *   counter doesn't exist in this guild (`counter_not_found`), or the update fails
  *   (`update_failed`).
  */
 router.post('/counters/update', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
+  const guildId = getCurrentGuildId(req);
   const { id } = req.body as Record<string, string | undefined>;
 
   const parsedId = parsePositiveIntId(id);
@@ -167,6 +171,7 @@ router.post('/counters/update', requireGuildContext, requireMod, csrfProtection,
 
   try {
     const hasDuplicateCommand = await isCounterCommandTaken(
+      guildId,
       [form.triggerCommand, form.checkCommand],
       parsedId,
     );
@@ -174,7 +179,7 @@ router.post('/counters/update', requireGuildContext, requireMod, csrfProtection,
       return res.redirect('/counters?error=duplicate_command');
     }
 
-    await updateCounter({
+    await updateCounter(guildId, {
       id: parsedId,
       triggerCommand: form.triggerCommand,
       checkCommand: form.checkCommand,
@@ -194,13 +199,14 @@ router.post('/counters/update', requireGuildContext, requireMod, csrfProtection,
 });
 
 /**
- * POST /counters/remove — deletes a counter.
+ * POST /counters/remove — deletes a counter. The counter must belong to the current guild.
  * @param req - Express request; reads `id` from `req.body`.
  * @param res - Express response; redirects to `/counters` on success, or to
  *   `/counters?error=<code>` if `id` is malformed (`invalid_id`), the counter
- *   doesn't exist (`counter_not_found`), or the delete fails (`remove_failed`).
+ *   doesn't exist in this guild (`counter_not_found`), or the delete fails (`remove_failed`).
  */
 router.post('/counters/remove', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
+  const guildId = getCurrentGuildId(req);
   const { id } = req.body as { id?: string };
   const parsedId = parsePositiveIntId(id);
 
@@ -209,7 +215,7 @@ router.post('/counters/remove', requireGuildContext, requireMod, csrfProtection,
   }
 
   try {
-    await removeCounter(parsedId);
+    await removeCounter(guildId, parsedId);
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
       return res.redirect('/counters?error=counter_not_found');
@@ -223,13 +229,14 @@ router.post('/counters/remove', requireGuildContext, requireMod, csrfProtection,
 
 /**
  * POST /counters/reset/:id — resets a counter's current value back to zero
- * (Manager+).
+ * (Manager+). The counter must belong to the current guild.
  * @param req - Express request; reads the `id` route param.
  * @param res - Express response; redirects to `/counters?reset=1` on success, or
  *   to `/counters?error=<code>` if `id` is malformed (`invalid_id`), the counter
- *   doesn't exist (`counter_not_found`), or the reset fails (`reset_failed`).
+ *   doesn't exist in this guild (`counter_not_found`), or the reset fails (`reset_failed`).
  */
 router.post('/counters/reset/:id', requireGuildContext, requireManager, csrfProtection, async (req, res) => {
+  const guildId = getCurrentGuildId(req);
   const rawId = req.params.id;
   const parsedId = parsePositiveIntId(typeof rawId === 'string' ? rawId : undefined);
   if (parsedId === null) {
@@ -237,7 +244,7 @@ router.post('/counters/reset/:id', requireGuildContext, requireManager, csrfProt
   }
 
   try {
-    await resetCounterCurrentValue(parsedId);
+    await resetCounterCurrentValue(guildId, parsedId);
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
       return res.redirect('/counters?error=counter_not_found');
