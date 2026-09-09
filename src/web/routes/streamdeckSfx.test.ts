@@ -29,6 +29,14 @@ vi.mock('../../audio/sfxPlayer', () => ({
   },
 }));
 
+vi.mock('../../audio/audioPlayer', () => ({
+  isPlaying: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock('../../shared/config', () => ({
+  GLOBAL_COOLDOWN_MS: 3_000,
+}));
+
 vi.mock('../../shared/statusStore', () => ({
   setVoicePlaying: vi.fn(),
 }));
@@ -52,6 +60,7 @@ import { setVoicePlaying } from '../../shared/statusStore';
 import { getDiscordClient } from '../../discord/discordBot';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
 import { buildTestApp } from '../../test-utils/expressTestApp';
+import { forgetGuildCommandState } from '../../commands/commandRouter';
 
 const TRIGGER: SfxTrigger = {
   id: BigInt(1),
@@ -79,6 +88,10 @@ function buildApp() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // POST /sfx shares its per-guild cooldown/in-flight guard with commandRouter.ts's real,
+  // module-singleton guildStates map — reset it so one test's successful play doesn't leave
+  // 'guild-123' on cooldown for the next.
+  forgetGuildCommandState('guild-123');
   vi.mocked(getAllSfxTriggers).mockResolvedValue([]);
   vi.mocked(findCachedSfxTrigger).mockResolvedValue(null);
   vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
@@ -220,6 +233,36 @@ describe('POST /sfx', () => {
       .expect(500);
 
     expect(res.body).toMatchObject({ ok: false });
+  });
+
+  it('returns 429 and does not play when the guild is still on cooldown from a prior play', async () => {
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
+    // Explicit, not relying on the ambient default: an earlier test in this file leaves
+    // playFile's mock permanently throwing (vi.clearAllMocks() doesn't undo a plain
+    // .mockImplementation()), so the first play here must set its own resolved behavior.
+    vi.mocked(playFile).mockResolvedValueOnce(undefined);
+
+    await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(200);
+    vi.mocked(playFile).mockClear();
+
+    const res = await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(429);
+
+    expect(res.body).toMatchObject({ ok: false });
+    expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+  });
+
+  it('releases the in-flight slot even when playFile throws, so a later request is only blocked by cooldown', async () => {
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
+    vi.mocked(playFile).mockImplementationOnce(() => { throw new Error('FFMPEG crashed'); });
+
+    await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(500);
+
+    // Cooldown wasn't recorded on failure (lastPlayedAt only updates on success), so a second
+    // attempt on the same guild lands on the "already in-flight" branch's guard cleanly — it
+    // must not still be latched from the failed attempt.
+    vi.mocked(playFile).mockResolvedValueOnce(undefined);
+    const res = await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(200);
+    expect(res.body).toEqual({ ok: true, file: 'ding.mp3' });
   });
 });
 

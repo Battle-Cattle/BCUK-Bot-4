@@ -11,15 +11,19 @@ import { resolveCommand } from './commandUtils';
 
 const log = createLogger('CommandRouter');
 
-interface GuildCommandState {
+export interface GuildCommandState {
   lastPlayedAt: number;
   inFlight: boolean;
 }
 
 const guildStates = new Map<string, GuildCommandState>();
 
-/** Returns the cooldown/in-flight state for a guild, creating a fresh record on first use. */
-function getGuildCommandState(guildId: string): GuildCommandState {
+/**
+ * Returns the cooldown/in-flight state for a guild, creating a fresh record on first use.
+ * Exported so other SFX-triggering entry points (e.g. the Streamdeck API route) share the
+ * same per-guild cooldown/in-flight guard as chat-triggered commands, rather than reimplementing it.
+ */
+export function getGuildCommandState(guildId: string): GuildCommandState {
   return getOrCreate(guildStates, guildId, () => ({ lastPlayedAt: 0, inFlight: false }));
 }
 
@@ -46,7 +50,7 @@ export function forgetGuildCommandState(guildId: string): void {
  */
 async function lookupAndPlay(
   command: string,
-  source: 'twitch' | 'discord',
+  source: 'twitch' | 'discord' | 'streamdeck',
   guildId: string,
   state: GuildCommandState,
 ): Promise<void> {
@@ -93,9 +97,9 @@ async function lookupAndPlay(
  * @returns True if the slot was claimed; false if the guild is on cooldown or already
  *   playing/in-flight, in which case `state` is left untouched.
  */
-function tryClaimGuildSlot(
+export function tryClaimGuildSlot(
   guildId: string,
-  source: 'twitch' | 'discord',
+  source: 'twitch' | 'discord' | 'streamdeck',
   command: string,
   state: GuildCommandState,
 ): boolean {
@@ -133,7 +137,7 @@ function tryClaimGuildSlot(
  */
 export async function handleCommand(
   rawMessage: string,
-  source: 'twitch' | 'discord',
+  source: 'twitch' | 'discord' | 'streamdeck',
   guildId: string | null,
   precomputedCommand?: string | null,
 ): Promise<void> {

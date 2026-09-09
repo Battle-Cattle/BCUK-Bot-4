@@ -6,6 +6,7 @@ import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
 import { requireApiKey } from '../middleware';
 import { resolvePresenceGuildOrRespond, getReadyDiscordClientOrRespond } from './streamdeckGuildResolution';
+import { getGuildCommandState, tryClaimGuildSlot } from '../../commands/commandRouter';
 
 const log = createLogger('Streamdeck');
 const router = Router();
@@ -49,38 +50,52 @@ router.post('/sfx', requireApiKey, async (req, res) => {
 
   const normalizedCommand = command.trim().toLowerCase();
 
-  let lookup;
-  try {
-    lookup = await findCachedSfxTrigger(normalizedCommand);
-  } catch (err) {
-    log.error('DB error looking up trigger:', err);
-    res.status(500).json({ ok: false, error: 'Database error' });
-    return;
-  }
-  if (!lookup) {
-    res.status(404).json({ ok: false, error: 'Unknown command' });
-    return;
-  }
-  const { files } = lookup;
-  if (files.length === 0) {
-    res.status(404).json({ ok: false, error: 'No sound files for this command' });
+  // Same per-guild cooldown/in-flight guard chat-triggered SFX gets from commandRouter.ts —
+  // without it, rapid repeated Streamdeck presses (or a leaked API key) could retrigger
+  // playback back-to-back, cutting off in-progress playback each time.
+  const state = getGuildCommandState(guildId);
+  if (!tryClaimGuildSlot(guildId, 'streamdeck', normalizedCommand, state)) {
+    res.status(429).json({ ok: false, error: 'Already playing or on cooldown in this guild' });
     return;
   }
 
-  const filename = pickWeightedRandom(files);
-
   try {
-    await playFile(filename, guildId);
-    setVoicePlaying(guildId, filename, normalizedCommand, 'streamdeck');
-    log.info(`Playing '${filename.replace(/[\r\n]/g, '')}' for trigger '${normalizedCommand.replace(/[\r\n]/g, '')}' in guild ${guildId}`);
-    res.json({ ok: true, file: filename });
-  } catch (err: unknown) {
-    if (err instanceof VoiceNotConnectedError) {
-      res.status(503).json({ ok: false, error: 'Bot is not connected to a voice channel' });
-    } else {
-      log.error(`Failed to play ${filename.replace(/[\r\n]/g, '')}:`, err);
-      res.status(500).json({ ok: false, error: 'Failed to play sound' });
+    let lookup;
+    try {
+      lookup = await findCachedSfxTrigger(normalizedCommand);
+    } catch (err) {
+      log.error('DB error looking up trigger:', err);
+      res.status(500).json({ ok: false, error: 'Database error' });
+      return;
     }
+    if (!lookup) {
+      res.status(404).json({ ok: false, error: 'Unknown command' });
+      return;
+    }
+    const { files } = lookup;
+    if (files.length === 0) {
+      res.status(404).json({ ok: false, error: 'No sound files for this command' });
+      return;
+    }
+
+    const filename = pickWeightedRandom(files);
+
+    try {
+      await playFile(filename, guildId);
+      state.lastPlayedAt = Date.now();
+      setVoicePlaying(guildId, filename, normalizedCommand, 'streamdeck');
+      log.info(`Playing '${filename.replace(/[\r\n]/g, '')}' for trigger '${normalizedCommand.replace(/[\r\n]/g, '')}' in guild ${guildId}`);
+      res.json({ ok: true, file: filename });
+    } catch (err: unknown) {
+      if (err instanceof VoiceNotConnectedError) {
+        res.status(503).json({ ok: false, error: 'Bot is not connected to a voice channel' });
+      } else {
+        log.error(`Failed to play ${filename.replace(/[\r\n]/g, '')}:`, err);
+        res.status(500).json({ ok: false, error: 'Failed to play sound' });
+      }
+    }
+  } finally {
+    state.inFlight = false;
   }
 });
 
