@@ -135,6 +135,17 @@ describe('getValidToken', () => {
     expect(token).toBeNull();
     expect(twitchFetch).not.toHaveBeenCalled();
   });
+
+  it('returns null and never calls twitchFetch/saveStreamerToken when twitch_user_id is unexpectedly null', async () => {
+    const streamer = makeStreamer({
+      eventsub_token_expiry: String(Date.now() + 1 * 60 * 1000),
+      twitch_user_id: null,
+    });
+    const token = await getValidToken(streamer);
+    expect(token).toBeNull();
+    expect(twitchFetch).not.toHaveBeenCalled();
+    expect(saveStreamerToken).not.toHaveBeenCalled();
+  });
 });
 
 // ─── exchangeCode ─────────────────────────────────────────────────────────────

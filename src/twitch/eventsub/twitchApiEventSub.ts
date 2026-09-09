@@ -24,10 +24,18 @@ export async function getValidToken(streamer: DbStreamerEventSub): Promise<strin
     log.warn(`No refresh token for ${streamer.twitch_name ?? 'unknown'}`);
     return null;
   }
+  if (!streamer.twitch_user_id) {
+    // Should not happen: eventsub_access_token and twitch_user_id are only ever written/cleared
+    // together (see saveStreamerToken/clearStreamerToken). Treat as a permanent failure rather
+    // than asserting non-null and letting mysql2 reject `undefined` as a bind parameter, which
+    // would otherwise be misclassified below as a transient error that never self-heals.
+    log.error(`Token refresh for ${streamer.twitch_name ?? 'unknown'} has an access token but no twitch_user_id — refusing to save; re-authorization required.`);
+    return null;
+  }
   try {
     const tokens = await refreshUserToken(streamer.eventsub_refresh_token);
     const expiryMs = tokens.expires_in != null ? Date.now() + tokens.expires_in * 1000 - 60_000 : null;
-    await saveStreamerToken(streamer.id, streamer.twitch_user_id!, tokens.access_token, tokens.refresh_token, expiryMs);
+    await saveStreamerToken(streamer.id, streamer.twitch_user_id, tokens.access_token, tokens.refresh_token, expiryMs);
     log.info(`Token refreshed for ${streamer.twitch_name ?? 'unknown'}`);
     return tokens.access_token;
   } catch (err) {
