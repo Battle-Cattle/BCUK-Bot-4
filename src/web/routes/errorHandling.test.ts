@@ -12,7 +12,46 @@ vi.mock('../../db', () => {
 });
 
 import { ReservedCommandError, CommandConflictError, isMysqlDuplicateEntryError } from '../../db';
-import { logAndRedirectError, handleReservedOrConflictCommandError } from './errorHandling';
+import { logAndRedirectError, handleReservedOrConflictCommandError, renderOrError } from './errorHandling';
+
+describe('renderOrError', () => {
+  function mockRes() {
+    const render = vi.fn();
+    const status = vi.fn().mockReturnThis();
+    return { res: { render, status } as unknown as Response, render, status };
+  }
+
+  function mockLog() {
+    const error = vi.fn();
+    return { log: { error } as unknown as import('winston').Logger, error };
+  }
+
+  it('runs render and never touches the error path on success', async () => {
+    const { res, render, status } = mockRes();
+    const { log, error } = mockLog();
+    const doRender = vi.fn().mockResolvedValue(undefined);
+
+    await renderOrError({ res, log, logLabel: 'Widget page error:', sessionUser: undefined, errorMessage: 'Failed to load widgets.' }, doRender);
+
+    expect(doRender).toHaveBeenCalledOnce();
+    expect(error).not.toHaveBeenCalled();
+    expect(status).not.toHaveBeenCalled();
+    expect(render).not.toHaveBeenCalled();
+  });
+
+  it('logs the error and renders the error view with a 500 status when render throws', async () => {
+    const { res, render, status } = mockRes();
+    const { log, error } = mockLog();
+    const boom = new Error('boom');
+    const doRender = vi.fn().mockRejectedValue(boom);
+
+    await renderOrError({ res, log, logLabel: 'Widget page error:', sessionUser: undefined, errorMessage: 'Failed to load widgets.' }, doRender);
+
+    expect(error).toHaveBeenCalledWith('Widget page error:', boom);
+    expect(status).toHaveBeenCalledWith(500);
+    expect(render).toHaveBeenCalledWith('error', expect.objectContaining({ message: 'Failed to load widgets.' }));
+  });
+});
 
 describe('logAndRedirectError', () => {
   function mockRes() {

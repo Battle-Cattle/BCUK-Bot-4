@@ -6,7 +6,8 @@ import { getSessionUser } from '../session';
 import { getStreamerByDiscordId, getAlertConfigsForStreamer, ALERT_EVENT_TYPES, ALERT_TEXT_ANIMATIONS } from '../../db';
 import { PUBLIC_URL, ALERT_STATUS_MAX_SSE_PER_STREAMER } from '../../shared/config';
 import { filterQueryParam } from './validation';
-import { renderError, renderView } from './viewHelpers';
+import { renderView } from './viewHelpers';
+import { renderOrError } from './errorHandling';
 import { router as mutationsRouter } from './alertsAdminMutations';
 import { router as assetMutationsRouter, MAX_IMAGE_MB, MAX_SOUND_MB } from './alertsAssetMutations';
 import { connections as alertsSourceConnections } from './alertsOverlaySource';
@@ -38,7 +39,7 @@ const KNOWN_SUCCESSES = new Set([
  *   loading settings fails.
  */
 router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
-  try {
+  await renderOrError({ res, log, logLabel: 'Alerts settings page error:', sessionUser: req.session.user, errorMessage: 'Failed to load alerts settings.' }, async () => {
     const streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
     const configs = streamer ? await getAlertConfigsForStreamer(streamer.id) : [];
     const configByType = Object.fromEntries(configs.map((c) => [c.event_type, c]));
@@ -56,10 +57,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       error:   filterQueryParam(req.query.error,   KNOWN_ERRORS),
       success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),
     });
-  } catch (err) {
-    log.error('Alerts settings page error:', err);
-    renderError(res, 500, 'Failed to load alerts settings.', req.session.user);
-  }
+  });
 });
 
 /**

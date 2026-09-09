@@ -12,7 +12,8 @@ import { csrfProtection } from '../csrf';
 import { requireManager, requireAdmin } from '../middleware';
 import { getSessionUser, getCurrentGuildId } from '../session';
 import { trimField, filterQueryParam } from './validation';
-import { renderError, renderView } from './viewHelpers';
+import { renderView } from './viewHelpers';
+import { renderOrError } from './errorHandling';
 import { runUserMutation } from './adminUserMutationQueue';
 import adminRefreshRouter, { getRefreshState } from './adminRefresh';
 import {
@@ -51,7 +52,7 @@ const KNOWN_ERRORS = new Set([
  */
 router.get('/users', requireManager, csrfProtection, async (req, res) => {
   const guildId = getCurrentGuildId(req);
-  try {
+  await renderOrError({ res, log, logLabel: 'Admin users error:', sessionUser: req.session.user, errorMessage: 'Failed to load users.' }, async () => {
     const users = await getGuildMemberUsers(guildId);
     renderView(res, 'admin', {
       user: req.session.user,
@@ -61,10 +62,7 @@ router.get('/users', requireManager, csrfProtection, async (req, res) => {
       error: filterQueryParam(req.query.error, KNOWN_ERRORS),
       refreshState: getRefreshState(guildId),
     });
-  } catch (err) {
-    log.error('Admin users error:', err);
-    renderError(res, 500, 'Failed to load users.', req.session.user);
-  }
+  });
 });
 
 /** Refresh the guild registry after a membership change; log but never fail the request. */

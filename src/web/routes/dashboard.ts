@@ -4,7 +4,8 @@ import { getGuildScopedStatus } from '../guildScopedStatus';
 import { csrfProtection } from '../csrf';
 import { getStreamerByDiscordId, getSfxTriggerCount, getCustomCommandCount, getCounterCount, getRecentStreamerEvents } from '../../db';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
-import { renderError, renderView } from './viewHelpers';
+import { renderView } from './viewHelpers';
+import { renderOrError } from './errorHandling';
 import { RECENT_EVENTS_LIMIT, type DashboardEvent } from './dashboardEvents';
 
 const log = createLogger('Web');
@@ -20,7 +21,7 @@ const router = Router();
  *   500 error page if loading status/streamer data fails.
  */
 router.get('/', csrfProtection, async (req, res) => {
-  try {
+  await renderOrError({ res, log, logLabel: 'Dashboard error:', sessionUser: req.session.user, errorMessage: 'Failed to load dashboard data.' }, async () => {
     const [status, sfxCount, commandCount, counterCount, streamer] = await Promise.all([
       getGuildScopedStatus(req.session.user?.currentGuildId ?? null),
       getSfxTriggerCount(), getCustomCommandCount(), getCounterCount(),
@@ -46,10 +47,7 @@ router.get('/', csrfProtection, async (req, res) => {
       csrfToken: req.csrfToken(),
       needsReconnect,
     });
-  } catch (err) {
-    log.error('Dashboard error:', err);
-    renderError(res, 500, 'Failed to load dashboard data.', req.session.user);
-  }
+  });
 });
 
 export default router;
