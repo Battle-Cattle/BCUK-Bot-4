@@ -20,7 +20,7 @@ vi.mock('./companionEvents', () => ({ disconnectCompanionConnections: vi.fn() })
 
 import express from 'express';
 import supertest from 'supertest';
-import router from './companionKeys';
+import router, { __resetRecentIssuesForTests } from './companionKeys';
 import { issueToken, getTokenStatus, revokeToken } from '../../db';
 import { AccessLevel } from '../../db';
 import { disconnectCompanionConnections } from './companionEvents';
@@ -43,6 +43,7 @@ function buildApp(sessionUser = SESSION_USER) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  __resetRecentIssuesForTests();
   vi.mocked(getTokenStatus).mockResolvedValue(null);
   vi.mocked(issueToken).mockResolvedValue('a'.repeat(64));
   vi.mocked(revokeToken).mockResolvedValue(undefined);
@@ -110,6 +111,45 @@ describe('POST /companion-key/request', () => {
     await supertest(buildApp()).post('/companion-key/request');
     expect(disconnectCompanionConnections).not.toHaveBeenCalled();
   });
+
+  it('a rapid duplicate request within the dedupe window reuses the first token instead of issuing again', async () => {
+    vi.mocked(issueToken).mockResolvedValue('first-plain-token');
+
+    const app = buildApp();
+    const first = await supertest(app).post('/companion-key/request');
+    expect((first.body as any).locals.newToken).toBe('first-plain-token');
+
+    // If the dedupe guard failed to kick in, this second call would return whatever
+    // issueToken resolves to now — which is unchanged, so a regression here wouldn't be
+    // masked by a queued "once" value.
+    const second = await supertest(app).post('/companion-key/request');
+
+    expect((second.body as any).locals.newToken).toBe('first-plain-token');
+    expect(issueToken).toHaveBeenCalledOnce();
+    expect(disconnectCompanionConnections).toHaveBeenCalledOnce();
+  });
+
+  it('issues again once the dedupe window has passed', async () => {
+    const dateNowSpy = vi.spyOn(Date, 'now');
+    try {
+      vi.mocked(issueToken).mockResolvedValueOnce('first-plain-token');
+      dateNowSpy.mockReturnValue(1_000_000);
+
+      const app = buildApp();
+      const first = await supertest(app).post('/companion-key/request');
+      expect((first.body as any).locals.newToken).toBe('first-plain-token');
+
+      vi.mocked(issueToken).mockResolvedValueOnce('second-plain-token');
+      dateNowSpy.mockReturnValue(1_000_000 + 10_000 + 1);
+
+      const second = await supertest(app).post('/companion-key/request');
+
+      expect((second.body as any).locals.newToken).toBe('second-plain-token');
+      expect(issueToken).toHaveBeenCalledTimes(2);
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+  });
 });
 
 // ─── POST /companion-key/revoke ───────────────────────────────────────────────
@@ -136,5 +176,19 @@ describe('POST /companion-key/revoke', () => {
     vi.mocked(revokeToken).mockRejectedValueOnce(new Error('DB error'));
     await supertest(buildApp()).post('/companion-key/revoke');
     expect(disconnectCompanionConnections).not.toHaveBeenCalled();
+  });
+
+  it('clears the issue dedupe cache, so a request right after a revoke issues a fresh token', async () => {
+    vi.mocked(issueToken).mockResolvedValueOnce('first-plain-token');
+    const app = buildApp();
+    await supertest(app).post('/companion-key/request');
+
+    await supertest(app).post('/companion-key/revoke');
+
+    vi.mocked(issueToken).mockResolvedValueOnce('second-plain-token');
+    const res = await supertest(app).post('/companion-key/request');
+
+    expect((res.body as any).locals.newToken).toBe('second-plain-token');
+    expect(issueToken).toHaveBeenCalledTimes(2);
   });
 });
