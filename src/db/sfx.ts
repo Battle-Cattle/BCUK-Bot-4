@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransactionOrNotFound } from './pool';
 import { fromBit, affectedOrExists, rowExists, getRowCount } from './utils';
+import { getOrCreate } from '../shared/mapUtils';
 
 export interface SfxTrigger {
   id: bigint;
@@ -343,19 +344,17 @@ export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
 
   const map = new Map<string, SfxTriggerRow>();
   for (const r of rows) {
-    if (!map.has(r.triggerId)) {
-      map.set(r.triggerId, {
-        triggerId: r.triggerId,
-        triggerCommand: r.triggerCommand,
-        description: r.description ?? null,
-        hidden: fromBit(r.triggerHidden),
-        categoryId: r.categoryId ?? null,
-        categoryName: r.categoryName ?? null,
-        files: [],
-      });
-    }
+    const triggerEntry = getOrCreate(map, r.triggerId, () => ({
+      triggerId: r.triggerId,
+      triggerCommand: r.triggerCommand,
+      description: r.description ?? null,
+      hidden: fromBit(r.triggerHidden),
+      categoryId: r.categoryId ?? null,
+      categoryName: r.categoryName ?? null,
+      files: [],
+    }));
     if (r.sfxId !== null) {
-      map.get(r.triggerId)!.files.push({
+      triggerEntry.files.push({
         id: r.sfxId,
         file: r.file,
         weight: r.weight,

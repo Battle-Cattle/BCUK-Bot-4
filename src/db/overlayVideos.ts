@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransactionOrNotFound } from './pool';
+import { getOrCreate } from '../shared/mapUtils';
 
 export interface OverlayVideo {
   id: number;
@@ -127,16 +128,14 @@ export async function getRewardsForStreamer(streamerId: number): Promise<Overlay
 
   const rewardMap = new Map<number, OverlayRewardWithVideos>();
   for (const row of rewardRows) {
-    if (!rewardMap.has(row.id)) {
-      rewardMap.set(row.id, {
-        id: row.id,
-        streamer_id: row.streamer_id,
-        twitch_reward_id: row.twitch_reward_id,
-        videos: [],
-      });
-    }
+    const rewardEntry = getOrCreate(rewardMap, row.id, () => ({
+      id: row.id,
+      streamer_id: row.streamer_id,
+      twitch_reward_id: row.twitch_reward_id,
+      videos: [],
+    }));
     if (row.video_id != null) {
-      rewardMap.get(row.id)!.videos.push({
+      rewardEntry.videos.push({
         video_id: row.video_id,
         weight: row.weight,
         name: row.name,

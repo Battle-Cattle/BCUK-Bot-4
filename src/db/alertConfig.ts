@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 import { fromBit } from './utils';
+import { getOrCreate } from '../shared/mapUtils';
 
 /** Twitch event types the alerts overlay can react to. */
 export type AlertEventType = 'follow' | 'sub' | 'resub' | 'giftsub' | 'raid';
@@ -87,8 +88,7 @@ export async function getEnabledAlertEventTypesBatch(streamerIds: number[]): Pro
     streamerIds,
   );
   for (const row of rows) {
-    if (!result.has(row.streamer_id)) result.set(row.streamer_id, new Set());
-    result.get(row.streamer_id)!.add(row.event_type);
+    getOrCreate(result, row.streamer_id, () => new Set<AlertEventType>()).add(row.event_type);
   }
   return result;
 }
