@@ -7,6 +7,7 @@ import { createMutationQueue } from '../shared/mutationQueue';
 import { withTimeout } from './twitchSendQueue';
 import { createLogger } from '../shared/logger';
 import { throttledJoin, compensateIfStale, resetJoinGate, partAsync, JOIN_PART_TIMEOUT_MS, MembershipDeps } from './twitchChannelNetworkOps';
+import { forgetChannelChatActivity } from './twitchChatActivity';
 
 const log = createLogger('Twitch');
 
@@ -362,6 +363,7 @@ export async function partTwitchChannel(channel: string): Promise<void> {
       // any stale Twurple channel memberships on the next successful connect.
       activeChannels.delete(normalized);
       activeChannelUserIds.delete(normalized);
+      forgetChannelChatActivity(normalized);
       setTwitchChannel(normalized, false);
       return;
     }
@@ -369,6 +371,7 @@ export async function partTwitchChannel(channel: string): Promise<void> {
     try {
       activeChannels.delete(normalized);
       activeChannelUserIds.delete(normalized);
+      forgetChannelChatActivity(normalized);
       setTwitchChannel(normalized, false);
       if (isChannelJoined(normalized)) {
         const generation = captureGeneration();

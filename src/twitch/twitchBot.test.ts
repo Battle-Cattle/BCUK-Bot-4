@@ -133,6 +133,7 @@ vi.mock('../commands/countdownHandler', () => ({
 
 vi.mock('./twitchChatActivity', () => ({
   recordChatMessage: vi.fn(),
+  forgetChannelChatActivity: vi.fn(),
 }));
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
