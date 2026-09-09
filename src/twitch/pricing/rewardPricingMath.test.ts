@@ -60,6 +60,21 @@ describe('computePrice', () => {
   it('is unaffected by a missing roundToNearest', () => {
     expect(computePrice(0.5, config)).toBe(483);
   });
+
+  it('floors curve=0 instead of pinning the price to max at every demand level', () => {
+    const zeroCurve = { baseCost: 200, maxMultiplier: 4, curve: 0 };
+    // Math.pow(x, 0) === 1 for every x, including 0 — without a floor this would return
+    // baseCost * (1 + maxMultiplier) even at demand=0, defeating the curve entirely.
+    expect(computePrice(0, zeroCurve)).toBe(200);
+    // Still less than the max at partial demand, since a near-zero curve is nearly flat but not 1.
+    expect(computePrice(0.5, zeroCurve)).toBeLessThan(1000);
+  });
+
+  it('floors a negative curve the same way as curve=0', () => {
+    const negativeCurve = { baseCost: 200, maxMultiplier: 4, curve: -1 };
+    expect(computePrice(0, negativeCurve)).toBe(200);
+    expect(computePrice(0.5, negativeCurve)).toBeLessThan(1000);
+  });
 });
 
 describe('decayDemand', () => {
