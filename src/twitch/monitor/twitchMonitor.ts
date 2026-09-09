@@ -47,7 +47,13 @@ async function pollStreams(): Promise<void> {
   currentPollPromise = (async () => {
     try {
       const userIds = Array.from(loginToUserId.values());
-      if (userIds.length === 0) return;
+      if (userIds.length === 0) {
+        // streamersData is non-empty (checked above) but no login resolved to a Twitch user ID —
+        // e.g. every configured twitch_name is currently invalid, or getUsers failed at startup/reload.
+        // Record this as a failed poll so the ops dashboard's health signal doesn't go stale/silent.
+        recordMonitorPoll(false, 'No Twitch user IDs resolved for any configured streamer.');
+        return;
+      }
 
       const liveStreams = await getStreams(userIds);
       const liveByUserId = new Map(
