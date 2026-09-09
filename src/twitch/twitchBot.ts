@@ -54,6 +54,23 @@ let disconnectListener: { unbind: () => void } | null = null;
 let userStateListenerId: string | null = null;
 
 /**
+ * Unbinds every listener {@link startTwitchBot} registered on `chatClient` and clears the
+ * module-level references, so a late event on a client we're abandoning (a failed connect, or
+ * a disconnect during {@link stopTwitchBot}) can never reach them.
+ * @param chatClient The client the listeners were registered on.
+ */
+function teardownTwitchListeners(chatClient: ChatClient): void {
+  messageListener?.unbind();
+  authSuccessListener?.unbind();
+  disconnectListener?.unbind();
+  if (userStateListenerId) { chatClient.irc.removeMessageListener(userStateListenerId); }
+  messageListener = null;
+  authSuccessListener = null;
+  disconnectListener = null;
+  userStateListenerId = null;
+}
+
+/**
  * Upper bound on how long {@link stopTwitchBot} waits for the `onDisconnect` event to fire after
  * calling `client.quit()`. `quit()` itself doesn't return a promise — bounding the wait here
  * guarantees shutdown always proceeds instead of hanging indefinitely if the event never arrives.
@@ -302,14 +319,7 @@ export async function startTwitchBot(): Promise<void> {
     // ones registered above) would otherwise stay live on `newClient` and could still update
     // module state (e.g. marking the bot connected) via a late event, even though startup already
     // reported failure to the caller.
-    messageListener.unbind();
-    authSuccessListener.unbind();
-    disconnectListener.unbind();
-    newClient.irc.removeMessageListener(userStateListenerId);
-    messageListener = null;
-    authSuccessListener = null;
-    disconnectListener = null;
-    userStateListenerId = null;
+    teardownTwitchListeners(newClient);
     try {
       newClient.quit();
     } catch (quitErr) {
@@ -456,16 +466,9 @@ export async function stopTwitchBot(): Promise<void> {
       unbind();
       getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
     }
-    // Unbind every listener startTwitchBot() registered on this client too — see their shared
-    // declaration for why a late event on this discarded client must not reach any of them.
-    messageListener?.unbind();
-    authSuccessListener?.unbind();
-    disconnectListener?.unbind();
-    if (userStateListenerId) { client.irc.removeMessageListener(userStateListenerId); }
-    messageListener = null;
-    authSuccessListener = null;
-    disconnectListener = null;
-    userStateListenerId = null;
+    // Unbind every listener startTwitchBot() registered on this client too — see
+    // teardownTwitchListeners for why a late event on this discarded client must not reach any of them.
+    teardownTwitchListeners(client);
     client = null;
     setChatClient(null);
   }
