@@ -40,13 +40,17 @@ export interface DbMatchedCounter extends DbCounter {
   matchType: CounterMatchType;
 }
 
-export interface UpdateCounterInput {
-  id: number;
+/** A counter's editable fields, shared by {@link addCounter} and {@link UpdateCounterInput}. */
+export interface CounterFieldsInput {
   triggerCommand: string;
   checkCommand: string;
   message: string;
   incrementMessage: string;
   resetYearly: boolean;
+}
+
+export interface UpdateCounterInput extends CounterFieldsInput {
+  id: number;
 }
 
 /** Thrown when a counter lookup/mutation matches no row. */
@@ -276,22 +280,12 @@ export async function getCounterHistory(
  * custom commands, and within this guild for other counters — the same trigger/check command may
  * exist in a different guild's counter without colliding).
  * @param guildId The guild this counter belongs to.
- * @param triggerCommand Command that increments the counter.
- * @param checkCommand Command that reports the counter's current value.
- * @param message Message shown when the counter is checked.
- * @param incrementMessage Message shown when the counter is incremented.
- * @param resetYearly Whether the counter's value is archived and reset each new year.
+ * @param input The counter's initial fields.
  * @throws If `triggerCommand` and `checkCommand` are the same, either is reserved, or either is
  *   already taken by another command.
  */
-export async function addCounter(
-  guildId: string,
-  triggerCommand: string,
-  checkCommand: string,
-  message: string,
-  incrementMessage: string,
-  resetYearly: boolean,
-): Promise<void> {
+export async function addCounter(guildId: string, input: CounterFieldsInput): Promise<void> {
+  const { triggerCommand, checkCommand, message, incrementMessage, resetYearly } = input;
   const fields = normalizeCounterFields(triggerCommand, checkCommand, message, incrementMessage);
   if (fields.triggerCommand === fields.checkCommand) {
     throw new Error('Counter trigger_command and check_command must be different');

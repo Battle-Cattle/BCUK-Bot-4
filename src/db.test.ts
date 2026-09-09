@@ -402,15 +402,17 @@ describe('unassignUserFromCommand', () => {
 // db.ts's wrappers invalidate the counter lookup cache after each write.
 
 describe('addCounter', () => {
+  const NEW_COUNTER = { triggerCommand: '!hits', checkCommand: '!checkhits', message: 'msg', incrementMessage: 'inc', resetYearly: false };
+
   it('calls the record function and invalidates the cache on success', async () => {
-    await addCounter('guild-1', '!hits', '!checkhits', 'msg', 'inc', false);
-    expect(addCounterRecord).toHaveBeenCalledWith('guild-1', '!hits', '!checkhits', 'msg', 'inc', false);
+    await addCounter('guild-1', NEW_COUNTER);
+    expect(addCounterRecord).toHaveBeenCalledWith('guild-1', NEW_COUNTER);
     expect(invalidateCounterLookupCache).toHaveBeenCalledOnce();
   });
 
   it('propagates errors without calling invalidate', async () => {
     vi.mocked(addCounterRecord).mockRejectedValue(new Error('DB error'));
-    await expect(addCounter('guild-1', '!hits', '!checkhits', 'msg', 'inc', false)).rejects.toThrow('DB error');
+    await expect(addCounter('guild-1', NEW_COUNTER)).rejects.toThrow('DB error');
     expect(invalidateCounterLookupCache).not.toHaveBeenCalled();
   });
 });

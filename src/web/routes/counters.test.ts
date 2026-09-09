@@ -229,7 +229,9 @@ describe('POST /counters/add', () => {
   it('scopes the duplicate-command check and the insert to the current guild', async () => {
     await supertest(buildApp()).post('/counters/add').type('form').send(VALID_ADD);
     expect(isCounterCommandTaken).toHaveBeenCalledWith(GUILD_ID, ['!hits', '!count']);
-    expect(addCounter).toHaveBeenCalledWith(GUILD_ID, '!hits', '!count', 'Count: %d', 'Now %d!', false);
+    expect(addCounter).toHaveBeenCalledWith(GUILD_ID, {
+      triggerCommand: '!hits', checkCommand: '!count', message: 'Count: %d', incrementMessage: 'Now %d!', resetYearly: false,
+    });
   });
 });
 

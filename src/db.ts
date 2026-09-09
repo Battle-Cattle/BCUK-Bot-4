@@ -263,7 +263,7 @@ import {
   incrementCounter as incrementCounterRecord,
   archiveAndResetYearlyCounters as archiveAndResetYearlyCountersRecord,
 } from './db/counters';
-import type { UpdateCounterInput } from './db/counters';
+import type { UpdateCounterInput, CounterFieldsInput } from './db/counters';
 import { invalidateCounterLookupCache } from './db/counterCache';
 
 // counters.ts is now a pure DB layer with no cache knowledge (breaks its import cycle with
@@ -272,18 +272,12 @@ import { invalidateCounterLookupCache } from './db/counterCache';
 /**
  * Creates a new counter and invalidates the counter lookup cache.
  * @param guildId - The guild this counter belongs to.
- * @param triggerCommand - Command that increments the counter.
- * @param checkCommand - Command that reports the counter's current value.
- * @param message - Message shown when the counter is checked.
- * @param incrementMessage - Message shown when the counter is incremented.
- * @param resetYearly - Whether the counter's value is archived and reset each new year.
+ * @param input - The counter's initial fields.
  * @returns Resolves once the insert (and cache invalidation) completes.
  */
-export async function addCounter(
-  guildId: string, triggerCommand: string, checkCommand: string, message: string, incrementMessage: string, resetYearly: boolean,
-): Promise<void> {
+export async function addCounter(guildId: string, input: CounterFieldsInput): Promise<void> {
   await withInvalidation(
-    () => addCounterRecord(guildId, triggerCommand, checkCommand, message, incrementMessage, resetYearly),
+    () => addCounterRecord(guildId, input),
     invalidateCounterLookupCache,
   );
 }

@@ -324,15 +324,19 @@ describe('getCounterHistory', () => {
 // ─── addCounter ──────────────────────────────────────────────────────────────
 
 describe('addCounter', () => {
+  function newCounter(overrides: Partial<{ triggerCommand: string; checkCommand: string; message: string; incrementMessage: string; resetYearly: boolean }> = {}) {
+    return { triggerCommand: '!hits', checkCommand: '!checkhits', message: 'msg', incrementMessage: 'inc', resetYearly: false, ...overrides };
+  }
+
   it('throws when trigger and check command are the same', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await expect(addCounter('guild-1', '!hits', '!hits', 'msg', 'inc', false)).rejects.toThrow('must be different');
+    await expect(addCounter('guild-1', newCounter({ checkCommand: '!hits' }))).rejects.toThrow('must be different');
   });
 
   it('calls assertNotReservedCommand for both commands', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
     mockConnection.execute.mockResolvedValue([{}, []]);
-    await addCounter('guild-1', '!hits', '!checkhits', 'msg', 'inc', false);
+    await addCounter('guild-1', newCounter());
     expect(assertNotReservedCommand).toHaveBeenCalledWith('!hits');
     expect(assertNotReservedCommand).toHaveBeenCalledWith('!checkhits');
   });
@@ -340,7 +344,7 @@ describe('addCounter', () => {
   it('calls runSerializedCommandWrite with both commands, scoped to the given guild', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
     mockConnection.execute.mockResolvedValue([{}, []]);
-    await addCounter('guild-1', '!hits', '!checkhits', 'msg', 'inc', true);
+    await addCounter('guild-1', newCounter({ resetYearly: true }));
     expect(runSerializedCommandWrite).toHaveBeenCalledWith(
       ['!hits', '!checkhits'],
       { guildId: 'guild-1' },
@@ -351,7 +355,7 @@ describe('addCounter', () => {
   it('inserts the counter with the given guild id', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
     mockConnection.execute.mockResolvedValue([{}, []]);
-    await addCounter('guild-1', '!hits', '!checkhits', 'msg', 'inc', true);
+    await addCounter('guild-1', newCounter({ resetYearly: true }));
     const [sql, params] = mockConnection.execute.mock.calls[0];
     expect(sql).toContain('INSERT INTO counter (guild_id,');
     expect(params).toEqual(['guild-1', '!hits', '!checkhits', 'msg', 'inc', 1]);
@@ -359,7 +363,7 @@ describe('addCounter', () => {
 
   it('throws when trigger and check differ only by case (normalized to same value)', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await expect(addCounter('guild-1', '!HITS', '!hits', 'msg', 'inc', false)).rejects.toThrow('must be different');
+    await expect(addCounter('guild-1', newCounter({ triggerCommand: '!HITS', checkCommand: '!hits' }))).rejects.toThrow('must be different');
   });
 });
 

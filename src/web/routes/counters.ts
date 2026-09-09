@@ -128,14 +128,13 @@ router.post('/counters/add', requireGuildContext, requireMod, csrfProtection, as
       return res.redirect('/counters?error=duplicate_command');
     }
 
-    await addCounter(
-      guildId,
-      form.triggerCommand,
-      form.checkCommand,
-      form.message,
-      form.incrementMessage,
-      form.resetYearly,
-    );
+    await addCounter(guildId, {
+      triggerCommand: form.triggerCommand,
+      checkCommand: form.checkCommand,
+      message: form.message,
+      incrementMessage: form.incrementMessage,
+      resetYearly: form.resetYearly,
+    });
   } catch (err) {
     if (handleReservedOrConflictCommandError(err, res, COUNTER_WRITE_ERROR_OPTIONS)) return;
     return logAndRedirectError({ res, log, logLabel: 'Add counter error:', err, basePath: '/counters', errorCode: 'add_failed' });
