@@ -20,14 +20,40 @@ export async function getValidToken(streamer: DbStreamerEventSub): Promise<strin
   const needsRefresh = streamer.eventsub_token_expiry != null
     && Date.now() > Number(streamer.eventsub_token_expiry) - TOKEN_BUFFER_MS;
   if (!needsRefresh) return streamer.eventsub_access_token;
-  if (!streamer.eventsub_refresh_token) {
-    log.warn(`No refresh token for ${streamer.twitch_name ?? 'unknown'}`);
+
+  if (!streamer.eventsub_refresh_token || !streamer.twitch_user_id) {
+    if (!streamer.eventsub_refresh_token) {
+      log.warn(`No refresh token for ${streamer.twitch_name ?? 'unknown'}`);
+    } else {
+      // Should not happen: eventsub_access_token and twitch_user_id are only ever written/cleared
+      // together (see saveStreamerToken/clearStreamerToken). Treat as a permanent failure rather
+      // than asserting non-null and letting mysql2 reject `undefined` as a bind parameter, which
+      // would otherwise be misclassified below as a transient error that never self-heals.
+      log.error(`Token refresh for ${streamer.twitch_name ?? 'unknown'} has an access token but no twitch_user_id — refusing to save; re-authorization required.`);
+    }
     return null;
   }
+
+  return refreshAndSaveToken(streamer, streamer.eventsub_refresh_token, streamer.twitch_user_id);
+}
+
+/**
+ * Exchanges `refreshToken` for a fresh EventSub token via Twitch and persists it to `streamer`'s
+ * row. On an unrecoverable auth failure (400/401), clears the stored token instead.
+ * @param streamer - Streamer row to refresh/persist the token for.
+ * @param refreshToken - The current refresh token to exchange.
+ * @param twitchUserId - The streamer's Twitch user ID, persisted alongside the new token.
+ * @returns The refreshed access token, or null if the refresh failed.
+ */
+async function refreshAndSaveToken(
+  streamer: DbStreamerEventSub,
+  refreshToken: string,
+  twitchUserId: string,
+): Promise<string | null> {
   try {
-    const tokens = await refreshUserToken(streamer.eventsub_refresh_token);
+    const tokens = await refreshUserToken(refreshToken);
     const expiryMs = tokens.expires_in != null ? Date.now() + tokens.expires_in * 1000 - 60_000 : null;
-    await saveStreamerToken(streamer.id, streamer.twitch_user_id!, tokens.access_token, tokens.refresh_token, expiryMs);
+    await saveStreamerToken(streamer.id, twitchUserId, tokens.access_token, tokens.refresh_token, expiryMs);
     log.info(`Token refreshed for ${streamer.twitch_name ?? 'unknown'}`);
     return tokens.access_token;
   } catch (err) {
