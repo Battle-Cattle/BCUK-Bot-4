@@ -13,6 +13,27 @@ const router = Router();
 
 const KNOWN_ERRORS = new Set(['request_failed', 'revoke_failed']);
 
+interface RecentIssue {
+  plain: string;
+  issuedAt: number;
+}
+
+// Tracks a just-issued token per discordId for a short window, so a rapid duplicate POST
+// /companion-key/request (double-click, browser retry/refresh) reuses the plaintext already
+// rendered instead of issuing again — issuing unconditionally replaces the prior token and
+// disconnects any open companion SSE connection, so a duplicate submit would otherwise silently
+// invalidate the token the user was just shown. Same pattern as streamdeckKeys.ts's
+// ROTATE_DEDUPE_WINDOW_MS/recentRotations. Entries expire lazily by age and are actively evicted
+// via a guarded timer once expired, so a plaintext token never lingers in process memory longer
+// than the dedupe window.
+const ISSUE_DEDUPE_WINDOW_MS = 10_000;
+const recentIssues = new Map<string, RecentIssue>();
+
+/** Test-only: clears the issue dedupe cache so each test starts from a clean slate. */
+export function __resetRecentIssuesForTests(): void {
+  recentIssues.clear();
+}
+
 /** Renders the current user's companion app token status page. */
 router.get('/companion-key', csrfProtection, async (req, res) => {
   try {
@@ -37,14 +58,26 @@ router.get('/companion-key', csrfProtection, async (req, res) => {
  * its own try/catch with a locally-derived fallback rather than risking the
  * already-issued token being lost behind a `request_failed` redirect. Issuing a
  * token replaces (invalidates) any prior one for this Discord ID, so this also ends
- * any companion SSE connection still open under the token just replaced.
+ * any companion SSE connection still open under the token just replaced. A request within
+ * {@link ISSUE_DEDUPE_WINDOW_MS} of the last one for this user reuses that plaintext instead of
+ * issuing (and invalidating) again — see {@link recentIssues}.
  */
 router.post('/companion-key/request', csrfProtection, async (req, res) => {
   const discordId = getSessionUser(req).discordId;
   let plain: string;
   try {
-    plain = await issueToken(discordId);
-    disconnectCompanionConnections(discordId);
+    const recent = recentIssues.get(discordId);
+    if (recent && Date.now() - recent.issuedAt < ISSUE_DEDUPE_WINDOW_MS) {
+      plain = recent.plain;
+    } else {
+      plain = await issueToken(discordId);
+      disconnectCompanionConnections(discordId);
+      const result: RecentIssue = { plain, issuedAt: Date.now() };
+      recentIssues.set(discordId, result);
+      setTimeout(() => {
+        if (recentIssues.get(discordId) === result) recentIssues.delete(discordId);
+      }, ISSUE_DEDUPE_WINDOW_MS).unref();
+    }
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Companion key request error:', err, basePath: '/companion-key', errorCode: 'request_failed' });
     return;
@@ -78,6 +111,7 @@ router.post('/companion-key/revoke', csrfProtection, async (req, res) => {
     const discordId = getSessionUser(req).discordId;
     await revokeToken(discordId);
     disconnectCompanionConnections(discordId);
+    recentIssues.delete(discordId);
     res.redirect('/companion-key');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Companion key revoke error:', err, basePath: '/companion-key', errorCode: 'revoke_failed' });
