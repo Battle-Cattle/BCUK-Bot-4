@@ -43,11 +43,15 @@ const NON_PRIVILEGED_CHANNEL_FLOOR_MS = 1_000;
 const MAX_PRIVILEGE_RECHECKS = 5;
 
 /**
- * Every send in this module runs behind a single global queue, so one stalled `send()` (the raw
- * Twurple IRC send used by `sendRawChatMessage()` has no built-in timeout and can hang
- * indefinitely on a stalled socket) would otherwise wedge every later send, across every channel
- * and feature, forever. Bounding it here
- * guarantees the queue always frees up, even though the underlying send may still be stuck.
+ * Bounds how long a queued `send()` callback may run before {@link throttledTwitchSend} gives up
+ * on it and frees {@link globalQueue} for the next send. This guards the callback in general —
+ * for the current sole caller, `sendRawChatMessage()`'s underlying `ChatClient#irc.say()` is a
+ * synchronous, fire-and-forget IRC write with no ack/flush promise, so this specific call always
+ * settles on the same tick and the timeout never actually fires for it; a genuinely stalled
+ * socket write on that path shows up only as Twitch never receiving the message, not as a
+ * logged timeout. If a caller is ever added whose `send()` can itself hang (e.g. one that awaits
+ * a real network round-trip), this is what stops it from wedging every later send, across every
+ * channel and feature, forever.
  */
 const SEND_TIMEOUT_MS = 10_000;
 
