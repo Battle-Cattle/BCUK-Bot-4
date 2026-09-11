@@ -27,6 +27,7 @@ import {
 import { getTwitchEnabledChannels } from '../db';
 import { getUsers } from './twitchApi';
 import { setTwitchChannel } from '../shared/statusStore';
+import { recordChatMessage, getMessageCount, clearChatActivity } from './twitchChatActivity';
 
 /**
  * Builds a minimal fake Twurple chat client, pre-seeded with the given already-joined channels.
@@ -47,6 +48,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers();
   clearMembershipState();
+  clearChatActivity();
   setChatClient(null);
   setConnected(false);
   setChannelJoinedHook(() => {});
@@ -225,6 +227,32 @@ describe('partTwitchChannel', () => {
     await expect(partTwitchChannel('alice')).rejects.toThrow('part failed');
 
     expect(getActiveChannels().has('alice')).toBe(false);
+  });
+
+  it('forgets recorded chat activity when parting via the client', async () => {
+    const client = makeMockClient(['alice']);
+    setChatClient(client as any);
+    setConnected(true);
+    await joinTwitchChannel('alice');
+    recordChatMessage('alice');
+    expect(getMessageCount('alice')).toBe(1);
+
+    await partTwitchChannel('alice');
+
+    expect(getMessageCount('alice')).toBe(0);
+  });
+
+  it('forgets recorded chat activity when parting while disconnected', async () => {
+    const client = makeMockClient();
+    setChatClient(client as any);
+    setConnected(false);
+    await joinTwitchChannel('alice');
+    recordChatMessage('alice');
+    expect(getMessageCount('alice')).toBe(1);
+
+    await partTwitchChannel('alice');
+
+    expect(getMessageCount('alice')).toBe(0);
   });
 });
 

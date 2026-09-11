@@ -16,6 +16,15 @@ export function getMessageCount(channel: string): number {
   return messageCounts.get(channel) ?? 0;
 }
 
+/**
+ * Forgets a channel's recorded chat activity, so it stops occupying memory once the bot is no
+ * longer active in it. Safe to call for a channel with no state (no-op). Called from
+ * `partTwitchChannel`; a channel the bot joins again later starts fresh.
+ */
+export function forgetChannelChatActivity(channel: string): void {
+  messageCounts.delete(channel);
+}
+
 /** Clears all recorded chat activity. Test-only. */
 export function clearChatActivity(): void {
   messageCounts.clear();
