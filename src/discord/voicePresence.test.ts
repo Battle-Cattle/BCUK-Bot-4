@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('./guildRegistry', () => ({ getRegisteredGuildIds: vi.fn() }));
-vi.mock('./discordBot', () => ({ getDiscordClient: vi.fn() }));
+vi.mock('./discordClientStore', () => ({ getDiscordClient: vi.fn() }));
 
 import { getRegisteredGuildIds } from './guildRegistry';
-import { getDiscordClient } from './discordBot';
+import { getDiscordClient } from './discordClientStore';
 import { getActiveGuildForUser, resolveGuildIdForDiscordId } from './voicePresence';
 
 function makeClient(guildVoiceChannels: Record<string, Record<string, string>>) {

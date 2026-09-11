@@ -1,6 +1,6 @@
 import { Client } from 'discord.js';
 import { getRegisteredGuildIds } from './guildRegistry';
-import { getDiscordClient } from './discordBot';
+import { getDiscordClient } from './discordClientStore';
 
 /**
  * Returns the guild ID in which the given Discord user currently has a live
