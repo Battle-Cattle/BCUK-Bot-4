@@ -40,6 +40,11 @@ vi.mock('../../discord/discordUtils', () => ({
 vi.mock('../../audio/audioPlayer', () => ({
   connect: vi.fn(),
   disconnect: vi.fn(),
+  isPlaying: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock('../../shared/config', () => ({
+  GLOBAL_COOLDOWN_MS: 3_000,
 }));
 
 vi.mock('../../discord/discordBot', () => ({
