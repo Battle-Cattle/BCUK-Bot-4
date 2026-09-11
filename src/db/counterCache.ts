@@ -32,10 +32,17 @@ function createEmptyCounterLookupCache(): CounterLookupCache {
   };
 }
 
+/** Builds this cache's composite key: counters are per-guild, so the same command string in two
+ *  different guilds must never collide with each other. */
+function cacheKey(guildId: string, normalizedCommand: string): string {
+  return `${guildId}:${normalizedCommand}`;
+}
+
 /**
- * Builds a counter lookup cache keyed by normalized trigger/check command, sorted by counter id
- * so the lowest id wins on collision. Logs a warning and skips the duplicate on any collision.
- * @param counters Counters to index.
+ * Builds a counter lookup cache keyed by guild + normalized trigger/check command, sorted by
+ * counter id so the lowest id wins on collision within the same guild. Logs a warning and skips
+ * the duplicate on any collision.
+ * @param counters Counters to index, across every guild.
  * @returns The populated `CounterLookupCache`.
  */
 function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
@@ -52,9 +59,9 @@ function buildCounterLookupCache(counters: DbCounter[]): CounterLookupCache {
 
     registerFirstWinsWithWarning(
       byCommand,
-      normalizedCommand,
+      cacheKey(counter.guild_id, normalizedCommand),
       { ...counter, matchType },
-      (existingCounter) => `Counter ${commandFieldLabel} collision: '${normalizedCommand}' is already registered (counter id=${existingCounter.id}); ignoring duplicate from counter id=${counter.id}.`,
+      (existingCounter) => `Counter ${commandFieldLabel} collision: '${normalizedCommand}' in guild ${counter.guild_id} is already registered (counter id=${existingCounter.id}); ignoring duplicate from counter id=${counter.id}.`,
     );
   };
 
@@ -84,18 +91,20 @@ export function invalidateCounterLookupCache(): void {
   counterLookupCacheState.invalidate();
 }
 
-/** Looks up a counter by its trigger or check command string; returns null if not found. */
-export async function findCounterByCommand(command: string): Promise<DbMatchedCounter | null> {
+/** Looks up a counter by its trigger or check command string within one guild; returns null if
+ *  not found in that guild (even if the same command matches a counter in a different guild). */
+export async function findCounterByCommand(guildId: string, command: string): Promise<DbMatchedCounter | null> {
   const normalizedCommand = normalizeCommand(command);
   if (!normalizedCommand) return null;
 
   const cache = await counterLookupCacheState.getCache();
-  const counter = cache.byCommand.get(normalizedCommand);
+  const counter = cache.byCommand.get(cacheKey(guildId, normalizedCommand));
   return counter ? { ...counter } : null;
 }
 
-/** Returns true if any of the given commands conflict with an existing counter (optionally excluding one by ID). */
-export async function isCounterCommandTaken(commandOrCommands: string | string[], excludeCounterId?: number): Promise<boolean> {
+/** Returns true if any of the given commands conflict with an existing counter in this guild
+ *  (optionally excluding one by ID). Counters in other guilds never collide. */
+export async function isCounterCommandTaken(guildId: string, commandOrCommands: string | string[], excludeCounterId?: number): Promise<boolean> {
   if (Array.isArray(commandOrCommands)) {
     const normalizedCommands = normalizeCommandList(commandOrCommands);
     if (new Set(normalizedCommands).size !== normalizedCommands.length) {
@@ -103,5 +112,5 @@ export async function isCounterCommandTaken(commandOrCommands: string | string[]
     }
   }
 
-  return isAnyCommandTakenAcrossTables(commandOrCommands, { excludeCounterId });
+  return isAnyCommandTakenAcrossTables(commandOrCommands, { excludeCounterId, guildId });
 }
