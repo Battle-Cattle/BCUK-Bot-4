@@ -33,6 +33,7 @@ import { getUsers, getStreams } from '../twitchApi';
 import { cancelOfflineTimersForLogin, handleStreamOffline } from './twitchMonitorOffline';
 import { getDiscordClient } from '../../discord/discordBot';
 import * as twitchMonitorAnnouncements from './twitchMonitorAnnouncements';
+import { getHealthSnapshot } from '../../shared/healthStore';
 
 function makeTextChannel(msgOverrides: Record<string, unknown> = {}) {
   const message = { id: 'msg1', channelId: '111', delete: vi.fn().mockResolvedValue(undefined), edit: vi.fn().mockResolvedValue(undefined), ...msgOverrides };
@@ -246,6 +247,34 @@ describe('60s poll interval', () => {
     vi.mocked(getStreams).mockResolvedValueOnce([makeStream()] as any);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(getLiveStates('guild-1')).toHaveLength(1);
+  });
+});
+
+describe('60s poll interval with no resolved user IDs', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    // Streamers are configured, but none of their logins resolved to a Twitch user ID
+    // (e.g. every configured twitch_name is currently invalid, or getUsers failed to
+    // resolve any of them) — loginToUserId ends up empty even though streamersData isn't.
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([]);
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient() as any);
+    await startTwitchMonitor();
+  });
+
+  afterEach(async () => {
+    await stopTwitchMonitor();
+    vi.useRealTimers();
+  });
+
+  it('records a failed poll instead of silently no-oping', async () => {
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(getStreams).not.toHaveBeenCalled();
+    const snapshot = getHealthSnapshot();
+    expect(snapshot.monitor.lastPollOk).toBe(false);
+    expect(snapshot.monitor.lastError).toBe('No Twitch user IDs resolved for any configured streamer.');
   });
 });
 
