@@ -22,6 +22,39 @@ let bootingClient: Client | null = null;
 
 export { getDiscordClient };
 
+// ─── Reconnect backoff ──────────────────────────────────────────────────────
+//
+// startDiscordBot()'s login() call can itself fail (a transient Discord outage exactly
+// overlapping a shardDisconnect self-heal, a revoked token, network unreachability at that
+// instant) — without a retry loop here, that single failed attempt would leave the process
+// alive-but-permanently-disconnected from Discord for the rest of its life, since nothing else
+// ever calls startDiscordBot() again. Mirrors audioPlayer.ts's per-guild voice reconnect backoff.
+
+const RECONNECT_BASE_DELAY_MS = 5_000;
+const RECONNECT_MAX_DELAY_MS = 5 * 60_000;
+let reconnectAttempts = 0;
+let reconnectTimer: NodeJS.Timeout | null = null;
+
+/** Cancels and nulls any pending Discord reconnect timer. */
+function clearReconnectTimer(): void {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+/** Schedules an exponential-backoff retry of {@link startDiscordBot}, skipping if one is already pending. */
+function scheduleReconnect(reason: string): void {
+  if (reconnectTimer) return;
+  const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts, RECONNECT_MAX_DELAY_MS);
+  reconnectAttempts += 1;
+  log.warn(`Scheduling Discord reconnect in ${delay}ms (${reason}).`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    startDiscordBot();
+  }, delay).unref();
+}
+
 /** How often a given shard's gateway connection errors are actually logged — see {@link logShardError}. */
 const SHARD_ERROR_LOG_INTERVAL_MS = 60_000;
 
@@ -246,6 +279,8 @@ function registerClientReadyHandler(client: Client): void {
       return;
     }
     bootingClient = null;
+    clearReconnectTimer();
+    reconnectAttempts = 0;
     setDiscordClient(c);
     log.info(`Logged in as ${c.user.tag}`);
     setDiscordReady(c.user.tag);
@@ -301,7 +336,8 @@ function registerConnectionHandlers(client: Client): void {
  * once `clientReady` fires, so callers cannot observe a partially-initialised
  * client. If {@link stopDiscordBot} is called before the connection completes,
  * the in-flight client is destroyed and the `clientReady` handler is discarded.
- * If login fails, `bootingClient` is cleared so the next call can retry.
+ * If login fails, `bootingClient` is cleared and a backoff retry of this function is scheduled
+ * automatically (see {@link scheduleReconnect}) — a caller never needs to retry manually.
  *
  * The guild registry must be loaded (see {@link reloadGuildRegistry}) before the
  * client connects, so the `messageCreate` gate can recognise registered guilds.
@@ -328,7 +364,8 @@ export function startDiscordBot(): void {
 
   localClient.login(DISCORD_TOKEN).catch((err) => {
     log.error('Login failed:', err);
-    bootingClient = null; // clear so the next startDiscordBot() call can retry
+    bootingClient = null; // clear so a retry can call startDiscordBot() again
+    scheduleReconnect('login failed');
   });
 }
 
@@ -343,6 +380,7 @@ export function stopDiscordBot(): void {
   const existingBooting = bootingClient;
   setDiscordClient(null);
   bootingClient = null;
+  clearReconnectTimer();
   recordDiscordConnected(false);
   existingReady?.destroy().catch((err: unknown) => log.error('Error destroying client:', err));
   existingBooting?.destroy().catch((err: unknown) => log.error('Error destroying booting client:', err));
