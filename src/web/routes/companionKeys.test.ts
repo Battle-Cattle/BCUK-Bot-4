@@ -150,6 +150,54 @@ describe('POST /companion-key/request', () => {
       dateNowSpy.mockRestore();
     }
   });
+
+  it("evicts the dedupe entry via its own timer once the window elapses, so it doesn't linger in memory", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(issueToken).mockResolvedValueOnce('first-plain-token');
+      const app = buildApp();
+      await supertest(app).post('/companion-key/request');
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      // The eviction timer having fired is only observable indirectly: with the entry gone,
+      // a request right after (still logically "instant", but a fresh Date.now() tick under
+      // fake timers) must issue again rather than reuse the stale plaintext.
+      vi.mocked(issueToken).mockResolvedValueOnce('second-plain-token');
+      const second = await supertest(app).post('/companion-key/request');
+
+      expect((second.body as any).locals.newToken).toBe('second-plain-token');
+      expect(issueToken).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a stale eviction timer does not delete a newer entry issued for the same user in the meantime', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(issueToken).mockResolvedValueOnce('first-plain-token');
+      const app = buildApp();
+      await supertest(app).post('/companion-key/request');
+
+      // Revoke replaces the first entry's timer with nothing, then a fresh request schedules a
+      // brand-new timer for a second entry — the first entry's now-stale timer is still pending.
+      await vi.advanceTimersByTimeAsync(5_000);
+      await supertest(app).post('/companion-key/revoke');
+      vi.mocked(issueToken).mockResolvedValueOnce('second-plain-token');
+      await supertest(app).post('/companion-key/request');
+
+      // Advance to when the first (stale) timer fires. The `recentIssues.get(...) === result`
+      // guard must keep it from deleting the second entry.
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      const third = await supertest(app).post('/companion-key/request');
+      expect((third.body as any).locals.newToken).toBe('second-plain-token');
+      expect(issueToken).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ─── POST /companion-key/revoke ───────────────────────────────────────────────
