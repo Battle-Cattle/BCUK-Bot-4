@@ -231,6 +231,7 @@ describe('POST /companion-key/request', () => {
     // now-cached token instead of calling issueToken again.
     const firstCall = handler(first.req, first.res, vi.fn());
     const secondCall = handler(second.req, second.res, vi.fn());
+    await vi.waitFor(() => expect(issueToken).toHaveBeenCalledOnce());
     resolveIssue('shared-plain-token');
     await Promise.all([firstCall, secondCall]);
 
@@ -296,6 +297,7 @@ describe('POST /companion-key/revoke', () => {
     const revokeReqRes = makeDirectCallReqRes();
     const revokeCall = revokeHandler(revokeReqRes.req, revokeReqRes.res, vi.fn());
 
+    await vi.waitFor(() => expect(issueToken).toHaveBeenCalledOnce());
     resolveIssue('in-flight-token');
     await firstCall;
     await revokeCall;
