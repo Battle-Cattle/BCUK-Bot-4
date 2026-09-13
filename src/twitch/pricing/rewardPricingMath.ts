@@ -2,10 +2,14 @@
 export interface RewardPricingConfig {
   baseCost: number;
   maxMultiplier: number;
+  /** Must be strictly positive — see {@link computePrice} for why `curve <= 0` breaks the formula. */
   curve: number;
   /** Rounds the computed price to the nearest multiple of this many points (e.g. 5 or 10). Omit, 0, or a non-positive value disables rounding. */
   roundToNearest?: number;
 }
+
+/** Smallest `curve` value {@link computePrice} will actually use — see there for why. */
+const MIN_CURVE = 0.01;
 
 /**
  * Computes the current redemption price from demand and a reward's pricing config.
@@ -14,13 +18,22 @@ export interface RewardPricingConfig {
  * back into range — rounding to a coarse step can otherwise push the price below `baseCost`
  * (even to a Twitch-invalid 0) or above the max.
  *
+ * `config.curve` is floored to {@link MIN_CURVE} if it isn't strictly positive: the admin panel
+ * already rejects `curve <= 0` at write time (`parsePositiveNumberField`), but `Math.pow(x, 0)`
+ * is `1` for every `x` including `0`, so a `curve` of `0` (or negative) reaching this function —
+ * a stale row predating that validation, or a value edited directly in the DB, which is managed
+ * outside this repo — would otherwise pin the price to the maximum at *every* demand level,
+ * including zero, defeating the curve entirely instead of just crashing or being a config-space
+ * curiosity.
+ *
  * @param demand - Current demand value; clamped to [0,1] before use.
  * @param config - The reward's pricing configuration.
  * @returns The price, always bounded to [baseCost, baseCost*(1+maxMultiplier)].
  */
 export function computePrice(demand: number, config: RewardPricingConfig): number {
   const usage = Math.min(1, Math.max(0, demand));
-  const curved = Math.pow(usage, config.curve);
+  const curve = config.curve > 0 ? config.curve : MIN_CURVE;
+  const curved = Math.pow(usage, curve);
   const raw = config.baseCost * (1 + curved * config.maxMultiplier);
   if (config.roundToNearest && config.roundToNearest > 0) {
     const max = config.baseCost * (1 + config.maxMultiplier);
