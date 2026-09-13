@@ -225,10 +225,10 @@ describe('POST /companion-key/request', () => {
     const first = makeDirectCallReqRes();
     const second = makeDirectCallReqRes();
 
-    // Both calls start before issueToken resolves: the first reaches its `await issueToken(...)`
-    // synchronously (registering the in-flight promise) before this line returns, so the second
-    // call — started immediately after, still before either awaits anything else — must find
-    // and share that same in-flight promise instead of calling issueToken again.
+    // Both calls start before issueToken resolves: the first synchronously registers itself in
+    // the per-discordId mutation queue before this line returns, so the second call — started
+    // immediately after — is queued behind it and, once its turn comes, finds the first call's
+    // now-cached token instead of calling issueToken again.
     const firstCall = handler(first.req, first.res, vi.fn());
     const secondCall = handler(second.req, second.res, vi.fn());
     resolveIssue('shared-plain-token');
@@ -278,6 +278,38 @@ describe('POST /companion-key/revoke', () => {
     const res = await supertest(app).post('/companion-key/request');
 
     expect((res.body as any).locals.newToken).toBe('second-plain-token');
+    expect(issueToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('a revoke that arrives while an issuance is in flight runs after it settles, so it is not undone by that issuance', async () => {
+    let resolveIssue!: (value: string) => void;
+    vi.mocked(issueToken).mockReturnValueOnce(new Promise((resolve) => { resolveIssue = resolve; }));
+
+    const requestHandler = getRouteHandler('/companion-key/request');
+    const revokeHandler = getRouteHandler('/companion-key/revoke');
+
+    // The issuance starts first and is still in flight (its issueToken call unresolved) when the
+    // revoke arrives — both share the same per-discordId mutation queue, so the revoke queues
+    // behind the issuance rather than racing its DB write.
+    const first = makeDirectCallReqRes();
+    const firstCall = requestHandler(first.req, first.res, vi.fn());
+    const revokeReqRes = makeDirectCallReqRes();
+    const revokeCall = revokeHandler(revokeReqRes.req, revokeReqRes.res, vi.fn());
+
+    resolveIssue('in-flight-token');
+    await firstCall;
+    await revokeCall;
+
+    expect(revokeToken).toHaveBeenCalledWith(SESSION_USER.discordId);
+    expect(revokeReqRes.res.redirect).toHaveBeenCalledWith('/companion-key');
+
+    // Because the revoke ran after the issuance's cache write (not clobbered by it), the next
+    // request must issue a fresh token rather than reuse the now-revoked cached one.
+    vi.mocked(issueToken).mockResolvedValueOnce('fresh-after-revoke-token');
+    const after = makeDirectCallReqRes();
+    await requestHandler(after.req, after.res, vi.fn());
+
+    expect(after.res.render).toHaveBeenCalledWith('companion-keys', expect.objectContaining({ newToken: 'fresh-after-revoke-token' }));
     expect(issueToken).toHaveBeenCalledTimes(2);
   });
 });

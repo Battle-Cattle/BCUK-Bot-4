@@ -7,6 +7,7 @@ import { renderError, renderView } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { getSessionUser } from '../session';
 import { disconnectCompanionConnections } from './companionEvents';
+import { createMutationQueue } from '../../shared/mutationQueue';
 
 const log = createLogger('Web');
 const router = Router();
@@ -29,47 +30,41 @@ interface RecentIssue {
 const ISSUE_DEDUPE_WINDOW_MS = 10_000;
 const recentIssues = new Map<string, RecentIssue>();
 
-// Coalesces concurrent issuances for the same discordId onto a single `issueToken` call.
-// `recentIssues` is only populated once an issuance resolves, so two requests arriving before
-// either finishes would otherwise both call `issueToken` — which upserts by discord_id, so the
-// second call's write silently replaces the first's token before the first request ever got to
-// cache (or render) it, handing that caller an already-invalidated plaintext.
-const inFlightIssues = new Map<string, Promise<string>>();
+// Serializes issue/revoke per discordId. Both the dedupe check and the issue/revoke itself run
+// inside a queued operation, so: (1) two concurrent issue requests can't both miss the cache and
+// each call `issueToken` — the second runs only after the first has cached its result, and then
+// reuses it; (2) a revoke racing an in-flight issuance always runs after that issuance settles,
+// so it can't be undone by the issuance's own (now-stale) cache write completing afterward.
+const tokenMutationQueue = createMutationQueue<string>();
 
 /** Test-only: clears the issue dedupe cache so each test starts from a clean slate. */
 export function __resetRecentIssuesForTests(): void {
   recentIssues.clear();
-  inFlightIssues.clear();
 }
 
 /**
- * Issues a fresh companion token for `discordId`, disconnects any SSE connections open under
- * the token it replaces, and caches the result in {@link recentIssues} for
- * {@link ISSUE_DEDUPE_WINDOW_MS}. Concurrent callers for the same `discordId` share one
- * in-flight call instead of each issuing (and invalidating) their own — see {@link inFlightIssues}.
- * @param discordId - Discord ID to issue a token for.
- * @returns The newly issued plaintext token.
+ * Returns a usable companion token for `discordId`: the cached plaintext if one was issued
+ * within {@link ISSUE_DEDUPE_WINDOW_MS}, otherwise a freshly issued one. Runs inside
+ * {@link tokenMutationQueue} so this check-then-issue is atomic with respect to concurrent
+ * issuances and revokes for the same `discordId` — see {@link tokenMutationQueue}.
+ * @param discordId - Discord ID to get or issue a token for.
+ * @returns The (cached or newly issued) plaintext token.
  */
-function issueAndCacheToken(discordId: string): Promise<string> {
-  const inFlight = inFlightIssues.get(discordId);
-  if (inFlight) return inFlight;
-
-  const issuance = (async (): Promise<string> => {
-    try {
-      const plain = await issueToken(discordId);
-      disconnectCompanionConnections(discordId);
-      const result: RecentIssue = { plain, issuedAt: Date.now() };
-      recentIssues.set(discordId, result);
-      setTimeout(() => {
-        if (recentIssues.get(discordId) === result) recentIssues.delete(discordId);
-      }, ISSUE_DEDUPE_WINDOW_MS).unref();
-      return plain;
-    } finally {
-      inFlightIssues.delete(discordId);
+function getOrIssueToken(discordId: string): Promise<string> {
+  return tokenMutationQueue.run(discordId, async () => {
+    const recent = recentIssues.get(discordId);
+    if (recent && Date.now() - recent.issuedAt < ISSUE_DEDUPE_WINDOW_MS) {
+      return recent.plain;
     }
-  })();
-  inFlightIssues.set(discordId, issuance);
-  return issuance;
+    const plain = await issueToken(discordId);
+    disconnectCompanionConnections(discordId);
+    const result: RecentIssue = { plain, issuedAt: Date.now() };
+    recentIssues.set(discordId, result);
+    setTimeout(() => {
+      if (recentIssues.get(discordId) === result) recentIssues.delete(discordId);
+    }, ISSUE_DEDUPE_WINDOW_MS).unref();
+    return plain;
+  });
 }
 
 /** Renders the current user's companion app token status page. */
@@ -98,16 +93,13 @@ router.get('/companion-key', csrfProtection, async (req, res) => {
  * token replaces (invalidates) any prior one for this Discord ID, so this also ends
  * any companion SSE connection still open under the token just replaced. A request within
  * {@link ISSUE_DEDUPE_WINDOW_MS} of the last one for this user reuses that plaintext instead of
- * issuing (and invalidating) again — see {@link recentIssues}.
+ * issuing (and invalidating) again — see {@link getOrIssueToken}.
  */
 router.post('/companion-key/request', csrfProtection, async (req, res) => {
   const discordId = getSessionUser(req).discordId;
   let plain: string;
   try {
-    const recent = recentIssues.get(discordId);
-    plain = recent && Date.now() - recent.issuedAt < ISSUE_DEDUPE_WINDOW_MS
-      ? recent.plain
-      : await issueAndCacheToken(discordId);
+    plain = await getOrIssueToken(discordId);
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Companion key request error:', err, basePath: '/companion-key', errorCode: 'request_failed' });
     return;
@@ -134,14 +126,18 @@ router.post('/companion-key/request', csrfProtection, async (req, res) => {
  * Revokes the current user's companion app token, and immediately ends any of their companion
  * app's open SSE connections (see `disconnectCompanionConnections`) — otherwise a connection
  * opened before the revoke would keep receiving events until it happened to disconnect on its
- * own, since `requireCompanionKey` only checks the token once, at connect time.
+ * own, since `requireCompanionKey` only checks the token once, at connect time. Runs inside
+ * {@link tokenMutationQueue} so a revoke racing an in-flight issuance for this Discord ID always
+ * runs after that issuance settles, rather than risk being undone by it.
  */
 router.post('/companion-key/revoke', csrfProtection, async (req, res) => {
   try {
     const discordId = getSessionUser(req).discordId;
-    await revokeToken(discordId);
-    disconnectCompanionConnections(discordId);
-    recentIssues.delete(discordId);
+    await tokenMutationQueue.run(discordId, async () => {
+      await revokeToken(discordId);
+      disconnectCompanionConnections(discordId);
+      recentIssues.delete(discordId);
+    });
     res.redirect('/companion-key');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Companion key revoke error:', err, basePath: '/companion-key', errorCode: 'revoke_failed' });
