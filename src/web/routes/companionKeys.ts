@@ -29,9 +29,47 @@ interface RecentIssue {
 const ISSUE_DEDUPE_WINDOW_MS = 10_000;
 const recentIssues = new Map<string, RecentIssue>();
 
+// Coalesces concurrent issuances for the same discordId onto a single `issueToken` call.
+// `recentIssues` is only populated once an issuance resolves, so two requests arriving before
+// either finishes would otherwise both call `issueToken` — which upserts by discord_id, so the
+// second call's write silently replaces the first's token before the first request ever got to
+// cache (or render) it, handing that caller an already-invalidated plaintext.
+const inFlightIssues = new Map<string, Promise<string>>();
+
 /** Test-only: clears the issue dedupe cache so each test starts from a clean slate. */
 export function __resetRecentIssuesForTests(): void {
   recentIssues.clear();
+  inFlightIssues.clear();
+}
+
+/**
+ * Issues a fresh companion token for `discordId`, disconnects any SSE connections open under
+ * the token it replaces, and caches the result in {@link recentIssues} for
+ * {@link ISSUE_DEDUPE_WINDOW_MS}. Concurrent callers for the same `discordId` share one
+ * in-flight call instead of each issuing (and invalidating) their own — see {@link inFlightIssues}.
+ * @param discordId - Discord ID to issue a token for.
+ * @returns The newly issued plaintext token.
+ */
+function issueAndCacheToken(discordId: string): Promise<string> {
+  const inFlight = inFlightIssues.get(discordId);
+  if (inFlight) return inFlight;
+
+  const issuance = (async (): Promise<string> => {
+    try {
+      const plain = await issueToken(discordId);
+      disconnectCompanionConnections(discordId);
+      const result: RecentIssue = { plain, issuedAt: Date.now() };
+      recentIssues.set(discordId, result);
+      setTimeout(() => {
+        if (recentIssues.get(discordId) === result) recentIssues.delete(discordId);
+      }, ISSUE_DEDUPE_WINDOW_MS).unref();
+      return plain;
+    } finally {
+      inFlightIssues.delete(discordId);
+    }
+  })();
+  inFlightIssues.set(discordId, issuance);
+  return issuance;
 }
 
 /** Renders the current user's companion app token status page. */
@@ -67,17 +105,9 @@ router.post('/companion-key/request', csrfProtection, async (req, res) => {
   let plain: string;
   try {
     const recent = recentIssues.get(discordId);
-    if (recent && Date.now() - recent.issuedAt < ISSUE_DEDUPE_WINDOW_MS) {
-      plain = recent.plain;
-    } else {
-      plain = await issueToken(discordId);
-      disconnectCompanionConnections(discordId);
-      const result: RecentIssue = { plain, issuedAt: Date.now() };
-      recentIssues.set(discordId, result);
-      setTimeout(() => {
-        if (recentIssues.get(discordId) === result) recentIssues.delete(discordId);
-      }, ISSUE_DEDUPE_WINDOW_MS).unref();
-    }
+    plain = recent && Date.now() - recent.issuedAt < ISSUE_DEDUPE_WINDOW_MS
+      ? recent.plain
+      : await issueAndCacheToken(discordId);
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Companion key request error:', err, basePath: '/companion-key', errorCode: 'request_failed' });
     return;

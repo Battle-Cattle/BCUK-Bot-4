@@ -41,6 +41,23 @@ function buildApp(sessionUser = SESSION_USER) {
   return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser, mockRender: 'nested' });
 }
 
+/**
+ * Finds a route's handler function directly from the router's internal stack, bypassing HTTP
+ * entirely — needed to invoke the handler twice back-to-back with no real I/O in between, so a
+ * second call deterministically lands while the first is still awaiting an unresolved promise.
+ */
+function getRouteHandler(routePath: string): (req: any, res: any, next: any) => Promise<void> | void {
+  const layer = (router as any).stack.find((l: any) => l.route?.path === routePath);
+  return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+
+/** Builds a minimal req/res pair for calling a companionKeys handler directly (see `getRouteHandler`). */
+function makeDirectCallReqRes() {
+  const req = { session: { user: SESSION_USER }, csrfToken: () => 'test-token' } as any;
+  const res: any = { render: vi.fn(), redirect: vi.fn() };
+  return { req, res };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   __resetRecentIssuesForTests();
@@ -197,6 +214,30 @@ describe('POST /companion-key/request', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('coalesces two concurrent requests onto a single issueToken call, so both get the same token', async () => {
+    let resolveIssue!: (value: string) => void;
+    vi.mocked(issueToken).mockReturnValueOnce(new Promise((resolve) => { resolveIssue = resolve; }));
+    vi.mocked(getTokenStatus).mockResolvedValue({ hasToken: true, createdAt: new Date() } as any);
+
+    const handler = getRouteHandler('/companion-key/request');
+    const first = makeDirectCallReqRes();
+    const second = makeDirectCallReqRes();
+
+    // Both calls start before issueToken resolves: the first reaches its `await issueToken(...)`
+    // synchronously (registering the in-flight promise) before this line returns, so the second
+    // call — started immediately after, still before either awaits anything else — must find
+    // and share that same in-flight promise instead of calling issueToken again.
+    const firstCall = handler(first.req, first.res, vi.fn());
+    const secondCall = handler(second.req, second.res, vi.fn());
+    resolveIssue('shared-plain-token');
+    await Promise.all([firstCall, secondCall]);
+
+    expect(first.res.render).toHaveBeenCalledWith('companion-keys', expect.objectContaining({ newToken: 'shared-plain-token' }));
+    expect(second.res.render).toHaveBeenCalledWith('companion-keys', expect.objectContaining({ newToken: 'shared-plain-token' }));
+    expect(issueToken).toHaveBeenCalledOnce();
+    expect(disconnectCompanionConnections).toHaveBeenCalledOnce();
   });
 });
 
