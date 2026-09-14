@@ -63,25 +63,28 @@ interface CounterResult {
 }
 
 /**
- * Looks up a counter by `command`, increments it if it's a trigger-type counter,
- * and formats the resulting response message. Shared by the Discord and Twitch
+ * Looks up a counter by `command` within `guildId`, increments it if it's a trigger-type
+ * counter, and formats the resulting response message. Shared by the Discord and Twitch
  * counter handlers so the lookup/increment/format logic isn't duplicated.
  *
  * A match is throttled via `cooldownKey` (`GLOBAL_COOLDOWN_MS` per guild/channel) — a match
  * found while that key's cooldown is active is treated the same as no match, before any
  * increment or reply happens.
  *
+ * @param guildId - The guild whose counters to search; counters are per-guild, so the same
+ *   command string in a different guild never matches here.
  * @param command - The full command string (e.g. `!clap`) used to find the counter.
  * @param errorPrefix - Log-line prefix identifying the calling platform (e.g. `[Discord]`).
  * @param cooldownKey - Cooldown-gate key for the invoking guild/channel.
- * @returns The response text, display label, and whether it's safe to send it; null if no counter matches `command`, or if the match is on cooldown.
+ * @returns The response text, display label, and whether it's safe to send it; null if no counter matches `command` in this guild, or if the match is on cooldown.
  */
 async function buildCounterResponse(
+  guildId: string,
   command: string,
   errorPrefix: string,
   cooldownKey: string,
 ): Promise<CounterResult | null> {
-  const counter = await findCounterByCommand(command);
+  const counter = await findCounterByCommand(guildId, command);
   if (!counter) return null;
 
   // No log here: a spammed matching command would otherwise emit one log line per rejected
@@ -123,8 +126,13 @@ async function buildCounterResponse(
  * command, builds the counter response, and replies in-channel if the counter
  * was safely resolved. Throttled per guild by `GLOBAL_COOLDOWN_MS`.
  *
+ * Guild context is resolved in priority order: the explicit `guildId` argument, then
+ * `message.guildId`. Returns without action when no guild context is available — counters
+ * are per-guild, so there's no meaningful catalog to search without one.
+ *
  * @param message - The Discord message to check for a counter command.
  * @param username - Display name of the sender (unused; kept for call-site symmetry with the Twitch handler).
+ * @param guildId - Explicit guild ID to search; falls back to message.guildId.
  * @param precomputedCommand - Already-parsed command token from the caller's single
  *   `extractCommand` call for this message, or omit to parse `message.content` here.
  * @returns Resolves once the reply (or a no-op) has completed.
@@ -132,12 +140,16 @@ async function buildCounterResponse(
 export async function executeCounterCommandForDiscord(
   message: Message,
   username?: string | null,
+  guildId?: string,
   precomputedCommand?: string | null,
 ): Promise<void> {
   const command = resolveCommand(message.content, precomputedCommand);
   if (!command) return;
 
-  const result = await buildCounterResponse(command, '[Discord]', discordCooldownKey(message));
+  const resolvedGuildId = guildId ?? message.guildId;
+  if (!resolvedGuildId) return;
+
+  const result = await buildCounterResponse(resolvedGuildId, command, '[Discord]', discordCooldownKey(message));
   if (!result) return;
 
   if (!result.canReply) return;
@@ -161,6 +173,9 @@ export async function executeCounterCommandForDiscord(
  * @param channel - Twitch channel the message was sent in (also the send target).
  * @param rawMessage - Raw chat message text.
  * @param username - Twitch login of the sender (unused; kept for call-site symmetry with the Discord handler).
+ * @param guildId - Guild whose counters to search — resolved by the caller from the linked
+ *   streamer's active voice guild (same resolution `commandRouter.ts`'s SFX triggers use). No-ops
+ *   without one, since counters are per-guild and there's nothing to search otherwise.
  * @param precomputedCommand - Already-parsed command token from the caller's single
  *   `extractCommand` call for this message, or omit to parse `rawMessage` here.
  * @returns Resolves once the send (or a no-op) has completed.
@@ -169,12 +184,14 @@ export async function executeCounterCommandForTwitch(
   channel: string,
   rawMessage: string,
   username?: string | null,
+  guildId?: string | null,
   precomputedCommand?: string | null,
 ): Promise<void> {
   const command = resolveCommand(rawMessage, precomputedCommand);
   if (!command) return;
+  if (!guildId) return;
 
-  const result = await buildCounterResponse(command, `[Twitch:${channel}]`, `twitch:${channel}`);
+  const result = await buildCounterResponse(guildId, command, `[Twitch:${channel}]`, `twitch:${channel}`);
   if (!result) return;
 
   if (!result.canReply) return;

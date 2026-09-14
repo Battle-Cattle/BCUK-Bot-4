@@ -66,6 +66,7 @@ const mockConnection = makeMockConnection();
 import { getPool } from './pool';
 import {
   getAllCounters,
+  getCountersForGuild,
   getCounterCount,
   getCounterHistory,
   addCounter,
@@ -79,7 +80,6 @@ import {
 } from './counters';
 import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
-import { getRowCount } from './utils';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 /** Builds a fake pool via the shared helper, matching this file's historical `(rows, meta)` call shape. */
@@ -116,10 +116,18 @@ describe('CounterNotFoundError', () => {
 // ─── getCounterCount ────────────────────────────────────────────────────────
 
 describe('getCounterCount', () => {
-  it('delegates to getRowCount for the counter table', async () => {
-    vi.mocked(getRowCount).mockResolvedValue(4);
-    expect(await getCounterCount()).toBe(4);
-    expect(getRowCount).toHaveBeenCalledWith('counter');
+  it('returns the counter row count scoped to the given guild', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ count: '4' }]) as any);
+    expect(await getCounterCount('guild-1')).toBe(4);
+  });
+
+  it('scopes the query to the given guild id', async () => {
+    const pool = makePool([{ count: '0' }]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getCounterCount('guild-1');
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('WHERE guild_id = ?');
+    expect(params).toEqual(['guild-1']);
   });
 });
 
@@ -145,12 +153,43 @@ describe('getAllCounters', () => {
   });
 });
 
+// ─── getCountersForGuild ────────────────────────────────────────────────────
+
+describe('getCountersForGuild', () => {
+  it('scopes the query to the given guild id', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getCountersForGuild('guild-1');
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('WHERE guild_id = ?');
+    expect(params).toEqual(['guild-1']);
+  });
+
+  it('maps guild_id onto each returned counter', async () => {
+    const rows = [
+      { id: 1, guild_id: '900000000000000001', trigger_command: '!hits', check_command: '!checkhits', message: 'msg', increment_message: 'inc', reset_yearly: 1, current_value: 5 },
+    ];
+    vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
+    const result = await getCountersForGuild('900000000000000001');
+    expect(result[0].guild_id).toBe('900000000000000001');
+  });
+});
+
 // ─── getCounterHistory ─────────────────────────────────────────────────────────
 
 describe('getCounterHistory', () => {
   it('returns null when the counter does not exist', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([]) as any);
-    expect(await getCounterHistory(99)).toBeNull();
+    expect(await getCounterHistory('guild-1', 99)).toBeNull();
+  });
+
+  it('scopes the lookup to the given guild id', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getCounterHistory('guild-1', 1);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('WHERE id = ? AND guild_id = ?');
+    expect(params).toEqual([1, 'guild-1']);
   });
 
   it('returns the counter and archived years newest-first, filtering out nulls', async () => {
@@ -172,7 +211,7 @@ describe('getCounterHistory', () => {
       {},
     ]);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await getCounterHistory(1);
+    const result = await getCounterHistory('guild-1', 1);
     expect(result).not.toBeNull();
     expect(result!.counter.id).toBe(1);
     expect(result!.counter.reset_yearly).toBe(true);
@@ -193,7 +232,7 @@ describe('getCounterHistory', () => {
       current_value: 0,
     };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
-    const result = await getCounterHistory(2);
+    const result = await getCounterHistory('guild-1', 2);
     expect(result).not.toBeNull();
     expect(result!.history).toEqual([]);
   });
@@ -217,7 +256,7 @@ describe('getCounterHistory', () => {
     pool.query.mockResolvedValue([[{ COLUMN_NAME: 'value2025' }], {}]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    const result = await getCounterHistory(3);
+    const result = await getCounterHistory('guild-1', 3);
 
     expect(result!.history).toEqual([{ year: 2025, value: 7 }]);
     const [sql] = pool.execute.mock.calls[0];
@@ -230,7 +269,7 @@ describe('getCounterHistory', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    await getCounterHistory(1);
+    await getCounterHistory('guild-1', 1);
 
     const [sql] = pool.query.mock.calls[0];
     expect(sql).toContain('information_schema.COLUMNS');
@@ -242,9 +281,9 @@ describe('getCounterHistory', () => {
     pool.query.mockResolvedValue([[{ COLUMN_NAME: 'value2025' }], {}]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    await getCounterHistory(1);
-    await getCounterHistory(2);
-    await getCounterHistory(3);
+    await getCounterHistory('guild-1', 1);
+    await getCounterHistory('guild-1', 2);
+    await getCounterHistory('guild-1', 3);
 
     expect(pool.query).toHaveBeenCalledTimes(1);
   });
@@ -273,7 +312,7 @@ describe('getCounterHistory', () => {
     ]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    const result = await getCounterHistory(4);
+    const result = await getCounterHistory('guild-1', 4);
 
     expect(result!.history).toEqual([{ year: lastYear, value: 42 }]);
     const [sql] = pool.execute.mock.calls[0];
@@ -285,33 +324,46 @@ describe('getCounterHistory', () => {
 // ─── addCounter ──────────────────────────────────────────────────────────────
 
 describe('addCounter', () => {
+  function newCounter(overrides: Partial<{ triggerCommand: string; checkCommand: string; message: string; incrementMessage: string; resetYearly: boolean }> = {}) {
+    return { triggerCommand: '!hits', checkCommand: '!checkhits', message: 'msg', incrementMessage: 'inc', resetYearly: false, ...overrides };
+  }
+
   it('throws when trigger and check command are the same', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await expect(addCounter('!hits', '!hits', 'msg', 'inc', false)).rejects.toThrow('must be different');
+    await expect(addCounter('guild-1', newCounter({ checkCommand: '!hits' }))).rejects.toThrow('must be different');
   });
 
   it('calls assertNotReservedCommand for both commands', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
     mockConnection.execute.mockResolvedValue([{}, []]);
-    await addCounter('!hits', '!checkhits', 'msg', 'inc', false);
+    await addCounter('guild-1', newCounter());
     expect(assertNotReservedCommand).toHaveBeenCalledWith('!hits');
     expect(assertNotReservedCommand).toHaveBeenCalledWith('!checkhits');
   });
 
-  it('calls runSerializedCommandWrite with both commands', async () => {
+  it('calls runSerializedCommandWrite with both commands, scoped to the given guild', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
     mockConnection.execute.mockResolvedValue([{}, []]);
-    await addCounter('!hits', '!checkhits', 'msg', 'inc', true);
+    await addCounter('guild-1', newCounter({ resetYearly: true }));
     expect(runSerializedCommandWrite).toHaveBeenCalledWith(
       ['!hits', '!checkhits'],
-      undefined,
+      { guildId: 'guild-1' },
       expect.any(Function),
     );
   });
 
+  it('inserts the counter with the given guild id', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool() as any);
+    mockConnection.execute.mockResolvedValue([{}, []]);
+    await addCounter('guild-1', newCounter({ resetYearly: true }));
+    const [sql, params] = mockConnection.execute.mock.calls[0];
+    expect(sql).toContain('INSERT INTO counter (guild_id,');
+    expect(params).toEqual(['guild-1', '!hits', '!checkhits', 'msg', 'inc', 1]);
+  });
+
   it('throws when trigger and check differ only by case (normalized to same value)', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await expect(addCounter('!HITS', '!hits', 'msg', 'inc', false)).rejects.toThrow('must be different');
+    await expect(addCounter('guild-1', newCounter({ triggerCommand: '!HITS', checkCommand: '!hits' }))).rejects.toThrow('must be different');
   });
 });
 
@@ -320,24 +372,45 @@ describe('addCounter', () => {
 describe('updateCounter', () => {
   it('throws when trigger and check are the same', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!old', check_command: '!oldcheck' }]) as any);
-    await expect(updateCounter({ id: 1, triggerCommand: '!hits', checkCommand: '!hits', message: 'm', incrementMessage: 'i', resetYearly: false }))
+    await expect(updateCounter('guild-1', { id: 1, triggerCommand: '!hits', checkCommand: '!hits', message: 'm', incrementMessage: 'i', resetYearly: false }))
       .rejects.toThrow('must be different');
   });
 
   it('throws CounterNotFoundError when getCounterCommandsById returns null', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([]) as any);
-    await expect(updateCounter({ id: 99, triggerCommand: '!hits', checkCommand: '!check', message: 'm', incrementMessage: 'i', resetYearly: false }))
+    await expect(updateCounter('guild-1', { id: 99, triggerCommand: '!hits', checkCommand: '!check', message: 'm', incrementMessage: 'i', resetYearly: false }))
       .rejects.toBeInstanceOf(CounterNotFoundError);
   });
 
   it('calls assertNotReservedCommand for both commands', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!old', check_command: '!oldcheck' }]) as any);
     mockConnection.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
-    await updateCounter({ id: 1, triggerCommand: '!new', checkCommand: '!newcheck', message: 'm', incrementMessage: 'i', resetYearly: false });
+    await updateCounter('guild-1', { id: 1, triggerCommand: '!new', checkCommand: '!newcheck', message: 'm', incrementMessage: 'i', resetYearly: false });
     expect(assertNotReservedCommand).toHaveBeenCalledWith('!new');
     expect(assertNotReservedCommand).toHaveBeenCalledWith('!newcheck');
   });
 
+  it('treats a counter id belonging to a different guild as not found (never reads its commands)', async () => {
+    // The lookup query itself is scoped by guild_id, so a counter belonging to another guild
+    // returns no rows here — the same as a genuinely nonexistent id — rather than leaking its
+    // current trigger/check commands to a caller in the wrong guild.
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(updateCounter('guild-1', { id: 1, triggerCommand: '!new', checkCommand: '!newcheck', message: 'm', incrementMessage: 'i', resetYearly: false }))
+      .rejects.toBeInstanceOf(CounterNotFoundError);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('AND guild_id = ?');
+    expect(params).toEqual([1, 'guild-1']);
+  });
+
+  it('scopes the UPDATE statement to the given guild id', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!old', check_command: '!oldcheck' }]) as any);
+    mockConnection.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
+    await updateCounter('guild-1', { id: 1, triggerCommand: '!new', checkCommand: '!newcheck', message: 'm', incrementMessage: 'i', resetYearly: false });
+    const [sql, params] = mockConnection.execute.mock.calls[0];
+    expect(sql).toContain('WHERE id = ? AND guild_id = ?');
+    expect(params).toEqual(['!new', '!newcheck', 'm', 'i', 0, 1, 'guild-1']);
+  });
 });
 
 // ─── removeCounter ────────────────────────────────────────────────────────────
@@ -345,20 +418,36 @@ describe('updateCounter', () => {
 describe('removeCounter', () => {
   it('throws CounterNotFoundError when counter does not exist', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([]) as any);
-    await expect(removeCounter(99)).rejects.toBeInstanceOf(CounterNotFoundError);
+    await expect(removeCounter('guild-1', 99)).rejects.toBeInstanceOf(CounterNotFoundError);
   });
 
   it('calls runSerializedCommandWrite with existing commands', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!hits', check_command: '!checkhits' }]) as any);
     mockConnection.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
-    await removeCounter(1);
+    await removeCounter('guild-1', 1);
     expect(runSerializedCommandWrite).toHaveBeenCalledWith(
       ['!hits', '!checkhits'],
-      { excludeCounterId: 1 },
+      { excludeCounterId: 1, guildId: 'guild-1' },
       expect.any(Function),
     );
   });
 
+  it('treats a counter id belonging to a different guild as not found', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(removeCounter('guild-1', 1)).rejects.toBeInstanceOf(CounterNotFoundError);
+    const [, params] = pool.execute.mock.calls[0];
+    expect(params).toEqual([1, 'guild-1']);
+  });
+
+  it('scopes the DELETE statement to the given guild id', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!hits', check_command: '!checkhits' }]) as any);
+    mockConnection.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
+    await removeCounter('guild-1', 1);
+    const [sql, params] = mockConnection.execute.mock.calls[0];
+    expect(sql).toContain('WHERE id = ? AND guild_id = ?');
+    expect(params).toEqual([1, 'guild-1']);
+  });
 });
 
 // ─── resetCounterCurrentValue ─────────────────────────────────────────────────
@@ -370,14 +459,24 @@ describe('resetCounterCurrentValue', () => {
       .mockResolvedValueOnce([{ affectedRows: 0 }, []])  // UPDATE: ResultSetHeader (affectedRows=0)
       .mockResolvedValueOnce([[], []]);                    // EXISTS check: no rows
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await expect(resetCounterCurrentValue(99)).rejects.toBeInstanceOf(CounterNotFoundError);
+    await expect(resetCounterCurrentValue('guild-1', 99)).rejects.toBeInstanceOf(CounterNotFoundError);
   });
 
   it('does not throw when affectedRows > 0', async () => {
     const pool = makePool();
     pool.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await expect(resetCounterCurrentValue(1)).resolves.not.toThrow();
+    await expect(resetCounterCurrentValue('guild-1', 1)).resolves.not.toThrow();
+  });
+
+  it('scopes the UPDATE statement to the given guild id', async () => {
+    const pool = makePool();
+    pool.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await resetCounterCurrentValue('guild-1', 1);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('WHERE id = ? AND guild_id = ?');
+    expect(params).toEqual([1, 'guild-1']);
   });
 });
 

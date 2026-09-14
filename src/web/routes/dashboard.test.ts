@@ -75,8 +75,14 @@ describe('GET /', () => {
   });
 
   it('includes usage-stat counts from the db layer', async () => {
-    const res = await supertest(buildApp()).get('/');
+    const res = await supertest(buildApp({ discordId: '100', currentGuildId: 'guild-A' })).get('/');
     expect(res.body.usageStats).toEqual({ sfxCount: 3, commandCount: 5, counterCount: 2 });
+  });
+
+  it('reports counterCount as 0 without querying the DB when no guild is selected (e.g. not logged in)', async () => {
+    const res = await supertest(buildApp()).get('/');
+    expect(res.body.usageStats).toEqual({ sfxCount: 3, commandCount: 5, counterCount: 0 });
+    expect(getCounterCount).not.toHaveBeenCalled();
   });
 
   it('scopes status to the session\'s current guild', async () => {
@@ -140,7 +146,7 @@ describe('GET /', () => {
     vi.mocked(getGuildScopedStatus).mockReturnValue(new Promise((resolve) => { resolveStatus = resolve; }) as any);
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
 
-    const responsePromise = supertest(buildApp({ discordId: '100' })).get('/');
+    const responsePromise = supertest(buildApp({ discordId: '100', currentGuildId: 'guild-A' })).get('/');
     // supertest's Test is a lazy thenable — the request isn't actually dispatched until it's
     // awaited/`.then()`ed, so attach a no-op handler now to kick it off without consuming the
     // promise this test still awaits below.
@@ -154,7 +160,7 @@ describe('GET /', () => {
     await vi.waitFor(() => expect(getStreamerByDiscordId).toHaveBeenCalled());
     expect(getSfxTriggerCount).toHaveBeenCalled();
     expect(getCustomCommandCount).toHaveBeenCalled();
-    expect(getCounterCount).toHaveBeenCalled();
+    expect(getCounterCount).toHaveBeenCalledWith('guild-A');
 
     resolveStatus(STATUS);
     const res = await responsePromise;

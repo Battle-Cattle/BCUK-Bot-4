@@ -411,7 +411,7 @@ Expected constraints and behavior:
 
 - `trigger_command` and `check_command` should be unique **per guild** (the same counter command may exist in different guilds).
 - Both command columns should store single-token commands including any prefix.
-- Current panel support includes CRUD and manual reset of `current_value`; runtime command handling/scheduler wiring can be implemented independently.
+- The admin panel (CRUD and manual reset of `current_value`) and runtime chat-command matching/increment are both guild-scoped by `guild_id`.
 
 Per-guild uniqueness (applied by `migrations/multi_guild.sql`, which also drops any earlier global `uq_counter_*` constraints):
 

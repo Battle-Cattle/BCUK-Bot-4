@@ -22,9 +22,13 @@ const router = Router();
  */
 router.get('/', csrfProtection, async (req, res) => {
   await renderOrError({ res, log, logLabel: 'Dashboard error:', sessionUser: req.session.user, errorMessage: 'Failed to load dashboard data.' }, async () => {
+    const currentGuildId = req.session.user?.currentGuildId ?? null;
     const [status, sfxCount, commandCount, counterCount, streamer] = await Promise.all([
-      getGuildScopedStatus(req.session.user?.currentGuildId ?? null),
-      getSfxTriggerCount(), getCustomCommandCount(), getCounterCount(),
+      getGuildScopedStatus(currentGuildId),
+      getSfxTriggerCount(), getCustomCommandCount(),
+      // Counters are per-guild (unlike SFX/custom commands, which are global) — 0 when no
+      // guild is selected (e.g. not logged in) rather than querying with a null guild id.
+      currentGuildId ? getCounterCount(currentGuildId) : Promise.resolve(0),
       req.session.user ? getStreamerByDiscordId(req.session.user.discordId) : Promise.resolve(null),
     ]);
 

@@ -182,7 +182,12 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
     const command = extractCommand(message);
 
     fireAndForget(executeCustomCommandForTwitch(normalizedChannel, message, displayName, command), 'Custom command error', log);
-    fireAndForget(executeCounterCommandForTwitch(normalizedChannel, message, displayName, command), 'Counter command error', log);
+    fireAndForget(
+      resolveGuildIdForTwitchCommand(normalizedChannel).then((guildId) =>
+        executeCounterCommandForTwitch(normalizedChannel, message, displayName, guildId, command)),
+      'Counter command error',
+      log,
+    );
     fireAndForget(executeMultiCommandForTwitch(normalizedChannel, message, displayName, command), 'Multi command error', log);
     fireAndForget(executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod, command), 'Shoutout error', log);
     fireAndForget(

@@ -6,7 +6,7 @@ vi.mock('../../db', () => {
   class CounterNotFoundError extends Error {}
   class ReservedCommandError extends Error {}
   return {
-    getAllCounters: vi.fn().mockResolvedValue([]),
+    getCountersForGuild: vi.fn().mockResolvedValue([]),
     addCounter: vi.fn().mockResolvedValue(undefined),
     updateCounter: vi.fn().mockResolvedValue(undefined),
     removeCounter: vi.fn().mockResolvedValue(undefined),
@@ -19,6 +19,11 @@ vi.mock('../../db', () => {
     AccessLevel: ACCESS_LEVEL_MOCK,
   };
 });
+
+const GUILD_ID = '900000000000000001';
+vi.mock('../session', () => ({
+  getCurrentGuildId: vi.fn(() => GUILD_ID),
+}));
 
 vi.mock('../csrf', () => ({
   csrfProtection: (req: any, res: any, next: any) => {
@@ -42,7 +47,7 @@ vi.mock('../../logger', () => ({
 import supertest from 'supertest';
 import router from './counters';
 import {
-  getAllCounters,
+  getCountersForGuild,
   addCounter,
   updateCounter,
   removeCounter,
@@ -84,7 +89,7 @@ const VALID_UPDATE = {
 beforeEach(() => {
   vi.clearAllMocks();
   middlewareCallOrder.length = 0;
-  vi.mocked(getAllCounters).mockResolvedValue([]);
+  vi.mocked(getCountersForGuild).mockResolvedValue([]);
   vi.mocked(addCounter).mockResolvedValue(undefined);
   vi.mocked(updateCounter).mockResolvedValue(undefined);
   vi.mocked(removeCounter).mockResolvedValue(undefined);
@@ -96,18 +101,19 @@ beforeEach(() => {
 // --- GET /counters ---
 
 describe('GET /counters', () => {
-  it('renders the counters view with the loaded counters', async () => {
+  it('renders the counters view with the current guild\'s counters', async () => {
     const counters = [{ id: 1, trigger_command: '!hits', check_command: '!count' }];
-    vi.mocked(getAllCounters).mockResolvedValue(counters as any);
+    vi.mocked(getCountersForGuild).mockResolvedValue(counters as any);
 
     const res = await supertest(buildApp()).get('/counters');
 
     expect(res.status).toBe(200);
     expect(res.text).toBe('rendered:counters');
+    expect(getCountersForGuild).toHaveBeenCalledWith(GUILD_ID);
   });
 
   it('renders a 500 error page when loading counters fails', async () => {
-    vi.mocked(getAllCounters).mockRejectedValue(new Error('db down'));
+    vi.mocked(getCountersForGuild).mockRejectedValue(new Error('db down'));
 
     const res = await supertest(buildApp()).get('/counters');
 
@@ -219,6 +225,14 @@ describe('POST /counters/add', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/counters');
   });
+
+  it('scopes the duplicate-command check and the insert to the current guild', async () => {
+    await supertest(buildApp()).post('/counters/add').type('form').send(VALID_ADD);
+    expect(isCounterCommandTaken).toHaveBeenCalledWith(GUILD_ID, ['!hits', '!count']);
+    expect(addCounter).toHaveBeenCalledWith(GUILD_ID, {
+      triggerCommand: '!hits', checkCommand: '!count', message: 'Count: %d', incrementMessage: 'Now %d!', resetYearly: false,
+    });
+  });
 });
 
 // --- POST /counters/update ---
@@ -284,6 +298,14 @@ describe('POST /counters/update', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/counters');
   });
+
+  it('scopes the duplicate-command check and the update to the current guild', async () => {
+    await supertest(buildApp()).post('/counters/update').type('form').send(VALID_UPDATE);
+    expect(isCounterCommandTaken).toHaveBeenCalledWith(GUILD_ID, ['!hits', '!count'], 42);
+    expect(updateCounter).toHaveBeenCalledWith(GUILD_ID, {
+      id: 42, triggerCommand: '!hits', checkCommand: '!count', message: 'Count: %d', incrementMessage: 'Now %d!', resetYearly: false,
+    });
+  });
 });
 
 // --- POST /counters/remove ---
@@ -321,6 +343,11 @@ describe('POST /counters/remove', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/counters');
   });
+
+  it('scopes the delete to the current guild', async () => {
+    await supertest(buildApp()).post('/counters/remove').type('form').send({ id: '5' });
+    expect(removeCounter).toHaveBeenCalledWith(GUILD_ID, 5);
+  });
 });
 
 // --- POST /counters/reset/:id ---
@@ -343,5 +370,10 @@ describe('POST /counters/reset/:id', () => {
       .post('/counters/reset/7');
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/counters?reset=1');
+  });
+
+  it('scopes the reset to the current guild', async () => {
+    await supertest(buildApp()).post('/counters/reset/7');
+    expect(resetCounterCurrentValue).toHaveBeenCalledWith(GUILD_ID, 7);
   });
 });

@@ -202,6 +202,25 @@ describe('isAnyCommandTakenAcrossTables', () => {
     expect(customCmdCall).toBeDefined();
     expect(customCmdCall![1]).toContain(7);
   });
+
+  it('scopes the counter query to guildId when given, without affecting the custom_command query', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[]]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await isAnyCommandTakenAcrossTables('!test', { guildId: 'guild-1' }, pool as any);
+    const counterCall = pool.execute.mock.calls.find((args) => (args[0] as string).includes('counter'));
+    const customCmdCall = pool.execute.mock.calls.find((args) => (args[0] as string).includes('custom_command'));
+    expect(counterCall![0]).toContain('AND guild_id = ?');
+    expect(counterCall![1]).toContain('guild-1');
+    expect(customCmdCall![0]).not.toContain('guild_id');
+  });
+
+  it('checks the counter table across every guild when guildId is omitted', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[]]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await isAnyCommandTakenAcrossTables('!test', undefined, pool as any);
+    const counterCall = pool.execute.mock.calls.find((args) => (args[0] as string).includes('counter'));
+    expect(counterCall![0]).not.toContain('guild_id');
+  });
 });
 
 // ─── commandExists ────────────────────────────────────────────────────────────

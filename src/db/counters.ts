@@ -3,7 +3,7 @@ import { getPool, withTransaction } from './pool';
 import { requireTrimmedString, normalizeCommand, type SqlExecutor } from './commandStringUtils';
 import { runSerializedCommandWrite } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
-import { fromBit, rowExists, affectedOrExists, getRowCount } from './utils';
+import { fromBit, affectedOrExists } from './utils';
 import {
   createManagedLookupCache,
   type RefreshingLookupCache,
@@ -25,6 +25,7 @@ const ARCHIVE_YEAR_COLUMNS = new Map<number, string>(
 
 export interface DbCounter {
   id: number;
+  guild_id: string;
   trigger_command: string;
   check_command: string;
   message: string;
@@ -39,13 +40,17 @@ export interface DbMatchedCounter extends DbCounter {
   matchType: CounterMatchType;
 }
 
-export interface UpdateCounterInput {
-  id: number;
+/** A counter's editable fields, shared by {@link addCounter} and {@link UpdateCounterInput}. */
+export interface CounterFieldsInput {
   triggerCommand: string;
   checkCommand: string;
   message: string;
   incrementMessage: string;
   resetYearly: boolean;
+}
+
+export interface UpdateCounterInput extends CounterFieldsInput {
+  id: number;
 }
 
 /** Thrown when a counter lookup/mutation matches no row. */
@@ -64,10 +69,12 @@ export interface CounterHistoryEntry {
 
 // ─── Row mapper ───────────────────────────────────────────────────────────────
 
-/** Maps a raw `counter` table row to a {@link DbCounter}. */
+/** Maps a raw `counter` table row to a {@link DbCounter}. `guild_id` is a Discord snowflake
+ *  (BIGINT) — kept as the string the driver returns, never coerced to `Number`. */
 function mapCounter(row: mysql.RowDataPacket): DbCounter {
   return {
     id: row.id,
+    guild_id: String(row.guild_id),
     trigger_command: row.trigger_command,
     check_command: row.check_command,
     message: row.message,
@@ -112,22 +119,50 @@ function normalizeCounterFields(
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
+const COUNTER_COLUMNS = 'id, guild_id, trigger_command, check_command, message, increment_message, reset_yearly, current_value';
+
 /**
- * Fetches all counters, ordered by trigger command.
- * @returns All counters.
+ * Fetches every counter across every guild, ordered by trigger command. Used by the runtime
+ * command-lookup cache ({@link findCounterByCommand}), which buckets the result per guild in
+ * memory — for a single guild's counters (e.g. the admin panel), use {@link getCountersForGuild}
+ * instead.
+ * @returns All counters, across every guild.
  */
 export async function getAllCounters(): Promise<DbCounter[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value
+    `SELECT ${COUNTER_COLUMNS}
      FROM counter
      ORDER BY trigger_command`,
   );
   return rows.map(mapCounter);
 }
 
-/** Return the total number of counters, for the dashboard's usage-stats summary. */
-export async function getCounterCount(): Promise<number> {
-  return getRowCount('counter');
+/**
+ * Fetches all counters belonging to one guild, ordered by trigger command.
+ * @param guildId The guild to fetch counters for.
+ * @returns That guild's counters.
+ */
+export async function getCountersForGuild(guildId: string): Promise<DbCounter[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT ${COUNTER_COLUMNS}
+     FROM counter
+     WHERE guild_id = ?
+     ORDER BY trigger_command`,
+    [guildId],
+  );
+  return rows.map(mapCounter);
+}
+
+/** Return the number of counters belonging to one guild, for the dashboard's usage-stats summary. */
+export async function getCounterCount(guildId: string): Promise<number> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    'SELECT COUNT(*) AS count FROM counter WHERE guild_id = ?',
+    [guildId],
+  );
+  // COUNT(*) is protocol-typed BIGINT, so bigNumberStrings stringifies it — but like
+  // getRowCount in utils.ts, this value is bounded by how many counters a human configures in
+  // one guild's admin panel, nowhere near Number.MAX_SAFE_INTEGER, so parsing it back is safe.
+  return Number.parseInt((rows[0] as mysql.RowDataPacket).count, 10);
 }
 
 /**
@@ -204,11 +239,13 @@ async function getExistingArchiveColumns(): Promise<string[]> {
  * columns that actually exist on the `counter` table right now (see
  * `getExistingArchiveColumns`), since not every year in `ARCHIVE_YEAR_COLUMNS` is
  * guaranteed to be a physical column yet.
+ * @param guildId - The guild the counter must belong to.
  * @param id - The counter's numeric id.
  * @returns The counter and its archived history (years with a non-null value,
- *   newest first), or `null` if no counter exists with the given id.
+ *   newest first), or `null` if no counter with the given id exists in this guild.
  */
 export async function getCounterHistory(
+  guildId: string,
   id: number,
 ): Promise<{ counter: DbCounter; history: CounterHistoryEntry[] } | null> {
   const existingColumns = await getExistingArchiveColumns();
@@ -216,11 +253,11 @@ export async function getCounterHistory(
     ? `, ${existingColumns.map((col) => `\`${col}\``).join(', ')}`
     : '';
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT id, trigger_command, check_command, message, increment_message, reset_yearly, current_value${selectColumns}
+    `SELECT ${COUNTER_COLUMNS}${selectColumns}
      FROM counter
-     WHERE id = ?
+     WHERE id = ? AND guild_id = ?
      LIMIT 1`,
-    [id],
+    [id, guildId],
   );
   if (rows.length === 0) return null;
 
@@ -239,22 +276,16 @@ export async function getCounterHistory(
 
 /**
  * Creates a new counter, starting at 0, after validating fields and checking the trigger/check
- * commands don't conflict with other reserved or in-use commands.
- * @param triggerCommand Command that increments the counter.
- * @param checkCommand Command that reports the counter's current value.
- * @param message Message shown when the counter is checked.
- * @param incrementMessage Message shown when the counter is incremented.
- * @param resetYearly Whether the counter's value is archived and reset each new year.
+ * commands don't conflict with other reserved or in-use commands (globally for other guilds'
+ * custom commands, and within this guild for other counters — the same trigger/check command may
+ * exist in a different guild's counter without colliding).
+ * @param guildId The guild this counter belongs to.
+ * @param input The counter's initial fields.
  * @throws If `triggerCommand` and `checkCommand` are the same, either is reserved, or either is
  *   already taken by another command.
  */
-export async function addCounter(
-  triggerCommand: string,
-  checkCommand: string,
-  message: string,
-  incrementMessage: string,
-  resetYearly: boolean,
-): Promise<void> {
+export async function addCounter(guildId: string, input: CounterFieldsInput): Promise<void> {
+  const { triggerCommand, checkCommand, message, incrementMessage, resetYearly } = input;
   const fields = normalizeCounterFields(triggerCommand, checkCommand, message, incrementMessage);
   if (fields.triggerCommand === fields.checkCommand) {
     throw new Error('Counter trigger_command and check_command must be different');
@@ -265,40 +296,48 @@ export async function addCounter(
 
   await runSerializedCommandWrite(
     [fields.triggerCommand, fields.checkCommand],
-    undefined,
+    { guildId },
     async (connection) => {
       await connection.execute(
-        `INSERT INTO counter (trigger_command, check_command, message, increment_message, reset_yearly, current_value)
-         VALUES (?, ?, ?, ?, ?, 0)`,
-        [fields.triggerCommand, fields.checkCommand, fields.message, fields.incrementMessage, resetYearly ? 1 : 0],
+        `INSERT INTO counter (guild_id, trigger_command, check_command, message, increment_message, reset_yearly, current_value)
+         VALUES (?, ?, ?, ?, ?, ?, 0)`,
+        [guildId, fields.triggerCommand, fields.checkCommand, fields.message, fields.incrementMessage, resetYearly ? 1 : 0],
       );
     },
   );
 }
 
 /**
- * Checks whether a counter with the given id exists.
+ * Checks whether a counter with the given id exists in this guild.
+ * @param guildId The guild the counter must belong to.
  * @param id The counter's numeric id.
  * @param executor Pool or transaction connection to query with.
- * @returns True if the counter exists.
+ * @returns True if a counter with that id exists in this guild.
  */
-async function counterExists(id: number, executor: SqlExecutor = getPool()): Promise<boolean> {
-  return rowExists(executor, 'counter', 'id', id);
+async function counterExists(guildId: string, id: number, executor: SqlExecutor = getPool()): Promise<boolean> {
+  const [rows] = await executor.execute<mysql.RowDataPacket[]>(
+    'SELECT 1 FROM counter WHERE id = ? AND guild_id = ? LIMIT 1',
+    [id, guildId],
+  );
+  return rows.length > 0;
 }
 
 /**
- * Looks up a counter's current trigger/check command strings by id.
+ * Looks up a counter's current trigger/check command strings by id, scoped to one guild.
+ * @param guildId The guild the counter must belong to.
  * @param id The counter's numeric id.
  * @param executor Pool or transaction connection to query with.
- * @returns The counter's trigger and check commands, or `null` if no counter exists with the given id.
+ * @returns The counter's trigger and check commands, or `null` if no counter with the given id
+ *   exists in this guild.
  */
 async function getCounterCommandsById(
+  guildId: string,
   id: number,
   executor: SqlExecutor = getPool(),
 ): Promise<{ trigger_command: string; check_command: string } | null> {
   const [rows] = await executor.execute<mysql.RowDataPacket[]>(
-    'SELECT trigger_command, check_command FROM counter WHERE id = ? LIMIT 1',
-    [id],
+    'SELECT trigger_command, check_command FROM counter WHERE id = ? AND guild_id = ? LIMIT 1',
+    [id, guildId],
   );
   if (rows.length === 0) return null;
   return { trigger_command: rows[0].trigger_command, check_command: rows[0].check_command };
@@ -307,12 +346,13 @@ async function getCounterCommandsById(
 /**
  * Updates an existing counter's fields, locking both its old and new trigger/check commands
  * so concurrent writes can't create a conflict during the transition.
+ * @param guildId The guild the counter must belong to.
  * @param input The counter's id and updated fields.
- * @throws {CounterNotFoundError} If no counter exists with the given id.
+ * @throws {CounterNotFoundError} If no counter with the given id exists in this guild.
  * @throws If `triggerCommand` and `checkCommand` are the same, either is reserved, or either is
  *   already taken by another command.
  */
-export async function updateCounter(input: UpdateCounterInput): Promise<void> {
+export async function updateCounter(guildId: string, input: UpdateCounterInput): Promise<void> {
   const { id, triggerCommand, checkCommand, message, incrementMessage, resetYearly } = input;
 
   const fields = normalizeCounterFields(triggerCommand, checkCommand, message, incrementMessage);
@@ -323,7 +363,7 @@ export async function updateCounter(input: UpdateCounterInput): Promise<void> {
   assertNotReservedCommand(fields.triggerCommand);
   assertNotReservedCommand(fields.checkCommand);
 
-  const current = await getCounterCommandsById(id);
+  const current = await getCounterCommandsById(guildId, id);
   if (!current) throw new CounterNotFoundError(id);
 
   // Lock old commands too so concurrent adds/updates can't sneak in during the
@@ -337,7 +377,7 @@ export async function updateCounter(input: UpdateCounterInput): Promise<void> {
 
   await runSerializedCommandWrite(
     commandsToLock,
-    { excludeCounterId: id },
+    { excludeCounterId: id, guildId },
     async (connection) => {
       const [result] = await connection.execute<mysql.ResultSetHeader>(
         `UPDATE counter
@@ -346,11 +386,11 @@ export async function updateCounter(input: UpdateCounterInput): Promise<void> {
              message = ?,
              increment_message = ?,
              reset_yearly = ?
-         WHERE id = ?`,
-        [fields.triggerCommand, fields.checkCommand, fields.message, fields.incrementMessage, resetYearly ? 1 : 0, id],
+         WHERE id = ? AND guild_id = ?`,
+        [fields.triggerCommand, fields.checkCommand, fields.message, fields.incrementMessage, resetYearly ? 1 : 0, id, guildId],
       );
 
-      if (!(await affectedOrExists(result.affectedRows, () => counterExists(id, connection)))) {
+      if (!(await affectedOrExists(result.affectedRows, () => counterExists(guildId, id, connection)))) {
         throw new CounterNotFoundError(id);
       }
     },
@@ -359,20 +399,21 @@ export async function updateCounter(input: UpdateCounterInput): Promise<void> {
 
 /**
  * Deletes a counter by id, locking its trigger/check commands during the delete.
+ * @param guildId The guild the counter must belong to.
  * @param id The counter's numeric id.
- * @throws {CounterNotFoundError} If no counter exists with the given id.
+ * @throws {CounterNotFoundError} If no counter with the given id exists in this guild.
  */
-export async function removeCounter(id: number): Promise<void> {
-  const current = await getCounterCommandsById(id);
+export async function removeCounter(guildId: string, id: number): Promise<void> {
+  const current = await getCounterCommandsById(guildId, id);
   if (!current) throw new CounterNotFoundError(id);
 
   await runSerializedCommandWrite(
     [current.trigger_command, current.check_command],
-    { excludeCounterId: id },
+    { excludeCounterId: id, guildId },
     async (connection) => {
       const [result] = await connection.execute<mysql.ResultSetHeader>(
-        'DELETE FROM counter WHERE id = ?',
-        [id],
+        'DELETE FROM counter WHERE id = ? AND guild_id = ?',
+        [id, guildId],
       );
       if (result.affectedRows === 0) throw new CounterNotFoundError(id);
     },
@@ -381,16 +422,17 @@ export async function removeCounter(id: number): Promise<void> {
 
 /**
  * Resets a counter's `current_value` to 0.
+ * @param guildId The guild the counter must belong to.
  * @param id The counter's numeric id.
- * @throws {CounterNotFoundError} If no counter exists with the given id.
+ * @throws {CounterNotFoundError} If no counter with the given id exists in this guild.
  */
-export async function resetCounterCurrentValue(id: number): Promise<void> {
+export async function resetCounterCurrentValue(guildId: string, id: number): Promise<void> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
-    'UPDATE counter SET current_value = 0 WHERE id = ?',
-    [id],
+    'UPDATE counter SET current_value = 0 WHERE id = ? AND guild_id = ?',
+    [id, guildId],
   );
 
-  if (!(await affectedOrExists(result.affectedRows, () => counterExists(id)))) {
+  if (!(await affectedOrExists(result.affectedRows, () => counterExists(guildId, id)))) {
     throw new CounterNotFoundError(id);
   }
 }

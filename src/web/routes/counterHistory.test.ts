@@ -19,7 +19,12 @@ vi.mock('../csrf', () => ({
 }));
 
 vi.mock('../middleware', () => ({
-  requireAuth: (_req: any, _res: any, next: any) => next(),
+  requireGuildContext: (_req: any, _res: any, next: any) => next(),
+}));
+
+const GUILD_ID = '900000000000000001';
+vi.mock('../session', () => ({
+  getCurrentGuildId: vi.fn(() => GUILD_ID),
 }));
 
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
@@ -59,7 +64,7 @@ describe('GET /counters/:id/history', () => {
 
     expect(res.status).toBe(200);
     expect(res.text).toBe('rendered:counterHistory');
-    expect(getCounterHistory).toHaveBeenCalledWith(1);
+    expect(getCounterHistory).toHaveBeenCalledWith(GUILD_ID, 1);
   });
 
   it('renders a 404 error page when id is non-numeric', async () => {

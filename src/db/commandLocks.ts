@@ -195,15 +195,24 @@ function buildCustomCommandExistsCheckPlan(
  * @param placeholders - `IN (...)` placeholder string sized for `normalizedCommands.length`.
  * @param normalizedCommands - Normalized command strings to check for a collision.
  * @param options.excludeCounterId - A counter `id` to exclude from the check.
+ * @param options.guildId - When given, scopes the check to counters in this guild only (the same
+ *   trigger/check command may exist in a different guild's counter without colliding). Omit to
+ *   check across every guild's counters — used when validating a *global* custom_command
+ *   trigger, which must not collide with any guild's counter.
  * @returns The SQL and params to run via {@link executeExistsCheck}.
  */
 function buildCounterExistsCheckPlan(
   placeholders: string,
   normalizedCommands: string[],
-  options?: { excludeCustomCommandId?: number; excludeCounterId?: number },
+  options?: { excludeCustomCommandId?: number; excludeCounterId?: number; guildId?: string },
 ): SqlExistsCheckPlan {
   let sql = `SELECT 1 FROM counter WHERE (trigger_command IN (${placeholders}) OR check_command IN (${placeholders}))`;
   const params: Array<string | number> = [...normalizedCommands, ...normalizedCommands];
+
+  if (options?.guildId !== undefined) {
+    sql += ' AND guild_id = ?';
+    params.push(options.guildId);
+  }
 
   if (options?.excludeCounterId !== undefined) {
     sql += ' AND id != ?';
@@ -230,7 +239,9 @@ async function executeExistsCheck(executor: SqlExecutor, plan: SqlExistsCheckPla
  * `counter` row (whichever tables `checks` enables), optionally excluding a specific
  * command/counter id from the check (used when updating an existing row in place).
  * @param commandOrCommands - A single command string or array of command strings to check.
- * @param options - Ids to exclude from the collision check, if updating an existing row.
+ * @param options - Ids to exclude from the collision check, if updating an existing row, and
+ *   `guildId` to scope the counter-table half of the check (see {@link buildCounterExistsCheckPlan}).
+ *   `guildId` has no effect on the custom_command half of the check, which is always global.
  * @param executor - Query executor to run the checks on; defaults to the pool, but a
  *   transaction connection is passed when called from {@link runSerializedCommandWrite}.
  * @param checks - Which tables to check; both default to enabled.
@@ -238,7 +249,7 @@ async function executeExistsCheck(executor: SqlExecutor, plan: SqlExistsCheckPla
  */
 export async function isAnyCommandTakenAcrossTables(
   commandOrCommands: string | string[],
-  options?: { excludeCustomCommandId?: number; excludeCounterId?: number },
+  options?: { excludeCustomCommandId?: number; excludeCounterId?: number; guildId?: string },
   executor: SqlExecutor = getPool(),
   checks: { includeCustomCommandTable?: boolean; includeCounterTable?: boolean } = {
     includeCustomCommandTable: true,
@@ -302,7 +313,9 @@ export async function commandExists(id: number, executor: SqlExecutor = getPool(
  * release is attempted and the connection returned to the pool in a `finally`; a release
  * failure is logged and swallowed rather than masking the original error.
  * @param commandOrCommands - The command(s) this write claims; also used for the collision check.
- * @param options - Ids to exclude from the collision check, if updating an existing row.
+ * @param options - Ids to exclude from the collision check, if updating an existing row, and
+ *   `guildId` to scope the counter-table half of the check to one guild (see
+ *   {@link isAnyCommandTakenAcrossTables}).
  * @param writeOperation - The transactional write to perform once locks are held and no collision exists.
  * @param checks - Which tables to include in the collision check; both default to enabled.
  * @returns The value returned by `writeOperation`.
@@ -310,7 +323,7 @@ export async function commandExists(id: number, executor: SqlExecutor = getPool(
  */
 export async function runSerializedCommandWrite<T>(
   commandOrCommands: string | string[],
-  options: { excludeCustomCommandId?: number; excludeCounterId?: number } | undefined,
+  options: { excludeCustomCommandId?: number; excludeCounterId?: number; guildId?: string } | undefined,
   writeOperation: (connection: mysql.PoolConnection) => Promise<T>,
   checks: { includeCustomCommandTable?: boolean; includeCounterTable?: boolean } = {
     includeCustomCommandTable: true,

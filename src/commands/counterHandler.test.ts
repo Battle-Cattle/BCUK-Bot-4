@@ -104,6 +104,19 @@ describe('executeCounterCommandForDiscord', () => {
     expect(msg.reply).not.toHaveBeenCalled();
   });
 
+  it('does nothing for a DM (no guildId, and none explicitly provided)', async () => {
+    const msg = makeMockMessage('!count', { guildId: null });
+    await executeCounterCommandForDiscord(msg as any);
+    expect(vi.mocked(findCounterByCommand)).not.toHaveBeenCalled();
+  });
+
+  it('prefers an explicit guildId over message.guildId', async () => {
+    vi.mocked(findCounterByCommand).mockResolvedValue(CHECK_COUNTER as any);
+    const msg = makeMockMessage('!count', { guildId: 'guild-from-message' });
+    await executeCounterCommandForDiscord(msg as any, null, 'guild-explicit');
+    expect(vi.mocked(findCounterByCommand)).toHaveBeenCalledWith('guild-explicit', '!count');
+  });
+
   it('replies with formatted increment message for a trigger counter', async () => {
     vi.mocked(findCounterByCommand).mockResolvedValue(TRIGGER_COUNTER as any);
     vi.mocked(incrementCounter).mockResolvedValue(5);
@@ -172,13 +185,25 @@ describe('executeCounterCommandForDiscord', () => {
 
 describe('executeCounterCommandForTwitch', () => {
   it('does nothing when the message has no command', async () => {
-    await executeCounterCommandForTwitch('#chan', '', null);
+    await executeCounterCommandForTwitch('#chan', '', null, 'guild-1');
     expect(vi.mocked(findCounterByCommand)).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when no guild could be resolved for the channel', async () => {
+    await executeCounterCommandForTwitch('#chan', '!hits', null, null);
+    expect(vi.mocked(findCounterByCommand)).not.toHaveBeenCalled();
+    expect(mockTwitchRuntime.send).not.toHaveBeenCalled();
+  });
+
+  it('looks up the counter scoped to the resolved guild', async () => {
+    vi.mocked(findCounterByCommand).mockResolvedValue(CHECK_COUNTER as any);
+    await executeCounterCommandForTwitch('#chan', '!count', null, 'guild-xyz');
+    expect(vi.mocked(findCounterByCommand)).toHaveBeenCalledWith('guild-xyz', '!count');
   });
 
   it('does nothing when the command is not a counter', async () => {
     vi.mocked(findCounterByCommand).mockResolvedValue(null);
-    await executeCounterCommandForTwitch('#chan', '!other', null);
+    await executeCounterCommandForTwitch('#chan', '!other', null, 'guild-1');
     expect(mockTwitchRuntime.send).not.toHaveBeenCalled();
   });
 
@@ -186,7 +211,7 @@ describe('executeCounterCommandForTwitch', () => {
     vi.mocked(findCounterByCommand).mockResolvedValue(TRIGGER_COUNTER as any);
     vi.mocked(incrementCounter).mockResolvedValue(10);
 
-    await executeCounterCommandForTwitch('#mychan', '!hits', 'viewer1');
+    await executeCounterCommandForTwitch('#mychan', '!hits', 'viewer1', 'guild-1');
 
     expect(mockTwitchRuntime.send).toHaveBeenCalledWith('#mychan', 'Count is now 10!');
   });
@@ -195,7 +220,7 @@ describe('executeCounterCommandForTwitch', () => {
     vi.mocked(findCounterByCommand).mockResolvedValue(TRIGGER_COUNTER as any);
     vi.mocked(incrementCounter).mockRejectedValue(new Error('DB down'));
 
-    await executeCounterCommandForTwitch('#chan', '!hits', null);
+    await executeCounterCommandForTwitch('#chan', '!hits', null, 'guild-1');
 
     expect(mockTwitchRuntime.send).not.toHaveBeenCalled();
   });
@@ -252,11 +277,11 @@ describe('counter cooldown', () => {
     vi.mocked(findCounterByCommand).mockResolvedValue(TRIGGER_COUNTER as any);
     vi.mocked(incrementCounter).mockResolvedValue(5);
 
-    await executeCounterCommandForTwitch('#chan', '!hits', null);
+    await executeCounterCommandForTwitch('#chan', '!hits', null, 'guild-1');
     expect(mockTwitchRuntime.send).toHaveBeenCalledTimes(1);
     expect(vi.mocked(incrementCounter)).toHaveBeenCalledTimes(1);
 
-    await executeCounterCommandForTwitch('#chan', '!hits', null);
+    await executeCounterCommandForTwitch('#chan', '!hits', null, 'guild-1');
     expect(mockTwitchRuntime.send).toHaveBeenCalledTimes(1);
     expect(vi.mocked(incrementCounter)).toHaveBeenCalledTimes(1);
   });
@@ -264,10 +289,10 @@ describe('counter cooldown', () => {
   it("does not apply one Twitch channel's cooldown to another channel", async () => {
     vi.mocked(findCounterByCommand).mockResolvedValue(CHECK_COUNTER as any);
 
-    await executeCounterCommandForTwitch('#chan-a', '!count', null);
+    await executeCounterCommandForTwitch('#chan-a', '!count', null, 'guild-a');
     expect(mockTwitchRuntime.send).toHaveBeenCalledTimes(1);
 
-    await executeCounterCommandForTwitch('#chan-b', '!count', null);
+    await executeCounterCommandForTwitch('#chan-b', '!count', null, 'guild-b');
     expect(mockTwitchRuntime.send).toHaveBeenCalledTimes(2);
   });
 });
