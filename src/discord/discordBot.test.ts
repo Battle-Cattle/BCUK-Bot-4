@@ -633,6 +633,19 @@ describe('startDiscordBot — login failure reconnect backoff', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(mockInstance.login).toHaveBeenCalledTimes(4);
   });
+
+  it('cancels a pending reconnect timer on stopDiscordBot, so the process does not log back in after being told to stop', async () => {
+    mockInstance.login.mockRejectedValueOnce(new Error('network unreachable'));
+    mod.startDiscordBot();
+    await flushMicrotasks();
+    expect(mockInstance.login).toHaveBeenCalledTimes(1);
+
+    // A retry is scheduled but hasn't fired yet — stopping now must clear it, not just leave it
+    // to fire into a process that was supposedly shut down.
+    mod.stopDiscordBot();
+    await vi.advanceTimersByTimeAsync(5 * 60_000); // past RECONNECT_MAX_DELAY_MS, so any surviving timer would have fired
+    expect(mockInstance.login).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ─── stopDiscordBot ───────────────────────────────────────────────────────────
