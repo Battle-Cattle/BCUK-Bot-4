@@ -364,6 +364,12 @@ export function startDiscordBot(): void {
 
   localClient.login(DISCORD_TOKEN).catch((err) => {
     log.error('Login failed:', err);
+    // A stopDiscordBot() (or a newer startDiscordBot()) may have already moved bootingClient
+    // past this login attempt by the time it rejects — e.g. the bot was told to stop while this
+    // login was still pending. In that case this rejection is stale: touching bootingClient or
+    // scheduling a reconnect here would either restart a bot that was told to stop, or clobber
+    // tracking for a genuinely newer boot attempt already in progress.
+    if (bootingClient !== localClient) return;
     bootingClient = null; // clear so a retry can call startDiscordBot() again
     scheduleReconnect('login failed');
   });

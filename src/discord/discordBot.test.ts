@@ -646,6 +646,26 @@ describe('startDiscordBot — login failure reconnect backoff', () => {
     await vi.advanceTimersByTimeAsync(5 * 60_000); // past RECONNECT_MAX_DELAY_MS, so any surviving timer would have fired
     expect(mockInstance.login).toHaveBeenCalledTimes(1);
   });
+
+  it('does not schedule a reconnect when a login rejects after stopDiscordBot already stopped that attempt', async () => {
+    const { promise: loginGate, reject: rejectLogin } = deferred<void>();
+    mockInstance.login.mockReturnValueOnce(loginGate);
+    mod.startDiscordBot();
+    await flushMicrotasks();
+    expect(mockInstance.login).toHaveBeenCalledOnce();
+
+    // stopDiscordBot() clears bootingClient before the pending login ever settles.
+    mod.stopDiscordBot();
+
+    // The stale login now rejects — this must be a no-op: it belongs to an attempt the bot was
+    // already told to stop, so it must not schedule a reconnect (which would restart a bot that
+    // was just shut down).
+    rejectLogin(new Error('network unreachable'));
+    await flushMicrotasks();
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000); // past RECONNECT_MAX_DELAY_MS
+    expect(mockInstance.login).toHaveBeenCalledOnce();
+  });
 });
 
 // ─── stopDiscordBot ───────────────────────────────────────────────────────────
