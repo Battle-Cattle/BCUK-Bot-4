@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockLogger } from '../test-utils/loggerMock';
 import { ACCESS_LEVEL_MOCK } from '../test-utils/accessLevelMock';
 import { flushMicrotasks } from '../test-utils/flushMicrotasks';
@@ -539,6 +539,132 @@ describe('startDiscordBot — gateway watchdog', () => {
     const handler = findHandler('shardDisconnect');
     handler({ code: 4004 }, 0);
     expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(false);
+  });
+});
+
+// ─── startDiscordBot — login failure reconnect backoff ─────────────────────────
+//
+// A failed shardDisconnect self-heal (or the very first boot) must not leave the process
+// permanently disconnected from Discord — startDiscordBot() schedules its own retry rather
+// than requiring some other caller to notice and retry manually.
+
+describe('startDiscordBot — login failure reconnect backoff', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('schedules a retry when login fails, and eventually reconnects on its own', async () => {
+    mockInstance.login.mockRejectedValueOnce(new Error('network unreachable'));
+    mod.startDiscordBot();
+    await flushMicrotasks();
+
+    expect(mockLog.error).toHaveBeenCalledWith('Login failed:', expect.any(Error));
+    expect(mod.getDiscordClient()).toBeNull();
+
+    // First retry backs off 5s (RECONNECT_BASE_DELAY_MS).
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(2);
+
+    // This attempt succeeds — fire clientReady.
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    expect(mod.getDiscordClient()).toBe(mockInstance);
+  });
+
+  it('backs off exponentially across repeated login failures, capped at the max delay', async () => {
+    mockInstance.login.mockRejectedValue(new Error('still down'));
+    mod.startDiscordBot();
+    await flushMicrotasks();
+    expect(mockInstance.login).toHaveBeenCalledTimes(1);
+
+    // 5s, then 10s, then 20s — each attempt itself also rejects and reschedules.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(4);
+  });
+
+  it('does not stack a second pending retry when two login failures happen in quick succession', async () => {
+    // Two failures back-to-back (e.g. two shardDisconnect events) must not schedule two
+    // independent timers — that would double the reconnect attempts once both fire.
+    mockInstance.login.mockRejectedValueOnce(new Error('first failure'));
+    mod.startDiscordBot();
+    await flushMicrotasks();
+    expect(mockInstance.login).toHaveBeenCalledTimes(1);
+
+    mockInstance.login.mockRejectedValueOnce(new Error('second failure'));
+    mod.startDiscordBot();
+    await flushMicrotasks();
+    expect(mockInstance.login).toHaveBeenCalledTimes(2);
+
+    // Only one retry timer should be pending — advancing past the base delay once fires exactly
+    // one more attempt, not two.
+    mockInstance.login.mockResolvedValueOnce(undefined);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(3);
+  });
+
+  it('resets the backoff after a successful reconnect, so a later failure starts from the base delay again', async () => {
+    mockInstance.login.mockRejectedValueOnce(new Error('first failure'));
+    mod.startDiscordBot();
+    await flushMicrotasks();
+
+    await vi.advanceTimersByTimeAsync(5_000); // first retry, succeeds this time
+    expect(mockInstance.login).toHaveBeenCalledTimes(2);
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    expect(mod.getDiscordClient()).toBe(mockInstance);
+
+    // A later shard disconnect forces a fresh login, which fails again — the backoff for this
+    // new failure must start from RECONNECT_BASE_DELAY_MS again, not continue from where the
+    // previous (already-recovered) failure episode left off.
+    const disconnectHandler = mockInstance.on.mock.calls.find(([e]: string[]) => e === 'shardDisconnect')?.[1];
+    mockInstance.login.mockRejectedValueOnce(new Error('second failure'));
+    disconnectHandler({ code: 4004 }, 0);
+    await flushMicrotasks();
+    expect(mockInstance.login).toHaveBeenCalledTimes(3);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(4);
+  });
+
+  it('cancels a pending reconnect timer on stopDiscordBot, so the process does not log back in after being told to stop', async () => {
+    mockInstance.login.mockRejectedValueOnce(new Error('network unreachable'));
+    mod.startDiscordBot();
+    await flushMicrotasks();
+    expect(mockInstance.login).toHaveBeenCalledTimes(1);
+
+    // A retry is scheduled but hasn't fired yet — stopping now must clear it, not just leave it
+    // to fire into a process that was supposedly shut down.
+    mod.stopDiscordBot();
+    await vi.advanceTimersByTimeAsync(5 * 60_000); // past RECONNECT_MAX_DELAY_MS, so any surviving timer would have fired
+    expect(mockInstance.login).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not schedule a reconnect when a login rejects after stopDiscordBot already stopped that attempt', async () => {
+    const { promise: loginGate, reject: rejectLogin } = deferred<void>();
+    mockInstance.login.mockReturnValueOnce(loginGate);
+    mod.startDiscordBot();
+    await flushMicrotasks();
+    expect(mockInstance.login).toHaveBeenCalledOnce();
+
+    // stopDiscordBot() clears bootingClient before the pending login ever settles.
+    mod.stopDiscordBot();
+
+    // The stale login now rejects — this must be a no-op: it belongs to an attempt the bot was
+    // already told to stop, so it must not schedule a reconnect (which would restart a bot that
+    // was just shut down).
+    rejectLogin(new Error('network unreachable'));
+    await flushMicrotasks();
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000); // past RECONNECT_MAX_DELAY_MS
+    expect(mockInstance.login).toHaveBeenCalledOnce();
   });
 });
 
