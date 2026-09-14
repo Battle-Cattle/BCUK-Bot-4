@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createLogger } from '../../shared/logger';
 import { getAllEventSubStreamers, getEnabledAlertEventTypesBatch } from '../../db';
 import type { DbStreamerEventSub, EventSubConfig, AlertEventType } from '../../db';
@@ -12,8 +13,17 @@ const log = createLogger('EventSub');
 
 export { dispatchNotification, handleRevocation, removeStreamerFromMap } from './twitchEventSubDispatch';
 
-// Tracks "login:type:token" triples that failed with 403 — skipped until bot restarts or token changes
+// Tracks "login:type:tokenHash" triples that failed with 403 — skipped until bot restarts or
+// token changes. Hashed rather than storing the raw access token: the key only needs to change
+// when the token does (so a refreshed token naturally computes a different key and retries),
+// not to retain the token's actual value in process memory for the (unbounded, until
+// clearAuthFailedSubs runs) lifetime of this Set.
 const authFailedSubs = new Set<string>();
+
+/** Derives the skip-key's token component without retaining the raw access token. */
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
 
 /** Returns true if any subscription for the given login has previously failed with a 403. */
 export function hasAuthFailedSubs(login: string): boolean {
@@ -291,7 +301,7 @@ export async function subscribeForStreamer(
  *  create call failed — callers use a non-null id to identify "the subscription created this
  *  round" when pruning stale duplicates in {@link deleteStaleSubscriptions}. */
 async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<string | null> {
-  const skipKey = `${login}:${spec.type}:${token}`;
+  const skipKey = `${login}:${spec.type}:${hashToken(token)}`;
   if (authFailedSubs.has(skipKey)) return null;
   try {
     const id = await createEventSubSubscription(spec.type, spec.version, spec.condition, sessionId, token);

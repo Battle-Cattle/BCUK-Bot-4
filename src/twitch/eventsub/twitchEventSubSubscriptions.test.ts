@@ -120,6 +120,71 @@ describe('hasAuthFailedSubs / clearAuthFailedSubs', () => {
     expect(hasAuthFailedSubs('streamerA')).toBe(false);
     expect(hasAuthFailedSubs('streamerB')).toBe(true);
   });
+
+  it('retries automatically once the token changes, without needing clearAuthFailedSubs', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['streamera']));
+    // Explicit persistent baseline: an earlier test in this describe block leaves
+    // createEventSubSubscription permanently rejecting via mockRejectedValue (not Once), which
+    // vi.clearAllMocks() does not undo — so only the first spec attempted here must reject.
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id-1');
+    vi.mocked(createEventSubSubscription).mockRejectedValueOnce(new TwitchAuthError('403'));
+
+    await subscribeForStreamer('sess-3', {
+      uid: 'uid-A3',
+      token: 'stale-token',
+      name: 'streamerA',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 4,
+    });
+    expect(hasAuthFailedSubs('streamerA')).toBe(true);
+    const callsAfterFirstRound = vi.mocked(createEventSubSubscription).mock.calls.length;
+    expect(callsAfterFirstRound).toBeGreaterThan(0);
+
+    // A refreshed token computes a different (hashed) skip key, so every spec — including the
+    // one that failed under the stale token — is attempted again rather than the failed one
+    // being silently skipped forever. This is the whole point of keying on the token at all,
+    // which the hashing change must preserve even though the raw token is no longer stored.
+    await subscribeForStreamer('sess-3', {
+      uid: 'uid-A3',
+      token: 'refreshed-token',
+      name: 'streamerA',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 4,
+    });
+
+    const callsAfterSecondRound = vi.mocked(createEventSubSubscription).mock.calls.length;
+    expect(callsAfterSecondRound - callsAfterFirstRound).toBe(callsAfterFirstRound);
+  });
+
+  it('keeps skipping only the same still-failing token+type across calls (does not retry that one every round)', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['streamera']));
+    // Explicit persistent baseline — see the comment in the previous test for why.
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id-1');
+    vi.mocked(createEventSubSubscription).mockRejectedValueOnce(new TwitchAuthError('403'));
+
+    await subscribeForStreamer('sess-4', {
+      uid: 'uid-A4',
+      token: 'still-bad-token',
+      name: 'streamerA',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 5,
+    });
+    const callsAfterFirstRound = vi.mocked(createEventSubSubscription).mock.calls.length;
+    expect(callsAfterFirstRound).toBeGreaterThan(0);
+
+    await subscribeForStreamer('sess-4', {
+      uid: 'uid-A4',
+      token: 'still-bad-token',
+      name: 'streamerA',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 5,
+    });
+
+    // Same token again — the one spec that previously failed is skipped this round, so the
+    // second round makes exactly one fewer call than the first.
+    const callsAfterSecondRound = vi.mocked(createEventSubSubscription).mock.calls.length;
+    expect(callsAfterSecondRound - callsAfterFirstRound).toBe(callsAfterFirstRound - 1);
+  });
 });
 
 // ---------------------------------------------------------------------------
