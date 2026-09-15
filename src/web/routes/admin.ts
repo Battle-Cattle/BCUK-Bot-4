@@ -171,6 +171,14 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
       shouldClearTwitchName,
     });
     await setMemberAccessLevel(guildId, trimmedDiscordId, level);
+    // Reloaded here, inside the guarded operation, rather than after runGuardedUserMutation
+    // returns: a newly-added member may have provisioned a previously-inert guild, and
+    // runUserMutationForActorAndTarget's timeout only bounds what the *caller* observes — the
+    // operation itself keeps running and can still commit after the caller's promise has
+    // rejected. Reloading here means that still happens even when the HTTP request times out
+    // waiting, instead of leaving the in-memory registry stale until some later mutation happens
+    // to reload it.
+    await reloadRegistrySafe();
   }, (err) => {
     if (err instanceof DuplicateTwitchNameError || isDuplicateTwitchNameDbError(err)) {
       res.redirect('/admin/users?error=duplicate_twitch_name');
@@ -179,8 +187,6 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
     }
   });
   if (!ok) return;
-  // A newly-added member may have provisioned a previously-inert guild.
-  await reloadRegistrySafe();
   res.redirect('/admin/users');
 });
 
@@ -250,10 +256,12 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
     const removeAuthErr = await checkRemoveAuth(sessionUser, guildId);
     if (removeAuthErr) throw new ManagerEditAuthError(removeAuthErr);
     await removeGuildMember(guildId, trimmedDiscordId);
+    // Reloaded here, inside the guarded operation — see the /users/add route's comment on
+    // reloadRegistrySafe for why (removing the guild's last member un-provisions it, and this
+    // must still happen even if the caller times out waiting on the queue).
+    await reloadRegistrySafe();
   }, (err) => handleDbError(err, res, 'remove_failed', 'Remove user'));
   if (!ok) return;
-  // Removing the guild's last member un-provisions it; refresh the registry.
-  await reloadRegistrySafe();
   res.redirect('/admin/users');
 });
 
