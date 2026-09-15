@@ -123,7 +123,7 @@ describe('runOfflineCheck', () => {
 
     expect(getStreams).toHaveBeenCalledWith(['uid123']);
     expect(setTwitchChannelLive).toHaveBeenCalledWith('alice', false);
-    expect(deleteAnnouncement).toHaveBeenCalledWith(liveStates, 'k1');
+    expect(deleteAnnouncement).toHaveBeenCalledWith(liveStates, 'k1', expect.any(Function));
     expect(state.offlineTimer).toBeNull();
   });
 
@@ -159,6 +159,37 @@ describe('runOfflineCheck', () => {
     await runOfflineCheck(liveStates, loginToUserId, 'k1', 'alice', 'alice');
 
     expect(deleteAnnouncement).toHaveBeenCalled();
+  });
+
+  // Regression test: the finally block must only clear the offlineTimer this specific check
+  // owns, not one a newer same-login operation has since scheduled on the same LiveState object
+  // (e.g. a fresh handleStreamOffline() call after a flap back offline) while this check's own
+  // Helix call was in flight.
+  it('does not clear a newer offlineTimer scheduled on the same state while the check was in flight', async () => {
+    let resolveGetStreams!: (streams: Awaited<ReturnType<typeof getStreams>>) => void;
+    vi.mocked(getStreams).mockImplementation(
+      () => new Promise((resolve) => { resolveGetStreams = resolve; }),
+    );
+    const ownedTimer = setTimeout(() => {}, 99999);
+    const state = makeState({ offlineTimer: ownedTimer });
+    const liveStates = new Map([['k1', state]]);
+    const loginToUserId = new Map([['alice', 'uid123']]);
+
+    const checkPromise = runOfflineCheck(liveStates, loginToUserId, 'k1', 'alice', 'alice');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // A newer offline-grace-period timer gets scheduled on the same state object before the
+    // in-flight check resolves — it must survive the earlier check's cleanup.
+    const newerTimer = setTimeout(() => {}, 99999);
+    state.offlineTimer = newerTimer;
+
+    resolveGetStreams([]);
+    await checkPromise;
+
+    expect(state.offlineTimer).toBe(newerTimer);
+    clearTimeout(ownedTimer);
+    clearTimeout(newerTimer);
   });
 
   // Regression test: runOfflineCheck must route through the same per-login withLoginLock the
@@ -268,7 +299,7 @@ describe('handleStreamOffline', () => {
     await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
 
     expect(getStreams).toHaveBeenCalledWith(['uid123']);
-    expect(deleteAnnouncement).toHaveBeenCalledWith(map, 'k1');
+    expect(deleteAnnouncement).toHaveBeenCalledWith(map, 'k1', expect.any(Function));
     expect(state.offlineTimer).toBeNull();
   });
 

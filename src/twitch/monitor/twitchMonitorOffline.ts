@@ -58,6 +58,11 @@ export async function runOfflineCheck(
   await withLoginLock(key, async (isCurrent) => {
     const currentState = liveStates.get(stateKey);
     if (!currentState) return;
+    // Captured before any await, so the `finally` below only ever clears the specific timer
+    // this call owns — not a newer timer a superseding same-login operation may have since
+    // scheduled on this same LiveState object (e.g. a fresh handleStreamOffline() call after a
+    // flap back offline).
+    const ownedTimer = currentState.offlineTimer;
     try {
       const userId = loginToUserId.get(key);
       if (!userId) return;
@@ -66,11 +71,15 @@ export async function runOfflineCheck(
       const isLive = streams.some((s) => s.user_id === userId && s.type === 'live');
       if (!isLive) {
         setTwitchChannelLive(key, false);
-        await deleteAnnouncement(liveStates, stateKey);
-        log.info(`${login} confirmed offline — announcement removed`);
+        // isCurrent is passed through so a caller superseded mid-delete (e.g. this lock timed
+        // out and a newer poll re-confirmed the streamer live while Discord/DB calls were still
+        // in flight) stops before clearing state the newer operation now owns — see
+        // deleteAnnouncement's own doc comment.
+        await deleteAnnouncement(liveStates, stateKey, isCurrent);
+        if (isCurrent()) log.info(`${login} confirmed offline — announcement removed`);
       }
     } finally {
-      currentState.offlineTimer = null;
+      if (currentState.offlineTimer === ownedTimer) currentState.offlineTimer = null;
     }
   });
 }
