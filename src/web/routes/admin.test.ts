@@ -31,11 +31,22 @@ vi.mock('../../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn(),
 }));
 
-vi.mock('../../shared/mutationQueue', () => ({
-  createMutationQueue: () => ({
-    run: (_key: string, fn: () => Promise<unknown>) => fn(),
-  }),
-}));
+// Real implementation (not a passthrough stub), with `run` wrapped in a spy so the
+// race-regression test below can assert call order against getMemberAccessLevel's own mock —
+// proving structurally (via mock.invocationCallOrder) that the authorization check happens
+// *inside* the queued operation rather than before it's enqueued, with no timing dependency.
+const { mockQueueRun } = vi.hoisted(() => ({ mockQueueRun: vi.fn() }));
+
+vi.mock('../../shared/mutationQueue', async () => {
+  const actual = await vi.importActual<typeof import('../../shared/mutationQueue')>('../../shared/mutationQueue');
+  return {
+    createMutationQueue: <K = string>() => {
+      const queue = actual.createMutationQueue<K>();
+      mockQueueRun.mockImplementation(queue.run.bind(queue));
+      return { ...queue, run: mockQueueRun };
+    },
+  };
+});
 
 vi.mock('./adminRefresh', async () => {
   const { Router } = await import('express');
@@ -291,6 +302,21 @@ describe('POST /users/update', () => {
     expect(second.headers.location).toBe('/admin/users?error=target_above_level');
     // Only the first call's write should have gone through.
     expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledTimes(1);
+  });
+
+  // Structural proof that the authorization check lives *inside* the queued operation rather
+  // than before it's enqueued: the buggy version called getMemberAccessLevel first and only
+  // then called runUserMutation (so checkOrder < runOrder); the fixed version enters the queue
+  // first and the check runs as part of the queued callback (so runOrder < checkOrder). Compares
+  // mock.invocationCallOrder from a single request — no timing/concurrency simulation needed.
+  it('runs the authorization check inside the queued operation, not before it is enqueued', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValueOnce(AccessLevel.MOD);
+
+    await supertest(buildApp(MANAGER)).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
+
+    const [runOrder] = mockQueueRun.mock.invocationCallOrder;
+    const [checkOrder] = vi.mocked(getMemberAccessLevel).mock.invocationCallOrder;
+    expect(runOrder).toBeLessThan(checkOrder);
   });
 });
 

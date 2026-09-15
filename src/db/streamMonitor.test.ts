@@ -159,6 +159,25 @@ describe('addStreamGroup', () => {
     const result = await addStreamGroup({ guildId: GUILD_ID, name: 'MyGroup', discordChannel: 'chan1', liveMessage: 'l', newGameMessage: 'g', multiTwitch: false, deleteOldPosts: false });
     expect(result).toBe(false);
   });
+
+  // Forward-compatible defense-in-depth: harmless today (no such constraint exists yet), but
+  // if one is ever added, a duplicate-key error from a race the WHERE NOT EXISTS guard didn't
+  // catch (e.g. under READ COMMITTED, see the function's own doc comment) should read as
+  // "already exists" rather than propagate as an unhandled DB error.
+  it('returns false instead of throwing when the insert rejects with ER_DUP_ENTRY', async () => {
+    const dupError = Object.assign(new Error('Duplicate entry'), { code: 'ER_DUP_ENTRY' });
+    const pool = { execute: vi.fn().mockRejectedValue(dupError) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await addStreamGroup({ guildId: GUILD_ID, name: 'MyGroup', discordChannel: 'chan1', liveMessage: 'l', newGameMessage: 'g', multiTwitch: false, deleteOldPosts: false });
+    expect(result).toBe(false);
+  });
+
+  it('rethrows a non-duplicate-key error', async () => {
+    const pool = { execute: vi.fn().mockRejectedValue(new Error('connection lost')) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(addStreamGroup({ guildId: GUILD_ID, name: 'MyGroup', discordChannel: 'chan1', liveMessage: 'l', newGameMessage: 'g', multiTwitch: false, deleteOldPosts: false }))
+      .rejects.toThrow('connection lost');
+  });
 });
 
 // ─── updateStreamGroup ────────────────────────────────────────────────────────
