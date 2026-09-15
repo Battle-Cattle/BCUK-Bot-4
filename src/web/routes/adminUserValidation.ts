@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { createLogger } from '../../shared/logger';
-import { findUser, getMemberAccessLevel, AccessLevel } from '../../db';
+import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser, AccessLevel } from '../../db';
 import { trimField, normalizeDiscordId } from './validation';
 import { getSessionUser } from '../session';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
@@ -124,25 +124,35 @@ export class ManagerEditAuthError extends Error {
  * always sees the latest committed state, since `runUserMutation` strictly serializes writes per
  * `discordId` and never releases a user's queue slot before its operation actually settles.
  *
- * @param sessionUser The acting user (current-guild access level + owner flag).
+ * The actor's own access level and owner flag are likewise re-read from the DB here rather than
+ * trusted from `sessionUser`/the session cache: the session value was current when the request
+ * came in, but by the time this runs the actor's own queue slot may have already processed an
+ * unrelated demotion of them — re-reading closes that gap the same way the target's level is
+ * re-read fresh above, instead of authorizing against a possibly-stale snapshot.
+ *
+ * @param sessionUser The acting user's identity (only `discordId` is used — their access level
+ *   and owner flag are re-resolved from the DB, not read off this object).
  * @param targetDiscordId The user being edited.
  * @param targetLevel The access level being assigned.
  * @param guildId The guild the edit applies to.
  */
 export async function checkManagerEditAuth(
-  sessionUser: { discordId: string; accessLevel: number; isOwner?: boolean },
+  sessionUser: { discordId: string },
   targetDiscordId: string,
   targetLevel: number,
   guildId: string,
 ): Promise<string | null> {
   if (targetDiscordId === sessionUser.discordId) return 'self_edit_forbidden';
+  const actingUser = await findUser(sessionUser.discordId);
+  const actingIsOwner = actingUser?.is_owner ?? false;
+  const actingAccessLevel = actingUser ? await getEffectiveAccessLevelForUser(guildId, actingUser) : AccessLevel.USER;
   // Bot owners are global super-admins — only another owner may touch them.
   const existingUser = await findUser(targetDiscordId);
-  if (existingUser?.is_owner && !sessionUser.isOwner) return 'target_above_level';
-  if (sessionUser.accessLevel < AccessLevel.ADMIN) {
-    if (targetLevel >= sessionUser.accessLevel) return 'access_level_too_high';
+  if (existingUser?.is_owner && !actingIsOwner) return 'target_above_level';
+  if (actingAccessLevel < AccessLevel.ADMIN) {
+    if (targetLevel >= actingAccessLevel) return 'access_level_too_high';
     const targetCurrentLevel = await getMemberAccessLevel(guildId, targetDiscordId);
-    if (targetCurrentLevel !== null && targetCurrentLevel >= sessionUser.accessLevel) return 'target_above_level';
+    if (targetCurrentLevel !== null && targetCurrentLevel >= actingAccessLevel) return 'target_above_level';
   }
   return null;
 }
@@ -158,23 +168,29 @@ export async function checkManagerEditAuth(
  *
  * Callers must run this *inside* the `runUserMutation` callback for `targetDiscordId` (throwing
  * a {@link ManagerEditAuthError} on a non-null result) — see `checkManagerEditAuth`'s doc comment
- * for why evaluating it before the write is enqueued would let it go stale.
+ * for why evaluating it before the write is enqueued would let it go stale, including why the
+ * actor's own access level and owner flag are re-read from the DB here rather than trusted from
+ * `sessionUser`.
  *
- * @param sessionUser The acting user (current-guild access level + owner flag).
+ * @param sessionUser The acting user's identity (only `discordId` is used — their access level
+ *   and owner flag are re-resolved from the DB, not read off this object).
  * @param guildId The guild to verify membership in.
  * @param targetDiscordId The user whose Twitch state is being toggled.
  */
 export async function checkToggleTwitchAuth(
-  sessionUser: { accessLevel: number; isOwner?: boolean },
+  sessionUser: { discordId: string },
   guildId: string,
   targetDiscordId: string,
 ): Promise<string | null> {
   const memberLevel = await getMemberAccessLevel(guildId, targetDiscordId);
   if (memberLevel === null) return 'target_above_level';
+  const actingUser = await findUser(sessionUser.discordId);
+  const actingIsOwner = actingUser?.is_owner ?? false;
+  const actingAccessLevel = actingUser ? await getEffectiveAccessLevelForUser(guildId, actingUser) : AccessLevel.USER;
   // Bot owners are global super-admins — only another owner may touch them, even an Admin.
   const existingUser = await findUser(targetDiscordId);
-  if (existingUser?.is_owner && !sessionUser.isOwner) return 'target_above_level';
-  if (!sessionUser.isOwner && sessionUser.accessLevel < AccessLevel.ADMIN && memberLevel >= sessionUser.accessLevel) {
+  if (existingUser?.is_owner && !actingIsOwner) return 'target_above_level';
+  if (!actingIsOwner && actingAccessLevel < AccessLevel.ADMIN && memberLevel >= actingAccessLevel) {
     return 'target_above_level';
   }
   return null;

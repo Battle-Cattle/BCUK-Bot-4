@@ -4,6 +4,7 @@ import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 vi.mock('../../db', () => ({
   findUser: vi.fn(),
   getMemberAccessLevel: vi.fn(),
+  getEffectiveAccessLevelForUser: vi.fn(),
   getGuildMemberUsers: vi.fn(),
   setMemberAccessLevel: vi.fn(),
   removeGuildMember: vi.fn(),
@@ -77,7 +78,7 @@ vi.mock('../../shared/logger', () => ({
 
 import supertest from 'supertest';
 import router from './admin';
-import { findUser, getMemberAccessLevel, getGuildMemberUsers, setMemberAccessLevel, removeGuildMember } from '../../db';
+import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser, getGuildMemberUsers, setMemberAccessLevel, removeGuildMember } from '../../db';
 import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { AccessLevel } from '../../db';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
@@ -112,7 +113,19 @@ function buildApp(sessionUser: SessionUser = ADMIN) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getGuildMemberUsers).mockResolvedValue([]);
-  vi.mocked(findUser).mockResolvedValue(null);
+  // The actor's own authorization is re-read from the DB inside checkManagerEditAuth/
+  // checkToggleTwitchAuth (not trusted from the session) — see admin.ts's TOCTOU fix. These
+  // stand in for that DB state, keyed by which fixture session is acting, so existing tests using
+  // ADMIN/MANAGER continue to behave like an actual Admin/Manager without each test wiring it up.
+  vi.mocked(findUser).mockImplementation(async (id: string) => {
+    if (id === ADMIN.discordId || id === MANAGER.discordId) return { discord_id: id, is_owner: false } as any;
+    return null;
+  });
+  vi.mocked(getEffectiveAccessLevelForUser).mockImplementation(async (_guildId: string, user: { discord_id: string }) => {
+    if (user.discord_id === ADMIN.discordId) return AccessLevel.ADMIN;
+    if (user.discord_id === MANAGER.discordId) return AccessLevel.MANAGER;
+    return AccessLevel.USER;
+  });
   vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
   vi.mocked(setMemberAccessLevel).mockResolvedValue(undefined);
   vi.mocked(removeGuildMember).mockResolvedValue(undefined);
@@ -300,6 +313,28 @@ describe('POST /users/update', () => {
     vi.mocked(getMemberAccessLevel).mockResolvedValueOnce(AccessLevel.ADMIN);
     const second = await supertest(buildApp(MANAGER)).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
     expect(second.headers.location).toBe('/admin/users?error=target_above_level');
+    // Only the first call's write should have gone through.
+    expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression coverage for the actor-side TOCTOU (CodeRabbit finding on PR #657): the acting
+  // Manager's own access level is re-read from the DB inside checkManagerEditAuth on every call,
+  // not trusted from the sessionUser snapshot taken when the request came in. Simulates the
+  // Manager themselves having been demoted (e.g. by an Admin) between two otherwise-identical
+  // requests within the same session — the second must be re-authorized against their current,
+  // lower DB level rather than reusing the higher level captured earlier in the session.
+  it('re-checks the acting Manager\'s own access level fresh on every call — rejects once they have since been demoted', async () => {
+    const first = await supertest(buildApp(MANAGER)).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
+    expect(first.headers.location).toBe('/admin/users');
+    expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, VALID_ID, 1);
+
+    // Simulates a concurrent demotion of the Manager themselves (e.g. to Mod) landing before this
+    // second, otherwise-identical request's queued check runs.
+    vi.mocked(getEffectiveAccessLevelForUser).mockImplementation(async (_guildId: string, user: { discord_id: string }) =>
+      user.discord_id === MANAGER.discordId ? AccessLevel.MOD : AccessLevel.USER,
+    );
+    const second = await supertest(buildApp(MANAGER)).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
+    expect(second.headers.location).toBe('/admin/users?error=access_level_too_high');
     // Only the first call's write should have gone through.
     expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledTimes(1);
   });
