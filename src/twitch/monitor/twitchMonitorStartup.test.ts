@@ -185,7 +185,7 @@ describe('handleOfflineStreamerOnStartup', () => {
   it('calls clearStreamerLive and adds group to groupsWithChanges', async () => {
     const groupsWithChanges = new Set<number>();
     await handleOfflineStreamerOnStartup(makeStreamer({ id: 10, discord_message_id: null, discord_channel_id: null, group: makeGroup({ id: 5 }) }), groupsWithChanges);
-    expect(clearStreamerLive).toHaveBeenCalledWith(10);
+    expect(clearStreamerLive).toHaveBeenCalledWith(10, null);
     expect(groupsWithChanges.has(5)).toBe(true);
   });
 
@@ -227,7 +227,7 @@ describe('performStartupLiveCheck', () => {
     vi.mocked(getStreams).mockResolvedValue([]);
     const streamer = makeStreamer({ twitch_name: 'alice', discord_message_id: 'msg1', discord_channel_id: 'ch1' });
     await performStartupLiveCheck(new Map(), new Map([['alice', 'u1']]), [streamer]);
-    expect(clearStreamerLive).toHaveBeenCalledWith(10);
+    expect(clearStreamerLive).toHaveBeenCalledWith(10, 'msg1');
   });
 
   it('skips streamers with no matching loginToUserId entry', async () => {

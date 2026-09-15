@@ -368,12 +368,22 @@ describe('setStreamerLive', () => {
 });
 
 describe('clearStreamerLive', () => {
-  it('executes UPDATE with id', async () => {
+  it('executes UPDATE guarded on the expected message id, with id and expected message id as params', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await clearStreamerLive(7);
+    await clearStreamerLive(7, 'msg42');
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
     expect(sql.toLowerCase()).toContain('update');
-    expect(params).toContain(7);
+    expect(sql).toContain('discord_message_id=?');
+    expect(params).toEqual([7, 'msg42']);
+  });
+
+  it('guards on discord_message_id IS NULL when expectedMessageId is null', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await clearStreamerLive(7, null);
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('discord_message_id IS NULL');
+    expect(params).toEqual([7]);
   });
 });

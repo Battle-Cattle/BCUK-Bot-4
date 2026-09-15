@@ -279,7 +279,12 @@ export async function deleteAnnouncement(
   // message), but clearing DB/map state below would still be this call's, not the newer op's, to do.
   if (!isCurrent()) return;
 
-  await clearStreamerLive(state.streamerId);
+  // clearStreamerLive's own WHERE guard (matching state.messageId) protects against this call's
+  // DB write landing *after* a newer setStreamerLive write, in case isCurrent() itself hasn't
+  // flipped false yet by the time this resolves (the two checks race independently) — see its doc
+  // comment. The isCurrent() check below still guards the in-memory liveStates/updateMultitwitch
+  // step that follows, which has no DB-level guard of its own.
+  await clearStreamerLive(state.streamerId, state.messageId);
   if (!isCurrent()) return; // superseded while clearing DB live status — don't delete a newer liveStates entry
   const groupId = state.groupId;
   liveStates.delete(stateKey);

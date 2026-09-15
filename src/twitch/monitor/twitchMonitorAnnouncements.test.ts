@@ -374,7 +374,7 @@ describe('deleteAnnouncement', () => {
     const liveStates = new Map([['k', makeLiveState({ messageId: 'msg1', channelId: 'ch1', streamerId: 10, groupId: 1 })]]);
     await deleteAnnouncement(liveStates, 'k');
     expect(tryDeleteDiscordMessage).toHaveBeenCalledWith('ch1', 'msg1');
-    expect(clearStreamerLive).toHaveBeenCalledWith(10);
+    expect(clearStreamerLive).toHaveBeenCalledWith(10, 'msg1');
     expect(updateMultitwitch).toHaveBeenCalledWith(1, liveStates);
     expect(liveStates.has('k')).toBe(false);
   });
@@ -383,7 +383,7 @@ describe('deleteAnnouncement', () => {
     vi.mocked(tryDeleteDiscordMessage).mockRejectedValueOnce(new Error('network'));
     const liveStates = new Map([['k', makeLiveState({ messageId: 'msg1', channelId: 'ch1', streamerId: 10, groupId: 1 })]]);
     await expect(deleteAnnouncement(liveStates, 'k')).resolves.not.toThrow();
-    expect(clearStreamerLive).toHaveBeenCalledWith(10);
+    expect(clearStreamerLive).toHaveBeenCalledWith(10, 'msg1');
     expect(updateMultitwitch).toHaveBeenCalledWith(1, liveStates);
     expect(liveStates.has('k')).toBe(false);
   });
@@ -407,7 +407,7 @@ describe('deleteAnnouncement', () => {
     });
     const liveStates = new Map([['k', makeLiveState({ messageId: 'msg1', channelId: 'ch1', streamerId: 10, groupId: 1 })]]);
     await deleteAnnouncement(liveStates, 'k', () => current);
-    expect(clearStreamerLive).toHaveBeenCalledWith(10);
+    expect(clearStreamerLive).toHaveBeenCalledWith(10, 'msg1');
     expect(updateMultitwitch).not.toHaveBeenCalled();
     expect(liveStates.has('k')).toBe(true);
   });
