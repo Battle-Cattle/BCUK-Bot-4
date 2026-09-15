@@ -120,8 +120,9 @@ export async function getStreamGroupsForGuild(guildId: string): Promise<DbStream
  * repo — see CLAUDE.md), so this guards in the application layer instead with an `INSERT ...
  * SELECT ... WHERE NOT EXISTS`.
  *
- * This closes the race under InnoDB's default `REPEATABLE READ` isolation (nothing in
- * `pool.ts` overrides it, so the connection runs under whatever the server's own default is):
+ * This closes the race when the server uses `REPEATABLE READ` isolation (nothing in `pool.ts`
+ * sets an isolation level, so the connection runs under whatever the server is configured
+ * with — this doesn't prove the deployed server actually uses `REPEATABLE READ`):
  * MySQL documents that an `INSERT ... SELECT` under `REPEATABLE READ` takes shared next-key
  * locks on the rows the `SELECT` scans, so two concurrent attempts for the same `guild_id`+`name`
  * serialize against each other and only one can affect a row. It does **not** close the race
