@@ -115,17 +115,40 @@ export async function getStreamGroupsForGuild(guildId: string): Promise<DbStream
 }
 
 /**
- * Insert a new stream group.
+ * Insert a new stream group, unless one with the same name already exists for this guild.
+ * `stream_group` has no unique constraint on `(guild_id, name)` (the DB is managed outside this
+ * repo — see CLAUDE.md), so this guards in the application layer instead with an `INSERT ...
+ * SELECT ... WHERE NOT EXISTS`.
+ *
+ * This closes the race when the server uses `REPEATABLE READ` isolation (nothing in `pool.ts`
+ * sets an isolation level, so the connection runs under whatever the server is configured
+ * with — this doesn't prove the deployed server actually uses `REPEATABLE READ`):
+ * MySQL documents that an `INSERT ... SELECT` under `REPEATABLE READ` takes shared next-key
+ * locks on the rows the `SELECT` scans, so two concurrent attempts for the same `guild_id`+`name`
+ * serialize against each other and only one can affect a row. It does **not** close the race
+ * under `READ COMMITTED` (or lower) — there, the same `SELECT` is a non-locking consistent read,
+ * so two concurrent statements could both see "no existing row" and both insert. `ER_DUP_ENTRY`
+ * is still caught below as forward-compatible defense-in-depth (harmless no-op today, since no
+ * such constraint exists yet), but the only way to fully close this under any isolation level is
+ * a real unique constraint on `(guild_id, name)` — a schema change outside this repo's control.
  *
  * @param input - Stream group fields to store, including the owning guild.
- * @returns Resolves once the row is inserted.
+ * @returns True if the group was created; false if a group with that name already existed for
+ *   this guild (nothing was inserted).
  */
-export async function addStreamGroup(input: AddStreamGroupInput): Promise<void> {
-  await getPool().execute(
-    `INSERT INTO stream_group (guild_id, name, discord_channel, live_message, new_game_message, multi_twitch, delete_old_posts)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [input.guildId, ...streamGroupParams(input)],
-  );
+export async function addStreamGroup(input: AddStreamGroupInput): Promise<boolean> {
+  try {
+    const [result] = await getPool().execute<mysql.ResultSetHeader>(
+      `INSERT INTO stream_group (guild_id, name, discord_channel, live_message, new_game_message, multi_twitch, delete_old_posts)
+       SELECT ?, ?, ?, ?, ?, ?, ?
+       WHERE NOT EXISTS (SELECT 1 FROM stream_group WHERE guild_id = ? AND name = ?)`,
+      [input.guildId, ...streamGroupParams(input), input.guildId, input.name],
+    );
+    return result.affectedRows > 0;
+  } catch (err) {
+    if (err && typeof err === 'object' && (err as { code?: string }).code === 'ER_DUP_ENTRY') return false;
+    throw err;
+  }
 }
 
 /**

@@ -4,6 +4,7 @@ import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 vi.mock('../../db', () => ({
   findUser: vi.fn(),
   getMemberAccessLevel: vi.fn(),
+  getEffectiveAccessLevelForUser: vi.fn(),
   getGuildMemberUsers: vi.fn(),
   setMemberAccessLevel: vi.fn(),
   removeGuildMember: vi.fn(),
@@ -31,11 +32,22 @@ vi.mock('../../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn(),
 }));
 
-vi.mock('../../shared/mutationQueue', () => ({
-  createMutationQueue: () => ({
-    run: (_key: string, fn: () => Promise<unknown>) => fn(),
-  }),
-}));
+// Real implementation (not a passthrough stub), with `run` wrapped in a spy so the
+// race-regression test below can assert call order against getMemberAccessLevel's own mock —
+// proving structurally (via mock.invocationCallOrder) that the authorization check happens
+// *inside* the queued operation rather than before it's enqueued, with no timing dependency.
+const { mockQueueRun } = vi.hoisted(() => ({ mockQueueRun: vi.fn() }));
+
+vi.mock('../../shared/mutationQueue', async () => {
+  const actual = await vi.importActual<typeof import('../../shared/mutationQueue')>('../../shared/mutationQueue');
+  return {
+    createMutationQueue: <K = string>() => {
+      const queue = actual.createMutationQueue<K>();
+      mockQueueRun.mockImplementation(queue.run.bind(queue));
+      return { ...queue, run: mockQueueRun };
+    },
+  };
+});
 
 vi.mock('./adminRefresh', async () => {
   const { Router } = await import('express');
@@ -66,7 +78,7 @@ vi.mock('../../shared/logger', () => ({
 
 import supertest from 'supertest';
 import router from './admin';
-import { findUser, getMemberAccessLevel, getGuildMemberUsers, setMemberAccessLevel, removeGuildMember } from '../../db';
+import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser, getGuildMemberUsers, setMemberAccessLevel, removeGuildMember } from '../../db';
 import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { AccessLevel } from '../../db';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
@@ -90,6 +102,7 @@ type SessionUser = {
 
 const GUILD_ID = '900000000000000001';
 const ADMIN: SessionUser = { discordId: '100000000000000001', discordName: 'AdminUser', discordAvatar: null, isOwner: false, accessLevel: AccessLevel.ADMIN, currentGuildId: GUILD_ID };
+const MANAGER: SessionUser = { discordId: '200000000000000001', discordName: 'ManagerUser', discordAvatar: null, isOwner: false, accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID };
 const VALID_ID = '300000000000000001';
 
 /** Builds a supertest-ready app: the admin router with a stubbed session and a render mock that flattens locals into the JSON body. */
@@ -100,7 +113,19 @@ function buildApp(sessionUser: SessionUser = ADMIN) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getGuildMemberUsers).mockResolvedValue([]);
-  vi.mocked(findUser).mockResolvedValue(null);
+  // The actor's own authorization is re-read from the DB inside checkManagerEditAuth/
+  // checkToggleTwitchAuth (not trusted from the session) — see admin.ts's TOCTOU fix. These
+  // stand in for that DB state, keyed by which fixture session is acting, so existing tests using
+  // ADMIN/MANAGER continue to behave like an actual Admin/Manager without each test wiring it up.
+  vi.mocked(findUser).mockImplementation(async (id: string) => {
+    if (id === ADMIN.discordId || id === MANAGER.discordId) return { discord_id: id, is_owner: false } as any;
+    return null;
+  });
+  vi.mocked(getEffectiveAccessLevelForUser).mockImplementation(async (_guildId: string, user: { discord_id: string }) => {
+    if (user.discord_id === ADMIN.discordId) return AccessLevel.ADMIN;
+    if (user.discord_id === MANAGER.discordId) return AccessLevel.MANAGER;
+    return AccessLevel.USER;
+  });
   vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
   vi.mocked(setMemberAccessLevel).mockResolvedValue(undefined);
   vi.mocked(removeGuildMember).mockResolvedValue(undefined);
@@ -266,6 +291,68 @@ describe('POST /users/update', () => {
     expect(res.headers.location).toBe('/admin/users');
     expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, VALID_ID, 1);
   });
+
+  // Regression coverage for the TOCTOU authorization race: checkManagerEditAuth now runs
+  // *inside* the runUserMutation callback (see adminUserValidation.ts's doc comment), not before
+  // it's enqueued, so its target-level read can never go stale against a write that already
+  // landed for the same discordId. This proves the check is re-evaluated fresh on every call
+  // rather than being decided once up front — combined with runUserMutation's own strict
+  // per-discordId serialization (tested in adminUserMutationQueue.test.ts/mutationQueue.test.ts),
+  // that means a concurrent promotion landing between a Manager's stale read and their write can
+  // no longer let a since-invalid edit through.
+  it('re-checks authorization fresh on every call — rejects once the target has since been promoted', async () => {
+    // First call: target is currently below the Manager's own level — allowed.
+    vi.mocked(getMemberAccessLevel).mockResolvedValueOnce(AccessLevel.MOD);
+    const first = await supertest(buildApp(MANAGER)).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
+    expect(first.headers.location).toBe('/admin/users');
+    expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, VALID_ID, 1);
+
+    // Simulates a concurrent Admin promotion landing between this Manager's original read and
+    // this second, otherwise-identical request — a stale up-front check would have no way to
+    // notice; the fresh in-callback check does.
+    vi.mocked(getMemberAccessLevel).mockResolvedValueOnce(AccessLevel.ADMIN);
+    const second = await supertest(buildApp(MANAGER)).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
+    expect(second.headers.location).toBe('/admin/users?error=target_above_level');
+    // Only the first call's write should have gone through.
+    expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression coverage for the actor-side TOCTOU (CodeRabbit finding on PR #657): the acting
+  // Manager's own access level is re-read from the DB inside checkManagerEditAuth on every call,
+  // not trusted from the sessionUser snapshot taken when the request came in. Simulates the
+  // Manager themselves having been demoted (e.g. by an Admin) between two otherwise-identical
+  // requests within the same session — the second must be re-authorized against their current,
+  // lower DB level rather than reusing the higher level captured earlier in the session.
+  it('re-checks the acting Manager\'s own access level fresh on every call — rejects once they have since been demoted', async () => {
+    const first = await supertest(buildApp(MANAGER)).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
+    expect(first.headers.location).toBe('/admin/users');
+    expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, VALID_ID, 1);
+
+    // Simulates a concurrent demotion of the Manager themselves (e.g. to Mod) landing before this
+    // second, otherwise-identical request's queued check runs.
+    vi.mocked(getEffectiveAccessLevelForUser).mockImplementation(async (_guildId: string, user: { discord_id: string }) =>
+      user.discord_id === MANAGER.discordId ? AccessLevel.MOD : AccessLevel.USER,
+    );
+    const second = await supertest(buildApp(MANAGER)).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
+    expect(second.headers.location).toBe('/admin/users?error=access_level_too_high');
+    // Only the first call's write should have gone through.
+    expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledTimes(1);
+  });
+
+  // Structural proof that the authorization check lives *inside* the queued operation rather
+  // than before it's enqueued: the buggy version called getMemberAccessLevel first and only
+  // then called runUserMutation (so checkOrder < runOrder); the fixed version enters the queue
+  // first and the check runs as part of the queued callback (so runOrder < checkOrder). Compares
+  // mock.invocationCallOrder from a single request — no timing/concurrency simulation needed.
+  it('runs the authorization check inside the queued operation, not before it is enqueued', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValueOnce(AccessLevel.MOD);
+
+    await supertest(buildApp(MANAGER)).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
+
+    const [runOrder] = mockQueueRun.mock.invocationCallOrder;
+    const [checkOrder] = vi.mocked(getMemberAccessLevel).mock.invocationCallOrder;
+    expect(runOrder).toBeLessThan(checkOrder);
+  });
 });
 
 // --- POST /users/remove ---
@@ -304,6 +391,21 @@ describe('POST /users/remove', () => {
     expect(res.headers.location).toBe('/admin/users');
     expect(vi.mocked(removeGuildMember)).toHaveBeenCalledWith(GUILD_ID, VALID_ID);
     expect(vi.mocked(reloadGuildRegistry)).toHaveBeenCalled();
+  });
+
+  // Regression coverage for the actor-side TOCTOU on removal (CodeRabbit finding on PR #657):
+  // requireAdmin only checks the session's access level at request time, before the operation
+  // waits on the mutation queue — the acting admin's own access level is re-read fresh from the
+  // DB inside the guarded operation, not trusted from the session, so a demotion of the actor
+  // between the request landing and the queued removal running is caught.
+  it('re-checks the acting Admin\'s own access level fresh — rejects once they have since been demoted, without removing', async () => {
+    vi.mocked(getEffectiveAccessLevelForUser).mockImplementation(async (_guildId: string, user: { discord_id: string }) =>
+      user.discord_id === ADMIN.discordId ? AccessLevel.MANAGER : AccessLevel.USER,
+    );
+    const res = await supertest(buildApp(ADMIN)).post('/users/remove').type('form').send({ discord_id: VALID_ID });
+    expect(res.headers.location).toBe('/admin/users?error=target_above_level');
+    expect(vi.mocked(removeGuildMember)).not.toHaveBeenCalled();
+    expect(vi.mocked(reloadGuildRegistry)).not.toHaveBeenCalled();
   });
 });
 

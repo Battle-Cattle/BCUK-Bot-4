@@ -64,7 +64,7 @@ beforeEach(() => {
   vi.mocked(getAllUsers).mockResolvedValue([]);
   vi.mocked(getAllEventSubStreamers).mockResolvedValue([]);
   vi.mocked(getLiveStates).mockReturnValue([]);
-  vi.mocked(addStreamGroup).mockResolvedValue(undefined);
+  vi.mocked(addStreamGroup).mockResolvedValue(true);
   vi.mocked(addStreamer).mockResolvedValue(undefined);
   vi.mocked(findUser).mockResolvedValue(null);
 });

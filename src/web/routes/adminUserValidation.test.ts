@@ -5,6 +5,7 @@ import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 vi.mock('../../db', () => ({
   findUser: vi.fn(),
   getMemberAccessLevel: vi.fn(),
+  getEffectiveAccessLevelForUser: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('../../twitch/twitchChannelName', () => ({
@@ -19,7 +20,7 @@ vi.mock('./adminUserMutations', () => ({
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-import { findUser, getMemberAccessLevel } from '../../db';
+import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser } from '../../db';
 import { AccessLevel } from '../../db';
 import { isLockWaitTimeoutDbError } from './adminUserMutations';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
@@ -29,10 +30,11 @@ import {
   parseTwitchEnabled,
   parseTwitchNameInput,
   checkManagerEditAuth,
+  checkRemoveAuth,
   handleDbError,
   resolveGuildId,
   resolveValidDiscordId,
-  resolveToggleTwitchInputs,
+  checkToggleTwitchAuth,
 } from './adminUserValidation';
 import type { Request, Response } from 'express';
 
@@ -186,67 +188,138 @@ describe('parseTwitchNameInput', () => {
 
 describe('checkManagerEditAuth', () => {
   const GUILD_ID = '900000000000000001';
-  const ADMIN_SESSION = { discordId: '100000000000000001', accessLevel: AccessLevel.ADMIN, isOwner: false };
-  const MANAGER_SESSION = { discordId: '200000000000000002', accessLevel: AccessLevel.MANAGER, isOwner: false };
+  const ADMIN_ID = '100000000000000001';
+  const MANAGER_ID = '200000000000000002';
+  const TARGET_ID = '300000000000000003';
+  const ADMIN_SESSION = { discordId: ADMIN_ID };
+  const MANAGER_SESSION = { discordId: MANAGER_ID };
+
+  // Sets up the acting user's fresh (re-read, not session-cached) access level and owner flag —
+  // see checkManagerEditAuth's doc comment on why these are resolved from the DB rather than
+  // trusted from the caller's sessionUser argument.
+  function mockActingUser(accessLevel: number, isOwner = false): void {
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(accessLevel);
+    vi.mocked(findUser).mockImplementation(async (id: string) =>
+      ({ discord_id: id, is_owner: id === ADMIN_ID || id === MANAGER_ID ? isOwner : false }) as any,
+    );
+  }
 
   beforeEach(() => {
     vi.mocked(findUser).mockResolvedValue(null);
     vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.USER);
   });
 
   it('returns "self_edit_forbidden" when editing own account', async () => {
-    const result = await checkManagerEditAuth(
-      { discordId: '100000000000000001', accessLevel: AccessLevel.ADMIN, isOwner: false },
-      '100000000000000001',
-      AccessLevel.USER,
-      GUILD_ID,
-    );
+    const result = await checkManagerEditAuth({ discordId: ADMIN_ID }, ADMIN_ID, AccessLevel.USER, GUILD_ID);
     expect(result).toBe('self_edit_forbidden');
   });
 
   it('returns "target_above_level" when a non-owner edits an owner', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: '300000000000000003', is_owner: true } as any);
-    const result = await checkManagerEditAuth(ADMIN_SESSION, '300000000000000003', AccessLevel.USER, GUILD_ID);
+    mockActingUser(AccessLevel.ADMIN);
+    vi.mocked(findUser).mockImplementation(async (id: string) =>
+      (id === TARGET_ID ? { discord_id: TARGET_ID, is_owner: true } : { discord_id: id, is_owner: false }) as any,
+    );
+    const result = await checkManagerEditAuth(ADMIN_SESSION, TARGET_ID, AccessLevel.USER, GUILD_ID);
     expect(result).toBe('target_above_level');
   });
 
   it('returns null for admin editing a lower-level user', async () => {
-    const result = await checkManagerEditAuth(ADMIN_SESSION, '300000000000000003', AccessLevel.USER, GUILD_ID);
+    mockActingUser(AccessLevel.ADMIN);
+    const result = await checkManagerEditAuth(ADMIN_SESSION, TARGET_ID, AccessLevel.USER, GUILD_ID);
     expect(result).toBeNull();
   });
 
   it('returns null for admin editing a user at the same level', async () => {
-    const result = await checkManagerEditAuth(ADMIN_SESSION, '300000000000000003', AccessLevel.ADMIN, GUILD_ID);
+    mockActingUser(AccessLevel.ADMIN);
+    const result = await checkManagerEditAuth(ADMIN_SESSION, TARGET_ID, AccessLevel.ADMIN, GUILD_ID);
     expect(result).toBeNull();
   });
 
   it('returns "access_level_too_high" when manager tries to set level >= their own', async () => {
-    const result = await checkManagerEditAuth(MANAGER_SESSION, '300000000000000003', AccessLevel.MANAGER, GUILD_ID);
+    mockActingUser(AccessLevel.MANAGER);
+    const result = await checkManagerEditAuth(MANAGER_SESSION, TARGET_ID, AccessLevel.MANAGER, GUILD_ID);
     expect(result).toBe('access_level_too_high');
   });
 
   it('returns "access_level_too_high" when manager tries to set level above their own', async () => {
-    const result = await checkManagerEditAuth(MANAGER_SESSION, '300000000000000003', AccessLevel.ADMIN, GUILD_ID);
+    mockActingUser(AccessLevel.MANAGER);
+    const result = await checkManagerEditAuth(MANAGER_SESSION, TARGET_ID, AccessLevel.ADMIN, GUILD_ID);
     expect(result).toBe('access_level_too_high');
   });
 
   it('returns "target_above_level" when the target is already at manager level in this guild', async () => {
+    mockActingUser(AccessLevel.MANAGER);
     vi.mocked(getMemberAccessLevel).mockResolvedValue(AccessLevel.MANAGER);
-    const result = await checkManagerEditAuth(MANAGER_SESSION, '300000000000000003', AccessLevel.MOD, GUILD_ID);
+    const result = await checkManagerEditAuth(MANAGER_SESSION, TARGET_ID, AccessLevel.MOD, GUILD_ID);
     expect(result).toBe('target_above_level');
-    expect(vi.mocked(getMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, '300000000000000003');
+    expect(vi.mocked(getMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, TARGET_ID);
   });
 
   it('returns null when the target is below manager level in this guild', async () => {
+    mockActingUser(AccessLevel.MANAGER);
     vi.mocked(getMemberAccessLevel).mockResolvedValue(AccessLevel.MOD);
-    const result = await checkManagerEditAuth(MANAGER_SESSION, '300000000000000003', AccessLevel.MOD, GUILD_ID);
+    const result = await checkManagerEditAuth(MANAGER_SESSION, TARGET_ID, AccessLevel.MOD, GUILD_ID);
     expect(result).toBeNull();
   });
 
   it('returns null when target has no membership in this guild yet', async () => {
+    mockActingUser(AccessLevel.MANAGER);
     vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
-    const result = await checkManagerEditAuth(MANAGER_SESSION, '300000000000000003', AccessLevel.MOD, GUILD_ID);
+    const result = await checkManagerEditAuth(MANAGER_SESSION, TARGET_ID, AccessLevel.MOD, GUILD_ID);
     expect(result).toBeNull();
+  });
+
+  it('re-reads the acting user\'s access level from the DB rather than trusting a stale value passed in', async () => {
+    // Regression coverage for the actor-side TOCTOU: even if a caller's sessionUser object still
+    // carries an old, higher access level, the DB's current (lower) level governs the decision.
+    mockActingUser(AccessLevel.MOD);
+    const result = await checkManagerEditAuth(MANAGER_SESSION, TARGET_ID, AccessLevel.MANAGER, GUILD_ID);
+    expect(result).toBe('access_level_too_high');
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).toHaveBeenCalledWith(GUILD_ID, expect.objectContaining({ discord_id: MANAGER_ID }));
+  });
+});
+
+// ─── checkRemoveAuth ─────────────────────────────────────────────────────────
+
+describe('checkRemoveAuth', () => {
+  const GUILD_ID = '900000000000000001';
+  const ADMIN_ID = '100000000000000001';
+  const ADMIN_SESSION = { discordId: ADMIN_ID };
+
+  function mockActingUser(accessLevel: number): void {
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(accessLevel);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: ADMIN_ID, is_owner: false } as any);
+  }
+
+  beforeEach(() => {
+    vi.mocked(findUser).mockResolvedValue(null);
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.USER);
+  });
+
+  it('returns null when the actor is currently an Admin', async () => {
+    mockActingUser(AccessLevel.ADMIN);
+    expect(await checkRemoveAuth(ADMIN_SESSION, GUILD_ID)).toBeNull();
+  });
+
+  it('returns "target_above_level" when the actor is no longer an Admin', async () => {
+    mockActingUser(AccessLevel.MANAGER);
+    expect(await checkRemoveAuth(ADMIN_SESSION, GUILD_ID)).toBe('target_above_level');
+  });
+
+  it('re-reads the acting user\'s access level from the DB rather than trusting a stale value passed in', async () => {
+    // Regression coverage for the actor-side TOCTOU: requireAdmin's session check happens before
+    // the operation is queued, so a demotion landing in between must still be caught here.
+    mockActingUser(AccessLevel.USER);
+    const result = await checkRemoveAuth(ADMIN_SESSION, GUILD_ID);
+    expect(result).toBe('target_above_level');
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).toHaveBeenCalledWith(GUILD_ID, expect.objectContaining({ discord_id: ADMIN_ID }));
+  });
+
+  it('treats a missing actor user row as User level (denies)', async () => {
+    vi.mocked(findUser).mockResolvedValue(null);
+    expect(await checkRemoveAuth(ADMIN_SESSION, GUILD_ID)).toBe('target_above_level');
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
 });
 
@@ -306,84 +379,80 @@ describe('resolveValidDiscordId', () => {
   });
 });
 
-// ─── resolveToggleTwitchInputs ───────────────────────────────────────────────
+// ─── checkToggleTwitchAuth ───────────────────────────────────────────────────
+//
+// Unlike the old resolveToggleTwitchInputs, this returns an error code (or null) directly
+// instead of redirecting — callers run it inside runUserMutation's callback, atomically with
+// the write it guards, so its result can't go stale against a concurrent write for the same
+// user (see checkManagerEditAuth's doc comment for the same reasoning).
 
-describe('resolveToggleTwitchInputs', () => {
+describe('checkToggleTwitchAuth', () => {
   const GUILD_ID = '900000000000000001';
+  const ACTOR_ID = '100000000000000001';
   const TARGET_ID = '300000000000000001';
-  const ADMIN_USER = { accessLevel: AccessLevel.ADMIN, isOwner: false };
-  const MANAGER_USER = { accessLevel: AccessLevel.MANAGER, isOwner: false };
-  const OWNER_USER = { accessLevel: AccessLevel.ADMIN, isOwner: true };
+  const ADMIN_SESSION = { discordId: ACTOR_ID };
+  const MANAGER_SESSION = { discordId: ACTOR_ID };
 
-  function mockRes() {
-    const redirect = vi.fn();
-    return { res: { redirect } as unknown as Response, redirect };
+  // See checkManagerEditAuth.test's mockActingUser — same reasoning: the actor's access level
+  // and owner flag are re-read from the DB inside the function, not trusted from the caller.
+  function mockActingUser(accessLevel: number, isOwner = false): void {
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(accessLevel);
+    vi.mocked(findUser).mockImplementation(async (id: string) =>
+      ({ discord_id: id, is_owner: id === ACTOR_ID ? isOwner : false }) as any,
+    );
   }
 
   beforeEach(() => {
     vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
     vi.mocked(findUser).mockResolvedValue(null);
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.USER);
   });
 
-  it('returns true when enabled flag is "true" and target is a guild member', async () => {
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'true');
-    expect(result).toBe(true);
-    expect(redirect).not.toHaveBeenCalled();
+  it('returns null when the actor is an admin and the target is a guild member', async () => {
+    mockActingUser(AccessLevel.ADMIN);
+    expect(await checkToggleTwitchAuth(ADMIN_SESSION, GUILD_ID, TARGET_ID)).toBeNull();
   });
 
-  it('returns false when enabled flag is "false" and target is a guild member', async () => {
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'false');
-    expect(result).toBe(false);
-    expect(redirect).not.toHaveBeenCalled();
-  });
-
-  it('redirects ?error=invalid_twitch_state and returns null for an unrecognised flag', async () => {
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'maybe');
-    expect(result).toBeNull();
-    expect(redirect).toHaveBeenCalledWith('/admin/users?error=invalid_twitch_state');
-  });
-
-  it('redirects ?error=target_above_level and returns null when target is not a guild member', async () => {
+  it('returns target_above_level when target is not a guild member', async () => {
+    mockActingUser(AccessLevel.ADMIN);
     vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'true');
-    expect(result).toBeNull();
-    expect(redirect).toHaveBeenCalledWith('/admin/users?error=target_above_level');
+    expect(await checkToggleTwitchAuth(ADMIN_SESSION, GUILD_ID, TARGET_ID)).toBe('target_above_level');
   });
 
-  it('redirects ?error=target_above_level when a non-admin actor targets a user at their own level', async () => {
+  it('returns target_above_level when a non-admin actor targets a user at their own level', async () => {
+    mockActingUser(AccessLevel.MANAGER);
     vi.mocked(getMemberAccessLevel).mockResolvedValue(AccessLevel.MANAGER);
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, MANAGER_USER, GUILD_ID, TARGET_ID, 'true');
-    expect(result).toBeNull();
-    expect(redirect).toHaveBeenCalledWith('/admin/users?error=target_above_level');
+    expect(await checkToggleTwitchAuth(MANAGER_SESSION, GUILD_ID, TARGET_ID)).toBe('target_above_level');
   });
 
   it('allows an admin actor to toggle a target at any level', async () => {
+    mockActingUser(AccessLevel.ADMIN);
     vi.mocked(getMemberAccessLevel).mockResolvedValue(AccessLevel.ADMIN);
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'true');
-    expect(result).toBe(true);
-    expect(redirect).not.toHaveBeenCalled();
+    expect(await checkToggleTwitchAuth(ADMIN_SESSION, GUILD_ID, TARGET_ID)).toBeNull();
   });
 
-  it('redirects ?error=target_above_level when a non-owner admin targets a bot owner', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: TARGET_ID, is_owner: true } as any);
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'true');
-    expect(result).toBeNull();
-    expect(redirect).toHaveBeenCalledWith('/admin/users?error=target_above_level');
+  it('returns target_above_level when a non-owner admin targets a bot owner', async () => {
+    mockActingUser(AccessLevel.ADMIN);
+    vi.mocked(findUser).mockImplementation(async (id: string) =>
+      (id === TARGET_ID ? { discord_id: TARGET_ID, is_owner: true } : { discord_id: id, is_owner: false }) as any,
+    );
+    expect(await checkToggleTwitchAuth(ADMIN_SESSION, GUILD_ID, TARGET_ID)).toBe('target_above_level');
   });
 
   it('allows an owner to toggle another bot owner', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: TARGET_ID, is_owner: true } as any);
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, OWNER_USER, GUILD_ID, TARGET_ID, 'true');
-    expect(result).toBe(true);
-    expect(redirect).not.toHaveBeenCalled();
+    mockActingUser(AccessLevel.ADMIN, true);
+    vi.mocked(findUser).mockImplementation(async (id: string) =>
+      ({ discord_id: id, is_owner: true }) as any,
+    );
+    expect(await checkToggleTwitchAuth(ADMIN_SESSION, GUILD_ID, TARGET_ID)).toBeNull();
+  });
+
+  it('re-reads the acting user\'s access level from the DB rather than trusting a stale value passed in', async () => {
+    mockActingUser(AccessLevel.MOD);
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(AccessLevel.MANAGER);
+    const result = await checkToggleTwitchAuth(MANAGER_SESSION, GUILD_ID, TARGET_ID);
+    expect(result).toBe('target_above_level');
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).toHaveBeenCalledWith(GUILD_ID, expect.objectContaining({ discord_id: ACTOR_ID }));
   });
 });
 

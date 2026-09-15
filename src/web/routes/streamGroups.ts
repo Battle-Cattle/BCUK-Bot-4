@@ -36,7 +36,7 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
   }
 
   try {
-    await addStreamGroup({
+    const created = await addStreamGroup({
       guildId: getCurrentGuildId(req),
       name: name!.trim().slice(0, 100),
       discordChannel: discord_channel!.trim().slice(0, 20),
@@ -45,6 +45,7 @@ router.post('/streams/groups/add', requireManager, csrfProtection, async (req, r
       multiTwitch: multi_twitch,
       deleteOldPosts: delete_old_posts,
     });
+    if (!created) return redirectStreamsInvalid(res, 'duplicate_group_name');
     triggerRestart();
   } catch (err) {
     return redirectStreamsFailure(res, log, 'Add stream group error:', err, 'add_group_failed');
