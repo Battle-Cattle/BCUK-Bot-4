@@ -587,6 +587,80 @@ describe('startDiscordBot — gateway watchdog', () => {
   });
 });
 
+// ─── startDiscordBot — gateway stall watchdog ──────────────────────────────────
+//
+// Covers the fallback for when discord.js's own reconnect loop gets stuck without ever firing
+// 'shardDisconnect' (no close code — the socket handshake itself keeps failing, e.g. a sustained
+// run of `Unexpected server response: 503`), and so never reaches the existing self-heal.
+
+describe('startDiscordBot — gateway stall watchdog', () => {
+  /** Finds the handler registered for `event` via `mockInstance.on`. */
+  function findHandler(event: string): (...args: any[]) => unknown {
+    return mockInstance.on.mock.calls.find(([e]: string[]) => e === event)?.[1];
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('forces a fresh login when no shard activity occurs for the stall threshold', async () => {
+    mod.startDiscordBot();
+    expect(mockInstance.login).toHaveBeenCalledOnce();
+
+    // No shardReconnecting/shardError/shardReady/shardDisconnect at all — total silence.
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('reconnect loop appears stuck'));
+    expect(mockInstance.destroy).toHaveBeenCalledOnce();
+    expect(mockInstance.login).toHaveBeenCalledTimes(2);
+  });
+
+  it('DMs the owner when the gateway reconnect loop appears stuck', async () => {
+    const ownerAlerts = await import('./ownerAlerts.js');
+    mod.startDiscordBot();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('reconnect appears stuck'));
+  });
+
+  it('does not force a reconnect while shard activity keeps arriving within the stall threshold', async () => {
+    mod.startDiscordBot();
+    const handler = findHandler('shardReconnecting');
+
+    // A reconnect attempt every 90s (under the 120s threshold) resets the clock each time.
+    await vi.advanceTimersByTimeAsync(90_000);
+    handler(0);
+    await vi.advanceTimersByTimeAsync(90_000);
+    handler(0);
+    await vi.advanceTimersByTimeAsync(90_000);
+
+    expect(mockInstance.login).toHaveBeenCalledOnce();
+  });
+
+  it('does not force a reconnect once the client is fully connected, even after a long idle', async () => {
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    await vi.advanceTimersByTimeAsync(600_000);
+
+    expect(mockInstance.login).toHaveBeenCalledOnce();
+  });
+
+  it('stops the watchdog on stopDiscordBot, so it does not fire after an intentional shutdown', async () => {
+    mod.startDiscordBot();
+    mod.stopDiscordBot();
+    mockInstance.login.mockClear();
+
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(mockInstance.login).not.toHaveBeenCalled();
+  });
+});
+
 // ─── startDiscordBot — login failure reconnect backoff ─────────────────────────
 //
 // A failed shardDisconnect self-heal (or the very first boot) must not leave the process
