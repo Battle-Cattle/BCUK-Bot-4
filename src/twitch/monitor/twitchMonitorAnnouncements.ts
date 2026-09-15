@@ -251,10 +251,16 @@ export async function editAnnouncement(
  * the in-memory map. DB/state cleanup always runs even if Discord message
  * deletion fails, so a transient Discord API error can't leave the streamer
  * stuck marked as live.
+ * @param isCurrent - See `withLoginLock` in twitchMonitorPoll.ts; checked after each `await` so a
+ *   caller superseded by a newer same-login operation (e.g. the streamer came back live again
+ *   while this call's own Discord/DB calls were in flight) stops before deleting or clearing
+ *   state a newer operation now owns. Defaults to always-current for callers outside a login
+ *   lock (e.g. full-monitor shutdown), which don't need this guard.
  */
 export async function deleteAnnouncement(
   liveStates: Map<string, LiveState>,
   stateKey: string,
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
   const state = liveStates.get(stateKey);
   if (!state || !state.messageId || !state.channelId) {
@@ -267,8 +273,19 @@ export async function deleteAnnouncement(
   } catch (err) {
     log.error(`Failed to delete announcement message for streamer ${state.streamerId}, continuing cleanup:`, err);
   }
+  // Superseded while deleting the Discord message (e.g. its lock timed out and a newer op for
+  // this login started) — the message is already gone (or never existed), which is harmless for
+  // the newer op's own edit/repost path (tryDeleteDiscordMessage/repost both tolerate a missing
+  // message), but clearing DB/map state below would still be this call's, not the newer op's, to do.
+  if (!isCurrent()) return;
 
-  await clearStreamerLive(state.streamerId);
+  // clearStreamerLive's own WHERE guard (matching state.messageId) protects against this call's
+  // DB write landing *after* a newer setStreamerLive write, in case isCurrent() itself hasn't
+  // flipped false yet by the time this resolves (the two checks race independently) — see its doc
+  // comment. The isCurrent() check below still guards the in-memory liveStates/updateMultitwitch
+  // step that follows, which has no DB-level guard of its own.
+  await clearStreamerLive(state.streamerId, state.messageId);
+  if (!isCurrent()) return; // superseded while clearing DB live status — don't delete a newer liveStates entry
   const groupId = state.groupId;
   liveStates.delete(stateKey);
   await updateMultitwitch(groupId, liveStates);

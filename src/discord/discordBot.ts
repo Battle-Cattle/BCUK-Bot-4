@@ -7,7 +7,7 @@ import { executeCounterCommandForDiscord, forgetGuildCounterCooldown } from '../
 import { setDiscordReady, clearVoiceStatus } from '../shared/statusStore';
 import { recordDiscordConnected } from '../shared/healthStore';
 import { executeHealthCommandForDiscord } from '../commands/healthCommandHandler';
-import { forgetGuild as forgetGuildVoiceState } from '../audio/audioPlayer';
+import { forgetGuild as forgetGuildVoiceState, disconnect as disconnectAllVoice } from '../audio/audioPlayer';
 import { forgetGuildRefreshState } from './guildRefreshState';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
 import { sendOwnerAlert } from './ownerAlerts';
@@ -308,6 +308,17 @@ function registerClientReadyHandler(client: Client): void {
  * this bot running a single (unsharded) client, that means every guild silently
  * stops receiving events. Force a fresh login so the process self-heals instead
  * of sitting alive-but-dead until someone notices and restarts it manually.
+ *
+ * `stopDiscordBot()`/`startDiscordBot()` destroy the old `Client` and construct a brand-new one —
+ * `audioPlayer.ts`'s custom (non-`voiceAdapterCreator`) voice adapter isn't registered with
+ * discord.js's own voice manager, so `Client.destroy()` doesn't tear down any active
+ * `VoiceConnection`s for us. Left alone, a guild connected to voice when the shard drops would be
+ * orphaned: its `GuildVoiceState.client` and adapter dispatcher entry still reference the
+ * destroyed client, so it can never receive gateway voice updates again and
+ * `scheduleReconnect` would retry forever against a dead client. `disconnectAllVoice()` (no
+ * `guildId` — every guild, since every one of them loses its client here) tears every guild's
+ * voice connection down first, so each cleanly reconnects once `startDiscordBot()`'s new client
+ * is ready, the same way it would after a normal `!voice` disconnect.
  * @param client - The Discord client to register the handlers on.
  */
 function registerConnectionHandlers(client: Client): void {
@@ -323,6 +334,7 @@ function registerConnectionHandlers(client: Client): void {
   client.on('shardDisconnect', (event, shardId) => {
     log.error(`Shard ${shardId} disconnected permanently (code ${event.code}) — reconnecting client.`);
     recordDiscordConnected(false);
+    disconnectAllVoice();
     stopDiscordBot();
     startDiscordBot();
   });

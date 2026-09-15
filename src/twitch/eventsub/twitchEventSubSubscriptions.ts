@@ -164,8 +164,11 @@ async function createSubscriptionsForStreamer(
   sessionId: string, data: StreamerEventSubData,
 ): Promise<SubscriptionResult> {
   const { uid, token, name, config, enabledAlerts = new Set<AlertEventType>() } = data;
-  const normalizedName = normalizeTwitchChannelName(name) ?? name.toLowerCase();
-  if (!getActiveChannels().has(normalizedName)) {
+  const normalizedName = normalizeTwitchChannelName(name);
+  // getActiveChannels() only ever contains normalized names, so a name that fails
+  // normalization can never match — skip immediately rather than falling back to an
+  // unnormalized key that would just fail the same `.has()` check anyway.
+  if (normalizedName === null || !getActiveChannels().has(normalizedName)) {
     log.info(`Skipping EventSub subscriptions for ${name} — bot not in channel`);
     return { desired: new Set(), created: new Map(), ownSubscriptions: [] };
   }

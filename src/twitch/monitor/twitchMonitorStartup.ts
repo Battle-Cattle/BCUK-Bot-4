@@ -105,7 +105,7 @@ export async function handleOfflineStreamerOnStartup(
       return;
     }
   }
-  await clearStreamerLive(streamer.id);
+  await clearStreamerLive(streamer.id, streamer.discord_message_id);
   groupsWithChanges.add(streamer.group.id);
 }
 

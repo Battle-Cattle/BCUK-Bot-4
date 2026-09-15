@@ -439,6 +439,27 @@ describe('shutdown', () => {
     expect(announceOrder).toBeLessThan(stopDiscordOrder);
     expect(announceOrder).toBeLessThan(stopTwitchOrder);
   });
+
+  it('still closes the pool and exits(0) when a teardown step rejects', async () => {
+    const { closePool } = await import('./db.js');
+    const { stopTwitchMonitor } = await import('./twitch/monitor/twitchMonitor.js');
+    const { stopDiscordBot } = await import('./discord/discordBot.js');
+
+    vi.mocked(stopTwitchMonitor).mockRejectedValueOnce(new Error('monitor teardown failed'));
+
+    await runMain();
+    process.emit('SIGINT');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(stopTwitchMonitor)).toHaveBeenCalledOnce();
+    // Steps after the rejecting one must still run.
+    expect(vi.mocked(stopDiscordBot)).toHaveBeenCalledOnce();
+    expect(vi.mocked(closePool)).toHaveBeenCalledOnce();
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(lastBotLogger?.error).toHaveBeenCalledWith(
+      'Error stopping Twitch monitor during shutdown:', expect.any(Error),
+    );
+  });
 });
 
 // ─── Global unhandled error handlers ──────────────────────────────────────────

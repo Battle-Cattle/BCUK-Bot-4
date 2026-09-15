@@ -26,7 +26,7 @@ vi.mock('../commands/counterHandler', () => ({
 vi.mock('../shared/statusStore', () => ({ setDiscordReady: vi.fn(), clearVoiceStatus: vi.fn() }));
 vi.mock('../shared/healthStore', () => ({ recordDiscordConnected: vi.fn() }));
 vi.mock('../commands/healthCommandHandler', () => ({ executeHealthCommandForDiscord: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('../audio/audioPlayer', () => ({ forgetGuild: vi.fn() }));
+vi.mock('../audio/audioPlayer', () => ({ forgetGuild: vi.fn(), disconnect: vi.fn() }));
 vi.mock('./guildRefreshState', () => ({ forgetGuildRefreshState: vi.fn() }));
 vi.mock('./ownerAlerts', () => ({ sendOwnerAlert: vi.fn().mockResolvedValue(true) }));
 vi.mock('./guildRegistry', () => ({
@@ -539,6 +539,19 @@ describe('startDiscordBot — gateway watchdog', () => {
     const handler = findHandler('shardDisconnect');
     handler({ code: 4004 }, 0);
     expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(false);
+  });
+
+  it('disconnects every guild\'s voice connection before replacing the client, so none are orphaned against the destroyed one', async () => {
+    const audioPlayer = await import('../audio/audioPlayer.js');
+    mod.startDiscordBot();
+    const handler = findHandler('shardDisconnect');
+    handler({ code: 4004 }, 0);
+
+    // No guildId — every guild loses its client here, not just one.
+    expect(vi.mocked(audioPlayer.disconnect)).toHaveBeenCalledWith();
+    const [disconnectOrder] = vi.mocked(audioPlayer.disconnect).mock.invocationCallOrder;
+    const [destroyOrder] = mockInstance.destroy.mock.invocationCallOrder;
+    expect(disconnectOrder).toBeLessThan(destroyOrder);
   });
 });
 

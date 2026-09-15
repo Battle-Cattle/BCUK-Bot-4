@@ -443,7 +443,7 @@ export { recordStreamerEvent, getRecentStreamerEvents } from './db/eventLog';
 export type { SfxTrigger, SfxFile, PublicSfxTrigger } from './db/sfx';
 export {
   findTrigger, findSoundFiles, getAllSfxTriggers, getSfxTriggerCount, getPublicSfxTriggers,
-  getAllCategories, createCategory, renameCategory, deleteCategory, getSfxFileById,
+  getAllCategories, getSfxFileById,
 } from './db/sfx';
 export type { SfxLookupResult } from './db/sfxCache';
 export { findCachedSfxTrigger } from './db/sfxCache';
@@ -455,8 +455,45 @@ import {
   addSfxFile as addSfxFileRecord,
   updateSfxFile as updateSfxFileRecord,
   deleteSfxFile as deleteSfxFileRecord,
+  createCategory as createCategoryRecord,
+  renameCategory as renameCategoryRecord,
+  deleteCategory as deleteCategoryRecord,
 } from './db/sfx';
 import { invalidateSfxLookupCache } from './db/sfxCache';
+
+/**
+ * Creates a new SFX category and invalidates the SFX lookup cache.
+ * @param name - Category name.
+ * @returns The new category id.
+ */
+export async function createCategory(name: string): Promise<number> {
+  return withInvalidation(() => createCategoryRecord(name), invalidateSfxLookupCache);
+}
+
+/**
+ * Renames an SFX category and invalidates the SFX lookup cache if it existed.
+ * @param id - Category id.
+ * @param name - New category name.
+ * @returns true if the category exists, false if no category with that id existed.
+ */
+export async function renameCategory(id: number, name: string): Promise<boolean> {
+  const renamed = await renameCategoryRecord(id, name);
+  if (renamed) invalidateSfxLookupCache();
+  return renamed;
+}
+
+/**
+ * Deletes an SFX category and invalidates the SFX lookup cache if it existed. Triggers/sounds
+ * referencing it keep working — the FK is ON DELETE SET NULL, so their category_id becomes
+ * NULL (uncategorised), which is why the cache (which snapshots category_id) must be invalidated.
+ * @param id - Category id.
+ * @returns true if the category existed, false otherwise.
+ */
+export async function deleteCategory(id: number): Promise<boolean> {
+  const deleted = await deleteCategoryRecord(id);
+  if (deleted) invalidateSfxLookupCache();
+  return deleted;
+}
 
 // sfx.ts is now a pure DB layer with no cache knowledge (breaks its import cycle with
 // sfxCache.ts); these wrappers add the cache invalidation that used to live there.

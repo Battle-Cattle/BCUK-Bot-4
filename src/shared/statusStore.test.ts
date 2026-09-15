@@ -146,6 +146,24 @@ describe('Twitch channel status', () => {
     mod.setTwitchChannelLive('unknown', true);
     expect(mod.getStatus(null).twitch['unknown']).toBeUndefined();
   });
+
+  it('trims stray whitespace so it keys the same channel as an already-normalized name', () => {
+    mod.setTwitchChannel('mychan', true);
+    mod.setTwitchChannel(' mychan ', false);
+    expect(mod.getStatus(null).twitch['mychan'].connected).toBe(false);
+    expect(mod.getStatus(null).twitch[' mychan ']).toBeUndefined();
+  });
+
+  it('setTwitchChannel is a no-op for a name that fails Twitch login validation', () => {
+    mod.setTwitchChannel('a', true);
+    expect(mod.getStatus(null).twitch['a']).toBeUndefined();
+  });
+
+  it('setTwitchChannelLive is a no-op for a name that fails Twitch login validation', () => {
+    mod.setTwitchChannel('mychan', true);
+    mod.setTwitchChannelLive('a', true);
+    expect(mod.getStatus(null).twitch['mychan'].isLive).toBe(false);
+  });
 });
 
 describe('onStatusChanged', () => {

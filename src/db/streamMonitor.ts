@@ -296,13 +296,23 @@ export async function setStreamerLive(
 }
 
 /**
- * Clear a streamer's live post state, nulling the stored message, channel, and game.
- *
+ * Clear a streamer's live post state, nulling the stored message, channel, and game — but only
+ * if `discord_message_id` still matches `expectedMessageId`. Guards against a delayed offline
+ * check (e.g. one superseded by a newer same-login operation after its lock timed out — see
+ * `twitchMonitorOffline.ts`'s `runOfflineCheck`) clearing a *newer* `setStreamerLive` write that
+ * landed first: by the time this call's own `clearStreamerLive` finally runs, the row's
+ * `discord_message_id` no longer matches what this call captured before it started cleaning up,
+ * so the UPDATE's WHERE clause matches no rows and the newer live state survives untouched.
  * @param id - DB row ID of the streamer to mark as offline.
+ * @param expectedMessageId - The `discord_message_id` this call expects to still be current
+ *   (typically the message being cleaned up), or `null` if the caller has no live post to guard
+ *   against (e.g. it never had a `discord_message_id` to begin with).
  */
-export async function clearStreamerLive(id: number): Promise<void> {
+export async function clearStreamerLive(id: number, expectedMessageId: string | null): Promise<void> {
   await getPool().execute(
-    'UPDATE streamer SET discord_message_id=NULL, discord_channel_id=NULL, live_game=NULL WHERE id=?',
-    [id],
+    expectedMessageId === null
+      ? 'UPDATE streamer SET discord_message_id=NULL, discord_channel_id=NULL, live_game=NULL WHERE id=? AND discord_message_id IS NULL'
+      : 'UPDATE streamer SET discord_message_id=NULL, discord_channel_id=NULL, live_game=NULL WHERE id=? AND discord_message_id=?',
+    expectedMessageId === null ? [id] : [id, expectedMessageId],
   );
 }

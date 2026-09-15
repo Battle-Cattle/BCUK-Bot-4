@@ -374,7 +374,7 @@ describe('deleteAnnouncement', () => {
     const liveStates = new Map([['k', makeLiveState({ messageId: 'msg1', channelId: 'ch1', streamerId: 10, groupId: 1 })]]);
     await deleteAnnouncement(liveStates, 'k');
     expect(tryDeleteDiscordMessage).toHaveBeenCalledWith('ch1', 'msg1');
-    expect(clearStreamerLive).toHaveBeenCalledWith(10);
+    expect(clearStreamerLive).toHaveBeenCalledWith(10, 'msg1');
     expect(updateMultitwitch).toHaveBeenCalledWith(1, liveStates);
     expect(liveStates.has('k')).toBe(false);
   });
@@ -383,8 +383,38 @@ describe('deleteAnnouncement', () => {
     vi.mocked(tryDeleteDiscordMessage).mockRejectedValueOnce(new Error('network'));
     const liveStates = new Map([['k', makeLiveState({ messageId: 'msg1', channelId: 'ch1', streamerId: 10, groupId: 1 })]]);
     await expect(deleteAnnouncement(liveStates, 'k')).resolves.not.toThrow();
-    expect(clearStreamerLive).toHaveBeenCalledWith(10);
+    expect(clearStreamerLive).toHaveBeenCalledWith(10, 'msg1');
     expect(updateMultitwitch).toHaveBeenCalledWith(1, liveStates);
+    expect(liveStates.has('k')).toBe(false);
+  });
+
+  // Regression coverage for the isCurrent guard: a caller superseded by a newer same-login
+  // operation (e.g. its withLoginLock timed out while this call's own awaits were still in
+  // flight) must stop before touching DB/map state a newer operation now owns.
+  it('does not clear DB/map state when isCurrent is false after the Discord message delete', async () => {
+    const liveStates = new Map([['k', makeLiveState({ messageId: 'msg1', channelId: 'ch1', streamerId: 10, groupId: 1 })]]);
+    await deleteAnnouncement(liveStates, 'k', () => false);
+    expect(tryDeleteDiscordMessage).toHaveBeenCalledWith('ch1', 'msg1');
+    expect(clearStreamerLive).not.toHaveBeenCalled();
+    expect(updateMultitwitch).not.toHaveBeenCalled();
+    expect(liveStates.has('k')).toBe(true);
+  });
+
+  it('does not delete the liveStates entry when isCurrent flips false after clearStreamerLive', async () => {
+    let current = true;
+    vi.mocked(clearStreamerLive).mockImplementationOnce(async () => {
+      current = false;
+    });
+    const liveStates = new Map([['k', makeLiveState({ messageId: 'msg1', channelId: 'ch1', streamerId: 10, groupId: 1 })]]);
+    await deleteAnnouncement(liveStates, 'k', () => current);
+    expect(clearStreamerLive).toHaveBeenCalledWith(10, 'msg1');
+    expect(updateMultitwitch).not.toHaveBeenCalled();
+    expect(liveStates.has('k')).toBe(true);
+  });
+
+  it('defaults isCurrent to always-true for callers outside a login lock', async () => {
+    const liveStates = new Map([['k', makeLiveState({ messageId: 'msg1', channelId: 'ch1', streamerId: 10, groupId: 1 })]]);
+    await deleteAnnouncement(liveStates, 'k');
     expect(liveStates.has('k')).toBe(false);
   });
 });

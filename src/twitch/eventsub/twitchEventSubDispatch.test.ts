@@ -220,10 +220,25 @@ describe('handleRevocation', () => {
     expect(logMock.warn).toHaveBeenCalledWith('Cleared token for revokedStreamer (user_removed)');
   });
 
-  it('does not clear the token for other revocation statuses', () => {
+  it('does not clear the token for other revocation statuses, but still triggers a reload', () => {
     handleRevocation({ type: 'channel.follow', status: 'moderator_removed', condition: { broadcaster_user_id: 'uid-revoke' } });
 
     expect(clearStreamerToken).not.toHaveBeenCalled();
+    expect(triggerReload).toHaveBeenCalledTimes(1);
+  });
+
+  it('triggers a reload for a non-auth revocation status even when the broadcaster is unknown', () => {
+    handleRevocation({ type: 'channel.follow', status: 'notification_failures_exceeded', condition: { broadcaster_user_id: 'unknown-uid' } });
+
+    expect(triggerReload).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not throw for a non-auth revocation status when no reload runtime is registered', () => {
+    registerEventSubReloadRuntime(null as unknown as { triggerReload: () => void });
+
+    expect(() => {
+      handleRevocation({ type: 'channel.follow', status: 'version_removed', condition: { broadcaster_user_id: 'uid-revoke' } });
+    }).not.toThrow();
   });
 
   it('logs an error if clearing the token itself fails', async () => {

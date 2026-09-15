@@ -1,4 +1,5 @@
 import { getOrCreate } from './mapUtils';
+import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 
 // Registered by the web layer (via onStatusChanged) so every mutator below can push a live
 // SSE update without this module importing anything from web/ — same rationale as the
@@ -170,22 +171,27 @@ function updateChannel(map: Map<string, ChannelStatus>, key: string, connected: 
 }
 
 /**
- * Updates the connected state for a Twitch channel. Notifies the registered status-change
- * listener (see {@link onStatusChanged}) with `null`, since channel state isn't scoped to
- * one guild.
+ * Updates the connected state for a Twitch channel. No-ops (including no notification) if
+ * `channel` doesn't normalize to a valid Twitch login (see {@link normalizeTwitchChannelName});
+ * otherwise notifies the registered status-change listener (see {@link onStatusChanged}) with
+ * `null`, since channel state isn't scoped to one guild.
  */
 export function setTwitchChannel(channel: string, connected: boolean): void {
-  updateChannel(state.twitch, channel.toLowerCase().replace(/^#/, ''), connected);
+  const key = normalizeTwitchChannelName(channel);
+  if (key === null) return;
+  updateChannel(state.twitch, key, connected);
   notifyStatusChanged(null);
 }
 
 /**
- * Updates the isLive flag for a Twitch channel. No-ops (including no notification) if the
+ * Updates the isLive flag for a Twitch channel. No-ops (including no notification) if `login`
+ * doesn't normalize to a valid Twitch login (see {@link normalizeTwitchChannelName}) or the
  * channel isn't tracked yet; otherwise notifies the registered status-change listener (see
  * {@link onStatusChanged}) with `null`, since channel state isn't scoped to one guild.
  */
 export function setTwitchChannelLive(login: string, isLive: boolean): void {
-  const key = login.toLowerCase().replace(/^#/, '');
+  const key = normalizeTwitchChannelName(login);
+  if (key === null) return;
   const existing = state.twitch.get(key);
   if (existing) {
     existing.isLive = isLive;

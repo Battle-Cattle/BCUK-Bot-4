@@ -210,6 +210,9 @@ import {
   addSfxFile as addSfxFileRecord,
   updateSfxFile as updateSfxFileRecord,
   deleteSfxFile as deleteSfxFileRecord,
+  createCategory as createCategoryRecord,
+  renameCategory as renameCategoryRecord,
+  deleteCategory as deleteCategoryRecord,
 } from './db/sfx';
 import {
   upsertUser, updateTwitchBotEnabled, upsertOverride, removeOverride,
@@ -220,6 +223,7 @@ import {
   initAlertConfigs, saveAlertConfig, setAlertImage, setAlertSound,
   createSfxTrigger, updateSfxTrigger, deleteSfxTrigger,
   addSfxFile, updateSfxFile, deleteSfxFile,
+  createCategory, renameCategory, deleteCategory,
   pingDb,
 } from './db';
 import { getPool } from './db/pool';
@@ -252,6 +256,9 @@ beforeEach(() => {
   vi.mocked(addSfxFileRecord).mockResolvedValue(1);
   vi.mocked(updateSfxFileRecord).mockResolvedValue(true);
   vi.mocked(deleteSfxFileRecord).mockResolvedValue('file.mp3');
+  vi.mocked(createCategoryRecord).mockResolvedValue(1);
+  vi.mocked(renameCategoryRecord).mockResolvedValue(true);
+  vi.mocked(deleteCategoryRecord).mockResolvedValue(true);
 });
 
 // ─── upsertUser ───────────────────────────────────────────────────────────────
@@ -516,6 +523,50 @@ describe('setAlertSound', () => {
 // wrappers invalidate the SFX lookup cache after each write — unconditionally for
 // createSfxTrigger/addSfxFile, and only when the record function reports a match
 // for updateSfxTrigger/deleteSfxTrigger/updateSfxFile/deleteSfxFile.
+
+describe('createCategory', () => {
+  it('calls the record function, returns its id, and invalidates the cache', async () => {
+    vi.mocked(createCategoryRecord).mockResolvedValue(9);
+    const id = await createCategory('Reactions');
+    expect(id).toBe(9);
+    expect(createCategoryRecord).toHaveBeenCalledWith('Reactions');
+    expect(invalidateSfxLookupCache).toHaveBeenCalledOnce();
+  });
+});
+
+describe('renameCategory', () => {
+  it('invalidates the cache when the record function reports a match', async () => {
+    vi.mocked(renameCategoryRecord).mockResolvedValue(true);
+    const result = await renameCategory(3, 'Memes');
+    expect(result).toBe(true);
+    expect(renameCategoryRecord).toHaveBeenCalledWith(3, 'Memes');
+    expect(invalidateSfxLookupCache).toHaveBeenCalledOnce();
+  });
+
+  it('does NOT invalidate the cache when no category matched', async () => {
+    vi.mocked(renameCategoryRecord).mockResolvedValue(false);
+    const result = await renameCategory(999, 'Memes');
+    expect(result).toBe(false);
+    expect(invalidateSfxLookupCache).not.toHaveBeenCalled();
+  });
+});
+
+describe('deleteCategory', () => {
+  it('invalidates the cache when a category was deleted', async () => {
+    vi.mocked(deleteCategoryRecord).mockResolvedValue(true);
+    const result = await deleteCategory(3);
+    expect(result).toBe(true);
+    expect(deleteCategoryRecord).toHaveBeenCalledWith(3);
+    expect(invalidateSfxLookupCache).toHaveBeenCalledOnce();
+  });
+
+  it('does NOT invalidate the cache when no category existed', async () => {
+    vi.mocked(deleteCategoryRecord).mockResolvedValue(false);
+    const result = await deleteCategory(999);
+    expect(result).toBe(false);
+    expect(invalidateSfxLookupCache).not.toHaveBeenCalled();
+  });
+});
 
 describe('createSfxTrigger', () => {
   it('calls the record function, returns its id, and invalidates the cache', async () => {

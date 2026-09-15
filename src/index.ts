@@ -84,10 +84,25 @@ function stopDbHealthCheck(): void {
 }
 
 /**
+ * Runs one shutdown teardown step, logging and swallowing any failure so it can't prevent later
+ * steps — in particular `closePool()` — from running. See {@link shutdown}.
+ * @param name - Human-readable label for the step, used only in the error log.
+ * @param fn - The teardown step to run.
+ */
+async function safeStop(name: string, fn: () => void | Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    log.error(`Error stopping ${name} during shutdown:`, err);
+  }
+}
+
+/**
  * Gracefully stops schedulers and bot connections, closes the DB pool, and exits the process.
  * Turns off owner-alert status reporting first and sends the owner a "shutting down" DM (see
  * `ownerAlerts.ts`'s `stopOwnerAlertWatcher`/`announceShutdown`) before anything actually
- * disconnects.
+ * disconnects. Each teardown step is isolated via {@link safeStop} so a failure in one component
+ * (e.g. the Twitch monitor) can't skip the rest — `closePool()` and `process.exit(0)` always run.
  * @param signal - The name of the signal that triggered shutdown (e.g. `SIGINT`).
  */
 async function shutdown(signal: string): Promise<void> {
@@ -97,18 +112,18 @@ async function shutdown(signal: string): Promise<void> {
   stopOwnerAlertWatcher();
   // ...then announce the shutdown itself, while the Discord client this DM needs is still up —
   // stopDiscordBot() below tears it down.
-  await announceShutdown();
+  await safeStop('owner alert shutdown announcement', announceShutdown);
   stopDbHealthCheck();
   stopCounterScheduler();
   stopChannelReconciliationPoll();
-  await stopRewardPricingScheduler();
-  await stopTimerCommandScheduler();
-  await stopEventSubReconciliation();
-  stopEventSub();
-  await stopTwitchMonitor();
-  await stopTwitchBot();
-  stopDiscordBot();
-  disconnect();
+  await safeStop('reward pricing scheduler', stopRewardPricingScheduler);
+  await safeStop('timer command scheduler', stopTimerCommandScheduler);
+  await safeStop('EventSub reconciliation', stopEventSubReconciliation);
+  await safeStop('EventSub', () => stopEventSub());
+  await safeStop('Twitch monitor', stopTwitchMonitor);
+  await safeStop('Twitch bot', stopTwitchBot);
+  await safeStop('Discord bot', () => stopDiscordBot());
+  await safeStop('audio player', () => disconnect());
   await closePool();
   process.exit(0);
 }

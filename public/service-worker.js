@@ -12,8 +12,12 @@ const STATIC_EXTENSIONS = ['.css', '.js', '.json', '.png', '.svg', '.woff2'];
 // '/streams' was dead (the actual route has always been '/admin/streams', already covered by
 // '/admin') — dropped. '/dashboard' and '/channel-points' added: both now carry live SSE
 // endpoints (dashboard status/events, channel-points pricing) that must always hit the
-// network directly, never the static-asset or runtime-cache paths below.
-const BYPASS_PATH_PREFIXES = ['/api', '/auth', '/admin', '/dashboard', '/channel-points'];
+// network directly, never the static-asset or runtime-cache paths below. '/' is included
+// too: it renders the per-user dashboard (CSRF token, recent-activity feed) and must never be
+// persisted into RUNTIME_CACHE, even for a future non-navigate request (navigations already
+// go network-only via handleNavigationRequest, but a same-origin fetch('/') from client script
+// would otherwise fall through to the runtime-cache path below and persist that HTML past logout).
+const BYPASS_PATH_PREFIXES = ['/api', '/auth', '/admin', '/dashboard', '/channel-points', '/'];
 
 const STATIC_ASSETS = [
   '/offline.html',
@@ -198,5 +202,7 @@ function shouldUseRuntimeCache(request, url) {
 }
 
 function isRuntimeCachePath(pathname) {
-  return pathname === '/';
+  // '/' is deliberately excluded — it renders per-user content and is already routed to
+  // isBypassPath (see BYPASS_PATH_PREFIXES) instead, never persisted into RUNTIME_CACHE.
+  return false;
 }
