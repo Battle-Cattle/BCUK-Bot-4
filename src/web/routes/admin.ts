@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import {
   getGuildMemberUsers,
   setMemberAccessLevel,
@@ -76,6 +76,38 @@ async function reloadRegistrySafe(): Promise<void> {
   }
 }
 
+/**
+ * Runs `operation` (typically a `checkManagerEditAuth`/`checkToggleTwitchAuth` check followed
+ * by the write it guards) inside `runUserMutation` for `discordId`, centralizing the
+ * `ManagerEditAuthError` → `?error=<code>` redirect shared by every queued mutation route below
+ * so it isn't repeated at each call site. Any other error is handled by `onOtherError` instead.
+ * @param res - Express response, used to redirect on a `ManagerEditAuthError`.
+ * @param discordId - The user whose mutations `operation` should serialize against.
+ * @param operation - The auth-check-then-write to run inside the queue.
+ * @param onOtherError - Called (and expected to redirect) for any error other than
+ *   `ManagerEditAuthError`.
+ * @returns true if `operation` succeeded — the caller should continue with any post-success side
+ *   effects and its own final redirect; false if it failed and a redirect has already been sent.
+ */
+async function runGuardedUserMutation(
+  res: Response,
+  discordId: string,
+  operation: () => Promise<void>,
+  onOtherError: (err: unknown) => void,
+): Promise<boolean> {
+  try {
+    await runUserMutation(discordId, operation);
+    return true;
+  } catch (err) {
+    if (err instanceof ManagerEditAuthError) {
+      res.redirect(`/admin/users?error=${err.code}`);
+    } else {
+      onOtherError(err);
+    }
+    return false;
+  }
+}
+
 // Add a member to the current guild, or update their identity/level (Manager+;
 // managers may only assign levels below their own). Identity and Twitch are global;
 // the access level is written to guild_member for the current guild.
@@ -115,30 +147,29 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
   if (twitchErr) return res.redirect(`/admin/users?error=${twitchErr}`);
 
   const sessionUser = getSessionUser(req);
-  try {
-    const trimmedDiscordName = trimField(discord_name);
-    await runUserMutation(trimmedDiscordId, async () => {
-      // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
-      const addAuthErr = await checkManagerEditAuth(sessionUser, trimmedDiscordId, level, guildId);
-      if (addAuthErr) throw new ManagerEditAuthError(addAuthErr);
-      // Ensure the global user row (whitelist + Twitch identity) exists, then grant
-      // membership of the current guild at the chosen level.
-      await addOrUpdateUserMutation({
-        discordId: trimmedDiscordId,
-        discordName: trimmedDiscordName,
-        level,
-        normalizedTwitchName,
-        shouldClearTwitchName,
-      });
-      await setMemberAccessLevel(guildId, trimmedDiscordId, level);
+  const trimmedDiscordName = trimField(discord_name);
+  const ok = await runGuardedUserMutation(res, trimmedDiscordId, async () => {
+    // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
+    const addAuthErr = await checkManagerEditAuth(sessionUser, trimmedDiscordId, level, guildId);
+    if (addAuthErr) throw new ManagerEditAuthError(addAuthErr);
+    // Ensure the global user row (whitelist + Twitch identity) exists, then grant
+    // membership of the current guild at the chosen level.
+    await addOrUpdateUserMutation({
+      discordId: trimmedDiscordId,
+      discordName: trimmedDiscordName,
+      level,
+      normalizedTwitchName,
+      shouldClearTwitchName,
     });
-  } catch (err) {
-    if (err instanceof ManagerEditAuthError) return res.redirect(`/admin/users?error=${err.code}`);
+    await setMemberAccessLevel(guildId, trimmedDiscordId, level);
+  }, (err) => {
     if (err instanceof DuplicateTwitchNameError || isDuplicateTwitchNameDbError(err)) {
-      return res.redirect('/admin/users?error=duplicate_twitch_name');
+      res.redirect('/admin/users?error=duplicate_twitch_name');
+    } else {
+      handleDbError(err, res, 'add_failed', 'Add user');
     }
-    return handleDbError(err, res, 'add_failed', 'Add user');
-  }
+  });
+  if (!ok) return;
   // A newly-added member may have provisioned a previously-inert guild.
   await reloadRegistrySafe();
   res.redirect('/admin/users');
@@ -168,17 +199,13 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
 
   const level = Number(access_level);
   const sessionUser = getSessionUser(req);
-  try {
-    await runUserMutation(trimmedDiscordId, async () => {
-      // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
-      const updateAuthErr = await checkManagerEditAuth(sessionUser, trimmedDiscordId, level, guildId);
-      if (updateAuthErr) throw new ManagerEditAuthError(updateAuthErr);
-      await setMemberAccessLevel(guildId, trimmedDiscordId, level);
-    });
-  } catch (err) {
-    if (err instanceof ManagerEditAuthError) return res.redirect(`/admin/users?error=${err.code}`);
-    return handleDbError(err, res, 'update_failed', 'Update access level');
-  }
+  const ok = await runGuardedUserMutation(res, trimmedDiscordId, async () => {
+    // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
+    const updateAuthErr = await checkManagerEditAuth(sessionUser, trimmedDiscordId, level, guildId);
+    if (updateAuthErr) throw new ManagerEditAuthError(updateAuthErr);
+    await setMemberAccessLevel(guildId, trimmedDiscordId, level);
+  }, (err) => handleDbError(err, res, 'update_failed', 'Update access level'));
+  if (!ok) return;
   res.redirect('/admin/users');
 });
 
@@ -240,17 +267,13 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   if (nextEnabled === null) return res.redirect('/admin/users?error=invalid_twitch_state');
 
   const sessionUser = getSessionUser(req);
-  try {
-    await runUserMutation(trimmedDiscordId, async () => {
-      // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
-      const toggleAuthErr = await checkToggleTwitchAuth(sessionUser, guildId, trimmedDiscordId);
-      if (toggleAuthErr) throw new ManagerEditAuthError(toggleAuthErr);
-      await toggleTwitchMutation(trimmedDiscordId, nextEnabled);
-    });
-  } catch (err) {
-    if (err instanceof ManagerEditAuthError) return res.redirect(`/admin/users?error=${err.code}`);
-    return handleDbError(err, res, 'toggle_failed', 'Toggle twitch user');
-  }
+  const ok = await runGuardedUserMutation(res, trimmedDiscordId, async () => {
+    // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
+    const toggleAuthErr = await checkToggleTwitchAuth(sessionUser, guildId, trimmedDiscordId);
+    if (toggleAuthErr) throw new ManagerEditAuthError(toggleAuthErr);
+    await toggleTwitchMutation(trimmedDiscordId, nextEnabled);
+  }, (err) => handleDbError(err, res, 'toggle_failed', 'Toggle twitch user'));
+  if (!ok) return;
   res.redirect('/admin/users');
 });
 
