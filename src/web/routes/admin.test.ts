@@ -90,6 +90,7 @@ type SessionUser = {
 
 const GUILD_ID = '900000000000000001';
 const ADMIN: SessionUser = { discordId: '100000000000000001', discordName: 'AdminUser', discordAvatar: null, isOwner: false, accessLevel: AccessLevel.ADMIN, currentGuildId: GUILD_ID };
+const MANAGER: SessionUser = { discordId: '200000000000000001', discordName: 'ManagerUser', discordAvatar: null, isOwner: false, accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID };
 const VALID_ID = '300000000000000001';
 
 /** Builds a supertest-ready app: the admin router with a stubbed session and a render mock that flattens locals into the JSON body. */
@@ -265,6 +266,31 @@ describe('POST /users/update', () => {
     const res = await supertest(buildApp()).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
     expect(res.headers.location).toBe('/admin/users');
     expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, VALID_ID, 1);
+  });
+
+  // Regression coverage for the TOCTOU authorization race: checkManagerEditAuth now runs
+  // *inside* the runUserMutation callback (see adminUserValidation.ts's doc comment), not before
+  // it's enqueued, so its target-level read can never go stale against a write that already
+  // landed for the same discordId. This proves the check is re-evaluated fresh on every call
+  // rather than being decided once up front — combined with runUserMutation's own strict
+  // per-discordId serialization (tested in adminUserMutationQueue.test.ts/mutationQueue.test.ts),
+  // that means a concurrent promotion landing between a Manager's stale read and their write can
+  // no longer let a since-invalid edit through.
+  it('re-checks authorization fresh on every call — rejects once the target has since been promoted', async () => {
+    // First call: target is currently below the Manager's own level — allowed.
+    vi.mocked(getMemberAccessLevel).mockResolvedValueOnce(AccessLevel.MOD);
+    const first = await supertest(buildApp(MANAGER)).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
+    expect(first.headers.location).toBe('/admin/users');
+    expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, VALID_ID, 1);
+
+    // Simulates a concurrent Admin promotion landing between this Manager's original read and
+    // this second, otherwise-identical request — a stale up-front check would have no way to
+    // notice; the fresh in-callback check does.
+    vi.mocked(getMemberAccessLevel).mockResolvedValueOnce(AccessLevel.ADMIN);
+    const second = await supertest(buildApp(MANAGER)).post('/users/update').type('form').send({ discord_id: VALID_ID, access_level: '1' });
+    expect(second.headers.location).toBe('/admin/users?error=target_above_level');
+    // Only the first call's write should have gone through.
+    expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledTimes(1);
   });
 });
 

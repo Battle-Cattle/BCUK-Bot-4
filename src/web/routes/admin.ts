@@ -25,10 +25,12 @@ import {
 import {
   accessLevelError,
   parseTwitchNameInput,
+  parseTwitchEnabled,
   checkManagerEditAuth,
+  checkToggleTwitchAuth,
+  ManagerEditAuthError,
   handleDbError,
   resolveValidDiscordId,
-  resolveToggleTwitchInputs,
 } from './adminUserValidation';
 
 const log = createLogger('Web');
@@ -112,11 +114,13 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
   const { normalizedTwitchName, shouldClearTwitchName, error: twitchErr } = parseTwitchNameInput(twitch_name, clear_twitch_name);
   if (twitchErr) return res.redirect(`/admin/users?error=${twitchErr}`);
 
-  const addAuthErr = await checkManagerEditAuth(getSessionUser(req), trimmedDiscordId, level, guildId);
-  if (addAuthErr) return res.redirect(`/admin/users?error=${addAuthErr}`);
+  const sessionUser = getSessionUser(req);
   try {
     const trimmedDiscordName = trimField(discord_name);
     await runUserMutation(trimmedDiscordId, async () => {
+      // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
+      const addAuthErr = await checkManagerEditAuth(sessionUser, trimmedDiscordId, level, guildId);
+      if (addAuthErr) throw new ManagerEditAuthError(addAuthErr);
       // Ensure the global user row (whitelist + Twitch identity) exists, then grant
       // membership of the current guild at the chosen level.
       await addOrUpdateUserMutation({
@@ -129,6 +133,7 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
       await setMemberAccessLevel(guildId, trimmedDiscordId, level);
     });
   } catch (err) {
+    if (err instanceof ManagerEditAuthError) return res.redirect(`/admin/users?error=${err.code}`);
     if (err instanceof DuplicateTwitchNameError || isDuplicateTwitchNameDbError(err)) {
       return res.redirect('/admin/users?error=duplicate_twitch_name');
     }
@@ -162,11 +167,16 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
   if (levelErr) return res.redirect(`/admin/users?error=${levelErr}`);
 
   const level = Number(access_level);
-  const updateAuthErr = await checkManagerEditAuth(getSessionUser(req), trimmedDiscordId, level, guildId);
-  if (updateAuthErr) return res.redirect(`/admin/users?error=${updateAuthErr}`);
+  const sessionUser = getSessionUser(req);
   try {
-    await runUserMutation(trimmedDiscordId, () => setMemberAccessLevel(guildId, trimmedDiscordId, level));
+    await runUserMutation(trimmedDiscordId, async () => {
+      // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
+      const updateAuthErr = await checkManagerEditAuth(sessionUser, trimmedDiscordId, level, guildId);
+      if (updateAuthErr) throw new ManagerEditAuthError(updateAuthErr);
+      await setMemberAccessLevel(guildId, trimmedDiscordId, level);
+    });
   } catch (err) {
+    if (err instanceof ManagerEditAuthError) return res.redirect(`/admin/users?error=${err.code}`);
     return handleDbError(err, res, 'update_failed', 'Update access level');
   }
   res.redirect('/admin/users');
@@ -226,12 +236,19 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   const trimmedDiscordId = resolveValidDiscordId(res, discord_id);
   if (!trimmedDiscordId) return;
 
-  const nextEnabled = await resolveToggleTwitchInputs(res, getSessionUser(req), guildId, trimmedDiscordId, is_twitch_bot_enabled);
-  if (nextEnabled === null) return;
+  const nextEnabled = parseTwitchEnabled(is_twitch_bot_enabled);
+  if (nextEnabled === null) return res.redirect('/admin/users?error=invalid_twitch_state');
 
+  const sessionUser = getSessionUser(req);
   try {
-    await runUserMutation(trimmedDiscordId, () => toggleTwitchMutation(trimmedDiscordId, nextEnabled));
+    await runUserMutation(trimmedDiscordId, async () => {
+      // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
+      const toggleAuthErr = await checkToggleTwitchAuth(sessionUser, guildId, trimmedDiscordId);
+      if (toggleAuthErr) throw new ManagerEditAuthError(toggleAuthErr);
+      await toggleTwitchMutation(trimmedDiscordId, nextEnabled);
+    });
   } catch (err) {
+    if (err instanceof ManagerEditAuthError) return res.redirect(`/admin/users?error=${err.code}`);
     return handleDbError(err, res, 'toggle_failed', 'Toggle twitch user');
   }
   res.redirect('/admin/users');

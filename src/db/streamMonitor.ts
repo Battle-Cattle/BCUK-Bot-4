@@ -115,17 +115,26 @@ export async function getStreamGroupsForGuild(guildId: string): Promise<DbStream
 }
 
 /**
- * Insert a new stream group.
+ * Insert a new stream group, unless one with the same name already exists for this guild.
+ * `stream_group` has no unique constraint on `(guild_id, name)` (the DB is managed outside this
+ * repo — see CLAUDE.md), so this guards in the application layer instead: the `INSERT ... SELECT
+ * ... WHERE NOT EXISTS` form runs as one statement, so a concurrent duplicate insert for the same
+ * guild+name can't race between a separate existence check and a separate insert — MySQL's own
+ * row/gap locking on the `WHERE NOT EXISTS` subquery serializes concurrent attempts against each
+ * other, and only one of them can affect a row.
  *
  * @param input - Stream group fields to store, including the owning guild.
- * @returns Resolves once the row is inserted.
+ * @returns True if the group was created; false if a group with that name already existed for
+ *   this guild (nothing was inserted).
  */
-export async function addStreamGroup(input: AddStreamGroupInput): Promise<void> {
-  await getPool().execute(
+export async function addStreamGroup(input: AddStreamGroupInput): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `INSERT INTO stream_group (guild_id, name, discord_channel, live_message, new_game_message, multi_twitch, delete_old_posts)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [input.guildId, ...streamGroupParams(input)],
+     SELECT ?, ?, ?, ?, ?, ?, ?
+     WHERE NOT EXISTS (SELECT 1 FROM stream_group WHERE guild_id = ? AND name = ?)`,
+    [input.guildId, ...streamGroupParams(input), input.guildId, input.name],
   );
+  return result.affectedRows > 0;
 }
 
 /**

@@ -129,6 +129,36 @@ describe('addStreamGroup', () => {
     expect(params).toContain('is live');
     expect(params).toContain('new game');
   });
+
+  // Regression coverage: stream_group has no unique constraint on (guild_id, name), so a
+  // retried/double-submitted "add group" request must be guarded at the application layer
+  // instead. The INSERT...SELECT...WHERE NOT EXISTS form runs as one statement so a concurrent
+  // duplicate can't race between a separate existence check and a separate insert.
+  it('uses an INSERT...SELECT...WHERE NOT EXISTS guarded on guild_id and name', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await addStreamGroup({ guildId: GUILD_ID, name: 'MyGroup', discordChannel: 'chan1', liveMessage: 'l', newGameMessage: 'g', multiTwitch: false, deleteOldPosts: false });
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('WHERE NOT EXISTS');
+    expect(sql).toContain('guild_id = ?');
+    expect(sql).toContain('AND name = ?');
+    // The guard params (guildId, name) must be the last two bound values, after the SELECT list.
+    expect(params.slice(-2)).toEqual([GUILD_ID, 'MyGroup']);
+  });
+
+  it('returns true when a row was inserted', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await addStreamGroup({ guildId: GUILD_ID, name: 'MyGroup', discordChannel: 'chan1', liveMessage: 'l', newGameMessage: 'g', multiTwitch: false, deleteOldPosts: false });
+    expect(result).toBe(true);
+  });
+
+  it('returns false without inserting when a group with that name already exists for the guild', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await addStreamGroup({ guildId: GUILD_ID, name: 'MyGroup', discordChannel: 'chan1', liveMessage: 'l', newGameMessage: 'g', multiTwitch: false, deleteOldPosts: false });
+    expect(result).toBe(false);
+  });
 });
 
 // ─── updateStreamGroup ────────────────────────────────────────────────────────

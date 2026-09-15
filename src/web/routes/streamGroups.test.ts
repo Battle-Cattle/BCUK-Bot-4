@@ -45,7 +45,7 @@ function buildApp(sessionUser: SessionUser = MANAGER) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(addStreamGroup).mockResolvedValue(undefined);
+  vi.mocked(addStreamGroup).mockResolvedValue(true);
   vi.mocked(updateStreamGroup).mockResolvedValue(true);
   vi.mocked(removeStreamGroupAndStreamers).mockResolvedValue(true);
   vi.mocked(restartTwitchMonitor).mockResolvedValue(undefined);
@@ -257,6 +257,17 @@ describe('POST /streams/groups/add — failure paths', () => {
       .send('name=n&discord_channel=chan&live_message=live&new_game_message=game');
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('error=add_group_failed');
+  });
+
+  it('redirects with duplicate_group_name and does not restart the monitor when addStreamGroup returns false', async () => {
+    vi.mocked(addStreamGroup).mockResolvedValueOnce(false);
+    const res = await supertest(buildApp())
+      .post('/streams/groups/add')
+      .send('name=n&discord_channel=chan&live_message=live&new_game_message=game');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=duplicate_group_name');
+    await flushRestartChain();
+    expect(restartTwitchMonitor).not.toHaveBeenCalled();
   });
 });
 

@@ -32,7 +32,7 @@ import {
   handleDbError,
   resolveGuildId,
   resolveValidDiscordId,
-  resolveToggleTwitchInputs,
+  checkToggleTwitchAuth,
 } from './adminUserValidation';
 import type { Request, Response } from 'express';
 
@@ -306,84 +306,52 @@ describe('resolveValidDiscordId', () => {
   });
 });
 
-// ─── resolveToggleTwitchInputs ───────────────────────────────────────────────
+// ─── checkToggleTwitchAuth ───────────────────────────────────────────────────
+//
+// Unlike the old resolveToggleTwitchInputs, this returns an error code (or null) directly
+// instead of redirecting — callers run it inside runUserMutation's callback, atomically with
+// the write it guards, so its result can't go stale against a concurrent write for the same
+// user (see checkManagerEditAuth's doc comment for the same reasoning).
 
-describe('resolveToggleTwitchInputs', () => {
+describe('checkToggleTwitchAuth', () => {
   const GUILD_ID = '900000000000000001';
   const TARGET_ID = '300000000000000001';
   const ADMIN_USER = { accessLevel: AccessLevel.ADMIN, isOwner: false };
   const MANAGER_USER = { accessLevel: AccessLevel.MANAGER, isOwner: false };
   const OWNER_USER = { accessLevel: AccessLevel.ADMIN, isOwner: true };
 
-  function mockRes() {
-    const redirect = vi.fn();
-    return { res: { redirect } as unknown as Response, redirect };
-  }
-
   beforeEach(() => {
     vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
     vi.mocked(findUser).mockResolvedValue(null);
   });
 
-  it('returns true when enabled flag is "true" and target is a guild member', async () => {
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'true');
-    expect(result).toBe(true);
-    expect(redirect).not.toHaveBeenCalled();
+  it('returns null when the actor is an admin and the target is a guild member', async () => {
+    expect(await checkToggleTwitchAuth(ADMIN_USER, GUILD_ID, TARGET_ID)).toBeNull();
   });
 
-  it('returns false when enabled flag is "false" and target is a guild member', async () => {
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'false');
-    expect(result).toBe(false);
-    expect(redirect).not.toHaveBeenCalled();
-  });
-
-  it('redirects ?error=invalid_twitch_state and returns null for an unrecognised flag', async () => {
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'maybe');
-    expect(result).toBeNull();
-    expect(redirect).toHaveBeenCalledWith('/admin/users?error=invalid_twitch_state');
-  });
-
-  it('redirects ?error=target_above_level and returns null when target is not a guild member', async () => {
+  it('returns target_above_level when target is not a guild member', async () => {
     vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'true');
-    expect(result).toBeNull();
-    expect(redirect).toHaveBeenCalledWith('/admin/users?error=target_above_level');
+    expect(await checkToggleTwitchAuth(ADMIN_USER, GUILD_ID, TARGET_ID)).toBe('target_above_level');
   });
 
-  it('redirects ?error=target_above_level when a non-admin actor targets a user at their own level', async () => {
+  it('returns target_above_level when a non-admin actor targets a user at their own level', async () => {
     vi.mocked(getMemberAccessLevel).mockResolvedValue(AccessLevel.MANAGER);
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, MANAGER_USER, GUILD_ID, TARGET_ID, 'true');
-    expect(result).toBeNull();
-    expect(redirect).toHaveBeenCalledWith('/admin/users?error=target_above_level');
+    expect(await checkToggleTwitchAuth(MANAGER_USER, GUILD_ID, TARGET_ID)).toBe('target_above_level');
   });
 
   it('allows an admin actor to toggle a target at any level', async () => {
     vi.mocked(getMemberAccessLevel).mockResolvedValue(AccessLevel.ADMIN);
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'true');
-    expect(result).toBe(true);
-    expect(redirect).not.toHaveBeenCalled();
+    expect(await checkToggleTwitchAuth(ADMIN_USER, GUILD_ID, TARGET_ID)).toBeNull();
   });
 
-  it('redirects ?error=target_above_level when a non-owner admin targets a bot owner', async () => {
+  it('returns target_above_level when a non-owner admin targets a bot owner', async () => {
     vi.mocked(findUser).mockResolvedValue({ discord_id: TARGET_ID, is_owner: true } as any);
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, ADMIN_USER, GUILD_ID, TARGET_ID, 'true');
-    expect(result).toBeNull();
-    expect(redirect).toHaveBeenCalledWith('/admin/users?error=target_above_level');
+    expect(await checkToggleTwitchAuth(ADMIN_USER, GUILD_ID, TARGET_ID)).toBe('target_above_level');
   });
 
   it('allows an owner to toggle another bot owner', async () => {
     vi.mocked(findUser).mockResolvedValue({ discord_id: TARGET_ID, is_owner: true } as any);
-    const { res, redirect } = mockRes();
-    const result = await resolveToggleTwitchInputs(res, OWNER_USER, GUILD_ID, TARGET_ID, 'true');
-    expect(result).toBe(true);
-    expect(redirect).not.toHaveBeenCalled();
+    expect(await checkToggleTwitchAuth(OWNER_USER, GUILD_ID, TARGET_ID)).toBeNull();
   });
 });
 
