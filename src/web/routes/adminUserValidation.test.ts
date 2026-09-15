@@ -30,6 +30,7 @@ import {
   parseTwitchEnabled,
   parseTwitchNameInput,
   checkManagerEditAuth,
+  checkRemoveAuth,
   handleDbError,
   resolveGuildId,
   resolveValidDiscordId,
@@ -276,6 +277,49 @@ describe('checkManagerEditAuth', () => {
     const result = await checkManagerEditAuth(MANAGER_SESSION, TARGET_ID, AccessLevel.MANAGER, GUILD_ID);
     expect(result).toBe('access_level_too_high');
     expect(vi.mocked(getEffectiveAccessLevelForUser)).toHaveBeenCalledWith(GUILD_ID, expect.objectContaining({ discord_id: MANAGER_ID }));
+  });
+});
+
+// ─── checkRemoveAuth ─────────────────────────────────────────────────────────
+
+describe('checkRemoveAuth', () => {
+  const GUILD_ID = '900000000000000001';
+  const ADMIN_ID = '100000000000000001';
+  const ADMIN_SESSION = { discordId: ADMIN_ID };
+
+  function mockActingUser(accessLevel: number): void {
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(accessLevel);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: ADMIN_ID, is_owner: false } as any);
+  }
+
+  beforeEach(() => {
+    vi.mocked(findUser).mockResolvedValue(null);
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.USER);
+  });
+
+  it('returns null when the actor is currently an Admin', async () => {
+    mockActingUser(AccessLevel.ADMIN);
+    expect(await checkRemoveAuth(ADMIN_SESSION, GUILD_ID)).toBeNull();
+  });
+
+  it('returns "target_above_level" when the actor is no longer an Admin', async () => {
+    mockActingUser(AccessLevel.MANAGER);
+    expect(await checkRemoveAuth(ADMIN_SESSION, GUILD_ID)).toBe('target_above_level');
+  });
+
+  it('re-reads the acting user\'s access level from the DB rather than trusting a stale value passed in', async () => {
+    // Regression coverage for the actor-side TOCTOU: requireAdmin's session check happens before
+    // the operation is queued, so a demotion landing in between must still be caught here.
+    mockActingUser(AccessLevel.USER);
+    const result = await checkRemoveAuth(ADMIN_SESSION, GUILD_ID);
+    expect(result).toBe('target_above_level');
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).toHaveBeenCalledWith(GUILD_ID, expect.objectContaining({ discord_id: ADMIN_ID }));
+  });
+
+  it('treats a missing actor user row as User level (denies)', async () => {
+    vi.mocked(findUser).mockResolvedValue(null);
+    expect(await checkRemoveAuth(ADMIN_SESSION, GUILD_ID)).toBe('target_above_level');
+    expect(vi.mocked(getEffectiveAccessLevelForUser)).not.toHaveBeenCalled();
   });
 });
 

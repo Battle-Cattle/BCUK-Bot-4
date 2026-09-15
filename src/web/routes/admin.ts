@@ -14,7 +14,7 @@ import { getSessionUser, getCurrentGuildId } from '../session';
 import { trimField, filterQueryParam } from './validation';
 import { renderView } from './viewHelpers';
 import { renderOrError } from './errorHandling';
-import { runUserMutation, runUserMutationForActorAndTarget } from './adminUserMutationQueue';
+import { runUserMutationForActorAndTarget } from './adminUserMutationQueue';
 import adminRefreshRouter, { getRefreshState } from './adminRefresh';
 import {
   DuplicateTwitchNameError,
@@ -27,6 +27,7 @@ import {
   parseTwitchNameInput,
   parseTwitchEnabled,
   checkManagerEditAuth,
+  checkRemoveAuth,
   checkToggleTwitchAuth,
   ManagerEditAuthError,
   handleDbError,
@@ -222,12 +223,15 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
 
 /**
  * POST /admin/users/remove — removes a member from the current guild. Refuses to
- * let an admin remove themselves, and reloads the guild registry afterwards since
- * removing the last member un-provisions the guild.
+ * let an admin remove themselves, re-checks the acting admin's own current
+ * authorization inside the queued operation (see `checkRemoveAuth`'s doc comment),
+ * and reloads the guild registry afterwards since removing the last member
+ * un-provisions the guild.
  * @param req - Express request; reads `discord_id` from `req.body`.
  * @param res - Express response; redirects to `/admin/users` on success, or to
  *   `/admin/users?error=<code>` if `discord_id` is invalid (`invalid_discord_id`),
- *   the target is the acting admin (`self_remove_forbidden`), or removal fails
+ *   the target is the acting admin (`self_remove_forbidden`), the actor's own
+ *   access has since dropped below Admin (`target_above_level`), or removal fails
  *   (`remove_failed`).
  */
 router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
@@ -237,14 +241,17 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
   const trimmedDiscordId = resolveValidDiscordId(res, discord_id);
   if (!trimmedDiscordId) return;
 
-  if (trimmedDiscordId === getSessionUser(req).discordId) {
+  const sessionUser = getSessionUser(req);
+  if (trimmedDiscordId === sessionUser.discordId) {
     return res.redirect('/admin/users?error=self_remove_forbidden');
   }
-  try {
-    await runUserMutation(trimmedDiscordId, () => removeGuildMember(guildId, trimmedDiscordId));
-  } catch (err) {
-    return handleDbError(err, res, 'remove_failed', 'Remove user');
-  }
+  const ok = await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
+    // Re-checked here, not before enqueueing — see checkRemoveAuth's doc comment.
+    const removeAuthErr = await checkRemoveAuth(sessionUser, guildId);
+    if (removeAuthErr) throw new ManagerEditAuthError(removeAuthErr);
+    await removeGuildMember(guildId, trimmedDiscordId);
+  }, (err) => handleDbError(err, res, 'remove_failed', 'Remove user'));
+  if (!ok) return;
   // Removing the guild's last member un-provisions it; refresh the registry.
   await reloadRegistrySafe();
   res.redirect('/admin/users');

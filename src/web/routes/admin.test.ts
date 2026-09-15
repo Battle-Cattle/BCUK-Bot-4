@@ -392,6 +392,21 @@ describe('POST /users/remove', () => {
     expect(vi.mocked(removeGuildMember)).toHaveBeenCalledWith(GUILD_ID, VALID_ID);
     expect(vi.mocked(reloadGuildRegistry)).toHaveBeenCalled();
   });
+
+  // Regression coverage for the actor-side TOCTOU on removal (CodeRabbit finding on PR #657):
+  // requireAdmin only checks the session's access level at request time, before the operation
+  // waits on the mutation queue — the acting admin's own access level is re-read fresh from the
+  // DB inside the guarded operation, not trusted from the session, so a demotion of the actor
+  // between the request landing and the queued removal running is caught.
+  it('re-checks the acting Admin\'s own access level fresh — rejects once they have since been demoted, without removing', async () => {
+    vi.mocked(getEffectiveAccessLevelForUser).mockImplementation(async (_guildId: string, user: { discord_id: string }) =>
+      user.discord_id === ADMIN.discordId ? AccessLevel.MANAGER : AccessLevel.USER,
+    );
+    const res = await supertest(buildApp(ADMIN)).post('/users/remove').type('form').send({ discord_id: VALID_ID });
+    expect(res.headers.location).toBe('/admin/users?error=target_above_level');
+    expect(vi.mocked(removeGuildMember)).not.toHaveBeenCalled();
+    expect(vi.mocked(reloadGuildRegistry)).not.toHaveBeenCalled();
+  });
 });
 
 // --- POST /users/toggle-twitch ---

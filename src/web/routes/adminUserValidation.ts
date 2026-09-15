@@ -158,6 +158,36 @@ export async function checkManagerEditAuth(
 }
 
 /**
+ * Authorizes an Admin removing a member from the current guild. Returns an error code string,
+ * or null when the removal is permitted.
+ *
+ * `/users/remove` is already gated `requireAdmin` at the route level, but that check runs against
+ * the session's access level at request time, before the operation waits on the target's mutation
+ * queue slot — the same staleness `checkManagerEditAuth`'s doc comment describes. An actor whose
+ * own Admin access was revoked between the request landing and this operation actually running
+ * could otherwise still have their now-unauthorized removal go through.
+ *
+ * Callers must run this *inside* the `runUserMutation`/`runUserMutationForActorAndTarget` callback
+ * for `targetDiscordId` (throwing a {@link ManagerEditAuthError} on a non-null result) — see
+ * `checkManagerEditAuth`'s doc comment for why evaluating it before the write is enqueued would
+ * let it go stale, including why the actor's own access level is re-read from the DB here rather
+ * than trusted from `sessionUser`/the `requireAdmin` middleware's session check.
+ *
+ * @param sessionUser The acting user's identity (only `discordId` is used — their access level is
+ *   re-resolved from the DB, not read off this object or the session).
+ * @param guildId The guild to check the actor's current access level in.
+ */
+export async function checkRemoveAuth(
+  sessionUser: { discordId: string },
+  guildId: string,
+): Promise<string | null> {
+  const actingUser = await findUser(sessionUser.discordId);
+  const actingAccessLevel = actingUser ? await getEffectiveAccessLevelForUser(guildId, actingUser) : AccessLevel.USER;
+  if (actingAccessLevel < AccessLevel.ADMIN) return 'target_above_level';
+  return null;
+}
+
+/**
  * Authorizes a Manager/Admin toggling a user's Twitch-bot participation within a guild.
  * Returns an error code string, or null when the toggle is permitted.
  *
