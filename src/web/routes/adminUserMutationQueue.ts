@@ -31,3 +31,45 @@ const USER_MUTATION_TIMEOUT_MS = 15_000;
 export function runUserMutation<T>(discordId: string, operation: () => Promise<T>): Promise<T> {
   return withTimeout(userMutationQueue.run(discordId, operation), USER_MUTATION_TIMEOUT_MS, 'User mutation');
 }
+
+/**
+ * Runs `operation` with both `actorId`'s and `targetId`'s {@link userMutationQueue} slots held
+ * for its duration — for a guarded admin mutation whose `operation` re-reads the *acting* user's
+ * current authorization (not just the target's) before writing, so that read and the write it
+ * guards need to be atomic against a concurrent mutation for either id, not just the target's.
+ *
+ * Without this, `runUserMutation(targetId, operation)` alone still leaves a gap: a concurrent
+ * mutation demoting the actor runs under its own `runUserMutation(actorId, ...)` call, which
+ * doesn't serialize against the target's queue slot at all, so it can commit between this
+ * operation's fresh actor-authorization read and its target write. Holding both slots for the
+ * operation's whole duration closes that gap — any mutation for either id now waits behind this
+ * one, and this one waits behind any already in flight for either id.
+ *
+ * Acquires the two ids' queue slots in a fixed (lexicographic, not actor/target) order, so two
+ * operations referencing the same two ids in swapped actor/target roles (e.g. A edits B, and
+ * concurrently B edits A) always request the slots in the same order and can never deadlock
+ * waiting on each other's slot. When `actorId === targetId` (impossible in practice — callers
+ * reject self-edits — but handled defensively), a single slot is acquired instead of nesting a
+ * key inside itself, which {@link userMutationQueue}'s own `run` forbids.
+ *
+ * @param actorId - The acting user's discordId.
+ * @param targetId - The mutation's target discordId.
+ * @param operation - The auth-check-then-write to run with both slots held.
+ * @returns Resolves or rejects with `operation`'s own result, subject to the same
+ *   {@link USER_MUTATION_TIMEOUT_MS} bound as {@link runUserMutation}.
+ */
+export function runUserMutationForActorAndTarget<T>(
+  actorId: string,
+  targetId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (actorId === targetId) {
+    return withTimeout(userMutationQueue.run(targetId, operation), USER_MUTATION_TIMEOUT_MS, 'User mutation');
+  }
+  const [firstId, secondId] = actorId < targetId ? [actorId, targetId] : [targetId, actorId];
+  return withTimeout(
+    userMutationQueue.run(firstId, () => userMutationQueue.run(secondId, operation)),
+    USER_MUTATION_TIMEOUT_MS,
+    'User mutation',
+  );
+}

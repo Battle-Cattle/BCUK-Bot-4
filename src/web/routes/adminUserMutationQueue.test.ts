@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { runUserMutation, userMutationQueue } from './adminUserMutationQueue';
+import { runUserMutation, runUserMutationForActorAndTarget, userMutationQueue } from './adminUserMutationQueue';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -46,5 +46,77 @@ describe('runUserMutation', () => {
 
     settleStalled('stalled result');
     expect(await next).toBe('next');
+  });
+});
+
+// Regression coverage for the actor-side TOCTOU: a guarded mutation whose operation re-reads the
+// *acting* user's own current authorization must serialize against mutations for the actor's id
+// too, not just the target's — see runUserMutationForActorAndTarget's doc comment.
+describe('runUserMutationForActorAndTarget', () => {
+  it('runs the operation through userMutationQueue, keyed by both actorId and targetId', async () => {
+    const runSpy = vi.spyOn(userMutationQueue, 'run');
+    const operation = vi.fn().mockResolvedValue('ok');
+
+    const result = await runUserMutationForActorAndTarget('actor-1', 'target-1', operation);
+
+    expect(result).toBe('ok');
+    expect(runSpy).toHaveBeenCalledWith('actor-1', expect.any(Function));
+    expect(runSpy).toHaveBeenCalledWith('target-1', expect.any(Function));
+    expect(operation).toHaveBeenCalledOnce();
+  });
+
+  it('acquires the two ids\' queue slots in lexicographic order regardless of actor/target role', async () => {
+    const runSpy = vi.spyOn(userMutationQueue, 'run');
+
+    await runUserMutationForActorAndTarget('zzz-actor', 'aaa-target', vi.fn().mockResolvedValue(undefined));
+
+    const [[firstKey], [secondKey]] = runSpy.mock.calls;
+    expect(firstKey).toBe('aaa-target');
+    expect(secondKey).toBe('zzz-actor');
+  });
+
+  it('collapses to a single queue slot when actorId equals targetId', async () => {
+    const runSpy = vi.spyOn(userMutationQueue, 'run');
+
+    await runUserMutationForActorAndTarget('same-id', 'same-id', vi.fn().mockResolvedValue(undefined));
+
+    expect(runSpy).toHaveBeenCalledTimes(1);
+    expect(runSpy).toHaveBeenCalledWith('same-id', expect.any(Function));
+  });
+
+  it('propagates the operation\'s own rejection', async () => {
+    const boom = new Error('boom');
+    await expect(runUserMutationForActorAndTarget('actor-1', 'target-1', () => Promise.reject(boom))).rejects.toBe(boom);
+  });
+
+  it('blocks the operation until a concurrent mutation already holding the actor\'s slot settles', async () => {
+    let releaseActorMutation!: () => void;
+    const actorMutation = runUserMutation('actor-2', () => new Promise<void>((resolve) => { releaseActorMutation = resolve; }));
+
+    const operation = vi.fn().mockResolvedValue('done');
+    const guarded = runUserMutationForActorAndTarget('actor-2', 'target-2', operation);
+
+    await Promise.resolve();
+    expect(operation).not.toHaveBeenCalled();
+
+    releaseActorMutation();
+    await actorMutation;
+    expect(await guarded).toBe('done');
+    expect(operation).toHaveBeenCalledOnce();
+  });
+
+  it('blocks the operation until a concurrent mutation already holding the target\'s slot settles', async () => {
+    let releaseTargetMutation!: () => void;
+    const targetMutation = runUserMutation('target-3', () => new Promise<void>((resolve) => { releaseTargetMutation = resolve; }));
+
+    const operation = vi.fn().mockResolvedValue('done');
+    const guarded = runUserMutationForActorAndTarget('actor-3', 'target-3', operation);
+
+    await Promise.resolve();
+    expect(operation).not.toHaveBeenCalled();
+
+    releaseTargetMutation();
+    await targetMutation;
+    expect(await guarded).toBe('done');
   });
 });

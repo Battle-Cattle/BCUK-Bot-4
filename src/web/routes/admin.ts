@@ -14,7 +14,7 @@ import { getSessionUser, getCurrentGuildId } from '../session';
 import { trimField, filterQueryParam } from './validation';
 import { renderView } from './viewHelpers';
 import { renderOrError } from './errorHandling';
-import { runUserMutation } from './adminUserMutationQueue';
+import { runUserMutation, runUserMutationForActorAndTarget } from './adminUserMutationQueue';
 import adminRefreshRouter, { getRefreshState } from './adminRefresh';
 import {
   DuplicateTwitchNameError,
@@ -77,12 +77,19 @@ async function reloadRegistrySafe(): Promise<void> {
 }
 
 /**
- * Runs `operation` (typically a `checkManagerEditAuth`/`checkToggleTwitchAuth` check followed
- * by the write it guards) inside `runUserMutation` for `discordId`, centralizing the
- * `ManagerEditAuthError` → `?error=<code>` redirect shared by every queued mutation route below
- * so it isn't repeated at each call site. Any other error is handled by `onOtherError` instead.
+ * Runs `operation` (typically a `checkManagerEditAuth`/`checkToggleTwitchAuth` check followed by
+ * the write it guards) inside `runUserMutationForActorAndTarget` for `actorId`/`targetId`,
+ * centralizing the `ManagerEditAuthError` → `?error=<code>` redirect shared by every queued
+ * mutation route below so it isn't repeated at each call site. Any other error is handled by
+ * `onOtherError` instead.
+ *
+ * Serializing against both ids (not just `targetId`) matters here specifically because
+ * `operation`'s authorization check re-reads the *acting* user's own current access level — see
+ * `runUserMutationForActorAndTarget`'s doc comment for why a target-only lock still leaves that
+ * read racing a concurrent demotion of the actor.
  * @param res - Express response, used to redirect on a `ManagerEditAuthError`.
- * @param discordId - The user whose mutations `operation` should serialize against.
+ * @param actorId - The acting user's discordId.
+ * @param targetId - The user whose mutations `operation` should serialize against.
  * @param operation - The auth-check-then-write to run inside the queue.
  * @param onOtherError - Called (and expected to redirect) for any error other than
  *   `ManagerEditAuthError`.
@@ -91,12 +98,13 @@ async function reloadRegistrySafe(): Promise<void> {
  */
 async function runGuardedUserMutation(
   res: Response,
-  discordId: string,
+  actorId: string,
+  targetId: string,
   operation: () => Promise<void>,
   onOtherError: (err: unknown) => void,
 ): Promise<boolean> {
   try {
-    await runUserMutation(discordId, operation);
+    await runUserMutationForActorAndTarget(actorId, targetId, operation);
     return true;
   } catch (err) {
     if (err instanceof ManagerEditAuthError) {
@@ -148,7 +156,7 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
 
   const sessionUser = getSessionUser(req);
   const trimmedDiscordName = trimField(discord_name);
-  const ok = await runGuardedUserMutation(res, trimmedDiscordId, async () => {
+  const ok = await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
     // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
     const addAuthErr = await checkManagerEditAuth(sessionUser, trimmedDiscordId, level, guildId);
     if (addAuthErr) throw new ManagerEditAuthError(addAuthErr);
@@ -199,7 +207,7 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
 
   const level = Number(access_level);
   const sessionUser = getSessionUser(req);
-  const ok = await runGuardedUserMutation(res, trimmedDiscordId, async () => {
+  const ok = await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
     // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
     const updateAuthErr = await checkManagerEditAuth(sessionUser, trimmedDiscordId, level, guildId);
     if (updateAuthErr) throw new ManagerEditAuthError(updateAuthErr);
@@ -267,7 +275,7 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   if (nextEnabled === null) return res.redirect('/admin/users?error=invalid_twitch_state');
 
   const sessionUser = getSessionUser(req);
-  const ok = await runGuardedUserMutation(res, trimmedDiscordId, async () => {
+  const ok = await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
     // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
     const toggleAuthErr = await checkToggleTwitchAuth(sessionUser, guildId, trimmedDiscordId);
     if (toggleAuthErr) throw new ManagerEditAuthError(toggleAuthErr);
