@@ -520,6 +520,38 @@ describe('startDiscordBot — gateway watchdog', () => {
     expect(mockLog.error).toHaveBeenCalledTimes(2);
   });
 
+  it('records the Discord connection as down on every shardError, even throttled ones, so the health dashboard reflects an ongoing gateway outage', async () => {
+    const healthStore = await import('../shared/healthStore.js');
+    mod.startDiscordBot();
+    const handler = findHandler('shardError');
+    const gatewayError = new Error('Unexpected server response: 503');
+
+    handler(gatewayError, 0);
+    expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenLastCalledWith(false);
+
+    // A second error within the log-throttle window is swallowed for logging purposes,
+    // but the connection is still down and must still be reflected.
+    vi.mocked(healthStore.recordDiscordConnected).mockClear();
+    handler(gatewayError, 0);
+    expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(false);
+  });
+
+  it('records the Discord connection as up when a shard becomes ready again', async () => {
+    const healthStore = await import('../shared/healthStore.js');
+    mod.startDiscordBot();
+    const handler = findHandler('shardReady');
+    handler(0);
+    expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(true);
+  });
+
+  it('records the Discord connection as up when a shard resumes', async () => {
+    const healthStore = await import('../shared/healthStore.js');
+    mod.startDiscordBot();
+    const handler = findHandler('shardResume');
+    handler(0, 5);
+    expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(true);
+  });
+
   it('forces a fresh login when a shard disconnects permanently', () => {
     mod.startDiscordBot();
     expect(mockInstance.login).toHaveBeenCalledOnce();

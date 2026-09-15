@@ -309,6 +309,17 @@ function registerClientReadyHandler(client: Client): void {
  * stops receiving events. Force a fresh login so the process self-heals instead
  * of sitting alive-but-dead until someone notices and restarts it manually.
  *
+ * 'shardError' also flips the health store's `discordConnected` flag to `false` —
+ * without this, a shard stuck in a reconnect-retry loop (e.g. a sustained run of
+ * `Unexpected server response: 503` on every attempt) never fires `shardDisconnect`
+ * (discord.js keeps retrying rather than giving up) and never re-fires `clientReady`
+ * (that only fires once per client lifetime), so nothing else would ever mark the
+ * bot as down — the `!health` command goes unanswered (expected, the gateway is
+ * down) while the web panel's health dashboard kept reading the last-known `true`
+ * forever. 'shardReady'/'shardResume' flip it back to `true` once the shard
+ * actually recovers, since a full client replacement (via `clientReady`) isn't
+ * guaranteed to happen for every recovery path.
+ *
  * `stopDiscordBot()`/`startDiscordBot()` destroy the old `Client` and construct a brand-new one —
  * `audioPlayer.ts`'s custom (non-`voiceAdapterCreator`) voice adapter isn't registered with
  * discord.js's own voice manager, so `Client.destroy()` doesn't tear down any active
@@ -329,7 +340,14 @@ function registerConnectionHandlers(client: Client): void {
     log.warn(`Shard ${shardId} lost its connection and is reconnecting...`);
   });
   client.on('shardError', (err, shardId) => {
+    recordDiscordConnected(false);
     logShardError(shardId, err);
+  });
+  client.on('shardReady', () => {
+    recordDiscordConnected(true);
+  });
+  client.on('shardResume', () => {
+    recordDiscordConnected(true);
   });
   client.on('shardDisconnect', (event, shardId) => {
     log.error(`Shard ${shardId} disconnected permanently (code ${event.code}) — reconnecting client.`);
