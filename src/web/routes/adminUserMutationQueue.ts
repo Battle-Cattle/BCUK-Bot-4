@@ -52,6 +52,18 @@ export function runUserMutation<T>(discordId: string, operation: () => Promise<T
  * reject self-edits — but handled defensively), a single slot is acquired instead of nesting a
  * key inside itself, which {@link userMutationQueue}'s own `run` forbids.
  *
+ * This compounds {@link runUserMutation}'s own documented timeout tradeoff: `firstId`'s slot here
+ * is released only once the *nested* `run(secondId, operation)` call itself settles, not at
+ * `firstId`'s own turn — so a slow queue for `secondId` (e.g. many other mutations already
+ * pending for that id) delays `firstId` for everyone else waiting on it too, for longer than
+ * {@link USER_MUTATION_TIMEOUT_MS} bounds for this call's own caller. This is accepted for the
+ * same reason `runUserMutation`'s single-key version is: every operation queued here is a couple
+ * of bounded DB writes on the same pool (no unbounded external call), so a queue backing up this
+ * badly would mean the DB itself is in trouble, not that this locking scheme introduced a new
+ * failure mode. A true fix would need a multi-key queue with atomic acquisition and real
+ * cancellation, which is a materially different (and riskier) primitive than this file's simple
+ * per-key `Promise` chaining — out of scope for the TOCTOU fix this function exists for.
+ *
  * @param actorId - The acting user's discordId.
  * @param targetId - The mutation's target discordId.
  * @param operation - The auth-check-then-write to run with both slots held.
