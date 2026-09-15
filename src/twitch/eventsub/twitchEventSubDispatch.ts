@@ -95,6 +95,12 @@ export function dispatchNotification(type: string, event: Record<string, unknown
  * torn down promptly — `subscribeForStreamer` sees zero desired subscriptions without a token and
  * self-stops the connection — rather than sitting open and idle until some unrelated admin action
  * elsewhere happens to trigger the next reload.
+ *
+ * For every other revocation status (e.g. `notification_failures_exceeded`, `version_removed`),
+ * the token is still valid, so a reload is triggered directly instead — `createSubscriptionsForStreamer`
+ * re-derives desired subscriptions from Twitch's live listing and recreates the now-missing one,
+ * which is a cheap no-op if nothing changed. Without this, a non-auth revocation would silently stop
+ * delivering that subscription's notifications until some unrelated reload happened to fire.
  */
 export function handleRevocation(sub: { type: string; status: string; condition: Record<string, string> }): void {
   log.warn(`Subscription revoked: type=${sub.type} status=${sub.status}`);
@@ -122,5 +128,8 @@ export function handleRevocation(sub: { type: string; status: string; condition:
           .catch((err) => log.error('Clear token error:', err));
       }
     }
+    return;
   }
+
+  eventSubReloadRuntimeRegistry.get()?.triggerReload();
 }
