@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createMutationQueue } from './mutationQueue';
 
 function deferred<T = void>() {
@@ -120,5 +120,117 @@ describe('createMutationQueue', () => {
     await Promise.all([op1, op2]);
 
     expect(queue.size()).toBe(0);
+  });
+});
+
+describe('createMutationQueue - runMany', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // ─── (a) two operations sharing one key still serialize ───────────────────
+
+  it('serializes operations that share a key, even when acquired via runMany', async () => {
+    const queue = createMutationQueue();
+    const order: string[] = [];
+    const { promise: gate, resolve: openGate } = deferred();
+
+    const op1 = queue.runMany(['k'], async () => {
+      order.push('a-start');
+      await gate;
+      order.push('a-end');
+    }, 1_000, 'test');
+    const op2 = queue.runMany(['k'], async () => {
+      order.push('b');
+    }, 1_000, 'test');
+
+    openGate();
+    await Promise.all([op1, op2]);
+
+    expect(order).toEqual(['a-start', 'a-end', 'b']);
+  });
+
+  it('acquires every key before running the operation', async () => {
+    const queue = createMutationQueue();
+    const order: string[] = [];
+    const { promise: gate, resolve: openGate } = deferred();
+
+    const holder = queue.run('b', async () => { await gate; });
+    const guarded = queue.runMany(['a', 'b'], async () => {
+      order.push('operation');
+    }, 1_000, 'test');
+
+    await Promise.resolve();
+    expect(order).toEqual([]); // 'b' is still held, so the operation can't have started
+
+    openGate();
+    await holder;
+    await guarded;
+    expect(order).toEqual(['operation']);
+  });
+
+  it('de-dupes a repeated key to a single slot instead of deadlocking against itself', async () => {
+    const queue = createMutationQueue();
+    const result = await queue.runMany(['k', 'k'], async () => 'ok', 1_000, 'test');
+    expect(result).toBe('ok');
+    expect(queue.size()).toBe(0);
+  });
+
+  // ─── (b) a timed-out pending acquisition doesn't block a later operation ──
+
+  it('cancels a still-pending acquisition on timeout, releasing every key without abandoning any operation', async () => {
+    const queue = createMutationQueue();
+
+    // Hold 'b' so the guarded call below acquires 'a' immediately but stalls waiting on 'b'.
+    let releaseB!: () => void;
+    const holdB = queue.run('b', () => new Promise<void>((resolve) => { releaseB = resolve; }));
+
+    const operation = vi.fn().mockResolvedValue('done');
+    const guarded = queue.runMany(['a', 'b'], operation, 1_000, 'test');
+    const assertion = expect(guarded).rejects.toThrow('test timed out after 1000ms');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
+    expect(operation).not.toHaveBeenCalled();
+
+    // 'a' was already acquired when the timeout hit — it must be released immediately rather
+    // than held until 'b' (the key actually holding things up) eventually frees.
+    expect(await queue.run('a', async () => 'a-free')).toBe('a-free');
+
+    // Once 'b' frees for real, a fresh operation for it must not be blocked by the cancelled,
+    // never-started guarded operation above.
+    releaseB();
+    await holdB;
+    expect(await queue.run('b', async () => 'b-free')).toBe('b-free');
+  });
+
+  // ─── (c) an already-running operation's key is never released early ──────
+
+  it('keeps every key held until a stalled operation genuinely settles, past the timeout', async () => {
+    const queue = createMutationQueue();
+    let resolveOperation!: (value: string) => void;
+    const guarded = queue.runMany(['x', 'y'], () => new Promise<string>((resolve) => { resolveOperation = resolve; }), 100, 'test');
+
+    const assertion = expect(guarded).rejects.toThrow('test timed out after 100ms');
+    await vi.advanceTimersByTimeAsync(100);
+    await assertion;
+
+    // Both keys are still held by the still-running operation — queued mutations for either
+    // must wait for it to genuinely finish, so they can never race its eventual side effects.
+    const nextX = queue.run('x', async () => 'x-next');
+    const nextY = queue.run('y', async () => 'y-next');
+    await vi.advanceTimersByTimeAsync(10_000);
+    const order: string[] = [];
+    void nextX.then(() => order.push('x-next'));
+    void nextY.then(() => order.push('y-next'));
+    await Promise.resolve();
+    expect(order).toEqual([]);
+
+    resolveOperation('done');
+    expect(await nextX).toBe('x-next');
+    expect(await nextY).toBe('y-next');
   });
 });
