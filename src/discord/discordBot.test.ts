@@ -754,6 +754,26 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     expect(mockInstance.login).toHaveBeenCalledTimes(4);
   });
 
+  it('lets the recovery-pending guard expire after its bounded timeout even if the replacement login never settles', async () => {
+    mod.startDiscordBot();
+    expect(mockInstance.login).toHaveBeenCalledOnce();
+
+    // The first stall forces a recovery whose replacement login resolves — as discord.js's own
+    // login() can once the socket handshake starts — without ever firing clientReady. Neither the
+    // success nor failure clear site ever runs for this attempt.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(2);
+
+    // Still within the guard's 5-minute bound — no second forced restart yet.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(2);
+
+    // Once the bound elapses, the watchdog can force another recovery even though the replacement
+    // login never resolved into a ready client, rejected, or fired clientReady.
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(3);
+  });
+
   it('stops the watchdog on stopDiscordBot, so it does not fire after an intentional shutdown', async () => {
     mod.startDiscordBot();
     mod.stopDiscordBot();
