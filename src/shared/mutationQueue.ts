@@ -1,3 +1,172 @@
+/** A single waiter's reservation for one key in a {@link createMutationQueue} queue. */
+interface KeyAcquisition {
+  /** Resolves once it's this waiter's turn. */
+  turn: Promise<void>;
+  /** Hands the slot to the next waiter — call it once, only after `turn` has resolved. */
+  release: () => void;
+  /**
+   * Gives up this waiter's turn if it hasn't arrived yet, silently passing the slot to the next
+   * waiter as soon as it would otherwise have become ours; once `turn` has already resolved,
+   * this is a no-op — an already-active waiter's key is never released early by a stray call.
+   */
+  cancel: () => void;
+}
+
+/**
+ * Registers a waiter for `key`'s slot in `queues`. Queuing happens synchronously (recording
+ * `key`'s new tail promise before returning), so several calls made back-to-back with no `await`
+ * in between — as `runMany` does for its whole key set — reserve their slots as one atomic step
+ * with no other caller able to interleave between them.
+ * @param queues - The shared per-key tail-promise map for one {@link createMutationQueue} instance.
+ * @param key - The key whose queue slot to wait for.
+ * @returns This waiter's {@link KeyAcquisition}.
+ */
+function acquireKey<K>(queues: Map<K, Promise<void>>, key: K): KeyAcquisition {
+  const previous = queues.get(key) ?? Promise.resolve();
+  let releaseCurrent!: () => void;
+  const current = new Promise<void>((resolve) => {
+    releaseCurrent = resolve;
+  });
+  // `previous` can never reject (see createMutationQueue's `run` doc comment), so `queued` is
+  // awaited by later callers instead of `current` alone, with no try/catch needed to swallow a
+  // failure that can't structurally occur.
+  const queued = (async () => {
+    await previous;
+    await current;
+  })().catch(() => {});
+  queues.set(key, queued);
+
+  let settled = false;
+  const release = (): void => {
+    if (settled) return;
+    settled = true;
+    releaseCurrent();
+    if (queues.get(key) === queued) {
+      queues.delete(key);
+    }
+  };
+
+  let cancelled = false;
+  void previous.then(() => {
+    if (cancelled) {
+      release();
+    }
+  });
+
+  return {
+    turn: previous,
+    release,
+    cancel: () => {
+      cancelled = true;
+    },
+  };
+}
+
+/** A shared deadline for a bounded call, exposed as a promise so it can be raced against. */
+interface Deadline {
+  /** Resolves once `timeoutMs` has elapsed. */
+  promise: Promise<void>;
+  /** The underlying timer, for clearing once the bounded call no longer needs it. */
+  timer: ReturnType<typeof setTimeout>;
+  /** True once `promise` has resolved. */
+  timedOut: () => boolean;
+}
+
+/**
+ * Starts a `timeoutMs` timer and exposes it as a racable {@link Deadline}.
+ * @param timeoutMs - Milliseconds until the deadline is reached.
+ * @returns The deadline; its timer is unref'd so a long-lived `timeoutMs` can't keep the event
+ *   loop alive on its own.
+ */
+function createDeadline(timeoutMs: number): Deadline {
+  let timedOut = false;
+  let timer!: ReturnType<typeof setTimeout>;
+  const promise = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      resolve();
+    }, timeoutMs);
+    timer.unref();
+  });
+  return { promise, timer, timedOut: () => timedOut };
+}
+
+/**
+ * Atomically reserves every key in `keys` (deduplicated, in a fixed sorted order so two calls
+ * naming an overlapping key set never wait on each other's slot and deadlock) and waits for all
+ * of them to become free, bounded by `deadline`.
+ * @param queues - The shared per-key tail-promise map for one {@link createMutationQueue} instance.
+ * @param keys - The keys to acquire together; duplicates collapse to one slot.
+ * @param deadline - The shared deadline bounding the wait for every key.
+ * @param timeoutMs - The deadline's original duration, used only in the timeout error message.
+ * @param label - Describes what timed out, used in the rejection message.
+ * @returns The `release` function for each acquired key, in acquisition order.
+ * @throws If `deadline` is reached before every key is acquired — every reservation is abandoned
+ *   first (a key already held is released immediately; a key whose turn hasn't arrived yet is
+ *   cancelled so it's silently passed to the next waiter instead of held hostage).
+ */
+async function acquireAll<K>(
+  queues: Map<K, Promise<void>>,
+  keys: K[],
+  deadline: Deadline,
+  timeoutMs: number,
+  label: string,
+): Promise<Array<() => void>> {
+  const acquisitions = [...new Set(keys)].sort().map((key) => acquireKey(queues, key));
+  const held: Array<() => void> = [];
+
+  for (const acquisition of acquisitions) {
+    await Promise.race([acquisition.turn, deadline.promise]);
+    if (deadline.timedOut()) {
+      for (const other of acquisitions) other.cancel();
+      for (const release of held) release();
+      throw new Error(`${label} timed out after ${timeoutMs}ms`);
+    }
+    held.push(acquisition.release);
+  }
+
+  return held;
+}
+
+/**
+ * Runs `operation` with every key in `held` already acquired, releasing all of them once
+ * `operation` settles. Bounds only what the *caller* observes to `deadline`: if `operation` is
+ * still running when `deadline` is reached, it is left running and every key stays held until it
+ * genuinely settles, so it can never race a later mutation for any of those keys.
+ * @param operation - The async work to run with every key held.
+ * @param held - The `release` function for each key to release once `operation` settles.
+ * @param deadline - The shared deadline bounding what the caller waits for.
+ * @param timeoutMs - The deadline's original duration, used only in the timeout error message.
+ * @param label - Describes what timed out, used in the rejection message.
+ * @returns Resolves or rejects with `operation`'s own result, or rejects with a timeout error if
+ *   `deadline` is reached first (`operation` keeps running and releases `held` once it settles).
+ */
+function runWithHeldKeys<T>(
+  operation: () => Promise<T>,
+  held: Array<() => void>,
+  deadline: Deadline,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    void deadline.promise.then(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    });
+    void (async () => {
+      try {
+        const result = await operation();
+        clearTimeout(deadline.timer);
+        for (const release of held) release();
+        resolve(result);
+      } catch (err) {
+        clearTimeout(deadline.timer);
+        for (const release of held) release();
+        reject(err as Error);
+      }
+    })();
+  });
+}
+
 /**
  * Creates a per-key serializing queue for async operations, with support for atomically
  * acquiring and holding several keys at once for a single operation.
@@ -49,62 +218,10 @@ export function createMutationQueue<K = string>(): {
 } {
   const queues = new Map<K, Promise<void>>();
 
-  /**
-   * Registers a waiter for `key`'s queue slot. Queuing happens synchronously (recording `key`'s
-   * new tail promise before returning), so several calls made back-to-back with no `await` in
-   * between — as `runMany` does for its whole key set — reserve their slots as one atomic step
-   * with no other caller able to interleave between them.
-   * @param key - The key whose queue slot to wait for.
-   * @returns `turn` resolves once it's this waiter's turn. `release` hands the slot to the next
-   *   waiter — call it once, only after `turn` has resolved. `cancel` gives up this waiter's turn
-   *   if it hasn't arrived yet, silently passing the slot to the next waiter as soon as it would
-   *   otherwise have become ours; once `turn` has already resolved, `cancel` is a no-op — an
-   *   already-active waiter's key is never released early by a stray `cancel` call.
-   */
-  function acquire(key: K): { turn: Promise<void>; release: () => void; cancel: () => void } {
-    const previous = queues.get(key) ?? Promise.resolve();
-    let releaseCurrent!: () => void;
-    const current = new Promise<void>((resolve) => {
-      releaseCurrent = resolve;
-    });
-    // See createMutationQueue's own `run` doc comment for why `previous` can never reject and
-    // why `queued` is awaited by later callers instead of `current` alone.
-    const queued = (async () => {
-      await previous;
-      await current;
-    })().catch(() => {});
-    queues.set(key, queued);
-
-    let settled = false;
-    const release = (): void => {
-      if (settled) return;
-      settled = true;
-      releaseCurrent();
-      if (queues.get(key) === queued) {
-        queues.delete(key);
-      }
-    };
-
-    let cancelled = false;
-    void previous.then(() => {
-      if (cancelled) {
-        release();
-      }
-    });
-
-    return {
-      turn: previous,
-      release,
-      cancel: () => {
-        cancelled = true;
-      },
-    };
-  }
-
   return {
     size: () => queues.size,
     async run<T>(key: K, operation: () => Promise<T>): Promise<T> {
-      const { turn, release } = acquire(key);
+      const { turn, release } = acquireKey(queues, key);
       await turn;
 
       try {
@@ -114,52 +231,9 @@ export function createMutationQueue<K = string>(): {
       }
     },
     async runMany<T>(keys: K[], operation: () => Promise<T>, timeoutMs: number, label: string): Promise<T> {
-      const uniqueKeys = [...new Set(keys)].sort();
-      const acquisitions = uniqueKeys.map((key) => acquire(key));
-      const held: Array<() => void> = [];
-
-      let timedOut = false;
-      let timer!: ReturnType<typeof setTimeout>;
-      const deadline = new Promise<void>((resolve) => {
-        timer = setTimeout(() => {
-          timedOut = true;
-          resolve();
-        }, timeoutMs);
-        // Unref'd so a long-lived `timeoutMs` can't keep the event loop alive on its own; cleared
-        // once `operation` settles below, whichever comes first.
-        timer.unref();
-      });
-
-      for (const acquisition of acquisitions) {
-        await Promise.race([acquisition.turn, deadline]);
-        if (timedOut) {
-          // Give up every reservation, not just the one we were waiting on: any not yet reached
-          // in this loop still hold a reserved slot in their key's queue. Ones already held are
-          // released for real; the rest just pass their turn on once it arrives, per `acquire`.
-          for (const other of acquisitions) other.cancel();
-          for (const release of held) release();
-          throw new Error(`${label} timed out after ${timeoutMs}ms`);
-        }
-        held.push(acquisition.release);
-      }
-
-      return new Promise<T>((resolve, reject) => {
-        void deadline.then(() => {
-          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-        });
-        void (async () => {
-          try {
-            const result = await operation();
-            clearTimeout(timer);
-            for (const release of held) release();
-            resolve(result);
-          } catch (err) {
-            clearTimeout(timer);
-            for (const release of held) release();
-            reject(err as Error);
-          }
-        })();
-      });
+      const deadline = createDeadline(timeoutMs);
+      const held = await acquireAll(queues, keys, deadline, timeoutMs, label);
+      return runWithHeldKeys(operation, held, deadline, timeoutMs, label);
     },
   };
 }
