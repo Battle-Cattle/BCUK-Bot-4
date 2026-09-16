@@ -118,19 +118,32 @@ const GATEWAY_STALL_THRESHOLD_MS = 120_000;
 let lastShardActivityAt = Date.now();
 let gatewayWatchdogTimer: NodeJS.Timeout | null = null;
 
+/**
+ * Tracks live gateway connectivity for {@link checkGatewayStall} — distinct from
+ * `getDiscordClient()` returning non-null, which only means a `Client` was *at some point*
+ * promoted to ready and stays in the store until `stopDiscordBot()`/`shardDisconnect` explicitly
+ * clear it. A `shardError` on an already-ready client does *not* clear it, so gating the watchdog
+ * on client existence would silently defeat it for exactly the incident it exists to catch: a
+ * previously-ready shard that errors out and then goes silent. Mirrors `recordDiscordConnected`'s
+ * true/false transitions one-for-one, kept separately so this module's stall detection doesn't
+ * depend on `healthStore`'s snapshot shape.
+ */
+let gatewayConnected = false;
+
 /** Stamps `lastShardActivityAt` with the current time — called from every shard lifecycle event. */
 function recordShardActivity(): void {
   lastShardActivityAt = Date.now();
 }
 
 /**
- * Polled every {@link GATEWAY_STALL_CHECK_INTERVAL_MS}: if the client isn't fully connected and
- * no shard activity has been recorded for {@link GATEWAY_STALL_THRESHOLD_MS}, discord.js's own
- * reconnect loop is presumed stuck. Logs, DMs the owner, and forces a fresh login the same way
- * `shardDisconnect` does (including tearing down orphaned voice connections first).
+ * Polled every {@link GATEWAY_STALL_CHECK_INTERVAL_MS}: if the gateway isn't currently connected
+ * (see {@link gatewayConnected}) and no shard activity has been recorded for
+ * {@link GATEWAY_STALL_THRESHOLD_MS}, discord.js's own reconnect loop is presumed stuck. Logs, DMs
+ * the owner, and forces a fresh login the same way `shardDisconnect` does (including tearing down
+ * orphaned voice connections first).
  */
 function checkGatewayStall(): void {
-  if (getDiscordClient()) return;
+  if (gatewayConnected) return;
   const stalledForMs = Date.now() - lastShardActivityAt;
   if (stalledForMs < GATEWAY_STALL_THRESHOLD_MS) return;
   const stalledForSec = Math.round(stalledForMs / 1000);
@@ -352,6 +365,7 @@ function registerClientReadyHandler(client: Client): void {
     log.info(`Logged in as ${c.user.tag}`);
     setDiscordReady(c.user.tag);
     recordDiscordConnected(true);
+    gatewayConnected = true;
     const waiters = readyWaiters;
     readyWaiters = [];
     waiters.forEach((resolve) => { resolve(); });
@@ -410,20 +424,24 @@ function registerConnectionHandlers(client: Client): void {
   client.on('shardError', (err, shardId) => {
     recordShardActivity();
     recordDiscordConnected(false);
+    gatewayConnected = false;
     logShardError(shardId, err);
   });
   client.on('shardReady', () => {
     recordShardActivity();
     recordDiscordConnected(true);
+    gatewayConnected = true;
   });
   client.on('shardResume', () => {
     recordShardActivity();
     recordDiscordConnected(true);
+    gatewayConnected = true;
   });
   client.on('shardDisconnect', (event, shardId) => {
     recordShardActivity();
     log.error(`Shard ${shardId} disconnected permanently (code ${event.code}) — reconnecting client.`);
     recordDiscordConnected(false);
+    gatewayConnected = false;
     disconnectAllVoice();
     stopDiscordBot();
     startDiscordBot();
@@ -498,6 +516,7 @@ export function stopDiscordBot(): void {
   clearReconnectTimer();
   stopGatewayWatchdog();
   recordDiscordConnected(false);
+  gatewayConnected = false;
   existingReady?.destroy().catch((err: unknown) => log.error('Error destroying client:', err));
   existingBooting?.destroy().catch((err: unknown) => log.error('Error destroying booting client:', err));
   log.info('Client destroyed.');

@@ -650,6 +650,25 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     expect(mockInstance.login).toHaveBeenCalledOnce();
   });
 
+  it('forces a fresh login when a previously-ready client errors out and then goes silent', async () => {
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    expect(mod.getDiscordClient()).toBe(mockInstance);
+
+    // getDiscordClient() stays non-null here (only shardDisconnect/stopDiscordBot clear it) — the
+    // watchdog must key off actual gateway connectivity, not client existence, or it would never
+    // fire for exactly this incident.
+    const errorHandler = findHandler('shardError');
+    errorHandler(new Error('Unexpected server response: 503'), 0);
+
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('reconnect loop appears stuck'));
+    expect(mockInstance.destroy).toHaveBeenCalledOnce();
+    expect(mockInstance.login).toHaveBeenCalledTimes(2);
+  });
+
   it('stops the watchdog on stopDiscordBot, so it does not fire after an intentional shutdown', async () => {
     mod.startDiscordBot();
     mod.stopDiscordBot();
