@@ -5,9 +5,13 @@ interface KeyAcquisition {
   /** Hands the slot to the next waiter — call it once, only after `turn` has resolved. */
   release: () => void;
   /**
-   * Gives up this waiter's turn if it hasn't arrived yet, silently passing the slot to the next
-   * waiter as soon as it would otherwise have become ours; once `turn` has already resolved,
-   * this is a no-op — an already-active waiter's key is never released early by a stray call.
+   * Gives up this acquisition. If `turn` hasn't resolved yet, the slot is silently passed to the
+   * next waiter as soon as it would otherwise have become ours. If `turn` has already resolved,
+   * `release` is called immediately (idempotently) instead — needed because a later key in a
+   * sorted set can become free, and its `turn` resolve, before an earlier key that's still
+   * blocked is even settled; nothing else will ever call `release` for it in that case. Callers
+   * that already have their own `release` reference for a still-in-use key (e.g. `runMany` after
+   * successfully acquiring it) may still call `cancel` freely — `release` is idempotent.
    */
   cancel: () => void;
 }
@@ -47,7 +51,9 @@ function acquireKey<K>(queues: Map<K, Promise<void>>, key: K): KeyAcquisition {
   };
 
   let cancelled = false;
+  let turnArrived = false;
   void previous.then(() => {
+    turnArrived = true;
     if (cancelled) {
       release();
     }
@@ -58,6 +64,9 @@ function acquireKey<K>(queues: Map<K, Promise<void>>, key: K): KeyAcquisition {
     release,
     cancel: () => {
       cancelled = true;
+      if (turnArrived) {
+        release();
+      }
     },
   };
 }

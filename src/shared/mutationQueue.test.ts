@@ -207,6 +207,34 @@ describe('createMutationQueue - runMany', () => {
     expect(await queue.run('b', async () => 'b-free')).toBe('b-free');
   });
 
+  // Regression test: a later sorted key can become free (its `turn` resolving) before an
+  // *earlier* key that's still blocked is even reached in the acquisition loop. Cancelling that
+  // later key's acquisition on timeout must still release it — otherwise nothing else ever would,
+  // since it was never added to `held` and its own `previous.then` callback already ran with
+  // `cancelled` still false by the time the timeout calls `cancel()`.
+  it('releases a later, already-free key on timeout even though its own turn arrived before it was ever reached', async () => {
+    const queue = createMutationQueue();
+
+    // Hold 'a' (sorts first) so the guarded call stalls on it, even though 'b' (sorts second)
+    // is free the whole time and its acquisition's turn resolves almost immediately.
+    let releaseA!: () => void;
+    const holdA = queue.run('a', () => new Promise<void>((resolve) => { releaseA = resolve; }));
+
+    const operation = vi.fn().mockResolvedValue('done');
+    const guarded = queue.runMany(['a', 'b'], operation, 1_000, 'test');
+    const assertion = expect(guarded).rejects.toThrow('test timed out after 1000ms');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
+    expect(operation).not.toHaveBeenCalled();
+
+    // 'b' must not be stuck forever just because its slot became free before the guarded call
+    // ever got around to using it.
+    expect(await queue.run('b', async () => 'b-free')).toBe('b-free');
+
+    releaseA();
+    await holdA;
+  });
+
   // ─── (c) an already-running operation's key is never released early ──────
 
   it('keeps every key held until a stalled operation genuinely settles, past the timeout', async () => {
