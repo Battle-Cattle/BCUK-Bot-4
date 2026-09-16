@@ -669,6 +669,42 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     expect(mockInstance.login).toHaveBeenCalledTimes(2);
   });
 
+  it('does not force another restart while a previous recovery login is still pending', async () => {
+    mod.startDiscordBot();
+    expect(mockInstance.login).toHaveBeenCalledOnce();
+
+    // The first stall forces a recovery whose replacement login hangs (neither resolves nor rejects).
+    const hungLogin = deferred<void>();
+    mockInstance.login.mockImplementationOnce(() => hungLogin.promise);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(2);
+
+    // A full second stall window elapses on top of that still-pending login — must not compound
+    // into another forced restart while the first one hasn't settled.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows the watchdog to fire again once a pending recovery login settles', async () => {
+    mod.startDiscordBot();
+    const hungLogin = deferred<void>();
+    mockInstance.login.mockImplementationOnce(() => hungLogin.promise);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(2);
+
+    // The pending login finally fails — this settles it (hands off to the ordinary backoff retry)
+    // and clears the recovery-pending guard.
+    hungLogin.reject(new Error('finally failed'));
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(5_000); // RECONNECT_BASE_DELAY_MS backoff retry
+    expect(mockInstance.login).toHaveBeenCalledTimes(3);
+
+    // With the guard cleared, a fresh stall window can force another recovery. Advanced past a
+    // full extra check interval to absorb tick-alignment drift from the earlier restart.
+    await vi.advanceTimersByTimeAsync(150_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(4);
+  });
+
   it('stops the watchdog on stopDiscordBot, so it does not fire after an intentional shutdown', async () => {
     mod.startDiscordBot();
     mod.stopDiscordBot();

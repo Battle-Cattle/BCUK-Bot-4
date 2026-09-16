@@ -130,6 +130,19 @@ let gatewayWatchdogTimer: NodeJS.Timeout | null = null;
  */
 let gatewayConnected = false;
 
+/**
+ * True from the moment {@link checkGatewayStall} forces a recovery until that recovery's
+ * replacement `login()` call settles (see {@link registerClientReadyHandler} and the login
+ * failure handler in {@link startDiscordBot}) — one way (success) or the other (failure, which
+ * hands off to the ordinary backoff retry). Guards against compounding restarts: without it, a
+ * replacement login that neither resolves nor rejects (hangs) would still leave `lastShardActivityAt`
+ * stale once its stall window re-elapses, so the next tick would tear it down and start yet another
+ * one on top of it, indefinitely, with no backoff — risking Discord's identify rate limits. While
+ * this is set, {@link checkGatewayStall} stands down and waits for the outstanding attempt to
+ * settle instead of piling on another.
+ */
+let watchdogRecoveryPending = false;
+
 /** Stamps `lastShardActivityAt` with the current time — called from every shard lifecycle event. */
 function recordShardActivity(): void {
   lastShardActivityAt = Date.now();
@@ -137,18 +150,20 @@ function recordShardActivity(): void {
 
 /**
  * Polled every {@link GATEWAY_STALL_CHECK_INTERVAL_MS}: if the gateway isn't currently connected
- * (see {@link gatewayConnected}) and no shard activity has been recorded for
+ * (see {@link gatewayConnected}), no recovery from a previous stall is still outstanding (see
+ * {@link watchdogRecoveryPending}), and no shard activity has been recorded for
  * {@link GATEWAY_STALL_THRESHOLD_MS}, discord.js's own reconnect loop is presumed stuck. Logs, DMs
  * the owner, and forces a fresh login the same way `shardDisconnect` does (including tearing down
  * orphaned voice connections first).
  */
 function checkGatewayStall(): void {
-  if (gatewayConnected) return;
+  if (gatewayConnected || watchdogRecoveryPending) return;
   const stalledForMs = Date.now() - lastShardActivityAt;
   if (stalledForMs < GATEWAY_STALL_THRESHOLD_MS) return;
   const stalledForSec = Math.round(stalledForMs / 1000);
   log.error(`No Discord gateway activity for ${stalledForSec}s — the reconnect loop appears stuck; forcing a fresh login.`);
   void sendOwnerAlert(`🔴 Discord gateway reconnect appears stuck (no activity for ${stalledForSec}s) — forcing a fresh login.`);
+  watchdogRecoveryPending = true;
   disconnectAllVoice();
   stopDiscordBot();
   startDiscordBot();
@@ -366,6 +381,7 @@ function registerClientReadyHandler(client: Client): void {
     setDiscordReady(c.user.tag);
     recordDiscordConnected(true);
     gatewayConnected = true;
+    watchdogRecoveryPending = false;
     const waiters = readyWaiters;
     readyWaiters = [];
     waiters.forEach((resolve) => { resolve(); });
@@ -497,6 +513,7 @@ export function startDiscordBot(): void {
     // tracking for a genuinely newer boot attempt already in progress.
     if (bootingClient !== localClient) return;
     bootingClient = null; // clear so a retry can call startDiscordBot() again
+    watchdogRecoveryPending = false;
     scheduleReconnect('login failed');
   });
 }
