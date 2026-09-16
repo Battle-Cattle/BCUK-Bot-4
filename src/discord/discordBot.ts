@@ -163,9 +163,12 @@ function checkGatewayStall(): void {
   const stalledForSec = Math.round(stalledForMs / 1000);
   log.error(`No Discord gateway activity for ${stalledForSec}s — the reconnect loop appears stuck; forcing a fresh login.`);
   void sendOwnerAlert(`🔴 Discord gateway reconnect appears stuck (no activity for ${stalledForSec}s) — forcing a fresh login.`);
-  watchdogRecoveryPending = true;
   disconnectAllVoice();
   stopDiscordBot();
+  // Set *after* stopDiscordBot() — which unconditionally clears this flag, so an intentional stop
+  // overlapping a previous recovery never leaves it stuck true — and before startDiscordBot(), with
+  // nothing async in between, so this recovery's own flag can't be clobbered by that clear.
+  watchdogRecoveryPending = true;
   startDiscordBot();
 }
 
@@ -435,6 +438,12 @@ function registerConnectionHandlers(client: Client): void {
   });
   client.on('shardReconnecting', (shardId) => {
     recordShardActivity();
+    // This bot runs a single (unsharded) client, so a shard reconnecting means the gateway is
+    // not currently connected — without this, checkGatewayStall()'s gatewayConnected guard would
+    // stay true from the prior clientReady and never let the watchdog catch a reconnect loop that
+    // never progresses past this event.
+    recordDiscordConnected(false);
+    gatewayConnected = false;
     log.warn(`Shard ${shardId} lost its connection and is reconnecting...`);
   });
   client.on('shardError', (err, shardId) => {
@@ -524,6 +533,12 @@ export function startDiscordBot(): void {
  * `destroy()` rejections are caught and logged rather than left unhandled.
  * Records the Discord connection as down in `healthStore` before tearing down.
  * Also stops the gateway stall watchdog — restarted fresh by the next {@link startDiscordBot}.
+ *
+ * Unconditionally clears {@link watchdogRecoveryPending}: any stop — intentional shutdown, the
+ * `shardDisconnect` self-heal, or the watchdog's own recovery — cancels whatever login was in
+ * flight, so the guard must not survive it. `checkGatewayStall()` re-sets the flag itself
+ * immediately after calling this, synchronously and with nothing async in between, so its own
+ * recovery's guard is never lost to this clear.
  */
 export function stopDiscordBot(): void {
   const existingReady = getDiscordClient();
@@ -534,6 +549,7 @@ export function stopDiscordBot(): void {
   stopGatewayWatchdog();
   recordDiscordConnected(false);
   gatewayConnected = false;
+  watchdogRecoveryPending = false;
   existingReady?.destroy().catch((err: unknown) => log.error('Error destroying client:', err));
   existingBooting?.destroy().catch((err: unknown) => log.error('Error destroying booting client:', err));
   log.info('Client destroyed.');
