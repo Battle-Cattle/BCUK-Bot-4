@@ -182,7 +182,7 @@ describe('GET /events/recent', () => {
   it('returns the mapped recent events for the resolved streamer', async () => {
     const occurredAt = new Date('2026-07-17T12:00:00Z');
     vi.mocked(getRecentStreamerEvents).mockResolvedValue([
-      { eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt },
+      { id: 42, eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt },
     ]);
 
     const res = await supertest(buildApp()).get('/events/recent');

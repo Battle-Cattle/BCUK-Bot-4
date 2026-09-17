@@ -73,7 +73,7 @@ function makeConfig(overrides: Partial<{
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(findCachedAlertConfig).mockResolvedValue(null);
-  vi.mocked(recordStreamerEvent).mockResolvedValue(true);
+  vi.mocked(recordStreamerEvent).mockResolvedValue(101);
 });
 
 // ---------------------------------------------------------------------------
@@ -529,7 +529,7 @@ describe('companion events push', () => {
 
     expect(getStreamerById).toHaveBeenCalledWith(STREAMER_ID);
     expect(mockPushCompanionEvent).toHaveBeenCalledWith('999888777', {
-      type: 'follow', displayName: 'TestUser', detail: null, occurredAt: expect.any(String),
+      type: 'follow', id: 101, displayName: 'TestUser', detail: null, occurredAt: expect.any(String),
     });
   });
 
@@ -540,7 +540,7 @@ describe('companion events push', () => {
     }, makeConfig({ raid_enabled: false, raid_shoutout_enabled: false }), STREAMER_ID);
 
     expect(mockPushCompanionEvent).toHaveBeenCalledWith('999888777', {
-      type: 'raid', displayName: 'RaiderDisplay', detail: '42 viewers', occurredAt: expect.any(String),
+      type: 'raid', id: 101, displayName: 'RaiderDisplay', detail: '42 viewers', occurredAt: expect.any(String),
     });
   });
 
@@ -921,7 +921,7 @@ describe('handleRedemption', () => {
   });
 
   it('does not push a live dashboard event when recordStreamerEvent reports the redemption was already recorded (a retry after collision)', async () => {
-    vi.mocked(recordStreamerEvent).mockResolvedValueOnce(false);
+    vi.mocked(recordStreamerEvent).mockResolvedValueOnce(null);
     vi.mocked(getVideosForReward).mockResolvedValue([]);
 
     await handleRedemption('streamer', event, makeConfig(), streamerId);
@@ -963,7 +963,7 @@ describe('handleRedemption', () => {
     expect(mockPushDashboardEvent).not.toHaveBeenCalled();
 
     // A retry with the same id must not be dropped as a duplicate.
-    vi.mocked(recordStreamerEvent).mockResolvedValue(true);
+    vi.mocked(recordStreamerEvent).mockResolvedValue(101);
     vi.mocked(getVideosForReward).mockResolvedValue([]);
     await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
   });

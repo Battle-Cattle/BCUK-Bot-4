@@ -27,6 +27,9 @@ export interface CompanionRedemptionEvent {
 /** A follow/sub/resub/giftsub/raid activity event forwarded to a user's companion app. */
 export interface CompanionActivityEvent {
   type: CompanionActivityEventType;
+  /** Stable `streamer_event_log.id`, unique across both this live push and the `/events/recent`
+   *  backfill — lets the client dedupe/order exactly instead of by `occurredAt` heuristic. */
+  id: number;
   displayName: string;
   detail: string | null;
   occurredAt: string;
@@ -143,7 +146,7 @@ router.get('/events/recent', requireCompanionKey, async (req, res) => {
     const companionEvents: CompanionActivityEvent[] = events
       .filter((e) => e.eventType !== 'redemption')
       .map((e) => ({
-        type: e.eventType as CompanionActivityEventType, displayName: e.displayName, detail: e.detail, occurredAt: e.occurredAt.toISOString(),
+        type: e.eventType as CompanionActivityEventType, id: e.id, displayName: e.displayName, detail: e.detail, occurredAt: e.occurredAt.toISOString(),
       }));
     res.json({ ok: true, events: companionEvents });
   } catch (err) {

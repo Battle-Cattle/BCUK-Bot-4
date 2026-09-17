@@ -15,6 +15,11 @@ function makePool(rows: unknown[] = [], meta: unknown = {}) {
   return makeMockPool({ rows, meta });
 }
 
+/** Builds a fake mysql pool whose `execute` resolves to an INSERT-style `ResultSetHeader`. */
+function makeInsertPool(insertId = 1, affectedRows = 1) {
+  return makeMockPool({ executeResult: [{ insertId, affectedRows }, []] });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   __resetEventLogPruneCountersForTests();
@@ -22,10 +27,10 @@ beforeEach(() => {
 
 describe('recordStreamerEvent', () => {
   it('inserts the event without pruning while under the prune-cadence threshold', async () => {
-    const pool = makePool();
+    const pool = makeInsertPool(1);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(true);
+    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(1);
 
     expect(pool.execute).toHaveBeenCalledTimes(1);
     const [insertSql, insertParams] = pool.execute.mock.calls[0];
@@ -34,7 +39,7 @@ describe('recordStreamerEvent', () => {
   });
 
   it('prunes the streamer down to the retention cap once the prune-cadence threshold is reached', async () => {
-    const pool = makePool();
+    const pool = makeInsertPool(1);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     for (let i = 0; i < PRUNE_EVERY_N_INSERTS - 1; i++) {
@@ -42,7 +47,7 @@ describe('recordStreamerEvent', () => {
     }
     pool.execute.mockClear();
 
-    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(true);
+    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(1);
 
     expect(pool.execute).toHaveBeenCalledTimes(2);
     const [deleteSql, deleteParams] = pool.execute.mock.calls[1];
@@ -52,7 +57,7 @@ describe('recordStreamerEvent', () => {
   });
 
   it('retries pruning on the very next insert when the prune DELETE fails, instead of waiting another full cadence', async () => {
-    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    const pool = { execute: vi.fn().mockResolvedValue([{ insertId: 1, affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     for (let i = 0; i < PRUNE_EVERY_N_INSERTS - 1; i++) {
@@ -61,17 +66,17 @@ describe('recordStreamerEvent', () => {
     pool.execute.mockClear();
     // The threshold-reaching insert's DELETE fails.
     pool.execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []]) // INSERT
+      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, []]) // INSERT
       .mockRejectedValueOnce(new Error('DB down')); // DELETE
 
     await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).rejects.toThrow('DB down');
     pool.execute.mockClear();
-    pool.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
+    pool.execute.mockResolvedValue([{ insertId: 1, affectedRows: 1 }, []]);
 
     // The counter must not have been cleared by the failed prune — this next insert (the first
     // of a "quiet" streak) should retry the prune immediately rather than needing
     // PRUNE_EVERY_N_INSERTS more successful inserts first.
-    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(true);
+    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(1);
 
     expect(pool.execute).toHaveBeenCalledTimes(2);
     const [deleteSql] = pool.execute.mock.calls[1];
@@ -83,7 +88,7 @@ describe('recordStreamerEvent', () => {
     const deletePromise = new Promise<[unknown, unknown]>((resolve) => {
       resolveDelete = () => resolve([{ affectedRows: 5 }, []]);
     });
-    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    const pool = { execute: vi.fn().mockResolvedValue([{ insertId: 1, affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     for (let i = 0; i < PRUNE_EVERY_N_INSERTS - 1; i++) {
@@ -93,7 +98,7 @@ describe('recordStreamerEvent', () => {
 
     // Call A's insert reaches the prune threshold; its DELETE is held pending.
     pool.execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []]) // call A's INSERT
+      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, []]) // call A's INSERT
       .mockImplementationOnce(() => deletePromise); // call A's DELETE, held pending
     const callA = recordStreamerEvent(5, 'follow', 'someviewer', null);
     await Promise.resolve();
@@ -104,14 +109,14 @@ describe('recordStreamerEvent', () => {
     // while call A's DELETE is still pending — the in-memory counter isn't reset until that
     // DELETE succeeds, so a naive implementation would compute a second threshold-reaching
     // count and start its own redundant DELETE.
-    pool.execute.mockResolvedValueOnce([{ affectedRows: 1 }, []]); // call B's INSERT
+    pool.execute.mockResolvedValueOnce([{ insertId: 2, affectedRows: 1 }, []]); // call B's INSERT
     const callB = recordStreamerEvent(5, 'follow', 'someviewer', null);
     await Promise.resolve();
     await Promise.resolve();
 
     resolveDelete();
-    await expect(callA).resolves.toBe(true);
-    await expect(callB).resolves.toBe(true);
+    await expect(callA).resolves.toBe(1);
+    await expect(callB).resolves.toBe(2);
 
     // Only 3 execute calls total (A's INSERT, A's DELETE, B's INSERT) — B piggybacks on A's
     // in-flight prune instead of issuing a second DELETE.
@@ -125,7 +130,7 @@ describe('recordStreamerEvent', () => {
     const deletePromise = new Promise<[unknown, unknown]>((resolve) => {
       resolveDelete = () => resolve([{ affectedRows: 5 }, []]);
     });
-    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    const pool = { execute: vi.fn().mockResolvedValue([{ insertId: 1, affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     for (let i = 0; i < PRUNE_EVERY_N_INSERTS - 1; i++) {
@@ -135,7 +140,7 @@ describe('recordStreamerEvent', () => {
 
     // Call A's insert reaches the threshold; its DELETE is held pending.
     pool.execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []]) // A's INSERT
+      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, []]) // A's INSERT
       .mockImplementationOnce(() => deletePromise); // A's DELETE, held pending
     const callA = recordStreamerEvent(5, 'follow', 'someviewer', null);
     await Promise.resolve();
@@ -145,7 +150,7 @@ describe('recordStreamerEvent', () => {
     // still be counted (not silently dropped just because it piggybacks on A's in-flight prune
     // instead of starting its own) — otherwise a burst could push the table further over the
     // retention cap than the documented bounded overshoot.
-    pool.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
+    pool.execute.mockResolvedValue([{ insertId: 1, affectedRows: 1 }, []]);
     const concurrentCalls = Array.from(
       { length: PRUNE_EVERY_N_INSERTS },
       () => recordStreamerEvent(5, 'follow', 'someviewer', null),
@@ -153,7 +158,7 @@ describe('recordStreamerEvent', () => {
     for (let i = 0; i < 8; i++) await Promise.resolve();
 
     resolveDelete();
-    await expect(Promise.all([callA, ...concurrentCalls])).resolves.toEqual(new Array(PRUNE_EVERY_N_INSERTS + 1).fill(true));
+    await expect(Promise.all([callA, ...concurrentCalls])).resolves.toEqual(new Array(PRUNE_EVERY_N_INSERTS + 1).fill(1));
 
     // A's INSERT + A's DELETE + 10 concurrent INSERTs + one follow-up DELETE. The follow-up
     // DELETE runs automatically once the counted concurrent inserts reached the threshold
@@ -204,7 +209,7 @@ describe('recordStreamerEvent', () => {
     };
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    await expect(recordStreamerEvent(5, 'redemption', 'someviewer', null, 'redemption-abc')).resolves.toBe(false);
+    await expect(recordStreamerEvent(5, 'redemption', 'someviewer', null, 'redemption-abc')).resolves.toBeNull();
 
     // No prune DELETE either — nothing new was inserted.
     expect(pool.execute).toHaveBeenCalledTimes(1);
@@ -266,12 +271,12 @@ describe('getRecentStreamerEvents', () => {
 
   it('maps rows to StreamerEvent objects', async () => {
     const occurredAt = new Date('2026-07-17T12:00:00Z');
-    const rows = [{ event_type: 'raid', display_name: 'raider1', detail: '12 viewers', occurred_at: occurredAt }];
+    const rows = [{ id: 42, event_type: 'raid', display_name: 'raider1', detail: '12 viewers', occurred_at: occurredAt }];
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
 
     const events = await getRecentStreamerEvents(5, 20);
 
-    expect(events).toEqual([{ eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt }]);
+    expect(events).toEqual([{ id: 42, eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt }]);
   });
 
   it('queries with streamerId, ordered newest first, and inlines a valid integer limit', async () => {
@@ -279,6 +284,7 @@ describe('getRecentStreamerEvents', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getRecentStreamerEvents(5, 20);
     const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('SELECT id, event_type, display_name, detail, occurred_at');
     expect(sql).toContain('ORDER BY occurred_at DESC, id DESC');
     expect(sql).toContain('LIMIT 20');
     expect(params).toEqual([5]);

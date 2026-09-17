@@ -182,10 +182,12 @@ async function recordAndPushDashboardEvent(
   detail: string | null,
 ): Promise<void> {
   try {
-    await recordStreamerEvent(streamerId, eventType, displayName, detail);
+    // No `redemptionId` is passed here, so recordStreamerEvent never skips the insert as an
+    // already-recorded duplicate — the returned id is always the new row's, never null.
+    const eventId = (await recordStreamerEvent(streamerId, eventType, displayName, detail))!;
     const occurredAt = new Date().toISOString();
     dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, { eventType, displayName, detail, occurredAt });
-    await pushCompanionActivityEvent(streamerId, eventType as CompanionActivityEventType, displayName, detail, occurredAt);
+    await pushCompanionActivityEvent(streamerId, eventType as CompanionActivityEventType, displayName, detail, occurredAt, eventId);
   } catch (err) {
     log.error(`Failed to record ${eventType} dashboard event for streamer ${streamerId}:`, err);
   }
@@ -202,6 +204,8 @@ async function recordAndPushDashboardEvent(
  * @param displayName - The acting Twitch viewer's display name.
  * @param detail - Short additional context, or null if there's none.
  * @param occurredAt - ISO timestamp of when the event was recorded.
+ * @param id - The event's stable `streamer_event_log.id`, shared with the `/events/recent`
+ *   backfill so the companion client can dedupe/order exactly instead of by timestamp heuristic.
  */
 async function pushCompanionActivityEvent(
   streamerId: number,
@@ -209,11 +213,12 @@ async function pushCompanionActivityEvent(
   displayName: string,
   detail: string | null,
   occurredAt: string,
+  id: number,
 ): Promise<void> {
   try {
     const streamer = await getStreamerById(streamerId);
     if (streamer) {
-      companionRuntimeRegistry.get()?.pushCompanionEvent(streamer.discord_id, { type: eventType, displayName, detail, occurredAt });
+      companionRuntimeRegistry.get()?.pushCompanionEvent(streamer.discord_id, { type: eventType, id, displayName, detail, occurredAt });
     }
   } catch (err) {
     log.error(`Failed to push companion event for ${eventType}:`, err);
@@ -250,11 +255,12 @@ async function recordAndPushDashboardEventOrThrow(
   detail: string | null,
   redemptionId: string,
 ): Promise<void> {
-  const inserted = await recordStreamerEvent(streamerId, eventType, displayName, detail, redemptionId);
+  const eventId = await recordStreamerEvent(streamerId, eventType, displayName, detail, redemptionId);
   // Only push the live SSE update when a new row was actually inserted — if this redemption was
   // already recorded on an earlier attempt (see recordStreamerEvent's doc comment), a retry must
-  // not re-deliver a second live dashboard event for the same physical redemption.
-  if (!inserted) return;
+  // not re-deliver a second live dashboard event for the same physical redemption. `insertId` is
+  // never 0 (auto-increment starts at 1), so `!eventId` only catches the genuine null-skip case.
+  if (!eventId) return;
   dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, {
     eventType, displayName, detail, occurredAt: new Date().toISOString(),
   });

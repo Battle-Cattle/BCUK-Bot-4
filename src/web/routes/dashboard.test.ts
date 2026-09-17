@@ -172,7 +172,7 @@ describe('GET /', () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 42, eventsub_access_token: null, twitch_name: null } as any);
     const occurredAt = new Date('2026-07-17T12:00:00Z');
     vi.mocked(getRecentStreamerEvents).mockResolvedValue([
-      { eventType: 'follow', displayName: 'someviewer', detail: null, occurredAt },
+      { id: 1, eventType: 'follow', displayName: 'someviewer', detail: null, occurredAt },
     ]);
 
     const res = await supertest(buildApp({ discordId: '100' })).get('/');
