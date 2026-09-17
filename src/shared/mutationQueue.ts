@@ -184,7 +184,7 @@ function runWithHeldKeys<T>(
  * keys are independent. A failure in one queued operation does not prevent
  * later operations on the same key from running.
  */
-export function createMutationQueue<K = string>(): {
+export function createMutationQueue<K extends string = string>(): {
   /**
    * Runs `operation` once any previously queued operation for `key` has settled. Two hazards
    * to avoid when writing `operation`, both of which hang this key's queue forever with no
@@ -219,7 +219,7 @@ export function createMutationQueue<K = string>(): {
    *   `operation`) before the caller sees a timeout rejection.
    * @param label - Describes what timed out, used in the rejection message (e.g. `'User mutation'`).
    * @returns Resolves or rejects with `operation`'s own result, or rejects with a timeout error if
-   *   every key isn't acquired and `operation` settled within `timeoutMs`.
+   *   the deadline occurs before every key is acquired or `operation` settles.
    */
   runMany<T>(keys: K[], operation: () => Promise<T>, timeoutMs: number, label: string): Promise<T>;
   /** Number of keys with at least one operation in flight. */

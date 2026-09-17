@@ -41,7 +41,7 @@ const { mockQueueRun, mockQueueRunMany } = vi.hoisted(() => ({ mockQueueRun: vi.
 vi.mock('../../shared/mutationQueue', async () => {
   const actual = await vi.importActual<typeof import('../../shared/mutationQueue')>('../../shared/mutationQueue');
   return {
-    createMutationQueue: <K = string>() => {
+    createMutationQueue: <K extends string = string>() => {
       const queue = actual.createMutationQueue<K>();
       mockQueueRun.mockImplementation(queue.run.bind(queue));
       mockQueueRunMany.mockImplementation(queue.runMany.bind(queue));
