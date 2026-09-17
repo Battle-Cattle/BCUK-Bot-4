@@ -88,14 +88,14 @@ async function reloadRegistrySafe(): Promise<void> {
  * `operation`'s authorization check re-reads the *acting* user's own current access level — see
  * `runUserMutationForActorAndTarget`'s doc comment for why a target-only lock still leaves that
  * read racing a concurrent demotion of the actor.
- * @param res - Express response, used to redirect on a `ManagerEditAuthError`.
+ *
+ * Redirects to `/admin/users` itself on success, so callers don't need to repeat that redirect.
+ * @param res - Express response, used to redirect on success or on a `ManagerEditAuthError`.
  * @param actorId - The acting user's discordId.
  * @param targetId - The user whose mutations `operation` should serialize against.
  * @param operation - The auth-check-then-write to run inside the queue.
  * @param onOtherError - Called (and expected to redirect) for any error other than
  *   `ManagerEditAuthError`.
- * @returns true if `operation` succeeded — the caller should continue with any post-success side
- *   effects and its own final redirect; false if it failed and a redirect has already been sent.
  */
 async function runGuardedUserMutation(
   res: Response,
@@ -103,17 +103,16 @@ async function runGuardedUserMutation(
   targetId: string,
   operation: () => Promise<void>,
   onOtherError: (err: unknown) => void,
-): Promise<boolean> {
+): Promise<void> {
   try {
     await runUserMutationForActorAndTarget(actorId, targetId, operation);
-    return true;
+    res.redirect('/admin/users');
   } catch (err) {
     if (err instanceof ManagerEditAuthError) {
       res.redirect(`/admin/users?error=${err.code}`);
     } else {
       onOtherError(err);
     }
-    return false;
   }
 }
 
@@ -157,7 +156,7 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
 
   const sessionUser = getSessionUser(req);
   const trimmedDiscordName = trimField(discord_name);
-  const ok = await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
+  await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
     // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
     const addAuthErr = await checkManagerEditAuth(sessionUser, trimmedDiscordId, level, guildId);
     if (addAuthErr) throw new ManagerEditAuthError(addAuthErr);
@@ -186,8 +185,6 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
       handleDbError(err, res, 'add_failed', 'Add user');
     }
   });
-  if (!ok) return;
-  res.redirect('/admin/users');
 });
 
 // Update a member's access level within the current guild (Manager+; managers may
@@ -214,14 +211,12 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
 
   const level = Number(access_level);
   const sessionUser = getSessionUser(req);
-  const ok = await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
+  await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
     // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
     const updateAuthErr = await checkManagerEditAuth(sessionUser, trimmedDiscordId, level, guildId);
     if (updateAuthErr) throw new ManagerEditAuthError(updateAuthErr);
     await setMemberAccessLevel(guildId, trimmedDiscordId, level);
   }, (err) => handleDbError(err, res, 'update_failed', 'Update access level'));
-  if (!ok) return;
-  res.redirect('/admin/users');
 });
 
 // Remove a member from the current guild (Admin only). The global user row and
@@ -251,7 +246,7 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
   if (trimmedDiscordId === sessionUser.discordId) {
     return res.redirect('/admin/users?error=self_remove_forbidden');
   }
-  const ok = await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
+  await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
     // Re-checked here, not before enqueueing — see checkRemoveAuth's doc comment.
     const removeAuthErr = await checkRemoveAuth(sessionUser, guildId);
     if (removeAuthErr) throw new ManagerEditAuthError(removeAuthErr);
@@ -261,8 +256,6 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
     // must still happen even if the caller times out waiting on the queue).
     await reloadRegistrySafe();
   }, (err) => handleDbError(err, res, 'remove_failed', 'Remove user'));
-  if (!ok) return;
-  res.redirect('/admin/users');
 });
 
 // Toggle twitch bot participation for a user (Manager+)
@@ -290,14 +283,12 @@ router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, 
   if (nextEnabled === null) return res.redirect('/admin/users?error=invalid_twitch_state');
 
   const sessionUser = getSessionUser(req);
-  const ok = await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
+  await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
     // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
     const toggleAuthErr = await checkToggleTwitchAuth(sessionUser, guildId, trimmedDiscordId);
     if (toggleAuthErr) throw new ManagerEditAuthError(toggleAuthErr);
     await toggleTwitchMutation(trimmedDiscordId, nextEnabled);
   }, (err) => handleDbError(err, res, 'toggle_failed', 'Toggle twitch user'));
-  if (!ok) return;
-  res.redirect('/admin/users');
 });
 
 export default router;
