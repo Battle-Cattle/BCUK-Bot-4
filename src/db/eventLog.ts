@@ -7,6 +7,7 @@ export type StreamerEventType = 'follow' | 'sub' | 'resub' | 'giftsub' | 'raid' 
 
 /** One recorded activity event for a streamer's dashboard "Recent Events" feed. */
 export interface StreamerEvent {
+  id: number;
   eventType: StreamerEventType;
   displayName: string;
   detail: string | null;
@@ -62,10 +63,13 @@ const pruneInFlight = new Map<number, Promise<void>>();
  *   text the viewer entered), or null if there's none.
  * @param redemptionId - Twitch's own redemption id, for `eventType: 'redemption'` only; omit or
  *   pass null for every other event type.
- * @returns True if this call actually inserted a new row; false if it collided with an
- *   already-recorded `redemptionId` and was skipped. Callers that also push a live update (e.g.
- *   the dashboard SSE feed) should only do so when this returns true, so a retry doesn't
- *   re-deliver a live event for a redemption that was already recorded on an earlier attempt.
+ * @returns The new row's auto-increment `id` (stable across the dashboard SSE push, the
+ *   companion SSE push, and the `/events/recent` backfill, so a client can dedupe/order
+ *   exactly instead of by timestamp heuristic) if this call actually inserted a new row; null
+ *   if it collided with an already-recorded `redemptionId` and was skipped. Callers that also
+ *   push a live update (e.g. the dashboard SSE feed) should only do so when this is non-null,
+ *   so a retry doesn't re-deliver a live event for a redemption that was already recorded on an
+ *   earlier attempt.
  */
 export async function recordStreamerEvent(
   streamerId: number,
@@ -73,14 +77,16 @@ export async function recordStreamerEvent(
   displayName: string,
   detail: string | null,
   redemptionId?: string | null,
-): Promise<boolean> {
+): Promise<number | null> {
+  let insertId: number;
   try {
-    await getPool().execute(
+    const [result] = await getPool().execute<mysql.ResultSetHeader>(
       `INSERT INTO streamer_event_log (streamer_id, event_type, display_name, detail, redemption_id) VALUES (?, ?, ?, ?, ?)`,
       [streamerId, eventType, displayName, detail, redemptionId ?? null],
     );
+    insertId = result.insertId;
   } catch (err) {
-    if (redemptionId && isMysqlDuplicateEntryError(err)) return false;
+    if (redemptionId && isMysqlDuplicateEntryError(err)) return null;
     throw err;
   }
 
@@ -91,7 +97,7 @@ export async function recordStreamerEvent(
   const count = (insertsSincePrune.get(streamerId) ?? 0) + 1;
   insertsSincePrune.set(streamerId, count);
   if (count >= PRUNE_EVERY_N_INSERTS) await ensurePruned(streamerId);
-  return true;
+  return insertId;
 }
 
 /**
@@ -161,13 +167,14 @@ export async function getRecentStreamerEvents(streamerId: number, limit: number)
   // caller-supplied limit is validated as a plain non-negative integer, then inlined directly.
   if (!Number.isInteger(limit) || limit < 0) throw new Error(`Invalid limit: ${limit}`);
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT event_type, display_name, detail, occurred_at FROM streamer_event_log
+    `SELECT id, event_type, display_name, detail, occurred_at FROM streamer_event_log
      WHERE streamer_id = ?
      ORDER BY occurred_at DESC, id DESC
      LIMIT ${limit}`,
     [streamerId],
   );
   return rows.map((r) => ({
+    id: r.id,
     eventType: r.event_type,
     displayName: r.display_name,
     detail: r.detail,

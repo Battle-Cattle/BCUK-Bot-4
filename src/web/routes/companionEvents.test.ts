@@ -402,8 +402,8 @@ describe('GET /events/recent', () => {
     const occurredAt = new Date('2026-07-17T12:00:00Z');
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 123 } as any);
     vi.mocked(getRecentStreamerEvents).mockResolvedValue([
-      { eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt },
-      { eventType: 'redemption', displayName: 'redeemer1', detail: 'Cool Reward', occurredAt },
+      { id: 42, eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt },
+      { id: 43, eventType: 'redemption', displayName: 'redeemer1', detail: 'Cool Reward', occurredAt },
     ]);
 
     const res = await supertest(buildApp()).get('/events/recent').set('x-test-discord-id', 'user1');
@@ -412,7 +412,7 @@ describe('GET /events/recent', () => {
     expect(getRecentStreamerEvents).toHaveBeenCalledWith(123, RECENT_EVENTS_LIMIT);
     expect(res.body).toEqual({
       ok: true,
-      events: [{ type: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt: occurredAt.toISOString() }],
+      events: [{ type: 'raid', id: 42, displayName: 'raider1', detail: '12 viewers', occurredAt: occurredAt.toISOString() }],
     });
   });
 });
