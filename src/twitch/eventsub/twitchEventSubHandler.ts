@@ -1,5 +1,5 @@
 import type { EventSubConfig, AlertEventType, StreamerEventType } from '../../db';
-import type { CompanionActivityEventType } from '../../web/routes/companionEvents';
+import type { CompanionActivityEvent, CompanionActivityEventType } from '../../web/routes/companionEvents';
 import { getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent } from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
@@ -187,7 +187,9 @@ async function recordAndPushDashboardEvent(
     const eventId = (await recordStreamerEvent(streamerId, eventType, displayName, detail))!;
     const occurredAt = new Date().toISOString();
     dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, { eventType, displayName, detail, occurredAt });
-    await pushCompanionActivityEvent(streamerId, eventType as CompanionActivityEventType, displayName, detail, occurredAt, eventId);
+    await pushCompanionActivityEvent(streamerId, {
+      type: eventType as CompanionActivityEventType, id: eventId, displayName, detail, occurredAt,
+    });
   } catch (err) {
     log.error(`Failed to record ${eventType} dashboard event for streamer ${streamerId}:`, err);
   }
@@ -200,28 +202,21 @@ async function recordAndPushDashboardEvent(
  * the same best-effort isolation {@link handleRedemption} uses for its own companion push.
  *
  * @param streamerId - DB row ID of the streamer, used to resolve the owning Discord ID.
- * @param eventType - Kind of activity that occurred.
- * @param displayName - The acting Twitch viewer's display name.
- * @param detail - Short additional context, or null if there's none.
- * @param occurredAt - ISO timestamp of when the event was recorded.
- * @param id - The event's stable `streamer_event_log.id`, shared with the `/events/recent`
- *   backfill so the companion client can dedupe/order exactly instead of by timestamp heuristic.
+ * @param event - The activity event to forward, already shaped for the companion SSE payload
+ *   (including its stable `streamer_event_log.id`, shared with the `/events/recent` backfill so
+ *   the companion client can dedupe/order exactly instead of by timestamp heuristic).
  */
 async function pushCompanionActivityEvent(
   streamerId: number,
-  eventType: CompanionActivityEventType,
-  displayName: string,
-  detail: string | null,
-  occurredAt: string,
-  id: number,
+  event: CompanionActivityEvent,
 ): Promise<void> {
   try {
     const streamer = await getStreamerById(streamerId);
     if (streamer) {
-      companionRuntimeRegistry.get()?.pushCompanionEvent(streamer.discord_id, { type: eventType, id, displayName, detail, occurredAt });
+      companionRuntimeRegistry.get()?.pushCompanionEvent(streamer.discord_id, event);
     }
   } catch (err) {
-    log.error(`Failed to push companion event for ${eventType}:`, err);
+    log.error(`Failed to push companion event for ${event.type}:`, err);
   }
 }
 
