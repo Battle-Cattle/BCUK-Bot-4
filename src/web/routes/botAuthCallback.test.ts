@@ -12,8 +12,10 @@ vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
   getUserFromToken: vi.fn(),
 }));
 
+// Mutable so a test can simulate a missing redirect URI.
+let mockRedirectUri: string | undefined = 'https://example.com/auth/twitch/bot/callback';
 vi.mock('../../shared/config', () => ({
-  TWITCH_BOT_OAUTH_REDIRECT_URI: 'https://example.com/auth/twitch/bot/callback',
+  get TWITCH_BOT_OAUTH_REDIRECT_URI() { return mockRedirectUri; },
 }));
 
 import express from 'express';
@@ -36,6 +38,7 @@ function buildApp(sessionOverrides: Record<string, any> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockRedirectUri = 'https://example.com/auth/twitch/bot/callback';
   vi.mocked(exchangeCode).mockResolvedValue({
     access_token: 'access',
     refresh_token: 'refresh',
@@ -76,6 +79,14 @@ describe('GET /twitch/bot/callback — state validation', () => {
     const res = await supertest(buildApp({ botOAuthState: { value: 'valid-state-abc', expiresAt: Date.now() - 1 } }))
       .get('/twitch/bot/callback?code=abc&state=valid-state-abc');
     expect(res.headers.location).toContain('error=bot_oauth_state_mismatch');
+  });
+
+  it('redirects with config_failed when TWITCH_BOT_OAUTH_REDIRECT_URI is not configured', async () => {
+    mockRedirectUri = '';
+    const res = await supertest(buildApp())
+      .get('/twitch/bot/callback?code=abc&state=valid-state-abc');
+    expect(res.headers.location).toBe('/admin/bot-auth?error=bot_oauth_config_failed');
+    expect(vi.mocked(exchangeCode)).not.toHaveBeenCalled();
   });
 });
 
