@@ -32,6 +32,8 @@ declare module 'express-session' {
     csrfToken?: string;
     eventsubOAuthState?: { value: string; expiresAt: number };
     eventsubStreamerId?: number;
+    /** Pending owner-only Twitch chat bot account connect flow (see #550), set by /admin/bot-auth/connect. */
+    botOAuthState?: { value: string; expiresAt: number };
     /** Pending companion-app loopback OAuth login, set by /companion/login. */
     companionOAuth?: { redirectUri: string; appState: string; expiresAt: number };
   }

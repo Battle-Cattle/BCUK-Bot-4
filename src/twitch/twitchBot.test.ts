@@ -3,7 +3,7 @@ import { mockLogger } from '../test-utils/loggerMock';
 
 // ─── Hoisted state (available inside vi.mock factories) ───────────────────────
 
-const { mockClient, handlers } = vi.hoisted(() => {
+const { mockClient, handlers, mockAuthProvider, authProviderHandlers } = vi.hoisted(() => {
   type Handler = (...args: any[]) => any;
 
   /** Builds a mock Twurple `onX`-style event binder that records handlers into `list`, mirroring the real `client.onX(handler) => Listener` shape (including `.unbind()`). */
@@ -44,6 +44,17 @@ const { mockClient, handlers } = vi.hoisted(() => {
     },
   };
 
+  // Mock RefreshingAuthProvider (replaces StaticAuthProvider — see #550): records its
+  // onRefresh/onRefreshFailure callbacks so tests can fire them directly, like the client's
+  // own event handlers above.
+  const refreshHandlers: Handler[] = [];
+  const refreshFailureHandlers: Handler[] = [];
+  const authProvider = {
+    addUser: vi.fn(),
+    onRefresh: vi.fn((cb: Handler) => { refreshHandlers.push(cb); }),
+    onRefreshFailure: vi.fn((cb: Handler) => { refreshFailureHandlers.push(cb); }),
+  };
+
   return {
     mockClient: client,
     handlers: {
@@ -54,6 +65,8 @@ const { mockClient, handlers } = vi.hoisted(() => {
       tokenFetchFailureHandlers,
       userStateHandlers,
     },
+    mockAuthProvider: authProvider,
+    authProviderHandlers: { refreshHandlers, refreshFailureHandlers },
   };
 });
 
@@ -66,14 +79,19 @@ vi.mock('@twurple/chat', () => ({
 }));
 
 vi.mock('@twurple/auth', () => ({
-  StaticAuthProvider: vi.fn(function MockStaticAuthProvider() { return {}; }),
+  RefreshingAuthProvider: vi.fn(function MockRefreshingAuthProvider() { return mockAuthProvider; }),
 }));
 
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../shared/config', () => ({
-  TWITCH_OAUTH_TOKEN: 'oauth:test',
   TWITCH_CLIENT_ID: 'test-client-id',
+  TWITCH_CLIENT_SECRET: 'test-client-secret',
+  PUBLIC_URL: 'https://example.com',
+}));
+
+vi.mock('../discord/ownerAlerts', () => ({
+  sendOwnerAlert: vi.fn(),
 }));
 
 // Uses the real createManagedLookupCache (not a fake) so tests below can
@@ -85,6 +103,9 @@ vi.mock('../db', async () => {
     getTwitchEnabledChannels: vi.fn(),
     getAllTwitchLinkedUsers: vi.fn(),
     findUserByTwitchName: vi.fn(),
+    getBotChatToken: vi.fn(),
+    saveBotChatToken: vi.fn(),
+    clearBotChatToken: vi.fn(),
     createManagedLookupCache,
     DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
     DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
@@ -157,7 +178,8 @@ import {
   __setConfirmedJoinedChannelsForTests,
 } from './twitchChannelMembership';
 import * as twitchChannelMembership from './twitchChannelMembership';
-import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName } from '../db';
+import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName, getBotChatToken, saveBotChatToken, clearBotChatToken } from '../db';
+import { sendOwnerAlert } from '../discord/ownerAlerts';
 import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
 import { getUsers } from './twitchApi';
 import { setTwitchChannel } from '../shared/statusStore';
@@ -267,17 +289,28 @@ function fireUserState(channel: string, rawBadges?: string): void {
   handlers.userStateHandlers.slice().forEach((h) => h(msg));
 }
 
+/** A valid stored bot chat token — the default `getBotChatToken` resolves to, so existing tests keep exercising a bot that actually connects (see `startTwitchBot` describe block below for the "no token" cases). */
+const STORED_BOT_TOKEN = {
+  twitchUserId: 'bot-uid',
+  accessToken: 'stored-access-token',
+  refreshToken: 'stored-refresh-token',
+  tokenExpiry: null,
+};
+
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
   vi.clearAllMocks();
   resetMockClient();
   clearHandlerArrays();
+  authProviderHandlers.refreshHandlers.length = 0;
+  authProviderHandlers.refreshFailureHandlers.length = 0;
   twitchChannelMembership.setChatClient(null);
   twitchChannelMembership.setConnected(false);
   vi.useFakeTimers();
   __resetTwitchSendQueueForTests();
   __resetTwitchPrivilegedChannelsForTests();
+  vi.mocked(getBotChatToken).mockResolvedValue(STORED_BOT_TOKEN as any);
 });
 
 afterEach(async () => {
@@ -833,6 +866,50 @@ describe('startTwitchBot', () => {
     });
 
     await expect(startTwitchBot()).rejects.toThrow('token fetch failed');
+  });
+
+  it('does not start the chat client and alerts the owner when no bot chat token is stored', async () => {
+    vi.mocked(getBotChatToken).mockResolvedValue(null);
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+
+    await startTwitchBot();
+
+    expect(mockClient.connect).not.toHaveBeenCalled();
+    expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
+    await expect(sayInChannel('streamer', 'hi')).rejects.toThrow('not connected');
+  });
+
+  it('adds the stored token to the auth provider under the chat intent', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+
+    await startTwitchBot();
+
+    expect(mockAuthProvider.addUser).toHaveBeenCalledWith(
+      STORED_BOT_TOKEN.twitchUserId,
+      expect.objectContaining({ accessToken: STORED_BOT_TOKEN.accessToken, refreshToken: STORED_BOT_TOKEN.refreshToken }),
+      ['chat'],
+    );
+  });
+
+  it('persists a refreshed token via the onRefresh handler', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+
+    await authProviderHandlers.refreshHandlers[0]('bot-uid', {
+      accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
+    });
+
+    expect(vi.mocked(saveBotChatToken)).toHaveBeenCalledWith('bot-uid', 'new-access', 'new-refresh', expect.any(Number));
+  });
+
+  it('clears the stored token and alerts the owner when a refresh fails', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', new Error('invalid_grant'));
+
+    expect(vi.mocked(clearBotChatToken)).toHaveBeenCalled();
+    expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
   });
 
   it('does not become connected if authentication succeeds after the connect timeout', async () => {

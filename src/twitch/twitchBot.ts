@@ -1,7 +1,8 @@
 import { ChatClient, type ChatMessage, UserState } from '@twurple/chat';
 import { onOwnUserState, isPrivilegedInChannel, clearPrivilegeState } from './twitchChannelPrivilege';
-import { StaticAuthProvider } from '@twurple/auth';
-import { TWITCH_OAUTH_TOKEN, TWITCH_CLIENT_ID } from '../shared/config';
+import { RefreshingAuthProvider, type AccessToken } from '@twurple/auth';
+import { TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET, PUBLIC_URL } from '../shared/config';
+import { sendOwnerAlert } from '../discord/ownerAlerts';
 import { handleCommand } from '../commands/commandRouter';
 import { executeCustomCommandForTwitch } from '../commands/customCommandHandler';
 import { executeCounterCommandForTwitch } from '../commands/counterHandler';
@@ -21,6 +22,9 @@ import {
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
   getAllTwitchLinkedUsers,
   findUserByTwitchName,
+  getBotChatToken,
+  saveBotChatToken,
+  clearBotChatToken,
   type RefreshingLookupCache,
 } from '../db';
 import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
@@ -246,14 +250,42 @@ function onDisconnected(manually: boolean, reason?: Error): void {
   clearPrivilegeState();
 }
 
+/** Where the owner can (re)connect the bot's own Twitch chat account (see issue #550). */
+const BOT_AUTH_CONNECT_URL = `${PUBLIC_URL}/admin/bot-auth`;
+
 /**
- * Strips tmi.js-style `oauth:` prefixes from an access token — Twurple's auth providers expect the
- * raw token.
- * @param token - The configured access token, with or without an `oauth:` prefix.
- * @returns The token without a leading `oauth:` prefix.
+ * Builds a `RefreshingAuthProvider` seeded with the bot's own stored chat token, wired to
+ * persist a refreshed token back to the DB (`onRefresh`) and to clear it and alert the owner
+ * if a refresh ever fails (`onRefreshFailure` — almost always means the refresh token was
+ * revoked, since Twurple's own refresh call never throws our `TwitchAuthError`). Replaces the
+ * old `StaticAuthProvider` seeded from the static `TWITCH_OAUTH_TOKEN` env var (see #550).
+ * @param stored - The bot's decrypted chat token, as loaded from the DB.
+ * @returns A `RefreshingAuthProvider` with the bot's user already added under the `chat` intent.
  */
-function stripOauthPrefix(token: string): string {
-  return token.startsWith('oauth:') ? token.slice('oauth:'.length) : token;
+async function buildBotAuthProvider(stored: NonNullable<Awaited<ReturnType<typeof getBotChatToken>>>): Promise<RefreshingAuthProvider> {
+  const authProvider = new RefreshingAuthProvider({ clientId: TWITCH_CLIENT_ID, clientSecret: TWITCH_CLIENT_SECRET });
+
+  authProvider.onRefresh(async (userId, newToken) => {
+    const expiryMs = newToken.expiresIn != null ? Date.now() + newToken.expiresIn * 1000 - 60_000 : null;
+    await saveBotChatToken(userId, newToken.accessToken, newToken.refreshToken!, expiryMs);
+  });
+  authProvider.onRefreshFailure(async (userId, error) => {
+    log.error(`Failed to refresh chat token for ${userId}: ${error.message}`);
+    await clearBotChatToken();
+    void sendOwnerAlert(`🔴 Twitch chat bot's token was revoked/expired and could not refresh. Reconnect it at ${BOT_AUTH_CONNECT_URL}`);
+  });
+
+  const now = Date.now();
+  const initialToken: AccessToken = {
+    accessToken: stored.accessToken,
+    refreshToken: stored.refreshToken,
+    scope: ['chat:read', 'chat:edit'],
+    expiresIn: stored.tokenExpiry != null ? Math.max(0, Math.floor((stored.tokenExpiry - now) / 1000)) : null,
+    obtainmentTimestamp: now,
+  };
+  authProvider.addUser(stored.twitchUserId, initialToken, ['chat']);
+
+  return authProvider;
 }
 
 /**
@@ -286,26 +318,28 @@ function connectAndWait(c: ChatClient): Promise<void> {
 }
 
 /**
- * Starts the Twitch bot: initializes the active-channel set, creates and
- * configures the Twurple chat client (static auth from the bot's own OAuth
- * token, auto-reconnect), wires up message/connect/disconnect handlers, and
- * connects.
- * @returns Resolves once the client has authenticated; rejects if the connection attempt fails.
+ * Starts the Twitch bot: initializes the active-channel set, then creates and configures the
+ * Twurple chat client using the bot's own OAuth-connected, auto-refreshing account (see #550)
+ * — falling back to a no-op if no account has been connected yet (see {@link BOT_AUTH_CONNECT_URL})
+ * rather than crashing the whole process, since Discord and the web panel don't depend on Twitch
+ * chat being up. Wires up message/connect/disconnect handlers and connects.
+ * @returns Resolves once the client has authenticated, or once it's given up because no bot
+ *   chat account is connected; rejects if a connection attempt is actually made and fails.
  */
 export async function startTwitchBot(): Promise<void> {
   await initializeActiveChannels();
 
-  const authProvider = new StaticAuthProvider(TWITCH_CLIENT_ID, stripOauthPrefix(TWITCH_OAUTH_TOKEN));
+  const stored = await getBotChatToken();
+  if (!stored) {
+    log.error(`No bot chat token connected — visit ${BOT_AUTH_CONNECT_URL} to connect the bot account. Chat bot will not start.`);
+    void sendOwnerAlert(`🔴 Twitch chat bot has no connected account. Reconnect it at ${BOT_AUTH_CONNECT_URL}`);
+    return;
+  }
+
+  const authProvider = await buildBotAuthProvider(stored);
   const newClient = new ChatClient({
     authProvider,
     channels: [],
-    // TWITCH_OAUTH_TOKEN currently carries the legacy `chat_login` scope rather than the modern
-    // `chat:read`/`chat:edit` ChatClient normally requires — tmi.js never checked scopes at all,
-    // so this went unnoticed until the Twurple migration. Without this, ChatClient rejects the
-    // token outright (surfaced only as a generic "None of the queried intents (chat) are known
-    // by the auth provider" — the real "missing scopes" error is swallowed internally). Tracked
-    // for a proper fix (a refreshing, modern-scoped token) in #550.
-    legacyScopes: true,
   });
   client = newClient;
   setChatClient(client);
