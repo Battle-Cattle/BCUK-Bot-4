@@ -45,24 +45,22 @@ export function runUserMutation<T>(discordId: string, operation: () => Promise<T
  * operation's whole duration closes that gap — any mutation for either id now waits behind this
  * one, and this one waits behind any already in flight for either id.
  *
- * Acquires the two ids' queue slots in a fixed (lexicographic, not actor/target) order, so two
- * operations referencing the same two ids in swapped actor/target roles (e.g. A edits B, and
- * concurrently B edits A) always request the slots in the same order and can never deadlock
- * waiting on each other's slot. When `actorId === targetId` (impossible in practice — callers
- * reject self-edits — but handled defensively), a single slot is acquired instead of nesting a
- * key inside itself, which {@link userMutationQueue}'s own `run` forbids.
+ * Both slots are acquired atomically via {@link userMutationQueue}'s `runMany`, in a fixed
+ * (lexicographic, not actor/target) order, so two operations referencing the same two ids in
+ * swapped actor/target roles (e.g. A edits B, and concurrently B edits A) always request the
+ * slots in the same order and can never deadlock waiting on each other's slot. When
+ * `actorId === targetId` (impossible in practice — callers reject self-edits — but handled
+ * defensively), `runMany` collapses the duplicate to a single slot instead of nesting a key
+ * inside itself.
  *
- * This compounds {@link runUserMutation}'s own documented timeout tradeoff: `firstId`'s slot here
- * is released only once the *nested* `run(secondId, operation)` call itself settles, not at
- * `firstId`'s own turn — so a slow queue for `secondId` (e.g. many other mutations already
- * pending for that id) delays `firstId` for everyone else waiting on it too, for longer than
- * {@link USER_MUTATION_TIMEOUT_MS} bounds for this call's own caller. This is accepted for the
- * same reason `runUserMutation`'s single-key version is: every operation queued here is a couple
- * of bounded DB writes on the same pool (no unbounded external call), so a queue backing up this
- * badly would mean the DB itself is in trouble, not that this locking scheme introduced a new
- * failure mode. A true fix would need a multi-key queue with atomic acquisition and real
- * cancellation, which is a materially different (and riskier) primitive than this file's simple
- * per-key `Promise` chaining — out of scope for the TOCTOU fix this function exists for.
+ * Unlike nesting two single-key `run` calls, `runMany` bounds the *whole* wait — for both slots,
+ * not just one at a time — by {@link USER_MUTATION_TIMEOUT_MS}: if either slot hasn't been
+ * acquired by then, both are given up immediately (an already-held slot is released right away; a
+ * still-pending one is cancelled so it's silently passed to the next waiter instead of held
+ * hostage) rather than one slot staying reserved for as long as the other's queue takes to drain.
+ * `operation` itself keeps the same tradeoff `runUserMutation` documents: once both slots are
+ * actually held and `operation` is running, a stall no longer frees them early, so it can't race a
+ * later mutation for either id and get its result overwritten.
  *
  * @param actorId - The acting user's discordId.
  * @param targetId - The mutation's target discordId.
@@ -75,13 +73,5 @@ export function runUserMutationForActorAndTarget<T>(
   targetId: string,
   operation: () => Promise<T>,
 ): Promise<T> {
-  if (actorId === targetId) {
-    return withTimeout(userMutationQueue.run(targetId, operation), USER_MUTATION_TIMEOUT_MS, 'User mutation');
-  }
-  const [firstId, secondId] = actorId < targetId ? [actorId, targetId] : [targetId, actorId];
-  return withTimeout(
-    userMutationQueue.run(firstId, () => userMutationQueue.run(secondId, operation)),
-    USER_MUTATION_TIMEOUT_MS,
-    'User mutation',
-  );
+  return userMutationQueue.runMany([actorId, targetId], operation, USER_MUTATION_TIMEOUT_MS, 'User mutation');
 }
