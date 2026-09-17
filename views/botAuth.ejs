@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Chat Bot Account</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body>
+  <%- include('partials/nav') %>
+
+  <main class="container">
+
+    <% if (error) { %>
+    <div class="card card-alert-danger"><%= getFriendlyError(error) %></div>
+    <% } %>
+    <% if (success === 'bot_connected') { %>
+    <div class="card card-alert-success">Twitch chat bot account connected successfully.</div>
+    <% } %>
+
+    <section class="section">
+      <h2 class="section-title">Chat Bot Account</h2>
+      <p class="hint">The Twitch account the chat bot itself logs in as. This is separate from any streamer's own EventSub connection — it's the single account used to send and read chat across every server.</p>
+
+      <div class="card card-spaced">
+        <div class="card-body">
+          <div class="form-row-wrap items-center">
+            <div>
+              <% if (isConnected) { %>
+              <span class="badge badge-active">✓ Connected<% if (connectedLogin) { %> as <strong class="mono"><%= connectedLogin %></strong><% } %></span>
+              <% } else { %>
+              <span class="badge">⚠ Not connected</span>
+              <% } %>
+            </div>
+            <a href="/admin/bot-auth/connect" class="btn btn-sm"><%= isConnected ? 'Reconnect' : 'Connect' %> Twitch</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+  <%- include('partials/pwa-register') %>
+  <%- include('partials/footer') %>
+</body>
+</html>

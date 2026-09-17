@@ -10,7 +10,6 @@ function require_env(name: string): string {
 export const DISCORD_TOKEN = require_env('DISCORD_TOKEN');
 
 export const TWITCH_USERNAME = require_env('TWITCH_USERNAME');
-export const TWITCH_OAUTH_TOKEN = require_env('TWITCH_OAUTH_TOKEN');
 
 // Twitch stream monitor (stream announcements — separate from chat bot)
 // Client credentials for Twitch API / EventSub
@@ -71,6 +70,11 @@ export const PUBLIC_URL = new URL(DISCORD_CALLBACK_URL).origin;
 // Twitch EventSub OAuth callback URL — required when any channel enables follow/sub notifications.
 // Must be registered in the Twitch developer console for the same app as TWITCH_CLIENT_ID.
 export const TWITCH_EVENTSUB_REDIRECT_URI = process.env.TWITCH_EVENTSUB_REDIRECT_URI ?? '';
+
+// Twitch chat bot OAuth callback URL — required to connect the bot's own chat account via
+// /admin/bot-auth (see issue #550). Must be registered in the Twitch developer console for the
+// same app as TWITCH_CLIENT_ID, in addition to (not instead of) TWITCH_EVENTSUB_REDIRECT_URI.
+export const TWITCH_BOT_OAUTH_REDIRECT_URI = process.env.TWITCH_BOT_OAUTH_REDIRECT_URI ?? '';
 
 // AES-256-GCM key for encrypting broadcaster OAuth tokens at rest.
 // Must be exactly 64 hex characters (32 bytes). Generate with: openssl rand -hex 32
