@@ -45,7 +45,12 @@
     "mysql2": "^3.23.1",
     "qs": ">=6.16.0",
     "madge": {
-      "typescript": "$typescript"
+      "typescript": "$typescript",
+      "dependency-tree": {
+        "filing-cabinet": {
+          "typescript": "$typescript"
+        }
+      }
     }
   },
   "devDependencies": {
