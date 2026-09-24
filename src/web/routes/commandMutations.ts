@@ -50,20 +50,50 @@ async function assignUsersToNewCommand(commandId: number, discordIds: string[]):
 
 /** Parses the optional `discord_ids` multi-select (one value or many) into normalized Discord IDs, dropping malformed ones. */
 function parseDiscordIdsField(rawDiscordIds: unknown): string[] {
-  const values: unknown[] = Array.isArray(rawDiscordIds) ? rawDiscordIds : rawDiscordIds ? [rawDiscordIds] : [];
-  return values
+  return ([] as unknown[]).concat(rawDiscordIds ?? [])
     .map((id) => (typeof id === 'string' ? normalizeDiscordId(id) : null))
     .filter((id): id is string => id !== null);
 }
 
+/** The add/update form's normalized trigger, output and flags. */
+interface CommandForm {
+  triggerString: string;
+  output: string;
+  isDiscordEnabled: boolean;
+  isMultiTwitch: boolean;
+}
+
 /**
- * Checks that a streamer below Mod may edit or delete a command themselves (see
- * {@link isCommandSelfManageable}).
+ * Reads and normalizes the add/update form. The Discord and multi-Twitch flags are only honoured
+ * for Mod+; a streamer's command is always Twitch-only, since both flags reach beyond their channel.
+ * @param req - Express request; reads `trigger_string`, `output`, `is_discord_enabled` and
+ *   `is_multi_twitch` from `req.body`.
+ * @returns The form, or null when the trigger or output is missing/invalid.
+ */
+function readCommandForm(req: Request): CommandForm | null {
+  const { trigger_string, output } = req.body as Record<string, string | undefined>;
+  const triggerString = normalizeSingleTokenRequiredText(trigger_string);
+  const normalizedOutput = normalizeRequiredText(output);
+  if (!triggerString || !normalizedOutput) return null;
+  const isCatalogManager = canManageCommandCatalog(req);
+  return {
+    triggerString,
+    output: normalizedOutput,
+    isDiscordEnabled: isCatalogManager && parseCheckboxField(req.body.is_discord_enabled),
+    isMultiTwitch: isCatalogManager && parseCheckboxField(req.body.is_multi_twitch),
+  };
+}
+
+/**
+ * Checks that the session user may edit or delete a command: always for Mod+, otherwise only a
+ * command the streamer owns outright (see {@link isCommandSelfManageable}).
+ * @param req - Express request; reads the session user.
  * @param commandId - ID of the command being changed.
- * @param discordId - Discord ID of the session user.
  * @returns `command_not_found` or `forbidden` when the change isn't allowed, or null when it is.
  */
-async function getSelfServiceDenial(commandId: number, discordId: string): Promise<string | null> {
+async function getSelfServiceDenial(req: Request, commandId: number): Promise<string | null> {
+  if (canManageCommandCatalog(req)) return null;
+  const discordId = req.session.user!.discordId;
   const command = await getCustomCommandWithAssignments(commandId);
   if (!command) return 'command_not_found';
   return isCommandSelfManageable(command, discordId) ? null : 'forbidden';
@@ -99,16 +129,8 @@ async function resolveNewCommandAssignees(req: Request): Promise<{ discordIds: s
  *   fails (`command_taken` or `assign_failed`).
  */
 router.post('/commands/add', requireGuildContext, csrfProtection, async (req, res) => {
-  const { trigger_string, output } = req.body as Record<string, string | undefined>;
-  const isCatalogManager = canManageCommandCatalog(req);
-  const isDiscordEnabled = isCatalogManager && parseCheckboxField(req.body.is_discord_enabled);
-  const isMultiTwitch = isCatalogManager && parseCheckboxField(req.body.is_multi_twitch);
-  const normalizedTriggerString = normalizeSingleTokenRequiredText(trigger_string);
-  const normalizedOutput = normalizeRequiredText(output);
-
-  if (!normalizedTriggerString || !normalizedOutput) {
-    return res.redirect('/commands?error=missing_fields');
-  }
+  const form = readCommandForm(req);
+  if (!form) return res.redirect('/commands?error=missing_fields');
 
   let commandId: number;
   let discordIds: string[];
@@ -116,7 +138,7 @@ router.post('/commands/add', requireGuildContext, csrfProtection, async (req, re
     const assignees = await resolveNewCommandAssignees(req);
     if ('error' in assignees) return res.redirect(`/commands?error=${assignees.error}`);
     discordIds = assignees.discordIds;
-    commandId = await addCustomCommand(normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
+    commandId = await addCustomCommand(form.triggerString, form.output, form.isDiscordEnabled, form.isMultiTwitch);
   } catch (err) {
     if (handleReservedOrConflictCommandError(err, res, COMMAND_WRITE_ERROR_OPTIONS)) return;
     return logAndRedirectError({ res, log, logLabel: 'Add custom command error:', err, basePath: '/commands', errorCode: 'add_failed' });
@@ -142,26 +164,18 @@ router.post('/commands/add', requireGuildContext, csrfProtection, async (req, re
  *   (`update_failed`).
  */
 router.post('/commands/update', requireGuildContext, csrfProtection, async (req, res) => {
-  const { command_id, trigger_string, output } = req.body as Record<string, string | undefined>;
-  const isCatalogManager = canManageCommandCatalog(req);
-  const isDiscordEnabled = isCatalogManager && parseCheckboxField(req.body.is_discord_enabled);
-  const isMultiTwitch = isCatalogManager && parseCheckboxField(req.body.is_multi_twitch);
-  const normalizedTriggerString = normalizeSingleTokenRequiredText(trigger_string);
-  const normalizedOutput = normalizeRequiredText(output);
-  const parsedCommandId = parsePositiveIntId(command_id);
+  const form = readCommandForm(req);
+  if (!form) return res.redirect('/commands?error=missing_fields');
 
-  if (!normalizedTriggerString || !normalizedOutput) {
-    return res.redirect('/commands?error=missing_fields');
-  }
-
+  const parsedCommandId = parsePositiveIntId((req.body as { command_id?: string }).command_id);
   if (parsedCommandId === null) {
     return res.redirect('/commands?error=invalid_id');
   }
 
   try {
-    const denial = isCatalogManager ? null : await getSelfServiceDenial(parsedCommandId, req.session.user!.discordId);
+    const denial = await getSelfServiceDenial(req, parsedCommandId);
     if (denial) return res.redirect(`/commands?error=${denial}`);
-    await updateCustomCommand(parsedCommandId, normalizedTriggerString, normalizedOutput, isDiscordEnabled, isMultiTwitch);
+    await updateCustomCommand(parsedCommandId, form.triggerString, form.output, form.isDiscordEnabled, form.isMultiTwitch);
   } catch (err) {
     if (err instanceof CommandNotFoundError) {
       return res.redirect('/commands?error=command_not_found');
@@ -193,7 +207,7 @@ router.post('/commands/remove', requireGuildContext, csrfProtection, async (req,
   }
 
   try {
-    const denial = canManageCommandCatalog(req) ? null : await getSelfServiceDenial(parsedCommandId, req.session.user!.discordId);
+    const denial = await getSelfServiceDenial(req, parsedCommandId);
     if (denial) return res.redirect(`/commands?error=${denial}`);
     await removeCustomCommand(parsedCommandId);
   } catch (err) {
