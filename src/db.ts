@@ -152,7 +152,7 @@ import {
   assignUsersToCommand as assignUsersToCommandRecord,
   unassignUserFromCommand as unassignUserFromCommandRecord,
 } from './db/customCommands';
-export { getAllCustomCommandsWithAssignments, getCustomCommandCount } from './db/customCommands';
+export { getAllCustomCommandsWithAssignments, getCustomCommandCount, getCustomCommandWithAssignments } from './db/customCommands';
 export type {
   DbCustomCommand, DbCustomCommandAssignedUser, DbCustomCommandWithAssignments,
 } from './db/customCommands';

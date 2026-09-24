@@ -49,6 +49,7 @@ vi.mock('./commandStringUtils', () => ({
 import { getPool } from './pool';
 import {
   getAllCustomCommandsWithAssignments,
+  getCustomCommandWithAssignments,
   getCustomCommandCount,
   addCustomCommand,
   updateCustomCommand,
@@ -105,6 +106,33 @@ describe('getCustomCommandCount', () => {
     pool.execute.mockResolvedValue([[{ count: 12 }], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await getCustomCommandCount()).toBe(12);
+  });
+});
+
+// ─── getCustomCommandWithAssignments ──────────────────────────────────────────
+
+describe('getCustomCommandWithAssignments', () => {
+  it('returns null when no command has that id', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await getCustomCommandWithAssignments(7)).toBeNull();
+  });
+
+  it('filters the query by command_id and returns the command with its assigned users', async () => {
+    const rows = [
+      { command_id: 7, trigger_string: '!clap', output: 'Clap!', is_discord_enabled: 0, is_multi_twitch: 0, assigned_discord_id: 'u1', user_discord_id: 'u1', discord_name: 'Alice', twitch_name: 'alice', access_level: 0, is_twitch_bot_enabled: 1 },
+      { command_id: 7, trigger_string: '!clap', output: 'Clap!', is_discord_enabled: 0, is_multi_twitch: 0, assigned_discord_id: 'u2', user_discord_id: 'u2', discord_name: 'Bob', twitch_name: 'bob', access_level: 0, is_twitch_bot_enabled: 1 },
+    ];
+    const pool = makePool();
+    pool.execute.mockResolvedValue([rows, []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    const result = await getCustomCommandWithAssignments(7);
+
+    expect(pool.execute.mock.calls[0][0]).toContain('WHERE c.command_id = ?');
+    expect(pool.execute.mock.calls[0][1]).toEqual([7]);
+    expect(result?.command_id).toBe(7);
+    expect(result?.assigned_users.map((u) => u.discord_id)).toEqual(['u1', 'u2']);
   });
 });
 

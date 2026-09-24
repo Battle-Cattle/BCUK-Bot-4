@@ -94,6 +94,8 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 
 0=User, 1=Mod (+voice), 2=Manager (+user list, streams/commands/counters/SFX), 3=Admin (full). Use `AccessLevel` const from `src/db/users.ts` — not raw numbers. Manager+ = ≥ 2.
 
+**Custom Commands exception:** any user with a linked Twitch account can manage the commands on their own channel. They can add Twitch-only commands, edit/delete commands assigned to them alone, and remove themselves from shared ones. Mod+ manage the whole catalog: Discord/multi-Twitch flags, assignments and server overrides. The rules live in `src/web/routes/commandPermissions.ts`.
+
 ---
 
 ## Design Decisions

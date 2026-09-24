@@ -28,12 +28,25 @@
         invalid_assignment_user: 'The selected user cannot be assigned to this command.',
         override_failed: 'Failed to save the server override.',
         override_reset_failed: 'Failed to reset the server override.',
+        forbidden: 'You can only change commands that run on your own Twitch channel alone.',
+        twitch_not_linked: 'Link your Twitch account in Settings before adding commands.',
       }; %>
       <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
         <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
       </div>
       <% } %>
 
+      <% if (!canManageCatalog) { %>
+      <p class="hint">These are the commands on your Twitch channel. Commands you add here run in your Twitch chat only. Commands shared with other channels, or enabled on Discord, are managed by the mods &mdash; you can remove them from your channel.</p>
+      <% } %>
+
+      <% if (!canManageCatalog && !twitchLinked) { %>
+      <div class="card card-spaced">
+        <div class="card-body">
+          <p>Link your Twitch account in <a href="/user/settings">Settings</a> to add commands to your channel.</p>
+        </div>
+      </div>
+      <% } else { %>
       <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add Command</span></div>
         <div class="card-body">
@@ -44,12 +57,14 @@
                 <label for="trigger_string" class="form-label">Trigger</label>
                 <input id="trigger_string" class="input full-width" type="text" name="trigger_string" placeholder="Trigger string, e.g. !hello" required>
               </div>
+              <% if (canManageCatalog) { %>
               <label class="input checkbox-input-label">
                 <input type="checkbox" name="is_discord_enabled"> Discord enabled
               </label>
               <label class="input checkbox-input-label">
                 <input type="checkbox" name="is_multi_twitch"> Multi-Twitch broadcast
               </label>
+              <% } %>
             </div>
             <div class="form-section-gap">
               <label for="output" class="form-label">Output</label>
@@ -77,6 +92,7 @@
           </form>
         </div>
       </div>
+      <% } %>
 
       <div class="card">
         <div class="table-scroll">
@@ -132,15 +148,25 @@
                 </td>
                 <td>
                   <div class="actions">
+                    <% if (command.canEdit) { %>
                     <button type="button" class="btn btn-sm btn-ghost btn-toggle-command-edit" data-command-id="<%= command.command_id %>" aria-controls="command-edit-<%= command.command_id %>" aria-expanded="false">✏️ Edit</button>
                     <form method="POST" action="/commands/remove" class="inline-form-sm js-confirm-remove-command" data-command-trigger="<%= command.trigger_string %>">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="command_id" value="<%= command.command_id %>">
                       <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                     </form>
+                    <% } else { %>
+                    <form method="POST" action="/commands/unassign" class="inline-form-sm">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <input type="hidden" name="command_id" value="<%= command.command_id %>">
+                      <input type="hidden" name="discord_id" value="<%= user.discordId %>">
+                      <button type="submit" class="btn btn-danger btn-sm">Remove from my channel</button>
+                    </form>
+                    <% } %>
                   </div>
                 </td>
               </tr>
+              <% if (command.canEdit) { %>
               <tr class="files-row is-hidden" id="command-edit-<%= command.command_id %>">
                 <td colspan="7">
                   <div class="command-edit-panel">
@@ -152,12 +178,14 @@
                           <label for="trigger_string_<%= command.command_id %>" class="form-label">Trigger</label>
                           <input id="trigger_string_<%= command.command_id %>" class="input full-width" type="text" name="trigger_string" value="<%= command.trigger_string %>" required>
                         </div>
+                        <% if (canManageCatalog) { %>
                         <label class="input checkbox-input-label">
                           <input type="checkbox" name="is_discord_enabled" <%= command.is_discord_enabled ? 'checked' : '' %>> Discord enabled
                         </label>
                         <label class="input checkbox-input-label">
                           <input type="checkbox" name="is_multi_twitch" <%= command.is_multi_twitch ? 'checked' : '' %>> Multi-Twitch broadcast
                         </label>
+                        <% } %>
                       </div>
                       <div class="form-section-gap">
                         <label for="output_<%= command.command_id %>" class="form-label">Output</label>
@@ -175,6 +203,7 @@
                       </div>
                     </form>
 
+                    <% if (canManageCatalog) { %>
                     <div class="command-assignment-shell">
                       <h3 class="command-assignment-title">Twitch Assignments</h3>
                       <% if (command.unassigned_users.length > 0) { %>
@@ -217,7 +246,9 @@
                       <% } %>
                     </div>
 
-                    <% if (user && user.currentGuildId) { %>
+                    <% } %>
+
+                    <% if (canManageCatalog && user && user.currentGuildId) { %>
                     <div class="command-guild-override-shell">
                       <h3 class="command-assignment-title">Server Override</h3>
                       <% var guildOverride = command.guildOverride; %>
@@ -252,10 +283,11 @@
                   </div>
                 </td>
               </tr>
+              <% } %>
               <% }) %>
               <% if (commands.length === 0) { %>
               <tr>
-                <td colspan="7" class="empty-msg">No custom commands configured yet.</td>
+                <td colspan="7" class="empty-msg"><%= canManageCatalog ? 'No custom commands configured yet.' : 'Your channel has no custom commands yet.' %></td>
               </tr>
               <% } %>
             </tbody>
