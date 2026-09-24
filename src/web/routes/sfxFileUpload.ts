@@ -40,46 +40,47 @@ function isValidId3Header(buf: Buffer): boolean {
   return (buf[6] & 0x80) === 0 && (buf[7] & 0x80) === 0 && (buf[8] & 0x80) === 0 && (buf[9] & 0x80) === 0;
 }
 
+const RIFF_MAGIC = Buffer.from([0x52, 0x49, 0x46, 0x46]); // "RIFF"
+const WAVE_MAGIC = Buffer.from([0x57, 0x41, 0x56, 0x45]); // "WAVE"
+const OGG_MAGIC = Buffer.from([0x4f, 0x67, 0x67, 0x53]); // "OggS"
+
+/**
+ * True if `buf` contains `bytes` starting at `offset` (false if `buf` is too short).
+ * @param buf - The buffer to inspect.
+ * @param bytes - The expected byte sequence.
+ * @param offset - Byte offset in `buf` to compare at; defaults to 0.
+ */
+export function startsWithBytes(buf: Buffer, bytes: Buffer, offset = 0): boolean {
+  return buf.length >= offset + bytes.length && buf.subarray(offset, offset + bytes.length).equals(bytes);
+}
+
+/**
+ * True if `buf` starts with a valid MPEG audio frame header: 11-bit sync (0xFF then top 3 bits of
+ * byte 1) followed by a valid version/layer/bitrate/sample-rate. Validates the full 4-byte header
+ * and rejects the reserved bit combinations so junk like `FF E0 00 00` — which only matches the
+ * sync — isn't mistaken for MP3.
+ */
+export function isValidMpegFrameHeader(buf: Buffer): boolean {
+  if (buf.length < 4 || buf[0] !== 0xff || (buf[1] & 0xe0) !== 0xe0) return false;
+  const versionBits = (buf[1] >> 3) & 0x03; // 0x01 = reserved MPEG version
+  const layerBits = (buf[1] >> 1) & 0x03; // 0x00 = reserved layer
+  const bitrateBits = (buf[2] >> 4) & 0x0f; // 0x0f = bad/invalid bitrate
+  const sampleRateBits = (buf[2] >> 2) & 0x03; // 0x03 = reserved sample rate
+  return versionBits !== 0x01 && layerBits !== 0x00 && bitrateBits !== 0x0f && sampleRateBits !== 0x03;
+}
+
 /**
  * Detect an audio file's type from its magic bytes, independent of the
  * client-supplied MIME type. Supports the three accepted formats.
  * - WAV: `RIFF` at offset 0 and `WAVE` at offset 8
  * - OGG: `OggS` at offset 0
  * - MP3: a complete 10-byte ID3v2 header at offset 0, or a valid MPEG audio
- *   frame header (see below)
+ *   frame header (see {@link isValidMpegFrameHeader})
  */
 export function detectAudioType(buf: Buffer): 'mp3' | 'ogg' | 'wav' | null {
-  if (
-    buf.length >= 12 &&
-    buf.subarray(0, 4).equals(Buffer.from([0x52, 0x49, 0x46, 0x46])) &&
-    buf.subarray(8, 12).equals(Buffer.from([0x57, 0x41, 0x56, 0x45]))
-  ) {
-    return 'wav';
-  }
-  if (buf.length >= 4 && buf.subarray(0, 4).equals(Buffer.from([0x4f, 0x67, 0x67, 0x53]))) {
-    return 'ogg';
-  }
-  if (isValidId3Header(buf)) {
-    return 'mp3';
-  }
-  // MPEG audio frame: 11-bit sync (0xFF then top 3 bits of byte 1) followed by a
-  // valid version/layer/bitrate/sample-rate. Validate the full 4-byte header and
-  // reject the reserved bit combinations so junk like `FF E0 00 00` — which only
-  // matches the sync — isn't mistaken for MP3.
-  if (buf.length >= 4 && buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) {
-    const versionBits = (buf[1] >> 3) & 0x03; // 0x01 = reserved MPEG version
-    const layerBits = (buf[1] >> 1) & 0x03; // 0x00 = reserved layer
-    const bitrateBits = (buf[2] >> 4) & 0x0f; // 0x0f = bad/invalid bitrate
-    const sampleRateBits = (buf[2] >> 2) & 0x03; // 0x03 = reserved sample rate
-    if (
-      versionBits !== 0x01 &&
-      layerBits !== 0x00 &&
-      bitrateBits !== 0x0f &&
-      sampleRateBits !== 0x03
-    ) {
-      return 'mp3';
-    }
-  }
+  if (startsWithBytes(buf, RIFF_MAGIC) && startsWithBytes(buf, WAVE_MAGIC, 8)) return 'wav';
+  if (startsWithBytes(buf, OGG_MAGIC)) return 'ogg';
+  if (isValidId3Header(buf) || isValidMpegFrameHeader(buf)) return 'mp3';
   return null;
 }
 

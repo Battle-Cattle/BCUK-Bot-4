@@ -5,7 +5,7 @@ import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, 
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
-import { trimField, filterQueryParam } from './validation';
+import { trimField, filterQueryParam, parseCheckboxField } from './validation';
 import { renderError, renderView, getFriendlyErrorMessage } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
@@ -172,6 +172,48 @@ router.post('/twitch-disconnect', requireAuth, csrfProtection, async (req, res) 
   }
 });
 
+const EVENTSUB_MESSAGE_MAX_LENGTH = 500;
+const EVENTSUB_MESSAGE_FIELDS = ['follow_message', 'sub_message', 'resub_message', 'giftsub_message', 'raid_message'] as const;
+
+/**
+ * Checks whether any submitted EventSub message template exceeds the length limit.
+ * @param body - The parsed `POST /user/eventsub-config` form body.
+ * @returns True if at least one message field is longer than {@link EVENTSUB_MESSAGE_MAX_LENGTH} once trimmed.
+ */
+export function hasOverlongMessage(body: Record<string, string | undefined>): boolean {
+  return EVENTSUB_MESSAGE_FIELDS.some((field) => trimField(body[field]).length > EVENTSUB_MESSAGE_MAX_LENGTH);
+}
+
+/**
+ * Builds the EventSub config to save from a submitted form body. Inputs are disabled in the UI
+ * when disconnected, so those keys are absent from the POST body — any field missing from `body`
+ * falls back to the existing saved config (then to a default) instead of being wiped. A message
+ * that is present but blank also falls back to its default.
+ * @param body - The parsed `POST /user/eventsub-config` form body.
+ * @param current - The streamer's currently saved config, or null if none exists yet.
+ * @returns The merged config.
+ */
+export function buildEventSubConfig(body: Record<string, string | undefined>, current: EventSubConfig | null): EventSubConfig {
+  /** Checkbox value if submitted, else the saved value, else unchecked. */
+  const flag = (key: keyof EventSubConfig): boolean =>
+    key in body ? parseCheckboxField(body[key]) : Boolean(current?.[key]);
+  /** Trimmed message if submitted and non-blank, else the saved message, else `fallback`. */
+  const msg = (key: keyof EventSubConfig, fallback: string): string =>
+    key in body ? (trimField(body[key]) || fallback) : ((current?.[key] as string | undefined) ?? fallback);
+
+  return {
+    follow_enabled:  flag('follow_enabled'),
+    follow_message:  msg('follow_message',  'Thanks {display_name} for the follow!'),
+    sub_enabled:     flag('sub_enabled'),
+    sub_message:     msg('sub_message',     'Thanks {display_name} for subscribing! ({tier_name})'),
+    resub_message:   msg('resub_message',   'Thanks {display_name} for {months} months! ({tier_name})'),
+    giftsub_message: msg('giftsub_message', '{gifter_display} gifted {count} sub(s) to the community!'),
+    raid_enabled:    flag('raid_enabled'),
+    raid_message:    msg('raid_message',    'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!'),
+    raid_shoutout_enabled: flag('raid_shoutout_enabled'),
+  };
+}
+
 // POST /user/eventsub-config
 
 /**
@@ -200,33 +242,9 @@ router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) =>
     if (!dbUser?.is_twitch_bot_enabled) return res.redirect('/user/settings?error=eventsub_not_bot_enabled');
 
     const body = req.body as Record<string, string | undefined>;
+    if (hasOverlongMessage(body)) return res.redirect('/user/settings?error=eventsub_config_failed');
 
-    const MESSAGE_MAX_LENGTH = 500;
-    const messageFields = ['follow_message', 'sub_message', 'resub_message', 'giftsub_message', 'raid_message'] as const;
-    for (const field of messageFields) {
-      if (trimField(body[field]).length > MESSAGE_MAX_LENGTH) {
-        return res.redirect('/user/settings?error=eventsub_config_failed');
-      }
-    }
-
-    // Inputs are disabled in the UI when disconnected, so those keys are absent from
-    // the POST body. Fall back to existing config to avoid wiping saved settings.
-    const current = streamer.config;
-    function bodyMsg(key: string, fallback: string): string {
-      return key in body ? (trimField(body[key]) || fallback) : (current?.[key as keyof EventSubConfig] as string | undefined ?? fallback);
-    }
-    const config: EventSubConfig = {
-      follow_enabled:  'follow_enabled'  in body ? body.follow_enabled  === 'on' : (current?.follow_enabled  ?? false),
-      follow_message:  bodyMsg('follow_message',  'Thanks {display_name} for the follow!'),
-      sub_enabled:     'sub_enabled'     in body ? body.sub_enabled     === 'on' : (current?.sub_enabled     ?? false),
-      sub_message:     bodyMsg('sub_message',     'Thanks {display_name} for subscribing! ({tier_name})'),
-      resub_message:   bodyMsg('resub_message',   'Thanks {display_name} for {months} months! ({tier_name})'),
-      giftsub_message: bodyMsg('giftsub_message', '{gifter_display} gifted {count} sub(s) to the community!'),
-      raid_enabled:    'raid_enabled' in body ? body.raid_enabled === 'on' : (current?.raid_enabled ?? false),
-      raid_message:    bodyMsg('raid_message',    'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!'),
-      raid_shoutout_enabled: 'raid_shoutout_enabled' in body ? body.raid_shoutout_enabled === 'on' : (current?.raid_shoutout_enabled ?? false),
-    };
-
+    const config = buildEventSubConfig(body, streamer.config);
     await saveEventConfig(streamer.id, config);
     reloadEventSubSubscriptions();
     res.redirect('/user/settings');

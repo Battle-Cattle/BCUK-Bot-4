@@ -32,7 +32,7 @@ vi.mock('../../twitch/eventsub/twitchEventSubSubscriptions', () => ({
 
 import express from 'express';
 import supertest from 'supertest';
-import router from './eventsubCallback';
+import router, { isExpectedTwitchAccount } from './eventsubCallback';
 import { getStreamerById, saveStreamerToken, initEventConfig, initAlertConfigs } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { AccessLevel } from '../../db';
@@ -141,5 +141,20 @@ describe('GET /twitch/eventsub/callback — user binding', () => {
       .get('/twitch/eventsub/callback?code=abc&state=valid-state-abc');
     expect(res.headers.location).toContain('success=twitch_connected');
     expect(vi.mocked(saveStreamerToken)).toHaveBeenCalled();
+  });
+});
+
+describe('isExpectedTwitchAccount', () => {
+  it('matches case-insensitively', () => {
+    expect(isExpectedTwitchAccount('StreamerA', 'streamera')).toBe(true);
+  });
+
+  it('rejects a different login', () => {
+    expect(isExpectedTwitchAccount('streamera', 'someoneelse')).toBe(false);
+  });
+
+  it('rejects when the streamer has no Twitch name', () => {
+    expect(isExpectedTwitchAccount(null, 'streamera')).toBe(false);
+    expect(isExpectedTwitchAccount('', 'streamera')).toBe(false);
   });
 });

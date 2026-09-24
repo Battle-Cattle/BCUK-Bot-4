@@ -142,6 +142,28 @@ async function handleChangeTwitchChannel({
   }
 }
 
+/**
+ * Returns a user's normalized Twitch channel name.
+ * @param user The user row, or null/undefined if there is none.
+ * @returns The normalized channel, or null if the user is missing or has no (valid) Twitch name.
+ */
+function channelOf(user: { twitch_name: string | null } | null | undefined): string | null {
+  return user?.twitch_name ? normalizeTwitchChannelName(user.twitch_name) : null;
+}
+
+/**
+ * Ensures no other user already has `twitchName` assigned.
+ * @param twitchName Normalized Twitch channel name being assigned.
+ * @param discordId Discord snowflake of the user it's being assigned to (excluded from the check).
+ * @returns Resolves if the name is free.
+ * @throws {@link DuplicateTwitchNameError} if another user already has it.
+ */
+async function assertTwitchNameAvailable(twitchName: string, discordId: string): Promise<void> {
+  if (await findUserByTwitchName(twitchName, discordId)) {
+    throw new DuplicateTwitchNameError(twitchName);
+  }
+}
+
 export interface AddOrUpdateParams {
   discordId: string;
   discordName: string;
@@ -166,37 +188,33 @@ export async function addOrUpdateUserMutation({
   shouldClearTwitchName,
 }: AddOrUpdateParams): Promise<void> {
   const existingUser = await findUser(discordId);
-  const previousChannel = existingUser?.twitch_name
-    ? normalizeTwitchChannelName(existingUser.twitch_name)
-    : null;
+  const previousChannel = channelOf(existingUser);
   const nextTwitchName = shouldClearTwitchName
     ? null
     : normalizedTwitchName ?? undefined;
 
   if (normalizedTwitchName) {
-    const conflictingUser = await findUserByTwitchName(normalizedTwitchName, discordId);
-    if (conflictingUser) {
-      throw new DuplicateTwitchNameError(normalizedTwitchName);
-    }
+    await assertTwitchNameAvailable(normalizedTwitchName, discordId);
   }
 
   await upsertUser(discordId, discordName, level, nextTwitchName);
 
-  const committedUser = await findUser(discordId);
-  const committedChannel = committedUser?.twitch_name
-    ? normalizeTwitchChannelName(committedUser.twitch_name)
-    : null;
+  const committedChannel = channelOf(await findUser(discordId));
+  const wasBotEnabled = existingUser?.is_twitch_bot_enabled ?? false;
 
-  if ((existingUser && !existingUser.is_twitch_bot_enabled) || previousChannel === committedChannel) {
+  // A brand-new user (no existing row) still goes through channel reconciliation below;
+  // only an existing user with the bot explicitly disabled is skipped.
+  const botDisabledForExistingUser = !!existingUser && !wasBotEnabled;
+  if (botDisabledForExistingUser || previousChannel === committedChannel) {
     return;
   }
 
   if (!committedChannel) {
-    await handleClearTwitchChannel(discordId, discordName, level, previousChannel, existingUser?.is_twitch_bot_enabled ?? false);
+    await handleClearTwitchChannel(discordId, discordName, level, previousChannel, wasBotEnabled);
     return;
   }
 
-  await handleChangeTwitchChannel({ discordId, discordName, level, previousChannel, committedChannel, wasBotEnabled: existingUser?.is_twitch_bot_enabled ?? false });
+  await handleChangeTwitchChannel({ discordId, discordName, level, previousChannel, committedChannel, wasBotEnabled });
 }
 
 /**

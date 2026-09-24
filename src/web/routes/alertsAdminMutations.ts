@@ -62,6 +62,16 @@ router.post('/settings/:eventType', requireAuth, csrfProtection, async (req, res
 });
 
 /**
+ * Builds the overlay URL for an uploaded alert asset (served by `GET /alerts/assets/:streamerId/:filename`).
+ * @param streamerId - DB row ID of the owning streamer.
+ * @param filename - The stored asset filename, or null/undefined if none is configured.
+ * @returns The asset URL, or null when there is no asset.
+ */
+export function alertAssetUrl(streamerId: number, filename: string | null | undefined): string | null {
+  return filename ? `/alerts/assets/${streamerId}/${filename}` : null;
+}
+
+/**
  * POST /alerts/settings/:eventType/test — pushes the requesting streamer's actual saved
  * configuration (message template, image, sound, duration, text animation) for one event type
  * through their alerts-overlay SSE stream, so they can preview their real setup live in OBS
@@ -96,8 +106,8 @@ router.post('/settings/:eventType/test', requireAuth, csrfProtection, async (req
     pushAlertEvent(streamer.twitch_name.toLowerCase(), {
       type: eventType,
       message,
-      imageUrl: config?.image_filename ? `/alerts/assets/${streamer.id}/${config.image_filename}` : null,
-      soundUrl: config?.sound_filename ? `/alerts/assets/${streamer.id}/${config.sound_filename}` : null,
+      imageUrl: alertAssetUrl(streamer.id, config?.image_filename),
+      soundUrl: alertAssetUrl(streamer.id, config?.sound_filename),
       durationMs: config?.duration_ms ?? 6000,
       textAnimation: config?.text_animation ?? 'none',
     });
