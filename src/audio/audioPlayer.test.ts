@@ -333,6 +333,50 @@ describe('reconnect', () => {
     expect(vi.mocked(voice.joinVoiceChannel).mock.calls.length).toBe(1);
   });
 
+  it('a superseded connect() that fails while the newer one is in flight leaves the live connection alone and schedules no reconnect', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client } = makeClient();
+      const voice = await import('@discordjs/voice');
+      await mod.connect(client as never, 'guild-A', 'chan-0');
+      const [liveConn] = createdConnections;
+
+      // Hold both follow-up attempts' Ready waits open so they overlap.
+      let failFirstReady!: (err: Error) => void;
+      let finishSecondReady!: () => void;
+      vi.mocked(voice.entersState)
+        .mockImplementationOnce(() => new Promise((_resolve, reject) => { failFirstReady = reject; }) as never)
+        .mockImplementationOnce(() => new Promise<void>((resolve) => { finishSecondReady = resolve; }) as never);
+
+      const firstConnect = mod.connect(client as never, 'guild-A', 'chan-1');
+      const firstRejection = expect(firstConnect).rejects.toThrow('ready timeout');
+      await vi.advanceTimersByTimeAsync(0); // first attempt reaches its Ready wait
+      const secondConnect = mod.connect(client as never, 'guild-A', 'chan-2');
+      await vi.advanceTimersByTimeAsync(0); // second attempt reaches its Ready wait
+      const [, firstConn, secondConn] = createdConnections;
+
+      failFirstReady(new Error('ready timeout'));
+      await firstRejection;
+
+      // The stale failure destroys only the connection it created — not the still-live one.
+      expect(firstConn.destroy).toHaveBeenCalled();
+      expect(liveConn.destroy).not.toHaveBeenCalled();
+      expect(mod.isConnected('guild-A')).toBe(true);
+
+      // Nor does it schedule a reconnect that would supersede the in-flight attempt.
+      const joinsBefore = vi.mocked(voice.joinVoiceChannel).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(vi.mocked(voice.joinVoiceChannel).mock.calls.length).toBe(joinsBefore);
+
+      finishSecondReady();
+      await secondConnect;
+      expect(mod.getCurrentChannelId('guild-A')).toBe('chan-2');
+      expect(secondConn.destroy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('clears a pending reconnect timer when connect is called again', async () => {
     vi.useFakeTimers();
     try {
