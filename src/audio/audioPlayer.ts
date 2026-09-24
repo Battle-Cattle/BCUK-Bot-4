@@ -228,7 +228,7 @@ export async function connect(client: Client, guildId: string, channelId: string
     setVoiceConnected(guildId, channel.name);
     log.info(`Joined voice channel: ${channel.name}`);
   } catch (err) {
-    handleConnectFailure(state, isStale(), previousConnection, nextConnection, deps, err);
+    handleConnectFailure(state, isStale(), { previousConnection, nextConnection }, err);
     throw err;
   }
 }
@@ -272,24 +272,21 @@ async function resolveVoiceChannel(
  * a superseded attempt only destroys the connection it created itself.
  * @param state - The guild's voice state.
  * @param stale - Whether this attempt has been superseded by a newer one.
- * @param previousConnection - The connection that was active before this attempt started.
- * @param nextConnection - The connection this attempt created, if it got that far.
- * @param deps - Connection handler dependencies for this guild.
+ * @param connections - `previousConnection`: the connection that was active before this attempt
+ *   started; `nextConnection`: the connection this attempt created, if it got that far.
  * @param err - The error the attempt failed with.
  */
 function handleConnectFailure(
   state: GuildVoiceState,
   stale: boolean,
-  previousConnection: VoiceConnection | null,
-  nextConnection: VoiceConnection | null,
-  deps: ConnectionHandlerDeps,
+  { previousConnection, nextConnection }: { previousConnection: VoiceConnection | null; nextConnection: VoiceConnection | null },
   err: unknown,
 ): void {
   if (stale) {
     nextConnection?.destroy();
     return;
   }
-  cleanupFailedConnect(previousConnection, nextConnection, deps);
+  cleanupFailedConnect(previousConnection, nextConnection, makeDeps(state));
   if (state.shouldAutoReconnect && !isPermanentVoiceMisconfigurationError(err)) {
     scheduleReconnect(state, 'connect failed');
   }
