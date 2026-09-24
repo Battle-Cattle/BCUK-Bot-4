@@ -29,9 +29,11 @@ import { assignUserToCommand, unassignUserFromCommand, findUser, CommandConflict
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-/** Builds a supertest-ready app: the command assignments router with a urlencoded body parser (no session or render stub needed). */
-function buildApp() {
-  return buildTestApp({ router, bodyParser: 'urlencoded' });
+const MOD_SESSION_USER = { discordId: '1', discordName: 'Mod', accessLevel: ACCESS_LEVEL_MOCK.MOD };
+
+/** Builds a supertest-ready app: the command assignments router with a urlencoded body parser and a Mod session user by default. */
+function buildApp(sessionUser: unknown = MOD_SESSION_USER) {
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
 }
 
 const VALID_COMMAND_ID = '5';
@@ -128,11 +130,27 @@ describe('POST /commands/assign', () => {
 // ─── POST /commands/unassign ──────────────────────────────────────────────────
 
 describe('POST /commands/unassign', () => {
-  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+  it('runs requireGuildContext without requireMod, so streamers can reach it to remove themselves', async () => {
     await supertest(buildApp())
       .post('/commands/unassign')
       .send(`command_id=${VALID_COMMAND_ID}&discord_id=${VALID_DISCORD_ID}`);
-    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext']);
+  });
+
+  it('lets a streamer below Mod unassign themselves', async () => {
+    const res = await supertest(buildApp({ discordId: VALID_DISCORD_ID, accessLevel: AccessLevel.USER }))
+      .post('/commands/unassign')
+      .send(`command_id=${VALID_COMMAND_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/commands');
+    expect(unassignUserFromCommand).toHaveBeenCalledWith(5, VALID_DISCORD_ID);
+  });
+
+  it('redirects a streamer below Mod to ?error=forbidden when unassigning someone else', async () => {
+    const res = await supertest(buildApp({ discordId: '999999999999999999', accessLevel: AccessLevel.USER }))
+      .post('/commands/unassign')
+      .send(`command_id=${VALID_COMMAND_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/commands?error=forbidden');
+    expect(unassignUserFromCommand).not.toHaveBeenCalled();
   });
 
   it('redirects to /commands on success', async () => {

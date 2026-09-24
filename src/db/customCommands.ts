@@ -57,8 +57,15 @@ export async function getCustomCommandCount(): Promise<number> {
   return getRowCount('custom_command');
 }
 
-/** Return all custom commands, each with its full list of assigned users. */
-export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCommandWithAssignments[]> {
+/**
+ * Runs the command + assignment join, optionally narrowed to one command, and groups the rows
+ * into one entry per command with its assigned users.
+ * @param commandId - When given, only this command is returned; otherwise every command.
+ * @returns Commands ordered by trigger string, each with its full list of assigned users.
+ */
+async function queryCommandsWithAssignments(commandId?: number): Promise<DbCustomCommandWithAssignments[]> {
+  const whereClause = commandId === undefined ? '' : 'WHERE c.command_id = ?';
+  const params = commandId === undefined ? [] : [commandId];
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT c.command_id, c.trigger_string, c.output, c.is_discord_enabled, c.is_multi_twitch,
             tuc.discord_id AS assigned_discord_id,
@@ -67,7 +74,9 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
      FROM custom_command c
      LEFT JOIN twitch_user_commands tuc ON c.command_id = tuc.command_id
      LEFT JOIN \`user\` u ON tuc.discord_id = u.discord_id
+     ${whereClause}
      ORDER BY c.trigger_string, u.discord_name, tuc.discord_id`,
+    params,
   );
 
   const commandMap = new Map<number, DbCustomCommandWithAssignments>();
@@ -91,6 +100,21 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
   }
 
   return Array.from(commandMap.values());
+}
+
+/** Return all custom commands, each with its full list of assigned users. */
+export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCommandWithAssignments[]> {
+  return queryCommandsWithAssignments();
+}
+
+/**
+ * Return one custom command with its full list of assigned users.
+ * @param commandId - ID of the command to look up.
+ * @returns The command, or null if no command has that ID.
+ */
+export async function getCustomCommandWithAssignments(commandId: number): Promise<DbCustomCommandWithAssignments | null> {
+  const [command] = await queryCommandsWithAssignments(commandId);
+  return command ?? null;
 }
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
