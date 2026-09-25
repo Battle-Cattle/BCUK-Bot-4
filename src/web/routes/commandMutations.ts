@@ -12,7 +12,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext, requireMod } from '../middleware';
-import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parseCheckboxField, normalizeDiscordId } from './validation';
+import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parseCheckboxField, parseDiscordIdList } from './validation';
 import { logAndRedirectError, handleReservedOrConflictCommandError } from './errorHandling';
 
 const log = createLogger('Web');
@@ -76,10 +76,7 @@ router.post('/commands/add', requireGuildContext, requireMod, csrfProtection, as
     return logAndRedirectError({ res, log, logLabel: 'Add custom command error:', err, basePath: '/commands', errorCode: 'add_failed' });
   }
 
-  const rawDiscordIds = req.body.discord_ids;
-  const discordIds: string[] = (Array.isArray(rawDiscordIds) ? rawDiscordIds : rawDiscordIds ? [rawDiscordIds] : [])
-    .map((id: string) => normalizeDiscordId(id))
-    .filter((id): id is string => id !== null);
+  const discordIds = parseDiscordIdList(req.body.discord_ids);
 
   const assignError = await assignUsersToNewCommand(commandId, discordIds);
   if (assignError) return res.redirect(`/commands?error=${assignError}`);

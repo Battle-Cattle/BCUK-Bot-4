@@ -99,7 +99,7 @@ export async function handlePollStreamer(
     await handleLiveStreamer({ liveStates, streamer, loginKey, existing, pollStream, isCurrent });
   } else if (existing && !existing.offlineTimer) {
     // Appears offline — start grace period (handleStreamOffline handles all groups for this login)
-    await handleStreamOffline(liveStates, loginToUserId, loginKey);
+    handleStreamOffline(liveStates, loginToUserId, loginKey);
   }
 }
 

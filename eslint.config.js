@@ -32,6 +32,21 @@ module.exports = tseslint.config(
       // Cyclomatic complexity cap. Every source function was brought under this; a warning
       // (not an error) nudges new code to extract helpers without failing CI on an edge case.
       complexity: ['warn', 12],
+      // Structure and async hygiene. Everything below is at zero violations; keep it that way.
+      '@typescript-eslint/switch-exhaustiveness-check': 'error',
+      '@typescript-eslint/only-throw-error': 'error',
+      '@typescript-eslint/prefer-promise-reject-errors': 'error',
+      '@typescript-eslint/require-await': 'error',
+      '@typescript-eslint/return-await': ['error', 'in-try-catch'],
+      '@typescript-eslint/no-unnecessary-boolean-literal-compare': 'error',
+      'max-depth': ['error', 3],
+      'max-lines-per-function': ['error', { max: 80, skipBlankLines: true, skipComments: true }],
+      'no-nested-ternary': 'error',
+      'no-else-return': 'error',
+      'no-lonely-if': 'error',
+      eqeqeq: ['error', 'always', { null: 'ignore' }],
+      // A warning, not an error: flags signatures that are growing without forcing a refactor.
+      'max-params': ['warn', 5],
     },
   },
   {
@@ -42,6 +57,21 @@ module.exports = tseslint.config(
       '@typescript-eslint/no-explicit-any': 'off',
       'no-console': 'off',
       complexity: 'off',
+      // Test files legitimately use long describe/it callbacks, deep nesting and async mocks
+      // without awaits, so the structure/async rules above apply to source files only.
+      '@typescript-eslint/switch-exhaustiveness-check': 'off',
+      '@typescript-eslint/only-throw-error': 'off',
+      '@typescript-eslint/prefer-promise-reject-errors': 'off',
+      '@typescript-eslint/require-await': 'off',
+      '@typescript-eslint/return-await': 'off',
+      '@typescript-eslint/no-unnecessary-boolean-literal-compare': 'off',
+      'max-depth': 'off',
+      'max-lines-per-function': 'off',
+      'no-nested-ternary': 'off',
+      'no-else-return': 'off',
+      'no-lonely-if': 'off',
+      eqeqeq: 'off',
+      'max-params': 'off',
     },
   },
   {

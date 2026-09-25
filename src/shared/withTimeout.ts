@@ -9,14 +9,13 @@
  *   own rejection reason, or a timeout error if neither happens within `ms`.
  */
 export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-    // Always cleared by promise settling above, but unref so a long-lived `ms` can't keep the
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    // Always cleared once `promise` settles, but unref so a long-lived `ms` can't keep the
     // event loop alive on its own if the process would otherwise be idle.
     timer.unref();
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (err) => { clearTimeout(timer); reject(err); },
-    );
   });
+  // race() subscribes to `promise`, so a rejection after the timeout wins is still observed.
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }

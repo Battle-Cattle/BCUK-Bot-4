@@ -16,6 +16,43 @@ export { refreshStates, getRefreshState, forgetGuildRefreshState };
 const log = createLogger('Web');
 
 /**
+ * Re-fetches one guild member's Discord display name and persists it if it changed. Never
+ * throws — a failed lookup or write is logged and reported as `'failed'`.
+ * @param user - The member's stored Discord id and current display name.
+ * @param guildId - Guild the member belongs to.
+ * @returns `'updated'` if the stored name changed, `'unchanged'` if it didn't, or `'failed'`.
+ */
+async function refreshMemberName(
+  user: { discord_id: string; discord_name: string | null }, guildId: string,
+): Promise<'updated' | 'unchanged' | 'failed'> {
+  try {
+    const name = await fetchMemberDisplayName(user.discord_id, guildId, true);
+    if (name == null) {
+      log.error(`Failed to refresh Discord name for ${user.discord_id}: Discord lookup returned no display name`);
+      return 'failed';
+    }
+    const trimmedName = name.trim();
+    if (!trimmedName || trimmedName === user.discord_name) return 'unchanged';
+    await runUserMutation(user.discord_id, () => updateDiscordName(user.discord_id, trimmedName));
+    return 'updated';
+  } catch (err) {
+    log.error(`Failed to refresh Discord name for ${user.discord_id}:`, err);
+    return 'failed';
+  }
+}
+
+/**
+ * Summarises a finished name-refresh run.
+ * @param updatedCount - Members whose name changed.
+ * @param failureCount - Members whose refresh failed.
+ * @returns `'success'`/`'partial'` if anything was updated (without/with failures), else `'error'` if anything failed, else `'noop'`.
+ */
+function refreshOutcome(updatedCount: number, failureCount: number): RefreshOutcome {
+  if (updatedCount > 0) return failureCount > 0 ? 'partial' : 'success';
+  return failureCount > 0 ? 'error' : 'noop';
+}
+
+/**
  * Re-fetches each of `guildId`'s members' current Discord display name and persists any that
  * changed, tracking progress/outcome in `refreshStates` for `/users/refresh-status` to poll.
  * @param guildId - Guild whose members' Discord names are refreshed.
@@ -36,35 +73,15 @@ async function runDiscordNameRefresh(guildId: string): Promise<void> {
     let failureCount = 0;
 
     for (const user of users) {
-      try {
-        const name = await fetchMemberDisplayName(user.discord_id, guildId, true);
-        if (name == null) {
-          failureCount++;
-          state.failureCount = failureCount;
-          log.error(`Failed to refresh Discord name for ${user.discord_id}: Discord lookup returned no display name`);
-          await new Promise((resolve) => setTimeout(resolve, 200));
-          continue;
-        }
-
-        const trimmedName = name?.trim();
-        if (trimmedName && trimmedName !== user.discord_name) {
-          await runUserMutation(user.discord_id, () => updateDiscordName(user.discord_id, trimmedName));
-          updatedCount++;
-          state.updatedCount = updatedCount;
-        }
-      } catch (err) {
-        failureCount++;
-        state.failureCount = failureCount;
-        log.error(`Failed to refresh Discord name for ${user.discord_id}:`, err);
-      }
+      const result = await refreshMemberName(user, guildId);
+      if (result === 'updated') state.updatedCount = ++updatedCount;
+      if (result === 'failed') state.failureCount = ++failureCount;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
 
     state.updatedCount = updatedCount;
     state.failureCount = failureCount;
-    state.outcome = updatedCount > 0
-      ? (failureCount > 0 ? 'partial' : 'success')
-      : (failureCount > 0 ? 'error' : 'noop');
+    state.outcome = refreshOutcome(updatedCount, failureCount);
   } catch (err) {
     state.failureCount = Math.max(state.failureCount, 1);
     state.outcome = 'error';
@@ -97,7 +114,7 @@ router.get('/users/refresh-status', requireManagerJson, (req, res) => {
  * @param res - Express response; always redirects to `/admin/users` immediately —
  *   the refresh itself runs asynchronously and is polled via `/users/refresh-status`.
  */
-router.post('/users/refresh-names', requireManager, csrfProtection, async (req, res) => {
+router.post('/users/refresh-names', requireManager, csrfProtection, (req, res) => {
   const guildId = getCurrentGuildId(req);
   if (getRefreshState(guildId).outcome === 'running') {
     return res.redirect('/admin/users');

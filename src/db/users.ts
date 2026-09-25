@@ -169,6 +169,20 @@ async function withShortLockTimeout<T>(fn: (conn: mysql.PoolConnection) => Promi
 }
 
 /**
+ * Normalizes a submitted Twitch name to its channel form.
+ * @param twitchName - The raw Twitch name.
+ * @returns The normalized channel name.
+ * @throws If the name is blank after trimming or isn't a valid Twitch channel name.
+ */
+function requireValidTwitchName(twitchName: string): string {
+  const normalizedChannelName = normalizeTwitchChannelName(twitchName.trim());
+  if (!twitchName.trim() || !normalizedChannelName) {
+    throw new Error(`Invalid twitchName: ${twitchName}`);
+  }
+  return normalizedChannelName;
+}
+
+/**
  * Upserts a user record.
  *
  * This module is a pure DB layer with no cache knowledge — `db.ts`'s `upsertUser` facade
@@ -192,21 +206,9 @@ export async function upsertUserRecord(
   }
   const trimmedDiscordName = discordName.trim() || null;
   const twitchNameProvided = twitchName !== undefined;
-  const normalizedTwitchName = !twitchNameProvided
-    ? null
-    : twitchName === null
-      ? null
-      : (() => {
-          const trimmedTwitchName = twitchName.trim();
-          if (!trimmedTwitchName) {
-            throw new Error(`Invalid twitchName: ${twitchName}`);
-          }
-          const normalizedChannelName = normalizeTwitchChannelName(trimmedTwitchName);
-          if (!normalizedChannelName) {
-            throw new Error(`Invalid twitchName: ${twitchName}`);
-          }
-          return normalizedChannelName;
-        })();
+  // Omitted (undefined) and explicitly cleared (null) both store NULL; twitchNameProvided
+  // decides below whether that NULL overwrites the existing value.
+  const normalizedTwitchName = twitchName == null ? null : requireValidTwitchName(twitchName);
   await withShortLockTimeout((conn) => conn.execute(
     `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
      VALUES (?, ?, ?, ?, 0) AS new_user

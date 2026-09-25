@@ -100,6 +100,22 @@ export function normalizeDiscordId(value: string | undefined): string | null {
 }
 
 /**
+ * Parses a multi-value form field of Discord IDs (e.g. repeated `discord_ids` checkboxes). A single
+ * value arrives as a string and several as an array; absent or empty means none. Entries that
+ * aren't valid snowflakes are dropped.
+ * @param raw - The raw form field value.
+ * @returns The valid, trimmed Discord IDs, in submission order.
+ */
+export function parseDiscordIdList(raw: unknown): string[] {
+  let values: unknown[] = [];
+  if (Array.isArray(raw)) values = raw;
+  else if (raw) values = [raw];
+  return values
+    .map((id) => normalizeDiscordId(typeof id === 'string' ? id : undefined))
+    .filter((id): id is string => id !== null);
+}
+
+/**
  * Returns `value` if it is a string present in `allowed`, otherwise `null`.
  * Used to sanitize query parameters against an explicit allowlist.
  * @param value - Raw query parameter value.

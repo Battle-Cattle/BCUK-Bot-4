@@ -7,7 +7,7 @@ import {
 import type { TimerCommandInput } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext, requireMod } from '../middleware';
-import { normalizeDiscordId, normalizeRequiredText, parseCheckboxField, parsePositiveIntId } from './validation';
+import { parseDiscordIdList, normalizeRequiredText, parseCheckboxField, parsePositiveIntId } from './validation';
 import { logAndRedirectError } from './errorHandling';
 
 const log = createLogger('Web');
@@ -109,10 +109,7 @@ router.post('/timers/add', requireGuildContext, requireMod, csrfProtection, asyn
     return logAndRedirectError({ res, log, logLabel: 'Add timer command error:', err, basePath: '/timers', errorCode: 'add_failed' });
   }
 
-  const rawDiscordIds = body.discord_ids;
-  const discordIds: string[] = (Array.isArray(rawDiscordIds) ? rawDiscordIds : rawDiscordIds ? [rawDiscordIds] : [])
-    .map((id) => normalizeDiscordId(id))
-    .filter((id): id is string => id !== null);
+  const discordIds = parseDiscordIdList(body.discord_ids);
 
   const assignError = await assignUsersToNewTimer(timerId, discordIds);
   if (assignError) return res.redirect(`/timers?error=${assignError}`);
