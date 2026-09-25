@@ -20,9 +20,6 @@ vi.mock('./lookupCache', () => ({
 vi.mock('./counters', () => ({
   getAllCounters: vi.fn(),
 }));
-vi.mock('../logger', () => ({
-  createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }),
-}));
 vi.mock('./commandLocks', () => ({
   isAnyCommandTakenAcrossTables: vi.fn(),
 }));

@@ -246,7 +246,6 @@ export async function unassignUserFromCommand(commandId: number, discordId: stri
 }
 export {
   CommandNotFoundError, CommandConflictError, isMysqlDuplicateEntryError,
-  isCustomCommandTriggerTaken,
 } from './db/commandLocks';
 export { ReservedCommandError } from './db/reservedCommands';
 
