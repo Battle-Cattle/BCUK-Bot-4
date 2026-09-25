@@ -11,14 +11,32 @@ const log = createLogger('EventSubReconciliation');
 const POLL_INTERVAL_MS = 60_000;
 
 /**
- * Last-seen redemption timestamp (epoch ms) per `${broadcasterUserId}:${twitchRewardId}`,
+ * Reconciliation cursor per `${broadcasterUserId}:${twitchRewardId}`,
  * tracked purely in memory (mirrors the existing WebSocket/redemption dedup caches). A key's
  * first poll looks back only one {@link POLL_INTERVAL_MS} instead of the reward's full history —
  * this poll exists to catch redemptions missed *while the bot was running* (a WebSocket
  * reconnect gap, a keepalive timeout, a session migration window, including the window right
  * after startup), not to backfill everything that ever happened for a reward.
  */
-const lastSeenRedeemedAt = new Map<string, number>();
+const lastSeenRedeemedAt = new Map<string, ReconciliationCursor>();
+
+/** A reward's reconciliation cursor and whether it's pinned just before a redemption that failed. */
+interface ReconciliationCursor {
+  /** Only redemptions redeemed strictly after this (epoch ms) are fetched next tick. */
+  at: number;
+  /** True when {@link at} sits just before a failed redemption so that it's retried. */
+  pinnedByFailure: boolean;
+}
+
+/**
+ * The furthest behind "now" a reconciliation cutoff may sit. Resuming from an old cursor also
+ * replays the redemptions after it that already succeeded, and those are only suppressed while
+ * the dedup cache still remembers them — an entry lives {@link REDEMPTION_DEDUP_TTL_MS} from when
+ * the redemption was handled, which is never before it was redeemed. Capping the lookback one poll
+ * interval inside that TTL means every replayed success is still deduped, at the cost of no longer
+ * retrying a redemption that has kept failing for longer than this.
+ */
+export const MAX_CURSOR_LAG_MS = REDEMPTION_DEDUP_TTL_MS - POLL_INTERVAL_MS;
 
 /**
  * How long a broadcaster's cursors survive while they're missing from the streamer snapshot. A
@@ -147,7 +165,9 @@ export function nextCursor(cutoff: number, succeededMax: number | null, failedMi
  * re-replaying already-succeeded ones. Re-replaying a success is not always a safe no-op: it's
  * only deduped by `handleRedemption`'s redemption-id TTL, which a sustained run of failures could
  * outlast, so keeping the cursor pinned in front of anything unhandled — instead of freezing it
- * for the whole tick — bounds how far behind an already-succeeded redemption can fall.
+ * for the whole tick — bounds how far behind an already-succeeded redemption can fall. A failure
+ * that persists past {@link MAX_CURSOR_LAG_MS} is abandoned (see {@link resolveCutoff}) rather
+ * than letting the replay window outgrow the dedup cache.
  *
  * @param info - Dispatch info for the redemption's streamer (login/streamerId/config).
  * @param uid - Broadcaster's Twitch user ID.
@@ -156,10 +176,7 @@ export function nextCursor(cutoff: number, succeededMax: number | null, failedMi
  */
 async function reconcileReward(info: StreamerInfo, uid: string, token: string, rewardId: string): Promise<void> {
   const key = `${uid}:${rewardId}`;
-  // First time seeing this reward: look back one poll interval rather than the reward's full
-  // history — this still covers the window right after the bot (re)started or first subscribed
-  // for this streamer, instead of leaving it as a permanent blind spot.
-  const cutoff = lastSeenRedeemedAt.get(key) ?? Date.now() - POLL_INTERVAL_MS;
+  const cutoff = resolveCutoff(key, info.login, Date.now());
 
   let redemptions: TwitchRewardRedemption[];
   try {
@@ -174,7 +191,34 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
   }
 
   const { succeededMax, failedMin } = await replayRedemptions(info, redemptions);
-  lastSeenRedeemedAt.set(key, nextCursor(cutoff, succeededMax, failedMin));
+  lastSeenRedeemedAt.set(key, { at: nextCursor(cutoff, succeededMax, failedMin), pinnedByFailure: failedMin !== null });
+}
+
+/**
+ * Picks the cutoff a reward's reconciliation fetches from this tick. A reward seen for the first
+ * time looks back one poll interval rather than its full history — this still covers the window
+ * right after the bot (re)started or first subscribed for this streamer, instead of leaving it as
+ * a permanent blind spot. A stored cursor is floored at `now - MAX_CURSOR_LAG_MS` (see
+ * {@link MAX_CURSOR_LAG_MS}); when that floor moves a cursor pinned by a failed redemption, the
+ * failure is abandoned and a warning is logged. A success cursor on a quiet reward also gets
+ * floored, silently — every redemption before the floor was already fetched by an earlier tick.
+ * @param key - The `${broadcasterUserId}:${twitchRewardId}` cursor key.
+ * @param login - Streamer login, for the warning.
+ * @param now - The current time (epoch ms).
+ * @returns The cutoff (epoch ms); redemptions redeemed strictly after it are fetched.
+ */
+function resolveCutoff(key: string, login: string, now: number): number {
+  const stored = lastSeenRedeemedAt.get(key);
+  if (!stored) return now - POLL_INTERVAL_MS;
+  const floor = now - MAX_CURSOR_LAG_MS;
+  if (stored.at >= floor) return stored.at;
+  if (stored.pinnedByFailure) {
+    log.warn(
+      `Abandoning reconciliation retry for reward ${key.slice(key.indexOf(':') + 1)} (${login}): a redemption at `
+      + `${new Date(stored.at + 1).toISOString()} has kept failing for longer than ${MAX_CURSOR_LAG_MS / 60_000} minutes`,
+    );
+  }
+  return floor;
 }
 
 /**
