@@ -142,8 +142,9 @@ export async function updateTwitchBotEnabled(discordId: string, enabled: boolean
 }
 
 /**
- * Deletes a user row that has no guild membership or streamer record (see
- * `deleteUnlinkedUserRecord`) and invalidates the custom-command lookup cache.
+ * Deletes a user row that nothing else references — no guild membership, streamer record,
+ * command/timer assignment or tokens (see `deleteUnlinkedUserRecord`) — and invalidates the
+ * custom-command lookup cache.
  * @param discordId - Discord snowflake as a string.
  * @returns True if the row was deleted; false if it didn't exist or is still referenced.
  */

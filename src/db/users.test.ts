@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'fs';
+import path from 'path';
 import { mockLogger } from '../test-utils/loggerMock';
 
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
@@ -22,6 +24,7 @@ import {
   getAllTwitchLinkedUsers,
   setTwitchBotEnabledRecord,
   deleteUnlinkedUserRecord,
+  USER_REFERENCING_COLUMNS,
   AccessLevel,
 } from './users';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
@@ -422,21 +425,35 @@ describe('setTwitchBotEnabledRecord', () => {
 });
 
 describe('deleteUnlinkedUserRecord', () => {
-  it('deletes only when the user has no guild membership or streamer record', async () => {
+  it('deletes only when no referencing table has a row for the user', async () => {
     const pool = makePool(undefined, [{ affectedRows: 1 }, []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(deleteUnlinkedUserRecord('123')).resolves.toBe(true);
     const [sql, params] = pool._conn.execute.mock.calls[1] as [string, unknown[]];
-    expect(sql).toMatch(/DELETE FROM `user`/);
-    expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM guild_member WHERE guild_member\.discord_id = \?\)/);
-    expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM streamer WHERE streamer\.discord_id = \?\)/);
-    expect(params).toEqual(['123', '123', '123']);
+    expect(sql).toMatch(/DELETE FROM `user`\s+WHERE discord_id = \?/);
+    for (const [table, column] of USER_REFERENCING_COLUMNS) {
+      expect(sql).toContain(`NOT EXISTS (SELECT 1 FROM ${table} WHERE ${table}.${column} = ?)`);
+    }
+    expect(params).toEqual(Array(USER_REFERENCING_COLUMNS.length + 1).fill('123'));
   });
 
   it('returns false when no row was deleted (missing or still referenced)', async () => {
     const pool = makePool(undefined, [{ affectedRows: 0 }, []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(deleteUnlinkedUserRecord('123')).resolves.toBe(false);
+  });
+
+  it('guards every foreign key to `user` declared in schema.sql', () => {
+    const schema = readFileSync(path.join(__dirname, '../../schema.sql'), 'utf8');
+    const referencing: string[] = [];
+    for (const [, table, body] of schema.matchAll(/CREATE TABLE IF NOT EXISTS `?(\w+)`?\s*\(([\s\S]*?)\)\s*ENGINE/g)) {
+      for (const [, column] of body.matchAll(/FOREIGN KEY \((\w+)\) REFERENCES `?user`?\s*\(discord_id\)/g)) {
+        referencing.push(`${table}.${column}`);
+      }
+    }
+    expect(referencing.length).toBeGreaterThan(0);
+    const guarded = USER_REFERENCING_COLUMNS.map(([table, column]) => `${table}.${column}`);
+    expect(guarded).toEqual(expect.arrayContaining(referencing));
   });
 });
 
