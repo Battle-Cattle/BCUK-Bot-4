@@ -182,13 +182,17 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
  * snapshot for longer than {@link CURSOR_RETENTION_MS} — e.g. a streamer removed from monitoring.
  * Without this, the map grows by one entry per reward for every streamer that ever connected, even
  * after they stop being reconciled. A shorter absence keeps the cursors, so a failed redemption's
- * retry position survives a reconnect.
+ * retry position survives a reconnect. The expiry check runs against each broadcaster's previous
+ * last-seen time before this tick's snapshot refreshes it, so a gap between ticks (e.g. polling
+ * paused by {@link stopEventSubReconciliation}) counts toward the window too.
  * @param currentUids - Broadcaster user ids from this tick's {@link getAllStreamerInfo} snapshot.
  * @param now - The tick's current time (epoch ms).
  * @returns Nothing — mutates {@link lastSeenRedeemedAt} and {@link uidLastSeenAt} in place.
  */
 function pruneStaleReconciliationCursors(currentUids: ReadonlySet<string>, now: number): void {
-  for (const uid of currentUids) uidLastSeenAt.set(uid, now);
+  // Expire before refreshing: a broadcaster present again this tick but last seen longer ago than
+  // the retention window (e.g. absent, then polling paused, then back) must still lose their stale
+  // cursors, so a returning broadcaster can't resume from one that outlived the dedup cache.
   for (const [uid, seenAt] of uidLastSeenAt) {
     if (now - seenAt > CURSOR_RETENTION_MS) uidLastSeenAt.delete(uid);
   }
@@ -196,6 +200,7 @@ function pruneStaleReconciliationCursors(currentUids: ReadonlySet<string>, now: 
     const uid = key.slice(0, key.indexOf(':'));
     if (!uidLastSeenAt.has(uid)) lastSeenRedeemedAt.delete(key);
   }
+  for (const uid of currentUids) uidLastSeenAt.set(uid, now);
 }
 
 /**

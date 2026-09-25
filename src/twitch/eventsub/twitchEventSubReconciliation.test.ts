@@ -152,6 +152,42 @@ describe('runReconciliationTick', () => {
     expect(handleRedemption).not.toHaveBeenCalled();
   });
 
+  it('drops an expired cursor when a broadcaster returns after an absence and a polling pause longer than CURSOR_RETENTION_MS', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const failedAt = new Date(Date.now() - 100).toISOString();
+    mockFulfilledOnly({ redemptions: [redemption('f1', failedAt)], cursor: null });
+    vi.mocked(handleRedemption).mockRejectedValueOnce(new Error('transient'));
+    await runReconciliationTick(); // cursor pinned before f1
+
+    // Absent for one tick, within the window — cursor kept.
+    vi.advanceTimersByTime(60_000);
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map());
+    await runReconciliationTick();
+
+    // Polling pauses past the window; the very next tick already has the broadcaster back.
+    vi.advanceTimersByTime(CURSOR_RETENTION_MS + 1_000);
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    vi.mocked(handleRedemption).mockClear();
+    await runReconciliationTick();
+
+    // The stale cursor must not survive: the lookback restarts, so the old f1 is out of range.
+    expect(handleRedemption).not.toHaveBeenCalled();
+  });
+
+  it('drops the cursors of a broadcaster present on every tick when the gap between ticks exceeds CURSOR_RETENTION_MS', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const failedAt = new Date(Date.now() - 100).toISOString();
+    mockFulfilledOnly({ redemptions: [redemption('f1', failedAt)], cursor: null });
+    vi.mocked(handleRedemption).mockRejectedValueOnce(new Error('transient'));
+    await runReconciliationTick();
+
+    vi.advanceTimersByTime(CURSOR_RETENTION_MS + 1_000); // e.g. reconciliation stopped and restarted
+    vi.mocked(handleRedemption).mockClear();
+    await runReconciliationTick();
+
+    expect(handleRedemption).not.toHaveBeenCalled();
+  });
+
   it('keeps the retention window inside the redemption dedup TTL', () => {
     expect(CURSOR_RETENTION_MS).toBeLessThan(REDEMPTION_DEDUP_TTL_MS);
   });
