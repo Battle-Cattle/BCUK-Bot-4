@@ -86,6 +86,22 @@ router.get('/voice/channels', requireGuildContext, requireModJson, async (req, r
 });
 
 /**
+ * Validates `POST /voice/join`'s optional `channelId` and resolves the channel to join, falling
+ * back to the guild's configured default voice channel when none is supplied.
+ * @param body - The parsed request body; undefined when the request had none.
+ * @param guildId - The session's current guild.
+ * @returns `{ channelId }` to join, or `{ error }` with the 400 message to reply with.
+ */
+async function resolveJoinChannelId(body: unknown, guildId: string): Promise<{ channelId: string } | { error: string }> {
+  const { channelId } = (body ?? {}) as { channelId?: unknown };
+  if (channelId !== undefined && typeof channelId !== 'string') return { error: 'channelId must be a string' };
+  const trimmed = channelId?.trim() ?? '';
+  if (trimmed && !normalizeDiscordId(trimmed)) return { error: 'Invalid channel ID' };
+  const resolved = trimmed || (await getGuildById(guildId))?.voice_channel_id;
+  return resolved ? { channelId: resolved } : { error: 'No voice channel selected and no default configured' };
+}
+
+/**
  * POST /voice/join — joins a specific voice channel, or the guild's configured
  * default channel if none is supplied (Mod+).
  * @param req - Express request; reads `channelId` from `req.body`; guild is
@@ -104,25 +120,14 @@ router.post('/voice/join', requireGuildContext, requireModJson, csrfProtection, 
   const discordClient = getReadyDiscordClientOrRespond(res);
   if (!discordClient) return;
   try {
-    const { channelId } = req.body as { channelId?: unknown };
-    if (channelId !== undefined && typeof channelId !== 'string') {
-      res.status(400).json({ ok: false, error: 'channelId must be a string' });
-      return;
-    }
-    const trimmedChannelId = typeof channelId === 'string' ? channelId.trim() : '';
-    if (trimmedChannelId && !normalizeDiscordId(trimmedChannelId)) {
-      res.status(400).json({ ok: false, error: 'Invalid channel ID' });
-      return;
-    }
-    // Fall back to the guild's configured default channel when none is supplied.
-    const resolvedChannelId = trimmedChannelId || (await getGuildById(guildId))?.voice_channel_id || undefined;
-    if (!resolvedChannelId) {
-      res.status(400).json({ ok: false, error: 'No voice channel selected and no default configured' });
+    const resolved = await resolveJoinChannelId(req.body, guildId);
+    if ('error' in resolved) {
+      res.status(400).json({ ok: false, error: resolved.error });
       return;
     }
 
     disconnect(guildId);
-    await connect(discordClient, guildId, resolvedChannelId);
+    await connect(discordClient, guildId, resolved.channelId);
     res.json({ ok: true });
   } catch (err) {
     log.error('Voice rejoin failed:', err);

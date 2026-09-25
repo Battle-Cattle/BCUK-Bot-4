@@ -10,7 +10,7 @@ import {
   type VoiceConnection,
   type AudioPlayer as DjsAudioPlayer,
 } from '@discordjs/voice';
-import { Client, ChannelType } from 'discord.js';
+import { Client, ChannelType, type Guild, type VoiceChannel } from 'discord.js';
 import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from '../shared/statusStore';
 
 const log = createLogger('AudioPlayer');
@@ -38,6 +38,12 @@ import {
 interface GuildVoiceState {
   guildId: string;
   connection: VoiceConnection | null;
+  // The connection the newest in-flight connect() attempt has joined, until it promotes or fails
+  // (null before it joins).
+  // @discordjs/voice returns the same VoiceConnection for every join in a guild while one is
+  // alive, so a superseded attempt can hold the very object a newer attempt is still using —
+  // see releaseStaleConnection.
+  pendingConnection: VoiceConnection | null;
   currentChannelId: string | null;
   targetChannelId: string | undefined;
   client: Client | null;
@@ -58,6 +64,7 @@ function getState(guildId: string): GuildVoiceState {
   return getOrCreate(states, guildId, () => ({
     guildId,
     connection: null,
+    pendingConnection: null,
     currentChannelId: null,
     targetChannelId: undefined,
     client: null,
@@ -178,6 +185,8 @@ export async function connect(client: Client, guildId: string, channelId: string
   const state = getState(guildId);
   clearReconnectTimer(state);
   const attemptId = ++state.currentAttemptId;
+  // Only a connection this (now newest) attempt has actually joined is protected from stale cleanup.
+  state.pendingConnection = null;
   let nextConnection: VoiceConnection | null = null;
 
   state.client = client;
@@ -186,25 +195,12 @@ export async function connect(client: Client, guildId: string, channelId: string
 
   const previousConnection = state.connection;
   const deps = makeDeps(state);
+  const isStale = () => attemptId !== state.currentAttemptId;
 
   try {
-    if (!guildId || !channelId) {
-      // Message text must stay in sync with isPermanentVoiceMisconfigurationError
-      // so this is classified as permanent (not retried).
-      throw new Error('Missing guild ID or voice channel ID');
-    }
-
-    // Fetching the channel from the target guild also validates that the channel
-    // belongs to that guild — a channel from another guild resolves to null here.
-    const guild = await client.guilds.fetch(guildId);
-    if (attemptId !== state.currentAttemptId) return;
-
-    const channel = await guild.channels.fetch(channelId);
-    if (attemptId !== state.currentAttemptId) return;
-
-    if (!channel || channel.type !== ChannelType.GuildVoice) {
-      throw new Error(`Channel ${channelId} is not a voice channel in guild ${guildId}`);
-    }
+    const resolved = await resolveVoiceChannel(client, guildId, channelId, isStale);
+    if (!resolved) return;
+    const { guild, channel } = resolved;
 
     nextConnection = joinVoiceChannel({
       channelId: channel.id,
@@ -214,22 +210,24 @@ export async function connect(client: Client, guildId: string, channelId: string
       selfMute: false,
     });
 
-    if (attemptId !== state.currentAttemptId) {
-      nextConnection.destroy();
+    if (isStale()) {
+      releaseStaleConnection(state, nextConnection);
       return;
     }
+    state.pendingConnection = nextConnection;
 
     const joinedConnection = nextConnection;
     setupConnectionHandlers(joinedConnection, attemptId, deps);
 
     await entersState(joinedConnection, VoiceConnectionStatus.Ready, VOICE_CONNECT_TIMEOUT_MS);
 
-    if (attemptId !== state.currentAttemptId) {
-      joinedConnection.destroy();
+    if (isStale()) {
+      releaseStaleConnection(state, joinedConnection);
       return;
     }
 
     releasePreviousConnection(previousConnection, joinedConnection, deps);
+    state.pendingConnection = null;
     state.connection = joinedConnection;
     state.currentChannelId = channel.id;
 
@@ -241,23 +239,91 @@ export async function connect(client: Client, guildId: string, channelId: string
     setVoiceConnected(guildId, channel.name);
     log.info(`Joined voice channel: ${channel.name}`);
   } catch (err) {
-    if (attemptId === state.currentAttemptId) {
-      cleanupFailedConnect(previousConnection, nextConnection, deps);
-    } else {
-      nextConnection?.destroy();
-    }
-
-    if (attemptId === state.currentAttemptId && state.shouldAutoReconnect && !isPermanentVoiceMisconfigurationError(err)) {
-      scheduleReconnect(state, 'connect failed');
-    }
-
+    handleConnectFailure(state, isStale(), { previousConnection, nextConnection }, err);
     throw err;
+  }
+}
+
+/**
+ * Fetches and validates the target guild and voice channel for {@link connect}. Fetching the
+ * channel from the target guild also validates that the channel belongs to that guild — a
+ * channel from another guild resolves to null here.
+ * @param client - The ready Discord client.
+ * @param guildId - The guild to fetch.
+ * @param channelId - The voice channel to fetch within that guild.
+ * @param isStale - Returns true once a newer connect/disconnect has superseded this attempt;
+ *   checked after each fetch.
+ * @returns The guild and voice channel, or null if the attempt went stale mid-fetch.
+ * @throws If either ID is missing, or the channel isn't a voice channel in that guild.
+ */
+async function resolveVoiceChannel(
+  client: Client, guildId: string, channelId: string, isStale: () => boolean,
+): Promise<{ guild: Guild; channel: VoiceChannel } | null> {
+  if (!guildId || !channelId) {
+    // Message text must stay in sync with isPermanentVoiceMisconfigurationError
+    // so this is classified as permanent (not retried).
+    throw new Error('Missing guild ID or voice channel ID');
+  }
+
+  const guild = await client.guilds.fetch(guildId);
+  if (isStale()) return null;
+
+  const channel = await guild.channels.fetch(channelId);
+  if (isStale()) return null;
+
+  if (!channel || channel.type !== ChannelType.GuildVoice) {
+    throw new Error(`Channel ${channelId} is not a voice channel in guild ${guildId}`);
+  }
+  return { guild, channel };
+}
+
+/**
+ * Destroys the connection a superseded {@link connect} attempt joined, unless something newer still
+ * uses it. @discordjs/voice hands back the existing VoiceConnection for every join in a guild while
+ * one is alive, so the stale attempt's connection may be the live one (`state.connection`) or the
+ * one the newest in-flight attempt is waiting on (`state.pendingConnection`); destroying it would
+ * kill that session. An already-destroyed connection is skipped, since destroying it again throws.
+ * @param state - The guild's voice state.
+ * @param connection - The connection the stale attempt joined, or null if it never got that far.
+ */
+function releaseStaleConnection(state: GuildVoiceState, connection: VoiceConnection | null): void {
+  if (!connection || connection === state.connection || connection === state.pendingConnection) return;
+  if (connection.state.status === VoiceConnectionStatus.Destroyed) return;
+  connection.destroy();
+}
+
+/**
+ * Cleans up after a failed {@link connect} attempt. The current attempt restores/tears down
+ * connection state and, unless the error is a permanent misconfiguration, schedules a reconnect;
+ * a superseded attempt only releases its own connection (see {@link releaseStaleConnection}).
+ * @param state - The guild's voice state.
+ * @param stale - Whether this attempt has been superseded by a newer one.
+ * @param connections - `previousConnection`: the connection that was active before this attempt
+ *   started; `nextConnection`: the connection this attempt created, if it got that far.
+ * @param err - The error the attempt failed with.
+ */
+function handleConnectFailure(
+  state: GuildVoiceState,
+  stale: boolean,
+  { previousConnection, nextConnection }: { previousConnection: VoiceConnection | null; nextConnection: VoiceConnection | null },
+  err: unknown,
+): void {
+  if (stale) {
+    releaseStaleConnection(state, nextConnection);
+    return;
+  }
+  state.pendingConnection = null;
+  cleanupFailedConnect(previousConnection, nextConnection, makeDeps(state));
+  if (state.shouldAutoReconnect && !isPermanentVoiceMisconfigurationError(err)) {
+    scheduleReconnect(state, 'connect failed');
   }
 }
 
 /** Tears down a single guild's voice connection and reconnect state. */
 function disconnectGuild(state: GuildVoiceState): void {
   state.currentAttemptId += 1;
+  // Any in-flight attempt is now stale; clearing this lets it destroy its connection when it notices.
+  state.pendingConnection = null;
   state.shouldAutoReconnect = false;
   state.client = null;
   state.targetChannelId = undefined;

@@ -22,7 +22,7 @@ import { getCustomRewards, getRewardRedemptions } from '../twitchApi';
 import { handleRedemption } from './twitchEventSubHandler';
 import {
   runReconciliationTick, startEventSubReconciliation, stopEventSubReconciliation,
-  __resetReconciliationCursorsForTests,
+  __resetReconciliationCursorsForTests, nextCursor,
 } from './twitchEventSubReconciliation';
 
 const streamer = { id: 1, twitch_name: 'streamerA', eventsub_access_token: 'tok' } as any;
@@ -312,5 +312,23 @@ describe('startEventSubReconciliation / stopEventSubReconciliation', () => {
 
     await vi.advanceTimersByTimeAsync(60_000);
     expect(getAllStreamerInfo).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('nextCursor', () => {
+  it('stays at the cutoff when nothing succeeded or failed', () => {
+    expect(nextCursor(100, null, null)).toBe(100);
+  });
+
+  it('advances to the latest success when nothing failed', () => {
+    expect(nextCursor(100, 250, null)).toBe(250);
+  });
+
+  it('pins just before the earliest failure, even when later redemptions succeeded', () => {
+    expect(nextCursor(100, 400, 200)).toBe(199);
+  });
+
+  it('pins just before the earliest failure when nothing succeeded', () => {
+    expect(nextCursor(100, null, 150)).toBe(149);
   });
 });

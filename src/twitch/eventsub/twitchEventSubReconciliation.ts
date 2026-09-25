@@ -69,6 +69,54 @@ async function fetchRedemptionsNewerThan(
 }
 
 /**
+ * Replays each fetched redemption through {@link handleRedemption} (its own dedup makes an
+ * already-delivered redemption a no-op), logging genuine catches and per-redemption failures.
+ * Redemptions with an unparseable `redeemed_at` are skipped.
+ * @param info - Dispatch info for the redemption's streamer.
+ * @param redemptions - Redemptions fetched for one reward this tick.
+ * @returns The latest `redeemed_at` (epoch ms) that was handled successfully and the earliest one
+ *   that failed, each null if there were none.
+ */
+async function replayRedemptions(
+  info: StreamerInfo, redemptions: TwitchRewardRedemption[],
+): Promise<{ succeededMax: number | null; failedMin: number | null }> {
+  let succeededMax: number | null = null;
+  let failedMin: number | null = null;
+  for (const r of redemptions) {
+    const redeemedAt = Date.parse(r.redeemed_at);
+    if (!Number.isFinite(redeemedAt)) continue;
+    try {
+      const processed = await handleRedemption(info.login, toRedemptionEvent(info.login, r), info.config ?? DEFAULT_EVENT_CONFIG, info.streamerId);
+      // Only log as a genuine catch when handleRedemption actually processed it — its own
+      // dedup means most redemptions in this window were already delivered live, and logging
+      // those as "missed" would be false (see reconcileReward's doc comment).
+      if (processed) {
+        log.warn(`Reconciliation caught a redemption missed by EventSub: "${r.reward.title}" (id=${r.id}) for ${info.login}`);
+      }
+      succeededMax = Math.max(succeededMax ?? redeemedAt, redeemedAt);
+    } catch (err) {
+      log.error(`Reconciled-redemption handler error for redemption ${r.id} (${info.login}):`, err);
+      failedMin = Math.min(failedMin ?? redeemedAt, redeemedAt);
+    }
+  }
+  return { succeededMax, failedMin };
+}
+
+/**
+ * Computes a reward's next reconciliation cursor: just before the earliest failure (so it's
+ * retried next tick), else the latest success, else unchanged. Every redemption fetched this tick
+ * has redeemedAt > cutoff, so `failedMin - 1` never moves the cursor backwards past where it was.
+ * @param cutoff - The cursor this tick fetched from.
+ * @param succeededMax - Latest successfully-handled `redeemed_at`, or null.
+ * @param failedMin - Earliest failed `redeemed_at`, or null.
+ * @returns The new cursor (epoch ms).
+ */
+export function nextCursor(cutoff: number, succeededMax: number | null, failedMin: number | null): number {
+  if (failedMin !== null) return failedMin - 1;
+  return succeededMax ?? cutoff;
+}
+
+/**
  * Fetches recent redemptions for one reward (both UNFULFILLED — still in the queue — and
  * FULFILLED — including rewards with `should_redemptions_skip_request_queue` set, which never
  * appear as UNFULFILLED) and replays any redeemed after the reward's tracked cursor through
@@ -111,29 +159,8 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
     return;
   }
 
-  let succeededMax: number | null = null;
-  let failedMin: number | null = null;
-  for (const r of redemptions) {
-    const redeemedAt = Date.parse(r.redeemed_at);
-    if (!Number.isFinite(redeemedAt)) continue;
-    try {
-      const processed = await handleRedemption(info.login, toRedemptionEvent(info.login, r), info.config ?? DEFAULT_EVENT_CONFIG, info.streamerId);
-      // Only log as a genuine catch when handleRedemption actually processed it — its own
-      // dedup means most redemptions in this window were already delivered live, and logging
-      // those as "missed" would be false (see the doc comment above).
-      if (processed) {
-        log.warn(`Reconciliation caught a redemption missed by EventSub: "${r.reward.title}" (id=${r.id}) for ${info.login}`);
-      }
-      if (succeededMax === null || redeemedAt > succeededMax) succeededMax = redeemedAt;
-    } catch (err) {
-      log.error(`Reconciled-redemption handler error for redemption ${r.id} (${info.login}):`, err);
-      if (failedMin === null || redeemedAt < failedMin) failedMin = redeemedAt;
-    }
-  }
-  // Every redemption fetched this tick has redeemedAt > cutoff, so failedMin - 1 never moves the
-  // cursor backwards past where it already was.
-  const newCursor = failedMin !== null ? failedMin - 1 : (succeededMax ?? cutoff);
-  lastSeenRedeemedAt.set(key, newCursor);
+  const { succeededMax, failedMin } = await replayRedemptions(info, redemptions);
+  lastSeenRedeemedAt.set(key, nextCursor(cutoff, succeededMax, failedMin));
 }
 
 /**
