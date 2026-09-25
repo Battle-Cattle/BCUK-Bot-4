@@ -22,8 +22,9 @@ import { getCustomRewards, getRewardRedemptions } from '../twitchApi';
 import { handleRedemption } from './twitchEventSubHandler';
 import {
   runReconciliationTick, startEventSubReconciliation, stopEventSubReconciliation,
-  __resetReconciliationCursorsForTests, nextCursor,
+  __resetReconciliationCursorsForTests, nextCursor, CURSOR_RETENTION_MS,
 } from './twitchEventSubReconciliation';
+import { REDEMPTION_DEDUP_TTL_MS } from './twitchEventSubRedemptionDedup';
 
 const streamer = { id: 1, twitch_name: 'streamerA', eventsub_access_token: 'tok' } as any;
 const config = { follow_enabled: true } as any;
@@ -108,37 +109,51 @@ describe('runReconciliationTick', () => {
     );
   });
 
-  it('drops the cursor for a streamer no longer returned by getAllStreamerInfo, so it re-establishes on reconnect', async () => {
-    // Seed tick 1 with a redemption so the cursor advances to ~"now" (not the initial
-    // one-poll-interval-ago default) — this is what makes the later assertion actually
-    // depend on pruning: without pruning, this recent cursor would still be in effect on
-    // tick 3 and would reject the older "reconnect" redemption below on its own.
+  it('keeps a failed redemption\'s retry position when the streamer is briefly missing from the snapshot', async () => {
+    // Tick 1: the redemption fails, pinning the cursor just before it.
     vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
-    const seedRedeemedAt = new Date(Date.now() - 100).toISOString();
-    mockFulfilledOnly({ redemptions: [redemption('seed', seedRedeemedAt)], cursor: null });
-    await runReconciliationTick(); // cursor lands at seedRedeemedAt (~"now")
-    vi.mocked(handleRedemption).mockClear();
+    const failedAt = new Date(Date.now() - 100).toISOString();
+    mockFulfilledOnly({ redemptions: [redemption('f1', failedAt)], cursor: null });
+    vi.mocked(handleRedemption).mockRejectedValueOnce(new Error('transient'));
+    await runReconciliationTick();
 
-    // uid1 is absent this tick (e.g. streamer disconnected) — its cursor should be pruned.
+    // Tick 2: streamer briefly absent (e.g. an EventSub reconnect).
     vi.mocked(getAllStreamerInfo).mockReturnValue(new Map());
     await runReconciliationTick();
 
-    // uid1 reconnects; this redemption is older than the tick-1 cursor (seedRedeemedAt) but
-    // within a fresh one-poll-interval lookback, so it's only replayed if the cursor was
-    // actually pruned in between — without pruning, the stale seedRedeemedAt cursor would
-    // still reject it as older-than-cutoff.
+    // Tick 3, 90s later: f1 is now older than a fresh one-interval lookback, so it's only retried
+    // if the pinned cursor survived the absence.
+    vi.advanceTimersByTime(90_000);
     vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
-    const reconnectRedeemedAt = new Date(Date.now() - 1_000).toISOString();
-    mockFulfilledOnly({ redemptions: [redemption('r1', reconnectRedeemedAt)], cursor: null });
+    vi.mocked(handleRedemption).mockClear();
     await runReconciliationTick();
 
     expect(handleRedemption).toHaveBeenCalledTimes(1);
-    expect(handleRedemption).toHaveBeenCalledWith(
-      'streamerA',
-      expect.objectContaining({ id: 'r1' }),
-      config,
-      1,
-    );
+    expect(handleRedemption).toHaveBeenCalledWith('streamerA', expect.objectContaining({ id: 'f1' }), config, 1);
+  });
+
+  it('drops a streamer\'s cursors once they have been missing for longer than CURSOR_RETENTION_MS', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const failedAt = new Date(Date.now() - 100).toISOString();
+    mockFulfilledOnly({ redemptions: [redemption('f1', failedAt)], cursor: null });
+    vi.mocked(handleRedemption).mockRejectedValueOnce(new Error('transient'));
+    await runReconciliationTick(); // cursor pinned before f1
+
+    // Absent past the retention window — this tick prunes the cursor.
+    vi.advanceTimersByTime(CURSOR_RETENTION_MS + 1_000);
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map());
+    await runReconciliationTick();
+
+    // On return the cursor restarts from a one-interval lookback, so the old f1 is out of range.
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    vi.mocked(handleRedemption).mockClear();
+    await runReconciliationTick();
+
+    expect(handleRedemption).not.toHaveBeenCalled();
+  });
+
+  it('keeps the retention window inside the redemption dedup TTL', () => {
+    expect(CURSOR_RETENTION_MS).toBeLessThan(REDEMPTION_DEDUP_TTL_MS);
   });
 
   it('does not replay a redemption older than or equal to the cursor', async () => {

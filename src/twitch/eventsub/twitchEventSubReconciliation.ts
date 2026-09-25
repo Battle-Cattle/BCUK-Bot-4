@@ -4,6 +4,7 @@ import { getAllStreamerInfo, type StreamerInfo } from './twitchEventSubDispatch'
 import { getValidToken } from './twitchApiEventSub';
 import { getCustomRewards, getRewardRedemptions, TwitchRewardRedemption } from '../twitchApi';
 import { handleRedemption, RedemptionEvent } from './twitchEventSubHandler';
+import { REDEMPTION_DEDUP_TTL_MS } from './twitchEventSubRedemptionDedup';
 
 const log = createLogger('EventSubReconciliation');
 
@@ -18,6 +19,19 @@ const POLL_INTERVAL_MS = 60_000;
  * after startup), not to backfill everything that ever happened for a reward.
  */
 const lastSeenRedeemedAt = new Map<string, number>();
+
+/**
+ * How long a broadcaster's cursors survive while they're missing from the streamer snapshot. A
+ * brief absence (EventSub reconnect, token refresh) must not discard a cursor pinned just before a
+ * failed redemption, or that redemption falls outside the fresh one-interval lookback and is never
+ * retried. Kept below {@link REDEMPTION_DEDUP_TTL_MS}: resuming from a pinned cursor also replays
+ * the redemptions after it that already succeeded, and the dedup cache only suppresses those while
+ * it still remembers them.
+ */
+export const CURSOR_RETENTION_MS = Math.min(5 * POLL_INTERVAL_MS, REDEMPTION_DEDUP_TTL_MS / 2);
+
+/** When each broadcaster user id was last present in a tick's streamer snapshot (epoch ms). */
+const uidLastSeenAt = new Map<string, number>();
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let tickRunning = false;
@@ -164,17 +178,23 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
 }
 
 /**
- * Drops `lastSeenRedeemedAt` entries whose broadcaster user id is no longer present in
- * `currentUids` — e.g. a streamer removed from monitoring or disconnected since the last tick.
- * Without this, the map grows by one entry per reward for every streamer that ever connected,
- * even after they stop being reconciled.
+ * Drops `lastSeenRedeemedAt` entries for broadcasters that have been missing from the streamer
+ * snapshot for longer than {@link CURSOR_RETENTION_MS} — e.g. a streamer removed from monitoring.
+ * Without this, the map grows by one entry per reward for every streamer that ever connected, even
+ * after they stop being reconciled. A shorter absence keeps the cursors, so a failed redemption's
+ * retry position survives a reconnect.
  * @param currentUids - Broadcaster user ids from this tick's {@link getAllStreamerInfo} snapshot.
- * @returns Nothing — mutates {@link lastSeenRedeemedAt} in place.
+ * @param now - The tick's current time (epoch ms).
+ * @returns Nothing — mutates {@link lastSeenRedeemedAt} and {@link uidLastSeenAt} in place.
  */
-function pruneStaleReconciliationCursors(currentUids: ReadonlySet<string>): void {
+function pruneStaleReconciliationCursors(currentUids: ReadonlySet<string>, now: number): void {
+  for (const uid of currentUids) uidLastSeenAt.set(uid, now);
+  for (const [uid, seenAt] of uidLastSeenAt) {
+    if (now - seenAt > CURSOR_RETENTION_MS) uidLastSeenAt.delete(uid);
+  }
   for (const key of lastSeenRedeemedAt.keys()) {
     const uid = key.slice(0, key.indexOf(':'));
-    if (!currentUids.has(uid)) lastSeenRedeemedAt.delete(key);
+    if (!uidLastSeenAt.has(uid)) lastSeenRedeemedAt.delete(key);
   }
 }
 
@@ -216,7 +236,7 @@ export async function runReconciliationTick(): Promise<void> {
   currentTickPromise = (async () => {
     try {
       const allStreamerInfo = [...getAllStreamerInfo()];
-      pruneStaleReconciliationCursors(new Set(allStreamerInfo.map(([uid]) => uid)));
+      pruneStaleReconciliationCursors(new Set(allStreamerInfo.map(([uid]) => uid)), Date.now());
       const entries = allStreamerInfo.filter(([, info]) => info.config !== null);
       await Promise.allSettled(entries.map(([uid, info]) => reconcileStreamer(uid, info)));
     } finally {
@@ -245,7 +265,8 @@ export async function stopEventSubReconciliation(): Promise<void> {
   await currentTickPromise;
 }
 
-/** Test-only: clears the in-memory per-reward cursor cache so each test starts from a clean slate. */
+/** Test-only: clears the in-memory cursor and last-seen caches so each test starts from a clean slate. */
 export function __resetReconciliationCursorsForTests(): void {
   lastSeenRedeemedAt.clear();
+  uidLastSeenAt.clear();
 }
