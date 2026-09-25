@@ -6,6 +6,7 @@ vi.mock('../../db', () => ({
   findUserByTwitchName: vi.fn(),
   upsertUser: vi.fn(),
   updateTwitchBotEnabled: vi.fn(),
+  deleteUnlinkedUser: vi.fn(),
   getTwitchEnabledChannels: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
@@ -31,6 +32,7 @@ import {
   findUserByTwitchName,
   upsertUser,
   updateTwitchBotEnabled,
+  deleteUnlinkedUser,
   getTwitchEnabledChannels,
 } from '../../db';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchChannelMembership';
@@ -57,6 +59,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(upsertUser).mockResolvedValue(undefined);
   vi.mocked(updateTwitchBotEnabled).mockResolvedValue(undefined);
+  vi.mocked(deleteUnlinkedUser).mockResolvedValue(true);
   vi.mocked(joinTwitchChannel).mockResolvedValue(undefined);
   vi.mocked(partTwitchChannel).mockResolvedValue(undefined);
   vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
@@ -556,5 +559,78 @@ describe('addOrUpdateUserMutation — rollback failure does not mask original er
         shouldClearTwitchName: true,
       }),
     ).rejects.toThrow('Part failed');
+  });
+});
+
+describe('addOrUpdateUserMutation — new-user rollback deletes the inserted row', () => {
+  const NEW_USER_PARAMS = {
+    discordId: '111',
+    discordName: 'TestUser',
+    level: AccessLevel.USER,
+    normalizedTwitchName: 'newchan',
+    shouldClearTwitchName: false,
+  };
+
+  function arrangeNewUser() {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce(null) // no pre-existing user
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'newchan' } as any);
+    vi.mocked(findUserByTwitchName).mockResolvedValue(null);
+  }
+
+  it('deletes the new row instead of upserting it when reconciliation fails', async () => {
+    arrangeNewUser();
+    vi.mocked(getTwitchEnabledChannels)
+      .mockRejectedValueOnce(new Error('DB unavailable')) // reconciliation fails
+      .mockResolvedValue([]); // rollback reconciliation
+
+    await expect(addOrUpdateUserMutation(NEW_USER_PARAMS)).rejects.toThrow('DB unavailable');
+
+    expect(deleteUnlinkedUser).toHaveBeenCalledWith('111');
+    // Only the original insert — no rollback upsert, and no bot-enabled restore for a deleted row.
+    expect(upsertUser).toHaveBeenCalledOnce();
+    expect(updateTwitchBotEnabled).not.toHaveBeenCalled();
+    // The committed channel isn't needed by anyone, so it's parted.
+    expect(partTwitchChannel).toHaveBeenCalledWith('newchan');
+  });
+
+  it('falls back to clearing the Twitch fields when the new row is already referenced', async () => {
+    arrangeNewUser();
+    vi.mocked(getTwitchEnabledChannels)
+      .mockRejectedValueOnce(new Error('DB unavailable'))
+      .mockResolvedValue([]);
+    vi.mocked(deleteUnlinkedUser).mockResolvedValue(false);
+
+    await expect(addOrUpdateUserMutation(NEW_USER_PARAMS)).rejects.toThrow('DB unavailable');
+
+    expect(deleteUnlinkedUser).toHaveBeenCalledWith('111');
+    const rollbackCall = vi.mocked(upsertUser).mock.calls[1];
+    expect(rollbackCall[3]).toBeNull();
+    expect(updateTwitchBotEnabled).toHaveBeenCalledWith('111', false);
+  });
+
+  it('still rethrows the original error when the rollback delete itself fails', async () => {
+    arrangeNewUser();
+    vi.mocked(getTwitchEnabledChannels).mockRejectedValueOnce(new Error('DB unavailable'));
+    vi.mocked(deleteUnlinkedUser).mockRejectedValue(new Error('Delete failed'));
+
+    await expect(addOrUpdateUserMutation(NEW_USER_PARAMS)).rejects.toThrow('DB unavailable');
+    expect(upsertUser).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the existing-user rollback (restore, never delete) for a user that already had a row', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, is_twitch_bot_enabled: true } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'newchan', is_twitch_bot_enabled: true } as any);
+    vi.mocked(findUserByTwitchName).mockResolvedValue(null);
+    vi.mocked(getTwitchEnabledChannels)
+      .mockRejectedValueOnce(new Error('DB unavailable'))
+      .mockResolvedValue([]);
+
+    await expect(addOrUpdateUserMutation(NEW_USER_PARAMS)).rejects.toThrow('DB unavailable');
+
+    expect(deleteUnlinkedUser).not.toHaveBeenCalled();
+    expect(vi.mocked(upsertUser).mock.calls[1][3]).toBeNull();
+    expect(updateTwitchBotEnabled).toHaveBeenCalledWith('111', true);
   });
 });

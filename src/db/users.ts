@@ -219,6 +219,41 @@ export async function upsertUserRecord(
 }
 
 /**
+ * Every `table.column` that references a user's `discord_id`. The tables with foreign keys to
+ * `user` delete (or null out) their rows along with the user, so {@link deleteUnlinkedUserRecord}
+ * refuses to delete a user while any of these still point at them. `streamdeck_api_keys` has no
+ * foreign key but is still owned by a user. Keep in sync with DATABASE-SCHEMA.md; a test checks
+ * every foreign key to `user` in schema.sql is listed here.
+ */
+export const USER_REFERENCING_COLUMNS: ReadonlyArray<readonly [table: string, column: string]> = [
+  ['guild_member', 'discord_id'],
+  ['streamer', 'discord_id'],
+  ['timer_command_streamer', 'discord_id'],
+  ['twitch_user_commands', 'discord_id'],
+  ['companion_app_tokens', 'discord_id'],
+  ['companion_oauth_codes', 'discord_id'],
+  ['streamdeck_api_keys', 'discord_id'],
+  ['streamdeck_key_guild_status', 'approved_by'],
+];
+
+const DELETE_UNLINKED_USER_SQL = `DELETE FROM \`user\`
+     WHERE discord_id = ?
+       AND ${USER_REFERENCING_COLUMNS.map(([table, column]) => `NOT EXISTS (SELECT 1 FROM ${table} WHERE ${table}.${column} = ?)`).join('\n       AND ')}`;
+
+/**
+ * Deletes a user row, but only while nothing references it (see {@link USER_REFERENCING_COLUMNS}).
+ * Meant for rolling back a user that was only just inserted — the guard means it can never cascade
+ * away an established user's guild access, streamer data, command assignments or tokens.
+ * @param discordId - Discord snowflake as a string.
+ * @returns True if the row was deleted; false if it didn't exist or is still referenced.
+ */
+export async function deleteUnlinkedUserRecord(discordId: string): Promise<boolean> {
+  const params = Array.from({ length: USER_REFERENCING_COLUMNS.length + 1 }, () => discordId);
+  const [result] = await withShortLockTimeout((conn) => conn.execute<mysql.ResultSetHeader>(DELETE_UNLINKED_USER_SQL, params));
+  return result.affectedRows > 0;
+}
+
+/**
  * Updates a user's stored Discord display name.
  * @param discordId - Discord snowflake as a string.
  * @param name - New display name; blank after trimming is stored as null.

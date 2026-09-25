@@ -10,6 +10,7 @@ vi.mock('./db/pool', () => ({ getPool: vi.fn(), closePool: vi.fn() }));
 vi.mock('./db/users', () => ({
   upsertUserRecord: vi.fn(),
   setTwitchBotEnabledRecord: vi.fn(),
+  deleteUnlinkedUserRecord: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
   ACCESS_LEVEL_LABELS: {},
   findUser: vi.fn(),
@@ -175,7 +176,7 @@ vi.mock('./db/lookupCache', () => ({
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60_000,
 }));
 
-import { upsertUserRecord, setTwitchBotEnabledRecord } from './db/users';
+import { upsertUserRecord, setTwitchBotEnabledRecord, deleteUnlinkedUserRecord } from './db/users';
 import { invalidateCustomCommandLookupCache } from './db/customCommandCache';
 import { upsertOverride as upsertOverrideRecord, removeOverride as removeOverrideRecord } from './db/guildCommandOverrides';
 import {
@@ -215,7 +216,7 @@ import {
   deleteCategory as deleteCategoryRecord,
 } from './db/sfx';
 import {
-  upsertUser, updateTwitchBotEnabled, upsertOverride, removeOverride,
+  upsertUser, updateTwitchBotEnabled, deleteUnlinkedUser, upsertOverride, removeOverride,
   addCustomCommand, updateCustomCommand, removeCustomCommand,
   assignUserToCommand, assignUsersToCommand, unassignUserFromCommand,
   addCounter, updateCounter, removeCounter, resetCounterCurrentValue,
@@ -285,6 +286,28 @@ describe('upsertUser', () => {
   it('propagates errors from upsertUserRecord without calling invalidate', async () => {
     vi.mocked(upsertUserRecord).mockRejectedValue(new Error('DB error'));
     await expect(upsertUser('1', 'Alice', 0, 'alice')).rejects.toThrow('DB error');
+    expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
+  });
+});
+
+// ─── deleteUnlinkedUser ───────────────────────────────────────────────────────
+
+describe('deleteUnlinkedUser', () => {
+  it('returns the record-layer result and invalidates the custom-command cache', async () => {
+    vi.mocked(deleteUnlinkedUserRecord).mockResolvedValue(true);
+    await expect(deleteUnlinkedUser('1')).resolves.toBe(true);
+    expect(deleteUnlinkedUserRecord).toHaveBeenCalledWith('1');
+    expect(invalidateCustomCommandLookupCache).toHaveBeenCalledOnce();
+  });
+
+  it('passes through false when the row was not deleted', async () => {
+    vi.mocked(deleteUnlinkedUserRecord).mockResolvedValue(false);
+    await expect(deleteUnlinkedUser('1')).resolves.toBe(false);
+  });
+
+  it('propagates errors without invalidating', async () => {
+    vi.mocked(deleteUnlinkedUserRecord).mockRejectedValue(new Error('DB error'));
+    await expect(deleteUnlinkedUser('1')).rejects.toThrow('DB error');
     expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
   });
 });

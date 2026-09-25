@@ -5,6 +5,7 @@ import {
   findUserByTwitchName,
   upsertUser,
   updateTwitchBotEnabled,
+  deleteUnlinkedUser,
   AccessLevelValue,
 } from '../../db';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchChannelMembership';
@@ -87,24 +88,39 @@ interface ChangeTwitchChannelParams {
   previousChannel: string | null;
   committedChannel: string;
   wasBotEnabled: boolean;
+  /** True when this edit created the user's row (there was no row before it). */
+  isNewUser: boolean;
+}
+
+/**
+ * Restores the user's DB row after a failed channel change. A row this edit created is deleted
+ * outright, so a failed add doesn't leave behind a user that never existed; if that delete is
+ * refused because something now references the row, falls back to the existing-user restore.
+ * An existing user's row gets its previous Twitch name and bot-enabled flag back.
+ * @param params The same before/after state passed to {@link handleChangeTwitchChannel}.
+ * @returns Resolves once the row is restored; rejects if a DB write fails.
+ */
+async function rollbackUserRow({
+  discordId, discordName, level, previousChannel, wasBotEnabled, isNewUser,
+}: ChangeTwitchChannelParams): Promise<void> {
+  if (isNewUser) {
+    if (await deleteUnlinkedUser(discordId)) return;
+    log.warn(`Add user rollback: new user ${discordId} is already referenced elsewhere; clearing Twitch fields instead of deleting`);
+  }
+  await upsertUser(discordId, discordName, level, previousChannel ?? null);
+  await updateTwitchBotEnabled(discordId, wasBotEnabled);
 }
 
 /**
  * Handles a user edit that changes their Twitch channel: joins the new channel (if it should
  * be joined) and parts the old one (if no other enabled user still needs it). On failure,
- * rolls the user's DB row and bot-enabled flag back to their pre-edit values, then reconciles
- * channel membership against that restored state.
+ * rolls the user's DB row back (see {@link rollbackUserRow}), then reconciles channel
+ * membership against that restored state.
  * @param params Before/after channel and user state needed to perform and, if necessary, roll back the change.
  * @returns Resolves once membership changes complete; rejects (after best-effort rollback) if either step fails.
  */
-async function handleChangeTwitchChannel({
-  discordId,
-  discordName,
-  level,
-  previousChannel,
-  committedChannel,
-  wasBotEnabled,
-}: ChangeTwitchChannelParams): Promise<void> {
+async function handleChangeTwitchChannel(params: ChangeTwitchChannelParams): Promise<void> {
+  const { previousChannel, committedChannel } = params;
   try {
     const enabledChannels = await getTwitchEnabledChannels();
     const shouldJoinCommittedChannel = enabledChannels.includes(committedChannel);
@@ -120,8 +136,7 @@ async function handleChangeTwitchChannel({
     }
   } catch (err) {
     try {
-      await upsertUser(discordId, discordName, level, previousChannel ?? null);
-      await updateTwitchBotEnabled(discordId, wasBotEnabled);
+      await rollbackUserRow(params);
 
       const rollbackEnabledChannels = await getTwitchEnabledChannels();
       const shouldRejoinPreviousChannel = !!previousChannel
@@ -214,7 +229,9 @@ export async function addOrUpdateUserMutation({
     return;
   }
 
-  await handleChangeTwitchChannel({ discordId, discordName, level, previousChannel, committedChannel, wasBotEnabled });
+  await handleChangeTwitchChannel({
+    discordId, discordName, level, previousChannel, committedChannel, wasBotEnabled, isNewUser: !existingUser,
+  });
 }
 
 /**
