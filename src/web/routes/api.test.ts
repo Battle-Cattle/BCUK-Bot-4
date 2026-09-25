@@ -144,6 +144,12 @@ describe('POST /voice/join', () => {
     expect(vi.mocked(connect)).toHaveBeenCalledWith({}, GUILD_ID, 'default-vc');
   });
 
+  it('falls back to the guild default channel when the request has no body at all', async () => {
+    // No Content-Type → express.json() leaves req.body undefined.
+    await supertest(buildApp()).post('/voice/join').expect(200);
+    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, GUILD_ID, 'default-vc');
+  });
+
   it('returns 400 when no channelId is given and guild has no default', async () => {
     vi.mocked(getGuildById).mockResolvedValueOnce({ guild_id: GUILD_ID, name: 'Test', voice_channel_id: null } as any);
     await supertest(buildApp()).post('/voice/join').send({}).expect(400);

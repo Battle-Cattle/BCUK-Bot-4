@@ -397,6 +397,50 @@ describe('POST /eventsub-config', () => {
     });
   });
 
+  it('clears a saved checkbox when a connected streamer submits it unticked', async () => {
+    vi.mocked(findUser).mockResolvedValue({ is_twitch_bot_enabled: true } as any);
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({
+      id: 9,
+      twitch_name: 'streamer',
+      eventsub_access_token: 'tok',
+      config: {
+        follow_enabled: true,
+        follow_message: 'Existing follow message',
+        sub_enabled: true,
+        sub_message: 'Existing sub message',
+        resub_message: 'Existing resub message',
+        giftsub_message: 'Existing giftsub message',
+        raid_enabled: true,
+        raid_message: 'Existing raid message',
+        raid_shoutout_enabled: true,
+      },
+    } as any);
+    vi.mocked(saveEventConfig).mockResolvedValue(undefined);
+
+    // raid_enabled is omitted — the browser leaves out an unticked checkbox.
+    const res = await supertest(buildApp())
+      .post('/eventsub-config')
+      .type('form')
+      .send({
+        follow_enabled: 'on',
+        follow_message: 'Existing follow message',
+        sub_enabled: 'on',
+        sub_message: 'Existing sub message',
+        resub_message: 'Existing resub message',
+        giftsub_message: 'Existing giftsub message',
+        raid_message: 'Existing raid message',
+        raid_shoutout_enabled: 'on',
+      });
+
+    expect(res.status).toBe(302);
+    expect(saveEventConfig).toHaveBeenCalledWith(9, expect.objectContaining({
+      follow_enabled: true,
+      sub_enabled: true,
+      raid_enabled: false,
+      raid_shoutout_enabled: true,
+    }));
+  });
+
   it('redirects with eventsub_config_failed when saving fails', async () => {
     vi.mocked(findUser).mockResolvedValue({ is_twitch_bot_enabled: true } as any);
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
@@ -428,7 +472,7 @@ describe('hasOverlongMessage', () => {
 
 describe('buildEventSubConfig', () => {
   it('uses defaults for omitted fields when there is no saved config', () => {
-    expect(buildEventSubConfig({}, null)).toEqual({
+    expect(buildEventSubConfig({}, null, false)).toEqual({
       follow_enabled: false,
       follow_message: 'Thanks {display_name} for the follow!',
       sub_enabled: false,
@@ -443,15 +487,26 @@ describe('buildEventSubConfig', () => {
 
   it('treats a present checkbox key with a value other than "on" as unchecked, ignoring the saved value', () => {
     const current = { follow_enabled: true } as any;
-    expect(buildEventSubConfig({ follow_enabled: '' }, current).follow_enabled).toBe(false);
+    expect(buildEventSubConfig({ follow_enabled: '' }, current, false).follow_enabled).toBe(false);
   });
 
   it('falls back to the default (not the saved value) for a present-but-blank message', () => {
     const current = { follow_message: 'Saved' } as any;
-    expect(buildEventSubConfig({ follow_message: '   ' }, current).follow_message).toBe('Thanks {display_name} for the follow!');
+    expect(buildEventSubConfig({ follow_message: '   ' }, current, true).follow_message).toBe('Thanks {display_name} for the follow!');
+  });
+
+  it('treats an omitted checkbox as unticked when connected, clearing a saved true value', () => {
+    const current = { follow_enabled: true, raid_enabled: true, raid_shoutout_enabled: true, sub_enabled: true } as any;
+    const config = buildEventSubConfig({ follow_enabled: 'on' }, current, true);
+    expect(config).toMatchObject({ follow_enabled: true, sub_enabled: false, raid_enabled: false, raid_shoutout_enabled: false });
+  });
+
+  it('keeps saved checkbox values for omitted (disabled) inputs when disconnected', () => {
+    const current = { follow_enabled: true, raid_enabled: true } as any;
+    expect(buildEventSubConfig({}, current, false)).toMatchObject({ follow_enabled: true, raid_enabled: true });
   });
 
   it('trims submitted messages', () => {
-    expect(buildEventSubConfig({ raid_message: '  Hi raiders  ' }, null).raid_message).toBe('Hi raiders');
+    expect(buildEventSubConfig({ raid_message: '  Hi raiders  ' }, null, true).raid_message).toBe('Hi raiders');
   });
 });

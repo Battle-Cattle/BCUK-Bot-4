@@ -88,12 +88,12 @@ router.get('/voice/channels', requireGuildContext, requireModJson, async (req, r
 /**
  * Validates `POST /voice/join`'s optional `channelId` and resolves the channel to join, falling
  * back to the guild's configured default voice channel when none is supplied.
- * @param body - The parsed request body.
+ * @param body - The parsed request body; undefined when the request had none.
  * @param guildId - The session's current guild.
  * @returns `{ channelId }` to join, or `{ error }` with the 400 message to reply with.
  */
 async function resolveJoinChannelId(body: unknown, guildId: string): Promise<{ channelId: string } | { error: string }> {
-  const { channelId } = body as { channelId?: unknown };
+  const { channelId } = (body ?? {}) as { channelId?: unknown };
   if (channelId !== undefined && typeof channelId !== 'string') return { error: 'channelId must be a string' };
   const trimmed = channelId?.trim() ?? '';
   if (trimmed && !normalizeDiscordId(trimmed)) return { error: 'Invalid channel ID' };

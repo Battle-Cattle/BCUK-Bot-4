@@ -377,6 +377,117 @@ describe('reconnect', () => {
     }
   });
 
+  describe('with @discordjs/voice connection reuse', () => {
+    // The real joinVoiceChannel returns the guild's existing connection while it isn't destroyed,
+    // and destroy() marks it destroyed (a second destroy() throws).
+    async function useRealisticJoin() {
+      const voice = await import('@discordjs/voice');
+      const byGuild = new Map<string, ReturnType<typeof makeConnection>>();
+      vi.mocked(voice.joinVoiceChannel).mockImplementation(({ guildId }) => {
+        const existing = byGuild.get(guildId);
+        if (existing && existing.state.status !== 'destroyed') return existing as never;
+        const conn = makeConnection();
+        conn.destroy.mockImplementation(() => {
+          if (conn.state.status === 'destroyed') throw new Error('Cannot destroy VoiceConnection - it has already been destroyed');
+          conn.state.status = 'destroyed';
+        });
+        byGuild.set(guildId, conn);
+        createdConnections.push(conn);
+        return conn as never;
+      });
+      return voice;
+    }
+
+    it('a stale attempt failing does not destroy the live connection it shares with a newer in-flight attempt', async () => {
+      vi.useFakeTimers();
+      try {
+        const { client } = makeClient();
+        const voice = await useRealisticJoin();
+        await mod.connect(client as never, 'guild-A', 'chan-0');
+        expect(createdConnections).toHaveLength(1);
+        const [sharedConn] = createdConnections;
+
+        let failFirstReady!: (err: Error) => void;
+        let finishSecondReady!: () => void;
+        vi.mocked(voice.entersState)
+          .mockImplementationOnce(() => new Promise((_resolve, reject) => { failFirstReady = reject; }) as never)
+          .mockImplementationOnce(() => new Promise<void>((resolve) => { finishSecondReady = resolve; }) as never);
+
+        const firstConnect = mod.connect(client as never, 'guild-A', 'chan-1');
+        const firstRejection = expect(firstConnect).rejects.toThrow('ready timeout');
+        await vi.advanceTimersByTimeAsync(0);
+        const secondConnect = mod.connect(client as never, 'guild-A', 'chan-2');
+        await vi.advanceTimersByTimeAsync(0);
+        // Every join reused the one live connection.
+        expect(createdConnections).toHaveLength(1);
+
+        failFirstReady(new Error('ready timeout'));
+        await firstRejection;
+        expect(sharedConn.destroy).not.toHaveBeenCalled();
+
+        finishSecondReady();
+        await secondConnect;
+        expect(sharedConn.destroy).not.toHaveBeenCalled();
+        expect(mod.isConnected('guild-A')).toBe(true);
+        expect(mod.getCurrentChannelId('guild-A')).toBe('chan-2');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a stale attempt failing does not destroy a new connection that a newer in-flight attempt reused', async () => {
+      vi.useFakeTimers();
+      try {
+        const { client } = makeClient();
+        const voice = await useRealisticJoin();
+        let failFirstReady!: (err: Error) => void;
+        let finishSecondReady!: () => void;
+        vi.mocked(voice.entersState)
+          .mockImplementationOnce(() => new Promise((_resolve, reject) => { failFirstReady = reject; }) as never)
+          .mockImplementationOnce(() => new Promise<void>((resolve) => { finishSecondReady = resolve; }) as never);
+
+        const firstConnect = mod.connect(client as never, 'guild-A', 'chan-1');
+        const firstRejection = expect(firstConnect).rejects.toThrow('ready timeout');
+        await vi.advanceTimersByTimeAsync(0); // first attempt creates the connection
+        const secondConnect = mod.connect(client as never, 'guild-A', 'chan-2');
+        await vi.advanceTimersByTimeAsync(0); // second attempt reuses it
+        expect(createdConnections).toHaveLength(1);
+        const [sharedConn] = createdConnections;
+
+        failFirstReady(new Error('ready timeout'));
+        await firstRejection;
+        expect(sharedConn.destroy).not.toHaveBeenCalled();
+
+        finishSecondReady();
+        await secondConnect;
+        expect(mod.isConnected('guild-A')).toBe(true);
+        expect(mod.getCurrentChannelId('guild-A')).toBe('chan-2');
+        expect(sharedConn.destroy).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('an attempt superseded by disconnect() destroys the connection it joined once it becomes ready', async () => {
+      const { client } = makeClient();
+      const voice = await useRealisticJoin();
+      let finishReady!: () => void;
+      vi.mocked(voice.entersState)
+        .mockImplementationOnce(() => new Promise<void>((resolve) => { finishReady = resolve; }) as never);
+
+      const pending = mod.connect(client as never, 'guild-A', 'chan-1');
+      await vi.waitFor(() => expect(createdConnections).toHaveLength(1));
+      const [conn] = createdConnections;
+
+      mod.disconnect('guild-A');
+      finishReady();
+      await pending;
+
+      expect(conn.destroy).toHaveBeenCalledOnce();
+      expect(mod.isConnected('guild-A')).toBe(false);
+    });
+  });
+
   it('clears a pending reconnect timer when connect is called again', async () => {
     vi.useFakeTimers();
     try {

@@ -186,17 +186,23 @@ export function hasOverlongMessage(body: Record<string, string | undefined>): bo
 
 /**
  * Builds the EventSub config to save from a submitted form body. Inputs are disabled in the UI
- * when disconnected, so those keys are absent from the POST body — any field missing from `body`
- * falls back to the existing saved config (then to a default) instead of being wiped. A message
- * that is present but blank also falls back to its default.
+ * when Twitch is disconnected, so those keys are absent from the POST body — any field missing
+ * from `body` falls back to the existing saved config (then to a default) instead of being wiped.
+ * When connected, the checkboxes are enabled and an unticked one is simply omitted from the body,
+ * so a missing checkbox key then means unchecked rather than "keep the saved value". A message
+ * that is present but blank falls back to its default.
  * @param body - The parsed `POST /user/eventsub-config` form body.
  * @param current - The streamer's currently saved config, or null if none exists yet.
+ * @param isConnected - Whether the streamer has a Twitch connection, i.e. whether the form's
+ *   inputs were enabled when it was submitted.
  * @returns The merged config.
  */
-export function buildEventSubConfig(body: Record<string, string | undefined>, current: EventSubConfig | null): EventSubConfig {
-  /** Checkbox value if submitted, else the saved value, else unchecked. */
+export function buildEventSubConfig(
+  body: Record<string, string | undefined>, current: EventSubConfig | null, isConnected: boolean,
+): EventSubConfig {
+  /** Checkbox value if the form's inputs were enabled (a missing key is unticked), else the saved value, else unchecked. */
   const flag = (key: keyof EventSubConfig): boolean =>
-    key in body ? parseCheckboxField(body[key]) : Boolean(current?.[key]);
+    key in body || isConnected ? parseCheckboxField(body[key]) : Boolean(current?.[key]);
   /** Trimmed message if submitted and non-blank, else the saved message, else `fallback`. */
   const msg = (key: keyof EventSubConfig, fallback: string): string =>
     key in body ? (trimField(body[key]) || fallback) : ((current?.[key] as string | undefined) ?? fallback);
@@ -244,7 +250,7 @@ router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) =>
     const body = req.body as Record<string, string | undefined>;
     if (hasOverlongMessage(body)) return res.redirect('/user/settings?error=eventsub_config_failed');
 
-    const config = buildEventSubConfig(body, streamer.config);
+    const config = buildEventSubConfig(body, streamer.config, !!streamer.eventsub_access_token);
     await saveEventConfig(streamer.id, config);
     reloadEventSubSubscriptions();
     res.redirect('/user/settings');
