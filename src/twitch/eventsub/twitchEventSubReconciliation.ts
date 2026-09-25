@@ -184,7 +184,9 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
  * after they stop being reconciled. A shorter absence keeps the cursors, so a failed redemption's
  * retry position survives a reconnect. The expiry check runs against each broadcaster's previous
  * last-seen time before this tick's snapshot refreshes it, so a gap between ticks (e.g. polling
- * paused by {@link stopEventSubReconciliation}) counts toward the window too.
+ * paused by {@link stopEventSubReconciliation}) counts toward the window too. Broadcasters present
+ * for a pass are marked seen again when it ends, so a slow pass doesn't make its own freshly
+ * written cursors look stale.
  * @param currentUids - Broadcaster user ids from this tick's {@link getAllStreamerInfo} snapshot.
  * @param now - The tick's current time (epoch ms).
  * @returns Nothing — mutates {@link lastSeenRedeemedAt} and {@link uidLastSeenAt} in place.
@@ -200,7 +202,17 @@ function pruneStaleReconciliationCursors(currentUids: ReadonlySet<string>, now: 
     const uid = key.slice(0, key.indexOf(':'));
     if (!uidLastSeenAt.has(uid)) lastSeenRedeemedAt.delete(key);
   }
-  for (const uid of currentUids) uidLastSeenAt.set(uid, now);
+  markBroadcastersSeen(currentUids, now);
+}
+
+/**
+ * Records `uids` as present in the streamer snapshot at `now`.
+ * @param uids - Broadcaster user ids to mark.
+ * @param now - Time to record (epoch ms).
+ * @returns Nothing — mutates {@link uidLastSeenAt} in place.
+ */
+function markBroadcastersSeen(uids: ReadonlySet<string>, now: number): void {
+  for (const uid of uids) uidLastSeenAt.set(uid, now);
 }
 
 /**
@@ -241,9 +253,14 @@ export async function runReconciliationTick(): Promise<void> {
   currentTickPromise = (async () => {
     try {
       const allStreamerInfo = [...getAllStreamerInfo()];
-      pruneStaleReconciliationCursors(new Set(allStreamerInfo.map(([uid]) => uid)), Date.now());
+      const presentUids = new Set(allStreamerInfo.map(([uid]) => uid));
+      pruneStaleReconciliationCursors(presentUids, Date.now());
       const entries = allStreamerInfo.filter(([, info]) => info.config !== null);
       await Promise.allSettled(entries.map(([uid, info]) => reconcileStreamer(uid, info)));
+      // A pass can run long (e.g. Helix rate-limit waits). These broadcasters were present for all
+      // of it and any cursor this pass wrote is fresh, so date their last-seen to when the pass
+      // ended — otherwise the next tick could expire a cursor written moments earlier.
+      markBroadcastersSeen(presentUids, Date.now());
     } finally {
       tickRunning = false;
     }
