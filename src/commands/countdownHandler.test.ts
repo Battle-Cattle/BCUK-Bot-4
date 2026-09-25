@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('./logger', () => ({ createLogger: () => ({ info: vi.fn(), error: vi.fn() }) }));
+vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: vi.fn() }) }));
 vi.mock('../shared/config', () => ({ GLOBAL_COOLDOWN_MS: 3_000 }));
 
 import {

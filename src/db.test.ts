@@ -49,7 +49,6 @@ vi.mock('./db/commandLocks', () => ({
   CommandNotFoundError: class extends Error {},
   CommandConflictError: class extends Error {},
   isMysqlDuplicateEntryError: vi.fn(),
-  isCustomCommandTriggerTaken: vi.fn(),
 }));
 
 vi.mock('./db/reservedCommands', () => ({

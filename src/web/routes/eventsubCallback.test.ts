@@ -18,8 +18,10 @@ vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
   getUserFromToken: vi.fn(),
 }));
 
+const REDIRECT_URI = 'https://example.com/auth/twitch/eventsub/callback';
+const configMock = vi.hoisted(() => ({ redirectUri: '' as string | undefined }));
 vi.mock('../../shared/config', () => ({
-  TWITCH_EVENTSUB_REDIRECT_URI: 'https://example.com/auth/twitch/eventsub/callback',
+  get TWITCH_EVENTSUB_REDIRECT_URI() { return configMock.redirectUri; },
 }));
 
 vi.mock('../../twitch/eventsub/twitchEventSub', () => ({
@@ -35,6 +37,8 @@ import supertest from 'supertest';
 import router from './eventsubCallback';
 import { getStreamerById, saveStreamerToken, initEventConfig, initAlertConfigs } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
+import { clearAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
@@ -65,6 +69,7 @@ function buildApp(sessionOverrides: Record<string, any> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  configMock.redirectUri = REDIRECT_URI;
   vi.mocked(getStreamerById).mockResolvedValue(MOCK_STREAMER as any);
   vi.mocked(exchangeCode).mockResolvedValue({
     access_token: 'access',
@@ -141,5 +146,87 @@ describe('GET /twitch/eventsub/callback — user binding', () => {
       .get('/twitch/eventsub/callback?code=abc&state=valid-state-abc');
     expect(res.headers.location).toContain('success=twitch_connected');
     expect(vi.mocked(saveStreamerToken)).toHaveBeenCalled();
+  });
+});
+
+const CALLBACK_URL = '/twitch/eventsub/callback?code=abc&state=valid-state-abc';
+
+describe('GET /twitch/eventsub/callback — Twitch account verification', () => {
+  it('rejects a token for a different Twitch account than the streamer record, without saving it', async () => {
+    vi.mocked(getUserFromToken).mockResolvedValue({ login: 'someoneelse', id: 'twitch999' } as any);
+    const res = await supertest(buildApp()).get(CALLBACK_URL);
+    expect(res.headers.location).toBe('/user/settings?error=eventsub_wrong_account&expected=teststreamer');
+    expect(vi.mocked(saveStreamerToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(reloadEventSubSubscriptions)).not.toHaveBeenCalled();
+  });
+
+  it('rejects any account when the streamer record has no twitch_name', async () => {
+    vi.mocked(getStreamerById).mockResolvedValue({ ...MOCK_STREAMER, twitch_name: null } as any);
+    const res = await supertest(buildApp()).get(CALLBACK_URL);
+    expect(res.headers.location).toBe('/user/settings?error=eventsub_wrong_account&expected=');
+    expect(vi.mocked(saveStreamerToken)).not.toHaveBeenCalled();
+  });
+
+  it('matches the Twitch login case-insensitively', async () => {
+    vi.mocked(getUserFromToken).mockResolvedValue({ login: 'TestStreamer', id: 'twitch123' } as any);
+    const res = await supertest(buildApp()).get(CALLBACK_URL);
+    expect(res.headers.location).toBe('/user/settings?success=twitch_connected');
+    expect(vi.mocked(clearAuthFailedSubs)).toHaveBeenCalledWith('teststreamer');
+  });
+
+  it('redirects with eventsub_token_invalid when the token does not resolve to a user', async () => {
+    vi.mocked(getUserFromToken).mockResolvedValue(null as any);
+    const res = await supertest(buildApp()).get(CALLBACK_URL);
+    expect(res.headers.location).toBe('/user/settings?error=eventsub_token_invalid');
+    expect(vi.mocked(saveStreamerToken)).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /twitch/eventsub/callback — token handling and errors', () => {
+  it('saves the token with an expiry one minute early, then clears auth failures and reloads subscriptions', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    try {
+      const res = await supertest(buildApp()).get(CALLBACK_URL);
+      expect(res.headers.location).toBe('/user/settings?success=twitch_connected');
+      expect(vi.mocked(exchangeCode)).toHaveBeenCalledWith('abc', REDIRECT_URI);
+      expect(vi.mocked(saveStreamerToken)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'twitch123', 'access', 'refresh', 1_000_000 + 3600 * 1000 - 60_000);
+      expect(vi.mocked(clearAuthFailedSubs)).toHaveBeenCalledWith('teststreamer');
+      expect(vi.mocked(reloadEventSubSubscriptions)).toHaveBeenCalledOnce();
+    } finally {
+      vi.mocked(Date.now).mockRestore();
+    }
+  });
+
+  it('saves a null expiry when Twitch returns no expires_in', async () => {
+    vi.mocked(exchangeCode).mockResolvedValue({ access_token: 'access', refresh_token: 'refresh' } as any);
+    await supertest(buildApp()).get(CALLBACK_URL);
+    expect(vi.mocked(saveStreamerToken)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'twitch123', 'access', 'refresh', null);
+  });
+
+  it('rejects with state_mismatch when the code param is missing', async () => {
+    const res = await supertest(buildApp()).get('/twitch/eventsub/callback?state=valid-state-abc');
+    expect(res.headers.location).toBe('/user/settings?error=eventsub_oauth_state_mismatch');
+    expect(vi.mocked(exchangeCode)).not.toHaveBeenCalled();
+  });
+
+  it('redirects with eventsub_config_failed and does not exchange the code when the redirect URI is not configured', async () => {
+    configMock.redirectUri = undefined;
+    const res = await supertest(buildApp()).get(CALLBACK_URL);
+    expect(res.headers.location).toBe('/user/settings?error=eventsub_config_failed');
+    expect(vi.mocked(exchangeCode)).not.toHaveBeenCalled();
+  });
+
+  it('redirects with invalid_id when the streamer record no longer exists', async () => {
+    vi.mocked(getStreamerById).mockResolvedValue(null as any);
+    const res = await supertest(buildApp()).get(CALLBACK_URL);
+    expect(res.headers.location).toBe('/user/settings?error=invalid_id');
+    expect(vi.mocked(exchangeCode)).not.toHaveBeenCalled();
+  });
+
+  it('redirects with eventsub_config_failed when the code exchange throws', async () => {
+    vi.mocked(exchangeCode).mockRejectedValue(new Error('twitch down'));
+    const res = await supertest(buildApp()).get(CALLBACK_URL);
+    expect(res.headers.location).toBe('/user/settings?error=eventsub_config_failed');
+    expect(vi.mocked(saveStreamerToken)).not.toHaveBeenCalled();
   });
 });

@@ -276,16 +276,6 @@ export async function isAnyCommandTakenAcrossTables(
   return results.some((exists) => exists);
 }
 
-/**
- * Checks whether `triggerString` is already taken by a custom command or counter, optionally excluding `excludeCommandId` from the check.
- * @param triggerString - Trigger string to check for a collision.
- * @param excludeCommandId - A `command_id` to exclude from the check, if updating an existing row.
- * @returns True if `triggerString` is already taken.
- */
-export async function isCustomCommandTriggerTaken(triggerString: string, excludeCommandId?: number): Promise<boolean> {
-  return isAnyCommandTakenAcrossTables(triggerString, { excludeCustomCommandId: excludeCommandId });
-}
-
 // ─── Serialized write ─────────────────────────────────────────────────────────
 
 /**
