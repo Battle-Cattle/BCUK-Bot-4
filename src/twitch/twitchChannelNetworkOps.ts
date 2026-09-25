@@ -29,8 +29,12 @@ let joinGate: Promise<void> = Promise.resolve();
  * the "stale part landing late" compensation branch cannot occur — only a synchronous throw
  * (converted here into a rejection) is possible.
  */
-export async function partAsync(client: ChatClient, channel: string): Promise<void> {
-  client.part(channel);
+export function partAsync(client: ChatClient, channel: string): Promise<void> {
+  // A throw inside the executor becomes a rejection, like the previous `async` body.
+  return new Promise<void>((resolve) => {
+    client.part(channel);
+    resolve();
+  });
 }
 
 /** Resets the global join throttle gate. */

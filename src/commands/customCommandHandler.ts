@@ -290,25 +290,26 @@ export async function executeCustomCommandForTwitch(
   const filledResponse = buildFilledResponse(result.response, rawMessage, username);
 
   const runtime = twitchChatRuntime.get();
-  if (runtime) {
-    if (result.isMultiTwitch) {
-      try {
-        const sent = await broadcastToActiveChannels(channel, command, filledResponse);
-        if (sent) {
-          log.info(`[Twitch] Sent custom command '${command}' in ${channel}.`);
-        } else {
-          log.info(`[Twitch] Broadcast custom command '${command}' in ${channel} reached no channels.`);
-        }
-      } catch (err) {
-        log.error(`[Twitch] Failed to broadcast custom command '${command}' in ${channel}:`, err);
-      }
-    } else {
-      try {
-        await runtime.send(channel, filledResponse);
+  if (!runtime) return;
+
+  if (result.isMultiTwitch) {
+    try {
+      const sent = await broadcastToActiveChannels(channel, command, filledResponse);
+      if (sent) {
         log.info(`[Twitch] Sent custom command '${command}' in ${channel}.`);
-      } catch (err) {
-        log.error(`[Twitch] Failed to send custom command '${command}' in ${channel}:`, err);
+      } else {
+        log.info(`[Twitch] Broadcast custom command '${command}' in ${channel} reached no channels.`);
       }
+    } catch (err) {
+      log.error(`[Twitch] Failed to broadcast custom command '${command}' in ${channel}:`, err);
     }
+    return;
+  }
+
+  try {
+    await runtime.send(channel, filledResponse);
+    log.info(`[Twitch] Sent custom command '${command}' in ${channel}.`);
+  } catch (err) {
+    log.error(`[Twitch] Failed to send custom command '${command}' in ${channel}:`, err);
   }
 }

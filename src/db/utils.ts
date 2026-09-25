@@ -6,7 +6,8 @@ import { getPool } from './pool';
 /** Converts a MySQL BIT(1) column value (Buffer, number, or boolean) to a boolean. */
 export function fromBit(value: unknown): boolean {
   if (Buffer.isBuffer(value)) return value[0] === 1;
-  return value == 1;
+  // Mirrors the previous loose `value == 1`: true for 1, true and '1' (number/boolean/string forms).
+  return Number(value) === 1;
 }
 
 const IDENTIFIER_PATTERN = /^[a-zA-Z0-9_]+$/;

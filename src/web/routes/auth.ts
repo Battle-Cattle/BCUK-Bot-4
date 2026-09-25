@@ -1,6 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Request, type Response } from 'express';
 import crypto from 'crypto';
+import { promisify } from 'util';
 import { DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_CALLBACK_URL } from '../../shared/config';
 import {
   findUser,
@@ -224,14 +225,11 @@ function buildSessionUser(
  * @param userData - The `SessionUser` payload to store.
  * @returns Resolves once the regenerated session has been saved.
  */
-function saveSessionUser(req: Request, userData: SessionUser): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    req.session.regenerate((err) => {
-      if (err) return reject(err);
-      req.session.user = userData;
-      req.session.save((saveErr) => (saveErr ? reject(saveErr) : resolve()));
-    });
-  });
+async function saveSessionUser(req: Request, userData: SessionUser): Promise<void> {
+  await promisify(req.session.regenerate.bind(req.session))();
+  // regenerate() replaces req.session, so read it again only after it has finished.
+  req.session.user = userData;
+  await promisify(req.session.save.bind(req.session))();
 }
 
 /**
