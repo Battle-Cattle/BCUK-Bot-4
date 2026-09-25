@@ -105,7 +105,7 @@ export {
 } from './db/users';
 export type { AccessLevelValue, DbUser } from './db/users';
 
-import { upsertUserRecord, setTwitchBotEnabledRecord } from './db/users';
+import { upsertUserRecord, setTwitchBotEnabledRecord, deleteUnlinkedUserRecord } from './db/users';
 
 // Wrappers add cache invalidation — users.ts is a pure DB layer with no cache knowledge.
 
@@ -139,6 +139,16 @@ export async function upsertUser(
  */
 export async function updateTwitchBotEnabled(discordId: string, enabled: boolean): Promise<void> {
   await withInvalidation(() => setTwitchBotEnabledRecord(discordId, enabled), invalidateCustomCommandLookupCache);
+}
+
+/**
+ * Deletes a user row that has no guild membership or streamer record (see
+ * `deleteUnlinkedUserRecord`) and invalidates the custom-command lookup cache.
+ * @param discordId - Discord snowflake as a string.
+ * @returns True if the row was deleted; false if it didn't exist or is still referenced.
+ */
+export async function deleteUnlinkedUser(discordId: string): Promise<boolean> {
+  return withInvalidation(() => deleteUnlinkedUserRecord(discordId), invalidateCustomCommandLookupCache);
 }
 
 // ─── Custom commands ────────────────────────────────────────────────────────

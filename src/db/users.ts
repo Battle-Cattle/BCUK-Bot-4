@@ -219,6 +219,25 @@ export async function upsertUserRecord(
 }
 
 /**
+ * Deletes a user row, but only while nothing else hangs off it: no guild membership and no
+ * streamer record. Meant for rolling back a user that was only just inserted — the guard means it
+ * can never cascade away an established user's guild access or streamer data, since every table
+ * that references `user` deletes with it.
+ * @param discordId - Discord snowflake as a string.
+ * @returns True if the row was deleted; false if it didn't exist or is still referenced.
+ */
+export async function deleteUnlinkedUserRecord(discordId: string): Promise<boolean> {
+  const [result] = await withShortLockTimeout((conn) => conn.execute<mysql.ResultSetHeader>(
+    `DELETE FROM \`user\`
+     WHERE discord_id = ?
+       AND NOT EXISTS (SELECT 1 FROM guild_member WHERE guild_member.discord_id = ?)
+       AND NOT EXISTS (SELECT 1 FROM streamer WHERE streamer.discord_id = ?)`,
+    [discordId, discordId, discordId],
+  ));
+  return result.affectedRows > 0;
+}
+
+/**
  * Updates a user's stored Discord display name.
  * @param discordId - Discord snowflake as a string.
  * @param name - New display name; blank after trimming is stored as null.

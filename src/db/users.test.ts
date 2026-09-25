@@ -21,6 +21,7 @@ import {
   getTwitchEnabledChannels,
   getAllTwitchLinkedUsers,
   setTwitchBotEnabledRecord,
+  deleteUnlinkedUserRecord,
   AccessLevel,
 } from './users';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
@@ -417,6 +418,25 @@ describe('setTwitchBotEnabledRecord', () => {
     await setTwitchBotEnabledRecord('1', false);
     const params = pool._conn.execute.mock.calls[1][1] as unknown[];
     expect(params[0]).toBe(0);
+  });
+});
+
+describe('deleteUnlinkedUserRecord', () => {
+  it('deletes only when the user has no guild membership or streamer record', async () => {
+    const pool = makePool(undefined, [{ affectedRows: 1 }, []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(deleteUnlinkedUserRecord('123')).resolves.toBe(true);
+    const [sql, params] = pool._conn.execute.mock.calls[1] as [string, unknown[]];
+    expect(sql).toMatch(/DELETE FROM `user`/);
+    expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM guild_member WHERE guild_member\.discord_id = \?\)/);
+    expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM streamer WHERE streamer\.discord_id = \?\)/);
+    expect(params).toEqual(['123', '123', '123']);
+  });
+
+  it('returns false when no row was deleted (missing or still referenced)', async () => {
+    const pool = makePool(undefined, [{ affectedRows: 0 }, []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(deleteUnlinkedUserRecord('123')).resolves.toBe(false);
   });
 });
 
