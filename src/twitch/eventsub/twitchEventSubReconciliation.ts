@@ -298,9 +298,9 @@ function markBroadcastersSeen(uids: ReadonlySet<string>, now: number): void {
 
 /**
  * Reconciles one streamer: resolves their broadcaster token, lists their custom rewards, and
- * reconciles each one via {@link reconcileReward}. No-ops silently if the streamer has no
- * usable token (nothing to authenticate the Helix calls with — the same condition that would
- * already be blocking their EventSub subscriptions from existing).
+ * reconciles each one via {@link reconcileReward}. If the streamer has no usable token (nothing
+ * to authenticate the Helix calls with) or their rewards can't be listed, nothing is fetched and
+ * their tracked cursors are marked fetch-pinned (see {@link markStreamerFetchFailed}).
  *
  * @param uid - Broadcaster's Twitch user ID (the streamer map's key).
  * @param info - Dispatch info for this streamer.
@@ -308,7 +308,11 @@ function markBroadcastersSeen(uids: ReadonlySet<string>, now: number): void {
 async function reconcileStreamer(uid: string, info: StreamerInfo): Promise<void> {
   const streamer = await getStreamerById(info.streamerId);
   const token = streamer ? await getValidToken(streamer) : null;
-  if (!token) return;
+  if (!token) {
+    // Nothing to fetch with, so this tick's window goes unreconciled like any other fetch failure.
+    markStreamerFetchFailed(uid);
+    return;
+  }
 
   let rewards;
   try {
@@ -324,7 +328,8 @@ async function reconcileStreamer(uid: string, info: StreamerInfo): Promise<void>
 
 /**
  * Marks every tracked reward cursor of a broadcaster as fetch-pinned (see {@link markFetchFailed})
- * when their rewards couldn't be listed, so none of those windows is later skipped silently.
+ * when nothing could be fetched for them this tick (no usable token, or their rewards couldn't be
+ * listed), so none of those windows is later skipped silently.
  * @param uid - Broadcaster's Twitch user ID.
  * @returns Nothing — mutates {@link lastSeenRedeemedAt} in place.
  */
