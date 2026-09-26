@@ -186,6 +186,19 @@ describe('GET /sfx/file/:id/audio', () => {
     }
   });
 
+  it('returns 404 when resolving the real path fails with a non-ENOENT error', async () => {
+    fs.writeFileSync(path.join(SFX_FOLDER_MOCK, 'clap.mp3'), 'fake-audio-bytes');
+    vi.mocked(getSfxFileById).mockResolvedValue({ file: 'clap.mp3' });
+    const spy = vi.spyOn(fs.promises, 'realpath').mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    try {
+      const res = await supertest(buildAudioApp()).get('/sfx/file/1/audio');
+      expect(res.status).toBe(404);
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('returns 404 when the DB row points at a file that no longer exists on disk', async () => {
     vi.mocked(getSfxFileById).mockResolvedValue({ file: 'missing.mp3' });
     const res = await supertest(buildAudioApp()).get('/sfx/file/1/audio');
