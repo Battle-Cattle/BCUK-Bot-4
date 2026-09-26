@@ -316,6 +316,25 @@ describe('reconnect', () => {
     }
   });
 
+  it('releases the connection and stops, without waiting for Ready, when the attempt goes stale during joinVoiceChannel', async () => {
+    // Unreachable in production today (see the comment on the post-join isStale check): force it by
+    // disconnecting the guild synchronously from inside the join mock.
+    const { client } = makeClient();
+    const voice = await import('@discordjs/voice');
+    const conn = makeConnection();
+    vi.mocked(voice.joinVoiceChannel).mockImplementationOnce(() => {
+      mod.disconnect('guild-A');
+      return conn as never;
+    });
+
+    await expect(mod.connect(client as never, 'guild-A', 'chan-1')).resolves.toBeUndefined();
+
+    expect(conn.destroy).toHaveBeenCalled();
+    expect(conn.on).not.toHaveBeenCalled(); // no connection handlers attached
+    expect(vi.mocked(voice.entersState)).not.toHaveBeenCalled();
+    expect(mod.isConnected('guild-A')).toBe(false);
+  });
+
   it('a second connect() to the same guild supersedes an in-flight one at the next await point', async () => {
     const { client } = makeClient();
     const voice = await import('@discordjs/voice');

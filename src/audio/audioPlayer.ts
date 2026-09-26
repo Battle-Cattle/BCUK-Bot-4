@@ -210,6 +210,11 @@ export async function connect(client: Client, guildId: string, channelId: string
       selfMute: false,
     });
 
+    // Defensive: unreachable today. joinVoiceChannel is synchronous, and the only things that make
+    // this attempt stale (a newer connect() or disconnectGuild(), both driven by HTTP routes,
+    // guildDelete or shutdown) can't run inside it. Kept so a future synchronous path out of
+    // joinVoiceChannel (an adapter or stateChange listener that disconnects) still can't leave a
+    // stale attempt waiting on Ready with handlers attached.
     if (isStale()) {
       releaseStaleConnection(state, nextConnection);
       return;
