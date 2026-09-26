@@ -1,8 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import fs from 'fs';
 import { OVERLAY_FOLDER, OVERLAY_MAX_SSE_PER_CHANNEL } from '../../shared/config';
-import { safeResolve } from '../../shared/pathUtils';
+import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 import { renderView } from './viewHelpers';
 import { createSseEventsHandler, createLoginValidator, broadcastToChannel } from './sseChannel';
 
@@ -79,7 +78,8 @@ router.get('/:login/events', createSseEventsHandler({
  *   params.
  * @param res - Express response; sends the file on success, or replies 400 if
  *   `streamerId`/`filename` are malformed or the resolved path is unsafe, or
- *   404 if the file doesn't exist.
+ *   404 if the file doesn't exist or its real path (following symlinks) is
+ *   outside the overlay folder.
  */
 router.get('/videos/:streamerId/:filename', async (req, res) => {
   const { streamerId, filename } = req.params;
@@ -90,18 +90,21 @@ router.get('/videos/:streamerId/:filename', async (req, res) => {
   const resolved = safeResolve(OVERLAY_FOLDER, streamerId, filename);
   if (!resolved) { res.status(400).end(); return; }
 
+  // safeResolve is purely lexical; also follow symlinks and re-check containment, since
+  // sendFile would follow a link under the folder that points outside it.
+  let realPath: string | null;
   try {
-    await fs.promises.access(resolved);
+    realPath = await realPathWithin(OVERLAY_FOLDER, resolved);
   } catch {
-    res.status(404).end();
-    return;
+    realPath = null;
   }
+  if (!realPath) { res.status(404).end(); return; }
 
-  // A TOCTOU race is possible here: the file can be removed between the access() check above
+  // A TOCTOU race is possible here: the file can be removed between the realpath check above
   // and sendFile() actually reading it (e.g. a concurrent delete). Passing a callback stops
   // Express from falling through to the default error handler (a 500) for that race — reply
   // 404 instead, as long as headers haven't already gone out.
-  res.sendFile(resolved, (err) => {
+  res.sendFile(realPath, (err) => {
     if (err && !res.headersSent) {
       res.status(404).end();
     }
