@@ -22,7 +22,7 @@ import { getCustomRewards, getRewardRedemptions } from '../twitchApi';
 import { handleRedemption } from './twitchEventSubHandler';
 import {
   runReconciliationTick, startEventSubReconciliation, stopEventSubReconciliation,
-  __resetReconciliationCursorsForTests, nextCursor, CURSOR_RETENTION_MS,
+  __resetReconciliationCursorsForTests, nextCursor, CURSOR_RETENTION_MS, MAX_CURSOR_LAG_MS,
 } from './twitchEventSubReconciliation';
 import { REDEMPTION_DEDUP_TTL_MS } from './twitchEventSubRedemptionDedup';
 
@@ -232,6 +232,176 @@ describe('runReconciliationTick', () => {
 
   it('keeps the retention window inside the redemption dedup TTL', () => {
     expect(CURSOR_RETENTION_MS).toBeLessThan(REDEMPTION_DEDUP_TTL_MS);
+  });
+
+  it('abandons a redemption that keeps failing for longer than MAX_CURSOR_LAG_MS, with a warning', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const t0 = Date.now();
+    const page = { redemptions: [redemption('s2', new Date(t0 + 1_000).toISOString()), redemption('f1', new Date(t0).toISOString())], cursor: null };
+    mockFulfilledOnly(page);
+    vi.mocked(handleRedemption).mockImplementation(async (_login, event: any) => {
+      if (event.id === 'f1') throw new Error('permanent');
+      return true;
+    });
+
+    // Present and failing on every tick, one poll interval apart, until the cap is passed.
+    let lastTickReplayed: string[] = [];
+    while (Date.now() - t0 <= MAX_CURSOR_LAG_MS + 60_000) {
+      vi.mocked(handleRedemption).mockClear();
+      await runReconciliationTick();
+      lastTickReplayed = vi.mocked(handleRedemption).mock.calls.map((c) => (c[1] as any).id);
+      vi.advanceTimersByTime(60_000);
+    }
+
+    // Neither the failure nor the success after it is replayed once the cap has moved the cursor.
+    expect(lastTickReplayed).toEqual([]);
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Abandoning reconciliation retry for reward rwd1 (streamerA)'));
+  });
+
+  it('keeps retrying a failed redemption younger than MAX_CURSOR_LAG_MS, without an abandon warning', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const t0 = Date.now();
+    mockFulfilledOnly({ redemptions: [redemption('f1', new Date(t0).toISOString())], cursor: null });
+    vi.mocked(handleRedemption).mockRejectedValue(new Error('transient'));
+    await runReconciliationTick(); // cursor pinned just before f1
+
+    // Keep the broadcaster fresh with ticks inside the retention window, stopping just short of the cap.
+    while (Date.now() - t0 < MAX_CURSOR_LAG_MS - 60_000) {
+      vi.advanceTimersByTime(60_000);
+      await runReconciliationTick();
+    }
+    vi.advanceTimersByTime(MAX_CURSOR_LAG_MS - 1_000 - (Date.now() - t0));
+    vi.mocked(handleRedemption).mockClear();
+    await runReconciliationTick();
+
+    expect(handleRedemption).toHaveBeenCalledTimes(1);
+    expect(handleRedemption).toHaveBeenCalledWith('streamerA', expect.objectContaining({ id: 'f1' }), config, 1);
+    expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Abandoning'));
+  });
+
+  it('floors a quiet reward\'s success cursor at MAX_CURSOR_LAG_MS without an abandon warning', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const t0 = Date.now();
+    mockFulfilledOnly({ redemptions: [redemption('s1', new Date(t0 - 100).toISOString())], cursor: null });
+    await runReconciliationTick(); // cursor lands on s1
+
+    // No new redemptions for longer than the cap; the broadcaster stays present every tick.
+    mockFulfilledOnly({ redemptions: [], cursor: null });
+    while (Date.now() - t0 <= MAX_CURSOR_LAG_MS + 60_000) {
+      vi.advanceTimersByTime(60_000);
+      await runReconciliationTick();
+    }
+
+    // A late-arriving redemption from before the floor isn't replayed; one after it is.
+    const floor = Date.now() - MAX_CURSOR_LAG_MS;
+    mockFulfilledOnly({
+      redemptions: [redemption('new', new Date(floor + 1_000).toISOString()), redemption('old', new Date(floor - 1_000).toISOString())],
+      cursor: null,
+    });
+    vi.mocked(handleRedemption).mockClear();
+    await runReconciliationTick();
+
+    expect(vi.mocked(handleRedemption).mock.calls.map((c) => (c[1] as any).id)).toEqual(['new']);
+    expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Abandoning'));
+    expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Skipping unreconciled'));
+  });
+
+  it('skips a redemption that ages past MAX_CURSOR_LAG_MS during a slow fetch, still handling newer ones', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const t0 = Date.now();
+    await runReconciliationTick(); // quiet: cursor stays at the initial lookback, t0 - one interval
+    while (Date.now() - t0 < MAX_CURSOR_LAG_MS - 2 * 60_000) {
+      vi.advanceTimersByTime(60_000);
+      await runReconciliationTick();
+    }
+
+    // The cutoff is still inside the cap when chosen, but the fetch stalls for two intervals, so by
+    // handling time 'old' is past the cap (its dedup entry may have expired) while 'new' is not.
+    const oldAt = t0 - 30_000;
+    const newAt = Date.now() - 1_000;
+    vi.mocked(getRewardRedemptions).mockImplementation(async (_uid, _rewardId, status) => {
+      if (status !== 'FULFILLED') return { redemptions: [], cursor: null };
+      vi.advanceTimersByTime(2 * 60_000);
+      return { redemptions: [redemption('new', new Date(newAt).toISOString()), redemption('old', new Date(oldAt).toISOString())], cursor: null };
+    });
+    await runReconciliationTick();
+
+    expect(vi.mocked(handleRedemption).mock.calls.map((c) => (c[1] as any).id)).toEqual(['new']);
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Skipping reconciliation replay of redemption old (streamerA)'));
+  });
+
+  it('warns when the cap skips a window whose redemptions could not be fetched', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const t0 = Date.now();
+    await runReconciliationTick(); // establishes a quiet cursor
+
+    vi.mocked(getRewardRedemptions).mockRejectedValue(new Error('helix down'));
+    while (Date.now() - t0 <= MAX_CURSOR_LAG_MS + 60_000) {
+      vi.advanceTimersByTime(60_000);
+      await runReconciliationTick();
+    }
+
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Skipping unreconciled redemptions for reward rwd1 (streamerA)'));
+    expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Abandoning'));
+  });
+
+  it('warns when the cap skips a window during which the streamer\'s rewards could not be listed', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const t0 = Date.now();
+    await runReconciliationTick(); // establishes a quiet cursor for rwd1
+
+    vi.mocked(getCustomRewards).mockRejectedValue(new Error('helix down'));
+    while (Date.now() - t0 <= MAX_CURSOR_LAG_MS + 60_000) {
+      vi.advanceTimersByTime(60_000);
+      await runReconciliationTick();
+    }
+    expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Skipping unreconciled'));
+
+    vi.mocked(getCustomRewards).mockResolvedValue([{ id: 'rwd1' } as any]);
+    await runReconciliationTick();
+
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Skipping unreconciled redemptions for reward rwd1 (streamerA)'));
+  });
+
+  it('warns when the cap skips a window during which the streamer had no usable token', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const t0 = Date.now();
+    await runReconciliationTick(); // establishes a quiet cursor for rwd1
+
+    vi.mocked(getValidToken).mockResolvedValue(null);
+    while (Date.now() - t0 <= MAX_CURSOR_LAG_MS + 60_000) {
+      vi.advanceTimersByTime(60_000);
+      await runReconciliationTick();
+    }
+    expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Skipping unreconciled'));
+
+    vi.mocked(getValidToken).mockResolvedValue('user-token');
+    await runReconciliationTick();
+
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Skipping unreconciled redemptions for reward rwd1 (streamerA)'));
+  });
+
+  it('logs a failed token lookup and warns when the cap skips the window it left unreconciled', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const t0 = Date.now();
+    await runReconciliationTick(); // establishes a quiet cursor for rwd1
+
+    vi.mocked(getStreamerById).mockRejectedValue(new Error('db down'));
+    while (Date.now() - t0 <= MAX_CURSOR_LAG_MS + 60_000) {
+      vi.advanceTimersByTime(60_000);
+      await runReconciliationTick();
+    }
+    expect(mockLog.error).toHaveBeenCalledWith('Failed to resolve the broadcaster token for streamerA:', expect.any(Error));
+
+    vi.mocked(getStreamerById).mockResolvedValue(streamer);
+    await runReconciliationTick();
+
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Skipping unreconciled redemptions for reward rwd1 (streamerA)'));
+  });
+
+  it('keeps the cursor lag cap at least one poll interval inside the redemption dedup TTL', () => {
+    expect(MAX_CURSOR_LAG_MS).toBeGreaterThan(0);
+    expect(MAX_CURSOR_LAG_MS + 60_000).toBeLessThanOrEqual(REDEMPTION_DEDUP_TTL_MS);
   });
 
   it('does not replay a redemption older than or equal to the cursor', async () => {
