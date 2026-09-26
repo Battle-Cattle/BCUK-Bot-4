@@ -381,6 +381,24 @@ describe('runReconciliationTick', () => {
     expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Skipping unreconciled redemptions for reward rwd1 (streamerA)'));
   });
 
+  it('logs a failed token lookup and warns when the cap skips the window it left unreconciled', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const t0 = Date.now();
+    await runReconciliationTick(); // establishes a quiet cursor for rwd1
+
+    vi.mocked(getStreamerById).mockRejectedValue(new Error('db down'));
+    while (Date.now() - t0 <= MAX_CURSOR_LAG_MS + 60_000) {
+      vi.advanceTimersByTime(60_000);
+      await runReconciliationTick();
+    }
+    expect(mockLog.error).toHaveBeenCalledWith('Failed to resolve the broadcaster token for streamerA:', expect.any(Error));
+
+    vi.mocked(getStreamerById).mockResolvedValue(streamer);
+    await runReconciliationTick();
+
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Skipping unreconciled redemptions for reward rwd1 (streamerA)'));
+  });
+
   it('keeps the cursor lag cap at least one poll interval inside the redemption dedup TTL', () => {
     expect(MAX_CURSOR_LAG_MS).toBeGreaterThan(0);
     expect(MAX_CURSOR_LAG_MS + 60_000).toBeLessThanOrEqual(REDEMPTION_DEDUP_TTL_MS);
