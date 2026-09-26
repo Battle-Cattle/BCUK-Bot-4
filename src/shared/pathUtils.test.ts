@@ -64,7 +64,10 @@ describe('realPathWithin', () => {
   let base: string;
 
   beforeAll(() => {
-    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'realpath-within-')));
+    // realpathSync.native, like the fs.promises.realpath the helper uses, expands Windows 8.3
+    // short names (e.g. RUNNER~1 in the temp dir); plain realpathSync doesn't, so the expected
+    // paths below would be spelled differently from what the helper returns.
+    root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'realpath-within-')));
     base = path.join(root, 'assets');
     const outside = path.join(root, 'outside');
     fs.mkdirSync(path.join(base, '5'), { recursive: true });
