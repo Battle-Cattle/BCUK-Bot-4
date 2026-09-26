@@ -31,6 +31,13 @@ interface ReconciliationCursor {
    * success (or the initial lookback).
    */
   pinnedBy: 'handler' | 'fetch' | null;
+  /**
+   * Set once {@link resolveCutoff} has warned that the cap is skipping this cursor's unfetched
+   * window, so a fetch outage that outlasts the cap warns once rather than on every tick. Carried
+   * across further fetch failures by {@link markFetchFailed}; any successful fetch writes a fresh
+   * cursor without it, so the next, separate outage warns again.
+   */
+  skipWarned?: boolean;
 }
 
 /**
@@ -212,7 +219,8 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
  * Records that the redemptions after a reward's cursor couldn't be fetched, so if the cap later
  * moves the cursor past that window, {@link resolveCutoff} logs the skipped window instead of
  * treating it as quiet. A handler pin still at `cutoff` is kept (it's the more specific reason);
- * one the cap already moved past was abandoned, so the new pin is `'fetch'`.
+ * one the cap already moved past was abandoned, so the new pin is `'fetch'`. A `'fetch'` pin that
+ * was already warned about keeps {@link ReconciliationCursor.skipWarned}: it's the same outage.
  * @param key - The `${broadcasterUserId}:${twitchRewardId}` cursor key.
  * @param cutoff - The cursor the failed fetch started from (epoch ms).
  * @returns Nothing — mutates {@link lastSeenRedeemedAt} in place.
@@ -220,7 +228,8 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
 function markFetchFailed(key: string, cutoff: number): void {
   const prev = lastSeenRedeemedAt.get(key);
   const pinnedBy = prev?.at === cutoff && prev.pinnedBy ? prev.pinnedBy : 'fetch';
-  lastSeenRedeemedAt.set(key, { at: cutoff, pinnedBy });
+  const skipWarned = prev?.pinnedBy === 'fetch' && prev.skipWarned === true;
+  lastSeenRedeemedAt.set(key, { at: cutoff, pinnedBy, skipWarned });
 }
 
 /**
@@ -229,7 +238,8 @@ function markFetchFailed(key: string, cutoff: number): void {
  * right after the bot (re)started or first subscribed for this streamer, instead of leaving it as
  * a permanent blind spot. A stored cursor is floored at `now - MAX_CURSOR_LAG_MS` (see
  * {@link MAX_CURSOR_LAG_MS}); when that floor moves a pinned cursor, a warning is logged — either
- * a failing redemption is abandoned, or a window that couldn't be fetched is skipped. A success
+ * a failing redemption is abandoned, or a window that couldn't be fetched is skipped (once per
+ * outage: see {@link ReconciliationCursor.skipWarned}). A success
  * cursor on a quiet reward also gets floored, silently — every redemption before the floor was
  * already fetched by an earlier tick.
  * @param key - The `${broadcasterUserId}:${twitchRewardId}` cursor key.
@@ -249,11 +259,12 @@ function resolveCutoff(key: string, login: string, now: number): number {
       `Abandoning reconciliation retry for reward ${reward} (${login}): a redemption at `
       + `${new Date(stored.at + 1).toISOString()} has kept failing for longer than ${minutes} minutes`,
     );
-  } else if (stored.pinnedBy === 'fetch') {
+  } else if (stored.pinnedBy === 'fetch' && !stored.skipWarned) {
     log.warn(
       `Skipping unreconciled redemptions for reward ${reward} (${login}): redemptions after `
       + `${new Date(stored.at).toISOString()} couldn't be fetched for longer than ${minutes} minutes`,
     );
+    stored.skipWarned = true;
   }
   return floor;
 }
