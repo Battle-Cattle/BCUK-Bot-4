@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 /** Hoisted so the `vi.mock` factories below can safely reference these — `vi.mock` factories are hoisted above imports, so plain imported bindings could throw `ReferenceError` depending on import order. This is a plain string literal (no filesystem calls) precisely so it can be computed before any module import has run; the directory itself is created below, after the real `fs`/`os`/`path` imports are available. */
@@ -166,6 +167,23 @@ describe('GET /sfx/file/:id/audio', () => {
     vi.mocked(getSfxFileById).mockResolvedValue({ file: '../../etc/passwd' });
     const res = await supertest(buildAudioApp()).get('/sfx/file/1/audio');
     expect(res.status).toBe(404);
+  });
+
+  it('returns 404 when a directory link under SFX_FOLDER points outside it', async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'bcuk-sfx-outside-'));
+    const link = path.join(SFX_FOLDER_MOCK, 'linked-out');
+    try {
+      fs.writeFileSync(path.join(outside, 'secret.mp3'), 'outside-bytes');
+      fs.rmSync(link, { recursive: true, force: true });
+      fs.symlinkSync(outside, link, 'junction'); // 'junction' works on Windows without elevation
+      vi.mocked(getSfxFileById).mockResolvedValue({ file: 'linked-out/secret.mp3' });
+
+      const res = await supertest(buildAudioApp()).get('/sfx/file/1/audio');
+      expect(res.status).toBe(404);
+    } finally {
+      fs.rmSync(link, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it('returns 404 when the DB row points at a file that no longer exists on disk', async () => {

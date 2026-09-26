@@ -91,7 +91,12 @@ router.get('/videos/:streamerId/:filename', async (req, res) => {
   if (!resolved) { res.status(400).end(); return; }
 
   // safeResolve is purely lexical; also follow symlinks and re-check containment, since
-  // sendFile would follow a link under the folder that points outside it.
+  // sendFile would follow a link under the folder that points outside it. Not atomic with the
+  // open inside sendFile: a path component swapped for a link in between would still be
+  // followed. Closing that needs fd-based serving (losing sendFile's Range/ETag handling, which
+  // videos rely on), and exploiting it needs write access to the folder — which already allows
+  // replacing the served files. Keeping the folder writable only by the bot's user (README,
+  // "Deployment") is what actually closes it.
   let realPath: string | null;
   try {
     realPath = await realPathWithin(OVERLAY_FOLDER, resolved);
