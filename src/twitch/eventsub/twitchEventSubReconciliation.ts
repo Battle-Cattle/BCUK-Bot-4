@@ -20,12 +20,17 @@ const POLL_INTERVAL_MS = 60_000;
  */
 const lastSeenRedeemedAt = new Map<string, ReconciliationCursor>();
 
-/** A reward's reconciliation cursor and whether it's pinned just before a redemption that failed. */
+/** A reward's reconciliation cursor and what, if anything, is holding it back. */
 interface ReconciliationCursor {
   /** Only redemptions redeemed strictly after this (epoch ms) are fetched next tick. */
   at: number;
-  /** True when {@link at} sits just before a failed redemption so that it's retried. */
-  pinnedByFailure: boolean;
+  /**
+   * Why {@link at} hasn't advanced: `'handler'` — it sits just before a redemption whose handler
+   * failed, so that redemption is retried; `'fetch'` — the redemptions after it couldn't be
+   * fetched (Helix error listing the reward or its redemptions); null — it's simply the latest
+   * success (or the initial lookback).
+   */
+  pinnedBy: 'handler' | 'fetch' | null;
 }
 
 /**
@@ -34,7 +39,9 @@ interface ReconciliationCursor {
  * the dedup cache still remembers them — an entry lives {@link REDEMPTION_DEDUP_TTL_MS} from when
  * the redemption was handled, which is never before it was redeemed. Capping the lookback one poll
  * interval inside that TTL means every replayed success is still deduped, at the cost of no longer
- * retrying a redemption that has kept failing for longer than this.
+ * retrying a redemption that has kept failing for longer than this. Enforced twice: on the cutoff
+ * when a tick picks it ({@link resolveCutoff}), and again per redemption right before it's handled
+ * ({@link replayRedemptions}), since a slow fetch can age a redemption past the cap in between.
  */
 export const MAX_CURSOR_LAG_MS = REDEMPTION_DEDUP_TTL_MS - POLL_INTERVAL_MS;
 
@@ -117,6 +124,12 @@ async function replayRedemptions(
   for (const r of redemptions) {
     const redeemedAt = Date.parse(r.redeemed_at);
     if (!Number.isFinite(redeemedAt)) continue;
+    // Re-check the cap at handling time: a slow fetch (or a slow handler earlier in this batch)
+    // can age a redemption past it after the cutoff was chosen, and its dedup entry may be gone.
+    if (Date.now() - redeemedAt > MAX_CURSOR_LAG_MS) {
+      log.warn(`Skipping reconciliation replay of redemption ${r.id} (${info.login}): redeemed more than ${MAX_CURSOR_LAG_MS / 60_000} minutes ago, outside the dedup window`);
+      continue;
+    }
     try {
       const processed = await handleRedemption(info.login, toRedemptionEvent(info.login, r), info.config ?? DEFAULT_EVENT_CONFIG, info.streamerId);
       // Only log as a genuine catch when handleRedemption actually processed it — its own
@@ -187,11 +200,27 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
     redemptions = [...unfulfilled, ...fulfilled];
   } catch (err) {
     log.error(`Failed to fetch redemptions for reward ${rewardId} (${info.login}):`, err);
+    markFetchFailed(key, cutoff);
     return;
   }
 
   const { succeededMax, failedMin } = await replayRedemptions(info, redemptions);
-  lastSeenRedeemedAt.set(key, { at: nextCursor(cutoff, succeededMax, failedMin), pinnedByFailure: failedMin !== null });
+  lastSeenRedeemedAt.set(key, { at: nextCursor(cutoff, succeededMax, failedMin), pinnedBy: failedMin === null ? null : 'handler' });
+}
+
+/**
+ * Records that the redemptions after a reward's cursor couldn't be fetched, so if the cap later
+ * moves the cursor past that window, {@link resolveCutoff} logs the skipped window instead of
+ * treating it as quiet. A handler pin still at `cutoff` is kept (it's the more specific reason);
+ * one the cap already moved past was abandoned, so the new pin is `'fetch'`.
+ * @param key - The `${broadcasterUserId}:${twitchRewardId}` cursor key.
+ * @param cutoff - The cursor the failed fetch started from (epoch ms).
+ * @returns Nothing — mutates {@link lastSeenRedeemedAt} in place.
+ */
+function markFetchFailed(key: string, cutoff: number): void {
+  const prev = lastSeenRedeemedAt.get(key);
+  const pinnedBy = prev?.at === cutoff && prev.pinnedBy ? prev.pinnedBy : 'fetch';
+  lastSeenRedeemedAt.set(key, { at: cutoff, pinnedBy });
 }
 
 /**
@@ -199,9 +228,10 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
  * time looks back one poll interval rather than its full history — this still covers the window
  * right after the bot (re)started or first subscribed for this streamer, instead of leaving it as
  * a permanent blind spot. A stored cursor is floored at `now - MAX_CURSOR_LAG_MS` (see
- * {@link MAX_CURSOR_LAG_MS}); when that floor moves a cursor pinned by a failed redemption, the
- * failure is abandoned and a warning is logged. A success cursor on a quiet reward also gets
- * floored, silently — every redemption before the floor was already fetched by an earlier tick.
+ * {@link MAX_CURSOR_LAG_MS}); when that floor moves a pinned cursor, a warning is logged — either
+ * a failing redemption is abandoned, or a window that couldn't be fetched is skipped. A success
+ * cursor on a quiet reward also gets floored, silently — every redemption before the floor was
+ * already fetched by an earlier tick.
  * @param key - The `${broadcasterUserId}:${twitchRewardId}` cursor key.
  * @param login - Streamer login, for the warning.
  * @param now - The current time (epoch ms).
@@ -212,10 +242,17 @@ function resolveCutoff(key: string, login: string, now: number): number {
   if (!stored) return now - POLL_INTERVAL_MS;
   const floor = now - MAX_CURSOR_LAG_MS;
   if (stored.at >= floor) return stored.at;
-  if (stored.pinnedByFailure) {
+  const reward = key.slice(key.indexOf(':') + 1);
+  const minutes = MAX_CURSOR_LAG_MS / 60_000;
+  if (stored.pinnedBy === 'handler') {
     log.warn(
-      `Abandoning reconciliation retry for reward ${key.slice(key.indexOf(':') + 1)} (${login}): a redemption at `
-      + `${new Date(stored.at + 1).toISOString()} has kept failing for longer than ${MAX_CURSOR_LAG_MS / 60_000} minutes`,
+      `Abandoning reconciliation retry for reward ${reward} (${login}): a redemption at `
+      + `${new Date(stored.at + 1).toISOString()} has kept failing for longer than ${minutes} minutes`,
+    );
+  } else if (stored.pinnedBy === 'fetch') {
+    log.warn(
+      `Skipping unreconciled redemptions for reward ${reward} (${login}): redemptions after `
+      + `${new Date(stored.at).toISOString()} couldn't be fetched for longer than ${minutes} minutes`,
     );
   }
   return floor;
@@ -278,10 +315,23 @@ async function reconcileStreamer(uid: string, info: StreamerInfo): Promise<void>
     rewards = await getCustomRewards(uid, token);
   } catch (err) {
     log.error(`Failed to list custom rewards for ${info.login}:`, err);
+    markStreamerFetchFailed(uid);
     return;
   }
 
   await Promise.allSettled(rewards.map((reward) => reconcileReward(info, uid, token, reward.id)));
+}
+
+/**
+ * Marks every tracked reward cursor of a broadcaster as fetch-pinned (see {@link markFetchFailed})
+ * when their rewards couldn't be listed, so none of those windows is later skipped silently.
+ * @param uid - Broadcaster's Twitch user ID.
+ * @returns Nothing — mutates {@link lastSeenRedeemedAt} in place.
+ */
+function markStreamerFetchFailed(uid: string): void {
+  for (const [key, cursor] of lastSeenRedeemedAt) {
+    if (key.startsWith(`${uid}:`)) markFetchFailed(key, cursor.at);
+  }
 }
 
 /**
