@@ -12,21 +12,23 @@ vi.mock('../../shared/config', () => ({
 
 vi.mock('fs', () => ({
   default: {
-    promises: { access: vi.fn() },
     readdirSync: () => ['controllerOverlay.ejs', 'overlaySource.ejs'],
   },
 }));
 
 vi.mock('../../shared/pathUtils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../shared/pathUtils')>();
-  return { safeResolve: vi.fn(actual.safeResolve) };
+  return {
+    safeResolve: vi.fn(actual.safeResolve),
+    // Real symlink resolution is covered in pathUtils.test.ts; here the file just "exists" as-is.
+    realPathWithin: vi.fn(async (_base: string, candidate: string) => candidate as string | null),
+  };
 });
 
-import fs from 'fs';
 import express from 'express';
 import supertest from 'supertest';
 import router, { MAX_SSE_CONNECTIONS_PER_CHANNEL, connections, pushOverlayEvent } from './overlaySource';
-import { safeResolve } from '../../shared/pathUtils';
+import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 
 /** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely — needed to control fake timers and the request's 'close' event deterministically. */
 function getRouteHandler(routePath: string): (req: any, res: any, next: any) => void {
@@ -332,21 +334,54 @@ describe('GET /videos/:streamerId/:filename', () => {
     expect(res.status).toBe(400);
   });
 
+  it('returns 404 without sending when the real path escapes the folder via a symlink', async () => {
+    vi.mocked(realPathWithin).mockResolvedValueOnce(null);
+    const sendFileSpy = vi.fn();
+    const app = express();
+    app.use((req, res, next) => {
+      (res as any).sendFile = (filePath: string) => { sendFileSpy(filePath); res.end(); };
+      next();
+    });
+    app.use(router);
+    const res = await supertest(app).get('/videos/123/clip.mp4');
+    expect(res.status).toBe(404);
+    expect(realPathWithin).toHaveBeenCalledWith('/app/overlay-videos', '/app/overlay-videos/123/clip.mp4');
+    expect(sendFileSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when resolving the real path fails', async () => {
+    vi.mocked(realPathWithin).mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    const res = await supertest(buildApp()).get('/videos/123/clip.mp4');
+    expect(res.status).toBe(404);
+  });
+
+  it('sends the resolved real path rather than the lexical one', async () => {
+    vi.mocked(realPathWithin).mockResolvedValueOnce('/app/overlay-videos/real/clip.mp4');
+    const sendFileSpy = vi.fn();
+    const app = express();
+    app.use((req, res, next) => {
+      (res as any).sendFile = (filePath: string) => { sendFileSpy(filePath); res.end(); };
+      next();
+    });
+    app.use(router);
+    const res = await supertest(app).get('/videos/123/clip.mp4');
+    expect(res.status).toBe(200);
+    expect(sendFileSpy).toHaveBeenCalledWith('/app/overlay-videos/real/clip.mp4');
+  });
+
   it('returns 404 when the file does not exist on disk', async () => {
-    vi.mocked(fs.promises.access).mockRejectedValueOnce(new Error('ENOENT'));
+    vi.mocked(realPathWithin).mockResolvedValueOnce(null);
     const res = await supertest(buildApp()).get('/videos/123/clip.mp4');
     expect(res.status).toBe(404);
   });
 
   it('sends the resolved file when it exists', async () => {
-    vi.mocked(fs.promises.access).mockResolvedValueOnce(undefined);
     const res = await supertest(buildApp()).get('/videos/123/clip.mp4');
     expect(res.status).toBe(200);
     expect(res.body.sentFile).toBe('/app/overlay-videos/123/clip.mp4');
   });
 
-  it('replies 404 instead of a raw 500 when sendFile errors after the access() check passed (TOCTOU race)', async () => {
-    vi.mocked(fs.promises.access).mockResolvedValueOnce(undefined);
+  it('replies 404 instead of a raw 500 when sendFile errors after the realpath check passed (TOCTOU race)', async () => {
     const app = express();
     app.use((req, res, next) => {
       (res as any).sendFile = (_filePath: string, cb: (err: Error) => void) => cb(new Error('ENOENT'));

@@ -1,9 +1,8 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import fs from 'fs';
 import type { AlertPayload } from '../../twitch/eventsub/twitchEventSubRuntime';
 import { ALERT_ASSETS_FOLDER, ALERT_MAX_SSE_PER_CHANNEL } from '../../shared/config';
-import { safeResolve } from '../../shared/pathUtils';
+import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 import { renderView } from './viewHelpers';
 import { createSseEventsHandler, createLoginValidator, broadcastToChannel } from './sseChannel';
 
@@ -78,7 +77,8 @@ router.get('/:login/events', createSseEventsHandler({
  * @param req - Express request; reads the `streamerId` and `filename` route params.
  * @param res - Express response; sends the file (with a detected-type `Content-Type` and
  *   `X-Content-Type-Options: nosniff`) on success, or replies 400 if `streamerId`/`filename`
- *   are malformed or the resolved path is unsafe, or 404 if the file doesn't exist.
+ *   are malformed or the resolved path is unsafe, or 404 if the file doesn't exist or its real
+ *   path (following symlinks) is outside the assets folder.
  */
 router.get('/assets/:streamerId/:filename', async (req, res) => {
   const { streamerId, filename } = req.params;
@@ -90,21 +90,24 @@ router.get('/assets/:streamerId/:filename', async (req, res) => {
   const resolved = safeResolve(ALERT_ASSETS_FOLDER, streamerId, filename);
   if (!resolved) { res.status(400).end(); return; }
 
+  // safeResolve is purely lexical; also follow symlinks and re-check containment, since
+  // sendFile would follow a link under the folder that points outside it.
+  let realPath: string | null;
   try {
-    await fs.promises.access(resolved);
+    realPath = await realPathWithin(ALERT_ASSETS_FOLDER, resolved);
   } catch {
-    res.status(404).end();
-    return;
+    realPath = null;
   }
+  if (!realPath) { res.status(404).end(); return; }
 
   const ext = match[1].toLowerCase();
   res.setHeader('Content-Type', CONTENT_TYPES[ext] ?? 'application/octet-stream');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   // A TOCTOU race is possible here: the file can be removed (e.g. via the delete-asset route)
-  // between the access() check above and sendFile() actually reading it. Passing a callback
+  // between the realpath check above and sendFile() actually reading it. Passing a callback
   // stops Express from falling through to the default error handler (a 500) for that race —
   // reply 404 instead, as long as headers haven't already gone out.
-  res.sendFile(resolved, (err) => {
+  res.sendFile(realPath, (err) => {
     if (err && !res.headersSent) {
       res.status(404).end();
     }
