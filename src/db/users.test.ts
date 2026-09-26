@@ -316,6 +316,17 @@ describe('upsertUserRecord', () => {
     await expect(upsertUserRecord('1', 'Alice', 0, 'invalid!')).rejects.toThrow('Invalid twitchName');
   });
 
+  it('trims and normalizes a valid twitchName before storing it', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await upsertUserRecord('1', 'Alice', 0, '  SomeChannel ');
+    expect(result).toBe(true);
+    expect(normalizeTwitchChannelName).toHaveBeenCalledWith('SomeChannel');
+    const params = pool._conn.execute.mock.calls[1][1] as unknown[];
+    expect(params[3]).toBe('somechannel');
+    expect(params[4]).toBe(1); // twitchNameProvided → overwrite the stored name
+  });
+
   it('trims discordName and passes null when blank', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
