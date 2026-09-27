@@ -345,6 +345,34 @@ describe('runReconciliationTick', () => {
     expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Abandoning'));
   });
 
+  it('warns about a skipped window once per outage, not on every tick past the cap', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const t0 = Date.now();
+    await runReconciliationTick(); // establishes a quiet cursor
+
+    const skipWarnings = () => mockLog.warn.mock.calls.filter(([msg]) => String(msg).includes('Skipping unreconciled')).length;
+    const tickFor = async (ms: number) => {
+      const until = Date.now() + ms;
+      while (Date.now() < until) {
+        vi.advanceTimersByTime(60_000);
+        await runReconciliationTick();
+      }
+    };
+
+    // Outage 1: keeps failing for several ticks after the cap first moves the cursor.
+    vi.mocked(getRewardRedemptions).mockRejectedValue(new Error('helix down'));
+    await tickFor(MAX_CURSOR_LAG_MS + 5 * 60_000);
+    expect(Date.now() - t0).toBeGreaterThan(MAX_CURSOR_LAG_MS + 3 * 60_000); // several ticks past the cap
+    expect(skipWarnings()).toBe(1);
+
+    // Recovery, then a second, separate outage that also outlasts the cap: warns again, once.
+    vi.mocked(getRewardRedemptions).mockResolvedValue({ redemptions: [], cursor: null });
+    await tickFor(60_000);
+    vi.mocked(getRewardRedemptions).mockRejectedValue(new Error('helix down again'));
+    await tickFor(MAX_CURSOR_LAG_MS + 5 * 60_000);
+    expect(skipWarnings()).toBe(2);
+  });
+
   it('warns when the cap skips a window during which the streamer\'s rewards could not be listed', async () => {
     vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
     const t0 = Date.now();
