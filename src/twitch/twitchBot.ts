@@ -254,19 +254,6 @@ function onDisconnected(manually: boolean, reason?: Error): void {
 const BOT_AUTH_CONNECT_URL = `${PUBLIC_URL}/admin/bot-auth`;
 
 /**
- * Whether a `RefreshingAuthProvider` refresh-failure error indicates the refresh token itself
- * is invalid/revoked, as opposed to a transient failure (network error, timeout, 5xx) or some
- * other client-configuration/request error that a later retry could still recover from. A 400 or
- * 401 status alone isn't enough — Twitch returns the same statuses for an invalid client secret
- * or a malformed request — so this also parses the response body and requires it to actually
- * name the refresh token as invalid (Twitch's documented example: `{"message": "Invalid refresh
- * token"}`). Duck-typed on `statusCode`/`body` rather than an `instanceof` check against
- * `@twurple/api-call`'s `HttpStatusCodeError` — that package is only a transitive dependency of
- * `@twurple/auth`, not one we declare directly.
- * @param error - The error `onRefreshFailure` was called with.
- * @returns True if this looks like a genuinely invalid/revoked refresh token.
- */
-/**
  * Bumped by {@link stopTwitchBot} and captured by {@link buildBotAuthProvider} at construction
  * time, so a `RefreshingAuthProvider` from a stopped/superseded session can tell its own
  * `onRefresh`/`onRefreshFailure` callbacks apart from the current one. `stopTwitchBot()` waits
@@ -277,6 +264,21 @@ const BOT_AUTH_CONNECT_URL = `${PUBLIC_URL}/admin/bot-auth`;
  */
 let authProviderGeneration = 0;
 
+/**
+ * Whether a `RefreshingAuthProvider` refresh-failure error indicates the refresh token itself
+ * is invalid/revoked, as opposed to a transient failure (network error, timeout, 5xx) or some
+ * other client-configuration/request error (including a missing/malformed refresh token, which
+ * mentions "refresh token" but isn't evidence the stored one is bad) that a later retry could
+ * still recover from. A 400 or 401 status alone isn't enough — Twitch returns the same statuses
+ * for an invalid client secret or a malformed request — so this also parses the response body
+ * and requires its message to both mention the refresh token *and* say it's invalid/revoked
+ * (Twitch's documented example: `{"message": "Invalid refresh token"}`), not just mention it.
+ * Duck-typed on `statusCode`/`body` rather than an `instanceof` check against `@twurple/api-call`'s
+ * `HttpStatusCodeError` — that package is only a transitive dependency of `@twurple/auth`, not
+ * one we declare directly.
+ * @param error - The error `onRefreshFailure` was called with.
+ * @returns True if this looks like a genuinely invalid/revoked refresh token.
+ */
 function isInvalidRefreshTokenError(error: Error): boolean {
   const statusCode = (error as { statusCode?: unknown }).statusCode;
   if (statusCode !== 400 && statusCode !== 401) return false;
@@ -286,7 +288,9 @@ function isInvalidRefreshTokenError(error: Error): boolean {
   try {
     const parsed: unknown = JSON.parse(rawBody);
     const message = parsed && typeof parsed === 'object' && 'message' in parsed ? (parsed as { message?: unknown }).message : undefined;
-    return typeof message === 'string' && message.toLowerCase().includes('refresh token');
+    if (typeof message !== 'string') return false;
+    const lower = message.toLowerCase();
+    return lower.includes('refresh token') && (lower.includes('invalid') || lower.includes('revoked'));
   } catch {
     return false;
   }

@@ -757,6 +757,20 @@ describe('startTwitchBot', () => {
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
   });
 
+  it('clears the stored token and alerts the owner when the response body says the refresh token was revoked', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+
+    const error = Object.assign(new Error('Encountered HTTP status code 400'), {
+      statusCode: 400,
+      body: JSON.stringify({ status: 400, message: 'Refresh token has been revoked' }),
+    });
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+
+    expect(vi.mocked(clearBotChatToken)).toHaveBeenCalled();
+    expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
+  });
+
   it('leaves the stored token in place when the status is 400/401 but the body does not name an invalid refresh token', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     await startTwitchBot();
@@ -766,6 +780,22 @@ describe('startTwitchBot', () => {
     const error = Object.assign(new Error('Encountered HTTP status code 400'), {
       statusCode: 400,
       body: JSON.stringify({ status: 400, message: 'Invalid client secret' }),
+    });
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+
+    expect(vi.mocked(clearBotChatToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
+  });
+
+  it('leaves the stored token in place when the body mentions the refresh token but does not say it is invalid/revoked (e.g. missing)', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+
+    // Mentions "refresh token", but a missing token is a request-shape problem, not evidence
+    // that the stored refresh token itself is bad.
+    const error = Object.assign(new Error('Encountered HTTP status code 400'), {
+      statusCode: 400,
+      body: JSON.stringify({ status: 400, message: 'Missing refresh token parameter' }),
     });
     await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
 
