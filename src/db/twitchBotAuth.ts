@@ -66,33 +66,37 @@ export async function getBotChatToken(): Promise<BotChatToken | null> {
 
 /**
  * Encrypt and persist the bot's own Twitch chat OAuth token, upserting the singleton row — but
- * only if `attemptStartedAt` is at least as recent as the currently stored one (or no row exists
- * yet). This is a *second*, independent compare-and-swap from {@link saveBotChatTokenIfOwnedBy}'s:
- * that one orders a stale in-process token refresh against a reconnect; this one orders two
- * separate, independently-authorized `/admin/bot-auth/connect` attempts against *each other* when
- * their callbacks complete out of order (e.g. the owner using two tabs or devices) — without it,
+ * only if `attemptId` is at least as recent as the currently stored one (or no row exists yet).
+ * This is a *second*, independent compare-and-swap from {@link saveBotChatTokenIfOwnedBy}'s: that
+ * one orders a stale in-process token refresh against a reconnect; this one orders two separate,
+ * independently-authorized `/admin/bot-auth/connect` attempts against *each other* when their
+ * callbacks complete out of order (e.g. the owner using two tabs or devices) — without it,
  * whichever callback's Twitch round trip happens to finish last would silently win, even if the
- * owner started it first. `attemptStartedAt` is minted once per attempt at connect-initiation time
- * (`botAuth.ts`'s `/connect` handler), not at save time, so ordering reflects when the owner acted,
- * not network timing. Bumps `connection_id` only when the save actually takes effect, for the same
- * reason {@link saveBotChatToken} always did — see that function's superseding doc for details.
- * Throws if `EVENTSUB_TOKEN_SECRET` is not configured, to prevent storing plaintext credentials.
+ * owner started it first. `attemptId` is minted once per attempt at connect-initiation time
+ * (`botAuth.ts`'s `mintBotConnectAttemptId`), not at save time, so ordering reflects when the owner
+ * acted, not network timing — and is a strictly increasing identifier, not a bare `Date.now()|`
+ * timestamp, so two attempts started in the same millisecond can't tie and both "win" the `>=`
+ * comparison. Bumps `connection_id` only when the save actually takes effect, for the same reason
+ * {@link saveBotChatToken} always did — see that function's superseding doc for details. Throws if
+ * `EVENTSUB_TOKEN_SECRET` is not configured, to prevent storing plaintext credentials.
  *
- * @param attemptStartedAt - Unix epoch milliseconds when this connect attempt was initiated.
+ * @param attemptId - This connect attempt's identifier (see `mintBotConnectAttemptId`).
  * @param twitchUserId - Twitch user ID of the connected bot account.
  * @param accessToken - OAuth access token (encrypted before storage).
  * @param refreshToken - OAuth refresh token (encrypted before storage).
  * @param expiryMs - Token expiry as Unix epoch milliseconds, or null if unknown.
- * @returns Whether this attempt actually won the row (false means a more recently *started*
- *   attempt already holds it).
+ * @returns The row's new `connection_id` if this attempt won, or null if a more recently *started*
+ *   attempt already holds it. The caller can use the returned `connection_id` later to CAS a
+ *   rollback (see {@link restoreBotChatTokenIfOwnedByConnection}) without that rollback itself
+ *   having to participate in attempt ordering.
  */
 export async function saveBotChatTokenIfLatestAttempt(
-  attemptStartedAt: number,
+  attemptId: number,
   twitchUserId: string,
   accessToken: string,
   refreshToken: string,
   expiryMs: number | null,
-): Promise<boolean> {
+): Promise<number | null> {
   if (!EVENTSUB_TOKEN_SECRET) throw new Error('EVENTSUB_TOKEN_SECRET is not configured — refusing to persist plaintext OAuth tokens');
   const storedAccess = encryptToken(accessToken, EVENTSUB_TOKEN_SECRET);
   const storedRefresh = encryptToken(refreshToken, EVENTSUB_TOKEN_SECRET);
@@ -106,12 +110,52 @@ export async function saveBotChatTokenIfLatestAttempt(
        token_expiry   = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, new_row.token_expiry, token_expiry),
        connection_id  = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, twitch_bot_chat_token.connection_id + 1, twitch_bot_chat_token.connection_id),
        attempt_started_at = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, new_row.attempt_started_at, attempt_started_at)`,
-    [twitchUserId, storedAccess, storedRefresh, expiryMs, attemptStartedAt],
+    [twitchUserId, storedAccess, storedRefresh, expiryMs, attemptId],
   );
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT attempt_started_at FROM twitch_bot_chat_token WHERE id = 1',
+    'SELECT connection_id, attempt_started_at FROM twitch_bot_chat_token WHERE id = 1',
   );
-  return rows.length > 0 && Number(rows[0].attempt_started_at) === attemptStartedAt;
+  if (rows.length === 0 || Number(rows[0].attempt_started_at) !== attemptId) return null;
+  return Number(rows[0].connection_id);
+}
+
+/**
+ * Restores `twitchUserId`/`accessToken`/`refreshToken`/`expiryMs` as the singleton row's contents,
+ * but only if the row's `connection_id` still matches `expectedConnectionId` — i.e. nothing has
+ * taken over the connection since the caller installed it. Used by `botAuthCallback.ts`'s
+ * failed-restart rollback to get back to a previous, known-working connection: unlike
+ * {@link saveBotChatTokenIfLatestAttempt}, a rollback isn't itself a competing, owner-initiated
+ * connect attempt, so it must not participate in `attempt_started_at` ordering — doing so would let
+ * it wrongly clobber a legitimately newer, still-in-flight connect attempt, or cause that attempt's
+ * own eventual save to be rejected as superseded by a rollback that was never a real attempt at
+ * all. `connection_id` ownership is the correct check instead, mirroring
+ * {@link saveBotChatTokenIfOwnedBy}/{@link clearBotChatTokenIfOwnedBy} — bumps `connection_id` on
+ * success, since a restored connection is still a new connection event.
+ * @param expectedConnectionId - The `connection_id` the caller's own (now-failed) connection
+ *   installed; the restore is dropped if the row has since moved past it.
+ * @param twitchUserId - Twitch user ID of the account being restored.
+ * @param accessToken - OAuth access token (encrypted before storage).
+ * @param refreshToken - OAuth refresh token (encrypted before storage).
+ * @param expiryMs - Token expiry as Unix epoch milliseconds, or null if unknown.
+ * @returns Whether the restore actually took effect.
+ */
+export async function restoreBotChatTokenIfOwnedByConnection(
+  expectedConnectionId: number,
+  twitchUserId: string,
+  accessToken: string,
+  refreshToken: string,
+  expiryMs: number | null,
+): Promise<boolean> {
+  if (!EVENTSUB_TOKEN_SECRET) throw new Error('EVENTSUB_TOKEN_SECRET is not configured — refusing to persist plaintext OAuth tokens');
+  const storedAccess = encryptToken(accessToken, EVENTSUB_TOKEN_SECRET);
+  const storedRefresh = encryptToken(refreshToken, EVENTSUB_TOKEN_SECRET);
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    `UPDATE twitch_bot_chat_token
+     SET twitch_user_id=?, access_token=?, refresh_token=?, token_expiry=?, connection_id=connection_id + 1
+     WHERE id=1 AND connection_id=?`,
+    [twitchUserId, storedAccess, storedRefresh, expiryMs, expectedConnectionId],
+  );
+  return result.affectedRows > 0;
 }
 
 /**

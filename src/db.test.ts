@@ -102,6 +102,7 @@ vi.mock('./db/eventSub', () => ({
 vi.mock('./db/twitchBotAuth', () => ({
   getBotChatToken: vi.fn(),
   saveBotChatTokenIfLatestAttempt: vi.fn(),
+  restoreBotChatTokenIfOwnedByConnection: vi.fn(),
   clearBotChatToken: vi.fn(),
   saveBotChatTokenIfOwnedBy: vi.fn(),
   clearBotChatTokenIfOwnedBy: vi.fn(),

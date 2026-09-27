@@ -365,7 +365,10 @@ export type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 
 // ─── Twitch bot chat OAuth token ────────────────────────────────────────────
 
-export { getBotChatToken, saveBotChatTokenIfLatestAttempt, clearBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy } from './db/twitchBotAuth';
+export {
+  getBotChatToken, saveBotChatTokenIfLatestAttempt, restoreBotChatTokenIfOwnedByConnection,
+  clearBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy,
+} from './db/twitchBotAuth';
 export type { BotChatToken } from './db/twitchBotAuth';
 
 // ─── Alerts overlay ─────────────────────────────────────────────────────────

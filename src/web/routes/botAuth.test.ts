@@ -220,4 +220,21 @@ describe('GET /admin/bot-auth/connect', () => {
     const res = await supertest(buildApp(NON_OWNER_SESSION_USER)).get('/connect');
     expect(res.status).toBe(403);
   });
+
+  it('mints strictly increasing attemptStartedAt values across consecutive connects, even within the same millisecond', async () => {
+    // A shared session object across both requests, mirroring the owner hitting /connect twice
+    // (e.g. a double submit) in the same browser session — the very case saveBotChatTokenIfLatestAttempt's
+    // ordering depends on being unambiguous.
+    const sessionObj: any = { user: OWNER_SESSION_USER };
+    const app = express();
+    app.use((req: any, _res: any, next: any) => { req.session = sessionObj; next(); });
+    app.use(router);
+
+    await supertest(app).get('/connect');
+    const first = sessionObj.botOAuthState.attemptStartedAt;
+    await supertest(app).get('/connect');
+    const second = sessionObj.botOAuthState.attemptStartedAt;
+
+    expect(second).toBeGreaterThan(first);
+  });
 });

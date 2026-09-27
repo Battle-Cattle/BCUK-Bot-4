@@ -14,7 +14,10 @@ vi.mock('../shared/crypto', () => ({
 
 import { getPool } from './pool';
 import { encryptToken, decryptToken } from '../shared/crypto';
-import { getBotChatToken, saveBotChatTokenIfLatestAttempt, clearBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy } from './twitchBotAuth';
+import {
+  getBotChatToken, saveBotChatTokenIfLatestAttempt, restoreBotChatTokenIfOwnedByConnection,
+  clearBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy,
+} from './twitchBotAuth';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 /** Builds a fake mysql pool whose `execute`/`query` resolve to the given rows. */
@@ -101,9 +104,9 @@ describe('getBotChatToken', () => {
 // ─── saveBotChatTokenIfLatestAttempt ──────────────────────────────────────────
 
 describe('saveBotChatTokenIfLatestAttempt', () => {
-  /** Builds a pool whose upsert call is a no-op and whose follow-up SELECT reports `wonAttempt` as the row's `attempt_started_at`. */
-  function makeAttemptPool(wonAttempt: number) {
-    return makeMockPool({ executeResult: [[{ attempt_started_at: wonAttempt }], []] });
+  /** Builds a pool whose upsert call is a no-op and whose follow-up SELECT reports `wonAttempt`/`wonConnectionId` as the row's `attempt_started_at`/`connection_id`. */
+  function makeAttemptPool(wonAttempt: number, wonConnectionId = 2) {
+    return makeMockPool({ executeResult: [[{ attempt_started_at: wonAttempt, connection_id: wonConnectionId }], []] });
   }
 
   it('throws when EVENTSUB_TOKEN_SECRET is not configured', async () => {
@@ -147,23 +150,63 @@ describe('saveBotChatTokenIfLatestAttempt', () => {
     expect(sql).toContain('twitch_bot_chat_token.connection_id + 1');
   });
 
-  it('returns true when this attempt won (its attempt_started_at is now stored)', async () => {
-    const pool = makeAttemptPool(1000);
+  it('returns the row\'s connection_id when this attempt won (its attempt_started_at is now stored)', async () => {
+    const pool = makeAttemptPool(1000, 5);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    expect(await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null)).toBe(true);
+    expect(await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null)).toBe(5);
   });
 
-  it('returns false when a more recently started attempt already holds the row', async () => {
+  it('returns null when a more recently started attempt already holds the row', async () => {
     // The stored attempt_started_at (2000) is newer than this call's own (1000).
     const pool = makeAttemptPool(2000);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    expect(await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null)).toBe(false);
+    expect(await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null)).toBeNull();
   });
 
-  it('returns false when the row disappeared between the upsert and the follow-up read', async () => {
+  it('returns null when the row disappeared between the upsert and the follow-up read', async () => {
     const pool = makeMockPool({ rows: [] });
     vi.mocked(getPool).mockReturnValue(pool as any);
-    expect(await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null)).toBe(false);
+    expect(await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null)).toBeNull();
+  });
+});
+
+// ─── restoreBotChatTokenIfOwnedByConnection ──────────────────────────────────
+
+describe('restoreBotChatTokenIfOwnedByConnection', () => {
+  it('throws when EVENTSUB_TOKEN_SECRET is not configured', async () => {
+    mockSecret = undefined;
+    vi.mocked(getPool).mockReturnValue(makePool() as any);
+    await expect(restoreBotChatTokenIfOwnedByConnection(1, 'uid', 'access', 'refresh', null)).rejects.toThrow('EVENTSUB_TOKEN_SECRET');
+  });
+
+  it('scopes the UPDATE to the expected connection_id, sets twitch_user_id, and encrypts tokens', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await restoreBotChatTokenIfOwnedByConnection(2, 'old-uid', 'myaccess', 'myrefresh', 1234567890);
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('WHERE id=1 AND connection_id=?');
+    expect(sql).toContain('twitch_user_id=?');
+    expect(params).toEqual(['old-uid', 'enc:myaccess', 'enc:myrefresh', 1234567890, 2]);
+  });
+
+  it('also bumps connection_id on success', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await restoreBotChatTokenIfOwnedByConnection(2, 'old-uid', 'a', 'r', null);
+    const [sql] = pool.execute.mock.calls[0] as [string];
+    expect(sql).toContain('connection_id=connection_id + 1');
+  });
+
+  it('returns true when the row was restored', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await restoreBotChatTokenIfOwnedByConnection(2, 'old-uid', 'a', 'r', null)).toBe(true);
+  });
+
+  it('returns false (declined) when the row has since moved to a newer connection_id', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await restoreBotChatTokenIfOwnedByConnection(2, 'old-uid', 'a', 'r', null)).toBe(false);
   });
 });
 

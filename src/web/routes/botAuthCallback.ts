@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Request, type Response } from 'express';
-import { getBotChatToken, saveBotChatTokenIfLatestAttempt, type BotChatToken } from '../../db';
+import { getBotChatToken, saveBotChatTokenIfLatestAttempt, restoreBotChatTokenIfOwnedByConnection, type BotChatToken } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { restartTwitchBot } from '../../twitch/twitchBot';
 import { TWITCH_BOT_OAUTH_REDIRECT_URI } from '../../shared/config';
@@ -16,19 +16,25 @@ const router = Router();
 
 /**
  * Best-effort restore of `previous` — the token that was live before this callback overwrote it —
- * after `restartTwitchBot()` fails to start chat on the newly connected account. Re-saves it under
- * a fresh `attempt_started_at` (so it wins {@link saveBotChatTokenIfLatestAttempt}'s ordering check
- * against the row this callback just wrote) and retries the restart. Never throws: any failure here
- * just means the caller's existing `chat_start_failed` warning path applies instead, leaving the
- * (also non-working) new token in place rather than looping further.
+ * after `restartTwitchBot()` fails to start chat on the newly connected account. Restores it via
+ * {@link restoreBotChatTokenIfOwnedByConnection}, CAS'd against `newConnectionId` (the row's
+ * `connection_id` right after this callback's own save won) rather than re-entering
+ * {@link saveBotChatTokenIfLatestAttempt}'s attempt-ordering: a rollback isn't itself a competing,
+ * owner-initiated connect attempt, so it must not be able to outrank — or be outranked by — a
+ * legitimately newer, still-in-flight connect attempt on the *same* ordering axis. If the row has
+ * since moved past `newConnectionId` (a newer connect attempt already saved over it), the rollback
+ * correctly declines rather than clobbering that newer attempt. Never throws: any failure here just
+ * means the caller's existing `chat_start_failed` warning path applies instead, leaving the (also
+ * non-working) new token in place rather than looping further.
+ * @param newConnectionId - The `connection_id` this callback's own save installed.
  * @param previous - The token active before this callback's save, or null if none was connected yet.
  * @returns True if the previous connection was restored and is running again.
  */
-async function tryRestorePreviousConnection(previous: BotChatToken | null): Promise<boolean> {
+async function tryRestorePreviousConnection(newConnectionId: number, previous: BotChatToken | null): Promise<boolean> {
   if (!previous) return false;
   try {
-    const restored = await saveBotChatTokenIfLatestAttempt(
-      Date.now(), previous.twitchUserId, previous.accessToken, previous.refreshToken, previous.tokenExpiry,
+    const restored = await restoreBotChatTokenIfOwnedByConnection(
+      newConnectionId, previous.twitchUserId, previous.accessToken, previous.refreshToken, previous.tokenExpiry,
     );
     if (!restored) return false;
     await restartTwitchBot();
@@ -45,15 +51,16 @@ async function tryRestorePreviousConnection(previous: BotChatToken | null): Prom
  * Split out of the main handler purely to keep its cyclomatic complexity down — see
  * {@link tryRestorePreviousConnection}'s doc for the restore logic itself.
  * @param res - Express response to redirect.
+ * @param newConnectionId - The `connection_id` this callback's own save installed.
  * @param previous - The token active before this callback's save, or null if none was connected yet.
  * @param startErr - The error `restartTwitchBot()` rejected with.
  */
-async function redirectAfterFailedRestart(res: Response, previous: BotChatToken | null, startErr: unknown): Promise<void> {
+async function redirectAfterFailedRestart(res: Response, newConnectionId: number, previous: BotChatToken | null, startErr: unknown): Promise<void> {
   // The token is saved either way — don't claim a config/exchange failure here, but don't
   // silently report success while chat is actually still offline either. Try to get back to
   // the previous, known-working connection before falling back to a bare warning.
   log.error('Failed to start Twitch chat after connecting:', startErr);
-  if (await tryRestorePreviousConnection(previous)) {
+  if (await tryRestorePreviousConnection(newConnectionId, previous)) {
     res.redirect('/admin/bot-auth?error=bot_oauth_connect_failed');
     return;
   }
@@ -127,10 +134,10 @@ router.get('/twitch/bot/callback', async (req, res) => {
     // stopped over a save that never happened. Ordered against any other in-flight connect
     // attempt by attemptStartedAt (see saveBotChatTokenIfLatestAttempt's doc) rather than by
     // whichever callback's network round trip happens to finish first.
-    const won = await saveBotChatTokenIfLatestAttempt(
+    const newConnectionId = await saveBotChatTokenIfLatestAttempt(
       attemptStartedAt, twitchUser.id, tokens.access_token, tokens.refresh_token, expiryMs,
     );
-    if (!won) {
+    if (newConnectionId === null) {
       log.warn(`Bot chat OAuth callback for ${twitchUser.login} superseded by a more recently started connect attempt — ignoring.`);
       return res.redirect('/admin/bot-auth?error=bot_oauth_superseded');
     }
@@ -146,7 +153,7 @@ router.get('/twitch/bot/callback', async (req, res) => {
       await restartTwitchBot();
       res.redirect('/admin/bot-auth?success=bot_connected');
     } catch (startErr) {
-      await redirectAfterFailedRestart(res, previous, startErr);
+      await redirectAfterFailedRestart(res, newConnectionId, previous, startErr);
     }
   } catch (err) {
     logAndRedirectError({

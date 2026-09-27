@@ -94,6 +94,35 @@ router.get('/', requireOwner, csrfProtection, async (req, res) => {
 
 // GET /admin/bot-auth/connect — initiates Twitch OAuth for the bot's own chat account
 
+// Module-level state for mintBotConnectAttemptId — fine only because this process is the sole bot
+// instance (see CLAUDE.md's Startup Sequence note); resets to 0 on restart, which doesn't matter
+// since the millisecond component alone already orders correctly across restarts, and this counter
+// only exists to break a tie between two attempts started within the same millisecond.
+let lastAttemptMs = 0;
+let attemptSeqWithinMs = 0;
+
+/**
+ * Mints a monotonically increasing, collision-free identifier for a single `/connect` attempt:
+ * wall-clock milliseconds combined with an in-process sequence number that disambiguates two
+ * attempts started within the same millisecond, which `Date.now()` alone can't (CodeRabbit flagged
+ * this on PR #666 — two attempts tied on `attempt_started_at` could both "win"
+ * `saveBotChatTokenIfLatestAttempt`'s `>=` comparison). Encoded as `ms * 1000 + seq` (seq wraps at
+ * 1000 — up to 999 attempts within the same millisecond before it can repeat, far beyond what a
+ * manual admin action could ever produce) so it still fits a `BIGINT` column and orders correctly
+ * as a plain integer. Safely within `Number.MAX_SAFE_INTEGER` for roughly the next two centuries.
+ * @returns This attempt's identifier.
+ */
+function mintBotConnectAttemptId(): number {
+  const ms = Date.now();
+  if (ms !== lastAttemptMs) {
+    lastAttemptMs = ms;
+    attemptSeqWithinMs = 0;
+  } else {
+    attemptSeqWithinMs += 1;
+  }
+  return ms * 1000 + (attemptSeqWithinMs % 1000);
+}
+
 /**
  * GET /admin/bot-auth/connect — starts the Twitch OAuth flow for the bot's own chat account.
  * Stores the OAuth state on the session, then redirects to Twitch's authorize URL requesting
@@ -110,8 +139,7 @@ router.get('/connect', requireOwner, (req, res) => {
     }
 
     const state = randomBytes(16).toString('hex');
-    const now = Date.now();
-    req.session.botOAuthState = { value: state, expiresAt: now + 10 * 60 * 1000, attemptStartedAt: now };
+    req.session.botOAuthState = { value: state, expiresAt: Date.now() + 10 * 60 * 1000, attemptStartedAt: mintBotConnectAttemptId() };
 
     const params = new URLSearchParams({
       client_id: TWITCH_CLIENT_ID,

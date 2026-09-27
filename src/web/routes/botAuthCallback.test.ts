@@ -6,6 +6,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({
   getBotChatToken: vi.fn(),
   saveBotChatTokenIfLatestAttempt: vi.fn(),
+  restoreBotChatTokenIfOwnedByConnection: vi.fn(),
 }));
 
 vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
@@ -26,13 +27,15 @@ vi.mock('../../shared/config', () => ({
 import express from 'express';
 import supertest from 'supertest';
 import router from './botAuthCallback';
-import { getBotChatToken, saveBotChatTokenIfLatestAttempt } from '../../db';
+import { getBotChatToken, saveBotChatTokenIfLatestAttempt, restoreBotChatTokenIfOwnedByConnection } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { restartTwitchBot } from '../../twitch/twitchBot';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** The `attemptStartedAt` used by the default session's `botOAuthState` in {@link buildApp}. */
 const ATTEMPT_STARTED_AT = 1_000;
+/** The `connection_id` {@link saveBotChatTokenIfLatestAttempt} resolves to by default (a win). */
+const NEW_CONNECTION_ID = 2;
 
 /** Builds a supertest-ready app: the bot-auth-callback router with a valid OAuth-state session, customizable via `sessionOverrides`. */
 function buildApp(sessionOverrides: Record<string, any> = {}) {
@@ -56,7 +59,8 @@ beforeEach(() => {
   vi.mocked(getUserFromToken).mockResolvedValue({ login: 'thebot', id: 'bot-uid' } as any);
   // No previous connection by default — tests exercising the rollback path override this.
   vi.mocked(getBotChatToken).mockResolvedValue(null);
-  vi.mocked(saveBotChatTokenIfLatestAttempt).mockResolvedValue(true);
+  vi.mocked(saveBotChatTokenIfLatestAttempt).mockResolvedValue(NEW_CONNECTION_ID);
+  vi.mocked(restoreBotChatTokenIfOwnedByConnection).mockResolvedValue(true);
   vi.mocked(restartTwitchBot).mockResolvedValue(undefined);
 });
 
@@ -113,7 +117,7 @@ describe('GET /twitch/bot/callback — token exchange', () => {
 
   it('saves the new token before restarting the chat client (so a save failure never takes down a working bot)', async () => {
     const callOrder: string[] = [];
-    vi.mocked(saveBotChatTokenIfLatestAttempt).mockImplementation(async () => { callOrder.push('save'); return true; });
+    vi.mocked(saveBotChatTokenIfLatestAttempt).mockImplementation(async () => { callOrder.push('save'); return NEW_CONNECTION_ID; });
     vi.mocked(restartTwitchBot).mockImplementation(async () => { callOrder.push('restart'); });
 
     await supertest(buildApp()).get('/twitch/bot/callback?code=abc&state=valid-state-abc');
@@ -130,7 +134,7 @@ describe('GET /twitch/bot/callback — token exchange', () => {
   });
 
   it('redirects with superseded (not a plain error) when a more recently started attempt already won the row', async () => {
-    vi.mocked(saveBotChatTokenIfLatestAttempt).mockResolvedValue(false);
+    vi.mocked(saveBotChatTokenIfLatestAttempt).mockResolvedValue(null);
     const res = await supertest(buildApp())
       .get('/twitch/bot/callback?code=abc&state=valid-state-abc');
     expect(res.headers.location).toBe('/admin/bot-auth?error=bot_oauth_superseded');
@@ -145,6 +149,7 @@ describe('GET /twitch/bot/callback — token exchange', () => {
     expect(res.headers.location).toBe('/admin/bot-auth?success=bot_connected&warning=chat_start_failed');
     // The token is still saved even though chat failed to start.
     expect(vi.mocked(saveBotChatTokenIfLatestAttempt)).toHaveBeenCalled();
+    expect(vi.mocked(restoreBotChatTokenIfOwnedByConnection)).not.toHaveBeenCalled();
   });
 
   it('restores the previous connection and redirects with connect_failed when restarting the new account fails', async () => {
@@ -153,15 +158,16 @@ describe('GET /twitch/bot/callback — token exchange', () => {
     };
     vi.mocked(getBotChatToken).mockResolvedValue(previous as any);
     vi.mocked(restartTwitchBot).mockRejectedValueOnce(new Error('connect failed')).mockResolvedValueOnce(undefined);
-    // First call saves the new (failing) account, second call (the rollback) saves the old one.
-    vi.mocked(saveBotChatTokenIfLatestAttempt).mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+    vi.mocked(restoreBotChatTokenIfOwnedByConnection).mockResolvedValue(true);
 
     const res = await supertest(buildApp())
       .get('/twitch/bot/callback?code=abc&state=valid-state-abc');
 
     expect(res.headers.location).toBe('/admin/bot-auth?error=bot_oauth_connect_failed');
-    expect(vi.mocked(saveBotChatTokenIfLatestAttempt)).toHaveBeenNthCalledWith(
-      2, expect.any(Number), 'old-uid', 'old-access', 'old-refresh', null,
+    // Restored via connection_id ownership (not attempt ordering), so a legitimately newer
+    // still-in-flight connect attempt can never be clobbered by this rollback.
+    expect(vi.mocked(restoreBotChatTokenIfOwnedByConnection)).toHaveBeenCalledWith(
+      NEW_CONNECTION_ID, 'old-uid', 'old-access', 'old-refresh', null,
     );
     expect(vi.mocked(restartTwitchBot)).toHaveBeenCalledTimes(2);
   });
@@ -172,7 +178,7 @@ describe('GET /twitch/bot/callback — token exchange', () => {
     };
     vi.mocked(getBotChatToken).mockResolvedValue(previous as any);
     vi.mocked(restartTwitchBot).mockRejectedValue(new Error('connect failed'));
-    vi.mocked(saveBotChatTokenIfLatestAttempt).mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+    vi.mocked(restoreBotChatTokenIfOwnedByConnection).mockResolvedValue(true);
 
     const res = await supertest(buildApp())
       .get('/twitch/bot/callback?code=abc&state=valid-state-abc');
@@ -180,13 +186,13 @@ describe('GET /twitch/bot/callback — token exchange', () => {
     expect(res.headers.location).toBe('/admin/bot-auth?success=bot_connected&warning=chat_start_failed');
   });
 
-  it('does not attempt a rollback when the rollback save itself is superseded', async () => {
+  it('does not attempt a second restart when the rollback save itself is declined (a newer connect attempt already took over)', async () => {
     const previous = {
       twitchUserId: 'old-uid', accessToken: 'old-access', refreshToken: 'old-refresh', tokenExpiry: null, connectionId: 1,
     };
     vi.mocked(getBotChatToken).mockResolvedValue(previous as any);
     vi.mocked(restartTwitchBot).mockRejectedValue(new Error('connect failed'));
-    vi.mocked(saveBotChatTokenIfLatestAttempt).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    vi.mocked(restoreBotChatTokenIfOwnedByConnection).mockResolvedValue(false);
 
     const res = await supertest(buildApp())
       .get('/twitch/bot/callback?code=abc&state=valid-state-abc');
