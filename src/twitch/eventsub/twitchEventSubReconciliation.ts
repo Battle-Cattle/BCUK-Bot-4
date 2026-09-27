@@ -19,7 +19,7 @@ import {
 
 // Cursor state (where each reward resumes from, and when each broadcaster was last present) lives
 // in twitchEventSubReconciliationCursors.ts; this module fetches, replays and runs the tick.
-export { MAX_CURSOR_LAG_MS, CURSOR_RETENTION_MS, nextCursor } from './twitchEventSubReconciliationCursors';
+export { MAX_CURSOR_LAG_MS, CURSOR_RETENTION_MS } from './twitchEventSubReconciliationCursors';
 
 const log = createLogger('EventSubReconciliation');
 
