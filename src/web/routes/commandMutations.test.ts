@@ -84,6 +84,12 @@ describe('POST /commands/add', () => {
     expect(res.headers.location).toBe('/commands?error=missing_fields');
   });
 
+  it('redirects to ?error=missing_fields without adding when trigger_string contains internal whitespace', async () => {
+    const res = await supertest(buildApp()).post('/commands/add').send('trigger_string=!hello%20world&output=out');
+    expect(res.headers.location).toBe('/commands?error=missing_fields');
+    expect(addCustomCommand).not.toHaveBeenCalled();
+  });
+
   it('redirects to ?error=missing_fields when output is absent', async () => {
     const res = await supertest(buildApp()).post('/commands/add').send('trigger_string=!clap');
     expect(res.headers.location).toBe('/commands?error=missing_fields');
