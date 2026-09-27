@@ -281,4 +281,12 @@ describe('clearBotChatTokenIfOwnedBy', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await clearBotChatTokenIfOwnedBy(1)).toBe(false);
   });
+
+  it('also bumps connection_id, so a stale onRefresh success from the same provider cannot pass its own CAS check afterwards', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await clearBotChatTokenIfOwnedBy(1);
+    const [sql] = pool.execute.mock.calls[0] as [string];
+    expect(sql).toContain('connection_id=connection_id + 1');
+  });
 });

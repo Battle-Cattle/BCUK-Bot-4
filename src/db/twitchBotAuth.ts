@@ -218,14 +218,19 @@ export async function saveBotChatTokenIfOwnedBy(
  * still matches `expectedConnectionId` — the `onRefreshFailure` counterpart to
  * {@link saveBotChatTokenIfOwnedBy}, for the same reason: a stale failure from a superseded
  * provider (including one superseded by a reconnect to the *same* account) must not clear a newer
- * connection's freshly connected token.
+ * connection's freshly connected token. Also bumps `connection_id` on success, so a stale *success*
+ * callback from the same now-cleared provider (`onRefresh`, calling {@link saveBotChatTokenIfOwnedBy}
+ * with this same `expectedConnectionId`) can no longer pass its own CAS check afterwards — without
+ * this, such a callback could restore `access_token`/`refresh_token` onto the just-cleared row
+ * without `twitch_user_id`, leaving it in an identity-less state.
  * @param expectedConnectionId - The `connection_id` this refresh failure was for.
  * @returns Whether a row was actually cleared (false means a reconnect superseded it first).
  */
 export async function clearBotChatTokenIfOwnedBy(expectedConnectionId: number): Promise<boolean> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `UPDATE twitch_bot_chat_token
-     SET twitch_user_id=NULL, access_token=NULL, refresh_token=NULL, token_expiry=NULL
+     SET twitch_user_id=NULL, access_token=NULL, refresh_token=NULL, token_expiry=NULL,
+         connection_id=connection_id + 1
      WHERE id=1 AND connection_id=?`,
     [expectedConnectionId],
   );
