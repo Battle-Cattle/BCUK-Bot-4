@@ -434,8 +434,9 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
  * companion push is exempt, since it's intentionally best-effort). A failure clears the in-flight
  * claim ({@link clearPendingRedemption}) instead, so a retry of the same redemption id (e.g.
  * reconciliation's next poll tick) is not misclassified as a duplicate. The overlay video and
- * companion push aren't tracked in the ledger, so a failure after them but before the final
- * `handled` write replays them on retry.
+ * companion push aren't tracked in the ledger, so the `handled` write happens just before them: a
+ * failed write means neither has been sent, and they're never replayed by a retry (at most lost
+ * if the process dies between the write and the pushes).
  *
  * @param login - Broadcaster login name.
  * @param event - Redemption event payload including reward ID and user details.
@@ -473,6 +474,14 @@ export async function handleRedemption(
     await applyRecordedRedemptionEffects(event, streamerId, progress);
 
     const videos = await getVideosForReward(event.reward.id, streamerId);
+
+    // Mark handled once every required effect (dashboard, pricing, overlay lookup) has succeeded,
+    // but before the two live pushes below: those aren't tracked in the ledger and can't be
+    // un-sent, so if this write failed after them, the retry would send them again. Written here,
+    // a failure means nothing live has gone out yet and the retry sends each once; the only loss
+    // case is the process dying between this write and the pushes, which suits best-effort pushes.
+    await markRedemptionEffect(event.id, streamerId, 'handled');
+
     if (videos.length > 0) {
       const filename = pickWeightedRandom(videos);
       const videoPath = `/overlay/videos/${streamerId}/${filename}`;
@@ -501,7 +510,6 @@ export async function handleRedemption(
       log.error('Failed to push companion event for redemption:', err);
     }
 
-    await markRedemptionEffect(event.id, streamerId, 'handled');
     markRedemptionHandled(event.id);
     return true;
   } catch (err) {

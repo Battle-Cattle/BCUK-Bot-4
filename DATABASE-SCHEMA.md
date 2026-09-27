@@ -208,7 +208,7 @@ Created by `migrations/streamer_event_log.sql`. `redemption_id` added by `migrat
 
 ## `redemption_handled`
 
-Durable per-redemption progress for `handleRedemption`. The in-memory dedup cache only remembers a redemption for 10 minutes, but EventSub reconciliation can replay redemptions up to `MAX_CURSOR_LAG_MS` (1 hour) back. This table lets a retry or replay skip every effect that already ran, so a redemption's dashboard row and dynamic-pricing increment are applied exactly once. The overlay video and companion notification aren't tracked and play again if a redemption is retried before `handled_at` is set. Rows are pruned by age (`REDEMPTION_LEDGER_RETENTION_MS`, 6 hours) from the reconciliation tick.
+Durable per-redemption progress for `handleRedemption`. The in-memory dedup cache only remembers a redemption for 10 minutes, but EventSub reconciliation can replay redemptions up to `MAX_CURSOR_LAG_MS` (1 hour) back. This table lets a retry or replay skip every effect that already ran, so a redemption's dashboard row and dynamic-pricing increment are applied exactly once. The overlay video and companion notification aren't tracked. `handled_at` is written just before they're sent, so a retry never replays them. Rows are pruned by age (`REDEMPTION_LEDGER_RETENTION_MS`, 6 hours) from the reconciliation tick.
 
 | Column | Type | Notes |
 | --- | --- | --- |

@@ -955,6 +955,26 @@ describe('handleRedemption', () => {
     expect(seenRedemptionIds.has('redemption-1')).toBe(false);
   });
 
+  it('sends no overlay or companion push when the final handled write fails, and sends each once on retry', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([{ file: 'clip1.mp4', weight: 1 }] as any[]);
+    vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
+    vi.mocked(markRedemptionEffect).mockImplementation(async (_id, _sid, effect) => {
+      if (effect === 'handled') throw new Error('ledger write failed');
+    });
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('ledger write failed');
+    expect(mockPushOverlayEvent).not.toHaveBeenCalled();
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+
+    // Retry: the ledger now records dashboard + pricing as done; the handled write succeeds.
+    vi.mocked(getRedemptionProgress).mockResolvedValue({ dashboardRecorded: true, pricingApplied: true, handled: false });
+    vi.mocked(markRedemptionEffect).mockResolvedValue(undefined);
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
+
+    expect(mockPushOverlayEvent).toHaveBeenCalledOnce();
+    expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
+  });
+
   it('propagates a ledger lookup failure and releases the in-flight claim without running any effect', async () => {
     vi.mocked(getRedemptionProgress).mockRejectedValueOnce(new Error('db down'));
 
