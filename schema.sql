@@ -406,6 +406,28 @@ CREATE TABLE IF NOT EXISTS streamer_event_log (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- redemption_handled
+-- Durable per-redemption progress for handleRedemption, so a retry or an
+-- EventSub reconciliation replay (up to MAX_CURSOR_LAG_MS, 1 hour, back) never
+-- re-applies an effect that already ran, long after the 10-minute in-memory
+-- dedup cache has forgotten the redemption. One row per Twitch redemption id;
+-- each flag marks a non-repeatable effect done, and handled_at marks every
+-- required effect done. Pruned by age (REDEMPTION_LEDGER_RETENTION_MS, 6 hours)
+-- from the reconciliation tick, so it stays bounded.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS redemption_handled (
+  redemption_id      VARCHAR(64) NOT NULL,
+  streamer_id        INT         NOT NULL,
+  dashboard_recorded TINYINT(1)  NOT NULL DEFAULT 0,
+  pricing_applied    TINYINT(1)  NOT NULL DEFAULT 0,
+  handled_at         DATETIME    NULL,
+  created_at         DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (redemption_id),
+  KEY idx_redemption_handled_created (created_at),
+  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
 -- streamdeck_api_keys
 -- One key/hash per user, shared across every guild they have access to — a
 -- single Streamdeck credential can act on multiple guilds. Per-guild approval

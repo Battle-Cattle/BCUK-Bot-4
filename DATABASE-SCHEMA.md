@@ -206,6 +206,21 @@ Live activity log for the dashboard's "Recent Events" feed: follows, subs, raids
 
 Created by `migrations/streamer_event_log.sql`. `redemption_id` added by `migrations/streamer_event_log_redemption_id.sql`.
 
+## `redemption_handled`
+
+Durable per-redemption progress for `handleRedemption`. The in-memory dedup cache only remembers a redemption for 10 minutes, but EventSub reconciliation can replay redemptions up to `MAX_CURSOR_LAG_MS` (1 hour) back. This table lets a retry or replay skip every effect that already ran, so a redemption's dashboard row and dynamic-pricing increment are applied exactly once. The overlay video and companion notification aren't tracked and play again if a redemption is retried before `handled_at` is set. Rows are pruned by age (`REDEMPTION_LEDGER_RETENTION_MS`, 6 hours) from the reconciliation tick.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `redemption_id` | `VARCHAR(64)` PK | Twitch's own redemption id |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `dashboard_recorded` | `TINYINT(1)` | 1 once the redemption's `streamer_event_log` row was recorded |
+| `pricing_applied` | `TINYINT(1)` | 1 once its dynamic-pricing increment was applied |
+| `handled_at` | `DATETIME` NULL | Set once every required effect succeeded. The redemption is then skipped entirely |
+| `created_at` | `DATETIME` | Defaults to `CURRENT_TIMESTAMP`. The prune key (`idx_redemption_handled_created`) |
+
+Created by `migrations/redemption_handled.sql`.
+
 ## `reward_pricing`
 
 Dynamic Channel Point Pricing: per-reward config and demand state. Independent of `overlay_reward` — a reward can have dynamic pricing without overlay videos and vice versa. Optional/opt-in per reward via `enabled`.

@@ -1,10 +1,10 @@
 import { createLogger } from '../../shared/logger';
-import { getStreamerById, DEFAULT_EVENT_CONFIG } from '../../db';
+import { getStreamerById, DEFAULT_EVENT_CONFIG, pruneRedemptionLedger } from '../../db';
 import { getAllStreamerInfo, type StreamerInfo } from './twitchEventSubDispatch';
 import { getValidToken } from './twitchApiEventSub';
 import { getCustomRewards, getRewardRedemptions, TwitchRewardRedemption } from '../twitchApi';
 import { handleRedemption, RedemptionEvent } from './twitchEventSubHandler';
-import { REDEMPTION_DEDUP_TTL_MS } from './twitchEventSubRedemptionDedup';
+import { REDEMPTION_RECOVERY_WINDOW_MS, REDEMPTION_LEDGER_RETENTION_MS } from './twitchEventSubRedemptionDedup';
 
 const log = createLogger('EventSubReconciliation');
 
@@ -41,26 +41,32 @@ interface ReconciliationCursor {
 }
 
 /**
- * The furthest behind "now" a reconciliation cutoff may sit. Resuming from an old cursor also
- * replays the redemptions after it that already succeeded, and those are only suppressed while
- * the dedup cache still remembers them — an entry lives {@link REDEMPTION_DEDUP_TTL_MS} from when
- * the redemption was handled, which is never before it was redeemed. Capping the lookback one poll
- * interval inside that TTL means every replayed success is still deduped, at the cost of no longer
- * retrying a redemption that has kept failing for longer than this. Enforced twice: on the cutoff
- * when a tick picks it ({@link resolveCutoff}), and again per redemption right before it's handled
+ * The furthest behind "now" a reconciliation cutoff may sit: the recovery window
+ * ({@link REDEMPTION_RECOVERY_WINDOW_MS}, 1 hour). Resuming from an old cursor also replays the
+ * redemptions after it that already succeeded; those are skipped by `handleRedemption`'s durable
+ * `redemption_handled` ledger (kept {@link REDEMPTION_LEDGER_RETENTION_MS}, well beyond this), not
+ * only by the 10-minute in-memory dedup cache. A redemption that keeps failing, or can't be
+ * fetched, for longer than this is abandoned with a warning. Enforced twice: on the cutoff when a
+ * tick picks it ({@link resolveCutoff}), and again per redemption right before it's handled
  * ({@link replayRedemptions}), since a slow fetch can age a redemption past the cap in between.
  */
-export const MAX_CURSOR_LAG_MS = REDEMPTION_DEDUP_TTL_MS - POLL_INTERVAL_MS;
+export const MAX_CURSOR_LAG_MS = REDEMPTION_RECOVERY_WINDOW_MS;
+
+/** How often the reconciliation tick prunes the `redemption_handled` ledger (ms). */
+const LEDGER_PRUNE_INTERVAL_MS = 10 * 60 * 1000;
+
+/** When the ledger was last pruned (epoch ms), or null if not yet this process. */
+let ledgerLastPrunedAt: number | null = null;
 
 /**
  * How long a broadcaster's cursors survive while they're missing from the streamer snapshot. A
  * brief absence (EventSub reconnect, token refresh) must not discard a cursor pinned just before a
  * failed redemption, or that redemption falls outside the fresh one-interval lookback and is never
- * retried. Kept below {@link REDEMPTION_DEDUP_TTL_MS}: resuming from a pinned cursor also replays
- * the redemptions after it that already succeeded, and the dedup cache only suppresses those while
- * it still remembers them.
+ * retried. Longer absences are treated as the streamer having left monitoring. (Replaying the
+ * successes after a resumed cursor is safe either way: `handleRedemption`'s durable ledger skips
+ * them.)
  */
-export const CURSOR_RETENTION_MS = Math.min(5 * POLL_INTERVAL_MS, REDEMPTION_DEDUP_TTL_MS / 2);
+export const CURSOR_RETENTION_MS = 5 * POLL_INTERVAL_MS;
 
 /** When each broadcaster user id was last present in a tick's streamer snapshot (epoch ms). */
 const uidLastSeenAt = new Map<string, number>();
@@ -379,11 +385,31 @@ export async function runReconciliationTick(): Promise<void> {
       // of it and any cursor this pass wrote is fresh, so date their last-seen to when the pass
       // ended — otherwise the next tick could expire a cursor written moments earlier.
       markBroadcastersSeen(presentUids, Date.now());
+      await maybePruneRedemptionLedger(Date.now());
     } finally {
       tickRunning = false;
     }
   })();
   return currentTickPromise;
+}
+
+/**
+ * Prunes `redemption_handled` rows older than {@link REDEMPTION_LEDGER_RETENTION_MS}, at most once
+ * per {@link LEDGER_PRUNE_INTERVAL_MS}. Runs from the reconciliation tick so it shares that
+ * lifecycle (started after EventSub, stopped before the DB pool closes). A failure is logged and
+ * retried on a later tick; it never fails the tick.
+ * @param now - The current time (epoch ms).
+ * @returns Resolves once the prune ran (or was skipped).
+ */
+async function maybePruneRedemptionLedger(now: number): Promise<void> {
+  if (ledgerLastPrunedAt !== null && now - ledgerLastPrunedAt < LEDGER_PRUNE_INTERVAL_MS) return;
+  ledgerLastPrunedAt = now;
+  try {
+    const deleted = await pruneRedemptionLedger(REDEMPTION_LEDGER_RETENTION_MS);
+    if (deleted > 0) log.debug(`Pruned ${deleted} expired redemption ledger row(s)`);
+  } catch (err) {
+    log.error('Failed to prune the redemption ledger:', err);
+  }
 }
 
 /**
@@ -405,8 +431,9 @@ export async function stopEventSubReconciliation(): Promise<void> {
   await currentTickPromise;
 }
 
-/** Test-only: clears the in-memory cursor and last-seen caches so each test starts from a clean slate. */
+/** Test-only: clears the in-memory cursor, last-seen and ledger-prune state so each test starts from a clean slate. */
 export function __resetReconciliationCursorsForTests(): void {
   lastSeenRedeemedAt.clear();
   uidLastSeenAt.clear();
+  ledgerLastPrunedAt = null;
 }
