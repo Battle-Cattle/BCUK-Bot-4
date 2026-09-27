@@ -84,6 +84,12 @@ describe('POST /commands/add', () => {
     expect(res.headers.location).toBe('/commands?error=missing_fields');
   });
 
+  it('redirects to ?error=missing_fields without adding when trigger_string contains internal whitespace', async () => {
+    const res = await supertest(buildApp()).post('/commands/add').send('trigger_string=!hello%20world&output=out');
+    expect(res.headers.location).toBe('/commands?error=missing_fields');
+    expect(addCustomCommand).not.toHaveBeenCalled();
+  });
+
   it('redirects to ?error=missing_fields when output is absent', async () => {
     const res = await supertest(buildApp()).post('/commands/add').send('trigger_string=!clap');
     expect(res.headers.location).toBe('/commands?error=missing_fields');
@@ -116,6 +122,30 @@ describe('POST /commands/add', () => {
       .send(`trigger_string=!clap&output=Clap&discord_ids=${VALID_DISCORD_ID}`);
     expect(res.headers.location).toBe('/commands');
     expect(assignUsersToCommand).toHaveBeenCalledWith(1, [VALID_DISCORD_ID]);
+  });
+
+  it('assigns every valid user when discord_ids is sent as a repeated field (array)', async () => {
+    const OTHER_DISCORD_ID = '223456789012345678';
+    vi.mocked(findUsersByIds).mockResolvedValue(new Map([
+      [VALID_DISCORD_ID, { discord_id: VALID_DISCORD_ID, twitch_name: 'alice' } as any],
+      [OTHER_DISCORD_ID, { discord_id: OTHER_DISCORD_ID, twitch_name: 'bob' } as any],
+    ]));
+    const res = await supertest(buildApp())
+      .post('/commands/add')
+      .send(`trigger_string=!clap&output=Clap&discord_ids=${VALID_DISCORD_ID}&discord_ids=${OTHER_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/commands');
+    expect(assignUsersToCommand).toHaveBeenCalledWith(1, [VALID_DISCORD_ID, OTHER_DISCORD_ID]);
+  });
+
+  it('skips assigning a user who exists but has no twitch_name', async () => {
+    vi.mocked(findUsersByIds).mockResolvedValue(new Map([
+      [VALID_DISCORD_ID, { discord_id: VALID_DISCORD_ID, twitch_name: null } as any],
+    ]));
+    const res = await supertest(buildApp())
+      .post('/commands/add')
+      .send(`trigger_string=!clap&output=Clap&discord_ids=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/commands');
+    expect(assignUsersToCommand).toHaveBeenCalledWith(1, []);
   });
 
   it('skips assigning user when findUsersByIds does not return a matching entry', async () => {

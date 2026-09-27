@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'fs';
+import path from 'path';
 import { mockLogger } from '../test-utils/loggerMock';
 
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
@@ -21,6 +23,8 @@ import {
   getTwitchEnabledChannels,
   getAllTwitchLinkedUsers,
   setTwitchBotEnabledRecord,
+  deleteUnlinkedUserRecord,
+  USER_REFERENCING_COLUMNS,
   AccessLevel,
 } from './users';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
@@ -312,6 +316,17 @@ describe('upsertUserRecord', () => {
     await expect(upsertUserRecord('1', 'Alice', 0, 'invalid!')).rejects.toThrow('Invalid twitchName');
   });
 
+  it('trims and normalizes a valid twitchName before storing it', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await upsertUserRecord('1', 'Alice', 0, '  SomeChannel ');
+    expect(result).toBe(true);
+    expect(normalizeTwitchChannelName).toHaveBeenCalledWith('SomeChannel');
+    const params = pool._conn.execute.mock.calls[1][1] as unknown[];
+    expect(params[3]).toBe('somechannel');
+    expect(params[4]).toBe(1); // twitchNameProvided → overwrite the stored name
+  });
+
   it('trims discordName and passes null when blank', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
@@ -417,6 +432,39 @@ describe('setTwitchBotEnabledRecord', () => {
     await setTwitchBotEnabledRecord('1', false);
     const params = pool._conn.execute.mock.calls[1][1] as unknown[];
     expect(params[0]).toBe(0);
+  });
+});
+
+describe('deleteUnlinkedUserRecord', () => {
+  it('deletes only when no referencing table has a row for the user', async () => {
+    const pool = makePool(undefined, [{ affectedRows: 1 }, []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(deleteUnlinkedUserRecord('123')).resolves.toBe(true);
+    const [sql, params] = pool._conn.execute.mock.calls[1] as [string, unknown[]];
+    expect(sql).toMatch(/DELETE FROM `user`\s+WHERE discord_id = \?/);
+    for (const [table, column] of USER_REFERENCING_COLUMNS) {
+      expect(sql).toContain(`NOT EXISTS (SELECT 1 FROM ${table} WHERE ${table}.${column} = ?)`);
+    }
+    expect(params).toEqual(Array(USER_REFERENCING_COLUMNS.length + 1).fill('123'));
+  });
+
+  it('returns false when no row was deleted (missing or still referenced)', async () => {
+    const pool = makePool(undefined, [{ affectedRows: 0 }, []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(deleteUnlinkedUserRecord('123')).resolves.toBe(false);
+  });
+
+  it('guards every foreign key to `user` declared in schema.sql', () => {
+    const schema = readFileSync(path.join(__dirname, '../../schema.sql'), 'utf8');
+    const referencing: string[] = [];
+    for (const [, table, body] of schema.matchAll(/CREATE TABLE IF NOT EXISTS `?(\w+)`?\s*\(([\s\S]*?)\)\s*ENGINE/g)) {
+      for (const [, column] of body.matchAll(/FOREIGN KEY \((\w+)\) REFERENCES `?user`?\s*\(discord_id\)/g)) {
+        referencing.push(`${table}.${column}`);
+      }
+    }
+    expect(referencing.length).toBeGreaterThan(0);
+    const guarded = USER_REFERENCING_COLUMNS.map(([table, column]) => `${table}.${column}`);
+    expect(guarded).toEqual(expect.arrayContaining(referencing));
   });
 });
 

@@ -22,7 +22,7 @@
     "@twurple/auth": "^8.2.0",
     "@twurple/chat": "^8.2.0",
     "discord.js": "^14.27.0",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.3",
     "ejs": "^6.0.1",
     "express": "^5.2.1",
     "express-mysql-session": "^3.0.3",
@@ -34,7 +34,7 @@
     "mediaplex": "^1.0.0",
     "multer": "^2.3.0",
     "mysql2": "^3.23.1",
-    "openai": "^7.15.0",
+    "openai": "^7.23.0",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0",
     "winston-transport": "^4.9.0"
@@ -45,7 +45,12 @@
     "mysql2": "^3.23.1",
     "qs": ">=6.16.0",
     "madge": {
-      "typescript": "$typescript"
+      "typescript": "$typescript",
+      "dependency-tree": {
+        "filing-cabinet": {
+          "typescript": "$typescript"
+        }
+      }
     }
   },
   "devDependencies": {
@@ -55,16 +60,16 @@
     "@types/express-mysql-session": "^3.0.8",
     "@types/express-session": "^1.19.0",
     "@types/multer": "^2.2.0",
-    "@types/node": "^26.5.1",
+    "@types/node": "^26.6.2",
     "@types/supertest": "^7.2.1",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^5.0.0",
-    "eslint": "^10.10.0",
+    "eslint": "^10.11.0",
     "madge": "^8.0.0",
-    "supertest": "^7.2.2",
+    "supertest": "^7.3.0",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.70.0",
+    "typescript-eslint": "^8.70.1",
     "vitest": "^5.0.0"
   },
   "allowScripts": {

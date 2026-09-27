@@ -50,6 +50,18 @@ function getSortedCommandLockNames(commands: string[]): string[] {
 }
 
 /**
+ * Describes why `GET_LOCK` didn't grant a lock.
+ * @param lockStatus - The `lock_status` value `GET_LOCK` returned (anything but `1`).
+ * @param lockName - Name of the lock that was requested.
+ * @returns A timeout message for `0`, an internal-error message for null, else an unexpected-result message.
+ */
+function lockFailureMessage(lockStatus: unknown, lockName: string): string {
+  if (lockStatus === '0' || lockStatus === 0) return `Timed out acquiring command write lock '${lockName}'`;
+  if (lockStatus == null) return `Internal error acquiring command write lock '${lockName}'`;
+  return `Unexpected result acquiring command write lock '${lockName}'`;
+}
+
+/**
  * Acquires a MySQL `GET_LOCK` named lock on `connection`, waiting up to
  * `COMMAND_WRITE_LOCK_TIMEOUT_SECONDS`.
  * @param connection - Pool connection to run `GET_LOCK` on.
@@ -68,13 +80,7 @@ export async function acquireNamedLock(connection: mysql.PoolConnection, lockNam
   const lockStatus = rows[0]?.lock_status;
   if (lockStatus === '1' || lockStatus === 1) return;
 
-  const message = (lockStatus === '0' || lockStatus === 0)
-    ? `Timed out acquiring command write lock '${lockName}'`
-    : lockStatus == null
-      ? `Internal error acquiring command write lock '${lockName}'`
-      : `Unexpected result acquiring command write lock '${lockName}'`;
-
-  throw new Error(`${message} (lock_status=${String(lockStatus)}).`);
+  throw new Error(`${lockFailureMessage(lockStatus, lockName)} (lock_status=${String(lockStatus)}).`);
 }
 
 /** Releases a MySQL named lock on `connection`. Swallows and logs any error — releasing must never block the caller's cleanup. */
@@ -276,16 +282,6 @@ export async function isAnyCommandTakenAcrossTables(
   return results.some((exists) => exists);
 }
 
-/**
- * Checks whether `triggerString` is already taken by a custom command or counter, optionally excluding `excludeCommandId` from the check.
- * @param triggerString - Trigger string to check for a collision.
- * @param excludeCommandId - A `command_id` to exclude from the check, if updating an existing row.
- * @returns True if `triggerString` is already taken.
- */
-export async function isCustomCommandTriggerTaken(triggerString: string, excludeCommandId?: number): Promise<boolean> {
-  return isAnyCommandTakenAcrossTables(triggerString, { excludeCustomCommandId: excludeCommandId });
-}
-
 // ─── Serialized write ─────────────────────────────────────────────────────────
 
 /**
@@ -348,7 +344,7 @@ export async function runSerializedCommandWrite<T>(
       if (await isAnyCommandTakenAcrossTables(normalizedCommands, options, conn, checks)) {
         throw new CommandConflictError(normalizedCommands);
       }
-      return await writeOperation(conn);
+      return writeOperation(conn);
     });
   } finally {
     if (connection) {

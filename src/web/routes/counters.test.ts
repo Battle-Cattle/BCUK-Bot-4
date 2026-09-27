@@ -40,7 +40,7 @@ vi.mock('../middleware', () => ({
   requireManager: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireManager'); next(); },
 }));
 
-vi.mock('../../logger', () => ({
+vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() }),
 }));
 

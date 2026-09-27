@@ -1,23 +1,33 @@
 import { createLogger } from '../../shared/logger';
-import { getStreamerById, DEFAULT_EVENT_CONFIG } from '../../db';
+import { getStreamerById, DEFAULT_EVENT_CONFIG, pruneRedemptionLedger } from '../../db';
 import { getAllStreamerInfo, type StreamerInfo } from './twitchEventSubDispatch';
 import { getValidToken } from './twitchApiEventSub';
 import { getCustomRewards, getRewardRedemptions, TwitchRewardRedemption } from '../twitchApi';
 import { handleRedemption, RedemptionEvent } from './twitchEventSubHandler';
+import { REDEMPTION_LEDGER_RETENTION_MS } from './twitchEventSubRedemptionDedup';
+import {
+  RECONCILIATION_POLL_INTERVAL_MS,
+  MAX_CURSOR_LAG_MS,
+  resolveCutoff,
+  markFetchFailed,
+  markStreamerFetchFailed,
+  recordReplayOutcome,
+  pruneStaleReconciliationCursors,
+  markBroadcastersSeen,
+  __resetReconciliationCursorStateForTests,
+} from './twitchEventSubReconciliationCursors';
+
+// Cursor state (where each reward resumes from, and when each broadcaster was last present) lives
+// in twitchEventSubReconciliationCursors.ts; this module fetches, replays and runs the tick.
+export { MAX_CURSOR_LAG_MS, CURSOR_RETENTION_MS } from './twitchEventSubReconciliationCursors';
 
 const log = createLogger('EventSubReconciliation');
 
-const POLL_INTERVAL_MS = 60_000;
+/** How often the reconciliation tick prunes the `redemption_handled` ledger (ms). */
+const LEDGER_PRUNE_INTERVAL_MS = 10 * 60 * 1000;
 
-/**
- * Last-seen redemption timestamp (epoch ms) per `${broadcasterUserId}:${twitchRewardId}`,
- * tracked purely in memory (mirrors the existing WebSocket/redemption dedup caches). A key's
- * first poll looks back only one {@link POLL_INTERVAL_MS} instead of the reward's full history —
- * this poll exists to catch redemptions missed *while the bot was running* (a WebSocket
- * reconnect gap, a keepalive timeout, a session migration window, including the window right
- * after startup), not to backfill everything that ever happened for a reward.
- */
-const lastSeenRedeemedAt = new Map<string, number>();
+/** When the ledger was last pruned (epoch ms), or null if not yet this process. */
+let ledgerLastPrunedAt: number | null = null;
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let tickRunning = false;
@@ -69,6 +79,46 @@ async function fetchRedemptionsNewerThan(
 }
 
 /**
+ * Replays each fetched redemption through {@link handleRedemption} (its own dedup makes an
+ * already-delivered redemption a no-op), logging genuine catches and per-redemption failures.
+ * Redemptions with an unparseable `redeemed_at` are skipped.
+ * @param info - Dispatch info for the redemption's streamer.
+ * @param redemptions - Redemptions fetched for one reward this tick.
+ * @returns The latest `redeemed_at` (epoch ms) that was handled successfully and the earliest one
+ *   that failed, each null if there were none.
+ */
+async function replayRedemptions(
+  info: StreamerInfo, redemptions: TwitchRewardRedemption[],
+): Promise<{ succeededMax: number | null; failedMin: number | null }> {
+  let succeededMax: number | null = null;
+  let failedMin: number | null = null;
+  for (const r of redemptions) {
+    const redeemedAt = Date.parse(r.redeemed_at);
+    if (!Number.isFinite(redeemedAt)) continue;
+    // Re-check the cap at handling time: a slow fetch (or a slow handler earlier in this batch)
+    // can age a redemption past it after the cutoff was chosen, and its dedup entry may be gone.
+    if (Date.now() - redeemedAt > MAX_CURSOR_LAG_MS) {
+      log.warn(`Skipping reconciliation replay of redemption ${r.id} (${info.login}): redeemed more than ${MAX_CURSOR_LAG_MS / 60_000} minutes ago, outside the dedup window`);
+      continue;
+    }
+    try {
+      const processed = await handleRedemption(info.login, toRedemptionEvent(info.login, r), info.config ?? DEFAULT_EVENT_CONFIG, info.streamerId);
+      // Only log as a genuine catch when handleRedemption actually processed it — its own
+      // dedup means most redemptions in this window were already delivered live, and logging
+      // those as "missed" would be false (see reconcileReward's doc comment).
+      if (processed) {
+        log.warn(`Reconciliation caught a redemption missed by EventSub: "${r.reward.title}" (id=${r.id}) for ${info.login}`);
+      }
+      succeededMax = Math.max(succeededMax ?? redeemedAt, redeemedAt);
+    } catch (err) {
+      log.error(`Reconciled-redemption handler error for redemption ${r.id} (${info.login}):`, err);
+      failedMin = Math.min(failedMin ?? redeemedAt, redeemedAt);
+    }
+  }
+  return { succeededMax, failedMin };
+}
+
+/**
  * Fetches recent redemptions for one reward (both UNFULFILLED — still in the queue — and
  * FULFILLED — including rewards with `should_redemptions_skip_request_queue` set, which never
  * appear as UNFULFILLED) and replays any redeemed after the reward's tracked cursor through
@@ -85,7 +135,9 @@ async function fetchRedemptionsNewerThan(
  * re-replaying already-succeeded ones. Re-replaying a success is not always a safe no-op: it's
  * only deduped by `handleRedemption`'s redemption-id TTL, which a sustained run of failures could
  * outlast, so keeping the cursor pinned in front of anything unhandled — instead of freezing it
- * for the whole tick — bounds how far behind an already-succeeded redemption can fall.
+ * for the whole tick — bounds how far behind an already-succeeded redemption can fall. A failure
+ * that persists past {@link MAX_CURSOR_LAG_MS} is abandoned (see {@link resolveCutoff}) rather
+ * than letting the replay window outgrow the dedup cache.
  *
  * @param info - Dispatch info for the redemption's streamer (login/streamerId/config).
  * @param uid - Broadcaster's Twitch user ID.
@@ -94,10 +146,7 @@ async function fetchRedemptionsNewerThan(
  */
 async function reconcileReward(info: StreamerInfo, uid: string, token: string, rewardId: string): Promise<void> {
   const key = `${uid}:${rewardId}`;
-  // First time seeing this reward: look back one poll interval rather than the reward's full
-  // history — this still covers the window right after the bot (re)started or first subscribed
-  // for this streamer, instead of leaving it as a permanent blind spot.
-  const cutoff = lastSeenRedeemedAt.get(key) ?? Date.now() - POLL_INTERVAL_MS;
+  const cutoff = resolveCutoff(key, info.login, Date.now());
 
   let redemptions: TwitchRewardRedemption[];
   try {
@@ -108,68 +157,46 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
     redemptions = [...unfulfilled, ...fulfilled];
   } catch (err) {
     log.error(`Failed to fetch redemptions for reward ${rewardId} (${info.login}):`, err);
+    markFetchFailed(key, cutoff);
     return;
   }
 
-  let succeededMax: number | null = null;
-  let failedMin: number | null = null;
-  for (const r of redemptions) {
-    const redeemedAt = Date.parse(r.redeemed_at);
-    if (!Number.isFinite(redeemedAt)) continue;
-    try {
-      const processed = await handleRedemption(info.login, toRedemptionEvent(info.login, r), info.config ?? DEFAULT_EVENT_CONFIG, info.streamerId);
-      // Only log as a genuine catch when handleRedemption actually processed it — its own
-      // dedup means most redemptions in this window were already delivered live, and logging
-      // those as "missed" would be false (see the doc comment above).
-      if (processed) {
-        log.warn(`Reconciliation caught a redemption missed by EventSub: "${r.reward.title}" (id=${r.id}) for ${info.login}`);
-      }
-      if (succeededMax === null || redeemedAt > succeededMax) succeededMax = redeemedAt;
-    } catch (err) {
-      log.error(`Reconciled-redemption handler error for redemption ${r.id} (${info.login}):`, err);
-      if (failedMin === null || redeemedAt < failedMin) failedMin = redeemedAt;
-    }
-  }
-  // Every redemption fetched this tick has redeemedAt > cutoff, so failedMin - 1 never moves the
-  // cursor backwards past where it already was.
-  const newCursor = failedMin !== null ? failedMin - 1 : (succeededMax ?? cutoff);
-  lastSeenRedeemedAt.set(key, newCursor);
-}
-
-/**
- * Drops `lastSeenRedeemedAt` entries whose broadcaster user id is no longer present in
- * `currentUids` — e.g. a streamer removed from monitoring or disconnected since the last tick.
- * Without this, the map grows by one entry per reward for every streamer that ever connected,
- * even after they stop being reconciled.
- * @param currentUids - Broadcaster user ids from this tick's {@link getAllStreamerInfo} snapshot.
- * @returns Nothing — mutates {@link lastSeenRedeemedAt} in place.
- */
-function pruneStaleReconciliationCursors(currentUids: ReadonlySet<string>): void {
-  for (const key of lastSeenRedeemedAt.keys()) {
-    const uid = key.slice(0, key.indexOf(':'));
-    if (!currentUids.has(uid)) lastSeenRedeemedAt.delete(key);
-  }
+  const { succeededMax, failedMin } = await replayRedemptions(info, redemptions);
+  recordReplayOutcome(key, cutoff, succeededMax, failedMin);
 }
 
 /**
  * Reconciles one streamer: resolves their broadcaster token, lists their custom rewards, and
- * reconciles each one via {@link reconcileReward}. No-ops silently if the streamer has no
- * usable token (nothing to authenticate the Helix calls with — the same condition that would
- * already be blocking their EventSub subscriptions from existing).
+ * reconciles each one via {@link reconcileReward}. If the streamer has no usable token (nothing
+ * to authenticate the Helix calls with), the token lookup itself fails (e.g. a DB error), or
+ * their rewards can't be listed, nothing is fetched and their tracked cursors are marked
+ * fetch-pinned (see {@link markStreamerFetchFailed}).
  *
  * @param uid - Broadcaster's Twitch user ID (the streamer map's key).
  * @param info - Dispatch info for this streamer.
  */
 async function reconcileStreamer(uid: string, info: StreamerInfo): Promise<void> {
-  const streamer = await getStreamerById(info.streamerId);
-  const token = streamer ? await getValidToken(streamer) : null;
-  if (!token) return;
+  let token: string | null;
+  try {
+    const streamer = await getStreamerById(info.streamerId);
+    token = streamer ? await getValidToken(streamer) : null;
+  } catch (err) {
+    log.error(`Failed to resolve the broadcaster token for ${info.login}:`, err);
+    markStreamerFetchFailed(uid);
+    return;
+  }
+  if (!token) {
+    // Nothing to fetch with, so this tick's window goes unreconciled like any other fetch failure.
+    markStreamerFetchFailed(uid);
+    return;
+  }
 
   let rewards;
   try {
     rewards = await getCustomRewards(uid, token);
   } catch (err) {
     log.error(`Failed to list custom rewards for ${info.login}:`, err);
+    markStreamerFetchFailed(uid);
     return;
   }
 
@@ -189,14 +216,39 @@ export async function runReconciliationTick(): Promise<void> {
   currentTickPromise = (async () => {
     try {
       const allStreamerInfo = [...getAllStreamerInfo()];
-      pruneStaleReconciliationCursors(new Set(allStreamerInfo.map(([uid]) => uid)));
+      const presentUids = new Set(allStreamerInfo.map(([uid]) => uid));
+      pruneStaleReconciliationCursors(presentUids, Date.now());
       const entries = allStreamerInfo.filter(([, info]) => info.config !== null);
       await Promise.allSettled(entries.map(([uid, info]) => reconcileStreamer(uid, info)));
+      // A pass can run long (e.g. Helix rate-limit waits). These broadcasters were present for all
+      // of it and any cursor this pass wrote is fresh, so date their last-seen to when the pass
+      // ended — otherwise the next tick could expire a cursor written moments earlier.
+      markBroadcastersSeen(presentUids, Date.now());
+      await maybePruneRedemptionLedger(Date.now());
     } finally {
       tickRunning = false;
     }
   })();
   return currentTickPromise;
+}
+
+/**
+ * Prunes `redemption_handled` rows older than {@link REDEMPTION_LEDGER_RETENTION_MS}, at most once
+ * per {@link LEDGER_PRUNE_INTERVAL_MS}. Runs from the reconciliation tick so it shares that
+ * lifecycle (started after EventSub, stopped before the DB pool closes). A failure is logged and
+ * retried on a later tick; it never fails the tick.
+ * @param now - The current time (epoch ms).
+ * @returns Resolves once the prune ran (or was skipped).
+ */
+async function maybePruneRedemptionLedger(now: number): Promise<void> {
+  if (ledgerLastPrunedAt !== null && now - ledgerLastPrunedAt < LEDGER_PRUNE_INTERVAL_MS) return;
+  ledgerLastPrunedAt = now;
+  try {
+    const deleted = await pruneRedemptionLedger(REDEMPTION_LEDGER_RETENTION_MS);
+    if (deleted > 0) log.debug(`Pruned ${deleted} expired redemption ledger row(s)`);
+  } catch (err) {
+    log.error('Failed to prune the redemption ledger:', err);
+  }
 }
 
 /**
@@ -208,8 +260,8 @@ export function startEventSubReconciliation(): void {
   if (tickTimer) return;
   tickTimer = setInterval(() => {
     runReconciliationTick().catch((err) => log.error('Reconciliation tick error:', err));
-  }, POLL_INTERVAL_MS);
-  log.info(`Started — redemption reconciliation every ${POLL_INTERVAL_MS / 1000}s`);
+  }, RECONCILIATION_POLL_INTERVAL_MS);
+  log.info(`Started — redemption reconciliation every ${RECONCILIATION_POLL_INTERVAL_MS / 1000}s`);
 }
 
 /** Stops the periodic reconciliation interval and awaits any in-flight tick before returning. */
@@ -218,7 +270,8 @@ export async function stopEventSubReconciliation(): Promise<void> {
   await currentTickPromise;
 }
 
-/** Test-only: clears the in-memory per-reward cursor cache so each test starts from a clean slate. */
+/** Test-only: clears the in-memory cursor, last-seen and ledger-prune state so each test starts from a clean slate. */
 export function __resetReconciliationCursorsForTests(): void {
-  lastSeenRedeemedAt.clear();
+  __resetReconciliationCursorStateForTests();
+  ledgerLastPrunedAt = null;
 }

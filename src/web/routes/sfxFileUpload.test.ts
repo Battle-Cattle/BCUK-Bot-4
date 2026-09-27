@@ -10,7 +10,7 @@ vi.mock('../middleware', () => ({ requireMod: (_req: any, _res: any, next: any) 
 vi.mock('../../db', () => ({ addSfxFile: vi.fn(), updateSfxFile: vi.fn(), deleteSfxFile: vi.fn() }));
 
 import multer from 'multer';
-import { detectAudioType, buildStoredName, handleUploadError } from './sfxFileUpload';
+import { detectAudioType, buildStoredName, handleUploadError, startsWithBytes, isValidMpegFrameHeader } from './sfxFileUpload';
 
 /** Minimal res stub capturing the redirect target. */
 function makeRes() {
@@ -122,5 +122,53 @@ describe('handleUploadError', () => {
     const res = makeRes();
     expect(handleUploadError(new Error('boom'), res)).toBe(true);
     expect(res.redirect).toHaveBeenCalledWith('/sfx?error=upload_failed');
+  });
+});
+
+// ── startsWithBytes / isValidMpegFrameHeader ─────────────────────────────────
+
+describe('startsWithBytes', () => {
+  const magic = Buffer.from([0x01, 0x02]);
+
+  it('matches at offset 0 by default', () => {
+    expect(startsWithBytes(Buffer.from([0x01, 0x02, 0x03]), magic)).toBe(true);
+  });
+
+  it('matches at a given offset', () => {
+    expect(startsWithBytes(Buffer.from([0x00, 0x01, 0x02]), magic, 1)).toBe(true);
+  });
+
+  it('returns false when the bytes differ', () => {
+    expect(startsWithBytes(Buffer.from([0x01, 0x03]), magic)).toBe(false);
+  });
+
+  it('returns false when the buffer is too short for the offset + length', () => {
+    expect(startsWithBytes(Buffer.from([0x00, 0x01]), magic, 1)).toBe(false);
+  });
+});
+
+describe('isValidMpegFrameHeader', () => {
+  it('accepts a well-formed MPEG-1 Layer III frame header', () => {
+    expect(isValidMpegFrameHeader(Buffer.from([0xff, 0xfb, 0x90, 0x00]))).toBe(true);
+  });
+
+  it('rejects a buffer shorter than 4 bytes', () => {
+    expect(isValidMpegFrameHeader(Buffer.from([0xff, 0xfb, 0x90]))).toBe(false);
+  });
+
+  it('rejects a missing frame sync', () => {
+    expect(isValidMpegFrameHeader(Buffer.from([0xff, 0x1b, 0x90, 0x00]))).toBe(false);
+  });
+
+  it('rejects a sync-only header with reserved version/layer bits', () => {
+    expect(isValidMpegFrameHeader(Buffer.from([0xff, 0xe0, 0x00, 0x00]))).toBe(false);
+  });
+
+  it('rejects the bad bitrate index', () => {
+    expect(isValidMpegFrameHeader(Buffer.from([0xff, 0xfb, 0xf0, 0x00]))).toBe(false);
+  });
+
+  it('rejects the reserved sample-rate index', () => {
+    expect(isValidMpegFrameHeader(Buffer.from([0xff, 0xfb, 0x9c, 0x00]))).toBe(false);
   });
 });

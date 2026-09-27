@@ -14,6 +14,7 @@ vi.mock('./db', () => ({
   })),
   closePool: vi.fn().mockResolvedValue(undefined),
   pingDb: vi.fn().mockResolvedValue(true),
+  isRedemptionLedgerReady: vi.fn().mockResolvedValue(true),
 }));
 vi.mock('./shared/healthStore', () => ({
   recordDbPing: vi.fn(),
@@ -234,6 +235,28 @@ describe('startup — guild registry preload', () => {
     // ownerAlerts.ts's primeOwnerAlertBaseline JSDoc for why that causes false "down" alerts).
     expect(vi.mocked(primeOwnerAlertBaseline).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(startOwnerAlertWatcher).mock.invocationCallOrder[0]);
+  });
+
+  it('calls process.exit(1) and does not start the bot when the redemption_handled migration is missing', async () => {
+    const db = await import('./db.js');
+    const { startDiscordBot } = await import('./discord/discordBot.js');
+    vi.mocked(db.isRedemptionLedgerReady).mockResolvedValueOnce(false);
+
+    await runMain();
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(vi.mocked(startDiscordBot)).not.toHaveBeenCalled();
+  });
+
+  it('calls process.exit(1) and does not start the bot when the redemption_handled check itself errors', async () => {
+    const db = await import('./db.js');
+    const { startDiscordBot } = await import('./discord/discordBot.js');
+    vi.mocked(db.isRedemptionLedgerReady).mockRejectedValueOnce(new Error('connection lost'));
+
+    await runMain();
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(vi.mocked(startDiscordBot)).not.toHaveBeenCalled();
   });
 
   it('calls process.exit(1) and does not start the bot when the DB connection ping fails', async () => {
