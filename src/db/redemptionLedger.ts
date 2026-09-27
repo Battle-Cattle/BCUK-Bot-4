@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
+import type { SqlExecutor } from './commandStringUtils';
 import { fromBit } from './utils';
 
 /**
@@ -54,11 +55,16 @@ export async function getRedemptionProgress(redemptionId: string): Promise<Redem
  * @param redemptionId - Twitch's own redemption id.
  * @param streamerId - DB row id of the streamer the redemption belongs to.
  * @param effect - Which effect completed; `'handled'` marks the whole redemption done.
+ * @param executor - Pool or transaction connection to write with. Pass the transaction's
+ *   connection to record the effect atomically with the effect's own write (as
+ *   `recordPricingUpdate` does for `'pricing_applied'`). Defaults to the pool.
  * @returns Resolves once the row is written.
  */
-export async function markRedemptionEffect(redemptionId: string, streamerId: number, effect: RedemptionEffect): Promise<void> {
+export async function markRedemptionEffect(
+  redemptionId: string, streamerId: number, effect: RedemptionEffect, executor: SqlExecutor = getPool(),
+): Promise<void> {
   const { column, value } = EFFECT_COLUMNS[effect];
-  await getPool().execute(
+  await executor.execute(
     `INSERT INTO redemption_handled (redemption_id, streamer_id, ${column}) VALUES (?, ?, ${value}) AS new_row
      ON DUPLICATE KEY UPDATE ${column} = new_row.${column}`,
     [redemptionId, streamerId],
@@ -78,4 +84,21 @@ export async function pruneRedemptionLedger(retentionMs: number): Promise<number
     [Math.ceil(retentionMs / 1000)],
   );
   return result.affectedRows;
+}
+
+/**
+ * Checks that the `redemption_handled` table exists (its migration has been applied), for the
+ * startup readiness check: every redemption reads and writes it, so running without it would make
+ * every redemption fail and be retried until the table appears.
+ * @returns True if the table exists; false if MySQL reports it missing (`ER_NO_SUCH_TABLE`).
+ * @throws Any other query error (e.g. a connection failure).
+ */
+export async function isRedemptionLedgerReady(): Promise<boolean> {
+  try {
+    await getPool().execute('SELECT 1 FROM redemption_handled LIMIT 1');
+    return true;
+  } catch (err) {
+    if ((err as { code?: string }).code === 'ER_NO_SUCH_TABLE') return false;
+    throw err;
+  }
 }

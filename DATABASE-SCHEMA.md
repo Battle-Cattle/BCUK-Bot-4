@@ -215,11 +215,11 @@ Durable per-redemption progress for `handleRedemption`. The in-memory dedup cach
 | `redemption_id` | `VARCHAR(64)` PK | Twitch's own redemption id |
 | `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
 | `dashboard_recorded` | `TINYINT(1)` | 1 once the redemption's `streamer_event_log` row was recorded |
-| `pricing_applied` | `TINYINT(1)` | 1 once its dynamic-pricing increment was applied |
+| `pricing_applied` | `TINYINT(1)` | 1 once its dynamic-pricing increment was applied. Written in the same transaction as the `reward_pricing` update (`recordPricingUpdate`), and checked inside the reward's pricing queue, so a retry never applies pricing twice |
 | `handled_at` | `DATETIME` NULL | Set once every required effect succeeded. The redemption is then skipped entirely |
 | `created_at` | `DATETIME` | Defaults to `CURRENT_TIMESTAMP`. The prune key (`idx_redemption_handled_created`) |
 
-Created by `migrations/redemption_handled.sql`.
+Created by `migrations/redemption_handled.sql`. The bot checks the table exists at startup (`isRedemptionLedgerReady`) and exits with an error if the migration hasn't been applied.
 
 ## `reward_pricing`
 

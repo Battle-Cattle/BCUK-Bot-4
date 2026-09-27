@@ -4,7 +4,7 @@ vi.mock('./pool', () => ({ getPool: vi.fn() }));
 vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
-import { getRedemptionProgress, markRedemptionEffect, pruneRedemptionLedger } from './redemptionLedger';
+import { getRedemptionProgress, markRedemptionEffect, pruneRedemptionLedger, isRedemptionLedgerReady } from './redemptionLedger';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 beforeEach(() => {
@@ -48,6 +48,42 @@ describe('markRedemptionEffect', () => {
     expect(sql).toContain(`INSERT INTO redemption_handled (redemption_id, streamer_id, ${column}) VALUES (?, ?, ${value}) AS new_row`);
     expect(sql).toContain(`ON DUPLICATE KEY UPDATE ${column} = new_row.${column}`);
     expect(params).toEqual(['r1', 5]);
+  });
+});
+
+describe('markRedemptionEffect executor', () => {
+  it('writes through the given transaction connection instead of the pool', async () => {
+    const pool = makeMockPool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const conn = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+
+    await markRedemptionEffect('r1', 5, 'pricing_applied', conn as any);
+
+    expect(conn.execute).toHaveBeenCalledOnce();
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe('isRedemptionLedgerReady', () => {
+  it('returns true when the table can be queried', async () => {
+    const pool = makeMockPool({ rows: [] });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(isRedemptionLedgerReady()).resolves.toBe(true);
+    expect(pool.execute.mock.calls[0][0]).toBe('SELECT 1 FROM redemption_handled LIMIT 1');
+  });
+
+  it('returns false when the table does not exist (migration not applied)', async () => {
+    const pool = makeMockPool();
+    pool.execute.mockRejectedValueOnce(Object.assign(new Error("Table 'bcuk.redemption_handled' doesn't exist"), { code: 'ER_NO_SUCH_TABLE' }));
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(isRedemptionLedgerReady()).resolves.toBe(false);
+  });
+
+  it('rethrows any other query error', async () => {
+    const pool = makeMockPool();
+    pool.execute.mockRejectedValueOnce(Object.assign(new Error('connection lost'), { code: 'PROTOCOL_CONNECTION_LOST' }));
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(isRedemptionLedgerReady()).rejects.toThrow('connection lost');
   });
 });
 
