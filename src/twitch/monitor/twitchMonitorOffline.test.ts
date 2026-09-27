@@ -197,7 +197,7 @@ describe('runOfflineCheck', () => {
   // takes over after this check's own Helix call is in flight is recognized as superseding it —
   // otherwise a flap right at grace-period expiry could delete an announcement a concurrent,
   // lock-protected poll had just confirmed live. Mirrors the timeout/supersession pattern in
-  // twitchMonitorPoll.test.ts's `withLoginLock` suite: a later same-login lock operation only
+  // twitchMonitorLoginLock.test.ts's `withLoginLock` suite: a later same-login lock operation only
   // gets to run once the earlier one's lock slot frees up, which (short of it actually finishing)
   // happens on the lock's own timeout — so this simulates that by letting the lock time out
   // while runOfflineCheck's Helix call is still pending, using a login key unique to this test so

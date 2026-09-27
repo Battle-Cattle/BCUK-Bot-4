@@ -1,14 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../logger', () => ({
+vi.mock('../shared/logger', () => ({
   createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }),
 }));
 
+// Captures the options customCommandCache passes to createManagedLookupCache (at import time, so
+// before any beforeEach clears mock call history) and the invalidate spy on the cache it gets back.
+const managedCache = vi.hoisted(() => ({
+  options: null as null | { createEmptyCache: () => any },
+  invalidate: null as null | ReturnType<typeof vi.fn>,
+}));
+
 vi.mock('./lookupCache', () => ({
-  createManagedLookupCache: vi.fn(({ loadCache }: { loadCache: () => Promise<unknown> }) => ({
-    getCache: () => loadCache(),
-    invalidate: vi.fn(),
-  })),
+  createManagedLookupCache: vi.fn((options: { loadCache: () => Promise<unknown>; createEmptyCache: () => unknown }) => {
+    managedCache.options = options;
+    managedCache.invalidate = vi.fn();
+    return { getCache: () => options.loadCache(), invalidate: managedCache.invalidate };
+  }),
   registerFirstWinsWithWarning: <K, V>(map: Map<K, V>, key: K, value: V, describeCollision: (existing: V) => string) => {
     const existing = map.get(key);
     if (existing !== undefined) {
@@ -34,15 +42,7 @@ vi.mock('./guildCommandOverrides', () => ({
   getAllOverrides: vi.fn(),
 }));
 
-vi.mock('../twitchChannelName', () => ({
-  normalizeTwitchChannelName: vi.fn((name: string | null) => {
-    if (!name) return null;
-    const result = name.trim().toLowerCase().replace(/^#/, '');
-    return result || null;
-  }),
-}));
-
-import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel } from './customCommandCache';
+import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel, invalidateCustomCommandLookupCache } from './customCommandCache';
 import { getAllCustomCommandsWithAssignments } from './customCommands';
 import { getTwitchEnabledChannels } from './users';
 import { getAllOverrides } from './guildCommandOverrides';
@@ -320,5 +320,31 @@ describe('getCustomCommandForTwitchChannel', () => {
     const result = await getCustomCommandForTwitchChannel('mychan', '!clap');
     expect(Object.isFrozen(result)).toBe(true);
     expect(() => { (result as any).output = 'mutated'; }).toThrow();
+  });
+});
+
+// ─── cache lifecycle ──────────────────────────────────────────────────────────
+
+describe('invalidateCustomCommandLookupCache', () => {
+  it('marks the managed lookup cache stale', () => {
+    invalidateCustomCommandLookupCache();
+    expect(managedCache.invalidate).toHaveBeenCalledOnce();
+  });
+});
+
+describe('empty (fallback) cache', () => {
+  it('is immediately stale and has no commands or overrides', () => {
+    const empty = managedCache.options!.createEmptyCache();
+    expect(empty.loadedAt).toBe(0);
+    expect(empty.discordByTrigger.size).toBe(0);
+    expect(empty.twitchByChannelAndTrigger.size).toBe(0);
+    expect(empty.overridesByGuild.size).toBe(0);
+  });
+
+  it('returns a fresh instance each time, so one fallback is never shared with the next', () => {
+    const first = managedCache.options!.createEmptyCache();
+    const second = managedCache.options!.createEmptyCache();
+    expect(first).not.toBe(second);
+    expect(first.discordByTrigger).not.toBe(second.discordByTrigger);
   });
 });

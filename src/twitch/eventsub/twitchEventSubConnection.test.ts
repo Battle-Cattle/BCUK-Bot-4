@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('./logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
+// A single hoisted instance so tests can assert on it — the module captures `log` at import time.
+const mockLog = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
+vi.mock('../../shared/logger', () => ({ createLogger: () => mockLog }));
 vi.mock('./twitchEventSubSubscriptions', () => ({
   subscribeForStreamer: vi.fn().mockResolvedValue(1),
   removeStreamerFromMap: vi.fn(),
@@ -18,6 +20,8 @@ import {
   isDuplicate,
   isStale,
   MESSAGE_TTL_MS,
+  purgeExpiredMessageIds,
+  seenMessageIds,
   StreamerConnection,
   EventSubMessage,
 } from './twitchEventSubConnection';
@@ -116,6 +120,42 @@ describe('isDuplicate', () => {
     isDuplicate('msg-expired-1');
     vi.advanceTimersByTime(MESSAGE_TTL_MS + 1);
     expect(isDuplicate('msg-expired-1')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// purgeExpiredMessageIds
+// ---------------------------------------------------------------------------
+describe('purgeExpiredMessageIds', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    seenMessageIds.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('removes only the entries whose TTL has passed', () => {
+    isDuplicate('msg-old');
+    vi.advanceTimersByTime(MESSAGE_TTL_MS / 2);
+    isDuplicate('msg-new');
+    vi.advanceTimersByTime(MESSAGE_TTL_MS / 2 + 1); // msg-old is now past its TTL, msg-new is not
+
+    purgeExpiredMessageIds();
+
+    expect(seenMessageIds.has('msg-old')).toBe(false);
+    expect(seenMessageIds.has('msg-new')).toBe(true);
+  });
+
+  it('keeps an entry that expires exactly now, matching isDuplicate treating it as still seen', () => {
+    isDuplicate('msg-edge');
+    vi.advanceTimersByTime(MESSAGE_TTL_MS);
+
+    purgeExpiredMessageIds();
+
+    expect(seenMessageIds.has('msg-edge')).toBe(true);
+    expect(isDuplicate('msg-edge')).toBe(true);
   });
 });
 
@@ -329,6 +369,29 @@ describe('StreamerConnection lifecycle', () => {
     expect(ws.listeners.has('message')).toBe(true);
     expect(ws.listeners.has('close')).toBe(true);
     expect(ws.listeners.has('error')).toBe(true);
+  });
+
+  it('the message listener parses the raw frame and dispatches it to handleMessage', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const ws = (conn as any).ws as MockWebSocket;
+
+    ws.listeners.get('message')!({ data: JSON.stringify(makeWelcomeMsg('sess-from-socket')) } as any);
+
+    await vi.waitFor(() =>
+      expect(subscribeForStreamer).toHaveBeenCalledWith('sess-from-socket', expect.objectContaining({ uid: 'uid-123' })),
+    );
+  });
+
+  it('the message listener logs and swallows a frame that is not valid JSON', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const ws = (conn as any).ws as MockWebSocket;
+
+    expect(() => ws.listeners.get('message')!({ data: 'not json{' } as any)).not.toThrow();
+
+    expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('Message parse error:'), expect.any(SyntaxError));
+    expect(subscribeForStreamer).not.toHaveBeenCalled();
   });
 
   it('stop() closes the socket, clears timers, and removes the streamer from the map', () => {

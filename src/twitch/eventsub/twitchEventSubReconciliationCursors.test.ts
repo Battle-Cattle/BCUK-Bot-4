@@ -42,6 +42,10 @@ describe('nextCursor', () => {
     expect(nextCursor(100, 500, null)).toBe(500);
   });
 
+  it('pins just before the earliest failure when nothing succeeded', () => {
+    expect(nextCursor(100, null, 150)).toBe(149);
+  });
+
   it('stays at the cutoff when nothing was handled', () => {
     expect(nextCursor(100, null, null)).toBe(100);
   });

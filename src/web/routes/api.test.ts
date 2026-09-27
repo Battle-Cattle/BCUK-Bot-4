@@ -34,10 +34,6 @@ vi.mock('../../db', () => ({
   getGuildById: vi.fn(),
 }));
 
-vi.mock('./shared', () => ({
-  normalizeDiscordId: (s: string) => (/^\d{17,20}$/.test(s) ? s : null),
-}));
-
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import supertest from 'supertest';
