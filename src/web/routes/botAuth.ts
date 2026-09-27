@@ -20,6 +20,8 @@ const KNOWN_ERRORS = new Set([
   'bot_oauth_state_mismatch',
   'bot_oauth_token_invalid',
   'bot_oauth_config_failed',
+  'bot_oauth_superseded',
+  'bot_oauth_connect_failed',
 ]);
 const KNOWN_SUCCESSES = new Set(['bot_connected']);
 const KNOWN_WARNINGS = new Set(['chat_start_failed']);
@@ -29,6 +31,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   bot_oauth_state_mismatch: 'Authorization failed — please try connecting again.',
   bot_oauth_token_invalid:  'Could not verify the connected Twitch account. Please try again.',
   bot_oauth_config_failed:  'Failed to save the bot chat token. Please try again.',
+  bot_oauth_superseded:     'Another connection attempt finished after this one — the more recently started attempt is active instead.',
+  bot_oauth_connect_failed: 'The new account failed to connect, so the previous working connection was restored. Check server logs and try again.',
 };
 
 const WARNING_MESSAGES: Record<string, string> = {
@@ -106,7 +110,8 @@ router.get('/connect', requireOwner, (req, res) => {
     }
 
     const state = randomBytes(16).toString('hex');
-    req.session.botOAuthState = { value: state, expiresAt: Date.now() + 10 * 60 * 1000 };
+    const now = Date.now();
+    req.session.botOAuthState = { value: state, expiresAt: now + 10 * 60 * 1000, attemptStartedAt: now };
 
     const params = new URLSearchParams({
       client_id: TWITCH_CLIENT_ID,

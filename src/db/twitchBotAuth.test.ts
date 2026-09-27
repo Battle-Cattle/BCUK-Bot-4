@@ -14,7 +14,7 @@ vi.mock('../shared/crypto', () => ({
 
 import { getPool } from './pool';
 import { encryptToken, decryptToken } from '../shared/crypto';
-import { getBotChatToken, saveBotChatToken, clearBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy } from './twitchBotAuth';
+import { getBotChatToken, saveBotChatTokenIfLatestAttempt, clearBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy } from './twitchBotAuth';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
 /** Builds a fake mysql pool whose `execute`/`query` resolve to the given rows. */
@@ -98,19 +98,24 @@ describe('getBotChatToken', () => {
   });
 });
 
-// ─── saveBotChatToken ───────────────────────────────────────────────────────
+// ─── saveBotChatTokenIfLatestAttempt ──────────────────────────────────────────
 
-describe('saveBotChatToken', () => {
+describe('saveBotChatTokenIfLatestAttempt', () => {
+  /** Builds a pool whose upsert call is a no-op and whose follow-up SELECT reports `wonAttempt` as the row's `attempt_started_at`. */
+  function makeAttemptPool(wonAttempt: number) {
+    return makeMockPool({ executeResult: [[{ attempt_started_at: wonAttempt }], []] });
+  }
+
   it('throws when EVENTSUB_TOKEN_SECRET is not configured', async () => {
     mockSecret = undefined;
     vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await expect(saveBotChatToken('uid', 'access', 'refresh', null)).rejects.toThrow('EVENTSUB_TOKEN_SECRET');
+    await expect(saveBotChatTokenIfLatestAttempt(1000, 'uid', 'access', 'refresh', null)).rejects.toThrow('EVENTSUB_TOKEN_SECRET');
   });
 
   it('encrypts tokens before saving', async () => {
-    const pool = makePool();
+    const pool = makeAttemptPool(1000);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await saveBotChatToken('uid', 'myaccess', 'myrefresh', 1234567890);
+    await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'myaccess', 'myrefresh', 1234567890);
     const params: unknown[] = pool.execute.mock.calls[0][1];
     expect(params).toContain('enc:myaccess');
     expect(params).toContain('enc:myrefresh');
@@ -118,29 +123,47 @@ describe('saveBotChatToken', () => {
     expect(params).not.toContain('myrefresh');
   });
 
-  it('includes twitchUserId and expiryMs in the query params', async () => {
-    const pool = makePool();
+  it('includes attemptStartedAt, twitchUserId, and expiryMs in the query params', async () => {
+    const pool = makeAttemptPool(1000);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await saveBotChatToken('u123', 'a', 'r', 9999);
+    await saveBotChatTokenIfLatestAttempt(1000, 'u123', 'a', 'r', 9999);
     const params: unknown[] = pool.execute.mock.calls[0][1];
-    expect(params).toContain('u123');
-    expect(params).toContain(9999);
+    expect(params).toEqual(['u123', 'enc:a', 'enc:r', 9999, 1000]);
   });
 
   it('upserts against the singleton row', async () => {
-    const pool = makePool();
+    const pool = makeAttemptPool(1000);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await saveBotChatToken('uid', 'a', 'r', null);
+    await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null);
     const sql: string = pool.execute.mock.calls[0][0];
     expect(sql.toUpperCase()).toContain('ON DUPLICATE KEY UPDATE');
   });
 
-  it('bumps connection_id on every save, including a reconnect to the same account', async () => {
-    const pool = makePool();
+  it('bumps connection_id conditionally on winning the attempt-ordering comparison', async () => {
+    const pool = makeAttemptPool(1000);
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await saveBotChatToken('uid', 'a', 'r', null);
+    await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null);
     const sql: string = pool.execute.mock.calls[0][0];
-    expect(sql).toContain('connection_id=twitch_bot_chat_token.connection_id + 1');
+    expect(sql).toContain('twitch_bot_chat_token.connection_id + 1');
+  });
+
+  it('returns true when this attempt won (its attempt_started_at is now stored)', async () => {
+    const pool = makeAttemptPool(1000);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null)).toBe(true);
+  });
+
+  it('returns false when a more recently started attempt already holds the row', async () => {
+    // The stored attempt_started_at (2000) is newer than this call's own (1000).
+    const pool = makeAttemptPool(2000);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null)).toBe(false);
+  });
+
+  it('returns false when the row disappeared between the upsert and the follow-up read', async () => {
+    const pool = makeMockPool({ rows: [] });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null)).toBe(false);
   });
 });
 
@@ -156,12 +179,13 @@ describe('clearBotChatToken', () => {
     expect(sql).toContain('WHERE id=1');
   });
 
-  it('also bumps connection_id', async () => {
+  it('also bumps connection_id and clears attempt_started_at', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
     await clearBotChatToken();
     const [sql] = pool.execute.mock.calls[0] as [string];
     expect(sql).toContain('connection_id=connection_id + 1');
+    expect(sql).toContain('attempt_started_at=NULL');
   });
 });
 

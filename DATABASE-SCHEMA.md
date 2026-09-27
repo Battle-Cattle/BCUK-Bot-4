@@ -183,6 +183,7 @@ Single global row (`id` pinned to 1) holding the refreshing OAuth token for the 
 | `refresh_token` | `TEXT` nullable | AES-256-GCM encrypted refresh token |
 | `token_expiry` | `BIGINT` nullable | Token expiry as Unix milliseconds |
 | `connection_id` | `BIGINT` | Increments on every save (initial connect or reconnect, same account or not); used as the compare-and-swap key so a write from a superseded in-process auth provider is dropped instead of clobbering a newer connection — see `src/twitch/twitchBot.ts` |
+| `attempt_started_at` | `BIGINT` nullable | Unix milliseconds; when the OAuth connect flow that produced the current row was *initiated* (not when its callback completed). Orders two independently-completing OAuth callbacks so the most recently *started* attempt always wins the row, regardless of which callback's network round trip finishes first — see `saveBotChatTokenIfLatestAttempt()` in `src/db/twitchBotAuth.ts` |
 
 Expected constraints:
 

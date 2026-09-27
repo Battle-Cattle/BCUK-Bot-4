@@ -65,48 +65,68 @@ export async function getBotChatToken(): Promise<BotChatToken | null> {
 }
 
 /**
- * Encrypt and persist the bot's own Twitch chat OAuth token, upserting the singleton row.
- * Bumps `connection_id` on every call (insert or update) — including a reconnect to the *same*
- * Twitch account — so any in-process `RefreshingAuthProvider` built from a previous connection is
- * provably superseded, closing the compare-and-swap race described on
- * {@link saveBotChatTokenIfOwnedBy}. Throws if `EVENTSUB_TOKEN_SECRET` is not configured, to
- * prevent storing plaintext credentials.
+ * Encrypt and persist the bot's own Twitch chat OAuth token, upserting the singleton row — but
+ * only if `attemptStartedAt` is at least as recent as the currently stored one (or no row exists
+ * yet). This is a *second*, independent compare-and-swap from {@link saveBotChatTokenIfOwnedBy}'s:
+ * that one orders a stale in-process token refresh against a reconnect; this one orders two
+ * separate, independently-authorized `/admin/bot-auth/connect` attempts against *each other* when
+ * their callbacks complete out of order (e.g. the owner using two tabs or devices) — without it,
+ * whichever callback's Twitch round trip happens to finish last would silently win, even if the
+ * owner started it first. `attemptStartedAt` is minted once per attempt at connect-initiation time
+ * (`botAuth.ts`'s `/connect` handler), not at save time, so ordering reflects when the owner acted,
+ * not network timing. Bumps `connection_id` only when the save actually takes effect, for the same
+ * reason {@link saveBotChatToken} always did — see that function's superseding doc for details.
+ * Throws if `EVENTSUB_TOKEN_SECRET` is not configured, to prevent storing plaintext credentials.
  *
+ * @param attemptStartedAt - Unix epoch milliseconds when this connect attempt was initiated.
  * @param twitchUserId - Twitch user ID of the connected bot account.
  * @param accessToken - OAuth access token (encrypted before storage).
  * @param refreshToken - OAuth refresh token (encrypted before storage).
  * @param expiryMs - Token expiry as Unix epoch milliseconds, or null if unknown.
+ * @returns Whether this attempt actually won the row (false means a more recently *started*
+ *   attempt already holds it).
  */
-export async function saveBotChatToken(
+export async function saveBotChatTokenIfLatestAttempt(
+  attemptStartedAt: number,
   twitchUserId: string,
   accessToken: string,
   refreshToken: string,
   expiryMs: number | null,
-): Promise<void> {
+): Promise<boolean> {
   if (!EVENTSUB_TOKEN_SECRET) throw new Error('EVENTSUB_TOKEN_SECRET is not configured — refusing to persist plaintext OAuth tokens');
   const storedAccess = encryptToken(accessToken, EVENTSUB_TOKEN_SECRET);
   const storedRefresh = encryptToken(refreshToken, EVENTSUB_TOKEN_SECRET);
   await getPool().execute(
-    `INSERT INTO twitch_bot_chat_token (id, twitch_user_id, access_token, refresh_token, token_expiry, connection_id)
-     VALUES (1, ?, ?, ?, ?, 1) AS new_row
+    `INSERT INTO twitch_bot_chat_token (id, twitch_user_id, access_token, refresh_token, token_expiry, connection_id, attempt_started_at)
+     VALUES (1, ?, ?, ?, ?, 1, ?) AS new_row
      ON DUPLICATE KEY UPDATE
-       twitch_user_id=new_row.twitch_user_id, access_token=new_row.access_token,
-       refresh_token=new_row.refresh_token, token_expiry=new_row.token_expiry,
-       connection_id=twitch_bot_chat_token.connection_id + 1`,
-    [twitchUserId, storedAccess, storedRefresh, expiryMs],
+       twitch_user_id = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, new_row.twitch_user_id, twitch_user_id),
+       access_token   = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, new_row.access_token, access_token),
+       refresh_token  = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, new_row.refresh_token, refresh_token),
+       token_expiry   = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, new_row.token_expiry, token_expiry),
+       connection_id  = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, twitch_bot_chat_token.connection_id + 1, twitch_bot_chat_token.connection_id),
+       attempt_started_at = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, new_row.attempt_started_at, attempt_started_at)`,
+    [twitchUserId, storedAccess, storedRefresh, expiryMs, attemptStartedAt],
   );
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    'SELECT attempt_started_at FROM twitch_bot_chat_token WHERE id = 1',
+  );
+  return rows.length > 0 && Number(rows[0].attempt_started_at) === attemptStartedAt;
 }
 
 /**
  * Null out the bot's own Twitch chat OAuth token (used when a refresh fails and the token must
  * be considered revoked, forcing a fresh `/admin/bot-auth` connect). Also bumps `connection_id`,
- * for the same reason {@link saveBotChatToken} does.
+ * for the same reason {@link saveBotChatTokenIfLatestAttempt} does, and clears
+ * `attempt_started_at` so any future connect attempt is guaranteed to win
+ * {@link saveBotChatTokenIfLatestAttempt}'s comparison rather than being compared against a stale
+ * timestamp from before the clear.
  */
 export async function clearBotChatToken(): Promise<void> {
   await getPool().execute(
     `UPDATE twitch_bot_chat_token
      SET twitch_user_id=NULL, access_token=NULL, refresh_token=NULL, token_expiry=NULL,
-         connection_id=connection_id + 1
+         connection_id=connection_id + 1, attempt_started_at=NULL
      WHERE id=1`,
   );
 }
@@ -118,8 +138,9 @@ export async function clearBotChatToken(): Promise<void> {
  * handler is the only caller: an in-flight refresh from a since-superseded provider (the owner
  * reconnected — to a *different* account, or even the *same* one — while this refresh was still in
  * flight; see the discussion on PR #666) has its write silently dropped instead of overwriting the
- * newer connection's token, because by the time it reaches the database `saveBotChatToken` has
- * already bumped `connection_id` past what this refresh was captured for. Keyed on `connection_id`
+ * newer connection's token, because by the time it reaches the database
+ * `saveBotChatTokenIfLatestAttempt` has already bumped `connection_id` past what this refresh was
+ * captured for. Keyed on `connection_id`
  * rather than `twitch_user_id` specifically because the latter can't distinguish a reconnect to the
  * same account from the still-current connection.
  * @param expectedConnectionId - The `connection_id` this refresh was performed under (captured
