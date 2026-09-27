@@ -1,5 +1,5 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
-import { getPool, closePool, pingDb } from './db';
+import { getPool, closePool, pingDb, isRedemptionLedgerReady } from './db';
 import { recordDbPing } from './shared/healthStore';
 import { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatcher, stopOwnerAlertWatcher, announceShutdown, announceStartup } from './discord/ownerAlerts';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
@@ -167,7 +167,8 @@ process.on('uncaughtException', (err) => {
  * {@link DISCORD_READY_FOR_STARTUP_DM_TIMEOUT_MS}) for Discord to actually be ready before that
  * DM, since `startDiscordBot()` itself doesn't block on it.
  * @returns Resolves once every component has started; rejects (and exits the process,
- *   via the `.catch` below) if DB connectivity or the guild registry load fails.
+ *   via the `.catch` below) if DB connectivity, the `redemption_handled` migration check, or the
+ *   guild registry load fails.
  */
 async function main(): Promise<void> {
   log.info('Starting BCUK Bot 4...');
@@ -182,6 +183,20 @@ async function main(): Promise<void> {
     recordDbPing(true);
   } catch (err) {
     log.error('Cannot connect to database:', err);
+    process.exit(1);
+  }
+
+  // Every channel-point redemption reads and writes redemption_handled; without it each one would
+  // fail and be retried until the table appears. Fail loudly instead of running degraded.
+  let ledgerReady = false;
+  try {
+    ledgerReady = await isRedemptionLedgerReady();
+  } catch (err) {
+    log.error('Cannot check the redemption_handled table:', err);
+    process.exit(1);
+  }
+  if (!ledgerReady) {
+    log.error('Database table redemption_handled is missing — apply migrations/redemption_handled.sql, then restart.');
     process.exit(1);
   }
 

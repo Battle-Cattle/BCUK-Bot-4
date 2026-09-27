@@ -448,6 +448,8 @@ export async function setAlertSound(
 
 export type { StreamerEventType, StreamerEvent } from './db/eventLog';
 export { recordStreamerEvent, getRecentStreamerEvents } from './db/eventLog';
+export type { RedemptionProgress, RedemptionEffect } from './db/redemptionLedger';
+export { getRedemptionProgress, markRedemptionEffect, pruneRedemptionLedger, isRedemptionLedgerReady } from './db/redemptionLedger';
 
 // ─── SFX ────────────────────────────────────────────────────────────────────
 

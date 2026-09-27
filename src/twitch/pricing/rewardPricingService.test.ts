@@ -11,6 +11,8 @@ vi.mock('../../db', () => ({
   deletePricingConfig: vi.fn(),
   getPricingSettingsForStreamer: vi.fn(),
   getStreamerById: vi.fn(),
+  getRedemptionProgress: vi.fn(),
+  markRedemptionEffect: vi.fn(),
 }));
 
 vi.mock('../eventsub/twitchApiEventSub', () => ({ getValidToken: vi.fn() }));
@@ -24,7 +26,7 @@ vi.mock('../twitchApi', () => {
 
 import {
   getPricingForReward, recordPricingUpdate, recordPricingHistory, markPricingUnsupported, deletePricingConfig,
-  getPricingSettingsForStreamer, getStreamerById,
+  getPricingSettingsForStreamer, getStreamerById, getRedemptionProgress, markRedemptionEffect,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
@@ -59,6 +61,8 @@ function makeRow(overrides: Partial<Record<string, unknown>> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getPricingSettingsForStreamer).mockResolvedValue(settings);
+  vi.mocked(getRedemptionProgress).mockReset().mockResolvedValue(null);
+  vi.mocked(markRedemptionEffect).mockReset().mockResolvedValue(undefined);
   vi.mocked(getStreamerById).mockResolvedValue(streamer);
   vi.mocked(getValidToken).mockResolvedValue('user-token');
   vi.mocked(recordPricingHistory).mockResolvedValue(undefined);
@@ -95,7 +99,7 @@ describe('applyRedemptionPricing', () => {
     expect(updateRewardCost).toHaveBeenCalledWith('bc1', 'rwd1', expect.any(Number), 'user-token');
     expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
       demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
-      lastPushedCost: expect.any(Number), lastRedemptionId: 'redemption-1',
+      lastPushedCost: expect.any(Number), lastRedemptionId: 'redemption-1', pricingAppliedRedemptionId: 'redemption-1',
     });
   });
 
@@ -128,7 +132,7 @@ describe('applyRedemptionPricing', () => {
     expect(markPricingUnsupported).not.toHaveBeenCalled();
     expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
       demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
-      lastPushedCost: null, lastRedemptionId: 'redemption-1',
+      lastPushedCost: null, lastRedemptionId: 'redemption-1', pricingAppliedRedemptionId: 'redemption-1',
     });
   });
 
@@ -141,7 +145,7 @@ describe('applyRedemptionPricing', () => {
     expect(updateRewardCost).not.toHaveBeenCalled();
     expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
       demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
-      lastPushedCost: maxPrice, lastRedemptionId: 'redemption-1',
+      lastPushedCost: maxPrice, lastRedemptionId: 'redemption-1', pricingAppliedRedemptionId: 'redemption-1',
     });
   });
 
@@ -151,7 +155,7 @@ describe('applyRedemptionPricing', () => {
     await expect(applyRedemptionPricing(1, 'rwd1', 'redemption-1')).resolves.toBeUndefined();
     expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
       demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
-      lastPushedCost: null, lastRedemptionId: 'redemption-1',
+      lastPushedCost: null, lastRedemptionId: 'redemption-1', pricingAppliedRedemptionId: 'redemption-1',
     });
   });
 
@@ -162,7 +166,7 @@ describe('applyRedemptionPricing', () => {
     expect(updateRewardCost).not.toHaveBeenCalled();
     expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
       demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
-      lastPushedCost: null, lastRedemptionId: 'redemption-1',
+      lastPushedCost: null, lastRedemptionId: 'redemption-1', pricingAppliedRedemptionId: 'redemption-1',
     });
   });
 
@@ -227,7 +231,7 @@ describe('redemption idempotency', () => {
 
     expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
       demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
-      lastPushedCost: expect.any(Number), lastRedemptionId: 'redemption-2',
+      lastPushedCost: expect.any(Number), lastRedemptionId: 'redemption-2', pricingAppliedRedemptionId: 'redemption-2',
     });
   });
 
@@ -250,6 +254,59 @@ describe('redemption idempotency', () => {
     expect(recordPricingUpdate).toHaveBeenCalledTimes(1);
   });
 
+  it('does not re-apply an older redemption the ledger records as priced, after a newer one moved last_redemption_id', async () => {
+    // A's pricing committed (with its ledger flag) but a later step failed; B then priced the same
+    // reward, so last_redemption_id no longer names A. The ledger flag must still stop A's retry.
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0.5, last_pushed_cost: null, last_redemption_id: 'redemption-B' }));
+    vi.mocked(getRedemptionProgress).mockResolvedValue({ dashboardRecorded: true, pricingApplied: true, handled: false });
+
+    await applyRedemptionPricing(1, 'rwd1', 'redemption-A');
+
+    expect(getRedemptionProgress).toHaveBeenCalledWith('redemption-A');
+    expect(updateRewardCost).not.toHaveBeenCalled();
+    expect(recordPricingUpdate).not.toHaveBeenCalled();
+  });
+
+  it('backfills the ledger flag when only last_redemption_id recognises the redemption, so a later retry after a newer redemption stays a no-op', async () => {
+    // A was priced before the ledger existed (or its ledger write was lost): only last_redemption_id knows.
+    let currentRow: any = makeRow({ demand: 0.5, last_pushed_cost: null, last_redemption_id: 'redemption-A' });
+    const pricedInLedger = new Set<string>();
+    vi.mocked(getPricingForReward).mockImplementation(async () => currentRow);
+    vi.mocked(markRedemptionEffect).mockImplementation(async (id) => { pricedInLedger.add(id); });
+    vi.mocked(getRedemptionProgress).mockImplementation(async (id) => (
+      pricedInLedger.has(id) ? { dashboardRecorded: true, pricingApplied: true, handled: false } : null
+    ));
+    vi.mocked(recordPricingUpdate).mockImplementation(async (_s, _r, fields) => {
+      if (fields.pricingAppliedRedemptionId) pricedInLedger.add(fields.pricingAppliedRedemptionId);
+      currentRow = { ...currentRow, last_redemption_id: fields.lastRedemptionId };
+    });
+
+    await applyRedemptionPricing(1, 'rwd1', 'redemption-A'); // retry of A: skipped, flag backfilled
+    expect(markRedemptionEffect).toHaveBeenCalledWith('redemption-A', 1, 'pricing_applied');
+    expect(recordPricingUpdate).not.toHaveBeenCalled();
+
+    await applyRedemptionPricing(1, 'rwd1', 'redemption-B'); // B moves last_redemption_id
+    expect(recordPricingUpdate).toHaveBeenCalledTimes(1);
+
+    await applyRedemptionPricing(1, 'rwd1', 'redemption-A'); // another retry of A: still a no-op
+    expect(recordPricingUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('prices a redemption the ledger has no pricing record for', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null, last_redemption_id: 'redemption-B' }));
+    vi.mocked(getRedemptionProgress).mockResolvedValue({ dashboardRecorded: true, pricingApplied: false, handled: false });
+
+    await applyRedemptionPricing(1, 'rwd1', 'redemption-A');
+
+    expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', expect.objectContaining({ pricingAppliedRedemptionId: 'redemption-A' }));
+  });
+
+  it('does not consult the ledger on a decay-only tick', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0.5, last_pushed_cost: null }));
+    await applyDecayTick(1, 'rwd1');
+    expect(getRedemptionProgress).not.toHaveBeenCalled();
+  });
+
   it('persists a decay-only tick without touching an existing last_redemption_id', async () => {
     vi.mocked(getPricingForReward).mockResolvedValue(makeRow({
       demand: 0.5, demand_updated_at: String(Date.now() - 300_000), last_pushed_cost: null, last_redemption_id: 'redemption-1',
@@ -259,7 +316,7 @@ describe('redemption idempotency', () => {
 
     expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
       demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
-      lastPushedCost: expect.any(Number), lastRedemptionId: 'redemption-1',
+      lastPushedCost: expect.any(Number), lastRedemptionId: 'redemption-1', pricingAppliedRedemptionId: null,
     });
   });
 });
@@ -314,7 +371,7 @@ describe('round_to_nearest', () => {
     expect(updateRewardCost).toHaveBeenCalledWith('bc1', 'rwd1', 480, 'user-token');
     expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
       demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
-      lastPushedCost: 480, lastRedemptionId: null,
+      lastPushedCost: 480, lastRedemptionId: null, pricingAppliedRedemptionId: null,
     });
   });
 
@@ -328,7 +385,7 @@ describe('round_to_nearest', () => {
     expect(updateRewardCost).not.toHaveBeenCalled();
     expect(recordPricingUpdate).toHaveBeenCalledWith(1, 'rwd1', {
       demand: expect.any(Number), demandUpdatedAtMs: expect.any(Number),
-      lastPushedCost: 500, lastRedemptionId: null,
+      lastPushedCost: 500, lastRedemptionId: null, pricingAppliedRedemptionId: null,
     });
   });
 });

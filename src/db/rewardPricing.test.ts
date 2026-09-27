@@ -1,6 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('./pool', () => ({ getPool: vi.fn() }));
+vi.mock('./pool', () => {
+  const getPool = vi.fn();
+  return {
+    getPool,
+    withTransaction: async (work: (conn: unknown) => Promise<unknown>) => {
+      const conn = await getPool().getConnection();
+      try {
+        await conn.beginTransaction();
+        const result = await work(conn);
+        await conn.commit();
+        return result;
+      } catch (err) {
+        await conn.rollback().catch(() => {});
+        throw err;
+      } finally {
+        conn.release();
+      }
+    },
+  };
+});
 vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
@@ -196,6 +215,36 @@ describe('recordPricingUpdate', () => {
     const sql: string = pool.execute.mock.calls[0][0];
     expect(sql).toContain('SET demand = ?, demand_updated_at = ?, last_pushed_cost = ?, last_redemption_id = ?');
     expect(pool.execute.mock.calls[0][1]).toEqual([0.75, 1700000000000, 350, 'redemption-abc', 7, 'rwd-abc']);
+  });
+
+  it('writes the reward update and the redemption\'s pricing_applied ledger flag in one transaction', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await recordPricingUpdate(7, 'rwd-abc', {
+      demand: 0.75, demandUpdatedAtMs: 1700000000000, lastPushedCost: 350, lastRedemptionId: 'redemption-abc', pricingAppliedRedemptionId: 'redemption-abc',
+    });
+
+    expect(pool.execute).not.toHaveBeenCalled();
+    const conn = pool._conn;
+    expect(conn.beginTransaction).toHaveBeenCalled();
+    expect(conn.execute.mock.calls[0][0]).toContain('UPDATE reward_pricing');
+    expect(conn.execute.mock.calls[0][1]).toEqual([0.75, 1700000000000, 350, 'redemption-abc', 7, 'rwd-abc']);
+    expect(conn.execute.mock.calls[1][0]).toContain('INSERT INTO redemption_handled (redemption_id, streamer_id, pricing_applied)');
+    expect(conn.execute.mock.calls[1][1]).toEqual(['redemption-abc', 7]);
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('rolls back the reward update when the ledger write fails', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    pool._conn.execute.mockResolvedValueOnce([[], []]).mockRejectedValueOnce(new Error('ledger write failed'));
+
+    await expect(recordPricingUpdate(7, 'rwd-abc', {
+      demand: 0.75, demandUpdatedAtMs: 1700000000000, lastPushedCost: 350, lastRedemptionId: 'redemption-abc', pricingAppliedRedemptionId: 'redemption-abc',
+    })).rejects.toThrow('ledger write failed');
+
+    expect(pool._conn.rollback).toHaveBeenCalled();
+    expect(pool._conn.commit).not.toHaveBeenCalled();
   });
 
   it('accepts a null lastPushedCost', async () => {
