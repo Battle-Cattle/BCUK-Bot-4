@@ -6,6 +6,7 @@ import {
   normalizeRequiredText,
   normalizeSingleTokenRequiredText,
   normalizeDiscordId,
+  parseDiscordIdList,
   filterQueryParam,
   parseWeight,
   parseRewardIdParam,
@@ -291,5 +292,27 @@ describe('parseRewardIdParam', () => {
 
   it('rejects a malformed string', () => {
     expect(parseRewardIdParam('not-a-uuid')).toBeNull();
+  });
+});
+
+describe('parseDiscordIdList', () => {
+  const A = '123456789012345678';
+  const B = '223456789012345678';
+
+  it('wraps a single submitted ID in a list', () => {
+    expect(parseDiscordIdList(A)).toEqual([A]);
+  });
+
+  it('keeps an array of IDs in submission order', () => {
+    expect(parseDiscordIdList([B, A])).toEqual([B, A]);
+  });
+
+  it('returns an empty list for an absent or empty field', () => {
+    expect(parseDiscordIdList(undefined)).toEqual([]);
+    expect(parseDiscordIdList('')).toEqual([]);
+  });
+
+  it('trims IDs and drops invalid or non-string entries', () => {
+    expect(parseDiscordIdList([` ${A} `, 'not-an-id', 42, B])).toEqual([A, B]);
   });
 });

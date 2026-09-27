@@ -169,6 +169,20 @@ async function withShortLockTimeout<T>(fn: (conn: mysql.PoolConnection) => Promi
 }
 
 /**
+ * Normalizes a submitted Twitch name to its channel form.
+ * @param twitchName - The raw Twitch name.
+ * @returns The normalized channel name.
+ * @throws If the name is blank after trimming or isn't a valid Twitch channel name.
+ */
+function requireValidTwitchName(twitchName: string): string {
+  const normalizedChannelName = normalizeTwitchChannelName(twitchName.trim());
+  if (!twitchName.trim() || !normalizedChannelName) {
+    throw new Error(`Invalid twitchName: ${twitchName}`);
+  }
+  return normalizedChannelName;
+}
+
+/**
  * Upserts a user record.
  *
  * This module is a pure DB layer with no cache knowledge — `db.ts`'s `upsertUser` facade
@@ -192,21 +206,9 @@ export async function upsertUserRecord(
   }
   const trimmedDiscordName = discordName.trim() || null;
   const twitchNameProvided = twitchName !== undefined;
-  const normalizedTwitchName = !twitchNameProvided
-    ? null
-    : twitchName === null
-      ? null
-      : (() => {
-          const trimmedTwitchName = twitchName.trim();
-          if (!trimmedTwitchName) {
-            throw new Error(`Invalid twitchName: ${twitchName}`);
-          }
-          const normalizedChannelName = normalizeTwitchChannelName(trimmedTwitchName);
-          if (!normalizedChannelName) {
-            throw new Error(`Invalid twitchName: ${twitchName}`);
-          }
-          return normalizedChannelName;
-        })();
+  // Omitted (undefined) and explicitly cleared (null) both store NULL; twitchNameProvided
+  // decides below whether that NULL overwrites the existing value.
+  const normalizedTwitchName = twitchName == null ? null : requireValidTwitchName(twitchName);
   await withShortLockTimeout((conn) => conn.execute(
     `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
      VALUES (?, ?, ?, ?, 0) AS new_user
@@ -214,6 +216,41 @@ export async function upsertUserRecord(
     [discordId, trimmedDiscordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
   ));
   return twitchNameProvided;
+}
+
+/**
+ * Every `table.column` that references a user's `discord_id`. The tables with foreign keys to
+ * `user` delete (or null out) their rows along with the user, so {@link deleteUnlinkedUserRecord}
+ * refuses to delete a user while any of these still point at them. `streamdeck_api_keys` has no
+ * foreign key but is still owned by a user. Keep in sync with DATABASE-SCHEMA.md; a test checks
+ * every foreign key to `user` in schema.sql is listed here.
+ */
+export const USER_REFERENCING_COLUMNS: ReadonlyArray<readonly [table: string, column: string]> = [
+  ['guild_member', 'discord_id'],
+  ['streamer', 'discord_id'],
+  ['timer_command_streamer', 'discord_id'],
+  ['twitch_user_commands', 'discord_id'],
+  ['companion_app_tokens', 'discord_id'],
+  ['companion_oauth_codes', 'discord_id'],
+  ['streamdeck_api_keys', 'discord_id'],
+  ['streamdeck_key_guild_status', 'approved_by'],
+];
+
+const DELETE_UNLINKED_USER_SQL = `DELETE FROM \`user\`
+     WHERE discord_id = ?
+       AND ${USER_REFERENCING_COLUMNS.map(([table, column]) => `NOT EXISTS (SELECT 1 FROM ${table} WHERE ${table}.${column} = ?)`).join('\n       AND ')}`;
+
+/**
+ * Deletes a user row, but only while nothing references it (see {@link USER_REFERENCING_COLUMNS}).
+ * Meant for rolling back a user that was only just inserted — the guard means it can never cascade
+ * away an established user's guild access, streamer data, command assignments or tokens.
+ * @param discordId - Discord snowflake as a string.
+ * @returns True if the row was deleted; false if it didn't exist or is still referenced.
+ */
+export async function deleteUnlinkedUserRecord(discordId: string): Promise<boolean> {
+  const params = Array.from({ length: USER_REFERENCING_COLUMNS.length + 1 }, () => discordId);
+  const [result] = await withShortLockTimeout((conn) => conn.execute<mysql.ResultSetHeader>(DELETE_UNLINKED_USER_SQL, params));
+  return result.affectedRows > 0;
 }
 
 /**

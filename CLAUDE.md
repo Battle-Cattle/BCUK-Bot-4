@@ -62,6 +62,7 @@ Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → wir
 
 - **`uncaughtException`/`unhandledRejection`** both log and `process.exit(1)` — deliberate: there's no process supervisor, so the app fails loudly instead of limping on with a corrupted state. Don't add a handler that swallows and continues.
 - **`shutdown()`** runs on `SIGINT`/`SIGTERM`: stops schedulers/EventSub/monitor/bots, disconnects audio, closes the DB pool, then exits 0.
+- **Single instance only.** Production runs exactly one bot process against the database. Several subsystems rely on that: the redemption reconciliation cursors (`twitchEventSubReconciliationCursors.ts`) and the WebSocket/redemption dedup caches are in-memory per process, the schedulers (counter/reward-pricing/timer) assume they're the only ticker, and the `redemption_handled` ledger is a check-then-act guard, not a cross-process lock. Don't design for horizontal scaling without first revisiting those; a change that assumes more than one instance needs a design decision, not a drive-by fix.
 
 ---
 

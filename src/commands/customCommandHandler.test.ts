@@ -225,6 +225,22 @@ describe('executeCustomCommandForTwitch', () => {
     expect(vi.mocked(getCustomCommandForTwitchChannel)).not.toHaveBeenCalled();
   });
 
+  it('skips sending a matched command, without erroring, when no Twitch runtime is registered', async () => {
+    // A fresh module instance has no runtime registered (the beforeEach registered one on the
+    // top-level instance only), so this reaches the `if (!runtime) return;` guard.
+    vi.resetModules();
+    const fresh = await import('./customCommandHandler.js');
+    const freshDb = await import('../db.js');
+    vi.mocked(freshDb.getCustomCommandForTwitchChannel).mockResolvedValue({ output: 'Hi', is_multi_twitch: false } as any);
+
+    await expect(fresh.executeCustomCommandForTwitch('#chan', '!hey', 'viewer1')).resolves.toBeUndefined();
+
+    expect(freshDb.getCustomCommandForTwitchChannel).toHaveBeenCalledWith('#chan', '!hey');
+    expect(mockRuntime.send).not.toHaveBeenCalled();
+    expect(log.error).not.toHaveBeenCalled();
+    expect(log.info).not.toHaveBeenCalled();
+  });
+
   it('does nothing when the command is not registered for that channel', async () => {
     vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue(null);
     await executeCustomCommandForTwitch('#chan', '!missing', null);

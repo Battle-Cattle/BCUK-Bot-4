@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
-import { getPool } from './pool';
+import { getPool, withTransaction } from './pool';
+import { markRedemptionEffect } from './redemptionLedger';
 import { fromBit } from './utils';
 import { buildInClausePlaceholders } from './commandStringUtils';
 
@@ -196,12 +197,21 @@ export interface PricingUpdateFields {
    * `syncRewardPrice`, which is the only caller and decides which to pass.
    */
   lastRedemptionId: string | null;
+  /**
+   * When this sync applied a redemption's increment, that redemption's id: the reward update and
+   * the redemption's `pricing_applied` ledger flag are then written in one transaction, so a retry
+   * of the redemption can never find its pricing applied but unrecorded (and apply it twice).
+   * Omitted/null on a decay-only tick.
+   */
+  pricingAppliedRedemptionId?: string | null;
 }
 
 /**
  * Persist a recalculated demand value (and, if it changed, the last cost pushed to Twitch).
  * Shared by the redemption hook and the periodic decay scheduler — the only writer of
- * demand state, keeping it separate from config edits (see upsertPricingConfig).
+ * demand state, keeping it separate from config edits (see upsertPricingConfig). When
+ * `fields.pricingAppliedRedemptionId` is set, also marks that redemption's pricing as applied in
+ * the `redemption_handled` ledger, in the same transaction.
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
@@ -212,12 +222,19 @@ export async function recordPricingUpdate(
   twitchRewardId: string,
   fields: PricingUpdateFields,
 ): Promise<void> {
-  await getPool().execute(
-    `UPDATE reward_pricing
+  const sql = `UPDATE reward_pricing
      SET demand = ?, demand_updated_at = ?, last_pushed_cost = ?, last_redemption_id = ?
-     WHERE streamer_id = ? AND twitch_reward_id = ?`,
-    [fields.demand, fields.demandUpdatedAtMs, fields.lastPushedCost, fields.lastRedemptionId, streamerId, twitchRewardId],
-  );
+     WHERE streamer_id = ? AND twitch_reward_id = ?`;
+  const params = [fields.demand, fields.demandUpdatedAtMs, fields.lastPushedCost, fields.lastRedemptionId, streamerId, twitchRewardId];
+  const redemptionId = fields.pricingAppliedRedemptionId;
+  if (!redemptionId) {
+    await getPool().execute(sql, params);
+    return;
+  }
+  await withTransaction(async (conn) => {
+    await conn.execute(sql, params);
+    await markRedemptionEffect(redemptionId, streamerId, 'pricing_applied', conn);
+  });
 }
 
 /**

@@ -91,13 +91,13 @@ export async function runOfflineCheck(
  * @param liveStates Live-state map keyed by group-scoped state key.
  * @param loginToUserId Map of normalized login to Twitch user id.
  * @param login Twitch login that went offline.
- * @returns Resolves once the grace-period timers have been (re)scheduled.
+ * @returns Nothing — the grace-period timers are (re)scheduled synchronously.
  */
-export async function handleStreamOffline(
+export function handleStreamOffline(
   liveStates: Map<string, LiveState>,
   loginToUserId: Map<string, string>,
   login: string,
-): Promise<void> {
+): void {
   const key = login.toLowerCase();
   // Collect all state entries for this login (one per group they belong to)
   const matchingEntries = Array.from(liveStates.entries()).filter(([, s]) => s.login === key);

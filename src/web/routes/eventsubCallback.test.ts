@@ -19,9 +19,10 @@ vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
 }));
 
 const REDIRECT_URI = 'https://example.com/auth/twitch/eventsub/callback';
-const configMock = vi.hoisted(() => ({ redirectUri: '' as string | undefined }));
+// A getter keeps the redirect URI adjustable per test (e.g. unset to cover the misconfiguration path).
+const mockConfig = vi.hoisted(() => ({ redirectUri: undefined as string | undefined }));
 vi.mock('../../shared/config', () => ({
-  get TWITCH_EVENTSUB_REDIRECT_URI() { return configMock.redirectUri; },
+  get TWITCH_EVENTSUB_REDIRECT_URI() { return mockConfig.redirectUri; },
 }));
 
 vi.mock('../../twitch/eventsub/twitchEventSub', () => ({
@@ -34,7 +35,7 @@ vi.mock('../../twitch/eventsub/twitchEventSubSubscriptions', () => ({
 
 import express from 'express';
 import supertest from 'supertest';
-import router from './eventsubCallback';
+import router, { isExpectedTwitchAccount, validateOAuthCallback } from './eventsubCallback';
 import { getStreamerById, saveStreamerToken, initEventConfig, initAlertConfigs } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
@@ -69,7 +70,7 @@ function buildApp(sessionOverrides: Record<string, any> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  configMock.redirectUri = REDIRECT_URI;
+  mockConfig.redirectUri = REDIRECT_URI;
   vi.mocked(getStreamerById).mockResolvedValue(MOCK_STREAMER as any);
   vi.mocked(exchangeCode).mockResolvedValue({
     access_token: 'access',
@@ -119,6 +120,14 @@ describe('GET /twitch/eventsub/callback — state validation', () => {
       .get('/twitch/eventsub/callback?code=abc&state=valid-state-abc');
     expect(res.headers.location).toContain('error=eventsub_oauth_state_mismatch');
   });
+
+  it('redirects with config_failed and never exchanges the code when the redirect URI is not configured', async () => {
+    mockConfig.redirectUri = undefined;
+    const res = await supertest(buildApp())
+      .get('/twitch/eventsub/callback?code=abc&state=valid-state-abc');
+    expect(res.headers.location).toBe('/user/settings?error=eventsub_config_failed');
+    expect(exchangeCode).not.toHaveBeenCalled();
+  });
 });
 
 describe('GET /twitch/eventsub/callback — user binding', () => {
@@ -149,6 +158,60 @@ describe('GET /twitch/eventsub/callback — user binding', () => {
   });
 });
 
+describe('isExpectedTwitchAccount', () => {
+  it('matches case-insensitively', () => {
+    expect(isExpectedTwitchAccount('StreamerA', 'streamera')).toBe(true);
+  });
+
+  it('rejects a different login', () => {
+    expect(isExpectedTwitchAccount('streamera', 'someoneelse')).toBe(false);
+  });
+
+  it('rejects when the streamer has no Twitch name', () => {
+    expect(isExpectedTwitchAccount(null, 'streamera')).toBe(false);
+    expect(isExpectedTwitchAccount('', 'streamera')).toBe(false);
+  });
+});
+
+describe('validateOAuthCallback', () => {
+  const stored = { value: 'valid-state-abc', expiresAt: Date.now() + 60_000 };
+  const valid = { code: 'abc', state: 'valid-state-abc' };
+
+  it('returns the code, streamer id and redirect URI when every check passes', () => {
+    expect(validateOAuthCallback(valid, stored, 1)).toEqual({ ok: true, code: 'abc', streamerId: 1, redirectUri: REDIRECT_URI });
+  });
+
+  it('returns eventsub_oauth_denied when Twitch reports an error, even with otherwise valid values', () => {
+    expect(validateOAuthCallback({ ...valid, error: 'access_denied' }, stored, 1))
+      .toEqual({ ok: false, errorCode: 'eventsub_oauth_denied' });
+  });
+
+  it.each([
+    ['code', { state: 'valid-state-abc' }, stored, 1],
+    ['state', { code: 'abc' }, stored, 1],
+    ['stored OAuth state', valid, undefined, 1],
+    ['streamer id', valid, stored, undefined],
+  ] as const)('returns eventsub_oauth_state_mismatch when the %s is missing', (_label, query, storedOAuth, streamerId) => {
+    expect(validateOAuthCallback(query, storedOAuth, streamerId))
+      .toEqual({ ok: false, errorCode: 'eventsub_oauth_state_mismatch' });
+  });
+
+  it('returns eventsub_oauth_state_mismatch when the state does not match', () => {
+    expect(validateOAuthCallback({ ...valid, state: 'wrong-state' }, stored, 1))
+      .toEqual({ ok: false, errorCode: 'eventsub_oauth_state_mismatch' });
+  });
+
+  it('returns eventsub_oauth_state_mismatch when the stored state has expired', () => {
+    expect(validateOAuthCallback(valid, { ...stored, expiresAt: Date.now() - 1 }, 1))
+      .toEqual({ ok: false, errorCode: 'eventsub_oauth_state_mismatch' });
+  });
+
+  it('returns eventsub_config_failed when TWITCH_EVENTSUB_REDIRECT_URI is not configured', () => {
+    mockConfig.redirectUri = undefined;
+    expect(validateOAuthCallback(valid, stored, 1)).toEqual({ ok: false, errorCode: 'eventsub_config_failed' });
+  });
+});
+
 const CALLBACK_URL = '/twitch/eventsub/callback?code=abc&state=valid-state-abc';
 
 describe('GET /twitch/eventsub/callback — Twitch account verification', () => {
@@ -160,14 +223,7 @@ describe('GET /twitch/eventsub/callback — Twitch account verification', () => 
     expect(vi.mocked(reloadEventSubSubscriptions)).not.toHaveBeenCalled();
   });
 
-  it('rejects any account when the streamer record has no twitch_name', async () => {
-    vi.mocked(getStreamerById).mockResolvedValue({ ...MOCK_STREAMER, twitch_name: null } as any);
-    const res = await supertest(buildApp()).get(CALLBACK_URL);
-    expect(res.headers.location).toBe('/user/settings?error=eventsub_wrong_account&expected=');
-    expect(vi.mocked(saveStreamerToken)).not.toHaveBeenCalled();
-  });
-
-  it('matches the Twitch login case-insensitively', async () => {
+  it('accepts a differently-cased login and clears auth failures under the lowercased login', async () => {
     vi.mocked(getUserFromToken).mockResolvedValue({ login: 'TestStreamer', id: 'twitch123' } as any);
     const res = await supertest(buildApp()).get(CALLBACK_URL);
     expect(res.headers.location).toBe('/user/settings?success=twitch_connected');
@@ -201,19 +257,6 @@ describe('GET /twitch/eventsub/callback — token handling and errors', () => {
     vi.mocked(exchangeCode).mockResolvedValue({ access_token: 'access', refresh_token: 'refresh' } as any);
     await supertest(buildApp()).get(CALLBACK_URL);
     expect(vi.mocked(saveStreamerToken)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'twitch123', 'access', 'refresh', null);
-  });
-
-  it('rejects with state_mismatch when the code param is missing', async () => {
-    const res = await supertest(buildApp()).get('/twitch/eventsub/callback?state=valid-state-abc');
-    expect(res.headers.location).toBe('/user/settings?error=eventsub_oauth_state_mismatch');
-    expect(vi.mocked(exchangeCode)).not.toHaveBeenCalled();
-  });
-
-  it('redirects with eventsub_config_failed and does not exchange the code when the redirect URI is not configured', async () => {
-    configMock.redirectUri = undefined;
-    const res = await supertest(buildApp()).get(CALLBACK_URL);
-    expect(res.headers.location).toBe('/user/settings?error=eventsub_config_failed');
-    expect(vi.mocked(exchangeCode)).not.toHaveBeenCalled();
   });
 
   it('redirects with invalid_id when the streamer record no longer exists', async () => {

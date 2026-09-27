@@ -48,7 +48,8 @@ function buildSfxLookupCache(triggers: Awaited<ReturnType<typeof getAllSfxTrigge
   const sortedTriggers = [...triggers].sort((left, right) => {
     const leftId = BigInt(left.triggerId);
     const rightId = BigInt(right.triggerId);
-    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+    if (leftId === rightId) return 0;
+    return leftId < rightId ? -1 : 1;
   });
 
   for (const row of sortedTriggers) {

@@ -112,6 +112,24 @@ router.post('/settings/videos/upload', requireAuth, csrfProtection, uploadVideo,
 });
 
 /**
+ * Post-commit cleanup after a video's DB row is deleted: removes its file from disk. The row is
+ * already gone by this point, so a failed removal must not turn an already-successful delete into
+ * a `delete_failed` response — it's logged and just leaves a stale file on disk.
+ * @param streamerId - DB row ID of the owning streamer (the file's subfolder).
+ * @param filename - The deleted video's stored filename.
+ * @returns Resolves once removal has been attempted; never rejects.
+ */
+async function removeDeletedVideoFile(streamerId: number, filename: string): Promise<void> {
+  const filePath = safeResolve(OVERLAY_FOLDER, String(streamerId), filename);
+  if (!filePath) return;
+  try {
+    await fs.promises.rm(filePath, { force: true });
+  } catch (err) {
+    log.error(`Failed to remove orphaned overlay video ${filePath}:`, err);
+  }
+}
+
+/**
  * POST /overlay/settings/videos/:id/delete — deletes a video belonging to the
  * requesting streamer, removing both its DB row and file on disk.
  * @param req - Express request; reads the `id` route param.
@@ -129,19 +147,7 @@ router.post('/settings/videos/:id/delete', requireAuth, csrfProtection, async (r
     if (videoId === null) return res.redirect('/overlay/settings?error=invalid_id');
 
     const filename = await deleteVideo(videoId, streamer.id);
-    if (filename) {
-      const filePath = safeResolve(OVERLAY_FOLDER, String(streamer.id), filename);
-      // Post-commit cleanup: the DB row is already gone by this point, so a failed removal
-      // must not turn an already-successful delete into a `delete_failed` response — it just
-      // leaves a stale file on disk.
-      if (filePath) {
-        try {
-          await fs.promises.rm(filePath, { force: true });
-        } catch (err) {
-          log.error(`Failed to remove orphaned overlay video ${filePath}:`, err);
-        }
-      }
-    }
+    if (filename) await removeDeletedVideoFile(streamer.id, filename);
 
     res.redirect('/overlay/settings?success=video_deleted');
   } catch (err) {

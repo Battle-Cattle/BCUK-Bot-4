@@ -5,6 +5,7 @@ import {
   findUserByTwitchName,
   upsertUser,
   updateTwitchBotEnabled,
+  deleteUnlinkedUser,
   AccessLevelValue,
 } from '../../db';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchChannelMembership';
@@ -87,24 +88,39 @@ interface ChangeTwitchChannelParams {
   previousChannel: string | null;
   committedChannel: string;
   wasBotEnabled: boolean;
+  /** True when this edit created the user's row (there was no row before it). */
+  isNewUser: boolean;
+}
+
+/**
+ * Restores the user's DB row after a failed channel change. A row this edit created is deleted
+ * outright, so a failed add doesn't leave behind a user that never existed; if that delete is
+ * refused because something now references the row, falls back to the existing-user restore.
+ * An existing user's row gets its previous Twitch name and bot-enabled flag back.
+ * @param params The same before/after state passed to {@link handleChangeTwitchChannel}.
+ * @returns Resolves once the row is restored; rejects if a DB write fails.
+ */
+async function rollbackUserRow({
+  discordId, discordName, level, previousChannel, wasBotEnabled, isNewUser,
+}: ChangeTwitchChannelParams): Promise<void> {
+  if (isNewUser) {
+    if (await deleteUnlinkedUser(discordId)) return;
+    log.warn(`Add user rollback: new user ${discordId} is already referenced elsewhere; clearing Twitch fields instead of deleting`);
+  }
+  await upsertUser(discordId, discordName, level, previousChannel ?? null);
+  await updateTwitchBotEnabled(discordId, wasBotEnabled);
 }
 
 /**
  * Handles a user edit that changes their Twitch channel: joins the new channel (if it should
  * be joined) and parts the old one (if no other enabled user still needs it). On failure,
- * rolls the user's DB row and bot-enabled flag back to their pre-edit values, then reconciles
- * channel membership against that restored state.
+ * rolls the user's DB row back (see {@link rollbackUserRow}), then reconciles channel
+ * membership against that restored state.
  * @param params Before/after channel and user state needed to perform and, if necessary, roll back the change.
  * @returns Resolves once membership changes complete; rejects (after best-effort rollback) if either step fails.
  */
-async function handleChangeTwitchChannel({
-  discordId,
-  discordName,
-  level,
-  previousChannel,
-  committedChannel,
-  wasBotEnabled,
-}: ChangeTwitchChannelParams): Promise<void> {
+async function handleChangeTwitchChannel(params: ChangeTwitchChannelParams): Promise<void> {
+  const { previousChannel, committedChannel } = params;
   try {
     const enabledChannels = await getTwitchEnabledChannels();
     const shouldJoinCommittedChannel = enabledChannels.includes(committedChannel);
@@ -120,8 +136,7 @@ async function handleChangeTwitchChannel({
     }
   } catch (err) {
     try {
-      await upsertUser(discordId, discordName, level, previousChannel ?? null);
-      await updateTwitchBotEnabled(discordId, wasBotEnabled);
+      await rollbackUserRow(params);
 
       const rollbackEnabledChannels = await getTwitchEnabledChannels();
       const shouldRejoinPreviousChannel = !!previousChannel
@@ -139,6 +154,28 @@ async function handleChangeTwitchChannel({
       log.error('Add user DB rollback failed:', rollbackErr);
     }
     throw err;
+  }
+}
+
+/**
+ * Returns a user's normalized Twitch channel name.
+ * @param user The user row, or null/undefined if there is none.
+ * @returns The normalized channel, or null if the user is missing or has no (valid) Twitch name.
+ */
+function channelOf(user: { twitch_name: string | null } | null | undefined): string | null {
+  return user?.twitch_name ? normalizeTwitchChannelName(user.twitch_name) : null;
+}
+
+/**
+ * Ensures no other user already has `twitchName` assigned.
+ * @param twitchName Normalized Twitch channel name being assigned.
+ * @param discordId Discord snowflake of the user it's being assigned to (excluded from the check).
+ * @returns Resolves if the name is free.
+ * @throws {@link DuplicateTwitchNameError} if another user already has it.
+ */
+async function assertTwitchNameAvailable(twitchName: string, discordId: string): Promise<void> {
+  if (await findUserByTwitchName(twitchName, discordId)) {
+    throw new DuplicateTwitchNameError(twitchName);
   }
 }
 
@@ -166,37 +203,35 @@ export async function addOrUpdateUserMutation({
   shouldClearTwitchName,
 }: AddOrUpdateParams): Promise<void> {
   const existingUser = await findUser(discordId);
-  const previousChannel = existingUser?.twitch_name
-    ? normalizeTwitchChannelName(existingUser.twitch_name)
-    : null;
+  const previousChannel = channelOf(existingUser);
   const nextTwitchName = shouldClearTwitchName
     ? null
     : normalizedTwitchName ?? undefined;
 
   if (normalizedTwitchName) {
-    const conflictingUser = await findUserByTwitchName(normalizedTwitchName, discordId);
-    if (conflictingUser) {
-      throw new DuplicateTwitchNameError(normalizedTwitchName);
-    }
+    await assertTwitchNameAvailable(normalizedTwitchName, discordId);
   }
 
   await upsertUser(discordId, discordName, level, nextTwitchName);
 
-  const committedUser = await findUser(discordId);
-  const committedChannel = committedUser?.twitch_name
-    ? normalizeTwitchChannelName(committedUser.twitch_name)
-    : null;
+  const committedChannel = channelOf(await findUser(discordId));
+  const wasBotEnabled = existingUser?.is_twitch_bot_enabled ?? false;
 
-  if ((existingUser && !existingUser.is_twitch_bot_enabled) || previousChannel === committedChannel) {
+  // A brand-new user (no existing row) still goes through channel reconciliation below;
+  // only an existing user with the bot explicitly disabled is skipped.
+  const botDisabledForExistingUser = !!existingUser && !wasBotEnabled;
+  if (botDisabledForExistingUser || previousChannel === committedChannel) {
     return;
   }
 
   if (!committedChannel) {
-    await handleClearTwitchChannel(discordId, discordName, level, previousChannel, existingUser?.is_twitch_bot_enabled ?? false);
+    await handleClearTwitchChannel(discordId, discordName, level, previousChannel, wasBotEnabled);
     return;
   }
 
-  await handleChangeTwitchChannel({ discordId, discordName, level, previousChannel, committedChannel, wasBotEnabled: existingUser?.is_twitch_bot_enabled ?? false });
+  await handleChangeTwitchChannel({
+    discordId, discordName, level, previousChannel, committedChannel, wasBotEnabled, isNewUser: !existingUser,
+  });
 }
 
 /**
