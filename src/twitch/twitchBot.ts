@@ -254,11 +254,29 @@ function onDisconnected(manually: boolean, reason?: Error): void {
 const BOT_AUTH_CONNECT_URL = `${PUBLIC_URL}/admin/bot-auth`;
 
 /**
+ * Whether a `RefreshingAuthProvider` refresh-failure error indicates the refresh token itself
+ * is invalid/revoked (Twitch's token endpoint returns 400/401 for this — same threshold as
+ * `TwitchAuthError` in `twitchApiEventSub.ts`), as opposed to a transient failure (network
+ * error, timeout, 5xx) that a later retry could still recover from. Duck-typed on `statusCode`
+ * rather than an `instanceof` check against `@twurple/api-call`'s `HttpStatusCodeError` — that
+ * package is only a transitive dependency of `@twurple/auth`, not one we declare directly.
+ * @param error - The error `onRefreshFailure` was called with.
+ * @returns True if this looks like a genuinely invalid/revoked refresh token.
+ */
+function isInvalidRefreshTokenError(error: Error): boolean {
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  return statusCode === 400 || statusCode === 401;
+}
+
+/**
  * Builds a `RefreshingAuthProvider` seeded with the bot's own stored chat token, wired to
- * persist a refreshed token back to the DB (`onRefresh`) and to clear it and alert the owner
- * if a refresh ever fails (`onRefreshFailure` — almost always means the refresh token was
- * revoked, since Twurple's own refresh call never throws our `TwitchAuthError`). Replaces the
- * old `StaticAuthProvider` seeded from the static `TWITCH_OAUTH_TOKEN` env var (see #550).
+ * persist a refreshed token back to the DB (`onRefresh`) and, on a refresh failure that looks
+ * like a genuinely invalid/revoked refresh token (see {@link isInvalidRefreshTokenError}), to
+ * clear it and alert the owner. A transient failure (network error, timeout, 5xx) is logged but
+ * leaves the stored token in place — Twurple never retries a failed refresh on its own for the
+ * life of the provider, but a later process restart rebuilds the provider from the still-valid
+ * stored token and can succeed. Replaces the old `StaticAuthProvider` seeded from the static
+ * `TWITCH_OAUTH_TOKEN` env var (see #550).
  * @param stored - The bot's decrypted chat token, as loaded from the DB.
  * @returns A `RefreshingAuthProvider` with the bot's user already added under the `chat` intent.
  */
@@ -271,6 +289,10 @@ async function buildBotAuthProvider(stored: NonNullable<Awaited<ReturnType<typeo
   });
   authProvider.onRefreshFailure(async (userId, error) => {
     log.error(`Failed to refresh chat token for ${userId}: ${error.message}`);
+    if (!isInvalidRefreshTokenError(error)) {
+      log.warn(`Refresh failure for ${userId} does not look like a revoked/invalid token — leaving the stored token in place for a future retry.`);
+      return;
+    }
     await clearBotChatToken();
     void sendOwnerAlert(`🔴 Twitch chat bot's token was revoked/expired and could not refresh. Reconnect it at ${BOT_AUTH_CONNECT_URL}`);
   });

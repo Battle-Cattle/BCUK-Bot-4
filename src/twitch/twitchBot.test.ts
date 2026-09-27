@@ -902,14 +902,47 @@ describe('startTwitchBot', () => {
     expect(vi.mocked(saveBotChatToken)).toHaveBeenCalledWith('bot-uid', 'new-access', 'new-refresh', expect.any(Number));
   });
 
-  it('clears the stored token and alerts the owner when a refresh fails', async () => {
+  it('clears the stored token and alerts the owner when the refresh token is invalid/revoked (401)', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     await startTwitchBot();
 
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', new Error('invalid_grant'));
+    const error = Object.assign(new Error('invalid_grant'), { statusCode: 401 });
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
 
     expect(vi.mocked(clearBotChatToken)).toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
+  });
+
+  it('clears the stored token and alerts the owner when the refresh token is invalid/revoked (400)', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+
+    const error = Object.assign(new Error('invalid refresh token'), { statusCode: 400 });
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+
+    expect(vi.mocked(clearBotChatToken)).toHaveBeenCalled();
+    expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
+  });
+
+  it('leaves the stored token in place and does not alert on a transient refresh failure (network error, no statusCode)', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', new Error('fetch failed'));
+
+    expect(vi.mocked(clearBotChatToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
+  });
+
+  it('leaves the stored token in place and does not alert on a transient refresh failure (5xx)', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+
+    const error = Object.assign(new Error('Encountered HTTP status code 503'), { statusCode: 503 });
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+
+    expect(vi.mocked(clearBotChatToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
 
   it('does not become connected if authentication succeeds after the connect timeout', async () => {

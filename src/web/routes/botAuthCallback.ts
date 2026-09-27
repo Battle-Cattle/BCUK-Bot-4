@@ -2,6 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { saveBotChatToken } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { startTwitchBot, stopTwitchBot } from '../../twitch/twitchBot';
 import { TWITCH_BOT_OAUTH_REDIRECT_URI } from '../../shared/config';
 import { logAndRedirectError } from './errorHandling';
 import { oauthStateMatches } from '../csrf';
@@ -57,8 +58,16 @@ router.get('/twitch/bot/callback', async (req, res) => {
     if (!twitchUser) return res.redirect('/admin/bot-auth?error=bot_oauth_token_invalid');
 
     const expiryMs = tokens.expires_in != null ? Date.now() + tokens.expires_in * 1000 - 60_000 : null;
+    // Stop any already-running chat client first — its RefreshingAuthProvider's onRefresh
+    // handler would otherwise still be able to write a refreshed *old* token back over the row
+    // we're about to save. stopTwitchBot() is a no-op if the bot never started (e.g. this is the
+    // very first connect), so this covers both the initial-connect and reconnect cases.
+    await stopTwitchBot();
     await saveBotChatToken(twitchUser.id, tokens.access_token, tokens.refresh_token, expiryMs);
     log.info(`Bot chat OAuth connected as ${twitchUser.login}`);
+    // Bring chat online immediately with the freshly saved token, rather than requiring a
+    // process restart to pick it up.
+    void startTwitchBot().catch((err) => log.error('Failed to start Twitch chat after connecting:', err));
     res.redirect('/admin/bot-auth?success=bot_connected');
   } catch (err) {
     logAndRedirectError({
