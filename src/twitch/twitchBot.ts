@@ -280,7 +280,7 @@ function isInvalidRefreshTokenError(error: Error): boolean {
  * @param stored - The bot's decrypted chat token, as loaded from the DB.
  * @returns A `RefreshingAuthProvider` with the bot's user already added under the `chat` intent.
  */
-async function buildBotAuthProvider(stored: NonNullable<Awaited<ReturnType<typeof getBotChatToken>>>): Promise<RefreshingAuthProvider> {
+function buildBotAuthProvider(stored: NonNullable<Awaited<ReturnType<typeof getBotChatToken>>>): RefreshingAuthProvider {
   const authProvider = new RefreshingAuthProvider({ clientId: TWITCH_CLIENT_ID, clientSecret: TWITCH_CLIENT_SECRET });
 
   authProvider.onRefresh(async (userId, newToken) => {
@@ -358,7 +358,7 @@ export async function startTwitchBot(): Promise<void> {
     return;
   }
 
-  const authProvider = await buildBotAuthProvider(stored);
+  const authProvider = buildBotAuthProvider(stored);
   const newClient = new ChatClient({
     authProvider,
     channels: [],
