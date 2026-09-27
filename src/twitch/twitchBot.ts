@@ -266,6 +266,17 @@ const BOT_AUTH_CONNECT_URL = `${PUBLIC_URL}/admin/bot-auth`;
  * @param error - The error `onRefreshFailure` was called with.
  * @returns True if this looks like a genuinely invalid/revoked refresh token.
  */
+/**
+ * Bumped by {@link stopTwitchBot} and captured by {@link buildBotAuthProvider} at construction
+ * time, so a `RefreshingAuthProvider` from a stopped/superseded session can tell its own
+ * `onRefresh`/`onRefreshFailure` callbacks apart from the current one. `stopTwitchBot()` waits
+ * for the client to disconnect, but that doesn't cancel a refresh already in flight on the old
+ * provider — without this guard, a refresh completing after a reconnect's `saveBotChatToken()`
+ * call could silently overwrite the freshly connected token with the superseded one (or clear it
+ * on a stale failure). See the discussion on PR #666.
+ */
+let authProviderGeneration = 0;
+
 function isInvalidRefreshTokenError(error: Error): boolean {
   const statusCode = (error as { statusCode?: unknown }).statusCode;
   if (statusCode !== 400 && statusCode !== 401) return false;
@@ -289,19 +300,30 @@ function isInvalidRefreshTokenError(error: Error): boolean {
  * leaves the stored token in place — Twurple never retries a failed refresh on its own for the
  * life of the provider, but a later process restart rebuilds the provider from the still-valid
  * stored token and can succeed. Replaces the old `StaticAuthProvider` seeded from the static
- * `TWITCH_OAUTH_TOKEN` env var (see #550).
+ * `TWITCH_OAUTH_TOKEN` env var (see #550). Guards its `onRefresh`/`onRefreshFailure` callbacks
+ * against {@link authProviderGeneration} having moved on (i.e. `stopTwitchBot()` was called for
+ * a reconnect) since this provider was built — see that field's doc for why.
  * @param stored - The bot's decrypted chat token, as loaded from the DB.
  * @returns A `RefreshingAuthProvider` with the bot's user already added under the `chat` intent.
  */
 function buildBotAuthProvider(stored: NonNullable<Awaited<ReturnType<typeof getBotChatToken>>>): RefreshingAuthProvider {
+  const generation = authProviderGeneration;
   const authProvider = new RefreshingAuthProvider({ clientId: TWITCH_CLIENT_ID, clientSecret: TWITCH_CLIENT_SECRET });
 
   authProvider.onRefresh(async (userId, newToken) => {
+    if (generation !== authProviderGeneration) {
+      log.warn(`Ignoring a refreshed token from a superseded chat auth provider for ${userId}.`);
+      return;
+    }
     const expiryMs = newToken.expiresIn != null ? Date.now() + newToken.expiresIn * 1000 - 60_000 : null;
     await saveBotChatToken(userId, newToken.accessToken, newToken.refreshToken!, expiryMs);
   });
   authProvider.onRefreshFailure(async (userId, error) => {
     log.error(`Failed to refresh chat token for ${userId}: ${error.message}`);
+    if (generation !== authProviderGeneration) {
+      log.warn(`Ignoring a refresh failure from a superseded chat auth provider for ${userId}.`);
+      return;
+    }
     if (!isInvalidRefreshTokenError(error)) {
       log.warn(`Refresh failure for ${userId} does not look like a revoked/invalid token — leaving the stored token in place for a future retry.`);
       return;
@@ -527,6 +549,9 @@ function quitAndWait(c: ChatClient): { promise: Promise<void>; unbind: () => voi
  * @returns Resolves once shutdown is complete.
  */
 export async function stopTwitchBot(): Promise<void> {
+  // Invalidate any in-flight onRefresh/onRefreshFailure callback from the provider being
+  // stopped, before anything else — see authProviderGeneration's doc.
+  authProviderGeneration++;
   connected = false;
   setConnected(false);
   recordTwitchChatConnected(false);
