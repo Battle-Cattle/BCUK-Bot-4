@@ -254,17 +254,6 @@ function onDisconnected(manually: boolean, reason?: Error): void {
 const BOT_AUTH_CONNECT_URL = `${PUBLIC_URL}/admin/bot-auth`;
 
 /**
- * Bumped by {@link stopTwitchBot} and captured by {@link buildBotAuthProvider} at construction
- * time, so a `RefreshingAuthProvider` from a stopped/superseded session can tell its own
- * `onRefresh`/`onRefreshFailure` callbacks apart from the current one. `stopTwitchBot()` waits
- * for the client to disconnect, but that doesn't cancel a refresh already in flight on the old
- * provider — without this guard, a refresh completing after a reconnect's `saveBotChatToken()`
- * call could silently overwrite the freshly connected token with the superseded one (or clear it
- * on a stale failure). See the discussion on PR #666.
- */
-let authProviderGeneration = 0;
-
-/**
  * Whether a `RefreshingAuthProvider` refresh-failure error indicates the refresh token itself
  * is invalid/revoked, as opposed to a transient failure (network error, timeout, 5xx) or some
  * other client-configuration/request error (including a missing/malformed refresh token, which
@@ -304,36 +293,28 @@ function isInvalidRefreshTokenError(error: Error): boolean {
  * leaves the stored token in place — Twurple never retries a failed refresh on its own for the
  * life of the provider, but a later process restart rebuilds the provider from the still-valid
  * stored token and can succeed. Replaces the old `StaticAuthProvider` seeded from the static
- * `TWITCH_OAUTH_TOKEN` env var (see #550). Guards its `onRefresh`/`onRefreshFailure` callbacks
- * two ways against a reconnect superseding this provider while one of them is in flight: cheaply,
- * in-process, via {@link authProviderGeneration} (skips the DB call entirely in the common case);
- * and, since that alone can't order two independent already-in-flight DB writes against each
- * other, via a database-level compare-and-swap (`saveBotChatTokenIfOwnedBy`/
- * `clearBotChatTokenIfOwnedBy`, keyed to the `userId` this provider was built for) so a write that
- * started before a reconnect but completes after it is dropped instead of clobbering the new
- * connection's token.
+ * `TWITCH_OAUTH_TOKEN` env var (see #550). Its `onRefresh`/`onRefreshFailure` callbacks are
+ * guarded against a reconnect superseding this provider while one of them is in flight via a
+ * database-level compare-and-swap (`saveBotChatTokenIfOwnedBy`/`clearBotChatTokenIfOwnedBy`,
+ * keyed to the `userId` this provider was built for): a write that started before a reconnect to
+ * a *different* account but completes after it finds the row already reassigned and is dropped
+ * as a no-op instead of clobbering the new connection's token. (A reconnect to the *same* account
+ * racing its own in-flight refresh isn't covered — accepted as an out-of-scope residual: it's a
+ * narrow timing window on a single-operator admin action, and self-heals on the next reconnect.
+ * See the discussion on PR #666.)
  * @param stored - The bot's decrypted chat token, as loaded from the DB.
  * @returns A `RefreshingAuthProvider` with the bot's user already added under the `chat` intent.
  */
 function buildBotAuthProvider(stored: NonNullable<Awaited<ReturnType<typeof getBotChatToken>>>): RefreshingAuthProvider {
-  const generation = authProviderGeneration;
   const authProvider = new RefreshingAuthProvider({ clientId: TWITCH_CLIENT_ID, clientSecret: TWITCH_CLIENT_SECRET });
 
   authProvider.onRefresh(async (userId, newToken) => {
-    if (generation !== authProviderGeneration) {
-      log.warn(`Ignoring a refreshed token from a superseded chat auth provider for ${userId}.`);
-      return;
-    }
     const expiryMs = newToken.expiresIn != null ? Date.now() + newToken.expiresIn * 1000 - 60_000 : null;
     const saved = await saveBotChatTokenIfOwnedBy(userId, newToken.accessToken, newToken.refreshToken!, expiryMs);
     if (!saved) log.warn(`Dropped a refreshed token for ${userId} — a reconnect replaced the stored account first.`);
   });
   authProvider.onRefreshFailure(async (userId, error) => {
     log.error(`Failed to refresh chat token for ${userId}: ${error.message}`);
-    if (generation !== authProviderGeneration) {
-      log.warn(`Ignoring a refresh failure from a superseded chat auth provider for ${userId}.`);
-      return;
-    }
     if (!isInvalidRefreshTokenError(error)) {
       log.warn(`Refresh failure for ${userId} does not look like a revoked/invalid token — leaving the stored token in place for a future retry.`);
       return;
@@ -563,9 +544,6 @@ function quitAndWait(c: ChatClient): { promise: Promise<void>; unbind: () => voi
  * @returns Resolves once shutdown is complete.
  */
 export async function stopTwitchBot(): Promise<void> {
-  // Invalidate any in-flight onRefresh/onRefreshFailure callback from the provider being
-  // stopped, before anything else — see authProviderGeneration's doc.
-  authProviderGeneration++;
   connected = false;
   setConnected(false);
   recordTwitchChatConnected(false);

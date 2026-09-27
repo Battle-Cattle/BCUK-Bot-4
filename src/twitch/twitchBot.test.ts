@@ -724,39 +724,12 @@ describe('startTwitchBot', () => {
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
 
-  it('ignores an onRefresh firing after stopTwitchBot() (reconnect race with a superseded provider)', async () => {
-    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
-    await startTwitchBot();
-    const staleRefreshHandler = authProviderHandlers.refreshHandlers[0];
-
-    await stopTwitchBot();
-    vi.mocked(saveBotChatTokenIfOwnedBy).mockClear();
-
-    await staleRefreshHandler('bot-uid', {
-      accessToken: 'stale-access', refreshToken: 'stale-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
-    });
-
-    expect(vi.mocked(saveBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
-  });
-
-  it('ignores an onRefreshFailure firing after stopTwitchBot() (reconnect race with a superseded provider)', async () => {
-    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
-    await startTwitchBot();
-    const staleFailureHandler = authProviderHandlers.refreshFailureHandlers[0];
-
-    await stopTwitchBot();
-    vi.mocked(clearBotChatTokenIfOwnedBy).mockClear();
-    vi.mocked(sendOwnerAlert).mockClear();
-
-    const error = Object.assign(new Error('Encountered HTTP status code 401'), {
-      statusCode: 401,
-      body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
-    });
-    await staleFailureHandler('bot-uid', error);
-
-    expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
-    expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
-  });
+  // A stale callback firing after stopTwitchBot() (reconnect to a *different* account) is covered
+  // by the "dropped at the DB level" tests below — saveBotChatTokenIfOwnedBy/
+  // clearBotChatTokenIfOwnedBy are the actual safety net (a compare-and-swap enforced by the
+  // database), not an in-process check here, since that alone can't order two independent
+  // already-in-flight DB writes against each other. See buildBotAuthProvider's doc for the
+  // accepted residual (a reconnect to the *same* account racing its own in-flight refresh).
 
   it('clears the stored token and alerts the owner when the response body names an invalid refresh token (401)', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
