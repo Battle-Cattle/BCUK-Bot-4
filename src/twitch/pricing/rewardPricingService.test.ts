@@ -12,6 +12,7 @@ vi.mock('../../db', () => ({
   getPricingSettingsForStreamer: vi.fn(),
   getStreamerById: vi.fn(),
   getRedemptionProgress: vi.fn(),
+  markRedemptionEffect: vi.fn(),
 }));
 
 vi.mock('../eventsub/twitchApiEventSub', () => ({ getValidToken: vi.fn() }));
@@ -25,7 +26,7 @@ vi.mock('../twitchApi', () => {
 
 import {
   getPricingForReward, recordPricingUpdate, recordPricingHistory, markPricingUnsupported, deletePricingConfig,
-  getPricingSettingsForStreamer, getStreamerById, getRedemptionProgress,
+  getPricingSettingsForStreamer, getStreamerById, getRedemptionProgress, markRedemptionEffect,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
@@ -61,6 +62,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getPricingSettingsForStreamer).mockResolvedValue(settings);
   vi.mocked(getRedemptionProgress).mockReset().mockResolvedValue(null);
+  vi.mocked(markRedemptionEffect).mockReset().mockResolvedValue(undefined);
   vi.mocked(getStreamerById).mockResolvedValue(streamer);
   vi.mocked(getValidToken).mockResolvedValue('user-token');
   vi.mocked(recordPricingHistory).mockResolvedValue(undefined);
@@ -263,6 +265,31 @@ describe('redemption idempotency', () => {
     expect(getRedemptionProgress).toHaveBeenCalledWith('redemption-A');
     expect(updateRewardCost).not.toHaveBeenCalled();
     expect(recordPricingUpdate).not.toHaveBeenCalled();
+  });
+
+  it('backfills the ledger flag when only last_redemption_id recognises the redemption, so a later retry after a newer redemption stays a no-op', async () => {
+    // A was priced before the ledger existed (or its ledger write was lost): only last_redemption_id knows.
+    let currentRow: any = makeRow({ demand: 0.5, last_pushed_cost: null, last_redemption_id: 'redemption-A' });
+    const pricedInLedger = new Set<string>();
+    vi.mocked(getPricingForReward).mockImplementation(async () => currentRow);
+    vi.mocked(markRedemptionEffect).mockImplementation(async (id) => { pricedInLedger.add(id); });
+    vi.mocked(getRedemptionProgress).mockImplementation(async (id) => (
+      pricedInLedger.has(id) ? { dashboardRecorded: true, pricingApplied: true, handled: false } : null
+    ));
+    vi.mocked(recordPricingUpdate).mockImplementation(async (_s, _r, fields) => {
+      if (fields.pricingAppliedRedemptionId) pricedInLedger.add(fields.pricingAppliedRedemptionId);
+      currentRow = { ...currentRow, last_redemption_id: fields.lastRedemptionId };
+    });
+
+    await applyRedemptionPricing(1, 'rwd1', 'redemption-A'); // retry of A: skipped, flag backfilled
+    expect(markRedemptionEffect).toHaveBeenCalledWith('redemption-A', 1, 'pricing_applied');
+    expect(recordPricingUpdate).not.toHaveBeenCalled();
+
+    await applyRedemptionPricing(1, 'rwd1', 'redemption-B'); // B moves last_redemption_id
+    expect(recordPricingUpdate).toHaveBeenCalledTimes(1);
+
+    await applyRedemptionPricing(1, 'rwd1', 'redemption-A'); // another retry of A: still a no-op
+    expect(recordPricingUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('prices a redemption the ledger has no pricing record for', async () => {

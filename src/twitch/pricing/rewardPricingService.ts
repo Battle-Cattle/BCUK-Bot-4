@@ -1,7 +1,7 @@
 import { createMutationQueue } from '../../shared/mutationQueue';
 import {
   getPricingForReward, recordPricingUpdate, recordPricingHistory, markPricingUnsupported, deletePricingConfig,
-  getPricingSettingsForStreamer, getStreamerById, getRedemptionProgress,
+  getPricingSettingsForStreamer, getStreamerById, getRedemptionProgress, markRedemptionEffect,
   type StreamerPricingSettings, type DbStreamerEventSub, type RewardPricingRow,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
@@ -164,7 +164,7 @@ async function syncRewardPrice(
 
   // Idempotency guard: a retried redemption (see handleRedemption's dedup pending/handled
   // lifecycle) must not double-apply its increment if this reward already processed it.
-  if (applyIncrement && redemptionId && await isRedemptionAlreadyPriced(row.last_redemption_id, redemptionId)) return;
+  if (applyIncrement && redemptionId && await isRedemptionAlreadyPriced(streamerId, row.last_redemption_id, redemptionId)) return;
 
   const settings = settingsHint ?? await getPricingSettingsForStreamer(streamerId);
   const now = Date.now();
@@ -201,14 +201,21 @@ async function syncRewardPrice(
  * Whether a redemption's pricing increment has already been applied. `last_redemption_id` only
  * remembers the reward's latest redemption, so a retry of an older one after a newer redemption was
  * priced would slip past it; the `redemption_handled` ledger's `pricing_applied` flag (written in
- * the same transaction as the reward update, see `recordPricingUpdate`) covers that case. Runs
- * inside the reward's pricing queue, so it can't race another redemption of the same reward.
+ * the same transaction as the reward update, see `recordPricingUpdate`) covers that case. When only
+ * `last_redemption_id` recognises the redemption (priced before the ledger existed, or its ledger
+ * write was lost), the flag is backfilled here, so a later retry still recognises it after a newer
+ * redemption replaces `last_redemption_id`. Runs inside the reward's pricing queue, so it can't race
+ * another redemption of the same reward.
+ * @param streamerId - DB row ID of the owning streamer, for the backfilled ledger row.
  * @param lastRedemptionId - The reward's `last_redemption_id`.
  * @param redemptionId - The redemption being priced.
  * @returns True if the increment must not be applied again.
  */
-async function isRedemptionAlreadyPriced(lastRedemptionId: string | null, redemptionId: string): Promise<boolean> {
-  if (lastRedemptionId === redemptionId) return true;
+async function isRedemptionAlreadyPriced(streamerId: number, lastRedemptionId: string | null, redemptionId: string): Promise<boolean> {
+  if (lastRedemptionId === redemptionId) {
+    await markRedemptionEffect(redemptionId, streamerId, 'pricing_applied');
+    return true;
+  }
   return (await getRedemptionProgress(redemptionId))?.pricingApplied === true;
 }
 
