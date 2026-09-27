@@ -93,3 +93,55 @@ export async function clearBotChatToken(): Promise<void> {
      WHERE id=1`,
   );
 }
+
+/**
+ * Encrypt and persist a refreshed token, but only if the singleton row still belongs to
+ * `expectedTwitchUserId` — a conditional (compare-and-swap) write, enforced atomically by the
+ * database rather than any in-process check. `twitchBot.ts`'s `RefreshingAuthProvider.onRefresh`
+ * handler is the only caller: an in-flight refresh from a since-superseded provider (e.g. the
+ * owner reconnected to a *different* account while this refresh was still in flight — see the
+ * discussion on PR #666) has its write silently dropped instead of overwriting the newly
+ * connected account's token, because by the time it reaches the database the row's
+ * `twitch_user_id` no longer matches the account this refresh was for.
+ * @param expectedTwitchUserId - The Twitch user ID this refresh was performed for; the write is
+ *   dropped if the stored row belongs to a different account by the time this executes.
+ * @param accessToken - Refreshed OAuth access token (encrypted before storage).
+ * @param refreshToken - Refreshed OAuth refresh token (encrypted before storage).
+ * @param expiryMs - Token expiry as Unix epoch milliseconds, or null if unknown.
+ * @returns Whether the row was actually updated (false means a reconnect superseded it first).
+ */
+export async function saveBotChatTokenIfOwnedBy(
+  expectedTwitchUserId: string,
+  accessToken: string,
+  refreshToken: string,
+  expiryMs: number | null,
+): Promise<boolean> {
+  if (!EVENTSUB_TOKEN_SECRET) throw new Error('EVENTSUB_TOKEN_SECRET is not configured — refusing to persist plaintext OAuth tokens');
+  const storedAccess = encryptToken(accessToken, EVENTSUB_TOKEN_SECRET);
+  const storedRefresh = encryptToken(refreshToken, EVENTSUB_TOKEN_SECRET);
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    `UPDATE twitch_bot_chat_token
+     SET access_token=?, refresh_token=?, token_expiry=?
+     WHERE id=1 AND twitch_user_id=?`,
+    [storedAccess, storedRefresh, expiryMs, expectedTwitchUserId],
+  );
+  return result.affectedRows > 0;
+}
+
+/**
+ * Null out the bot's own Twitch chat OAuth token, but only if the singleton row still belongs to
+ * `expectedTwitchUserId` — the `onRefreshFailure` counterpart to
+ * {@link saveBotChatTokenIfOwnedBy}, for the same reason: a stale failure from a superseded
+ * provider must not clear a different account's freshly connected token.
+ * @param expectedTwitchUserId - The Twitch user ID this refresh failure was for.
+ * @returns Whether a row was actually cleared (false means a reconnect superseded it first).
+ */
+export async function clearBotChatTokenIfOwnedBy(expectedTwitchUserId: string): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    `UPDATE twitch_bot_chat_token
+     SET twitch_user_id=NULL, access_token=NULL, refresh_token=NULL, token_expiry=NULL
+     WHERE id=1 AND twitch_user_id=?`,
+    [expectedTwitchUserId],
+  );
+  return result.affectedRows > 0;
+}

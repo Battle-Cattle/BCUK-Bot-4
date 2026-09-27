@@ -104,8 +104,8 @@ vi.mock('../db', async () => {
     getAllTwitchLinkedUsers: vi.fn(),
     findUserByTwitchName: vi.fn(),
     getBotChatToken: vi.fn(),
-    saveBotChatToken: vi.fn(),
-    clearBotChatToken: vi.fn(),
+    saveBotChatTokenIfOwnedBy: vi.fn(),
+    clearBotChatTokenIfOwnedBy: vi.fn(),
     createManagedLookupCache,
     DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
     DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
@@ -176,7 +176,7 @@ import {
   __setConfirmedJoinedChannelsForTests,
 } from './twitchChannelMembership';
 import * as twitchChannelMembership from './twitchChannelMembership';
-import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName, getBotChatToken, saveBotChatToken, clearBotChatToken } from '../db';
+import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName, getBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy } from '../db';
 import { sendOwnerAlert } from '../discord/ownerAlerts';
 import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
 import { getUsers } from './twitchApi';
@@ -309,6 +309,8 @@ beforeEach(() => {
   __resetTwitchSendQueueForTests();
   __resetTwitchPrivilegedChannelsForTests();
   vi.mocked(getBotChatToken).mockResolvedValue(STORED_BOT_TOKEN as any);
+  vi.mocked(saveBotChatTokenIfOwnedBy).mockResolvedValue(true);
+  vi.mocked(clearBotChatTokenIfOwnedBy).mockResolvedValue(true);
 });
 
 afterEach(async () => {
@@ -692,7 +694,34 @@ describe('startTwitchBot', () => {
       accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
     });
 
-    expect(vi.mocked(saveBotChatToken)).toHaveBeenCalledWith('bot-uid', 'new-access', 'new-refresh', expect.any(Number));
+    expect(vi.mocked(saveBotChatTokenIfOwnedBy)).toHaveBeenCalledWith('bot-uid', 'new-access', 'new-refresh', expect.any(Number));
+  });
+
+  it('logs but does not throw when a refreshed-token write is dropped at the DB level (a reconnect replaced the account first)', async () => {
+    // Simulates a refresh that started before a reconnect and completed after it: the generation
+    // check still passes (no stopTwitchBot() call in this test), but the conditional DB write
+    // itself reports no row updated because the account changed underneath it.
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    vi.mocked(saveBotChatTokenIfOwnedBy).mockResolvedValue(false);
+    await startTwitchBot();
+
+    await expect(authProviderHandlers.refreshHandlers[0]('bot-uid', {
+      accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
+    })).resolves.toBeUndefined();
+  });
+
+  it('does not alert the owner when a token-clear write is dropped at the DB level (a reconnect replaced the account first)', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    vi.mocked(clearBotChatTokenIfOwnedBy).mockResolvedValue(false);
+    await startTwitchBot();
+
+    const error = Object.assign(new Error('Encountered HTTP status code 401'), {
+      statusCode: 401,
+      body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
+    });
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+
+    expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
 
   it('ignores an onRefresh firing after stopTwitchBot() (reconnect race with a superseded provider)', async () => {
@@ -701,13 +730,13 @@ describe('startTwitchBot', () => {
     const staleRefreshHandler = authProviderHandlers.refreshHandlers[0];
 
     await stopTwitchBot();
-    vi.mocked(saveBotChatToken).mockClear();
+    vi.mocked(saveBotChatTokenIfOwnedBy).mockClear();
 
     await staleRefreshHandler('bot-uid', {
       accessToken: 'stale-access', refreshToken: 'stale-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
     });
 
-    expect(vi.mocked(saveBotChatToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(saveBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
   });
 
   it('ignores an onRefreshFailure firing after stopTwitchBot() (reconnect race with a superseded provider)', async () => {
@@ -716,7 +745,7 @@ describe('startTwitchBot', () => {
     const staleFailureHandler = authProviderHandlers.refreshFailureHandlers[0];
 
     await stopTwitchBot();
-    vi.mocked(clearBotChatToken).mockClear();
+    vi.mocked(clearBotChatTokenIfOwnedBy).mockClear();
     vi.mocked(sendOwnerAlert).mockClear();
 
     const error = Object.assign(new Error('Encountered HTTP status code 401'), {
@@ -725,7 +754,7 @@ describe('startTwitchBot', () => {
     });
     await staleFailureHandler('bot-uid', error);
 
-    expect(vi.mocked(clearBotChatToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
 
@@ -739,7 +768,7 @@ describe('startTwitchBot', () => {
     });
     await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
 
-    expect(vi.mocked(clearBotChatToken)).toHaveBeenCalled();
+    expect(vi.mocked(clearBotChatTokenIfOwnedBy)).toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
   });
 
@@ -753,7 +782,7 @@ describe('startTwitchBot', () => {
     });
     await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
 
-    expect(vi.mocked(clearBotChatToken)).toHaveBeenCalled();
+    expect(vi.mocked(clearBotChatTokenIfOwnedBy)).toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
   });
 
@@ -767,7 +796,7 @@ describe('startTwitchBot', () => {
     });
     await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
 
-    expect(vi.mocked(clearBotChatToken)).toHaveBeenCalled();
+    expect(vi.mocked(clearBotChatTokenIfOwnedBy)).toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
   });
 
@@ -783,7 +812,7 @@ describe('startTwitchBot', () => {
     });
     await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
 
-    expect(vi.mocked(clearBotChatToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
 
@@ -799,7 +828,7 @@ describe('startTwitchBot', () => {
     });
     await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
 
-    expect(vi.mocked(clearBotChatToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
 
@@ -810,7 +839,7 @@ describe('startTwitchBot', () => {
     const error = Object.assign(new Error('Encountered HTTP status code 401'), { statusCode: 401, body: 'not json' });
     await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
 
-    expect(vi.mocked(clearBotChatToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
 
@@ -820,7 +849,7 @@ describe('startTwitchBot', () => {
 
     await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', new Error('fetch failed'));
 
-    expect(vi.mocked(clearBotChatToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
 
@@ -834,7 +863,7 @@ describe('startTwitchBot', () => {
     });
     await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
 
-    expect(vi.mocked(clearBotChatToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
 

@@ -103,6 +103,8 @@ vi.mock('./db/twitchBotAuth', () => ({
   getBotChatToken: vi.fn(),
   saveBotChatToken: vi.fn(),
   clearBotChatToken: vi.fn(),
+  saveBotChatTokenIfOwnedBy: vi.fn(),
+  clearBotChatTokenIfOwnedBy: vi.fn(),
 }));
 
 vi.mock('./db/sfx', () => ({
