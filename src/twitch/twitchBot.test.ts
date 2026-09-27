@@ -162,6 +162,7 @@ vi.mock('./twitchChatActivity', () => ({
 import {
   startTwitchBot,
   stopTwitchBot,
+  restartTwitchBot,
   sayInChannel,
   __resetTwitchChannelDiscordIdCacheForTests,
   __resetTwitchPrivilegedChannelsForTests,
@@ -1034,6 +1035,68 @@ describe('stopTwitchBot', () => {
     expect(handlers.messageHandlers).toHaveLength(1);
     expect(handlers.authSuccessHandlers).toHaveLength(1);
     expect(handlers.userStateHandlers).toHaveLength(1);
+  });
+});
+
+// ─── restartTwitchBot ───────────────────────────────────────────────────────────
+
+describe('restartTwitchBot', () => {
+  it('stops the existing client and starts a new one', async () => {
+    await connectBot();
+    mockClient.quit.mockClear();
+    mockClient.connect.mockClear();
+
+    await restartTwitchBot();
+
+    expect(mockClient.quit).toHaveBeenCalledTimes(1);
+    expect(mockClient.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('serializes overlapping calls so a second restart does not stop the client until the first has finished starting', async () => {
+    await connectBot();
+
+    const callOrder: string[] = [];
+    let releaseFirstConnect: () => void = () => {};
+    const firstConnectGate = new Promise<void>((resolve) => { releaseFirstConnect = resolve; });
+    let connectCallCount = 0;
+    mockClient.connect.mockImplementation(() => {
+      connectCallCount += 1;
+      const gate = connectCallCount === 1 ? firstConnectGate : Promise.resolve();
+      void gate.then(() => fireAuthSuccess());
+    });
+    mockClient.quit.mockImplementation(() => {
+      callOrder.push(`quit${connectCallCount + 1}`);
+      queueMicrotask(() => fireDisconnect(true));
+    });
+
+    const restart1 = restartTwitchBot();
+    const restart2 = restartTwitchBot();
+
+    // Flush pending microtasks: restart1's stop (and the start it kicks off) should have run, but
+    // restart2's stop must still be blocked behind restart1's still-pending connect() — without
+    // the serialization in restartTwitchBot(), restart2's stopTwitchBot() would run immediately
+    // instead of waiting.
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(callOrder).toEqual(['quit1']);
+
+    releaseFirstConnect();
+    await restart1;
+    await restart2;
+
+    expect(callOrder).toEqual(['quit1', 'quit2']);
+    expect(connectCallCount).toBe(2);
+  });
+
+  it('does not permanently break the restart chain when one restart fails', async () => {
+    await connectBot();
+    mockClient.connect.mockImplementationOnce(() => {
+      handlers.tokenFetchFailureHandlers.slice().forEach((h) => h(new Error('token fetch failed')));
+    });
+
+    await expect(restartTwitchBot()).rejects.toThrow('token fetch failed');
+
+    mockClient.connect.mockImplementation(() => { queueMicrotask(() => fireAuthSuccess()); });
+    await expect(restartTwitchBot()).resolves.toBeUndefined();
   });
 });
 

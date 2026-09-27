@@ -538,6 +538,35 @@ function quitAndWait(c: ChatClient): { promise: Promise<void>; unbind: () => voi
 }
 
 /**
+ * Chains successive {@link restartTwitchBot} calls so they run one at a time — see that
+ * function's doc for why.
+ */
+let restartChain: Promise<void> = Promise.resolve();
+
+/**
+ * Stops and restarts the Twitch chat client, serialized behind a module-level promise chain so
+ * overlapping calls (e.g. the owner submitting the `/admin/bot-auth` connect form twice, or from
+ * two tabs) can't both call {@link stopTwitchBot} before either calls {@link startTwitchBot}.
+ * Without this, `stopTwitchBot`/`startTwitchBot` assign the same module-level `client`/listener
+ * references, so an overlapping pair would silently overwrite them mid-flight: the first
+ * `ChatClient` gets abandoned still connected (nothing left holds a reference to stop it), while
+ * its `RefreshingAuthProvider` keeps trying to refresh in the background — harmlessly dropped at
+ * the DB level by the `connection_id` compare-and-swap (see {@link buildBotAuthProvider}), but the
+ * orphaned IRC connection itself is never closed.
+ * @returns Resolves once this restart's `startTwitchBot()` has settled; rejects if it throws.
+ */
+export function restartTwitchBot(): Promise<void> {
+  const next = restartChain.then(async () => {
+    await stopTwitchBot();
+    await startTwitchBot();
+  });
+  // Swallow so one failed restart doesn't permanently poison the chain for later callers — each
+  // caller still observes its own rejection via the `next` promise returned to it.
+  restartChain = next.catch(() => {});
+  return next;
+}
+
+/**
  * Stops the Twitch bot: disconnects the Twurple chat client (marking channels
  * disconnected if the disconnect itself fails or doesn't settle within
  * {@link DISCONNECT_TIMEOUT_MS}), tears down the client reference, and

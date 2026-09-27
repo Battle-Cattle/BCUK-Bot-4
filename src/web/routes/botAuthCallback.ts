@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { saveBotChatToken } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { startTwitchBot, stopTwitchBot } from '../../twitch/twitchBot';
+import { restartTwitchBot } from '../../twitch/twitchBot';
 import { TWITCH_BOT_OAUTH_REDIRECT_URI } from '../../shared/config';
 import { logAndRedirectError } from './errorHandling';
 import { oauthStateMatches } from '../csrf';
@@ -69,11 +69,12 @@ router.get('/twitch/bot/callback', async (req, res) => {
 
     // Only now stop any already-running chat client — its RefreshingAuthProvider's onRefresh
     // handler could otherwise still write a refreshed *old* token back over the row just saved.
-    // stopTwitchBot() is a no-op if the bot never started (e.g. this is the very first connect),
-    // so this covers both the initial-connect and reconnect cases.
-    await stopTwitchBot();
+    // restartTwitchBot() is a no-op stop if the bot never started (e.g. this is the very first
+    // connect), so this covers both the initial-connect and reconnect cases. It also serializes
+    // against a second, overlapping callback (e.g. the owner double-submitting or using two
+    // tabs) so both can't stop the bot before either has (re)started it.
     try {
-      await startTwitchBot();
+      await restartTwitchBot();
       res.redirect('/admin/bot-auth?success=bot_connected');
     } catch (startErr) {
       // The token is saved either way — don't claim a config/exchange failure here, but don't

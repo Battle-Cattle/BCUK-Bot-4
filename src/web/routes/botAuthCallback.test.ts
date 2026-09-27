@@ -13,8 +13,7 @@ vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
 }));
 
 vi.mock('../../twitch/twitchBot', () => ({
-  startTwitchBot: vi.fn(),
-  stopTwitchBot: vi.fn(),
+  restartTwitchBot: vi.fn(),
 }));
 
 // Mutable so a test can simulate a missing redirect URI.
@@ -28,7 +27,7 @@ import supertest from 'supertest';
 import router from './botAuthCallback';
 import { saveBotChatToken } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { startTwitchBot, stopTwitchBot } from '../../twitch/twitchBot';
+import { restartTwitchBot } from '../../twitch/twitchBot';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a supertest-ready app: the bot-auth-callback router with a valid OAuth-state session, customizable via `sessionOverrides`. */
@@ -52,8 +51,7 @@ beforeEach(() => {
   } as any);
   vi.mocked(getUserFromToken).mockResolvedValue({ login: 'thebot', id: 'bot-uid' } as any);
   vi.mocked(saveBotChatToken).mockResolvedValue(undefined);
-  vi.mocked(stopTwitchBot).mockResolvedValue(undefined);
-  vi.mocked(startTwitchBot).mockResolvedValue(undefined);
+  vi.mocked(restartTwitchBot).mockResolvedValue(undefined);
 });
 
 describe('GET /twitch/bot/callback — state validation', () => {
@@ -99,36 +97,34 @@ describe('GET /twitch/bot/callback — state validation', () => {
 });
 
 describe('GET /twitch/bot/callback — token exchange', () => {
-  it('succeeds, saves the token, and stops/restarts the chat client', async () => {
+  it('succeeds, saves the token, and restarts the chat client', async () => {
     const res = await supertest(buildApp())
       .get('/twitch/bot/callback?code=abc&state=valid-state-abc');
     expect(res.headers.location).toContain('success=bot_connected');
     expect(vi.mocked(saveBotChatToken)).toHaveBeenCalledWith('bot-uid', 'access', 'refresh', expect.any(Number));
-    expect(vi.mocked(stopTwitchBot)).toHaveBeenCalled();
-    expect(vi.mocked(startTwitchBot)).toHaveBeenCalled();
+    expect(vi.mocked(restartTwitchBot)).toHaveBeenCalled();
   });
 
-  it('saves the new token before stopping the chat client (so a save failure never takes down a working bot)', async () => {
+  it('saves the new token before restarting the chat client (so a save failure never takes down a working bot)', async () => {
     const callOrder: string[] = [];
     vi.mocked(saveBotChatToken).mockImplementation(async () => { callOrder.push('save'); });
-    vi.mocked(stopTwitchBot).mockImplementation(async () => { callOrder.push('stop'); });
+    vi.mocked(restartTwitchBot).mockImplementation(async () => { callOrder.push('restart'); });
 
     await supertest(buildApp()).get('/twitch/bot/callback?code=abc&state=valid-state-abc');
 
-    expect(callOrder).toEqual(['save', 'stop']);
+    expect(callOrder).toEqual(['save', 'restart']);
   });
 
-  it('does not stop the chat client when saving the token fails', async () => {
+  it('does not restart the chat client when saving the token fails', async () => {
     vi.mocked(saveBotChatToken).mockRejectedValue(new Error('db boom'));
     const res = await supertest(buildApp())
       .get('/twitch/bot/callback?code=abc&state=valid-state-abc');
     expect(res.headers.location).toContain('error=bot_oauth_config_failed');
-    expect(vi.mocked(stopTwitchBot)).not.toHaveBeenCalled();
-    expect(vi.mocked(startTwitchBot)).not.toHaveBeenCalled();
+    expect(vi.mocked(restartTwitchBot)).not.toHaveBeenCalled();
   });
 
   it('redirects with a chat_start_failed warning (not a plain error) if restarting the chat client fails', async () => {
-    vi.mocked(startTwitchBot).mockRejectedValue(new Error('connect failed'));
+    vi.mocked(restartTwitchBot).mockRejectedValue(new Error('connect failed'));
     const res = await supertest(buildApp())
       .get('/twitch/bot/callback?code=abc&state=valid-state-abc');
     expect(res.headers.location).toBe('/admin/bot-auth?success=bot_connected&warning=chat_start_failed');
