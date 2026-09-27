@@ -815,11 +815,37 @@ describe('stopTwitchBot', () => {
 // off*. These tests seed confirmedJoinedChannels (via __setConfirmedJoinedChannelsForTests) up
 // front, before starting the bot, rather than firing a separate synthetic reconnect afterward —
 // deliberately not mockClient.currentChannels, which reconcileJoinedChannels no longer trusts (see
-// confirmedJoinedChannels's doc in twitchChannelMembership.ts for why). Only the startup wiring is
-// covered here; reconcileJoinedChannels' own part/join/online rules are unit-tested in
-// twitchChannelMembership.test.ts.
+// confirmedJoinedChannels's doc in twitchChannelMembership.ts for why). Each reconcile outcome
+// (part / join / mark online / cache user ID) is checked once through startTwitchBot() here, so a
+// startup-wiring regression can't hide behind the direct reconcileJoinedChannels() unit tests; the
+// rules' edge cases (failures, throttling, disconnected client) live in twitchChannelMembership.test.ts.
 
 describe('startTwitchBot — initial channel reconciliation', () => {
+  it('parts a joined channel that is not in activeChannels', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    vi.mocked(getUsers).mockResolvedValue([]);
+    __setConfirmedJoinedChannelsForTests(['stale']);
+
+    await startTwitchBot();
+    await vi.runAllTimersAsync();
+
+    expect(mockClient.part).toHaveBeenCalledWith('stale');
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('stale', false);
+  });
+
+  it('marks a channel online without joining or parting when it is in both activeChannels and confirmed joined', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
+    vi.mocked(getUsers).mockResolvedValue([]);
+    __setConfirmedJoinedChannelsForTests(['streamer']);
+
+    await startTwitchBot();
+    await vi.runAllTimersAsync();
+
+    expect(mockClient.part).not.toHaveBeenCalled();
+    expect(mockClient.join).not.toHaveBeenCalled();
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('streamer', true);
+  });
+
   it('joins an activeChannels channel that the client is not yet joined to', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['streamer']);
     vi.mocked(getUsers).mockResolvedValue([]);
