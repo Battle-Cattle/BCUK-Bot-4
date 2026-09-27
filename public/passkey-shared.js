@@ -1,6 +1,6 @@
 /**
  * Shared helpers for the passkey (WebAuthn) pages. Loaded after
- * /vendor/simplewebauthn-browser.js, which defines window.SimpleWebAuthnBrowser.
+ * /vendor/simplewebauthn/index.umd.min.js, which defines window.SimpleWebAuthnBrowser.
  */
 window.BCUKPasskey = (function () {
   /**
@@ -42,20 +42,25 @@ window.BCUKPasskey = (function () {
     return { ok: res.ok, status: res.status, data: data };
   }
 
+  // First match wins, so more specific platforms come before the ones they overlap with.
+  var DEVICE_LABELS = [
+    [/iPhone/, 'iPhone'],
+    [/iPad/, 'iPad'],
+    [/Android/, 'Android device'],
+    [/Windows/, 'Windows PC'],
+    [/Mac OS X|Macintosh/, 'Mac'],
+    [/CrOS/, 'Chromebook'],
+    [/Linux/, 'Linux PC'],
+  ];
+
   /**
    * Guesses a friendly label for the current device from the user agent.
    * @returns {string}
    */
   function guessDeviceLabel() {
     var ua = navigator.userAgent || '';
-    if (/iPhone/.test(ua)) return 'iPhone';
-    if (/iPad/.test(ua)) return 'iPad';
-    if (/Android/.test(ua)) return 'Android device';
-    if (/Windows/.test(ua)) return 'Windows PC';
-    if (/Mac OS X|Macintosh/.test(ua)) return 'Mac';
-    if (/CrOS/.test(ua)) return 'Chromebook';
-    if (/Linux/.test(ua)) return 'Linux PC';
-    return 'Passkey';
+    var match = DEVICE_LABELS.find(function (entry) { return entry[0].test(ua); });
+    return match ? match[1] : 'Passkey';
   }
 
   return { isSupported: isSupported, postJson: postJson, guessDeviceLabel: guessDeviceLabel };

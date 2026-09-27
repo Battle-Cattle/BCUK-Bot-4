@@ -97,19 +97,15 @@ app.use(serviceWorkerRouter);
 
 // Browser half of the passkey (WebAuthn) flow, served straight from the installed package so
 // it always matches the server library's version. Must be same-origin: CSP is script-src 'self'.
-const SIMPLEWEBAUTHN_BROWSER_BUNDLE = path.join(
-  __dirname,
-  '../../node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js',
+app.use(
+  '/vendor/simplewebauthn',
+  express.static(path.join(__dirname, '../../node_modules/@simplewebauthn/browser/dist/bundle'), {
+    /** Forces revalidation on every response, matching the public/ static assets below. */
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-cache');
+    },
+  }),
 );
-/**
- * GET /vendor/simplewebauthn-browser.js — serves the `@simplewebauthn/browser` UMD bundle.
- * @param _req - Express request (unused).
- * @param res - Express response; sends the bundle with `Cache-Control: no-cache`, like other static assets.
- */
-app.get('/vendor/simplewebauthn-browser.js', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-cache');
-  res.sendFile(SIMPLEWEBAUTHN_BROWSER_BUNDLE);
-});
 
 // Static assets. `Cache-Control: no-cache` forces revalidation (via the ETag express.static
 // already sends) on every request rather than letting browsers serve a stale copy from

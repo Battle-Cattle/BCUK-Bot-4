@@ -199,7 +199,7 @@ describe('static assets', () => {
 
 describe('passkey browser bundle', () => {
   it('serves the @simplewebauthn/browser bundle same-origin with no-cache', async () => {
-    const res = await request(app).get('/vendor/simplewebauthn-browser.js');
+    const res = await request(app).get('/vendor/simplewebauthn/index.umd.min.js');
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toContain('javascript');
     expect(res.headers['cache-control']).toBe('no-cache');
