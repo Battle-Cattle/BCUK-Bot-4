@@ -22,6 +22,7 @@ const KNOWN_ERRORS = new Set([
   'bot_oauth_config_failed',
 ]);
 const KNOWN_SUCCESSES = new Set(['bot_connected']);
+const KNOWN_WARNINGS = new Set(['chat_start_failed']);
 
 const ERROR_MESSAGES: Record<string, string> = {
   bot_oauth_denied:         'Twitch authorization was denied.',
@@ -30,9 +31,18 @@ const ERROR_MESSAGES: Record<string, string> = {
   bot_oauth_config_failed:  'Failed to save the bot chat token. Please try again.',
 };
 
+const WARNING_MESSAGES: Record<string, string> = {
+  chat_start_failed: 'Account connected, but the chat client failed to start. Check server logs — it will retry the next time the bot restarts.',
+};
+
 /** Looks up a `botAuth` page error code in {@link ERROR_MESSAGES}, for use as an EJS template helper. */
 function getFriendlyError(key: string): string {
   return getFriendlyErrorMessage(ERROR_MESSAGES, key);
+}
+
+/** Looks up a `botAuth` page warning code in {@link WARNING_MESSAGES}, for use as an EJS template helper. */
+function getFriendlyWarning(key: string): string {
+  return getFriendlyErrorMessage(WARNING_MESSAGES, key);
 }
 
 /** Query-param filter mirroring `validation.ts`'s `filterQueryParam` for this route's small, page-local known-value sets. */
@@ -68,7 +78,9 @@ router.get('/', requireOwner, csrfProtection, async (req, res) => {
       connectedLogin,
       error: filterKnown(req.query.error, KNOWN_ERRORS),
       success: filterKnown(req.query.success, KNOWN_SUCCESSES),
+      warning: filterKnown(req.query.warning, KNOWN_WARNINGS),
       getFriendlyError,
+      getFriendlyWarning,
     });
   } catch (err) {
     log.error('Bot auth page error:', err);

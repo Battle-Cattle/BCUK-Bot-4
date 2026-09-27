@@ -21,11 +21,14 @@ const router = Router();
  * token (see issue #550).
  * @param req - Express request; reads `code`/`state`/`error` query params and the stored
  *   `botOAuthState` session value.
- * @param res - Express response; redirects to `/admin/bot-auth?success=bot_connected` on
- *   success, or to `/admin/bot-auth?error=<code>` if Twitch denied authorization
- *   (`error=bot_oauth_denied`), the OAuth state is missing or mismatched
- *   (`error=bot_oauth_state_mismatch`), config is missing or the token exchange fails
- *   (`error=bot_oauth_token_invalid`), or any other error occurs (`error=bot_oauth_config_failed`).
+ * @param res - Express response; redirects to `/admin/bot-auth?success=bot_connected` once the
+ *   token is saved and chat has started, or `?success=bot_connected&warning=chat_start_failed`
+ *   if the token saved but starting chat with it then failed (still worth reporting as connected
+ *   — the next successful start, e.g. after a restart, will pick up the saved token). Redirects
+ *   to `/admin/bot-auth?error=<code>` if Twitch denied authorization (`error=bot_oauth_denied`),
+ *   the OAuth state is missing or mismatched (`error=bot_oauth_state_mismatch`), config is
+ *   missing or the token exchange fails (`error=bot_oauth_token_invalid`), or any other error
+ *   occurs — including a failure to save the token — (`error=bot_oauth_config_failed`).
  */
 router.get('/twitch/bot/callback', async (req, res) => {
   const { code, state, error } = req.query as Record<string, string | undefined>;
@@ -58,17 +61,26 @@ router.get('/twitch/bot/callback', async (req, res) => {
     if (!twitchUser) return res.redirect('/admin/bot-auth?error=bot_oauth_token_invalid');
 
     const expiryMs = tokens.expires_in != null ? Date.now() + tokens.expires_in * 1000 - 60_000 : null;
-    // Stop any already-running chat client first — its RefreshingAuthProvider's onRefresh
-    // handler would otherwise still be able to write a refreshed *old* token back over the row
-    // we're about to save. stopTwitchBot() is a no-op if the bot never started (e.g. this is the
-    // very first connect), so this covers both the initial-connect and reconnect cases.
-    await stopTwitchBot();
+    // Save first, before touching the running chat client — if this throws, the catch below
+    // reports a config-failed error and an already-working bot (on the old token) is never
+    // stopped over a save that never happened.
     await saveBotChatToken(twitchUser.id, tokens.access_token, tokens.refresh_token, expiryMs);
     log.info(`Bot chat OAuth connected as ${twitchUser.login}`);
-    // Bring chat online immediately with the freshly saved token, rather than requiring a
-    // process restart to pick it up.
-    void startTwitchBot().catch((err) => log.error('Failed to start Twitch chat after connecting:', err));
-    res.redirect('/admin/bot-auth?success=bot_connected');
+
+    // Only now stop any already-running chat client — its RefreshingAuthProvider's onRefresh
+    // handler could otherwise still write a refreshed *old* token back over the row just saved.
+    // stopTwitchBot() is a no-op if the bot never started (e.g. this is the very first connect),
+    // so this covers both the initial-connect and reconnect cases.
+    await stopTwitchBot();
+    try {
+      await startTwitchBot();
+      res.redirect('/admin/bot-auth?success=bot_connected');
+    } catch (startErr) {
+      // The token is saved either way — don't claim a config/exchange failure here, but don't
+      // silently report success while chat is actually still offline either.
+      log.error('Failed to start Twitch chat after connecting:', startErr);
+      res.redirect('/admin/bot-auth?success=bot_connected&warning=chat_start_failed');
+    }
   } catch (err) {
     logAndRedirectError({
       res, log, logLabel: 'Bot chat OAuth callback error:', err, basePath: '/admin/bot-auth', errorCode: 'bot_oauth_config_failed',

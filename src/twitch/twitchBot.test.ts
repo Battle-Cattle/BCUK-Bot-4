@@ -695,26 +695,59 @@ describe('startTwitchBot', () => {
     expect(vi.mocked(saveBotChatToken)).toHaveBeenCalledWith('bot-uid', 'new-access', 'new-refresh', expect.any(Number));
   });
 
-  it('clears the stored token and alerts the owner when the refresh token is invalid/revoked (401)', async () => {
+  it('clears the stored token and alerts the owner when the response body names an invalid refresh token (401)', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     await startTwitchBot();
 
-    const error = Object.assign(new Error('invalid_grant'), { statusCode: 401 });
+    const error = Object.assign(new Error('Encountered HTTP status code 401'), {
+      statusCode: 401,
+      body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
+    });
     await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
 
     expect(vi.mocked(clearBotChatToken)).toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
   });
 
-  it('clears the stored token and alerts the owner when the refresh token is invalid/revoked (400)', async () => {
+  it('clears the stored token and alerts the owner when the response body names an invalid refresh token (400)', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     await startTwitchBot();
 
-    const error = Object.assign(new Error('invalid refresh token'), { statusCode: 400 });
+    const error = Object.assign(new Error('Encountered HTTP status code 400'), {
+      statusCode: 400,
+      body: JSON.stringify({ status: 400, message: 'Invalid refresh token' }),
+    });
     await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
 
     expect(vi.mocked(clearBotChatToken)).toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
+  });
+
+  it('leaves the stored token in place when the status is 400/401 but the body does not name an invalid refresh token', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+
+    // Same status Twitch would return for e.g. a bad client secret — not evidence the refresh
+    // token itself is invalid.
+    const error = Object.assign(new Error('Encountered HTTP status code 400'), {
+      statusCode: 400,
+      body: JSON.stringify({ status: 400, message: 'Invalid client secret' }),
+    });
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+
+    expect(vi.mocked(clearBotChatToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
+  });
+
+  it('leaves the stored token in place when the status is 400/401 but the body is not parseable JSON', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+
+    const error = Object.assign(new Error('Encountered HTTP status code 401'), { statusCode: 401, body: 'not json' });
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+
+    expect(vi.mocked(clearBotChatToken)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
 
   it('leaves the stored token in place and does not alert on a transient refresh failure (network error, no statusCode)', async () => {
@@ -731,7 +764,10 @@ describe('startTwitchBot', () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     await startTwitchBot();
 
-    const error = Object.assign(new Error('Encountered HTTP status code 503'), { statusCode: 503 });
+    const error = Object.assign(new Error('Encountered HTTP status code 503'), {
+      statusCode: 503,
+      body: JSON.stringify({ status: 503, message: 'Internal server error' }),
+    });
     await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
 
     expect(vi.mocked(clearBotChatToken)).not.toHaveBeenCalled();

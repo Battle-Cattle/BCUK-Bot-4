@@ -108,21 +108,32 @@ describe('GET /twitch/bot/callback — token exchange', () => {
     expect(vi.mocked(startTwitchBot)).toHaveBeenCalled();
   });
 
-  it('stops the chat client before saving the new token (so a live onRefresh cannot overwrite it)', async () => {
+  it('saves the new token before stopping the chat client (so a save failure never takes down a working bot)', async () => {
     const callOrder: string[] = [];
-    vi.mocked(stopTwitchBot).mockImplementation(async () => { callOrder.push('stop'); });
     vi.mocked(saveBotChatToken).mockImplementation(async () => { callOrder.push('save'); });
+    vi.mocked(stopTwitchBot).mockImplementation(async () => { callOrder.push('stop'); });
 
     await supertest(buildApp()).get('/twitch/bot/callback?code=abc&state=valid-state-abc');
 
-    expect(callOrder).toEqual(['stop', 'save']);
+    expect(callOrder).toEqual(['save', 'stop']);
   });
 
-  it('still redirects with success even if restarting the chat client fails', async () => {
+  it('does not stop the chat client when saving the token fails', async () => {
+    vi.mocked(saveBotChatToken).mockRejectedValue(new Error('db boom'));
+    const res = await supertest(buildApp())
+      .get('/twitch/bot/callback?code=abc&state=valid-state-abc');
+    expect(res.headers.location).toContain('error=bot_oauth_config_failed');
+    expect(vi.mocked(stopTwitchBot)).not.toHaveBeenCalled();
+    expect(vi.mocked(startTwitchBot)).not.toHaveBeenCalled();
+  });
+
+  it('redirects with a chat_start_failed warning (not a plain error) if restarting the chat client fails', async () => {
     vi.mocked(startTwitchBot).mockRejectedValue(new Error('connect failed'));
     const res = await supertest(buildApp())
       .get('/twitch/bot/callback?code=abc&state=valid-state-abc');
-    expect(res.headers.location).toContain('success=bot_connected');
+    expect(res.headers.location).toBe('/admin/bot-auth?success=bot_connected&warning=chat_start_failed');
+    // The token is still saved even though chat failed to start.
+    expect(vi.mocked(saveBotChatToken)).toHaveBeenCalled();
   });
 
   it('redirects with token_invalid when the exchanged token does not validate', async () => {

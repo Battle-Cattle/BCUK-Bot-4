@@ -134,6 +134,38 @@ describe('GET /admin/bot-auth', () => {
     const res = await supertest(buildApp(undefined)).get('/');
     expect(res.status).toBe(403);
   });
+
+  it('passes through a known warning query param', async () => {
+    const res = await supertest(buildApp(OWNER_SESSION_USER)).get('/?warning=chat_start_failed');
+    const body = res.body as any;
+    expect(body.locals.warning).toBe('chat_start_failed');
+  });
+
+  it('drops an unknown warning query param', async () => {
+    const res = await supertest(buildApp(OWNER_SESSION_USER)).get('/?warning=not_a_real_warning');
+    const body = res.body as any;
+    expect(body.locals.warning).toBeUndefined();
+  });
+});
+
+describe('getFriendlyWarning (passed to the template as a helper)', () => {
+  it('falls back to a generic message for a key with no mapped copy', async () => {
+    let captured: any;
+    const app = express();
+    app.use((req: any, res: any, next: any) => {
+      req.session = { user: OWNER_SESSION_USER };
+      req.csrfToken = () => 'test-token';
+      res.render = (_view: string, locals?: any) => {
+        captured = locals;
+        res.json({});
+      };
+      next();
+    });
+    app.use(router);
+
+    await supertest(app).get('/');
+    expect(captured.getFriendlyWarning('some_unmapped_key')).toBe('An error occurred (some_unmapped_key).');
+  });
 });
 
 describe('getFriendlyError (passed to the template as a helper)', () => {
