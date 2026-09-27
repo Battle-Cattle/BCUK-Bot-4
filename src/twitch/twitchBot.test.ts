@@ -293,6 +293,7 @@ const STORED_BOT_TOKEN = {
   accessToken: 'stored-access-token',
   refreshToken: 'stored-refresh-token',
   tokenExpiry: null,
+  connectionId: 1,
 };
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -694,13 +695,13 @@ describe('startTwitchBot', () => {
       accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
     });
 
-    expect(vi.mocked(saveBotChatTokenIfOwnedBy)).toHaveBeenCalledWith('bot-uid', 'new-access', 'new-refresh', expect.any(Number));
+    expect(vi.mocked(saveBotChatTokenIfOwnedBy)).toHaveBeenCalledWith(STORED_BOT_TOKEN.connectionId, 'new-access', 'new-refresh', expect.any(Number));
   });
 
-  it('logs but does not throw when a refreshed-token write is dropped at the DB level (a reconnect replaced the account first)', async () => {
-    // Simulates a refresh that started before a reconnect and completed after it: the generation
-    // check still passes (no stopTwitchBot() call in this test), but the conditional DB write
-    // itself reports no row updated because the account changed underneath it.
+  it('logs but does not throw when a refreshed-token write is dropped at the DB level (a reconnect replaced this connection first)', async () => {
+    // Simulates a refresh that started before a reconnect (to the same account or a different
+    // one — connection_id covers both) and completed after it: the conditional DB write reports
+    // no row updated because connection_id moved on underneath it.
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     vi.mocked(saveBotChatTokenIfOwnedBy).mockResolvedValue(false);
     await startTwitchBot();
@@ -710,7 +711,7 @@ describe('startTwitchBot', () => {
     })).resolves.toBeUndefined();
   });
 
-  it('does not alert the owner when a token-clear write is dropped at the DB level (a reconnect replaced the account first)', async () => {
+  it('does not alert the owner when a token-clear write is dropped at the DB level (a reconnect replaced this connection first)', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     vi.mocked(clearBotChatTokenIfOwnedBy).mockResolvedValue(false);
     await startTwitchBot();
@@ -724,12 +725,29 @@ describe('startTwitchBot', () => {
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
 
-  // A stale callback firing after stopTwitchBot() (reconnect to a *different* account) is covered
-  // by the "dropped at the DB level" tests below — saveBotChatTokenIfOwnedBy/
-  // clearBotChatTokenIfOwnedBy are the actual safety net (a compare-and-swap enforced by the
-  // database), not an in-process check here, since that alone can't order two independent
-  // already-in-flight DB writes against each other. See buildBotAuthProvider's doc for the
-  // accepted residual (a reconnect to the *same* account racing its own in-flight refresh).
+  // A stale callback firing after a reconnect — to a *different* account or the *same* one — is
+  // covered by the "dropped at the DB level" tests above: saveBotChatTokenIfOwnedBy/
+  // clearBotChatTokenIfOwnedBy are the actual safety net (a compare-and-swap on connection_id
+  // enforced by the database), not an in-process check here, since that alone can't order two
+  // independent already-in-flight DB writes against each other. connection_id (rather than the
+  // Twitch user ID) is what makes the same-account case covered too — see buildBotAuthProvider's
+  // doc and the discussion on PR #666.
+
+  it('drops a refreshed token from a stale connection even when the reconnect was to the same Twitch account', async () => {
+    // A same-account reconnect still bumps connection_id (saveBotChatToken always does), so an
+    // in-flight refresh captured under the old connection_id is dropped exactly like a
+    // different-account reconnect would be — this is the case that used to be an accepted,
+    // unfixed residual before connection_id existed.
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    vi.mocked(saveBotChatTokenIfOwnedBy).mockResolvedValue(false);
+    await startTwitchBot();
+
+    await authProviderHandlers.refreshHandlers[0]('bot-uid', {
+      accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
+    });
+
+    expect(vi.mocked(saveBotChatTokenIfOwnedBy)).toHaveBeenCalledWith(STORED_BOT_TOKEN.connectionId, 'new-access', 'new-refresh', expect.any(Number));
+  });
 
   it('clears the stored token and alerts the owner when the response body names an invalid refresh token (401)', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);

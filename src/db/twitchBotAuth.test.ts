@@ -29,6 +29,7 @@ function makeRow(overrides: object = {}): Record<string, unknown> {
     access_token: 'enc:accesstok',
     refresh_token: 'enc:refreshtok',
     token_expiry: 1234567890,
+    connection_id: 1,
     ...overrides,
   };
 }
@@ -56,7 +57,14 @@ describe('getBotChatToken', () => {
       accessToken: 'accesstok',
       refreshToken: 'refreshtok',
       tokenExpiry: 1234567890,
+      connectionId: 1,
     });
+  });
+
+  it('coerces connection_id to a number', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([makeRow({ connection_id: '7' })]) as any);
+    const token = await getBotChatToken();
+    expect(token!.connectionId).toBe(7);
   });
 
   it('returns null when the row exists but has no token yet (all-null singleton row)', async () => {
@@ -126,6 +134,14 @@ describe('saveBotChatToken', () => {
     const sql: string = pool.execute.mock.calls[0][0];
     expect(sql.toUpperCase()).toContain('ON DUPLICATE KEY UPDATE');
   });
+
+  it('bumps connection_id on every save, including a reconnect to the same account', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await saveBotChatToken('uid', 'a', 'r', null);
+    const sql: string = pool.execute.mock.calls[0][0];
+    expect(sql).toContain('connection_id=twitch_bot_chat_token.connection_id + 1');
+  });
 });
 
 // ─── clearBotChatToken ──────────────────────────────────────────────────────
@@ -139,6 +155,14 @@ describe('clearBotChatToken', () => {
     expect(sql.toUpperCase()).toContain('UPDATE');
     expect(sql).toContain('WHERE id=1');
   });
+
+  it('also bumps connection_id', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await clearBotChatToken();
+    const [sql] = pool.execute.mock.calls[0] as [string];
+    expect(sql).toContain('connection_id=connection_id + 1');
+  });
 });
 
 // ─── saveBotChatTokenIfOwnedBy ────────────────────────────────────────────────
@@ -147,47 +171,47 @@ describe('saveBotChatTokenIfOwnedBy', () => {
   it('throws when EVENTSUB_TOKEN_SECRET is not configured', async () => {
     mockSecret = undefined;
     vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await expect(saveBotChatTokenIfOwnedBy('uid', 'access', 'refresh', null)).rejects.toThrow('EVENTSUB_TOKEN_SECRET');
+    await expect(saveBotChatTokenIfOwnedBy(1, 'access', 'refresh', null)).rejects.toThrow('EVENTSUB_TOKEN_SECRET');
   });
 
-  it('scopes the UPDATE to the expected twitch_user_id and encrypts tokens', async () => {
+  it('scopes the UPDATE to the expected connection_id and encrypts tokens', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await saveBotChatTokenIfOwnedBy('uid', 'myaccess', 'myrefresh', 1234567890);
+    await saveBotChatTokenIfOwnedBy(1, 'myaccess', 'myrefresh', 1234567890);
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain('WHERE id=1 AND twitch_user_id=?');
-    expect(params).toEqual(['enc:myaccess', 'enc:myrefresh', 1234567890, 'uid']);
+    expect(sql).toContain('WHERE id=1 AND connection_id=?');
+    expect(params).toEqual(['enc:myaccess', 'enc:myrefresh', 1234567890, 1]);
   });
 
   it('returns true when a row was updated', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    expect(await saveBotChatTokenIfOwnedBy('uid', 'a', 'r', null)).toBe(true);
+    expect(await saveBotChatTokenIfOwnedBy(1, 'a', 'r', null)).toBe(true);
   });
 
-  it('returns false (a superseded write) when the row no longer belongs to the expected user', async () => {
+  it('returns false (a superseded write) when the row has since moved to a newer connection_id — including a reconnect to the same account', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    expect(await saveBotChatTokenIfOwnedBy('stale-uid', 'a', 'r', null)).toBe(false);
+    expect(await saveBotChatTokenIfOwnedBy(1, 'a', 'r', null)).toBe(false);
   });
 });
 
 // ─── clearBotChatTokenIfOwnedBy ───────────────────────────────────────────────
 
 describe('clearBotChatTokenIfOwnedBy', () => {
-  it('scopes the UPDATE to the expected twitch_user_id', async () => {
+  it('scopes the UPDATE to the expected connection_id', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await clearBotChatTokenIfOwnedBy('uid');
+    await clearBotChatTokenIfOwnedBy(1);
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
     expect(sql.toUpperCase()).toContain('UPDATE');
-    expect(sql).toContain('WHERE id=1 AND twitch_user_id=?');
-    expect(params).toEqual(['uid']);
+    expect(sql).toContain('WHERE id=1 AND connection_id=?');
+    expect(params).toEqual([1]);
   });
 
-  it('returns false (a superseded clear) when the row no longer belongs to the expected user', async () => {
+  it('returns false (a superseded clear) when the row has since moved to a newer connection_id', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    expect(await clearBotChatTokenIfOwnedBy('stale-uid')).toBe(false);
+    expect(await clearBotChatTokenIfOwnedBy(1)).toBe(false);
   });
 });

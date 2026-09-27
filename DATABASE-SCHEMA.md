@@ -182,6 +182,7 @@ Single global row (`id` pinned to 1) holding the refreshing OAuth token for the 
 | `access_token` | `TEXT` nullable | AES-256-GCM encrypted OAuth access token |
 | `refresh_token` | `TEXT` nullable | AES-256-GCM encrypted refresh token |
 | `token_expiry` | `BIGINT` nullable | Token expiry as Unix milliseconds |
+| `connection_id` | `BIGINT` | Increments on every save (initial connect or reconnect, same account or not); used as the compare-and-swap key so a write from a superseded in-process auth provider is dropped instead of clobbering a newer connection — see `src/twitch/twitchBot.ts` |
 
 Expected constraints:
 

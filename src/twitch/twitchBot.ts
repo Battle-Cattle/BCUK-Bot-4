@@ -296,22 +296,23 @@ function isInvalidRefreshTokenError(error: Error): boolean {
  * `TWITCH_OAUTH_TOKEN` env var (see #550). Its `onRefresh`/`onRefreshFailure` callbacks are
  * guarded against a reconnect superseding this provider while one of them is in flight via a
  * database-level compare-and-swap (`saveBotChatTokenIfOwnedBy`/`clearBotChatTokenIfOwnedBy`,
- * keyed to the `userId` this provider was built for): a write that started before a reconnect to
- * a *different* account but completes after it finds the row already reassigned and is dropped
- * as a no-op instead of clobbering the new connection's token. (A reconnect to the *same* account
- * racing its own in-flight refresh isn't covered — accepted as an out-of-scope residual: it's a
- * narrow timing window on a single-operator admin action, and self-heals on the next reconnect.
- * See the discussion on PR #666.)
+ * keyed to `stored.connectionId`, the row's `connection_id` at the moment this provider was
+ * built): a write that started before a reconnect but completes after it finds `connection_id`
+ * already bumped past that value and is dropped as a no-op instead of clobbering the newer
+ * connection's token. Keyed on `connection_id` rather than the Twitch user ID specifically so a
+ * reconnect to the *same* account is covered too, not just a reconnect to a different one — see
+ * the discussion on PR #666.
  * @param stored - The bot's decrypted chat token, as loaded from the DB.
  * @returns A `RefreshingAuthProvider` with the bot's user already added under the `chat` intent.
  */
 function buildBotAuthProvider(stored: NonNullable<Awaited<ReturnType<typeof getBotChatToken>>>): RefreshingAuthProvider {
   const authProvider = new RefreshingAuthProvider({ clientId: TWITCH_CLIENT_ID, clientSecret: TWITCH_CLIENT_SECRET });
+  const { connectionId } = stored;
 
   authProvider.onRefresh(async (userId, newToken) => {
     const expiryMs = newToken.expiresIn != null ? Date.now() + newToken.expiresIn * 1000 - 60_000 : null;
-    const saved = await saveBotChatTokenIfOwnedBy(userId, newToken.accessToken, newToken.refreshToken!, expiryMs);
-    if (!saved) log.warn(`Dropped a refreshed token for ${userId} — a reconnect replaced the stored account first.`);
+    const saved = await saveBotChatTokenIfOwnedBy(connectionId, newToken.accessToken, newToken.refreshToken!, expiryMs);
+    if (!saved) log.warn(`Dropped a refreshed token for ${userId} — a reconnect replaced this connection first.`);
   });
   authProvider.onRefreshFailure(async (userId, error) => {
     log.error(`Failed to refresh chat token for ${userId}: ${error.message}`);
@@ -319,9 +320,9 @@ function buildBotAuthProvider(stored: NonNullable<Awaited<ReturnType<typeof getB
       log.warn(`Refresh failure for ${userId} does not look like a revoked/invalid token — leaving the stored token in place for a future retry.`);
       return;
     }
-    const cleared = await clearBotChatTokenIfOwnedBy(userId);
+    const cleared = await clearBotChatTokenIfOwnedBy(connectionId);
     if (!cleared) {
-      log.warn(`Not clearing the stored token for ${userId} — a reconnect replaced the stored account first.`);
+      log.warn(`Not clearing the stored token for ${userId} — a reconnect replaced this connection first.`);
       return;
     }
     void sendOwnerAlert(`🔴 Twitch chat bot's token was revoked/expired and could not refresh. Reconnect it at ${BOT_AUTH_CONNECT_URL}`);
