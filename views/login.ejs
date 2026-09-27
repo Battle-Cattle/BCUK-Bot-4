@@ -17,6 +17,9 @@
     <% const errorMessages = {
       user_not_found: 'Your account could not be found. Please sign in again.',
       no_guilds: 'You no longer have access to any servers. Contact an admin if this seems wrong.',
+      not_whitelisted: 'You are not on the whitelist. Contact an admin to be added.',
+      passkey_failed: 'Passkey sign-in failed. Please try again, or sign in with Discord.',
+      passkey_unknown: 'That passkey is not registered. Sign in with Discord and add it again from your settings.',
     }; %>
     <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
       <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
@@ -29,8 +32,17 @@
       </svg>
       Login with Discord
     </a>
+    <div class="is-hidden" id="passkey-login-wrapper">
+      <button type="button" class="btn btn-ghost btn-passkey" id="passkey-login">
+        <span aria-hidden="true">&#128070;</span>
+        Sign in with fingerprint / passkey
+      </button>
+    </div>
     <p class="login-note">Access is restricted to whitelisted users only.</p>
   </div>
+  <script src="/vendor/simplewebauthn-browser.js" defer></script>
+  <script src="/passkey-shared.js" defer></script>
+  <script src="/passkey-login.js" defer></script>
   <%- include('partials/pwa-register') %>
   <%- include('partials/footer') %>
 </body>

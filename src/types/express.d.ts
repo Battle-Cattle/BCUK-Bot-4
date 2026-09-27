@@ -34,6 +34,8 @@ declare module 'express-session' {
     eventsubStreamerId?: number;
     /** Pending companion-app loopback OAuth login, set by /companion/login. */
     companionOAuth?: { redirectUri: string; appState: string; expiresAt: number };
+    /** Pending WebAuthn (passkey) challenge, set by the /auth/passkey options routes and consumed by verify. */
+    webauthnChallenge?: { purpose: 'register' | 'login'; value: string; discordId?: string; expiresAt: number };
   }
 }
 

@@ -7,6 +7,7 @@ vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   saveEventConfig: vi.fn(),
   clearStreamerToken: vi.fn(),
+  listPasskeysForUser: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
@@ -40,7 +41,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 import express from 'express';
 import supertest from 'supertest';
 import router, { buildEventSubConfig, hasOverlongMessage } from './userSettings';
-import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken } from '../../db';
+import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, listPasskeysForUser } from '../../db';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -58,6 +59,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(findUser).mockResolvedValue(null);
   vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+  vi.mocked(listPasskeysForUser).mockResolvedValue([]);
 });
 
 describe('GET / — query param filtering', () => {
@@ -89,6 +91,24 @@ describe('GET / — query param filtering', () => {
     vi.mocked(findUser).mockRejectedValue(new Error('DB down'));
     const res = await supertest(buildApp()).get('/');
     expect(res.status).toBe(500);
+  });
+});
+
+describe('GET / — passkeys', () => {
+  it("passes the user's passkeys to the template", async () => {
+    const passkeys = [{ credentialId: 'cred1', deviceLabel: 'Phone', createdAt: new Date('2026-01-01T00:00:00Z'), lastUsedAt: null }];
+    vi.mocked(listPasskeysForUser).mockResolvedValue(passkeys);
+    const res = await supertest(buildApp()).get('/');
+    expect(res.status).toBe(200);
+    expect(listPasskeysForUser).toHaveBeenCalledWith(USER.discordId);
+    expect(res.body.passkeys).toEqual([{ ...passkeys[0], createdAt: '2026-01-01T00:00:00.000Z' }]);
+  });
+
+  it('passes passkey success and error codes through to the template', async () => {
+    const ok = await supertest(buildApp()).get('/?success=passkey_added');
+    expect(ok.body.success).toBe('passkey_added');
+    const err = await supertest(buildApp()).get('/?error=passkey_limit');
+    expect(err.body.error).toBe('passkey_limit');
   });
 });
 

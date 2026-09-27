@@ -26,15 +26,18 @@ import type { SessionUser } from '../../types/express';
 const log = createLogger('Web');
 const router = Router();
 
-/** Discord's minimal `@me` profile shape used by the OAuth2 callback. */
-interface DiscordProfile {
+/** Discord's minimal `@me` profile shape used by the OAuth2 callback (and rebuilt from the bot client by passkey login). */
+export interface DiscordProfile {
   id: string;
   username: string;
   avatar: string | null;
 }
 
-/** Error codes `GET /auth/login` accepts via `?error=`, both originating from `POST /guild/select`. */
-const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds']);
+/**
+ * Error codes `GET /auth/login` accepts via `?error=`: `user_not_found`/`no_guilds` originate from
+ * `POST /guild/select`; the `passkey_*`/`not_whitelisted` codes from a failed passkey sign-in (see passkeys.ts).
+ */
+const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds', 'not_whitelisted', 'passkey_failed', 'passkey_unknown']);
 
 // ─── Redirect to Discord OAuth2 ─────────────────────────────────────────────
 
@@ -109,7 +112,7 @@ async function fetchDiscordProfile(accessToken: string): Promise<DiscordProfile>
  * @param dbUser - The whitelisted user row from `findUser`.
  * @returns The user's accessible guilds (empty if not provisioned anywhere).
  */
-async function resolveAccessibleGuilds(dbUser: DbUser): Promise<DbGuild[]> {
+export async function resolveAccessibleGuilds(dbUser: DbUser): Promise<DbGuild[]> {
   return dbUser.is_owner ? getAllGuilds() : getGuildsForMember(dbUser.discord_id);
 }
 
@@ -233,6 +236,29 @@ async function saveSessionUser(req: Request, userData: SessionUser): Promise<voi
 }
 
 /**
+ * Creates the dashboard session for a whitelisted user with at least one accessible guild:
+ * syncs their display name, picks the initial guild/access level, then regenerates and saves
+ * the session. Shared by the Discord OAuth callback and passkey sign-in so both produce an
+ * identical session.
+ * @param req - Express request whose session is regenerated and populated.
+ * @param profile - The user's Discord profile (id, username, avatar hash).
+ * @param dbUser - The whitelisted user row from `findUser`.
+ * @param accessibleGuilds - Non-empty result of `resolveAccessibleGuilds`.
+ * @returns Resolves once the new session has been saved.
+ */
+export async function establishDashboardSession(
+  req: Request,
+  profile: DiscordProfile,
+  dbUser: DbUser,
+  accessibleGuilds: DbGuild[],
+): Promise<void> {
+  const syncedDiscordName = await syncDiscordName(profile, dbUser, accessibleGuilds[0].guild_id);
+  const guildAndAccessLevel = await resolveInitialGuildAndAccessLevel(accessibleGuilds, dbUser);
+  const userData = buildSessionUser(profile, dbUser, syncedDiscordName, accessibleGuilds, guildAndAccessLevel);
+  await saveSessionUser(req, userData);
+}
+
+/**
  * GET /auth/discord/callback — completes the Discord OAuth2 flow. Validates the
  * `state` param against the session, exchanges the `code` for an access token,
  * fetches the Discord profile, and checks the user whitelist. The token-exchange
@@ -295,10 +321,7 @@ router.get('/discord/callback', async (req, res) => {
     if (await tryCompleteCompanionLogin(req, res, profile.id)) return;
     delete req.session.companionOAuth;
 
-    const syncedDiscordName = await syncDiscordName(profile, dbUser, accessibleGuilds[0].guild_id);
-    const guildAndAccessLevel = await resolveInitialGuildAndAccessLevel(accessibleGuilds, dbUser);
-    const userData = buildSessionUser(profile, dbUser, syncedDiscordName, accessibleGuilds, guildAndAccessLevel);
-    await saveSessionUser(req, userData);
+    await establishDashboardSession(req, profile, dbUser, accessibleGuilds);
 
     res.redirect('/');
   } catch (err) {

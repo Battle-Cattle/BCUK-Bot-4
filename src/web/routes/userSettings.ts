@@ -1,7 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { randomBytes } from 'crypto';
-import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, EventSubConfig } from '../../db';
+import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, listPasskeysForUser, EventSubConfig } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
@@ -27,8 +27,12 @@ const KNOWN_ERRORS = new Set([
   'eventsub_token_invalid',
   'eventsub_wrong_account',
   'invalid_id',
+  'passkey_register_failed',
+  'passkey_exists',
+  'passkey_limit',
+  'passkey_delete_failed',
 ]);
-const KNOWN_SUCCESSES = new Set(['twitch_connected']);
+const KNOWN_SUCCESSES = new Set(['twitch_connected', 'passkey_added', 'passkey_removed']);
 
 const ERROR_MESSAGES: Record<string, string> = {
   no_streamer_record:            'You are not configured as a monitored streamer.',
@@ -40,6 +44,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   eventsub_token_invalid:        'Could not verify the Twitch account. Please try again.',
   eventsub_wrong_account:        'Wrong Twitch account — please authorize with your own broadcaster account.',
   invalid_id:                    'Invalid request — please try again.',
+  passkey_register_failed:       'Could not add the passkey. Please try again.',
+  passkey_exists:                'That passkey is already registered.',
+  passkey_limit:                 'You have reached the maximum number of passkeys. Remove one before adding another.',
+  passkey_delete_failed:         'Could not remove the passkey. Please try again.',
 };
 
 /** Looks up a `userSettings` page error code in {@link ERROR_MESSAGES}, for use as an EJS template helper. */
@@ -51,8 +59,8 @@ function getFriendlyError(key: string): string {
 
 /**
  * GET /user/settings — renders the logged-in user's settings page, including their
- * Twitch connection status, EventSub config, and any `error`/`success` query-param
- * banner from a prior redirect.
+ * Twitch connection status, EventSub config, registered passkeys, and any
+ * `error`/`success` query-param banner from a prior redirect.
  * @param req - Express request; reads `req.session.user`, `error`, `success`, and
  *   `expected` query params.
  * @param res - Express response; renders the `userSettings` view, or a 500 error
@@ -61,9 +69,10 @@ function getFriendlyError(key: string): string {
 router.get('/', requireAuth, csrfProtection, async (req, res) => {
   try {
     const discordId = getSessionUser(req).discordId;
-    const [dbUser, streamer] = await Promise.all([
+    const [dbUser, streamer, passkeys] = await Promise.all([
       findUser(discordId),
       getStreamerByDiscordId(discordId),
+      listPasskeysForUser(discordId),
     ]);
 
     const errorKey = filterQueryParam(req.query.error, KNOWN_ERRORS);
@@ -87,6 +96,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       streamer: safeStreamer,
       isConnected,
       needsReconnect,
+      passkeys,
       csrfToken: req.csrfToken(),
       error: errorKey,
       success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),

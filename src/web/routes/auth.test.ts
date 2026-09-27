@@ -30,7 +30,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import express from 'express';
 import supertest from 'supertest';
-import router from './auth';
+import router, { establishDashboardSession, resolveAccessibleGuilds } from './auth';
 import {
   findUser,
   updateDiscordName,
@@ -471,6 +471,11 @@ describe('GET /login', () => {
     expect((res.body as any).locals.error).toBe('no_guilds');
   });
 
+  it.each(['not_whitelisted', 'passkey_failed', 'passkey_unknown'])('passes the passkey sign-in error code %s through to the view', async (code) => {
+    const res = await supertest(buildApp()).get(`/login?error=${code}`);
+    expect((res.body as any).locals.error).toBe(code);
+  });
+
   it('filters out an unrecognized ?error= code', async () => {
     const res = await supertest(buildApp()).get('/login?error=not_a_real_code');
     expect(res.status).toBe(200);
@@ -487,5 +492,42 @@ describe('POST /logout', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/auth/login');
     expect(destroy).toHaveBeenCalled();
+  });
+});
+
+// ─── establishDashboardSession / resolveAccessibleGuilds (shared with passkey login) ──
+
+describe('establishDashboardSession', () => {
+  it('regenerates the session and stores the same user payload the Discord callback builds', async () => {
+    const guild = { guild_id: 'g1', name: 'Guild One', voice_channel_id: null };
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.MANAGER);
+    const dbUser = { discord_id: '42', discord_name: 'Alice', is_owner: false } as any;
+    const regenerate = vi.fn((cb: (err: null) => void) => cb(null));
+    const save = vi.fn((cb: (err: null) => void) => cb(null));
+    const req: any = { session: { regenerate, save } };
+    // regenerate() replaces req.session in real express-session; the stub keeps the same object.
+    await establishDashboardSession(req, { id: '42', username: 'alice', avatar: 'abc' }, dbUser, [guild as any]);
+
+    expect(regenerate).toHaveBeenCalled();
+    expect(save).toHaveBeenCalled();
+    expect(req.session.user).toEqual({
+      discordId: '42',
+      discordName: 'Alice',
+      discordAvatar: 'https://cdn.discordapp.com/avatars/42/abc.png',
+      isOwner: false,
+      currentGuildId: 'g1',
+      accessLevel: AccessLevel.MANAGER,
+      guilds: [{ guildId: 'g1', name: 'Guild One' }],
+    });
+  });
+});
+
+describe('resolveAccessibleGuilds', () => {
+  it('returns every guild for an owner and memberships otherwise', async () => {
+    vi.mocked(getAllGuilds).mockResolvedValue([{ guild_id: 'all' }] as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: 'mine' }] as any);
+    expect(await resolveAccessibleGuilds({ discord_id: '1', is_owner: true } as any)).toEqual([{ guild_id: 'all' }]);
+    expect(await resolveAccessibleGuilds({ discord_id: '1', is_owner: false } as any)).toEqual([{ guild_id: 'mine' }]);
+    expect(getGuildsForMember).toHaveBeenCalledWith('1');
   });
 });

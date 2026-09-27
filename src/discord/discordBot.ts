@@ -264,6 +264,27 @@ export async function fetchMemberDisplayName(
 }
 
 /**
+ * Fetches a user's global Discord profile (username and avatar hash) via the bot client.
+ * Used by passkey login, which has no Discord OAuth `@me` response to read these from.
+ * @param discordId - Discord user ID to look up.
+ * @returns The user's username and avatar hash (null avatar if they use the default one),
+ *   or null if the bot isn't ready or the fetch fails.
+ */
+export async function fetchDiscordUserProfile(
+  discordId: string,
+): Promise<{ username: string; avatar: string | null } | null> {
+  const client = getDiscordClient();
+  if (!client) return null;
+  try {
+    const user = await client.users.fetch(discordId);
+    return { username: user.username, avatar: user.avatar };
+  } catch (err) {
+    log.warn(`Failed to fetch Discord profile for ${discordId}:`, err);
+    return null;
+  }
+}
+
+/**
  * Grants the Discord server's owner Admin access to a brand-new guild, creating
  * their whitelist `user` row first if they don't already have one. Only ever
  * called for a guild's first-ever appearance (see the `guildCreate` handler in

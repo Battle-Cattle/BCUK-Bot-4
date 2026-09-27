@@ -12,6 +12,7 @@ const log = createLogger('Web');
 
 const isProduction = process.env.NODE_ENV === 'production';
 import authRouter from './routes/auth';
+import passkeysRouter from './routes/passkeys';
 import guildRouter from './routes/guild';
 import eventsubCallbackRouter from './routes/eventsubCallback';
 import eventsubAdminRouter from './routes/eventsubAdmin';
@@ -93,6 +94,22 @@ app.set('views', path.join(__dirname, '../../views'));
 // Served ahead of the static middleware below so its cache-version substitution (see
 // serviceWorker.ts) takes effect instead of the raw, unsubstituted file on disk.
 app.use(serviceWorkerRouter);
+
+// Browser half of the passkey (WebAuthn) flow, served straight from the installed package so
+// it always matches the server library's version. Must be same-origin: CSP is script-src 'self'.
+const SIMPLEWEBAUTHN_BROWSER_BUNDLE = path.join(
+  __dirname,
+  '../../node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js',
+);
+/**
+ * GET /vendor/simplewebauthn-browser.js — serves the `@simplewebauthn/browser` UMD bundle.
+ * @param _req - Express request (unused).
+ * @param res - Express response; sends the bundle with `Cache-Control: no-cache`, like other static assets.
+ */
+app.get('/vendor/simplewebauthn-browser.js', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(SIMPLEWEBAUTHN_BROWSER_BUNDLE);
+});
 
 // Static assets. `Cache-Control: no-cache` forces revalidation (via the ETag express.static
 // already sends) on every request rather than letting browsers serve a stale copy from
@@ -178,6 +195,7 @@ app.use((req, res, next) => {
 });
 
 // Routes
+app.use('/auth/passkey', authLimiter, passkeysRouter);
 app.use('/auth', authLimiter, authRouter);
 // EventSub OAuth callback — must be outside requireAuth (Twitch redirects here without session)
 app.use('/auth', authLimiter, eventsubCallbackRouter);

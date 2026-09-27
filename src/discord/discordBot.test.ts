@@ -68,6 +68,7 @@ function makeMockClient() {
     login: vi.fn().mockResolvedValue(undefined),
     destroy: vi.fn().mockResolvedValue(undefined),
     user: { tag: 'Bot#1234' },
+    users: { fetch: vi.fn().mockResolvedValue({ username: 'alice', avatar: 'abc123' }) },
     guilds: {
       cache: { get: vi.fn().mockReturnValue(null) },
       fetch: vi.fn().mockResolvedValue(mockGuild),
@@ -179,6 +180,32 @@ describe('fetchMemberDisplayName', () => {
 
     const result = await mod.fetchMemberDisplayName('missing', 'guild-id', false);
     expect(result).toBeNull();
+  });
+});
+
+// ─── fetchDiscordUserProfile ──────────────────────────────────────────────────
+
+describe('fetchDiscordUserProfile', () => {
+  it('returns null when client is not ready', async () => {
+    expect(await mod.fetchDiscordUserProfile('123')).toBeNull();
+  });
+
+  it('returns the username and avatar hash when the fetch succeeds', async () => {
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    expect(await mod.fetchDiscordUserProfile('user123')).toEqual({ username: 'alice', avatar: 'abc123' });
+    expect(mockInstance.users.fetch).toHaveBeenCalledWith('user123');
+  });
+
+  it('returns null when the user fetch throws', async () => {
+    mockInstance.users.fetch.mockRejectedValueOnce(new Error('unknown user'));
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    expect(await mod.fetchDiscordUserProfile('missing')).toBeNull();
   });
 });
 

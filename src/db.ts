@@ -655,3 +655,15 @@ export {
   revokeToken,
 } from './db/companionTokens';
 export { createCode, exchangeCodeForToken } from './db/companionOAuthCodes';
+
+// ─── Passkeys (WebAuthn) ─────────────────────────────────────────────────────
+
+export {
+  listPasskeysForUser,
+  listPasskeyDescriptorsForUser,
+  findPasskey,
+  insertPasskey,
+  recordPasskeyUse,
+  deletePasskey,
+} from './db/webauthnCredentials';
+export type { PasskeySummary, StoredPasskey, NewPasskey } from './db/webauthnCredentials';

@@ -1,0 +1,76 @@
+/**
+ * User Settings: "Add a passkey on this device" and passkey removal confirmation.
+ */
+(function () {
+  var csrfToken = (document.body && document.body.dataset.csrfToken) || '';
+  var addRow = document.getElementById('passkey-add-row');
+  var addButton = document.getElementById('passkey-add');
+  var unsupported = document.getElementById('passkey-unsupported');
+
+  document.addEventListener('submit', function (event) {
+    var form = event.target;
+    if (!(form instanceof HTMLFormElement) || !form.classList.contains('js-confirm-remove-passkey')) return;
+    if (!window.confirm('Remove this passkey? You will no longer be able to sign in with it.')) event.preventDefault();
+  });
+
+  if (!addRow || !addButton || !window.BCUKPasskey) return;
+
+  /**
+   * Sends the browser back to the settings page with a result code banner.
+   * @param {'error'|'success'} kind - Query parameter to set.
+   * @param {string} code - Result code the settings page understands.
+   */
+  function finish(kind, code) {
+    window.location.href = '/user/settings?' + kind + '=' + encodeURIComponent(code);
+  }
+
+  /**
+   * Runs the full registration ceremony: fetch options, prompt the authenticator
+   * (fingerprint/face/PIN), then send the result back for verification.
+   */
+  async function registerPasskey() {
+    var label = window.prompt('Name this passkey', window.BCUKPasskey.guessDeviceLabel());
+    if (label === null) return;
+
+    addButton.disabled = true;
+    try {
+      var optionsRes = await window.BCUKPasskey.postJson('/auth/passkey/register/options', {}, csrfToken);
+      if (!optionsRes.ok) {
+        finish('error', (optionsRes.data && optionsRes.data.error) || 'passkey_register_failed');
+        return;
+      }
+
+      var attestation;
+      try {
+        attestation = await window.SimpleWebAuthnBrowser.startRegistration({ optionsJSON: optionsRes.data });
+      } catch (err) {
+        // The user dismissed the prompt, or this authenticator already holds one of their passkeys.
+        if (err && err.name === 'InvalidStateError') finish('error', 'passkey_exists');
+        return;
+      }
+
+      var verifyRes = await window.BCUKPasskey.postJson(
+        '/auth/passkey/register/verify',
+        { response: attestation, label: label },
+        csrfToken
+      );
+      if (verifyRes.ok) finish('success', 'passkey_added');
+      else finish('error', (verifyRes.data && verifyRes.data.error) || 'passkey_register_failed');
+    } catch (_err) {
+      finish('error', 'passkey_register_failed');
+    } finally {
+      addButton.disabled = false;
+    }
+  }
+
+  window.BCUKPasskey.isSupported().then(function (supported) {
+    if (supported) {
+      addRow.classList.remove('is-hidden');
+      addButton.addEventListener('click', function () {
+        void registerPasskey();
+      });
+    } else if (unsupported) {
+      unsupported.classList.remove('is-hidden');
+    }
+  });
+})();

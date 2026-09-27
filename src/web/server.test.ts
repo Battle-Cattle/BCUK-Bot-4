@@ -77,6 +77,7 @@ function errorTriggerRouter() {
 }
 
 vi.mock('./routes/auth', () => ({ default: emptyRouter() }));
+vi.mock('./routes/passkeys', () => ({ default: emptyRouter() }));
 vi.mock('./routes/guild', () => ({ default: markerRouter('guild') }));
 vi.mock('./routes/eventsubCallback', () => ({ default: emptyRouter() }));
 vi.mock('./routes/eventsubAdmin', () => ({ default: markerRouter('eventsubAdmin') }));
@@ -193,6 +194,16 @@ describe('static assets', () => {
     const res = await request(app).get('/style.css');
     expect(res.status).toBe(200);
     expect(res.headers['cache-control']).toBe('no-cache');
+  });
+});
+
+describe('passkey browser bundle', () => {
+  it('serves the @simplewebauthn/browser bundle same-origin with no-cache', async () => {
+    const res = await request(app).get('/vendor/simplewebauthn-browser.js');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('javascript');
+    expect(res.headers['cache-control']).toBe('no-cache');
+    expect(res.text).toContain('SimpleWebAuthnBrowser');
   });
 });
 

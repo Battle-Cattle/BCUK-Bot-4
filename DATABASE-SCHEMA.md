@@ -491,6 +491,27 @@ Expected constraints and behavior:
 - Consuming a code (`consumeCodeOnConnection` in `src/db/companionOAuthCodes.ts`) is a single `UPDATE ... WHERE used_at IS NULL AND expires_at > NOW()`, so concurrent redemption attempts of the same code cannot both succeed.
 - `exchangeCodeForToken()` marks the code used and issues the companion token in one DB transaction, so a failure issuing the token rolls back the "used" mark instead of permanently burning the code.
 
+## `webauthn_credentials`
+
+Passkeys (WebAuthn credentials) for fingerprint / face / device-PIN sign-in to the web panel. A user adds one from User Settings after signing in with Discord; afterwards the login page's passkey button signs them in directly. Created by `migrations/webauthn_credentials.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `credential_id` | `VARCHAR(512)` PK, `ascii_bin` | base64url credential ID from the authenticator; binary collation because IDs are case-sensitive |
+| `discord_id` | `BIGINT` | FK to `user.discord_id` ON DELETE CASCADE; the passkey's owner |
+| `public_key` | `VARBINARY(1024)` | COSE-encoded credential public key |
+| `sign_count` | `INT UNSIGNED` | WebAuthn signature counter (32-bit by spec, so read as a plain number); updated on each sign-in |
+| `transports` | `VARCHAR(255)` nullable | Comma-separated transport hints (`internal`, `hybrid`, ...) |
+| `device_label` | `VARCHAR(100)` | User-chosen name shown in User Settings |
+| `created_at` | `DATETIME` | Defaults to `CURRENT_TIMESTAMP` |
+| `last_used_at` | `DATETIME` nullable | Last successful sign-in with this passkey |
+
+Expected constraints and behavior:
+
+- `KEY idx_webauthn_credentials_discord_id (discord_id)` for the per-user listing on the settings page.
+- Deleting a passkey (`deletePasskey` in `src/db/webauthnCredentials.ts`) is scoped by `discord_id`, so a user can only remove their own.
+- A passkey never bypasses the whitelist: sign-in re-checks the `user` row and guild access exactly like the Discord OAuth callback, so removing a user (which cascades here) or all their guild memberships locks them out.
+
 ## `sessions`
 
 Managed automatically by `express-mysql-session`.
