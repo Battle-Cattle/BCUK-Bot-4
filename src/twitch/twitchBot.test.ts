@@ -178,6 +178,7 @@ import {
 } from './twitchChannelMembership';
 import * as twitchChannelMembership from './twitchChannelMembership';
 import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName, getBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy } from '../db';
+import { __resetTransientRebuildStateForTests } from './twitchBotAuthProvider';
 import { sendOwnerAlert } from '../discord/ownerAlerts';
 import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
 import { getUsers } from './twitchApi';
@@ -313,6 +314,7 @@ beforeEach(() => {
   vi.mocked(getBotChatToken).mockResolvedValue(STORED_BOT_TOKEN as any);
   vi.mocked(saveBotChatTokenIfOwnedBy).mockResolvedValue(true);
   vi.mocked(clearBotChatTokenIfOwnedBy).mockResolvedValue(true);
+  __resetTransientRebuildStateForTests();
 });
 
 afterEach(async () => {
@@ -939,7 +941,7 @@ describe('startTwitchBot', () => {
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
 
-  it('alerts the owner when the automatic rebuild after a transient refresh failure itself fails to reconnect', async () => {
+  it('does not alert the owner the first time an automatic rebuild fails to reconnect (still within the retry budget)', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     await startTwitchBot();
 
@@ -956,6 +958,38 @@ describe('startTwitchBot', () => {
     // Unlike the invalid-token path, the DB token is untouched here — the alert wording must not
     // imply the credential was cleared.
     expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
+  });
+
+  it('gives up and alerts the owner once after repeated rebuild attempts fail to reconnect', async () => {
+    // A rebuild that can't reconnect at all (e.g. the stored token is genuinely still bad, or an
+    // ongoing Twitch outage) has the new provider's own first token fetch fail too, re-emitting
+    // onRefreshFailure and recursing straight back into another rebuild attempt — see
+    // rebuildAfterTransientRefreshFailure's doc. Simulate that recursion by firing the same
+    // registered handler repeatedly; this test only cares that the retries are bounded and the
+    // owner is paged exactly once when they run out, not the recursion mechanism itself.
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+
+    mockClient.connect.mockImplementation(() => {
+      handlers.tokenFetchFailureHandlers.slice().forEach((h) => h(new Error('token fetch failed')));
+    });
+
+    const error = Object.assign(new Error('Encountered HTTP status code 503'), {
+      statusCode: 503,
+      body: JSON.stringify({ status: 503, message: 'Internal server error' }),
+    });
+
+    for (let i = 0; i < 10; i++) {
+      const result = authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+      await vi.runAllTimersAsync();
+      await result;
+    }
+
+    // Unlike the invalid-token path, the DB token is untouched here — the alert wording must not
+    // imply the credential was cleared.
+    expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
   });
 

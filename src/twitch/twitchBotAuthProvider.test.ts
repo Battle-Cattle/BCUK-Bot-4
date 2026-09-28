@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockLogger } from '../test-utils/loggerMock';
 
 // ─── Hoisted state (available inside vi.mock factories) ───────────────────────
@@ -41,13 +41,16 @@ vi.mock('../discord/ownerAlerts', () => ({
 vi.mock('../db', () => ({
   saveBotChatTokenIfOwnedBy: vi.fn(),
   clearBotChatTokenIfOwnedBy: vi.fn(),
+  getBotChatToken: vi.fn(),
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS: 5_000,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60_000,
 }));
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { RefreshingAuthProvider } from '@twurple/auth';
-import { buildBotAuthProvider, BOT_AUTH_CONNECT_URL } from './twitchBotAuthProvider';
-import { saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy } from '../db';
+import { buildBotAuthProvider, BOT_AUTH_CONNECT_URL, __resetTransientRebuildStateForTests } from './twitchBotAuthProvider';
+import { saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy, getBotChatToken } from '../db';
 import { sendOwnerAlert } from '../discord/ownerAlerts';
 
 const STORED_BOT_TOKEN = {
@@ -60,11 +63,27 @@ const STORED_BOT_TOKEN = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useFakeTimers();
   authProviderHandlers.refreshHandlers.length = 0;
   authProviderHandlers.refreshFailureHandlers.length = 0;
   vi.mocked(saveBotChatTokenIfOwnedBy).mockResolvedValue(true);
   vi.mocked(clearBotChatTokenIfOwnedBy).mockResolvedValue(true);
+  vi.mocked(getBotChatToken).mockResolvedValue(STORED_BOT_TOKEN as any);
+  __resetTransientRebuildStateForTests();
 });
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+/** Awaits a refresh-failure handler while also flushing any pending backoff timers it started. */
+async function runRefreshFailureHandler(...args: Parameters<Handler>): Promise<void> {
+  const result = authProviderHandlers.refreshFailureHandlers[0](...args);
+  await vi.runAllTimersAsync();
+  await result;
+}
+
+type Handler = (...args: any[]) => any;
 
 describe('buildBotAuthProvider', () => {
   it('constructs a RefreshingAuthProvider with the configured client credentials', () => {
@@ -150,28 +169,85 @@ describe('buildBotAuthProvider', () => {
       const restart = vi.fn().mockResolvedValue(undefined);
       buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
 
-      await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', transientError);
+      await runRefreshFailureHandler('bot-uid', transientError);
 
       expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
       expect(restart).toHaveBeenCalled();
     });
 
-    it('does not alert the owner when the rebuild succeeds', async () => {
+    it('does not alert the owner on a single failed rebuild attempt', async () => {
       const restart = vi.fn().mockResolvedValue(undefined);
       buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
 
-      await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', transientError);
+      await runRefreshFailureHandler('bot-uid', transientError);
 
       expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
     });
 
-    it('alerts the owner when the rebuild itself fails to reconnect', async () => {
+    it('does not alert the owner when a single rebuild fails to reconnect (still within the retry budget)', async () => {
       const restart = vi.fn().mockRejectedValue(new Error('reconnect failed'));
       buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
 
-      await expect(authProviderHandlers.refreshFailureHandlers[0]('bot-uid', transientError)).resolves.toBeUndefined();
+      await expect(runRefreshFailureHandler('bot-uid', transientError)).resolves.toBeUndefined();
 
+      expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
+    });
+
+    it('gives up and alerts the owner exactly once after repeated consecutive failures exhaust the retry budget', async () => {
+      const restart = vi.fn().mockRejectedValue(new Error('reconnect failed'));
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
+
+      // The real trigger for repeat failures is each rebuilt provider's own onRefreshFailure firing
+      // again (see the doc on rebuildAfterTransientRefreshFailure); simulate that by firing the same
+      // registered handler repeatedly, since this test only cares about the bound, not the recursion.
+      for (let i = 0; i < 10; i++) {
+        await runRefreshFailureHandler('bot-uid', transientError);
+      }
+
+      expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledTimes(1);
       expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining(BOT_AUTH_CONNECT_URL));
+    });
+
+    it('stops calling restart once the retry budget is exhausted', async () => {
+      const restart = vi.fn().mockRejectedValue(new Error('reconnect failed'));
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
+
+      for (let i = 0; i < 10; i++) {
+        await runRefreshFailureHandler('bot-uid', transientError);
+      }
+
+      expect(restart.mock.calls.length).toBeLessThanOrEqual(5);
+    });
+
+    it('abandons the rebuild without restarting if a newer connection has since been saved', async () => {
+      const restart = vi.fn().mockResolvedValue(undefined);
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
+      vi.mocked(getBotChatToken).mockResolvedValue({ ...STORED_BOT_TOKEN, connectionId: 2 } as any);
+
+      await runRefreshFailureHandler('bot-uid', transientError);
+
+      expect(restart).not.toHaveBeenCalled();
+    });
+
+    it('resets the retry budget for a connection after it successfully refreshes again', async () => {
+      const restart = vi.fn().mockRejectedValue(new Error('reconnect failed'));
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
+
+      for (let i = 0; i < 5; i++) {
+        await runRefreshFailureHandler('bot-uid', transientError);
+      }
+      await authProviderHandlers.refreshHandlers[0]('bot-uid', {
+        accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
+      });
+      vi.mocked(sendOwnerAlert).mockClear();
+      restart.mockClear();
+
+      for (let i = 0; i < 5; i++) {
+        await runRefreshFailureHandler('bot-uid', transientError);
+      }
+
+      expect(restart).toHaveBeenCalled();
+      expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
     });
   });
 });
