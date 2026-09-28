@@ -17,11 +17,10 @@ const log = createLogger('Twitch');
 export const BOT_AUTH_CONNECT_URL = `${PUBLIC_URL}/admin/bot-auth`;
 
 /**
- * How many consecutive transient-refresh-failure rebuilds a single connection may trigger before
- * we stop retrying automatically and alert the owner instead. Bounds the otherwise-unbounded loop
- * described in {@link rebuildAfterTransientRefreshFailure}'s doc: a rebuilt provider seeded from a
- * genuinely still-expired/unreachable token fails its very first refresh attempt on connect too,
- * re-emitting `onRefreshFailure` and queuing another rebuild.
+ * How many reconnect attempts {@link rebuildAfterTransientRefreshFailure}'s retry loop makes
+ * before it gives up and alerts the owner instead. Bounds a genuinely still-expired/unreachable
+ * stored token from retrying forever: every attempt in that loop is a real `restart()` call, so
+ * without a cap a persistent failure would keep rebuilding indefinitely.
  */
 const MAX_TRANSIENT_REBUILD_ATTEMPTS = 5;
 
