@@ -764,6 +764,57 @@ describe('startTwitchBot', () => {
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
   });
 
+  it('disconnects the chat client (not just the DB row) after a confirmed invalid refresh token', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+    mockClient.quit.mockClear();
+
+    const error = Object.assign(new Error('Encountered HTTP status code 401'), {
+      statusCode: 401,
+      body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
+    });
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+
+    // Leaving the dead session connected until Twitch eventually rejects it would misrepresent
+    // the bot's actual state — restartTwitchBot() (not a bare disconnect) tears it down and, since
+    // there's no token left to reconnect with, leaves the bot stopped.
+    expect(mockClient.quit).toHaveBeenCalled();
+  });
+
+  it('still alerts the owner even if disconnecting the chat client after the clear fails', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+
+    // Simulates restartTwitchBot()'s own startTwitchBot() call failing (e.g. a transient
+    // reconnect error) — the alert must still fire since the DB is already cleared either way.
+    mockClient.connect.mockImplementationOnce(() => {
+      handlers.tokenFetchFailureHandlers.slice().forEach((h) => h(new Error('token fetch failed')));
+    });
+
+    const error = Object.assign(new Error('Encountered HTTP status code 401'), {
+      statusCode: 401,
+      body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
+    });
+    await expect(authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error)).resolves.toBeUndefined();
+
+    expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
+  });
+
+  it('does not disconnect the chat client when the clear itself is declined (a reconnect replaced this connection first)', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    vi.mocked(clearBotChatTokenIfOwnedBy).mockResolvedValue(false);
+    await startTwitchBot();
+    mockClient.quit.mockClear();
+
+    const error = Object.assign(new Error('Encountered HTTP status code 401'), {
+      statusCode: 401,
+      body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
+    });
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+
+    expect(mockClient.quit).not.toHaveBeenCalled();
+  });
+
   it('clears the stored token and alerts the owner when the response body names an invalid refresh token (400)', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     await startTwitchBot();

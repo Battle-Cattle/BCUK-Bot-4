@@ -289,19 +289,19 @@ function isInvalidRefreshTokenError(error: Error): boolean {
  * Builds a `RefreshingAuthProvider` seeded with the bot's own stored chat token, wired to
  * persist a refreshed token back to the DB (`onRefresh`) and, on a refresh failure that looks
  * like a genuinely invalid/revoked refresh token (see {@link isInvalidRefreshTokenError}), to
- * clear it and alert the owner. A transient failure (network error, timeout, 5xx) is logged but
- * leaves the stored token in place — Twurple never retries a failed refresh on its own for the
- * life of the provider, but a later process restart rebuilds the provider from the still-valid
- * stored token and can succeed. Replaces the old `StaticAuthProvider` seeded from the static
- * `TWITCH_OAUTH_TOKEN` env var (see #550). Its `onRefresh`/`onRefreshFailure` callbacks are
- * guarded against a reconnect superseding this provider while one of them is in flight via a
- * database-level compare-and-swap (`saveBotChatTokenIfOwnedBy`/`clearBotChatTokenIfOwnedBy`,
- * keyed to `stored.connectionId`, the row's `connection_id` at the moment this provider was
- * built): a write that started before a reconnect but completes after it finds `connection_id`
- * already bumped past that value and is dropped as a no-op instead of clobbering the newer
- * connection's token. Keyed on `connection_id` rather than the Twitch user ID specifically so a
- * reconnect to the *same* account is covered too, not just a reconnect to a different one — see
- * the discussion on PR #666.
+ * clear it, disconnect the now-dead chat session, and alert the owner. A transient failure
+ * (network error, timeout, 5xx) is logged but leaves the stored token in place — Twurple never
+ * retries a failed refresh on its own for the life of the provider, but a later process restart
+ * rebuilds the provider from the still-valid stored token and can succeed. Replaces the old
+ * `StaticAuthProvider` seeded from the static `TWITCH_OAUTH_TOKEN` env var (see #550). Its
+ * `onRefresh`/`onRefreshFailure` callbacks are guarded against a reconnect superseding this
+ * provider while one of them is in flight via a database-level compare-and-swap
+ * (`saveBotChatTokenIfOwnedBy`/`clearBotChatTokenIfOwnedBy`, keyed to `stored.connectionId`, the
+ * row's `connection_id` at the moment this provider was built): a write that started before a
+ * reconnect but completes after it finds `connection_id` already bumped past that value and is
+ * dropped as a no-op instead of clobbering the newer connection's token. Keyed on `connection_id`
+ * rather than the Twitch user ID specifically so a reconnect to the *same* account is covered
+ * too, not just a reconnect to a different one — see the discussion on PR #666.
  * @param stored - The bot's decrypted chat token, as loaded from the DB.
  * @returns A `RefreshingAuthProvider` with the bot's user already added under the `chat` intent.
  */
@@ -324,6 +324,18 @@ function buildBotAuthProvider(stored: NonNullable<Awaited<ReturnType<typeof getB
     if (!cleared) {
       log.warn(`Not clearing the stored token for ${userId} — a reconnect replaced this connection first.`);
       return;
+    }
+    // Disconnect the now-credential-less chat session immediately rather than leaving it running
+    // on its last-known (still-live-for-now) access token until Twitch eventually rejects it —
+    // restartTwitchBot() is used (not a bare stopTwitchBot()) so this serializes against a
+    // concurrent /admin/bot-auth reconnect instead of racing it: if a newer connection has
+    // already been saved by the time this runs, startTwitchBot() just reconnects with that
+    // current token instead of leaving chat down. Failure here is logged but never suppresses
+    // the owner alert below — the DB is already cleared either way, so the owner must be told.
+    try {
+      await restartTwitchBot();
+    } catch (restartErr) {
+      log.error(`Failed to disconnect the chat client after clearing ${userId}'s revoked token:`, restartErr);
     }
     void sendOwnerAlert(`🔴 Twitch chat bot's token was revoked/expired and could not refresh. Reconnect it at ${BOT_AUTH_CONNECT_URL}`);
   });
