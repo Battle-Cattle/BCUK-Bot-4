@@ -175,7 +175,7 @@ describe('buildBotAuthProvider', () => {
       expect(restart).toHaveBeenCalled();
     });
 
-    it('does not alert the owner on a single failed rebuild attempt', async () => {
+    it('does not alert the owner when the rebuild succeeds on the first attempt', async () => {
       const restart = vi.fn().mockResolvedValue(undefined);
       buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
 
@@ -184,39 +184,28 @@ describe('buildBotAuthProvider', () => {
       expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
     });
 
-    it('does not alert the owner when a single rebuild fails to reconnect (still within the retry budget)', async () => {
-      const restart = vi.fn().mockRejectedValue(new Error('reconnect failed'));
+    it('retries with backoff and does not alert if a later attempt succeeds — this is the single call that owns the whole bounded loop, not one attempt per onRefreshFailure invocation (see the doc on rebuildAfterTransientRefreshFailure for why it cannot rely on being re-invoked)', async () => {
+      const restart = vi.fn()
+        .mockRejectedValueOnce(new Error('reconnect failed'))
+        .mockRejectedValueOnce(new Error('reconnect failed'))
+        .mockResolvedValueOnce(undefined);
       buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
 
-      await expect(runRefreshFailureHandler('bot-uid', transientError)).resolves.toBeUndefined();
+      await runRefreshFailureHandler('bot-uid', transientError);
 
+      expect(restart).toHaveBeenCalledTimes(3);
       expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
     });
 
-    it('gives up and alerts the owner exactly once after repeated consecutive failures exhaust the retry budget', async () => {
+    it('gives up and alerts the owner exactly once after exhausting the retry budget within a single call', async () => {
       const restart = vi.fn().mockRejectedValue(new Error('reconnect failed'));
       buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
 
-      // The real trigger for repeat failures is each rebuilt provider's own onRefreshFailure firing
-      // again (see the doc on rebuildAfterTransientRefreshFailure); simulate that by firing the same
-      // registered handler repeatedly, since this test only cares about the bound, not the recursion.
-      for (let i = 0; i < 10; i++) {
-        await runRefreshFailureHandler('bot-uid', transientError);
-      }
+      await runRefreshFailureHandler('bot-uid', transientError);
 
+      expect(restart).toHaveBeenCalledTimes(5);
       expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledTimes(1);
       expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining(BOT_AUTH_CONNECT_URL));
-    });
-
-    it('stops calling restart once the retry budget is exhausted', async () => {
-      const restart = vi.fn().mockRejectedValue(new Error('reconnect failed'));
-      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
-
-      for (let i = 0; i < 10; i++) {
-        await runRefreshFailureHandler('bot-uid', transientError);
-      }
-
-      expect(restart.mock.calls.length).toBeLessThanOrEqual(5);
     });
 
     it('abandons the rebuild without restarting if a newer connection has since been saved', async () => {
@@ -227,27 +216,28 @@ describe('buildBotAuthProvider', () => {
       await runRefreshFailureHandler('bot-uid', transientError);
 
       expect(restart).not.toHaveBeenCalled();
+      expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
     });
 
-    it('resets the retry budget for a connection after it successfully refreshes again', async () => {
-      const restart = vi.fn().mockRejectedValue(new Error('reconnect failed'));
+    it('does not start a second competing retry loop if onRefreshFailure fires again for the same connection while one is already in flight', async () => {
+      // Simulates the real recursive trigger this guards against: restart() builds a new provider
+      // from the same still-bad stored token, and that provider's own first token fetch can
+      // re-emit onRefreshFailure for the same connectionId before the original loop has finished.
+      let resolveRestart!: () => void;
+      const restart = vi.fn(() => new Promise<void>((resolve) => { resolveRestart = resolve; }));
       buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
 
-      for (let i = 0; i < 5; i++) {
-        await runRefreshFailureHandler('bot-uid', transientError);
-      }
-      await authProviderHandlers.refreshHandlers[0]('bot-uid', {
-        accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
-      });
-      vi.mocked(sendOwnerAlert).mockClear();
-      restart.mockClear();
+      const first = authProviderHandlers.refreshFailureHandlers[0]('bot-uid', transientError);
+      const second = authProviderHandlers.refreshFailureHandlers[0]('bot-uid', transientError);
+      // Flush the microtasks between `first`'s synchronous in-flight guard check and its `await
+      // restart()` call (it awaits `getBotChatToken()` first), so `restart` has actually been
+      // invoked — and `resolveRestart` assigned — before we resolve it.
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      resolveRestart();
+      await vi.runAllTimersAsync();
+      await Promise.all([first, second]);
 
-      for (let i = 0; i < 5; i++) {
-        await runRefreshFailureHandler('bot-uid', transientError);
-      }
-
-      expect(restart).toHaveBeenCalled();
-      expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
+      expect(restart).toHaveBeenCalledTimes(1);
     });
   });
 });

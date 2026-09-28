@@ -25,20 +25,24 @@ export const BOT_AUTH_CONNECT_URL = `${PUBLIC_URL}/admin/bot-auth`;
  */
 const MAX_TRANSIENT_REBUILD_ATTEMPTS = 5;
 
-/** Consecutive transient-rebuild attempt counts, keyed by the connection they belong to. */
-const transientRebuildAttempts = new Map<number, number>();
-/** Connections that have already received the "gave up retrying" owner alert, to send it once. */
-const transientRebuildAlerted = new Set<number>();
+/**
+ * Connections currently running their own {@link rebuildAfterTransientRefreshFailure} retry loop.
+ * Guards against a second, competing loop: rebuilding calls `restart()`, which builds a *new*
+ * provider from the same still-bad stored token, and that new provider's own first token fetch can
+ * re-emit `onRefreshFailure` for the same `connectionId` while the original loop is still running
+ * (mid-backoff or mid-`restart()`). Without this guard that re-emission would start a second,
+ * independent loop racing the first one instead of being a no-op — the original loop already owns
+ * driving the next attempt regardless of *why* `restart()` failed (see this function's doc).
+ */
+const transientRebuildInFlight = new Set<number>();
 
 /**
- * Clears all tracked transient-rebuild retry state. For tests only: this state is intentionally
- * module-level (it must survive a rebuild replacing the whole provider instance, see
- * {@link rebuildAfterTransientRefreshFailure}), so without this, independent test cases that reuse
- * the same `connectionId` would otherwise leak retry counts into each other.
+ * Clears tracked in-flight transient-rebuild state. For tests only: this state is intentionally
+ * module-level (it must survive a rebuild replacing the whole provider instance), so without this,
+ * independent test cases that reuse the same `connectionId` would otherwise leak into each other.
  */
 export function __resetTransientRebuildStateForTests(): void {
-  transientRebuildAttempts.clear();
-  transientRebuildAlerted.clear();
+  transientRebuildInFlight.clear();
 }
 
 /**
@@ -85,53 +89,53 @@ function isInvalidRefreshTokenError(error: Error): boolean {
  * still-stored token) starts with a clean failure cache, so a later refresh can actually be
  * attempted again instead of requiring a manual process restart.
  *
- * Bounded and connection-aware because a rebuild isn't guaranteed to fix anything: if the stored
- * token is still expired/unreachable (an ongoing outage, or a failure this module misclassified as
- * transient), the rebuilt `ChatClient` fails its own first token fetch while connecting, which
- * `RefreshingAuthProvider` reports by re-emitting `onRefreshFailure` on the *new* provider —
- * recursing straight back into this function. Without a cap that recurses indefinitely, hammering
- * Twitch's token endpoint and (before this fix) alerting the owner on every single attempt.
- * `MAX_TRANSIENT_REBUILD_ATTEMPTS` bounds the loop with exponential backoff between attempts, and
- * only alerts once, when the limit is reached. Attempts are tracked per `connectionId` (not
- * globally) so they don't get confused with a *different* connection's failures, and are
- * abandoned early — before sleeping through backoff and before restarting — if a newer connection
- * has since been saved (e.g. the owner reconnected via `/admin/bot-auth`), since retrying a
- * superseded connection is pointless. `onRefresh`'s success handler clears this connection's
- * tracked state, since a successful refresh means it has recovered and a future failure should
- * start counting from zero again.
+ * Owns its own bounded, backed-off retry loop rather than relying on being re-invoked from
+ * outside — a rebuild isn't guaranteed to fix anything (an ongoing outage, or a failure this
+ * module misclassified as transient), and `restart()` can fail for reasons that have nothing to do
+ * with the refresh token (e.g. a plain connect timeout), so nothing would necessarily call this
+ * function again on its own. (One case *does* call it again on its own: if the stored token really
+ * is still bad, the rebuilt `ChatClient`'s own first token fetch fails too, which
+ * `RefreshingAuthProvider` reports by re-emitting `onRefreshFailure` on the *new* provider. The
+ * `transientRebuildInFlight` guard makes that a no-op instead of a second, competing loop — this
+ * loop already owns retrying regardless.) Backs off exponentially between attempts, gives up and
+ * alerts the owner once after `MAX_TRANSIENT_REBUILD_ATTEMPTS`, and re-checks before every attempt
+ * (skipping the wait if none has elapsed yet) whether a newer connection has since been saved (e.g.
+ * the owner reconnected via `/admin/bot-auth`), abandoning immediately since retrying a superseded
+ * connection is pointless.
  * @param userId - The Twitch user ID `onRefreshFailure` fired for, for logging only.
- * @param connectionId - The `connection_id` this provider was built for, for scoping retry state
- *   and detecting supersession.
+ * @param connectionId - The `connection_id` this provider was built for, for detecting
+ *   supersession and for the in-flight guard described above.
  * @param restart - `restartTwitchBot`, injected by the caller.
  */
 async function rebuildAfterTransientRefreshFailure(userId: string, connectionId: number, restart: () => Promise<void>): Promise<void> {
-  const attempt = (transientRebuildAttempts.get(connectionId) ?? 0) + 1;
-  if (attempt > MAX_TRANSIENT_REBUILD_ATTEMPTS) {
-    if (!transientRebuildAlerted.has(connectionId)) {
-      transientRebuildAlerted.add(connectionId);
-      void sendOwnerAlert(
-        `🟠 Twitch chat bot's token refresh has failed ${MAX_TRANSIENT_REBUILD_ATTEMPTS} times in a row and stopped retrying automatically. Check server logs — reconnect manually at ${BOT_AUTH_CONNECT_URL} if this persists.`,
-      );
-    }
-    return;
-  }
-  transientRebuildAttempts.set(connectionId, attempt);
-
-  log.warn(
-    `Refresh failure for ${userId} does not look like a revoked/invalid token — rebuilding the chat connection from the still-stored token (attempt ${attempt}/${MAX_TRANSIENT_REBUILD_ATTEMPTS}).`,
-  );
-  if (attempt > 1) {
-    const backoffMs = Math.min(DEFAULT_REFRESH_FAILURE_BACKOFF_MS * 2 ** (attempt - 2), DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS);
-    await new Promise<void>((resolve) => setTimeout(resolve, backoffMs));
-  }
-
-  const current = await getBotChatToken();
-  if (!current || current.connectionId !== connectionId) return; // superseded by a reconnect since this failure fired
-
+  if (transientRebuildInFlight.has(connectionId)) return; // an active retry loop for this connection already owns this
+  transientRebuildInFlight.add(connectionId);
   try {
-    await restart();
-  } catch (restartErr) {
-    log.error(`Failed to rebuild the chat connection after a transient refresh failure for ${userId} (attempt ${attempt}/${MAX_TRANSIENT_REBUILD_ATTEMPTS}):`, restartErr);
+    for (let attempt = 1; attempt <= MAX_TRANSIENT_REBUILD_ATTEMPTS; attempt++) {
+      if (attempt > 1) {
+        const backoffMs = Math.min(DEFAULT_REFRESH_FAILURE_BACKOFF_MS * 2 ** (attempt - 2), DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS);
+        await new Promise<void>((resolve) => setTimeout(resolve, backoffMs));
+      }
+
+      const current = await getBotChatToken();
+      if (!current || current.connectionId !== connectionId) return; // superseded by a reconnect since this failure fired
+
+      log.warn(
+        `Refresh failure for ${userId} does not look like a revoked/invalid token — rebuilding the chat connection from the still-stored token (attempt ${attempt}/${MAX_TRANSIENT_REBUILD_ATTEMPTS}).`,
+      );
+      try {
+        await restart();
+        return; // reconnected — recovered
+      } catch (restartErr) {
+        log.error(`Failed to rebuild the chat connection after a transient refresh failure for ${userId} (attempt ${attempt}/${MAX_TRANSIENT_REBUILD_ATTEMPTS}):`, restartErr);
+      }
+    }
+
+    void sendOwnerAlert(
+      `🟠 Twitch chat bot's token refresh has failed ${MAX_TRANSIENT_REBUILD_ATTEMPTS} times in a row and stopped retrying automatically. Check server logs — reconnect manually at ${BOT_AUTH_CONNECT_URL} if this persists.`,
+    );
+  } finally {
+    transientRebuildInFlight.delete(connectionId);
   }
 }
 
@@ -168,14 +172,7 @@ export function buildBotAuthProvider(stored: BotChatToken, restart: () => Promis
   authProvider.onRefresh(async (userId, newToken) => {
     const expiryMs = newToken.expiresIn != null ? Date.now() + newToken.expiresIn * 1000 - 60_000 : null;
     const saved = await saveBotChatTokenIfOwnedBy(connectionId, newToken.accessToken, newToken.refreshToken!, expiryMs);
-    if (!saved) {
-      log.warn(`Dropped a refreshed token for ${userId} — a reconnect replaced this connection first.`);
-      return;
-    }
-    // A successful refresh means this connection has recovered — any transient-failure retry
-    // state tracked for it is now stale.
-    transientRebuildAttempts.delete(connectionId);
-    transientRebuildAlerted.delete(connectionId);
+    if (!saved) log.warn(`Dropped a refreshed token for ${userId} — a reconnect replaced this connection first.`);
   });
   authProvider.onRefreshFailure(async (userId, error) => {
     log.error(`Failed to refresh chat token for ${userId}: ${error.message}`);
