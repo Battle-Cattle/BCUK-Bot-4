@@ -19,6 +19,12 @@ let cachedAppToken: string | null = null;
 let appTokenExpiry = 0;
 let tokenRefreshPromise: Promise<string> | null = null;
 
+/**
+ * Requests a new app access token via the client-credentials flow and caches it, expiring
+ * 60 s early to avoid using a token right at its expiry.
+ * @returns The new access token.
+ * @throws If the token request fails.
+ */
 async function fetchNewAppToken(): Promise<string> {
   const body = new URLSearchParams({
     client_id: TWITCH_CLIENT_ID,
@@ -91,6 +97,13 @@ function throwOnHelixError(res: Response, label: string): void {
   throw new Error(`[TwitchAPI] ${label} failed: ${res.status}`);
 }
 
+/**
+ * Splits an array into consecutive chunks.
+ * @param arr - The array to split.
+ * @param size - Maximum chunk length; must be > 0.
+ * @returns The chunks, in order.
+ * @throws If `size` is not positive.
+ */
 function chunks<T>(arr: T[], size: number): T[][] {
   if (size <= 0) throw new Error(`chunks: size must be > 0, got ${size}`);
   const result: T[][] = [];
@@ -102,6 +115,14 @@ const HELIX_MAX_RETRIES = 3;
 
 const NETWORK_RETRY_DELAYS_MS = [2_000, 4_000];
 
+/**
+ * GETs a Helix URL, retrying network errors with fixed backoff ({@link NETWORK_RETRY_DELAYS_MS})
+ * and 429s up to {@link HELIX_MAX_RETRIES} times, waiting until the `ratelimit-reset` time.
+ * @param url - Full Helix URL.
+ * @param headers - Request headers (auth + client ID).
+ * @returns The final response, which may still be a 429 if retries ran out.
+ * @throws The last network error if every attempt failed to connect.
+ */
 async function fetchHelixWithRetry(url: string, headers: Record<string, string>): Promise<Response> {
   let res: Response;
   for (let attempt = 0; ; attempt++) {

@@ -149,14 +149,24 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     // One query for every config's history instead of one query per config.
     const historyByRewardId = await getPricingHistoryForRewards(pricingConfigs.map((c) => c.id), rangeStartMs);
 
+    /**
+     * Renders the price-history chart for one reward from the pre-fetched history.
+     * @param config - The reward's pricing config.
+     * @returns Chart HTML.
+     */
     function buildHistoryChart(config: RewardPricingRow): string {
       const points = historyByRewardId.get(config.id) ?? [];
       // recorded_at is BIGINT epoch ms — safe to coerce, won't exceed MAX_SAFE_INTEGER until year 275760.
       return renderPriceHistoryChart(points.map((p) => ({ t: Number(p.recorded_at), cost: p.cost })), rangeStartMs, rangeEndMs);
     }
 
-    // Only ever called for a config drawn from `pricingConfigs`, which is populated in the same
-    // branch as `pricingSettings` above — so `pricingSettings` is guaranteed non-null here.
+    /**
+     * Builds the pricing simulation chart and summary for one reward. Only ever called for a
+     * config drawn from `pricingConfigs`, which is populated in the same branch as
+     * `pricingSettings` above — so `pricingSettings` is guaranteed non-null here.
+     * @param config - The reward's pricing config.
+     * @returns Chart HTML and a text summary for the view.
+     */
     function buildSimulation(config: RewardPricingRow): { simulationChartSafeHtml: string; simulationSummary: string } {
       const { chart, summary } = buildSimulationChart(config, pricingSettings!);
       return { simulationChartSafeHtml: chart, simulationSummary: summary };

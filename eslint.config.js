@@ -1,6 +1,8 @@
 // @ts-check
 const js = require('@eslint/js');
 const tseslint = require('typescript-eslint');
+const jsdoc = require('eslint-plugin-jsdoc');
+const vitest = require('@vitest/eslint-plugin');
 
 module.exports = tseslint.config(
   {
@@ -153,6 +155,49 @@ module.exports = tseslint.config(
           message: 'Import DB functions from src/db.ts only, not directly from src/db/* modules — see CLAUDE.md Critical Invariants.',
         }],
       }],
+    },
+  },
+  {
+    // CLAUDE.md "Docstrings": every function needs a JSDoc comment, and a stale one is worse
+    // than none. require-jsdoc covers function declarations, methods, and module-level arrow/
+    // function expressions; concise inline callbacks are exempt per CLAUDE.md, and constructors
+    // are covered by their class's JSDoc. Test files are exempt too.
+    files: ['src/**/*.ts'],
+    ignores: ['src/**/*.test.ts'],
+    plugins: { jsdoc },
+    settings: { jsdoc: { mode: 'typescript' } },
+    rules: {
+      'jsdoc/require-jsdoc': ['error', {
+        publicOnly: false,
+        checkConstructors: false,
+        require: { FunctionDeclaration: true, MethodDefinition: true },
+        // Module-level arrow/function expressions only (plain or exported `const x = () => …`);
+        // small closures declared inside a function body count as inline callbacks.
+        contexts: [
+          'Program > VariableDeclaration > VariableDeclarator > ArrowFunctionExpression',
+          'Program > VariableDeclaration > VariableDeclarator > FunctionExpression',
+          'Program > ExportNamedDeclaration > VariableDeclaration > VariableDeclarator > ArrowFunctionExpression',
+          'Program > ExportNamedDeclaration > VariableDeclaration > VariableDeclarator > FunctionExpression',
+        ],
+      }],
+      'jsdoc/check-param-names': ['error', { checkDestructured: false }],
+      'jsdoc/check-tag-names': 'error',
+      // Types live in the TypeScript signature; a JSDoc {type} would just drift from it.
+      'jsdoc/no-types': 'error',
+    },
+  },
+  {
+    // A stray `.only`/`.skip` or an assertion-free test silently weakens CI.
+    files: ['src/**/*.test.ts'],
+    plugins: { vitest },
+    rules: {
+      ...vitest.configs.recommended.rules,
+      'vitest/no-disabled-tests': 'error',
+      // Count shared assertion helpers (e.g. server.test.ts's expectExactThreshold) as assertions.
+      'vitest/expect-expect': ['error', { assertFunctionNames: ['expect*'] }],
+      // Off: this codebase deliberately creates `expect(p).rejects…` before advancing fake
+      // timers and awaits it afterwards, which valid-expect can't distinguish from a missing await.
+      'vitest/valid-expect': 'off',
     },
   },
   {

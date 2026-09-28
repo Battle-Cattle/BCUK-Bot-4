@@ -236,6 +236,11 @@ export class StreamerConnection {
     recordEventSubConnected(this.name, true);
   }
 
+  /**
+   * WebSocket `message` handler: parses the frame and dispatches it, logging (not throwing) on
+   * malformed JSON or handler errors.
+   * @param ev - The WebSocket message event.
+   */
   private onMessage(ev: MessageEvent): void {
     try {
       const msg = JSON.parse(ev.data as string) as EventSubMessage;
@@ -319,6 +324,11 @@ export class StreamerConnection {
     }
   }
 
+  /**
+   * Dispatches a parsed EventSub message by `message_type` after dropping stale or duplicate
+   * messages and resetting the keepalive watchdog.
+   * @param msg - The parsed EventSub message.
+   */
   private handleMessage(msg: EventSubMessage): void {
     const { message_type, message_id, message_timestamp } = msg.metadata;
     if (isStale(message_timestamp)) { log.warn(`[${this.name}] Stale message (${message_type}) — ignoring`); return; }
@@ -419,6 +429,7 @@ export class StreamerConnection {
     this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.connect(); }, delay);
   }
 
+  /** Cancels the keepalive watchdog, if armed. */
   private clearKeepaliveTimer(): void {
     if (this.keepaliveTimer) { clearTimeout(this.keepaliveTimer); this.keepaliveTimer = null; }
   }

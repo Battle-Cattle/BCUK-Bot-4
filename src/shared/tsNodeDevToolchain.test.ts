@@ -1,5 +1,5 @@
-import { describe, it } from 'vitest';
-import { execFileSync } from 'child_process';
+import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'child_process';
 import path from 'path';
 
 // tsc (used by `npm run build`) and Vitest (its own esbuild transform) never
@@ -22,14 +22,10 @@ describe('ts-node dev toolchain', () => {
       }
     `;
 
-    try {
-      execFileSync(process.execPath, ['-e', script], { cwd: projectRoot, stdio: 'pipe' });
-    } catch (err) {
-      const e = err as { stderr?: Buffer; message: string };
-      throw new Error(
-        `ts-node failed to register/transpile a project module — this breaks \`npm run dev\`:\n${e.stderr?.toString() ?? e.message}`,
-        { cause: err },
-      );
-    }
+    const result = spawnSync(process.execPath, ['-e', script], { cwd: projectRoot, encoding: 'utf8' });
+    expect(
+      result.status,
+      `ts-node failed to register/transpile a project module — this breaks \`npm run dev\`:\n${result.stderr || result.error?.message}`,
+    ).toBe(0);
   }, 15000);
 });

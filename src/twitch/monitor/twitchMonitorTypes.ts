@@ -25,6 +25,14 @@ export interface LiveState {
   offlineTimer: ReturnType<typeof setTimeout> | null;
 }
 
+/**
+ * Builds the in-memory {@link LiveState} for a streamer that has just gone live.
+ * @param streamer - The streamer's DB row, including its group.
+ * @param stream - The live stream from Helix.
+ * @param messageId - ID of the posted announcement message, or null if none was posted.
+ * @param channelId - Discord channel the announcement was posted in, or null.
+ * @returns A fresh live state with no offline timer.
+ */
 export function makeLiveState(
   streamer: DbStreamerFull,
   stream: TwitchStream,
