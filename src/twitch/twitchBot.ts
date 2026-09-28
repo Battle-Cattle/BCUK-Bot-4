@@ -286,14 +286,46 @@ function isInvalidRefreshTokenError(error: Error): boolean {
 }
 
 /**
+ * Recovers from a transient (non-invalid-token) refresh failure by rebuilding the chat connection
+ * from the still-stored, still-valid token, via `restartTwitchBot()`. This exists because
+ * `RefreshingAuthProvider` permanently caches a refresh failure per user for the life of the
+ * provider instance and never retries it on its own — see {@link buildBotAuthProvider}'s doc for
+ * why merely leaving the old provider in place would silently and permanently break chat auth for
+ * a blip that Twitch itself has already recovered from. Building a *new* provider (via
+ * `startTwitchBot()` reading the same, unchanged, still-stored token) starts with a clean failure
+ * cache, so a later refresh can actually be attempted again instead of requiring a manual process
+ * restart. Only alerts the owner if the rebuild itself fails to reconnect — a successful rebuild
+ * is a self-healed blip and not worth paging anyone for; a rebuild that can't reconnect (e.g. an
+ * ongoing Twitch outage) is exactly the "can't fix itself" case the owner needs to know about.
+ * `restartTwitchBot()`'s own serialization means this can't race a concurrent
+ * `/admin/bot-auth` reconnect: if a newer connection has already been saved by the time this
+ * runs, it reconnects with that current token instead.
+ * @param userId - The Twitch user ID `onRefreshFailure` fired for, for logging only.
+ */
+async function rebuildAfterTransientRefreshFailure(userId: string): Promise<void> {
+  log.warn(`Refresh failure for ${userId} does not look like a revoked/invalid token — rebuilding the chat connection from the still-stored token.`);
+  try {
+    await restartTwitchBot();
+  } catch (restartErr) {
+    log.error(`Failed to rebuild the chat connection after a transient refresh failure for ${userId}:`, restartErr);
+    void sendOwnerAlert(
+      `🟠 Twitch chat bot's token refresh failed and the automatic reconnect also failed. Check server logs — reconnect manually at ${BOT_AUTH_CONNECT_URL} if this persists.`,
+    );
+  }
+}
+
+/**
  * Builds a `RefreshingAuthProvider` seeded with the bot's own stored chat token, wired to
  * persist a refreshed token back to the DB (`onRefresh`) and, on a refresh failure that looks
  * like a genuinely invalid/revoked refresh token (see {@link isInvalidRefreshTokenError}), to
  * clear it, disconnect the now-dead chat session, and alert the owner. A transient failure
- * (network error, timeout, 5xx) is logged but leaves the stored token in place — Twurple never
- * retries a failed refresh on its own for the life of the provider, but a later process restart
- * rebuilds the provider from the still-valid stored token and can succeed. Replaces the old
- * `StaticAuthProvider` seeded from the static `TWITCH_OAUTH_TOKEN` env var (see #550). Its
+ * (network error, timeout, 5xx) instead rebuilds the connection from the still-stored token (see
+ * {@link rebuildAfterTransientRefreshFailure}) rather than merely leaving it in place: Twurple's
+ * `RefreshingAuthProvider` permanently caches a refresh failure per user for the life of the
+ * provider instance (`_cachedRefreshFailures`) and never retries it on its own, so without a
+ * rebuild a single transient blip would silently and permanently break chat auth in this process
+ * until a manual restart — even though the stored token itself is still perfectly valid. Replaces
+ * the old `StaticAuthProvider` seeded from the static `TWITCH_OAUTH_TOKEN` env var (see #550). Its
  * `onRefresh`/`onRefreshFailure` callbacks are guarded against a reconnect superseding this
  * provider while one of them is in flight via a database-level compare-and-swap
  * (`saveBotChatTokenIfOwnedBy`/`clearBotChatTokenIfOwnedBy`, keyed to `stored.connectionId`, the
@@ -317,7 +349,7 @@ function buildBotAuthProvider(stored: NonNullable<Awaited<ReturnType<typeof getB
   authProvider.onRefreshFailure(async (userId, error) => {
     log.error(`Failed to refresh chat token for ${userId}: ${error.message}`);
     if (!isInvalidRefreshTokenError(error)) {
-      log.warn(`Refresh failure for ${userId} does not look like a revoked/invalid token — leaving the stored token in place for a future retry.`);
+      await rebuildAfterTransientRefreshFailure(userId);
       return;
     }
     const cleared = await clearBotChatTokenIfOwnedBy(connectionId);

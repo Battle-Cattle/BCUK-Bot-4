@@ -764,10 +764,15 @@ describe('startTwitchBot', () => {
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
   });
 
-  it('disconnects the chat client (not just the DB row) after a confirmed invalid refresh token', async () => {
+  it('disconnects the chat client (not just the DB row) after a confirmed invalid refresh token, and does not reconnect', async () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     await startTwitchBot();
     mockClient.quit.mockClear();
+    mockClient.connect.mockClear();
+    // The stored token is genuinely gone after the clear — without this, the default mock would
+    // keep resolving the pre-clear token and restartTwitchBot()'s own startTwitchBot() call would
+    // reconnect with it, masking a regression where the clear didn't actually take effect.
+    vi.mocked(getBotChatToken).mockResolvedValueOnce(null);
 
     const error = Object.assign(new Error('Encountered HTTP status code 401'), {
       statusCode: 401,
@@ -779,6 +784,7 @@ describe('startTwitchBot', () => {
     // the bot's actual state — restartTwitchBot() (not a bare disconnect) tears it down and, since
     // there's no token left to reconnect with, leaves the bot stopped.
     expect(mockClient.quit).toHaveBeenCalled();
+    expect(mockClient.connect).not.toHaveBeenCalled();
   });
 
   it('still alerts the owner even if disconnecting the chat client after the clear fails', async () => {
@@ -908,6 +914,49 @@ describe('startTwitchBot', () => {
 
     expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
+  });
+
+  it('rebuilds the chat connection after a transient refresh failure, instead of merely leaving the dead provider in place', async () => {
+    // Twurple's RefreshingAuthProvider permanently caches a refresh failure per user and never
+    // retries it on its own — leaving the old provider running would silently and permanently
+    // break chat auth for a blip Twitch has already recovered from. A rebuild (via
+    // restartTwitchBot(), which re-reads the still-valid stored token) is required to recover
+    // within the same process, not just on a manual restart.
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+    mockClient.quit.mockClear();
+    mockClient.connect.mockClear();
+
+    const error = Object.assign(new Error('Encountered HTTP status code 503'), {
+      statusCode: 503,
+      body: JSON.stringify({ status: 503, message: 'Internal server error' }),
+    });
+    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+
+    expect(mockClient.quit).toHaveBeenCalled();
+    expect(mockClient.connect).toHaveBeenCalled();
+    // A successfully self-healed blip is not worth paging anyone for.
+    expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
+  });
+
+  it('alerts the owner when the automatic rebuild after a transient refresh failure itself fails to reconnect', async () => {
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
+    await startTwitchBot();
+
+    mockClient.connect.mockImplementationOnce(() => {
+      handlers.tokenFetchFailureHandlers.slice().forEach((h) => h(new Error('token fetch failed')));
+    });
+
+    const error = Object.assign(new Error('Encountered HTTP status code 503'), {
+      statusCode: 503,
+      body: JSON.stringify({ status: 503, message: 'Internal server error' }),
+    });
+    await expect(authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error)).resolves.toBeUndefined();
+
+    // Unlike the invalid-token path, the DB token is untouched here — the alert wording must not
+    // imply the credential was cleared.
+    expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
   });
 
   it('does not become connected if authentication succeeds after the connect timeout', async () => {
