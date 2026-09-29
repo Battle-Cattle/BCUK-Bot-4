@@ -666,4 +666,4 @@ export {
   recordPasskeyUse,
   deletePasskey,
 } from './db/webauthnCredentials';
-export type { PasskeySummary, StoredPasskey, NewPasskey } from './db/webauthnCredentials';
+export type { PasskeySummary, StoredPasskey, NewPasskey, InsertPasskeyResult } from './db/webauthnCredentials';

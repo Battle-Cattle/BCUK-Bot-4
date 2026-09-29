@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import { getPool } from './pool';
+import { getPool, withTransaction } from './pool';
 import { isMysqlDuplicateEntryError } from './commandStringUtils';
 
 /** A passkey as shown in the user's settings page — no key material. */
@@ -90,29 +90,47 @@ export async function findPasskey(credentialId: string): Promise<StoredPasskey |
   };
 }
 
+/** Outcome of {@link insertPasskey}. */
+export type InsertPasskeyResult = 'inserted' | 'duplicate' | 'limit';
+
 /**
- * Stores a newly-registered passkey.
+ * Stores a newly-registered passkey, enforcing the per-user passkey limit atomically: the owner's
+ * `user` row is locked (`FOR UPDATE`) before counting, so two concurrent registrations for the
+ * same user serialise instead of both slipping in under the limit.
  * @param passkey - The verified registration's credential data and the owner's chosen label.
- * @returns True if stored, false if a passkey with that credential ID already exists.
+ * @param maxPerUser - The most passkeys a user may hold; the insert is refused at this count.
+ * @returns `'inserted'` if stored, `'limit'` if the user already has `maxPerUser` passkeys, or
+ *   `'duplicate'` if a passkey with that credential ID already exists.
  */
-export async function insertPasskey(passkey: NewPasskey): Promise<boolean> {
+export async function insertPasskey(passkey: NewPasskey, maxPerUser: number): Promise<InsertPasskeyResult> {
   try {
-    await getPool().execute(
-      `INSERT INTO webauthn_credentials
-         (credential_id, discord_id, public_key, sign_count, transports, device_label)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        passkey.credentialId,
-        passkey.discordId,
-        Buffer.from(passkey.publicKey),
-        passkey.signCount,
-        passkey.transports.length > 0 ? passkey.transports.join(',') : null,
-        passkey.deviceLabel,
-      ],
-    );
-    return true;
+    return await withTransaction(async (conn) => {
+      await conn.execute('SELECT discord_id FROM `user` WHERE discord_id = ? FOR UPDATE', [passkey.discordId]);
+      const [countRows] = await conn.execute<mysql.RowDataPacket[]>(
+        'SELECT COUNT(*) AS count FROM webauthn_credentials WHERE discord_id = ?',
+        [passkey.discordId],
+      );
+      // COUNT(*) comes back as a BIGINT string (bigNumberStrings), but it's bounded by the per-user
+      // passkey limit (single digits), so parsing it to a number here is safe.
+      if (Number.parseInt(String(countRows[0].count), 10) >= maxPerUser) return 'limit';
+
+      await conn.execute(
+        `INSERT INTO webauthn_credentials
+           (credential_id, discord_id, public_key, sign_count, transports, device_label)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          passkey.credentialId,
+          passkey.discordId,
+          Buffer.from(passkey.publicKey),
+          passkey.signCount,
+          passkey.transports.length > 0 ? passkey.transports.join(',') : null,
+          passkey.deviceLabel,
+        ],
+      );
+      return 'inserted';
+    });
   } catch (err) {
-    if (isMysqlDuplicateEntryError(err)) return false;
+    if (isMysqlDuplicateEntryError(err)) return 'duplicate';
     throw err;
   }
 }

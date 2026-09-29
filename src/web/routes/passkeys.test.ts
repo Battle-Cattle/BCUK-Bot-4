@@ -81,7 +81,7 @@ beforeEach(() => {
   vi.mocked(listPasskeyDescriptorsForUser).mockResolvedValue([]);
   vi.mocked(generateRegistrationOptions).mockResolvedValue({ challenge: 'reg-chal' } as any);
   vi.mocked(generateAuthenticationOptions).mockResolvedValue({ challenge: 'auth-chal' } as any);
-  vi.mocked(insertPasskey).mockResolvedValue(true);
+  vi.mocked(insertPasskey).mockResolvedValue('inserted');
   vi.mocked(deletePasskey).mockResolvedValue(true);
   vi.mocked(fetchDiscordUserProfile).mockResolvedValue({ username: 'alice', avatar: 'av' });
   vi.mocked(resolveAccessibleGuilds).mockResolvedValue([{ guild_id: 'g1' }] as any);
@@ -187,7 +187,7 @@ describe('POST /register/verify', () => {
       signCount: 0,
       transports: ['internal'],
       deviceLabel: 'Pixel',
-    });
+    }, 10);
     expect(session.webauthnChallenge).toBeUndefined();
   });
 
@@ -262,9 +262,18 @@ describe('POST /register/verify', () => {
     expect(res.body.error).toBe('passkey_register_failed');
   });
 
+  it('returns 409 passkey_limit when the limit was reached between options and verify', async () => {
+    vi.mocked(verifyRegistrationResponse).mockResolvedValueOnce(verified as any);
+    vi.mocked(insertPasskey).mockResolvedValueOnce('limit');
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('passkey_limit');
+  });
+
   it('returns 409 passkey_exists when the credential is already stored', async () => {
     vi.mocked(verifyRegistrationResponse).mockResolvedValue(verified as any);
-    vi.mocked(insertPasskey).mockResolvedValue(false);
+    vi.mocked(insertPasskey).mockResolvedValue('duplicate');
     const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
     const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
     expect(res.status).toBe(409);

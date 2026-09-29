@@ -146,7 +146,8 @@ router.post('/register/options', requireAuth, csrfProtection, async (req, res) =
  *   session and CSRF token.
  * @param res - Express response; `{ ok: true }` on success, 400 `{ error: 'passkey_register_failed' }`
  *   when the challenge or response is invalid, 409 `{ error: 'passkey_exists' }` for an
- *   already-registered credential, or 500 on an unexpected failure.
+ *   already-registered credential, 409 `{ error: 'passkey_limit' }` if the user reached the
+ *   passkey limit since requesting options, or 500 on an unexpected failure.
  */
 router.post('/register/verify', requireAuth, csrfProtection, async (req, res) => {
   const user = getSessionUser(req);
@@ -178,16 +179,18 @@ router.post('/register/verify', requireAuth, csrfProtection, async (req, res) =>
 
   try {
     const { credential } = verification.registrationInfo;
-    const stored = await insertPasskey({
+    const result = await insertPasskey({
       credentialId: credential.id,
       discordId: user.discordId,
       publicKey: credential.publicKey,
       signCount: credential.counter,
       transports: credential.transports ?? [],
       deviceLabel: sanitizeDeviceLabel(body.label),
-    });
-    if (!stored) {
-      res.status(409).json({ ok: false, error: 'passkey_exists' });
+    }, MAX_PASSKEYS_PER_USER);
+    if (result !== 'inserted') {
+      // 'limit' re-checks the count atomically with the insert, since the check in
+      // /register/options can be raced by two registrations started in parallel.
+      res.status(409).json({ ok: false, error: result === 'limit' ? 'passkey_limit' : 'passkey_exists' });
       return;
     }
     log.info(`Passkey registered for ${user.discordId}`);
