@@ -384,6 +384,15 @@ describe('POST /login/verify', () => {
     expect(establishDashboardSession).not.toHaveBeenCalled();
   });
 
+  it('still signs in when recording the counter fails after a verified assertion', async () => {
+    vi.mocked(recordPasskeyUse).mockRejectedValueOnce(new Error('db write failed'));
+    const { app } = buildApp(futureChallenge('login'));
+    const res = await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, redirect: '/' });
+    expect(establishDashboardSession).toHaveBeenCalledTimes(1);
+  });
+
   it('returns not_whitelisted when the user has since been removed', async () => {
     vi.mocked(findUser).mockResolvedValue(null);
     const { app } = buildApp(futureChallenge('login'));
