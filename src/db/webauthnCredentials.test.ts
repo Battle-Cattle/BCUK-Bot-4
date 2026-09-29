@@ -59,15 +59,15 @@ describe('listPasskeyDescriptorsForUser', () => {
   it('splits stored transports and treats NULL as none', async () => {
     const pool = makeMockPool({
       rows: [
-        { credential_id: 'a', transports: 'internal,hybrid' },
-        { credential_id: 'b', transports: null },
+        { credential_id: 'a', user_handle: 'h1', transports: 'internal,hybrid' },
+        { credential_id: 'b', user_handle: 'h1', transports: null },
       ],
     });
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     expect(await listPasskeyDescriptorsForUser('123')).toEqual([
-      { credentialId: 'a', transports: ['internal', 'hybrid'] },
-      { credentialId: 'b', transports: [] },
+      { credentialId: 'a', userHandle: 'h1', transports: ['internal', 'hybrid'] },
+      { credentialId: 'b', userHandle: 'h1', transports: [] },
     ]);
   });
 });
@@ -83,6 +83,7 @@ describe('findPasskey', () => {
       rows: [{
         credential_id: 'cred1',
         discord_id: '900000000000000001',
+        user_handle: 'handle-b64',
         public_key: Buffer.from([1, 2, 3]),
         sign_count: 7,
         transports: 'internal',
@@ -95,6 +96,7 @@ describe('findPasskey', () => {
     expect(result).toEqual({
       credentialId: 'cred1',
       discordId: '900000000000000001',
+      userHandle: 'handle-b64',
       publicKey: new Uint8Array([1, 2, 3]),
       signCount: 7,
       transports: ['internal'],
@@ -106,6 +108,7 @@ describe('insertPasskey', () => {
   const NEW = {
     credentialId: 'cred1',
     discordId: '123',
+    userHandle: 'handle-b64',
     publicKey: new Uint8Array([9, 8]),
     signCount: 0,
     transports: ['internal', 'hybrid'],
@@ -133,7 +136,7 @@ describe('insertPasskey', () => {
     expect(calls[0][1]).toEqual(['123']);
     expect(calls[1][0]).toContain('COUNT(*)');
     expect(calls[2][0]).toContain('INSERT INTO webauthn_credentials');
-    expect(calls[2][1]).toEqual(['cred1', '123', Buffer.from([9, 8]), 0, 'internal,hybrid', 'Laptop']);
+    expect(calls[2][1]).toEqual(['cred1', '123', 'handle-b64', Buffer.from([9, 8]), 0, 'internal,hybrid', 'Laptop']);
     expect(pool._conn.commit).toHaveBeenCalledTimes(1);
   });
 
@@ -163,7 +166,7 @@ describe('insertPasskey', () => {
 
     await insertPasskey({ ...NEW, transports: [] }, 10);
 
-    expect((pool._conn.execute.mock.calls[2][1] as unknown[])[4]).toBeNull();
+    expect((pool._conn.execute.mock.calls[2][1] as unknown[])[5]).toBeNull();
   });
 });
 

@@ -10,7 +10,8 @@
   document.addEventListener('submit', function (event) {
     var form = event.target;
     if (!(form instanceof HTMLFormElement) || !form.classList.contains('js-confirm-remove-passkey')) return;
-    if (!window.confirm('Remove this passkey? You will no longer be able to sign in with it.')) event.preventDefault();
+    var label = form.dataset.passkeyLabel || 'this passkey';
+    if (!window.confirm('Remove "' + label + '"? You will no longer be able to sign in with it.')) event.preventDefault();
   });
 
   if (!addRow || !addButton || !window.BCUKPasskey) return;
@@ -44,8 +45,10 @@
       try {
         attestation = await window.SimpleWebAuthnBrowser.startRegistration({ optionsJSON: optionsRes.data });
       } catch (err) {
-        // The user dismissed the prompt, or this authenticator already holds one of their passkeys.
+        // InvalidStateError: this authenticator already holds one of their passkeys. A cancelled or
+        // dismissed prompt is ignored; any other failure is shown.
         if (err && err.name === 'InvalidStateError') finish('error', 'passkey_exists');
+        else if (!window.BCUKPasskey.isUserCancellation(err)) finish('error', 'passkey_register_failed');
         return;
       }
 

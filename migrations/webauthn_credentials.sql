@@ -7,6 +7,9 @@ CREATE TABLE webauthn_credentials (
   -- base64url credential ID; ascii_bin because IDs are case-sensitive.
   credential_id VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   discord_id    BIGINT        NOT NULL,
+  -- base64url WebAuthn user handle: random per user, shared by all their passkeys. Stored
+  -- rather than derived from an app secret so secret rotation never invalidates passkeys.
+  user_handle   VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   public_key    VARBINARY(1024) NOT NULL,
   sign_count    INT UNSIGNED  NOT NULL DEFAULT 0,
   transports    VARCHAR(255)  NULL,

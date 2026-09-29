@@ -499,6 +499,7 @@ Passkeys (WebAuthn credentials) for fingerprint / face / device-PIN sign-in to t
 | --- | --- | --- |
 | `credential_id` | `VARCHAR(512)` PK, `ascii_bin` | base64url credential ID from the authenticator; binary collation because IDs are case-sensitive |
 | `discord_id` | `BIGINT` | FK to `user.discord_id` ON DELETE CASCADE; the passkey's owner |
+| `user_handle` | `VARCHAR(128)`, `ascii_bin` | base64url WebAuthn user handle: random 32 bytes chosen at a user's first registration and reused for their later passkeys. Sign-in checks the assertion's `userHandle` against it. Stored (not derived from an app secret) so secret rotation never invalidates passkeys |
 | `public_key` | `VARBINARY(1024)` | COSE-encoded credential public key |
 | `sign_count` | `INT UNSIGNED` | WebAuthn signature counter (32-bit by spec, so read as a plain number); updated on each sign-in |
 | `transports` | `VARCHAR(255)` nullable | Comma-separated transport hints (`internal`, `hybrid`, ...) |

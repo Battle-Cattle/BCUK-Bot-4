@@ -14,6 +14,8 @@ export interface PasskeySummary {
 export interface StoredPasskey {
   credentialId: string;
   discordId: string;
+  /** base64url WebAuthn user handle registered with this credential. */
+  userHandle: string;
   publicKey: Uint8Array<ArrayBuffer>;
   /** WebAuthn signature counter — a 32-bit unsigned value, stored as `INT UNSIGNED`, so a plain number. */
   signCount: number;
@@ -24,6 +26,8 @@ export interface StoredPasskey {
 export interface NewPasskey {
   credentialId: string;
   discordId: string;
+  /** base64url WebAuthn user handle put in the registration options. */
+  userHandle: string;
   publicKey: Uint8Array;
   signCount: number;
   transports: string[];
@@ -50,20 +54,22 @@ export async function listPasskeysForUser(discordId: string): Promise<PasskeySum
 }
 
 /**
- * Lists the credential IDs (and transports) a user already has, so registration can tell the
- * browser not to create a second passkey on an authenticator that already holds one.
+ * Lists the credential IDs (with user handle and transports) a user already has, so registration
+ * can reuse their user handle and tell the browser not to create a second passkey on an
+ * authenticator that already holds one.
  * @param discordId - The owning user's Discord ID.
- * @returns Credential ID + transports for each of the user's passkeys.
+ * @returns Credential ID, user handle and transports for each of the user's passkeys.
  */
 export async function listPasskeyDescriptorsForUser(
   discordId: string,
-): Promise<{ credentialId: string; transports: string[] }[]> {
+): Promise<{ credentialId: string; userHandle: string; transports: string[] }[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT credential_id, transports FROM webauthn_credentials WHERE discord_id = ?',
+    'SELECT credential_id, user_handle, transports FROM webauthn_credentials WHERE discord_id = ?',
     [discordId],
   );
   return rows.map((r) => ({
     credentialId: String(r.credential_id),
+    userHandle: String(r.user_handle),
     transports: parseTransports(r.transports as string | null),
   }));
 }
@@ -75,7 +81,7 @@ export async function listPasskeyDescriptorsForUser(
  */
 export async function findPasskey(credentialId: string): Promise<StoredPasskey | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT credential_id, discord_id, public_key, sign_count, transports
+    `SELECT credential_id, discord_id, user_handle, public_key, sign_count, transports
      FROM webauthn_credentials WHERE credential_id = ?`,
     [credentialId],
   );
@@ -84,6 +90,7 @@ export async function findPasskey(credentialId: string): Promise<StoredPasskey |
   return {
     credentialId: String(r.credential_id),
     discordId: String(r.discord_id),
+    userHandle: String(r.user_handle),
     publicKey: new Uint8Array(r.public_key as Buffer),
     signCount: Number(r.sign_count),
     transports: parseTransports(r.transports as string | null),
@@ -116,11 +123,12 @@ export async function insertPasskey(passkey: NewPasskey, maxPerUser: number): Pr
 
       await conn.execute(
         `INSERT INTO webauthn_credentials
-           (credential_id, discord_id, public_key, sign_count, transports, device_label)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+           (credential_id, discord_id, user_handle, public_key, sign_count, transports, device_label)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           passkey.credentialId,
           passkey.discordId,
+          passkey.userHandle,
           Buffer.from(passkey.publicKey),
           passkey.signCount,
           passkey.transports.length > 0 ? passkey.transports.join(',') : null,

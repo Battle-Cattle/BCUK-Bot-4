@@ -30,8 +30,9 @@
       var assertion;
       try {
         assertion = await window.SimpleWebAuthnBrowser.startAuthentication({ optionsJSON: optionsRes.data });
-      } catch (_err) {
-        // The user cancelled the prompt — just let them try again.
+      } catch (err) {
+        // A cancelled/dismissed prompt just lets them try again; anything else is shown.
+        if (!window.BCUKPasskey.isUserCancellation(err)) fail('passkey_failed');
         return;
       }
 

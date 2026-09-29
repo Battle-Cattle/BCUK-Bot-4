@@ -72,10 +72,10 @@
                 <td><%= new Date(pk.createdAt).toLocaleDateString('en-GB') %></td>
                 <td><%= pk.lastUsedAt ? new Date(pk.lastUsedAt).toLocaleDateString('en-GB') : 'Never' %></td>
                 <td>
-                  <form method="POST" action="/auth/passkey/delete" class="inline-form-sm js-confirm-remove-passkey">
+                  <form method="POST" action="/auth/passkey/delete" class="inline-form-sm js-confirm-remove-passkey" data-passkey-label="<%= pk.deviceLabel %>">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <input type="hidden" name="credentialId" value="<%= pk.credentialId %>">
-                    <button type="submit" class="btn btn-ghost btn-sm">Remove</button>
+                    <button type="submit" class="btn btn-ghost btn-sm" aria-label="Remove passkey <%= pk.deviceLabel %>">Remove</button>
                   </form>
                 </td>
               </tr>

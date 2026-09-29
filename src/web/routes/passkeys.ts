@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Request } from 'express';
-import { createHmac } from 'crypto';
+import { randomBytes } from 'crypto';
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -10,7 +10,7 @@ import {
   type AuthenticatorTransport,
   type RegistrationResponseJSON,
 } from '@simplewebauthn/server';
-import { PUBLIC_URL, SESSION_SECRET } from '../../shared/config';
+import { PUBLIC_URL } from '../../shared/config';
 import {
   findUser,
   findPasskey,
@@ -41,14 +41,16 @@ const CREDENTIAL_ID_PATTERN = /^[A-Za-z0-9_-]{1,512}$/;
 type ChallengePurpose = 'register' | 'login';
 
 /**
- * Derives the opaque WebAuthn user handle for a Discord user: an HMAC of their Discord ID, so
- * the same user always gets the same handle (letting an authenticator replace rather than
- * duplicate a passkey) without storing the raw Discord ID on the authenticator.
- * @param discordId - The user's Discord ID.
- * @returns The 32-byte user handle.
+ * Picks the WebAuthn user handle for a registration: the user's existing handle if they already
+ * have a passkey (so every passkey of theirs shares one handle and an authenticator replaces
+ * rather than duplicates it), otherwise a fresh random one. The handle is random and stored per
+ * credential, not derived from a secret, so rotating any app secret never invalidates passkeys,
+ * and it never exposes the Discord ID to the authenticator.
+ * @param existing - The user's current passkey descriptors.
+ * @returns The base64url user handle.
  */
-export function webauthnUserHandle(discordId: string): Uint8Array<ArrayBuffer> {
-  return new Uint8Array(createHmac('sha256', SESSION_SECRET).update(`webauthn-user:${discordId}`).digest());
+export function chooseUserHandle(existing: { userHandle: string }[]): string {
+  return existing[0]?.userHandle ?? randomBytes(32).toString('base64url');
 }
 
 /**
@@ -56,10 +58,16 @@ export function webauthnUserHandle(discordId: string): Uint8Array<ArrayBuffer> {
  * @param req - Express request whose session receives the challenge.
  * @param purpose - Which ceremony the challenge is for, so a login challenge can't complete a registration.
  * @param value - The base64url challenge from the generated options.
- * @param discordId - For registration, the user the challenge was issued to.
+ * @param registration - For registration, the user the challenge was issued to and the user handle
+ *   put in the options, so verify stores the same handle.
  */
-function storeChallenge(req: Request, purpose: ChallengePurpose, value: string, discordId?: string): void {
-  req.session.webauthnChallenge = { purpose, value, discordId, expiresAt: Date.now() + CHALLENGE_TTL_MS };
+function storeChallenge(
+  req: Request,
+  purpose: ChallengePurpose,
+  value: string,
+  registration?: { discordId: string; userHandle: string },
+): void {
+  req.session.webauthnChallenge = { purpose, value, ...registration, expiresAt: Date.now() + CHALLENGE_TTL_MS };
 }
 
 /**
@@ -67,13 +75,17 @@ function storeChallenge(req: Request, purpose: ChallengePurpose, value: string, 
  * `purpose`. Always consumes it, so each challenge can be used for at most one verification.
  * @param req - Express request whose session holds the challenge.
  * @param purpose - The ceremony being verified.
- * @returns The challenge (and bound Discord ID, for registration), or null if missing/expired/wrong purpose.
+ * @returns The challenge (and bound Discord ID and user handle, for registration), or null if
+ *   missing/expired/wrong purpose.
  */
-function takeChallenge(req: Request, purpose: ChallengePurpose): { value: string; discordId?: string } | null {
+function takeChallenge(
+  req: Request,
+  purpose: ChallengePurpose,
+): { value: string; discordId?: string; userHandle?: string } | null {
   const stored = req.session.webauthnChallenge;
   delete req.session.webauthnChallenge;
   if (!stored || stored.purpose !== purpose || Date.now() > stored.expiresAt) return null;
-  return { value: stored.value, discordId: stored.discordId };
+  return { value: stored.value, discordId: stored.discordId, userHandle: stored.userHandle };
 }
 
 /**
@@ -117,10 +129,11 @@ router.post('/register/options', requireAuth, csrfProtection, async (req, res) =
       return;
     }
 
+    const userHandle = chooseUserHandle(existing);
     const options = await generateRegistrationOptions({
       rpName: RP_NAME,
       rpID: RP_ID,
-      userID: webauthnUserHandle(user.discordId),
+      userID: new Uint8Array(Buffer.from(userHandle, 'base64url')),
       userName: user.discordName,
       userDisplayName: user.discordName,
       attestationType: 'none',
@@ -131,7 +144,7 @@ router.post('/register/options', requireAuth, csrfProtection, async (req, res) =
       authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
       preferredAuthenticatorType: 'localDevice',
     });
-    storeChallenge(req, 'register', options.challenge, user.discordId);
+    storeChallenge(req, 'register', options.challenge, { discordId: user.discordId, userHandle });
     res.json(options);
   } catch (err) {
     log.error('Passkey registration options error:', err);
@@ -153,7 +166,11 @@ router.post('/register/verify', requireAuth, csrfProtection, async (req, res) =>
   const user = getSessionUser(req);
   const body = req.body as { response?: unknown; label?: unknown } | undefined;
   const challenge = takeChallenge(req, 'register');
-  if (!challenge || challenge.discordId !== user.discordId || !isCredentialResponse(body?.response)) {
+  if (
+    !challenge?.userHandle ||
+    challenge.discordId !== user.discordId ||
+    !isCredentialResponse(body?.response)
+  ) {
     res.status(400).json({ ok: false, error: 'passkey_register_failed' });
     return;
   }
@@ -182,6 +199,7 @@ router.post('/register/verify', requireAuth, csrfProtection, async (req, res) =>
     const result = await insertPasskey({
       credentialId: credential.id,
       discordId: user.discordId,
+      userHandle: challenge.userHandle,
       publicKey: credential.publicKey,
       signCount: credential.counter,
       transports: credential.transports ?? [],
@@ -259,8 +277,7 @@ async function verifyAssertion(assertion: AuthenticationResponseJSON, expectedCh
   const passkey = await findPasskey(assertion.id);
   if (!passkey) return { ok: false, status: 401, error: 'passkey_unknown' };
 
-  const expectedHandle = Buffer.from(webauthnUserHandle(passkey.discordId)).toString('base64url');
-  if (assertion.response.userHandle && assertion.response.userHandle !== expectedHandle) {
+  if (assertion.response.userHandle && assertion.response.userHandle !== passkey.userHandle) {
     log.warn(`Passkey ${passkey.credentialId} presented a mismatched user handle`);
     return { ok: false, status: 401, error: 'passkey_failed' };
   }

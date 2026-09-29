@@ -63,5 +63,22 @@ window.BCUKPasskey = (function () {
     return match ? match[1] : 'Passkey';
   }
 
-  return { isSupported: isSupported, postJson: postJson, guessDeviceLabel: guessDeviceLabel };
+  /**
+   * True when a startRegistration/startAuthentication rejection just means the user backed out:
+   * the library's own abort (ERROR_CEREMONY_ABORTED), or NotAllowedError, which browsers raise
+   * when the prompt is dismissed or times out (deliberately indistinguishable, per the WebAuthn
+   * spec). Anything else is a real failure worth showing.
+   * @param {any} err - The rejection from the SimpleWebAuthn browser call.
+   * @returns {boolean}
+   */
+  function isUserCancellation(err) {
+    return !!err && (err.code === 'ERROR_CEREMONY_ABORTED' || err.name === 'NotAllowedError');
+  }
+
+  return {
+    isSupported: isSupported,
+    postJson: postJson,
+    guessDeviceLabel: guessDeviceLabel,
+    isUserCancellation: isUserCancellation,
+  };
 })();

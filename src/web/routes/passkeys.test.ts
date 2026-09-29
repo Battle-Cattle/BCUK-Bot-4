@@ -4,7 +4,6 @@ import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../shared/config', () => ({
   PUBLIC_URL: 'https://panel.example.com',
-  SESSION_SECRET: 's'.repeat(32),
 }));
 vi.mock('../../db', () => ({
   findUser: vi.fn(),
@@ -36,7 +35,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import express from 'express';
 import supertest from 'supertest';
-import router, { sanitizeDeviceLabel, webauthnUserHandle } from './passkeys';
+import router, { sanitizeDeviceLabel, chooseUserHandle } from './passkeys';
 import {
   findUser,
   findPasskey,
@@ -88,13 +87,15 @@ beforeEach(() => {
   vi.mocked(establishDashboardSession).mockResolvedValue(undefined);
 });
 
-describe('webauthnUserHandle', () => {
-  it('is stable per user, differs between users, and does not embed the Discord ID', () => {
-    const a = Buffer.from(webauthnUserHandle('42'));
-    expect(a).toHaveLength(32);
-    expect(Buffer.from(webauthnUserHandle('42')).equals(a)).toBe(true);
-    expect(Buffer.from(webauthnUserHandle('43')).equals(a)).toBe(false);
-    expect(a.toString('utf8')).not.toContain('42');
+describe('chooseUserHandle', () => {
+  it("reuses the user's existing handle so all their passkeys share one", () => {
+    expect(chooseUserHandle([{ userHandle: 'existing-handle' }, { userHandle: 'other' }])).toBe('existing-handle');
+  });
+
+  it('generates a fresh random 32-byte handle for a first passkey', () => {
+    const a = chooseUserHandle([]);
+    expect(Buffer.from(a, 'base64url')).toHaveLength(32);
+    expect(chooseUserHandle([])).not.toBe(a);
   });
 });
 
@@ -122,7 +123,8 @@ describe('POST /register/options', () => {
   });
 
   it('returns options requiring a user-verified discoverable credential and stores the challenge', async () => {
-    vi.mocked(listPasskeyDescriptorsForUser).mockResolvedValue([{ credentialId: 'old', transports: ['internal'] }]);
+    const handle = Buffer.alloc(32, 7).toString('base64url');
+    vi.mocked(listPasskeyDescriptorsForUser).mockResolvedValue([{ credentialId: 'old', userHandle: handle, transports: ['internal'] }]);
     const { app, session } = buildApp({ user: USER });
 
     const res = await supertest(app).post('/register/options');
@@ -133,13 +135,15 @@ describe('POST /register/options', () => {
     expect(opts.rpID).toBe('panel.example.com');
     expect(opts.authenticatorSelection).toEqual({ residentKey: 'required', userVerification: 'required' });
     expect(opts.excludeCredentials).toEqual([{ id: 'old', transports: ['internal'] }]);
-    expect(Buffer.from(opts.userID!).equals(Buffer.from(webauthnUserHandle('42')))).toBe(true);
-    expect(session.webauthnChallenge).toMatchObject({ purpose: 'register', value: 'reg-chal', discordId: '42' });
+    expect(Buffer.from(opts.userID!).equals(Buffer.alloc(32, 7))).toBe(true);
+    expect(session.webauthnChallenge).toMatchObject({
+      purpose: 'register', value: 'reg-chal', discordId: '42', userHandle: handle,
+    });
   });
 
   it('refuses with passkey_limit once the user has 10 passkeys', async () => {
     vi.mocked(listPasskeyDescriptorsForUser).mockResolvedValue(
-      Array.from({ length: 10 }, (_, i) => ({ credentialId: `c${i}`, transports: [] })),
+      Array.from({ length: 10 }, (_, i) => ({ credentialId: `c${i}`, userHandle: 'h', transports: [] })),
     );
     const { app } = buildApp({ user: USER });
     const res = await supertest(app).post('/register/options');
@@ -168,7 +172,7 @@ describe('POST /register/verify', () => {
 
   it('stores the verified passkey with a sanitised label and consumes the challenge', async () => {
     vi.mocked(verifyRegistrationResponse).mockResolvedValue(verified as any);
-    const { app, session } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const { app, session } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }) });
 
     const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL, label: '  Pixel  ' });
 
@@ -183,12 +187,20 @@ describe('POST /register/verify', () => {
     expect(insertPasskey).toHaveBeenCalledWith({
       credentialId: 'new-cred',
       discordId: '42',
+      userHandle: 'user-handle',
       publicKey: new Uint8Array([1, 2]),
       signCount: 0,
       transports: ['internal'],
       deviceLabel: 'Pixel',
     }, 10);
     expect(session.webauthnChallenge).toBeUndefined();
+  });
+
+  it('rejects a registration challenge that carries no user handle', async () => {
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
+    expect(res.status).toBe(400);
+    expect(verifyRegistrationResponse).not.toHaveBeenCalled();
   });
 
   it('rejects when there is no pending registration challenge', async () => {
@@ -214,20 +226,20 @@ describe('POST /register/verify', () => {
   });
 
   it('rejects a challenge issued to a different user', async () => {
-    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '99' }) });
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '99', userHandle: 'user-handle' }) });
     const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
     expect(res.status).toBe(400);
   });
 
   it('rejects a malformed response body', async () => {
-    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }) });
     const res = await supertest(app).post('/register/verify').send({ response: 'nope' });
     expect(res.status).toBe(400);
   });
 
   it('returns 400 when verification throws', async () => {
     vi.mocked(verifyRegistrationResponse).mockRejectedValue(new Error('bad origin'));
-    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }) });
     const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
     expect(res.status).toBe(400);
     expect(insertPasskey).not.toHaveBeenCalled();
@@ -235,7 +247,7 @@ describe('POST /register/verify', () => {
 
   it('returns 400 when the library reports the registration as unverified', async () => {
     vi.mocked(verifyRegistrationResponse).mockResolvedValueOnce({ verified: false } as any);
-    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }) });
     const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('passkey_register_failed');
@@ -247,7 +259,7 @@ describe('POST /register/verify', () => {
       verified: true,
       registrationInfo: { credential: { id: 'new-cred', publicKey: new Uint8Array([1]), counter: 0 } },
     } as any);
-    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }) });
     const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
     expect(res.status).toBe(200);
     expect(vi.mocked(insertPasskey).mock.calls[0][0].transports).toEqual([]);
@@ -256,7 +268,7 @@ describe('POST /register/verify', () => {
   it('returns 500 when saving the passkey throws', async () => {
     vi.mocked(verifyRegistrationResponse).mockResolvedValueOnce(verified as any);
     vi.mocked(insertPasskey).mockRejectedValueOnce(new Error('db down'));
-    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }) });
     const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
     expect(res.status).toBe(500);
     expect(res.body.error).toBe('passkey_register_failed');
@@ -265,7 +277,7 @@ describe('POST /register/verify', () => {
   it('returns 409 passkey_limit when the limit was reached between options and verify', async () => {
     vi.mocked(verifyRegistrationResponse).mockResolvedValueOnce(verified as any);
     vi.mocked(insertPasskey).mockResolvedValueOnce('limit');
-    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }) });
     const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('passkey_limit');
@@ -274,7 +286,7 @@ describe('POST /register/verify', () => {
   it('returns 409 passkey_exists when the credential is already stored', async () => {
     vi.mocked(verifyRegistrationResponse).mockResolvedValue(verified as any);
     vi.mocked(insertPasskey).mockResolvedValue('duplicate');
-    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }) });
     const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('passkey_exists');
@@ -339,6 +351,7 @@ describe('POST /login/verify', () => {
   const stored = {
     credentialId: 'cred-1',
     discordId: '42',
+    userHandle: 'stored-handle',
     publicKey: new Uint8Array([1]),
     signCount: 3,
     transports: ['internal'],
@@ -394,7 +407,7 @@ describe('POST /login/verify', () => {
   });
 
   it('rejects a registration challenge used for sign-in', async () => {
-    const { app } = buildApp(futureChallenge('register', { discordId: '42' }));
+    const { app } = buildApp(futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }));
     const res = await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
     expect(res.status).toBe(400);
   });
@@ -415,8 +428,8 @@ describe('POST /login/verify', () => {
     expect(res.body.error).toBe('passkey_unknown');
   });
 
-  it('rejects an assertion whose user handle belongs to a different user', async () => {
-    const otherHandle = Buffer.from(webauthnUserHandle('99')).toString('base64url');
+  it('rejects an assertion whose user handle does not match the stored one', async () => {
+    const otherHandle = 'someone-elses-handle';
     const { app } = buildApp(futureChallenge('login'));
     const res = await supertest(app)
       .post('/login/verify')
@@ -426,7 +439,7 @@ describe('POST /login/verify', () => {
   });
 
   it('accepts an assertion carrying the matching user handle', async () => {
-    const handle = Buffer.from(webauthnUserHandle('42')).toString('base64url');
+    const handle = 'stored-handle';
     const { app } = buildApp(futureChallenge('login'));
     const res = await supertest(app)
       .post('/login/verify')
