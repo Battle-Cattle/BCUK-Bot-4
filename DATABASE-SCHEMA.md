@@ -513,6 +513,21 @@ Expected constraints and behavior:
 - Deleting a passkey (`deletePasskey` in `src/db/webauthnCredentials.ts`) is scoped by `discord_id`, so a user can only remove their own.
 - A passkey never bypasses the whitelist: sign-in re-checks the `user` row and guild access exactly like the Discord OAuth callback, so removing a user (which cascades here) or all their guild memberships locks them out.
 
+## `webauthn_challenges`
+
+Outstanding WebAuthn (passkey) challenges, one row per issued challenge. Created by `migrations/webauthn_credentials.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `challenge` | `VARCHAR(128)` PK, `ascii_bin` | base64url challenge from the generated registration/authentication options |
+| `purpose` | `ENUM('register','login')` | The ceremony it was issued for; a login challenge can't complete a registration or vice versa |
+| `expires_at` | `DATETIME` | Computed DB-side as `NOW() + 5 minutes` at creation |
+
+Expected constraints and behavior:
+
+- The challenge is also kept on the session, binding it to the browser that requested it; this table is what makes it single-use. `consumeWebauthnChallenge` (`src/db/webauthnChallenges.ts`) is one `DELETE ... WHERE challenge = ? AND purpose = ? AND expires_at > NOW()`, so of two concurrent verifications with the same challenge exactly one gets `affectedRows = 1`.
+- `saveWebauthnChallenge` prunes expired rows before each insert, so abandoned challenges don't accumulate (issuing is rate-limited by `authLimiter`).
+
 ## `sessions`
 
 Managed automatically by `express-mysql-session`.

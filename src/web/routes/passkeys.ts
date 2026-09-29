@@ -18,6 +18,8 @@ import {
   recordPasskeyUse,
   deletePasskey,
   listPasskeyDescriptorsForUser,
+  saveWebauthnChallenge,
+  consumeWebauthnChallenge,
   type DbUser,
   type StoredPasskey,
 } from '../../db';
@@ -54,38 +56,62 @@ export function chooseUserHandle(existing: { userHandle: string }[]): string {
 }
 
 /**
- * Stores a freshly-generated WebAuthn challenge on the session, replacing any earlier one.
+ * Records a freshly-generated WebAuthn challenge: in the DB (which makes it single-use, see
+ * {@link takeChallenge}) and on the session (which binds it to this browser, replacing any
+ * earlier one).
  * @param req - Express request whose session receives the challenge.
  * @param purpose - Which ceremony the challenge is for, so a login challenge can't complete a registration.
  * @param value - The base64url challenge from the generated options.
  * @param registration - For registration, the user the challenge was issued to and the user handle
  *   put in the options, so verify stores the same handle.
+ * @returns Resolves once the challenge is persisted.
  */
-function storeChallenge(
+async function storeChallenge(
   req: Request,
   purpose: ChallengePurpose,
   value: string,
   registration?: { discordId: string; userHandle: string },
-): void {
+): Promise<void> {
+  await saveWebauthnChallenge(value, purpose, CHALLENGE_TTL_MS / 1000);
   req.session.webauthnChallenge = { purpose, value, ...registration, expiresAt: Date.now() + CHALLENGE_TTL_MS };
 }
 
 /**
- * Removes the session's pending WebAuthn challenge and returns it if it is unexpired and for
- * `purpose`. Always consumes it, so each challenge can be used for at most one verification.
+ * Removes the session's pending WebAuthn challenge and, if it is unexpired and for `purpose`,
+ * atomically consumes it in the DB. The session copy is always cleared; the DB `DELETE` is what
+ * guarantees single use, so even concurrent requests sharing one session can't both redeem it.
  * @param req - Express request whose session holds the challenge.
  * @param purpose - The ceremony being verified.
  * @returns The challenge (and bound Discord ID and user handle, for registration), or null if
- *   missing/expired/wrong purpose.
+ *   missing/expired/wrong purpose/already consumed.
+ * @throws If the DB consume fails.
  */
-function takeChallenge(
+async function takeChallenge(
   req: Request,
   purpose: ChallengePurpose,
-): { value: string; discordId?: string; userHandle?: string } | null {
+): Promise<{ value: string; discordId?: string; userHandle?: string } | null> {
   const stored = req.session.webauthnChallenge;
   delete req.session.webauthnChallenge;
   if (!stored || stored.purpose !== purpose || Date.now() > stored.expiresAt) return null;
+  if (!(await consumeWebauthnChallenge(stored.value, purpose))) return null;
   return { value: stored.value, discordId: stored.discordId, userHandle: stored.userHandle };
+}
+
+/**
+ * Consumes the session's registration challenge (see {@link takeChallenge}) and checks it was
+ * issued to `discordId` and carries the user handle to store with the new passkey.
+ * @param req - Express request whose session holds the challenge.
+ * @param discordId - The signed-in user completing registration.
+ * @returns The challenge value and user handle, or null if missing/invalid/for another user.
+ * @throws If the DB consume fails.
+ */
+async function takeRegistrationChallenge(
+  req: Request,
+  discordId: string,
+): Promise<{ value: string; userHandle: string } | null> {
+  const challenge = await takeChallenge(req, 'register');
+  if (!challenge?.userHandle || challenge.discordId !== discordId) return null;
+  return { value: challenge.value, userHandle: challenge.userHandle };
 }
 
 /**
@@ -144,7 +170,7 @@ router.post('/register/options', requireAuth, csrfProtection, async (req, res) =
       authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
       preferredAuthenticatorType: 'localDevice',
     });
-    storeChallenge(req, 'register', options.challenge, { discordId: user.discordId, userHandle });
+    await storeChallenge(req, 'register', options.challenge, { discordId: user.discordId, userHandle });
     res.json(options);
   } catch (err) {
     log.error('Passkey registration options error:', err);
@@ -165,12 +191,15 @@ router.post('/register/options', requireAuth, csrfProtection, async (req, res) =
 router.post('/register/verify', requireAuth, csrfProtection, async (req, res) => {
   const user = getSessionUser(req);
   const body = req.body as { response?: unknown; label?: unknown } | undefined;
-  const challenge = takeChallenge(req, 'register');
-  if (
-    !challenge?.userHandle ||
-    challenge.discordId !== user.discordId ||
-    !isCredentialResponse(body?.response)
-  ) {
+  let challenge;
+  try {
+    challenge = await takeRegistrationChallenge(req, user.discordId);
+  } catch (err) {
+    log.error('Passkey registration challenge error:', err);
+    res.status(500).json({ ok: false, error: 'passkey_register_failed' });
+    return;
+  }
+  if (!challenge || !isCredentialResponse(body?.response)) {
     res.status(400).json({ ok: false, error: 'passkey_register_failed' });
     return;
   }
@@ -253,7 +282,7 @@ router.post('/delete', requireAuth, csrfProtection, async (req, res) => {
 router.post('/login/options', async (req, res) => {
   try {
     const options = await generateAuthenticationOptions({ rpID: RP_ID, userVerification: 'required' });
-    storeChallenge(req, 'login', options.challenge);
+    await storeChallenge(req, 'login', options.challenge);
     res.json(options);
   } catch (err) {
     log.error('Passkey login options error:', err);
@@ -340,13 +369,13 @@ async function loadDiscordProfile(dbUser: DbUser): Promise<DiscordProfile> {
  */
 router.post('/login/verify', async (req, res) => {
   const response = (req.body as { response?: unknown } | undefined)?.response;
-  const challenge = takeChallenge(req, 'login');
-  if (!challenge || !isCredentialResponse(response)) {
-    res.status(400).json({ ok: false, error: 'passkey_failed' });
-    return;
-  }
-
   try {
+    const challenge = await takeChallenge(req, 'login');
+    if (!challenge || !isCredentialResponse(response)) {
+      res.status(400).json({ ok: false, error: 'passkey_failed' });
+      return;
+    }
+
     const result = await verifyAssertion(response as unknown as AuthenticationResponseJSON, challenge.value);
     if (!result.ok) {
       res.status(result.status).json({ ok: false, error: result.error });

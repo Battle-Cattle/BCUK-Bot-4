@@ -20,3 +20,15 @@ CREATE TABLE webauthn_credentials (
   KEY idx_webauthn_credentials_discord_id (discord_id),
   FOREIGN KEY (discord_id) REFERENCES `user`(discord_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Outstanding WebAuthn challenges. The session also holds the challenge (binding it to the
+-- browser that asked for it), but consumption is a conditional DELETE on this table so a
+-- challenge can be redeemed exactly once even by concurrent requests sharing a session.
+CREATE TABLE webauthn_challenges (
+  -- base64url challenge; ascii_bin because it's case-sensitive.
+  challenge   VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  purpose     ENUM('register', 'login') NOT NULL,
+  expires_at  DATETIME     NOT NULL,
+  PRIMARY KEY (challenge),
+  KEY idx_webauthn_challenges_expires_at (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

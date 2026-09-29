@@ -667,3 +667,5 @@ export {
   deletePasskey,
 } from './db/webauthnCredentials';
 export type { PasskeySummary, StoredPasskey, NewPasskey, InsertPasskeyResult } from './db/webauthnCredentials';
+export { saveWebauthnChallenge, consumeWebauthnChallenge } from './db/webauthnChallenges';
+export type { WebauthnChallengePurpose } from './db/webauthnChallenges';

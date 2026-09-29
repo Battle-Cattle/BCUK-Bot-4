@@ -12,6 +12,8 @@ vi.mock('../../db', () => ({
   recordPasskeyUse: vi.fn(),
   deletePasskey: vi.fn(),
   listPasskeyDescriptorsForUser: vi.fn(),
+  saveWebauthnChallenge: vi.fn(),
+  consumeWebauthnChallenge: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('@simplewebauthn/server', () => ({
@@ -43,6 +45,8 @@ import {
   recordPasskeyUse,
   deletePasskey,
   listPasskeyDescriptorsForUser,
+  saveWebauthnChallenge,
+  consumeWebauthnChallenge,
 } from '../../db';
 import {
   generateRegistrationOptions,
@@ -78,6 +82,8 @@ function futureChallenge(purpose: 'register' | 'login', extra: Record<string, un
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(listPasskeyDescriptorsForUser).mockResolvedValue([]);
+  vi.mocked(saveWebauthnChallenge).mockResolvedValue(undefined);
+  vi.mocked(consumeWebauthnChallenge).mockResolvedValue(true);
   vi.mocked(generateRegistrationOptions).mockResolvedValue({ challenge: 'reg-chal' } as any);
   vi.mocked(generateAuthenticationOptions).mockResolvedValue({ challenge: 'auth-chal' } as any);
   vi.mocked(insertPasskey).mockResolvedValue('inserted');
@@ -139,6 +145,7 @@ describe('POST /register/options', () => {
     expect(session.webauthnChallenge).toMatchObject({
       purpose: 'register', value: 'reg-chal', discordId: '42', userHandle: handle,
     });
+    expect(saveWebauthnChallenge).toHaveBeenCalledWith('reg-chal', 'register', 300);
   });
 
   it('refuses with passkey_limit once the user has 10 passkeys', async () => {
@@ -201,6 +208,24 @@ describe('POST /register/verify', () => {
     const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
     expect(res.status).toBe(400);
     expect(verifyRegistrationResponse).not.toHaveBeenCalled();
+  });
+
+  it('consumes the challenge in the DB and rejects when another request already consumed it', async () => {
+    vi.mocked(consumeWebauthnChallenge).mockResolvedValueOnce(false);
+    const { app, session } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }) });
+    const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
+    expect(consumeWebauthnChallenge).toHaveBeenCalledWith('chal', 'register');
+    expect(res.status).toBe(400);
+    expect(verifyRegistrationResponse).not.toHaveBeenCalled();
+    expect(session.webauthnChallenge).toBeUndefined();
+  });
+
+  it('returns 500 when consuming the challenge fails', async () => {
+    vi.mocked(consumeWebauthnChallenge).mockRejectedValueOnce(new Error('db down'));
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }) });
+    const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('passkey_register_failed');
   });
 
   it('rejects when there is no pending registration challenge', async () => {
@@ -333,10 +358,19 @@ describe('POST /login/options', () => {
     expect(res.body).toEqual({ challenge: 'auth-chal' });
     expect(generateAuthenticationOptions).toHaveBeenCalledWith({ rpID: 'panel.example.com', userVerification: 'required' });
     expect(session.webauthnChallenge).toMatchObject({ purpose: 'login', value: 'auth-chal' });
+    expect(saveWebauthnChallenge).toHaveBeenCalledWith('auth-chal', 'login', 300);
   });
 });
 
 describe('POST /login/options — failures', () => {
+  it('returns 500 and leaves no session challenge when saving it to the DB fails', async () => {
+    vi.mocked(saveWebauthnChallenge).mockRejectedValueOnce(new Error('db down'));
+    const { app, session } = buildApp();
+    const res = await supertest(app).post('/login/options');
+    expect(res.status).toBe(500);
+    expect(session.webauthnChallenge).toBeUndefined();
+  });
+
   it('returns 500 passkey_failed when generating options throws', async () => {
     vi.mocked(generateAuthenticationOptions).mockRejectedValueOnce(new Error('boom'));
     const { app, session } = buildApp();
@@ -418,6 +452,24 @@ describe('POST /login/verify', () => {
     const replay = await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
     expect(replay.status).toBe(400);
     expect(establishDashboardSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects when a concurrent request already consumed the same challenge', async () => {
+    vi.mocked(consumeWebauthnChallenge).mockResolvedValueOnce(false);
+    const { app } = buildApp(futureChallenge('login'));
+    const res = await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
+    expect(consumeWebauthnChallenge).toHaveBeenCalledWith('chal', 'login');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('passkey_failed');
+    expect(findPasskey).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 passkey_failed when consuming the challenge fails', async () => {
+    vi.mocked(consumeWebauthnChallenge).mockRejectedValueOnce(new Error('db down'));
+    const { app } = buildApp(futureChallenge('login'));
+    const res = await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('passkey_failed');
   });
 
   it('returns passkey_unknown for an unregistered credential', async () => {
