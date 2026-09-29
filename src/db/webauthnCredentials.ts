@@ -144,14 +144,16 @@ export async function insertPasskey(passkey: NewPasskey, maxPerUser: number): Pr
 }
 
 /**
- * Records a successful sign-in with a passkey: stores the authenticator's new signature
- * counter and stamps `last_used_at`.
+ * Records a successful sign-in with a passkey: raises the stored signature counter to the
+ * authenticator's new value (never lowers it) and stamps `last_used_at`.
  * @param credentialId - The passkey that was used.
  * @param signCount - The new signature counter reported by the authenticator.
  */
 export async function recordPasskeyUse(credentialId: string, signCount: number): Promise<void> {
   await getPool().execute(
-    'UPDATE webauthn_credentials SET sign_count = ?, last_used_at = NOW() WHERE credential_id = ?',
+    // GREATEST keeps the counter monotonic: two sign-ins racing each other can't write an older
+    // value over a newer one, which would weaken the library's cloned-authenticator check.
+    'UPDATE webauthn_credentials SET sign_count = GREATEST(sign_count, ?), last_used_at = NOW() WHERE credential_id = ?',
     [signCount, credentialId],
   );
 }

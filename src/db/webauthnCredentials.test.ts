@@ -171,13 +171,14 @@ describe('insertPasskey', () => {
 });
 
 describe('recordPasskeyUse', () => {
-  it('updates the counter and last-used time for the credential', async () => {
+  it('only ever raises the counter (GREATEST) and stamps last-used time', async () => {
     const pool = makeMockPool({ executeResult: [{ affectedRows: 1 }, []] });
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     await recordPasskeyUse('cred1', 5);
 
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('sign_count = GREATEST(sign_count, ?)');
     expect(sql).toContain('last_used_at = NOW()');
     expect(params).toEqual([5, 'cred1']);
   });
