@@ -149,6 +149,17 @@ describe('POST /register/options', () => {
   });
 });
 
+describe('POST /register/options — failures', () => {
+  it('returns 500 passkey_register_failed when generating options throws', async () => {
+    vi.mocked(generateRegistrationOptions).mockRejectedValueOnce(new Error('boom'));
+    const { app, session } = buildApp({ user: USER });
+    const res = await supertest(app).post('/register/options');
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('passkey_register_failed');
+    expect(session.webauthnChallenge).toBeUndefined();
+  });
+});
+
 describe('POST /register/verify', () => {
   const verified = {
     verified: true,
@@ -222,6 +233,35 @@ describe('POST /register/verify', () => {
     expect(insertPasskey).not.toHaveBeenCalled();
   });
 
+  it('returns 400 when the library reports the registration as unverified', async () => {
+    vi.mocked(verifyRegistrationResponse).mockResolvedValueOnce({ verified: false } as any);
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('passkey_register_failed');
+    expect(insertPasskey).not.toHaveBeenCalled();
+  });
+
+  it('stores an empty transports list when the authenticator reports none', async () => {
+    vi.mocked(verifyRegistrationResponse).mockResolvedValueOnce({
+      verified: true,
+      registrationInfo: { credential: { id: 'new-cred', publicKey: new Uint8Array([1]), counter: 0 } },
+    } as any);
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
+    expect(res.status).toBe(200);
+    expect(vi.mocked(insertPasskey).mock.calls[0][0].transports).toEqual([]);
+  });
+
+  it('returns 500 when saving the passkey throws', async () => {
+    vi.mocked(verifyRegistrationResponse).mockResolvedValueOnce(verified as any);
+    vi.mocked(insertPasskey).mockRejectedValueOnce(new Error('db down'));
+    const { app } = buildApp({ user: USER, ...futureChallenge('register', { discordId: '42' }) });
+    const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('passkey_register_failed');
+  });
+
   it('returns 409 passkey_exists when the credential is already stored', async () => {
     vi.mocked(verifyRegistrationResponse).mockResolvedValue(verified as any);
     vi.mocked(insertPasskey).mockResolvedValue(false);
@@ -272,6 +312,17 @@ describe('POST /login/options', () => {
     expect(res.body).toEqual({ challenge: 'auth-chal' });
     expect(generateAuthenticationOptions).toHaveBeenCalledWith({ rpID: 'panel.example.com', userVerification: 'required' });
     expect(session.webauthnChallenge).toMatchObject({ purpose: 'login', value: 'auth-chal' });
+  });
+});
+
+describe('POST /login/options — failures', () => {
+  it('returns 500 passkey_failed when generating options throws', async () => {
+    vi.mocked(generateAuthenticationOptions).mockRejectedValueOnce(new Error('boom'));
+    const { app, session } = buildApp();
+    const res = await supertest(app).post('/login/options');
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('passkey_failed');
+    expect(session.webauthnChallenge).toBeUndefined();
   });
 });
 
@@ -391,6 +442,24 @@ describe('POST /login/verify', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true, redirect: '/' });
     expect(establishDashboardSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns passkey_failed when the library reports the assertion as unverified', async () => {
+    vi.mocked(verifyAuthenticationResponse).mockResolvedValueOnce({ verified: false, authenticationInfo: { newCounter: 0 } } as any);
+    const { app } = buildApp(futureChallenge('login'));
+    const res = await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('passkey_failed');
+    expect(recordPasskeyUse).not.toHaveBeenCalled();
+    expect(establishDashboardSession).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the Discord ID as the username when the user has no stored name and the bot fetch fails', async () => {
+    vi.mocked(fetchDiscordUserProfile).mockResolvedValueOnce(null);
+    vi.mocked(findUser).mockResolvedValueOnce({ ...dbUser, discord_name: null } as any);
+    const { app } = buildApp(futureChallenge('login'));
+    await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
+    expect(vi.mocked(establishDashboardSession).mock.calls[0][1]).toEqual({ id: '42', username: '42', avatar: null });
   });
 
   it('returns not_whitelisted when the user has since been removed', async () => {
