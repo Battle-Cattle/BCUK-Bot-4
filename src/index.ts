@@ -128,8 +128,8 @@ async function shutdown(signal: string): Promise<void> {
   process.exit(0);
 }
 
-process.on('SIGINT',  () => { shutdown('SIGINT').catch((err)  => { log.error('Shutdown error:', err); process.exit(1); }); });
-process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err) => { log.error('Shutdown error:', err); process.exit(1); }); });
+process.on('SIGINT',  () => { shutdown('SIGINT').catch((err: unknown)  => { log.error('Shutdown error:', err); process.exit(1); }); });
+process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err: unknown) => { log.error('Shutdown error:', err); process.exit(1); }); });
 
 // Without these, a rejection or throw originating from inside a third-party library's own
 // internals (discord.js, @twurple/chat, mysql2, ws) rather than the app's own promise chains would go
@@ -251,7 +251,7 @@ async function main(): Promise<void> {
   startTimerCommandScheduler();
   startDbHealthCheck();
 
-  startTwitchMonitor().catch((err) => log.error('TwitchMonitor startup error:', err));
+  startTwitchMonitor().catch((err: unknown) => log.error('TwitchMonitor startup error:', err));
   startEventSub();
   startEventSubReconciliation();
 
@@ -263,7 +263,7 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
   log.error('Fatal startup error:', err);
   process.exit(1);
 });

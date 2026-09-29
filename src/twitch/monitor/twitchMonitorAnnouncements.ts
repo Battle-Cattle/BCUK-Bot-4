@@ -237,7 +237,7 @@ export async function editAnnouncement(
     const published = await publishEditedAnnouncement({ discordClient, state, content, embed, templateKey, isCurrent });
     if (!published) return;
 
-    await persistStreamerLive(state.streamerId, state.messageId!, state.channelId!, stream.game_name, isCurrent);
+    await persistStreamerLive(state.streamerId, state.messageId, state.channelId, stream.game_name, isCurrent);
     if (!isCurrent()) return;
     await updateMultitwitch(group.id, liveStates);
   } catch (err) {

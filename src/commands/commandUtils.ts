@@ -13,7 +13,7 @@ interface ErrorLogger {
  * @param log - Logger to report the rejection to, so the log line keeps the caller's module tag.
  */
 export function fireAndForget(promise: Promise<void>, context: string, log: ErrorLogger): void {
-  promise.catch((err) => log.error(`${context}:`, err));
+  promise.catch((err: unknown) => log.error(`${context}:`, err));
 }
 
 /**

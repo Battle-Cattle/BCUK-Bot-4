@@ -37,7 +37,9 @@ module.exports = tseslint.config(
       // Structure and async hygiene. Everything below is at zero violations; keep it that way.
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
       '@typescript-eslint/only-throw-error': 'error',
-      '@typescript-eslint/prefer-promise-reject-errors': 'error',
+      // allowThrowingUnknown: re-rejecting a caught (`unknown`) error as-is is propagation, not a
+      // non-Error rejection; casting it to Error just to satisfy the rule would be a lie.
+      '@typescript-eslint/prefer-promise-reject-errors': ['error', { allowThrowingUnknown: true }],
       '@typescript-eslint/require-await': 'error',
       '@typescript-eslint/return-await': ['error', 'in-try-catch'],
       '@typescript-eslint/no-unnecessary-boolean-literal-compare': 'error',
@@ -64,6 +66,10 @@ module.exports = tseslint.config(
       '@typescript-eslint/prefer-return-this-type': 'error',
       '@typescript-eslint/prefer-reduce-type-parameter': 'error',
       '@typescript-eslint/no-misused-spread': 'error',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'error',
+      // `.catch((err) => …)` gets `err: any` by default; this makes it `unknown`, matching what
+      // `strict`'s useUnknownInCatchVariables already does for try/catch.
+      '@typescript-eslint/use-unknown-in-catch-callback-variable': 'error',
       // Correctness. All at zero violations.
       'no-param-reassign': 'error',
       'no-return-assign': 'error',
@@ -135,6 +141,8 @@ module.exports = tseslint.config(
       '@typescript-eslint/prefer-readonly': 'off',
       'prefer-template': 'off',
       'max-lines': 'off',
+      // Tests cast mocks (`as any`, `as ReturnType<…>`) deliberately for readability.
+      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
     },
   },
   {

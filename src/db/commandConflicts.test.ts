@@ -99,8 +99,9 @@ describe('assertDiscordTriggerAvailable', () => {
 
   it('includes the trigger string in the conflict error', async () => {
     const exec = makeExecutor([{ command_id: 1 }]);
-    const error = await assertDiscordTriggerAvailable('!test', exec).catch((e) => e);
-    expect(error.commands).toContain('!test');
+    await expect(assertDiscordTriggerAvailable('!test', exec)).rejects.toMatchObject({
+      commands: expect.arrayContaining(['!test']),
+    });
   });
 
   it('adds AND command_id <> ? clause when excludeCommandId is provided', async () => {

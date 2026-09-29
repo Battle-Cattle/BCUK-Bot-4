@@ -359,7 +359,7 @@ function registerGuildCreateHandler(client: Client): void {
       }
       await reloadGuildRegistry();
       log.info(`Registered guild '${guild.name}' (${guild.id}).`);
-    })().catch((err) => log.error(`Failed to register guild ${guild.id}:`, err));
+    })().catch((err: unknown) => log.error(`Failed to register guild ${guild.id}:`, err));
   });
 }
 
@@ -534,7 +534,7 @@ export function startDiscordBot(): void {
   registerClientReadyHandler(localClient);
   registerConnectionHandlers(localClient);
 
-  localClient.login(DISCORD_TOKEN).catch((err) => {
+  localClient.login(DISCORD_TOKEN).catch((err: unknown) => {
     log.error('Login failed:', err);
     // A stopDiscordBot() (or a newer startDiscordBot()) may have already moved bootingClient
     // past this login attempt by the time it rejects — e.g. the bot was told to stop while this

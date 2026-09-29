@@ -170,7 +170,7 @@ function runWithHeldKeys<T>(
       } catch (err) {
         clearTimeout(deadline.timer);
         for (const release of held) release();
-        reject(err as Error);
+        reject(err);
       }
     })();
   });

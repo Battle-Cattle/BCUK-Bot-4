@@ -158,12 +158,12 @@ export async function performStartupLiveCheck(
       } else if (streamer.discord_message_id) {
         await handleOfflineStreamerOnStartup(streamer, groupsWithChanges);
       }
-    }).map((work) => work.catch((err) => log.error('Startup reconciliation failed for a streamer:', err))),
+    }).map((work) => work.catch((err: unknown) => log.error('Startup reconciliation failed for a streamer:', err))),
   );
 
   // Each group's MultiTwitch refresh is independent of the others.
   await Promise.allSettled(
     Array.from(groupsWithChanges, (gid) =>
-      updateMultitwitch(gid, liveStates).catch((err) => log.error(`MultiTwitch refresh failed for group ${gid}:`, err))),
+      updateMultitwitch(gid, liveStates).catch((err: unknown) => log.error(`MultiTwitch refresh failed for group ${gid}:`, err))),
   );
 }

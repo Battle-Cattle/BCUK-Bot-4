@@ -28,7 +28,7 @@ export function startEventSub(): void {
         }
       }
     })
-    .catch((err) => { log.error('EventSub start error:', err); });
+    .catch((err: unknown) => { log.error('EventSub start error:', err); });
 }
 
 /** Stops and discards every active EventSub connection, and blocks any queued/future reload from starting new ones. */
@@ -48,7 +48,7 @@ export function reloadEventSubSubscriptions(): void {
   if (globalStopped) return;
   topReloadChain = topReloadChain
     .then(() => doReload())
-    .catch((err) => { log.error('EventSub reload error:', err); });
+    .catch((err: unknown) => { log.error('EventSub reload error:', err); });
 }
 
 /**

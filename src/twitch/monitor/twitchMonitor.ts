@@ -143,7 +143,7 @@ export async function startTwitchMonitor(): Promise<void> {
   await performStartupLiveCheck(liveStates, loginToUserId, streamersData);
 
   pollTimer = setInterval(() => {
-    pollStreams().catch((err) => log.error('Poll error:', err));
+    pollStreams().catch((err: unknown) => log.error('Poll error:', err));
   }, POLL_INTERVAL_MS);
   log.info(`Polling ${loginToUserId.size} streamer(s) every ${POLL_INTERVAL_MS / 1000}s`);
 }

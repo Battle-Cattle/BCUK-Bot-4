@@ -113,7 +113,7 @@ function scheduleReconnect(state: GuildVoiceState, reason: string): void {
     state.reconnectTimer = null;
     if (scheduledAttemptId !== state.currentAttemptId) return;
     if (!state.shouldAutoReconnect || !state.client || state.connection || !state.targetChannelId) return;
-    connect(state.client, state.guildId, state.targetChannelId).catch((err) => {
+    connect(state.client, state.guildId, state.targetChannelId).catch((err: unknown) => {
       log.error(`Voice rejoin failed for guild ${state.guildId}:`, err);
     });
   }, delay);

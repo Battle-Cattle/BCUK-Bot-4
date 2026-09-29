@@ -167,7 +167,7 @@ describe('exchangeCode', () => {
 
   it('throws a generic Error on a 500 response', async () => {
     vi.mocked(twitchFetch).mockResolvedValue(mockFetch(500, {}));
-    const err = await exchangeCode('code123', 'https://example.com/callback').catch((e) => e);
+    const err = await exchangeCode('code123', 'https://example.com/callback').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(TwitchAuthError);
   });
@@ -197,7 +197,7 @@ describe('refreshUserToken', () => {
 
   it('throws a generic Error on a 500 response', async () => {
     vi.mocked(twitchFetch).mockResolvedValue(mockFetch(500, {}));
-    const err = await refreshUserToken('rt').catch((e) => e);
+    const err = await refreshUserToken('rt').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(TwitchAuthError);
   });
@@ -267,7 +267,7 @@ describe('createEventSubSubscription', () => {
 
   it('throws a generic Error on 500', async () => {
     vi.mocked(twitchFetch).mockResolvedValue(mockFetch(500, {}, 'Server Error'));
-    const err = await createEventSubSubscription('channel.follow', '1', {}, 'session1', 'token').catch((e) => e);
+    const err = await createEventSubSubscription('channel.follow', '1', {}, 'session1', 'token').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(TwitchAuthError);
   });

@@ -218,7 +218,7 @@ function onConnected(): void {
   // disconnected state until reconcileJoinedChannels() asynchronously
   // rechecks the actual joined memberships and corrects the status.
   getActiveChannels().forEach((ch) => { setTwitchChannel(ch, false); });
-  void reconcileJoinedChannels().catch((err) => {
+  void reconcileJoinedChannels().catch((err: unknown) => {
     log.error('Failed to reconcile joined channels:', err);
   });
 }
