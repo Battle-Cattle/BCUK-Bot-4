@@ -50,11 +50,8 @@ describe('getOrCreate', () => {
 
       const result = getOrCreate(map, 'a', makeDefault);
 
-      if (typeof falsyValue === 'number' && Number.isNaN(falsyValue)) {
-        expect(Number.isNaN(result as number)).toBe(true);
-      } else {
-        expect(result).toBe(falsyValue);
-      }
+      // toBe compares with Object.is, so NaN matches NaN here.
+      expect(result).toBe(falsyValue);
       expect(makeDefault).not.toHaveBeenCalled();
     },
   );

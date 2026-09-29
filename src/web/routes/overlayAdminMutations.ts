@@ -48,6 +48,15 @@ export function detectVideoType(buf: Buffer): 'webm' | 'mp4' | null {
   return null;
 }
 
+/**
+ * Writes an uploaded overlay video to the streamer's folder under a random name and records it
+ * in the DB, deleting the file again if the DB insert fails.
+ * @param streamer - Owning streamer.
+ * @param file - The Multer upload (in-memory buffer).
+ * @param name - Display name for the video.
+ * @returns Resolves once the file is saved and recorded.
+ * @throws With `code: 'invalid_path'` or `'invalid_file'` for a bad path or non-video upload.
+ */
 async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.File, name: string): Promise<void> {
   const dir = safeResolve(OVERLAY_FOLDER, String(streamer.id));
   if (!dir) throw Object.assign(new Error('Path traversal blocked'), { code: 'invalid_path' });

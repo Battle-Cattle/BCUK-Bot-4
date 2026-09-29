@@ -101,8 +101,7 @@ describe('handleFollow', () => {
       follow_enabled: true,
       follow_message: 'Welcome {username} aka {display_name}!',
     }), STREAMER_ID);
-    expect(mockSend).toHaveBeenCalledOnce();
-    expect(mockSend).toHaveBeenCalledWith('streamer', 'Welcome testuser aka TestUser!');
+    expect(mockSend).toHaveBeenCalledExactlyOnceWith('streamer', 'Welcome testuser aka TestUser!');
   });
 });
 
@@ -1105,8 +1104,7 @@ describe('handleRedemption', () => {
     expect(mockPushDashboardEvent).toHaveBeenCalledTimes(2);
     expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
     expect(applyRedemptionPricing).toHaveBeenCalledTimes(2);
-    expect(mockPushOverlayEvent).toHaveBeenCalledOnce();
-    expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
+    expect(mockPushOverlayEvent).toHaveBeenCalledExactlyOnceWith('streamer', '/overlay/videos/7/clip1.mp4');
   });
 
   it('processes two notifications with different redemption ids normally', async () => {

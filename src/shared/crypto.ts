@@ -3,6 +3,12 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 const ALGORITHM = 'aes-256-gcm';
 const ENC_PREFIX = 'enc:';
 
+/**
+ * Validates and decodes the AES-256 key.
+ * @param secret - 64-character hex string.
+ * @returns The 32-byte key.
+ * @throws If `secret` isn't exactly 64 hex characters.
+ */
 function parseKey(secret: string): Buffer {
   if (!/^[0-9a-fA-F]{64}$/.test(secret)) {
     throw new Error('EVENTSUB_TOKEN_SECRET must be exactly 64 hex characters (32 bytes)');

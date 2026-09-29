@@ -251,6 +251,8 @@ export async function editAnnouncement(
  * the in-memory map. DB/state cleanup always runs even if Discord message
  * deletion fails, so a transient Discord API error can't leave the streamer
  * stuck marked as live.
+ * @param liveStates - The monitor's in-memory live-state map.
+ * @param stateKey - Key of the streamer's entry in `liveStates`.
  * @param isCurrent - See `withLoginLock` in twitchMonitorPoll.ts; checked after each `await` so a
  *   caller superseded by a newer same-login operation (e.g. the streamer came back live again
  *   while this call's own Discord/DB calls were in flight) stops before deleting or clearing
