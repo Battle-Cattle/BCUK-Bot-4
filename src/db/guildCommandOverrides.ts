@@ -20,6 +20,12 @@ export interface DbGuildCommandOverride {
   output: string | null;
 }
 
+/**
+ * Maps a `guild_command_overrides` row to a {@link DbGuildCommandOverride}. `guild_id` is a
+ * BIGINT snowflake, so it stays a string.
+ * @param row - Raw row from mysql2.
+ * @returns The mapped override.
+ */
 function mapOverride(row: mysql.RowDataPacket): DbGuildCommandOverride {
   return {
     guild_id: String(row.guild_id),

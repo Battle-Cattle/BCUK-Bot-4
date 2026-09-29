@@ -44,11 +44,6 @@ describe('assertNotReservedCommand', () => {
   });
 
   it('error name is ReservedCommandError', () => {
-    try {
-      assertNotReservedCommand('!so');
-      expect.fail('expected throw');
-    } catch (err) {
-      expect((err as ReservedCommandError).name).toBe('ReservedCommandError');
-    }
+    expect(() => assertNotReservedCommand('!so')).toThrow(expect.objectContaining({ name: 'ReservedCommandError' }));
   });
 });

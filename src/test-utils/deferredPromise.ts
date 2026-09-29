@@ -1,3 +1,7 @@
+/**
+ * Creates a promise along with its `resolve`/`reject` functions, so a test can settle it on demand.
+ * @returns The promise and its settle functions.
+ */
 export function deferred<T = void>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;

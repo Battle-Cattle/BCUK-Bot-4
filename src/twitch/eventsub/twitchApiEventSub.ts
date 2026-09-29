@@ -212,6 +212,13 @@ export async function listEventSubSubscriptions(
   return results;
 }
 
+/**
+ * Deletes an EventSub subscription. A 404 (already gone) counts as success.
+ * @param id - Subscription ID.
+ * @param token - Access token authorised to manage the subscription.
+ * @returns Resolves once the subscription is deleted or confirmed absent.
+ * @throws On any other non-OK response.
+ */
 export async function deleteEventSubSubscription(id: string, token: string): Promise<void> {
   const res = await twitchFetch(
     `https://api.twitch.tv/helix/eventsub/subscriptions?id=${encodeURIComponent(id)}`,

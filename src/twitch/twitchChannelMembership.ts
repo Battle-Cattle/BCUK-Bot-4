@@ -155,12 +155,21 @@ function isChannelJoined(channel: string): boolean {
   return confirmedJoinedChannels.has(channel);
 }
 
+/**
+ * Looks up and caches a channel's Twitch user ID in the background, skipping the write if the
+ * channel was deactivated meanwhile. Failures are logged, not thrown.
+ * @param channel - Normalized channel name.
+ */
 function cacheChannelUserId(channel: string): void {
   getUsers([channel])
     .then(([u]) => { if (u && activeChannels.has(channel)) activeChannelUserIds.set(channel, u.id); })
     .catch((err) => { log.warn(`Failed to cache user ID for channel ${channel}:`, err); });
 }
 
+/**
+ * Invokes the registered channel-joined hook, if any, logging (not throwing) on error.
+ * @param channel - Normalized channel name that was joined.
+ */
 function fireChannelJoinedHook(channel: string): void {
   try { _onChannelJoined?.(channel); } catch (err) { log.error('Channel joined hook error:', err); }
 }

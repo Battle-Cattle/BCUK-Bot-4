@@ -68,6 +68,11 @@ export interface RedemptionEvent {
   user_input: string;
 }
 
+/**
+ * Converts a Twitch subscription tier code to a display name.
+ * @param tier - Tier code (`'1000'`, `'2000'` or `'3000'`).
+ * @returns `'Tier 1'`–`'Tier 3'`, or the raw code if unrecognised.
+ */
 function tierName(tier: string): string {
   return ({ '1000': 'Tier 1', '2000': 'Tier 2', '3000': 'Tier 3' } as Record<string, string>)[tier] ?? tier;
 }

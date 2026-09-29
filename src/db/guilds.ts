@@ -18,8 +18,12 @@ export interface DbGuildMembership extends DbGuild {
 
 // ─── Row mapper ───────────────────────────────────────────────────────────────
 
-// guild_id and voice_channel_id are BIGINT → strings (bigNumberStrings: true).
-// Never coerce to Number — snowflakes lose precision.
+/**
+ * Maps a `guilds` row to a {@link DbGuild}. guild_id and voice_channel_id are BIGINT → strings
+ * (bigNumberStrings: true). Never coerce to Number — snowflakes lose precision.
+ * @param row - Raw row from mysql2.
+ * @returns The mapped guild.
+ */
 function mapGuild(row: mysql.RowDataPacket): DbGuild {
   return {
     guild_id: String(row.guild_id),

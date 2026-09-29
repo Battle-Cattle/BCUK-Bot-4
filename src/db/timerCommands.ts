@@ -59,6 +59,11 @@ export class TimerCommandNotFoundError extends Error {
   }
 }
 
+/**
+ * Maps a `timer_commands` row to a {@link DbTimerCommand}, converting BIT columns to booleans.
+ * @param r - Raw row from mysql2.
+ * @returns The mapped timer command.
+ */
 function mapRow(r: mysql.RowDataPacket): DbTimerCommand {
   return {
     id: r.id,

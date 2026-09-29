@@ -32,6 +32,12 @@ export function registerRewardPricingRuntime(runtime: RewardPricingRuntime): voi
 // (different keys) run fully concurrently.
 const pricingQueue = createMutationQueue<string>();
 
+/**
+ * Builds the {@link pricingQueue} key that serialises work on one streamer's reward.
+ * @param streamerId - Streamer DB row ID.
+ * @param twitchRewardId - Twitch custom reward ID.
+ * @returns The `streamerId:rewardId` key.
+ */
 function queueKey(streamerId: number, twitchRewardId: string): string {
   return `${streamerId}:${twitchRewardId}`;
 }
