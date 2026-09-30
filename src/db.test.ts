@@ -43,6 +43,7 @@ vi.mock('./db/customCommands', () => ({
   removeCustomCommand: vi.fn(),
   updateOwnCustomCommand: vi.fn(),
   removeOwnCustomCommand: vi.fn(),
+  discardOwnNewCustomCommand: vi.fn(),
   assignUserToCommand: vi.fn(),
   assignUsersToCommand: vi.fn(),
   unassignUserFromCommand: vi.fn(),
@@ -186,6 +187,7 @@ import {
   removeCustomCommand as removeCustomCommandRecord,
   updateOwnCustomCommand as updateOwnCustomCommandRecord,
   removeOwnCustomCommand as removeOwnCustomCommandRecord,
+  discardOwnNewCustomCommand as discardOwnNewCustomCommandRecord,
   assignUserToCommand as assignUserToCommandRecord,
   assignUsersToCommand as assignUsersToCommandRecord,
   unassignUserFromCommand as unassignUserFromCommandRecord,
@@ -221,6 +223,7 @@ import {
 import {
   upsertUser, updateTwitchBotEnabled, deleteUnlinkedUser, upsertOverride, removeOverride,
   addCustomCommand, updateCustomCommand, removeCustomCommand, updateOwnCustomCommand, removeOwnCustomCommand,
+  discardOwnNewCustomCommand,
   assignUserToCommand, assignUsersToCommand, unassignUserFromCommand,
   addCounter, updateCounter, removeCounter, resetCounterCurrentValue,
   incrementCounter, archiveAndResetYearlyCounters,
@@ -431,6 +434,21 @@ describe('removeOwnCustomCommand', () => {
   it('does not invalidate the cache when the ownership check denies the delete', async () => {
     vi.mocked(removeOwnCustomCommandRecord).mockRejectedValueOnce(new Error('denied'));
     await expect(removeOwnCustomCommand(1, 'user1')).rejects.toThrow('denied');
+    expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
+  });
+});
+
+describe('discardOwnNewCustomCommand', () => {
+  it('calls the record function and invalidates the cache on success', async () => {
+    vi.mocked(discardOwnNewCustomCommandRecord).mockResolvedValueOnce(undefined);
+    await discardOwnNewCustomCommand(1, 'user1');
+    expect(discardOwnNewCustomCommandRecord).toHaveBeenCalledWith(1, 'user1');
+    expect(invalidateCustomCommandLookupCache).toHaveBeenCalledOnce();
+  });
+
+  it('does not invalidate the cache when the cleanup is denied', async () => {
+    vi.mocked(discardOwnNewCustomCommandRecord).mockRejectedValueOnce(new Error('denied'));
+    await expect(discardOwnNewCustomCommand(1, 'user1')).rejects.toThrow('denied');
     expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
   });
 });

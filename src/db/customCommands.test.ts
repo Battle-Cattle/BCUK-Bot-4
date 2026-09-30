@@ -58,6 +58,7 @@ import {
   removeCustomCommand,
   updateOwnCustomCommand,
   removeOwnCustomCommand,
+  discardOwnNewCustomCommand,
   assignUserToCommand,
   assignUsersToCommand,
   unassignUserFromCommand,
@@ -388,6 +389,39 @@ describe('removeOwnCustomCommand', () => {
     expect(conn.execute).toHaveBeenCalledTimes(2);
     expect(conn.rollback).toHaveBeenCalled();
     expect(releaseNamedLock).toHaveBeenCalledWith(conn, 'bcuk_cmdid_5');
+  });
+});
+
+describe('discardOwnNewCustomCommand', () => {
+  it('deletes the new command when it is still unclaimed (the failed assignment left no assignees)', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    for (const result of ownershipRows({ is_discord_enabled: 0, is_multi_twitch: 0 }, [])) {
+      conn.execute.mockResolvedValueOnce(result);
+    }
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []])  // DELETE twitch_user_commands
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]);  // DELETE custom_command
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await discardOwnNewCustomCommand(5, STREAMER_ID);
+
+    expect(conn.execute.mock.calls[0][0]).toContain('FOR UPDATE');
+    expect(conn.execute.mock.calls[3][0]).toContain('DELETE FROM custom_command');
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('leaves the command alone when a Mod adopted it in the meantime', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    for (const result of ownershipRows({ is_discord_enabled: 0, is_multi_twitch: 0 }, [OTHER_ID])) {
+      conn.execute.mockResolvedValueOnce(result);
+    }
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(discardOwnNewCustomCommand(5, STREAMER_ID)).rejects.toThrow('Command not self-manageable: 5');
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+    expect(conn.rollback).toHaveBeenCalled();
   });
 });
 

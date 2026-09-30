@@ -9,6 +9,7 @@ vi.mock('../../db', () => {
     CommandNotFoundError,
     CommandSelfServiceDeniedError,
     findUser: vi.fn(),
+    discardOwnNewCustomCommand: vi.fn().mockResolvedValue(undefined),
     updateCustomCommand: vi.fn().mockResolvedValue(undefined),
     updateOwnCustomCommand: vi.fn().mockResolvedValue(undefined),
     removeCustomCommand: vi.fn().mockResolvedValue(undefined),
@@ -18,6 +19,7 @@ vi.mock('../../db', () => {
 
 import {
   commandAccessErrorCode,
+  discardNewCommandAsSessionUser,
   readCommandForm,
   removeCommandAsSessionUser,
   resolveNewCommandAssignees,
@@ -26,6 +28,7 @@ import {
 import {
   CommandNotFoundError,
   CommandSelfServiceDeniedError,
+  discardOwnNewCustomCommand,
   findUser,
   removeCustomCommand,
   removeOwnCustomCommand,
@@ -112,6 +115,20 @@ describe('removeCommandAsSessionUser', () => {
   it("uses the owner-checked delete with the streamer's ID for a streamer", async () => {
     await removeCommandAsSessionUser(req(ACCESS_LEVEL_MOCK.USER), 5);
     expect(removeOwnCustomCommand).toHaveBeenCalledWith(5, STREAMER_ID);
+    expect(removeCustomCommand).not.toHaveBeenCalled();
+  });
+});
+
+describe('discardNewCommandAsSessionUser', () => {
+  it('uses the unrestricted delete for a Mod', async () => {
+    await discardNewCommandAsSessionUser(req(ACCESS_LEVEL_MOCK.MOD), 5);
+    expect(removeCustomCommand).toHaveBeenCalledWith(5);
+    expect(discardOwnNewCustomCommand).not.toHaveBeenCalled();
+  });
+
+  it("uses the unclaimed-only cleanup with the streamer's ID for a streamer", async () => {
+    await discardNewCommandAsSessionUser(req(ACCESS_LEVEL_MOCK.USER), 5);
+    expect(discardOwnNewCustomCommand).toHaveBeenCalledWith(5, STREAMER_ID);
     expect(removeCustomCommand).not.toHaveBeenCalled();
   });
 });

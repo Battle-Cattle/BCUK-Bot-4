@@ -6,7 +6,7 @@ import { AccessLevel } from './users';
 import type { AccessLevelValue } from './users';
 import { assertNotReservedCommand } from './reservedCommands';
 import { requireTrimmedString, CommandNotFoundError, CommandSelfServiceDeniedError, type SqlExecutor } from './commandStringUtils';
-import { isCommandSelfManageableBy } from './commandSelfService';
+import { isCommandSelfManageableBy, isCommandUnclaimedBy } from './commandSelfService';
 import { acquireNamedLock, releaseNamedLock, commandExists, runSerializedCommandWrite } from './commandLocks';
 import {
   assertDiscordTriggerAvailable, assertMultiTwitchTriggerAvailable, assertNoSingleTwitchAssignmentOverlap,
@@ -101,21 +101,28 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
 
 // ─── Streamer self-service ────────────────────────────────────────────────────
 
+/** A streamer-ownership rule checked under lock: the streamer, and the predicate their write needs. */
+interface OwnershipCheck {
+  discordId: string;
+  /** {@link isCommandSelfManageableBy} for edits/deletes, {@link isCommandUnclaimedBy} for failed-create cleanup. */
+  allows: typeof isCommandSelfManageableBy;
+}
+
 /**
- * Re-checks {@link isCommandSelfManageableBy} inside the caller's transaction, locking the command
- * row and its assignment rows (`SELECT … FOR UPDATE`) so a concurrent assignment or flag change
- * can't land between this check and the caller's write: it either commits first and is seen here,
- * or waits for this transaction to finish.
+ * Re-checks a streamer-ownership rule inside the caller's transaction, locking the command row and
+ * its assignment rows (`SELECT … FOR UPDATE`) so a concurrent assignment or flag change can't land
+ * between this check and the caller's write: it either commits first and is seen here, or waits
+ * for this transaction to finish.
  * @param connection - Connection with an open transaction.
  * @param commandId - ID of the command being changed.
- * @param discordId - Discord ID of the streamer.
+ * @param check - The streamer and the rule their write must satisfy.
  * @throws {CommandNotFoundError} If the command doesn't exist.
- * @throws {CommandSelfServiceDeniedError} If the streamer doesn't own it outright.
+ * @throws {CommandSelfServiceDeniedError} If the rule doesn't hold.
  */
-async function assertSelfManageableWithinTransaction(
+async function assertOwnershipWithinTransaction(
   connection: SqlExecutor,
   commandId: number,
-  discordId: string,
+  check: OwnershipCheck,
 ): Promise<void> {
   const [commandRows] = await connection.execute<mysql.RowDataPacket[]>(
     'SELECT is_discord_enabled, is_multi_twitch FROM custom_command WHERE command_id = ? FOR UPDATE',
@@ -132,7 +139,7 @@ async function assertSelfManageableWithinTransaction(
     is_multi_twitch: fromBit(commandRows[0].is_multi_twitch),
   };
   const assignedDiscordIds = assignmentRows.map((row) => String(row.discord_id));
-  if (!isCommandSelfManageableBy(flags, assignedDiscordIds, discordId)) {
+  if (!check.allows(flags, assignedDiscordIds, check.discordId)) {
     throw new CommandSelfServiceDeniedError(commandId);
   }
 }
@@ -201,7 +208,7 @@ interface CustomCommandFields {
  * @param commandId - ID of the command to update.
  * @param fields - New trigger (lowercased before storing), output (max 2000 characters) and flags.
  * @param selfServiceDiscordId - When set, the update only goes ahead if this streamer owns the
- *   command outright, checked inside the transaction ({@link assertSelfManageableWithinTransaction}).
+ *   command outright, checked inside the transaction ({@link assertOwnershipWithinTransaction}).
  */
 async function writeCustomCommandUpdate(
   commandId: number,
@@ -219,7 +226,7 @@ async function writeCustomCommandUpdate(
     { excludeCustomCommandId: commandId },
     async (connection) => {
       if (selfServiceDiscordId !== undefined) {
-        await assertSelfManageableWithinTransaction(connection, commandId, selfServiceDiscordId);
+        await assertOwnershipWithinTransaction(connection, commandId, { discordId: selfServiceDiscordId, allows: isCommandSelfManageableBy });
       }
 
       if (isDiscordEnabled) {
@@ -292,22 +299,22 @@ export async function updateOwnCustomCommand(
 }
 
 /**
- * Shared body of {@link removeCustomCommand} and {@link removeOwnCustomCommand}: under the
- * command's id lock, in one transaction, optionally re-checks streamer ownership, then deletes the
- * command and its assignments.
+ * Shared body of {@link removeCustomCommand}, {@link removeOwnCustomCommand} and
+ * {@link discardOwnNewCustomCommand}: under the command's id lock, in one transaction, optionally
+ * re-checks a streamer-ownership rule, then deletes the command and its assignments.
  * @param commandId - ID of the command to delete.
- * @param selfServiceDiscordId - When set, the delete only goes ahead (and deletes nothing
- *   otherwise) if this streamer owns the command outright, checked inside the transaction.
+ * @param check - When set, the delete only goes ahead (and deletes nothing otherwise) if this
+ *   rule holds, checked inside the transaction.
  */
-async function deleteCustomCommand(commandId: number, selfServiceDiscordId?: string): Promise<void> {
+async function deleteCustomCommand(commandId: number, check?: OwnershipCheck): Promise<void> {
   const connection = await getPool().getConnection();
   const lockName = `bcuk_cmdid_${commandId}`;
 
   try {
     await acquireNamedLock(connection, lockName);
     await runInTransaction(connection, async () => {
-      if (selfServiceDiscordId !== undefined) {
-        await assertSelfManageableWithinTransaction(connection, commandId, selfServiceDiscordId);
+      if (check !== undefined) {
+        await assertOwnershipWithinTransaction(connection, commandId, check);
       }
       await connection.execute(
         'DELETE FROM twitch_user_commands WHERE command_id = ?',
@@ -347,7 +354,21 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
  * @throws {CommandSelfServiceDeniedError} If the streamer doesn't own it outright.
  */
 export async function removeOwnCustomCommand(commandId: number, discordId: string): Promise<void> {
-  await deleteCustomCommand(commandId, discordId);
+  await deleteCustomCommand(commandId, { discordId, allows: isCommandSelfManageableBy });
+}
+
+/**
+ * Cleans up a streamer's just-created command after its self-assignment failed, but only while
+ * it is still unclaimed ({@link isCommandUnclaimedBy}), re-checked inside the delete's own
+ * transaction. If a Mod adopted it in the meantime, it is left in place.
+ *
+ * @param commandId - ID of the command to discard.
+ * @param discordId - Discord ID of the streamer who created it.
+ * @throws {CommandNotFoundError} If the command doesn't exist.
+ * @throws {CommandSelfServiceDeniedError} If a Mod has since adopted it.
+ */
+export async function discardOwnNewCustomCommand(commandId: number, discordId: string): Promise<void> {
+  await deleteCustomCommand(commandId, { discordId, allows: isCommandUnclaimedBy });
 }
 
 /**

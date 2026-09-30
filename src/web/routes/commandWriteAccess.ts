@@ -2,6 +2,7 @@ import type { Request } from 'express';
 import {
   CommandNotFoundError,
   CommandSelfServiceDeniedError,
+  discardOwnNewCustomCommand,
   findUser,
   removeCustomCommand,
   removeOwnCustomCommand,
@@ -99,4 +100,17 @@ export async function updateCommandAsSessionUser(req: Request, commandId: number
 export async function removeCommandAsSessionUser(req: Request, commandId: number): Promise<void> {
   if (canManageCommandCatalog(req)) return removeCustomCommand(commandId);
   return removeOwnCustomCommand(commandId, req.session.user!.discordId);
+}
+
+/**
+ * Cleans up a just-created command whose assignment failed, as the session user: the unrestricted
+ * `removeCustomCommand` for Mod+, or `discardOwnNewCustomCommand` for a streamer below Mod, which
+ * leaves the command alone if a Mod adopted it in the meantime.
+ * @param req - Express request; reads the session user.
+ * @param commandId - ID of the command to discard.
+ * @returns Resolves once the cleanup completes; rejects if it fails or is denied.
+ */
+export async function discardNewCommandAsSessionUser(req: Request, commandId: number): Promise<void> {
+  if (canManageCommandCatalog(req)) return removeCustomCommand(commandId);
+  return discardOwnNewCustomCommand(commandId, req.session.user!.discordId);
 }

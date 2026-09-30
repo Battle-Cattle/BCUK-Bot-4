@@ -19,3 +19,23 @@ export function isCommandSelfManageableBy(
     && !command.is_discord_enabled
     && !command.is_multi_twitch;
 }
+
+/**
+ * Whether a streamer's own just-created command is still unclaimed, so a failed self-assignment
+ * may clean it up: no Discord or multi-Twitch flag, and no assignee other than the streamer (a
+ * failed assignment may have left none). If a Mod adopted the new command in the meantime, by
+ * assigning someone else or turning on a cross-channel flag, the cleanup must leave it alone.
+ * @param command - The command's Discord/multi-Twitch flags.
+ * @param assignedDiscordIds - Discord IDs of every user assigned to the command.
+ * @param discordId - Discord ID of the streamer who created it.
+ * @returns True when the command is still the streamer's, unadopted.
+ */
+export function isCommandUnclaimedBy(
+  command: { is_discord_enabled: boolean; is_multi_twitch: boolean },
+  assignedDiscordIds: string[],
+  discordId: string,
+): boolean {
+  return assignedDiscordIds.every((assigned) => assigned === discordId)
+    && !command.is_discord_enabled
+    && !command.is_multi_twitch;
+}

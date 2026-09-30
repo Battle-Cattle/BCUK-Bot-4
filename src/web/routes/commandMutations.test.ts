@@ -16,6 +16,7 @@ vi.mock('../../db', () => {
     findUser: vi.fn().mockResolvedValue(null),
     updateOwnCustomCommand: vi.fn().mockResolvedValue(undefined),
     removeOwnCustomCommand: vi.fn().mockResolvedValue(undefined),
+    discardOwnNewCustomCommand: vi.fn().mockResolvedValue(undefined),
     CommandConflictError,
     CommandNotFoundError,
     CommandSelfServiceDeniedError,
@@ -36,7 +37,7 @@ import supertest from 'supertest';
 import router from './commandMutations';
 import {
   addCustomCommand, updateCustomCommand, removeCustomCommand,
-  assignUsersToCommand, findUsersByIds, findUser, updateOwnCustomCommand, removeOwnCustomCommand, CommandSelfServiceDeniedError,
+  assignUsersToCommand, findUsersByIds, findUser, updateOwnCustomCommand, removeOwnCustomCommand, discardOwnNewCustomCommand, CommandSelfServiceDeniedError,
   CommandConflictError, CommandNotFoundError, ReservedCommandError,
   isMysqlDuplicateEntryError,
 } from '../../db';
@@ -63,6 +64,7 @@ beforeEach(() => {
   vi.mocked(findUser).mockResolvedValue(null);
   vi.mocked(updateOwnCustomCommand).mockResolvedValue(undefined);
   vi.mocked(removeOwnCustomCommand).mockResolvedValue(undefined);
+  vi.mocked(discardOwnNewCustomCommand).mockResolvedValue(undefined);
   vi.mocked(isMysqlDuplicateEntryError).mockReturnValue(false);
 });
 
@@ -325,6 +327,16 @@ describe('streamer self-service (below Mod)', () => {
       expect(addCustomCommand).toHaveBeenCalledWith('!hi', 'hi', false, false);
       expect(findUsersByIds).toHaveBeenCalledWith([STREAMER_ID]);
       expect(assignUsersToCommand).toHaveBeenCalledWith(1, [STREAMER_ID]);
+    });
+
+    it('cleans up with the unclaimed-only discard (not the unrestricted delete) when self-assignment fails', async () => {
+      vi.mocked(findUser).mockResolvedValue({ discord_id: STREAMER_ID, twitch_name: 'streamer' } as any);
+      vi.mocked(findUsersByIds).mockResolvedValue(new Map([[STREAMER_ID, { discord_id: STREAMER_ID, twitch_name: 'streamer' } as any]]));
+      vi.mocked(assignUsersToCommand).mockRejectedValueOnce(new Error('DB error'));
+      const res = await supertest(streamerApp()).post('/commands/add').send('trigger_string=!hi&output=hi');
+      expect(res.headers.location).toBe('/commands?error=assign_failed');
+      expect(discardOwnNewCustomCommand).toHaveBeenCalledWith(1, STREAMER_ID);
+      expect(removeCustomCommand).not.toHaveBeenCalled();
     });
 
     it('redirects to ?error=add_failed when the streamer lookup throws', async () => {

@@ -6,7 +6,6 @@ import {
   CommandConflictError,
   isMysqlDuplicateEntryError,
   findUsersByIds,
-  removeCustomCommand,
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
@@ -14,6 +13,7 @@ import { parsePositiveIntId } from './validation';
 import { logAndRedirectError, handleReservedOrConflictCommandError } from './errorHandling';
 import {
   commandAccessErrorCode,
+  discardNewCommandAsSessionUser,
   readCommandForm,
   removeCommandAsSessionUser,
   resolveNewCommandAssignees,
@@ -26,10 +26,19 @@ const router = Router();
 /** `handleReservedOrConflictCommandError` options scoped to the commands admin page. */
 const COMMAND_WRITE_ERROR_OPTIONS = { basePath: '/commands', conflictErrorCode: 'command_taken' };
 
-/** Assigns users to a newly created command.  On any failure, deletes the command
- *  to avoid leaving it in a partially-assigned state.  Returns an error code, or
- *  null on success. */
-async function assignUsersToNewCommand(commandId: number, discordIds: string[]): Promise<string | null> {
+/**
+ * Assigns users to a newly created command. On any failure, cleans the command up via `discard`
+ * to avoid leaving it in a partially-assigned state.
+ * @param commandId - ID of the just-created command.
+ * @param discordIds - Discord IDs to assign (users without a Twitch name are skipped).
+ * @param discard - Deletes the command on failure (see `discardNewCommandAsSessionUser`).
+ * @returns An error code, or null on success.
+ */
+async function assignUsersToNewCommand(
+  commandId: number,
+  discordIds: string[],
+  discard: (commandId: number) => Promise<void>,
+): Promise<string | null> {
   try {
     const users = await findUsersByIds(discordIds);
     const eligibleDiscordIds = discordIds.filter((discordId) => {
@@ -39,7 +48,7 @@ async function assignUsersToNewCommand(commandId: number, discordIds: string[]):
     await assignUsersToCommand(commandId, eligibleDiscordIds);
   } catch (err) {
     try {
-      await removeCustomCommand(commandId);
+      await discard(commandId);
     } catch (cleanupErr) {
       log.error('Cleanup after failed assign error:', cleanupErr);
     }
@@ -79,7 +88,7 @@ router.post('/commands/add', requireGuildContext, csrfProtection, async (req, re
     return logAndRedirectError({ res, log, logLabel: 'Add custom command error:', err, basePath: '/commands', errorCode: 'add_failed' });
   }
 
-  const assignError = await assignUsersToNewCommand(commandId, discordIds);
+  const assignError = await assignUsersToNewCommand(commandId, discordIds, (id) => discardNewCommandAsSessionUser(req, id));
   if (assignError) return res.redirect(`/commands?error=${assignError}`);
 
   res.redirect('/commands');

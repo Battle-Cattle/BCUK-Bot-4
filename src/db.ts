@@ -161,6 +161,7 @@ import {
   removeCustomCommand as removeCustomCommandRecord,
   updateOwnCustomCommand as updateOwnCustomCommandRecord,
   removeOwnCustomCommand as removeOwnCustomCommandRecord,
+  discardOwnNewCustomCommand as discardOwnNewCustomCommandRecord,
   assignUserToCommand as assignUserToCommandRecord,
   assignUsersToCommand as assignUsersToCommandRecord,
   unassignUserFromCommand as unassignUserFromCommandRecord,
@@ -251,6 +252,18 @@ export async function updateOwnCustomCommand(
  */
 export async function removeOwnCustomCommand(commandId: number, discordId: string): Promise<void> {
   return withInvalidation(() => removeOwnCustomCommandRecord(commandId, discordId), invalidateCustomCommandLookupCache);
+}
+
+/**
+ * Cleans up a streamer's just-created command after a failed self-assignment, only while it is
+ * still unclaimed (checked under a lock), and invalidates the custom-command lookup cache. A denied
+ * cleanup throws before the cache is invalidated.
+ * @param commandId - ID of the command to discard.
+ * @param discordId - Discord ID of the streamer who created it.
+ * @returns Resolves once the deletion (and cache invalidation) completes.
+ */
+export async function discardOwnNewCustomCommand(commandId: number, discordId: string): Promise<void> {
+  return withInvalidation(() => discardOwnNewCustomCommandRecord(commandId, discordId), invalidateCustomCommandLookupCache);
 }
 
 /**
