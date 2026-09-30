@@ -1,24 +1,24 @@
 import { createLogger } from '../../shared/logger';
-import { Router, type Request } from 'express';
+import { Router } from 'express';
 import {
   addCustomCommand,
   assignUsersToCommand,
   CommandConflictError,
-  CommandNotFoundError,
-  CommandSelfServiceDeniedError,
   isMysqlDuplicateEntryError,
-  findUser,
   findUsersByIds,
   removeCustomCommand,
-  removeOwnCustomCommand,
-  updateCustomCommand,
-  updateOwnCustomCommand,
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
-import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parseCheckboxField, parseDiscordIdList } from './validation';
+import { parsePositiveIntId } from './validation';
 import { logAndRedirectError, handleReservedOrConflictCommandError } from './errorHandling';
-import { canManageCommandCatalog } from './commandPermissions';
+import {
+  commandAccessErrorCode,
+  readCommandForm,
+  removeCommandAsSessionUser,
+  resolveNewCommandAssignees,
+  updateCommandAsSessionUser,
+} from './commandWriteAccess';
 
 const log = createLogger('Web');
 const router = Router();
@@ -48,62 +48,6 @@ async function assignUsersToNewCommand(commandId: number, discordIds: string[]):
     return 'assign_failed';
   }
   return null;
-}
-
-/** The add/update form's normalized trigger, output and flags. */
-interface CommandForm {
-  triggerString: string;
-  output: string;
-  isDiscordEnabled: boolean;
-  isMultiTwitch: boolean;
-}
-
-/**
- * Reads and normalizes the add/update form. The Discord and multi-Twitch flags are only honoured
- * for Mod+; a streamer's command is always Twitch-only, since both flags reach beyond their channel.
- * @param req - Express request; reads `trigger_string`, `output`, `is_discord_enabled` and
- *   `is_multi_twitch` from `req.body`.
- * @returns The form, or null when the trigger or output is missing/invalid.
- */
-function readCommandForm(req: Request): CommandForm | null {
-  const { trigger_string, output } = req.body as Record<string, string | undefined>;
-  const triggerString = normalizeSingleTokenRequiredText(trigger_string);
-  const normalizedOutput = normalizeRequiredText(output);
-  if (!triggerString || !normalizedOutput) return null;
-  const isCatalogManager = canManageCommandCatalog(req);
-  return {
-    triggerString,
-    output: normalizedOutput,
-    isDiscordEnabled: isCatalogManager && parseCheckboxField(req.body.is_discord_enabled),
-    isMultiTwitch: isCatalogManager && parseCheckboxField(req.body.is_multi_twitch),
-  };
-}
-
-/**
- * Maps the not-found/not-yours errors a command write can throw to their redirect codes.
- * @param err - The error thrown by the write.
- * @returns `command_not_found`, `forbidden`, or null for any other error.
- */
-function commandAccessErrorCode(err: unknown): string | null {
-  if (err instanceof CommandNotFoundError) return 'command_not_found';
-  if (err instanceof CommandSelfServiceDeniedError) return 'forbidden';
-  return null;
-}
-
-/**
- * Works out who a new command is assigned to. Mod+ pick any users via `discord_ids`; a streamer
- * below Mod always gets the command on their own channel only, which needs a linked Twitch account.
- * @param req - Express request; reads `discord_ids` and the session user.
- * @returns The Discord IDs to assign, or an `error` code (`twitch_not_linked`) to redirect with.
- */
-async function resolveNewCommandAssignees(req: Request): Promise<{ discordIds: string[] } | { error: string }> {
-  if (canManageCommandCatalog(req)) {
-    return { discordIds: parseDiscordIdList(req.body.discord_ids) };
-  }
-  const selfId = req.session.user!.discordId;
-  const self = await findUser(selfId);
-  if (!self?.twitch_name) return { error: 'twitch_not_linked' };
-  return { discordIds: [selfId] };
 }
 
 /**
@@ -165,13 +109,7 @@ router.post('/commands/update', requireGuildContext, csrfProtection, async (req,
   }
 
   try {
-    // A streamer's update/delete goes through the *Own* variants, which re-check ownership inside
-    // the write's own transaction (a pre-read here could go stale before the write).
-    if (canManageCommandCatalog(req)) {
-      await updateCustomCommand(parsedCommandId, form.triggerString, form.output, form.isDiscordEnabled, form.isMultiTwitch);
-    } else {
-      await updateOwnCustomCommand(parsedCommandId, form.triggerString, form.output, req.session.user!.discordId);
-    }
+    await updateCommandAsSessionUser(req, parsedCommandId, form);
   } catch (err) {
     const accessErrorCode = commandAccessErrorCode(err);
     if (accessErrorCode) return res.redirect(`/commands?error=${accessErrorCode}`);
@@ -203,11 +141,7 @@ router.post('/commands/remove', requireGuildContext, csrfProtection, async (req,
   }
 
   try {
-    if (canManageCommandCatalog(req)) {
-      await removeCustomCommand(parsedCommandId);
-    } else {
-      await removeOwnCustomCommand(parsedCommandId, req.session.user!.discordId);
-    }
+    await removeCommandAsSessionUser(req, parsedCommandId);
   } catch (err) {
     const accessErrorCode = commandAccessErrorCode(err);
     if (accessErrorCode) return res.redirect(`/commands?error=${accessErrorCode}`);
