@@ -42,6 +42,44 @@ type AssertionResult =
   | { ok: false; status: number; error: 'passkey_failed' | 'passkey_unknown' };
 
 /**
+ * Checks an assertion's user handle and signature against its stored passkey and the session's
+ * challenge (origin, RP ID and user verification included).
+ * @param assertion - The browser's `navigator.credentials.get()` result.
+ * @param expectedChallenge - The challenge taken from the session.
+ * @param passkey - The stored passkey the assertion names.
+ * @returns The authenticator's new signature counter if the assertion is valid, otherwise null.
+ */
+async function verifySignature(
+  assertion: AuthenticationResponseJSON,
+  expectedChallenge: string,
+  passkey: StoredPasskey,
+): Promise<number | null> {
+  if (assertion.response.userHandle && assertion.response.userHandle !== passkey.userHandle) {
+    log.warn(`Passkey ${passkey.credentialId} presented a mismatched user handle`);
+    return null;
+  }
+  try {
+    const verification = await verifyAuthenticationResponse({
+      response: assertion,
+      expectedChallenge,
+      expectedOrigin: EXPECTED_ORIGIN,
+      expectedRPID: RP_ID,
+      credential: {
+        id: passkey.credentialId,
+        publicKey: passkey.publicKey,
+        counter: passkey.signCount,
+        transports: passkey.transports as AuthenticatorTransport[],
+      },
+      requireUserVerification: true,
+    });
+    return verification.verified ? verification.authenticationInfo.newCounter : null;
+  } catch (err) {
+    log.warn('Passkey assertion verification failed:', err);
+    return null;
+  }
+}
+
+/**
  * Verifies a sign-in assertion against its stored passkey and the session's challenge, then
  * atomically records the authenticator's new signature counter. The counter must be accepted:
  * a stale counter (another sign-in claimed it first) or a since-deleted passkey fails the sign-in,
@@ -55,37 +93,14 @@ async function verifyAssertion(assertion: AuthenticationResponseJSON, expectedCh
   const passkey = await findPasskey(assertion.id);
   if (!passkey) return { ok: false, status: 401, error: 'passkey_unknown' };
 
-  if (assertion.response.userHandle && assertion.response.userHandle !== passkey.userHandle) {
-    log.warn(`Passkey ${passkey.credentialId} presented a mismatched user handle`);
-    return { ok: false, status: 401, error: 'passkey_failed' };
-  }
-
-  let verification;
-  try {
-    verification = await verifyAuthenticationResponse({
-      response: assertion,
-      expectedChallenge,
-      expectedOrigin: EXPECTED_ORIGIN,
-      expectedRPID: RP_ID,
-      credential: {
-        id: passkey.credentialId,
-        publicKey: passkey.publicKey,
-        counter: passkey.signCount,
-        transports: passkey.transports as AuthenticatorTransport[],
-      },
-      requireUserVerification: true,
-    });
-  } catch (err) {
-    log.warn('Passkey assertion verification failed:', err);
-    return { ok: false, status: 401, error: 'passkey_failed' };
-  }
-  if (!verification.verified) return { ok: false, status: 401, error: 'passkey_failed' };
+  const newCounter = await verifySignature(assertion, expectedChallenge, passkey);
+  if (newCounter === null) return { ok: false, status: 401, error: 'passkey_failed' };
 
   // Strict: the new signature counter must be accepted atomically before the sign-in succeeds. A
   // failed write throws (the route answers 500 `passkey_failed`); a rejected one means another
   // sign-in already claimed this counter value (a possible cloned authenticator) or the passkey
   // was deleted meanwhile. Either way, no session is created.
-  if (!(await recordPasskeyUse(passkey.credentialId, verification.authenticationInfo.newCounter))) {
+  if (!(await recordPasskeyUse(passkey.credentialId, newCounter))) {
     log.warn(`Passkey ${passkey.credentialId} sign-in rejected: counter already used or passkey removed`);
     return { ok: false, status: 401, error: 'passkey_failed' };
   }
