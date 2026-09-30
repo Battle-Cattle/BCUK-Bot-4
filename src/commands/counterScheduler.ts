@@ -82,6 +82,10 @@ export function stopCounterScheduler(): void {
   }
 }
 
+/**
+ * Milliseconds from now until the next local-time 1 January 00:00.
+ * @returns Delay in ms until the next year boundary.
+ */
 function msUntilNextJan1(): number {
   const now = new Date();
   const nextJan1 = new Date(now.getFullYear() + 1, 0, 1, 0, 0, 0, 0);

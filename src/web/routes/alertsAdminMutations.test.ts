@@ -38,7 +38,7 @@ vi.mock('../../twitch/eventsub/twitchEventSub', () => ({
 vi.mock('../../shared/config', () => ({}));
 
 import supertest from 'supertest';
-import { router } from './alertsAdminMutations';
+import { router, alertAssetUrl } from './alertsAdminMutations';
 import { getStreamerByDiscordId, saveAlertConfig, getAlertConfig } from '../../db';
 import { AccessLevel } from '../../db';
 import { pushAlertEvent } from './alertsOverlaySource';
@@ -258,5 +258,16 @@ describe('POST /settings/:eventType/test', () => {
     expect(vi.mocked(pushAlertEvent)).toHaveBeenCalledWith('teststreamer', expect.objectContaining({
       message: '[Test] Hi {display_nam}!',
     }));
+  });
+});
+
+describe('alertAssetUrl', () => {
+  it('builds the overlay asset URL for a configured file', () => {
+    expect(alertAssetUrl(7, 'boom.gif')).toBe('/alerts/assets/7/boom.gif');
+  });
+
+  it('returns null when no file is configured', () => {
+    expect(alertAssetUrl(7, null)).toBeNull();
+    expect(alertAssetUrl(7, undefined)).toBeNull();
   });
 });

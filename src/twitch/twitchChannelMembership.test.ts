@@ -162,6 +162,41 @@ describe('joinTwitchChannel', () => {
     expect(client.join).toHaveBeenCalledWith('alice');
   });
 
+  it('normalizes the channel name before joining', async () => {
+    const client = makeMockClient();
+    setChatClient(client as any);
+    setConnected(true);
+
+    await joinTwitchChannel('#ALICE');
+
+    expect(client.join).toHaveBeenCalledWith('alice');
+    expect(getActiveChannels().has('alice')).toBe(true);
+  });
+
+  it('caches the channel user ID when the channel is already joined', async () => {
+    const client = makeMockClient(['alice']);
+    setChatClient(client as any);
+    setConnected(true);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'alice', id: 'uid-joined' }]);
+
+    await joinTwitchChannel('alice');
+    await flushMicrotasks();
+
+    expect(getActiveChannelUserIds().get('alice')).toBe('uid-joined');
+  });
+
+  it('caches the channel user ID when queuing a channel while disconnected', async () => {
+    const client = makeMockClient();
+    setChatClient(client as any);
+    setConnected(false);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'alice', id: 'uid-queued' }]);
+
+    await joinTwitchChannel('alice');
+    await flushMicrotasks();
+
+    expect(getActiveChannelUserIds().get('alice')).toBe('uid-queued');
+  });
+
   it('logs and does not throw when the joined-channel hook itself throws', async () => {
     const client = makeMockClient();
     setChatClient(client as any);
@@ -227,6 +262,48 @@ describe('partTwitchChannel', () => {
     await expect(partTwitchChannel('alice')).rejects.toThrow('part failed');
 
     expect(getActiveChannels().has('alice')).toBe(false);
+  });
+
+  it('removes local state without calling client.part when connected but no longer confirmed joined', async () => {
+    const client = makeMockClient();
+    setChatClient(client as any);
+    setConnected(true);
+    await joinTwitchChannel('alice');
+    __setConfirmedJoinedChannelsForTests([]); // the channel is still desired but no longer joined
+
+    await partTwitchChannel('alice');
+
+    expect(client.part).not.toHaveBeenCalled();
+    expect(getActiveChannels().has('alice')).toBe(false);
+  });
+
+  it('removes the channel user ID from the cache on part', async () => {
+    const client = makeMockClient(['alice']);
+    setChatClient(client as any);
+    setConnected(true);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'alice', id: 'uid-alice' }]);
+    await joinTwitchChannel('alice');
+    await flushMicrotasks();
+    expect(getActiveChannelUserIds().get('alice')).toBe('uid-alice');
+
+    await partTwitchChannel('alice');
+
+    expect(getActiveChannelUserIds().has('alice')).toBe(false);
+  });
+
+  it('does not write a stale user ID back if the channel was parted before getUsers resolved', async () => {
+    const client = makeMockClient(['alice']);
+    setChatClient(client as any);
+    setConnected(true);
+    const { promise: usersPromise, resolve: resolveUsers } = deferred<{ login: string; id: string }[]>();
+    vi.mocked(getUsers).mockReturnValueOnce(usersPromise as any);
+    await joinTwitchChannel('alice'); // user-ID lookup is now pending
+    await partTwitchChannel('alice');
+
+    resolveUsers([{ login: 'alice', id: 'uid-stale' }]);
+    await flushMicrotasks();
+
+    expect(getActiveChannelUserIds().has('alice')).toBe(false);
   });
 
   it('forgets recorded chat activity when parting via the client', async () => {

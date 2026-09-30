@@ -26,6 +26,16 @@ describe('fromBit', () => {
     expect(fromBit('1')).toBe(true);
   });
 
+  it('returns true for boolean true and false for boolean false', () => {
+    expect(fromBit(true)).toBe(true);
+    expect(fromBit(false)).toBe(false);
+  });
+
+  it('returns false for undefined and the string "0"', () => {
+    expect(fromBit(undefined)).toBe(false);
+    expect(fromBit('0')).toBe(false);
+  });
+
   it('returns false for null', () => {
     expect(fromBit(null)).toBe(false);
   });

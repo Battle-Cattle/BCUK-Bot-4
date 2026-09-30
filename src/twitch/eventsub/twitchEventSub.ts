@@ -51,6 +51,12 @@ export function reloadEventSubSubscriptions(): void {
     .catch((err) => { log.error('EventSub reload error:', err); });
 }
 
+/**
+ * Syncs the per-streamer EventSub connections with the DB: stops connections for streamers
+ * no longer configured, reloads existing ones, and starts new ones. No-ops if EventSub was
+ * stopped while the streamer list was loading.
+ * @returns Resolves once connections are reconciled.
+ */
 async function doReload(): Promise<void> {
   const streamers = await loadStreamersForEventSub();
   if (globalStopped) return;

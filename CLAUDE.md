@@ -51,7 +51,7 @@ npm test      # Vitest
 
 - **Runtime:** discord.js v14, tmi.js (Twitch chat), `mediaplex` (Opus), express v5 + `express-session`/`express-mysql-session`, `mysql2`, `helmet`, `winston`.
 - **TypeScript:** `strict: true`, target ES2024, `moduleResolution: NodeNext`. `package.json` pins `"engines": { "node": ">=24" }` — see Node/npm version above.
-- **ESLint** (flat config, type-aware): `no-floating-promises`, `no-misused-promises`, and `no-console` are all **errors**, not warnings — these affect how code must be written (await/void everything, use `logger` not `console.*`). `no-explicit-any` is a warning; relaxed for `*.test.ts`.
+- **ESLint** (flat config, type-aware): `no-floating-promises`, `no-misused-promises`, and `no-console` are all **errors**, not warnings — these affect how code must be written (await/void everything, use `logger` not `console.*`). `no-explicit-any` is a warning; relaxed for `*.test.ts`. `eslint-plugin-jsdoc` enforces the Docstrings rule below (`require-jsdoc` on function declarations, methods and module-level arrow functions; `check-param-names` catches stale `@param`s), and `@vitest/eslint-plugin` guards tests (no `.only`/`.skip`, no assertion-free tests).
 - **Test/build scripts:** `npm run build` (`tsc -p tsconfig.build.json`), `npm run lint`, `npm run check:circular` (madge).
 
 ---
@@ -62,6 +62,7 @@ Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → wir
 
 - **`uncaughtException`/`unhandledRejection`** both log and `process.exit(1)` — deliberate: there's no process supervisor, so the app fails loudly instead of limping on with a corrupted state. Don't add a handler that swallows and continues.
 - **`shutdown()`** runs on `SIGINT`/`SIGTERM`: stops schedulers/EventSub/monitor/bots, disconnects audio, closes the DB pool, then exits 0.
+- **Single instance only.** Production runs exactly one bot process against the database. Several subsystems rely on that: the redemption reconciliation cursors (`twitchEventSubReconciliationCursors.ts`) and the WebSocket/redemption dedup caches are in-memory per process, the schedulers (counter/reward-pricing/timer) assume they're the only ticker, and the `redemption_handled` ledger is a check-then-act guard, not a cross-process lock. Don't design for horizontal scaling without first revisiting those; a change that assumes more than one instance needs a design decision, not a drive-by fix.
 
 ---
 

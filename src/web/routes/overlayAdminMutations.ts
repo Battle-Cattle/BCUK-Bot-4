@@ -48,6 +48,15 @@ export function detectVideoType(buf: Buffer): 'webm' | 'mp4' | null {
   return null;
 }
 
+/**
+ * Writes an uploaded overlay video to the streamer's folder under a random name and records it
+ * in the DB, deleting the file again if the DB insert fails.
+ * @param streamer - Owning streamer.
+ * @param file - The Multer upload (in-memory buffer).
+ * @param name - Display name for the video.
+ * @returns Resolves once the file is saved and recorded.
+ * @throws With `code: 'invalid_path'` or `'invalid_file'` for a bad path or non-video upload.
+ */
 async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.File, name: string): Promise<void> {
   const dir = safeResolve(OVERLAY_FOLDER, String(streamer.id));
   if (!dir) throw Object.assign(new Error('Path traversal blocked'), { code: 'invalid_path' });
@@ -112,6 +121,24 @@ router.post('/settings/videos/upload', requireAuth, csrfProtection, uploadVideo,
 });
 
 /**
+ * Post-commit cleanup after a video's DB row is deleted: removes its file from disk. The row is
+ * already gone by this point, so a failed removal must not turn an already-successful delete into
+ * a `delete_failed` response — it's logged and just leaves a stale file on disk.
+ * @param streamerId - DB row ID of the owning streamer (the file's subfolder).
+ * @param filename - The deleted video's stored filename.
+ * @returns Resolves once removal has been attempted; never rejects.
+ */
+async function removeDeletedVideoFile(streamerId: number, filename: string): Promise<void> {
+  const filePath = safeResolve(OVERLAY_FOLDER, String(streamerId), filename);
+  if (!filePath) return;
+  try {
+    await fs.promises.rm(filePath, { force: true });
+  } catch (err) {
+    log.error(`Failed to remove orphaned overlay video ${filePath}:`, err);
+  }
+}
+
+/**
  * POST /overlay/settings/videos/:id/delete — deletes a video belonging to the
  * requesting streamer, removing both its DB row and file on disk.
  * @param req - Express request; reads the `id` route param.
@@ -129,19 +156,7 @@ router.post('/settings/videos/:id/delete', requireAuth, csrfProtection, async (r
     if (videoId === null) return res.redirect('/overlay/settings?error=invalid_id');
 
     const filename = await deleteVideo(videoId, streamer.id);
-    if (filename) {
-      const filePath = safeResolve(OVERLAY_FOLDER, String(streamer.id), filename);
-      // Post-commit cleanup: the DB row is already gone by this point, so a failed removal
-      // must not turn an already-successful delete into a `delete_failed` response — it just
-      // leaves a stale file on disk.
-      if (filePath) {
-        try {
-          await fs.promises.rm(filePath, { force: true });
-        } catch (err) {
-          log.error(`Failed to remove orphaned overlay video ${filePath}:`, err);
-        }
-      }
-    }
+    if (filename) await removeDeletedVideoFile(streamer.id, filename);
 
     res.redirect('/overlay/settings?success=video_deleted');
   } catch (err) {

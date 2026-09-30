@@ -63,15 +63,26 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
 
   constructor(private readonly options: ManagedLookupCacheOptions<TCache>) {}
 
+  /** Clears the refresh backoff so the next refresh may start immediately. */
   private resetRefreshFailureState(): void {
     this.refreshAllowedAt = 0;
     this.refreshFailureCount = 0;
   }
 
+  /**
+   * Blocks further refresh attempts until `retryDelayMs` from now.
+   * @param retryDelayMs - Backoff delay before the next refresh may start.
+   */
   private applyRefreshFailure(retryDelayMs: number): void {
     this.refreshAllowedAt = Date.now() + retryDelayMs;
   }
 
+  /**
+   * Logs a failed background refresh and, if nothing has loaded yet, installs an empty cache
+   * so callers are served something while the retry backoff runs.
+   * @param err - The refresh error.
+   * @param retryDelayMs - Backoff delay before the next refresh, for the log message.
+   */
   private handleRefreshFailureFallback(err: unknown, retryDelayMs: number): void {
     if (!this.cache) {
       this.cache = this.options.createEmptyCache();
@@ -81,12 +92,22 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
     }
   }
 
+  /**
+   * Clears the in-flight refresh slot, but only if it still holds `promiseForFinally` — an
+   * {@link invalidate} or newer refresh may already have replaced it.
+   * @param promiseForFinally - The refresh promise that just settled.
+   */
   private clearInFlightIfCurrent(promiseForFinally: Promise<TCache>): void {
     if (this.inFlightPromise === promiseForFinally) {
       this.inFlightPromise = null;
     }
   }
 
+  /**
+   * Installs a freshly loaded cache unless an {@link invalidate} happened since the refresh began.
+   * @param requestVersion - Cache version captured when the refresh started.
+   * @param rebuiltCache - The newly loaded cache.
+   */
   private applyRefreshSuccess(requestVersion: number, rebuiltCache: TCache): void {
     if (requestVersion === this.version) {
       this.cache = rebuiltCache;
@@ -94,6 +115,12 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
     }
   }
 
+  /**
+   * Records a failed refresh (unless superseded by an {@link invalidate}) and applies exponential
+   * backoff, capped at `refreshFailureMaxBackoffMs`.
+   * @param requestVersion - Cache version captured when the refresh started.
+   * @param err - The refresh error.
+   */
   private applyRefreshError(requestVersion: number, err: unknown): void {
     if (requestVersion === this.version) {
       this.refreshFailureCount += 1;
@@ -107,6 +134,12 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
     }
   }
 
+  /**
+   * Starts a background reload if none is in flight and the backoff window has passed.
+   * @param now - Current time in epoch ms.
+   * @returns The in-flight refresh promise (new or existing), or null if backoff blocks a new one
+   *   and none is running.
+   */
   private startRefresh(now: number): Promise<TCache> | null {
     if (!this.inFlightPromise && now >= this.refreshAllowedAt) {
       const requestVersion = this.version;
@@ -127,6 +160,12 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
     return this.inFlightPromise;
   }
 
+  /**
+   * Awaits a refresh, falling back to the current (possibly stale) cache if it rejects.
+   * @param promise - The refresh promise to await.
+   * @returns The refreshed cache, or the existing cache if the refresh failed.
+   * @throws The refresh error when there is no cache to fall back to.
+   */
   private async awaitCachePromise(promise: Promise<TCache>): Promise<TCache> {
     try {
       return await promise;
@@ -138,6 +177,12 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
     }
   }
 
+  /**
+   * Returns the cache, loading it on first use. A loaded cache is returned immediately even past
+   * its TTL (stale-while-revalidate), with a background refresh kicked off; only a cold cache
+   * makes the caller wait on the load.
+   * @returns The current cache.
+   */
   async getCache(): Promise<TCache> {
     const now = Date.now();
 
@@ -179,6 +224,10 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
     return this.awaitCachePromise(retryRefreshPromise);
   }
 
+  /**
+   * Drops the cache and any in-flight refresh and resets backoff, so the next {@link getCache}
+   * reloads from scratch. Bumps the version so a refresh already in flight can't reinstall stale data.
+   */
   invalidate(): void {
     this.version += 1;
     this.cache = null;

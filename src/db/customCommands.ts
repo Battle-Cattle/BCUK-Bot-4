@@ -40,6 +40,11 @@ export interface DbCustomCommandWithAssignments extends DbCustomCommand {
 
 // ─── Row mappers ─────────────────────────────────────────────────────────────
 
+/**
+ * Maps a `custom_commands` row to a {@link DbCustomCommand}, converting BIT columns to booleans.
+ * @param row - Raw row from mysql2.
+ * @returns The mapped command.
+ */
 function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
   return {
     command_id: row.command_id,

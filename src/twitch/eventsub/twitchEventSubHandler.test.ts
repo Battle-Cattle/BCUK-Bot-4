@@ -3,6 +3,7 @@ import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../db', () => ({
   getVideosForReward: vi.fn(), getStreamerById: vi.fn(), findCachedAlertConfig: vi.fn(), recordStreamerEvent: vi.fn(),
+  getRedemptionProgress: vi.fn(), markRedemptionEffect: vi.fn(),
 }));
 vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../commands/shoutoutHandler', () => ({ buildShoutoutMessage: vi.fn() }));
@@ -19,7 +20,9 @@ import {
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
   registerEventSubAlertRuntime, registerEventSubDashboardRuntime,
 } from './twitchEventSubRuntime';
-import { getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent } from '../../db';
+import {
+  getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent, getRedemptionProgress, markRedemptionEffect,
+} from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
@@ -74,6 +77,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(findCachedAlertConfig).mockResolvedValue(null);
   vi.mocked(recordStreamerEvent).mockResolvedValue(101);
+  vi.mocked(getRedemptionProgress).mockReset().mockResolvedValue(null);
+  vi.mocked(markRedemptionEffect).mockReset().mockResolvedValue(undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -96,8 +101,7 @@ describe('handleFollow', () => {
       follow_enabled: true,
       follow_message: 'Welcome {username} aka {display_name}!',
     }), STREAMER_ID);
-    expect(mockSend).toHaveBeenCalledOnce();
-    expect(mockSend).toHaveBeenCalledWith('streamer', 'Welcome testuser aka TestUser!');
+    expect(mockSend).toHaveBeenCalledExactlyOnceWith('streamer', 'Welcome testuser aka TestUser!');
   });
 });
 
@@ -885,6 +889,101 @@ describe('handleRedemption', () => {
     expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
   });
 
+  it('records each required effect in the durable ledger, then marks the redemption handled', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
+
+    expect(getRedemptionProgress).toHaveBeenCalledWith('redemption-1');
+    expect(vi.mocked(markRedemptionEffect).mock.calls).toEqual([
+      ['redemption-1', streamerId, 'dashboard_recorded'],
+      ['redemption-1', streamerId, 'pricing_applied'],
+      ['redemption-1', streamerId, 'handled'],
+    ]);
+    expect(seenRedemptionIds.has('redemption-1')).toBe(true);
+  });
+
+  it('drops a redemption the durable ledger already records as handled, after the in-memory cache forgot it', async () => {
+    vi.mocked(getRedemptionProgress).mockResolvedValue({ dashboardRecorded: true, pricingApplied: true, handled: true });
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(false);
+
+    expect(recordStreamerEvent).not.toHaveBeenCalled();
+    expect(applyRedemptionPricing).not.toHaveBeenCalled();
+    expect(getVideosForReward).not.toHaveBeenCalled();
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+    expect(markRedemptionEffect).not.toHaveBeenCalled();
+    // Re-remembered in memory, and the in-flight claim released.
+    expect(seenRedemptionIds.has('redemption-1')).toBe(true);
+    expect(pendingRedemptionIds.has('redemption-1')).toBe(false);
+  });
+
+  it('resumes a partly-handled redemption without re-applying the effects the ledger records as done', async () => {
+    vi.mocked(getRedemptionProgress).mockResolvedValue({ dashboardRecorded: true, pricingApplied: true, handled: false });
+    vi.mocked(getVideosForReward).mockResolvedValue([{ file: 'clip1.mp4', weight: 1 }] as any[]);
+    vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
+
+    expect(recordStreamerEvent).not.toHaveBeenCalled();
+    expect(applyRedemptionPricing).not.toHaveBeenCalled();
+    // Live effects still run: a late replay still plays the overlay and notifies the companion.
+    expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
+    expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
+    expect(vi.mocked(markRedemptionEffect).mock.calls).toEqual([['redemption-1', streamerId, 'handled']]);
+  });
+
+  it('applies pricing on resume when only the dashboard record had completed', async () => {
+    vi.mocked(getRedemptionProgress).mockResolvedValue({ dashboardRecorded: true, pricingApplied: false, handled: false });
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+
+    await handleRedemption('streamer', event, makeConfig(), streamerId);
+
+    expect(recordStreamerEvent).not.toHaveBeenCalled();
+    expect(applyRedemptionPricing).toHaveBeenCalledWith(streamerId, 'reward-abc', 'redemption-1');
+  });
+
+  it('keeps the pricing effect recorded but does not mark the redemption handled when a later step fails', async () => {
+    vi.mocked(getVideosForReward).mockRejectedValueOnce(new Error('transient db error'));
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('transient db error');
+
+    expect(markRedemptionEffect).toHaveBeenCalledWith('redemption-1', streamerId, 'pricing_applied');
+    expect(markRedemptionEffect).not.toHaveBeenCalledWith('redemption-1', streamerId, 'handled');
+    expect(pendingRedemptionIds.has('redemption-1')).toBe(false);
+    expect(seenRedemptionIds.has('redemption-1')).toBe(false);
+  });
+
+  it('sends no overlay or companion push when the final handled write fails, and sends each once on retry', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([{ file: 'clip1.mp4', weight: 1 }] as any[]);
+    vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
+    vi.mocked(markRedemptionEffect).mockImplementation(async (_id, _sid, effect) => {
+      if (effect === 'handled') throw new Error('ledger write failed');
+    });
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('ledger write failed');
+    expect(mockPushOverlayEvent).not.toHaveBeenCalled();
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+
+    // Retry: the ledger now records dashboard + pricing as done; the handled write succeeds.
+    vi.mocked(getRedemptionProgress).mockResolvedValue({ dashboardRecorded: true, pricingApplied: true, handled: false });
+    vi.mocked(markRedemptionEffect).mockResolvedValue(undefined);
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).resolves.toBe(true);
+
+    expect(mockPushOverlayEvent).toHaveBeenCalledOnce();
+    expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
+  });
+
+  it('propagates a ledger lookup failure and releases the in-flight claim without running any effect', async () => {
+    vi.mocked(getRedemptionProgress).mockRejectedValueOnce(new Error('db down'));
+
+    await expect(handleRedemption('streamer', event, makeConfig(), streamerId)).rejects.toThrow('db down');
+
+    expect(recordStreamerEvent).not.toHaveBeenCalled();
+    expect(applyRedemptionPricing).not.toHaveBeenCalled();
+    expect(pendingRedemptionIds.has('redemption-1')).toBe(false);
+  });
+
   it('applies dynamic pricing for the redeemed reward', async () => {
     vi.mocked(getVideosForReward).mockResolvedValue([]);
 
@@ -1005,8 +1104,7 @@ describe('handleRedemption', () => {
     expect(mockPushDashboardEvent).toHaveBeenCalledTimes(2);
     expect(mockPushCompanionEvent).toHaveBeenCalledOnce();
     expect(applyRedemptionPricing).toHaveBeenCalledTimes(2);
-    expect(mockPushOverlayEvent).toHaveBeenCalledOnce();
-    expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
+    expect(mockPushOverlayEvent).toHaveBeenCalledExactlyOnceWith('streamer', '/overlay/videos/7/clip1.mp4');
   });
 
   it('processes two notifications with different redemption ids normally', async () => {

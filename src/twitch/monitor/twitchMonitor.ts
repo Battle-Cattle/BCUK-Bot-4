@@ -107,6 +107,11 @@ export async function triggerImmediateLiveCheck(login: string): Promise<void> {
 
 // ─── Internal teardown ────────────────────────────────────────────────────────
 
+/**
+ * Stops the poll timer, waits for any in-flight poll to finish, and clears every pending
+ * offline timer.
+ * @returns Resolves once no poll is running.
+ */
 async function teardown(): Promise<void> {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   // Wait for any in-flight poll to complete before callers mutate liveStates.

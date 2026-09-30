@@ -19,7 +19,7 @@ const RESERVED_LOGINS = new Set(['settings']);
 
 // Mirrors real EventEmitter semantics (multiple listeners per event, all fired in registration
 // order) rather than keeping only the last one — attachSseConnection and a caller built on top of
-// it (e.g. createOverlayStatusEventsHandler) can each register their own 'close'/'error' listener
+// attachSseConnection (e.g. createOverlayStatusEventsHandler) can each register their own 'close'/'error' listener
 // on the same req/res, and both must still fire.
 function makeRes() {
   const handlers: Record<string, Array<() => void>> = {};

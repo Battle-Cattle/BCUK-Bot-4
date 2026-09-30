@@ -1,6 +1,8 @@
-import type { EventSubConfig, AlertEventType, StreamerEventType } from '../../db';
+import type { EventSubConfig, AlertEventType, StreamerEventType, RedemptionProgress } from '../../db';
 import type { CompanionActivityEvent, CompanionActivityEventType } from '../../web/routes/companionEvents';
-import { getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent } from '../../db';
+import {
+  getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent, getRedemptionProgress, markRedemptionEffect,
+} from '../../db';
 import { pickWeightedRandom } from '../../commands/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { createLogger } from '../../shared/logger';
@@ -66,6 +68,11 @@ export interface RedemptionEvent {
   user_input: string;
 }
 
+/**
+ * Converts a Twitch subscription tier code to a display name.
+ * @param tier - Tier code (`'1000'`, `'2000'` or `'3000'`).
+ * @returns `'Tier 1'`–`'Tier 3'`, or the raw code if unrecognised.
+ */
 function tierName(tier: string): string {
   return ({ '1000': 'Tier 1', '2000': 'Tier 2', '3000': 'Tier 3' } as Record<string, string>)[tier] ?? tier;
 }
@@ -421,13 +428,20 @@ export async function handleRaid(login: string, event: RaidEvent, config: EventS
  * Deduplicates on Twitch's own redemption id ({@link isDuplicateRedemption}) before doing
  * anything else — a duplicate (or an id already being processed by another in-flight call) is
  * dropped silently, since every effect below (companion push, dashboard record, pricing, overlay
- * trigger) would otherwise double-fire for one physical redemption. The id is only marked as
- * successfully handled ({@link markRedemptionHandled}) once the dashboard record, pricing update,
- * and overlay lookup have all completed without throwing (the companion push is exempt, since
- * it's intentionally best-effort). A failure clears the in-flight claim
- * ({@link clearPendingRedemption}) instead, so a retry of the same redemption id (e.g.
- * reconciliation's next poll tick) is not misclassified as a duplicate and re-runs the failed
- * work from scratch.
+ * trigger) would otherwise double-fire for one physical redemption. That in-memory cache only
+ * remembers a redemption for `REDEMPTION_DEDUP_TTL_MS`, so the durable `redemption_handled`
+ * ledger ({@link getRedemptionProgress}) is checked next: a redemption it records as fully handled
+ * is dropped too, and one recorded as partly done resumes, skipping the dashboard record and
+ * pricing increment if they already ran (see {@link applyRecordedRedemptionEffects}). This is
+ * what lets reconciliation safely replay redemptions up to `MAX_CURSOR_LAG_MS` (1 hour) old. The
+ * id is only marked as handled — in the ledger and via {@link markRedemptionHandled} — once the
+ * dashboard record, pricing update, and overlay lookup have all completed without throwing (the
+ * companion push is exempt, since it's intentionally best-effort). A failure clears the in-flight
+ * claim ({@link clearPendingRedemption}) instead, so a retry of the same redemption id (e.g.
+ * reconciliation's next poll tick) is not misclassified as a duplicate. The overlay video and
+ * companion push aren't tracked in the ledger, so the `handled` write happens just before them: a
+ * failed write means neither has been sent, and they're never replayed by a retry (at most lost
+ * if the process dies between the write and the pushes).
  *
  * @param login - Broadcaster login name.
  * @param event - Redemption event payload including reward ID and user details.
@@ -448,20 +462,31 @@ export async function handleRedemption(
     return false;
   }
 
-  // Only mark the redemption as handled (via markRedemptionHandled) once every effect below has
-  // run without throwing. If anything throws, clearPendingRedemption releases the in-flight claim
-  // and the error is rethrown, so a retry (e.g. reconciliation's next poll tick) re-runs this
-  // redemption from scratch instead of being silently dropped as a duplicate.
+  // Only mark the redemption as handled (in the durable ledger and via markRedemptionHandled) once
+  // every effect below has run without throwing. If anything throws, clearPendingRedemption
+  // releases the in-flight claim and the error is rethrown, so a retry (e.g. reconciliation's next
+  // poll tick) resumes this redemption — skipping the effects the ledger says already ran —
+  // instead of being silently dropped as a duplicate.
   try {
-    const detail = event.user_input ? `${event.reward.title}: ${event.user_input}` : event.reward.title;
-    await recordAndPushDashboardEventOrThrow(streamerId, 'redemption', event.user_name, detail, event.id);
-
-    // Awaited (unlike the other EventSub handlers' fire-and-forget pricing calls elsewhere):
-    // a failed pricing update must propagate so the redemption is retried instead of silently
-    // marked complete. See the doc comment above.
-    await applyRedemptionPricing(streamerId, event.reward.id, event.id);
+    const progress = await getRedemptionProgress(event.id);
+    if (progress?.handled) {
+      // Completed before, beyond what the in-memory cache still remembers (e.g. a reconciliation
+      // replay older than REDEMPTION_DEDUP_TTL_MS). Re-remember it so later duplicates stay cheap.
+      markRedemptionHandled(event.id);
+      log.warn(`Redemption "${event.reward.title}" (id=${event.id}) already handled (durable record) — ignoring`);
+      return false;
+    }
+    await applyRecordedRedemptionEffects(event, streamerId, progress);
 
     const videos = await getVideosForReward(event.reward.id, streamerId);
+
+    // Mark handled once every required effect (dashboard, pricing, overlay lookup) has succeeded,
+    // but before the two live pushes below: those aren't tracked in the ledger and can't be
+    // un-sent, so if this write failed after them, the retry would send them again. Written here,
+    // a failure means nothing live has gone out yet and the retry sends each once; the only loss
+    // case is the process dying between this write and the pushes, which suits best-effort pushes.
+    await markRedemptionEffect(event.id, streamerId, 'handled');
+
     if (videos.length > 0) {
       const filename = pickWeightedRandom(videos);
       const videoPath = `/overlay/videos/${streamerId}/${filename}`;
@@ -495,6 +520,30 @@ export async function handleRedemption(
   } catch (err) {
     clearPendingRedemption(event.id);
     throw err;
+  }
+}
+
+/**
+ * Runs a redemption's required effects that must not repeat — the dashboard record and the
+ * dynamic-pricing increment — skipping any that the durable ledger (`progress`) says already ran,
+ * and recording each in the ledger as soon as it succeeds. Both are awaited (unlike the other
+ * EventSub handlers' fire-and-forget pricing calls): a failure must propagate so the redemption is
+ * retried rather than silently marked complete. The dashboard record keeps its own
+ * `redemption_id` unique-index guard as a second line of defence.
+ * @param event - The redemption being handled.
+ * @param streamerId - DB row id of the streamer.
+ * @param progress - The redemption's recorded progress, or null if none is recorded yet.
+ * @returns Resolves once both effects have run (or were already recorded).
+ */
+async function applyRecordedRedemptionEffects(event: RedemptionEvent, streamerId: number, progress: RedemptionProgress | null): Promise<void> {
+  if (!progress?.dashboardRecorded) {
+    const detail = event.user_input ? `${event.reward.title}: ${event.user_input}` : event.reward.title;
+    await recordAndPushDashboardEventOrThrow(streamerId, 'redemption', event.user_name, detail, event.id);
+    await markRedemptionEffect(event.id, streamerId, 'dashboard_recorded');
+  }
+  if (!progress?.pricingApplied) {
+    await applyRedemptionPricing(streamerId, event.reward.id, event.id);
+    await markRedemptionEffect(event.id, streamerId, 'pricing_applied');
   }
 }
 

@@ -34,10 +34,6 @@ vi.mock('../../db', () => ({
   getGuildById: vi.fn(),
 }));
 
-vi.mock('./shared', () => ({
-  normalizeDiscordId: (s: string) => (/^\d{17,20}$/.test(s) ? s : null),
-}));
-
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import supertest from 'supertest';
@@ -141,6 +137,12 @@ describe('POST /voice/join', () => {
 
   it('falls back to the guild default channel when no channelId is given', async () => {
     await supertest(buildApp()).post('/voice/join').send({}).expect(200);
+    expect(vi.mocked(connect)).toHaveBeenCalledWith({}, GUILD_ID, 'default-vc');
+  });
+
+  it('falls back to the guild default channel when the request has no body at all', async () => {
+    // No Content-Type → express.json() leaves req.body undefined.
+    await supertest(buildApp()).post('/voice/join').expect(200);
     expect(vi.mocked(connect)).toHaveBeenCalledWith({}, GUILD_ID, 'default-vc');
   });
 

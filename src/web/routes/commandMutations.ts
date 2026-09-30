@@ -14,7 +14,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
-import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parseCheckboxField, normalizeDiscordId } from './validation';
+import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parseCheckboxField, parseDiscordIdList } from './validation';
 import { logAndRedirectError, handleReservedOrConflictCommandError } from './errorHandling';
 import { canManageCommandCatalog, isCommandSelfManageable } from './commandPermissions';
 
@@ -46,13 +46,6 @@ async function assignUsersToNewCommand(commandId: number, discordIds: string[]):
     return 'assign_failed';
   }
   return null;
-}
-
-/** Parses the optional `discord_ids` multi-select (one value or many) into normalized Discord IDs, dropping malformed ones. */
-function parseDiscordIdsField(rawDiscordIds: unknown): string[] {
-  return ([] as unknown[]).concat(rawDiscordIds ?? [])
-    .map((id) => (typeof id === 'string' ? normalizeDiscordId(id) : null))
-    .filter((id): id is string => id !== null);
 }
 
 /** The add/update form's normalized trigger, output and flags. */
@@ -107,7 +100,7 @@ async function getSelfServiceDenial(req: Request, commandId: number): Promise<st
  */
 async function resolveNewCommandAssignees(req: Request): Promise<{ discordIds: string[] } | { error: string }> {
   if (canManageCommandCatalog(req)) {
-    return { discordIds: parseDiscordIdsField(req.body.discord_ids) };
+    return { discordIds: parseDiscordIdList(req.body.discord_ids) };
   }
   const selfId = req.session.user!.discordId;
   const self = await findUser(selfId);

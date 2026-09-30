@@ -35,6 +35,10 @@ export function oauthStateMatches(submitted: string, stored: string): boolean {
   return crypto.timingSafeEqual(submittedBuf, storedBuf);
 }
 
+/**
+ * Creates the error passed to `next()` for a CSRF failure.
+ * @returns An error with `code: 'EBADCSRFTOKEN'`.
+ */
 function createCsrfError(): Error & { code: string } {
   const error = new Error('Invalid CSRF token') as Error & { code: string };
   error.code = 'EBADCSRFTOKEN';
@@ -55,6 +59,12 @@ export function ensureSessionCsrfToken(req: Parameters<RequestHandler>[0]): stri
   return req.session.csrfToken;
 }
 
+/**
+ * Extracts the submitted CSRF token from the `_csrf` body field, else the non-blank
+ * `x-csrf-token` header, else the `x-xsrf-token` header.
+ * @param req - Express request.
+ * @returns The submitted token, or null if none was sent.
+ */
 function getSubmittedCsrfToken(req: Parameters<RequestHandler>[0]): string | null {
   if (typeof req.body?._csrf === 'string') return req.body._csrf;
   const xcsrf = req.headers['x-csrf-token'];

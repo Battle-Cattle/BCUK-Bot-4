@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { throttledJoin, compensateIfStale, resetJoinGate, JOIN_PART_TIMEOUT_MS, MembershipDeps } from './twitchChannelNetworkOps';
+import { throttledJoin, compensateIfStale, resetJoinGate, partAsync, JOIN_PART_TIMEOUT_MS, MembershipDeps } from './twitchChannelNetworkOps';
 import { flushMicrotasks } from '../test-utils/flushMicrotasks';
 
 /** Builds a minimal fake Twurple chat client, pre-seeded with the given already-joined channels. */
@@ -213,5 +213,22 @@ describe('compensateIfStale', () => {
     await flushMicrotasks();
 
     expect(runs).toEqual(['alice']);
+  });
+});
+
+describe('partAsync', () => {
+  it('calls client.part synchronously and resolves', async () => {
+    const client = makeMockClient();
+    const result = partAsync(client as any, 'alice');
+    expect(client.part).toHaveBeenCalledWith('alice');
+    await expect(result).resolves.toBeUndefined();
+  });
+
+  it('turns a synchronous client.part throw into a rejection instead of throwing', async () => {
+    const client = makeMockClient();
+    client.part.mockImplementation(() => { throw new Error('not connected'); });
+    let result: Promise<void> | undefined;
+    expect(() => { result = partAsync(client as any, 'alice'); }).not.toThrow();
+    await expect(result).rejects.toThrow('not connected');
   });
 });

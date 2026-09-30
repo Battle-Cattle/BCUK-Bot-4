@@ -1,7 +1,8 @@
 import { createMutationQueue } from '../../shared/mutationQueue';
 import {
   getPricingForReward, recordPricingUpdate, recordPricingHistory, markPricingUnsupported, deletePricingConfig,
-  getPricingSettingsForStreamer, getStreamerById, type StreamerPricingSettings, type DbStreamerEventSub,
+  getPricingSettingsForStreamer, getStreamerById, getRedemptionProgress, markRedemptionEffect,
+  type StreamerPricingSettings, type DbStreamerEventSub, type RewardPricingRow,
 } from '../../db';
 import { getValidToken } from '../eventsub/twitchApiEventSub';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
@@ -31,6 +32,12 @@ export function registerRewardPricingRuntime(runtime: RewardPricingRuntime): voi
 // (different keys) run fully concurrently.
 const pricingQueue = createMutationQueue<string>();
 
+/**
+ * Builds the {@link pricingQueue} key that serialises work on one streamer's reward.
+ * @param streamerId - Streamer DB row ID.
+ * @param twitchRewardId - Twitch custom reward ID.
+ * @returns The `streamerId:rewardId` key.
+ */
 function queueKey(streamerId: number, twitchRewardId: string): string {
   return `${streamerId}:${twitchRewardId}`;
 }
@@ -163,18 +170,13 @@ async function syncRewardPrice(
 
   // Idempotency guard: a retried redemption (see handleRedemption's dedup pending/handled
   // lifecycle) must not double-apply its increment if this reward already processed it.
-  if (applyIncrement && redemptionId && row.last_redemption_id === redemptionId) return;
+  if (applyIncrement && redemptionId && await isRedemptionAlreadyPriced(streamerId, row.last_redemption_id, redemptionId)) return;
 
   const settings = settingsHint ?? await getPricingSettingsForStreamer(streamerId);
   const now = Date.now();
   // demand_updated_at is BIGINT epoch ms — safe to coerce, won't exceed MAX_SAFE_INTEGER until year 275760.
   const elapsedSeconds = Math.max(0, (now - Number(row.demand_updated_at)) / 1000);
-  const newDemand = applyIncrement
-    ? applyRedemption(
-        row.demand, elapsedSeconds, settings.half_life_seconds,
-        computeRedemptionIncrement(row.cooldown_seconds, settings.half_life_seconds, settings.time_to_max_multiplier),
-      )
-    : decayDemand(row.demand, elapsedSeconds, settings.half_life_seconds);
+  const newDemand = computeNewDemand(row, settings, elapsedSeconds, applyIncrement);
 
   const newCost = computePrice(newDemand, {
     baseCost: row.base_cost,
@@ -195,18 +197,73 @@ async function syncRewardPrice(
     demandUpdatedAtMs: now,
     lastPushedCost,
     lastRedemptionId: applyIncrement ? redemptionId : row.last_redemption_id,
+    pricingAppliedRedemptionId: applyIncrement ? redemptionId : null,
   });
 
+  await publishPricingSideEffects(streamerId, row.id, { rewardId: twitchRewardId, cost: newCost, demand: newDemand, recordedAt: now });
+}
+
+/**
+ * Whether a redemption's pricing increment has already been applied. `last_redemption_id` only
+ * remembers the reward's latest redemption, so a retry of an older one after a newer redemption was
+ * priced would slip past it; the `redemption_handled` ledger's `pricing_applied` flag (written in
+ * the same transaction as the reward update, see `recordPricingUpdate`) covers that case. When only
+ * `last_redemption_id` recognises the redemption (priced before the ledger existed, or its ledger
+ * write was lost), the flag is backfilled here, so a later retry still recognises it after a newer
+ * redemption replaces `last_redemption_id`. Runs inside the reward's pricing queue, so it can't race
+ * another redemption of the same reward.
+ * @param streamerId - DB row ID of the owning streamer, for the backfilled ledger row.
+ * @param lastRedemptionId - The reward's `last_redemption_id`.
+ * @param redemptionId - The redemption being priced.
+ * @returns True if the increment must not be applied again.
+ */
+async function isRedemptionAlreadyPriced(streamerId: number, lastRedemptionId: string | null, redemptionId: string): Promise<boolean> {
+  if (lastRedemptionId === redemptionId) {
+    await markRedemptionEffect(redemptionId, streamerId, 'pricing_applied');
+    return true;
+  }
+  return (await getRedemptionProgress(redemptionId))?.pricingApplied === true;
+}
+
+/**
+ * Computes a reward's new demand after `elapsedSeconds` of decay, plus one redemption's increment
+ * when `applyIncrement` is true.
+ * @param row - The reward's current pricing row.
+ * @param settings - The owning streamer's pricing settings.
+ * @param elapsedSeconds - Seconds since `row.demand_updated_at`.
+ * @param applyIncrement - True for a redemption; false for a decay-only tick.
+ * @returns The new demand value.
+ */
+function computeNewDemand(
+  row: RewardPricingRow, settings: StreamerPricingSettings, elapsedSeconds: number, applyIncrement: boolean,
+): number {
+  if (!applyIncrement) return decayDemand(row.demand, elapsedSeconds, settings.half_life_seconds);
+  const increment = computeRedemptionIncrement(row.cooldown_seconds, settings.half_life_seconds, settings.time_to_max_multiplier);
+  return applyRedemption(row.demand, elapsedSeconds, settings.half_life_seconds, increment);
+}
+
+/**
+ * Best-effort follow-ups after a price update is recorded: appends a price-history row and pushes
+ * a live update to open Channel Points admin pages. Each failure is logged and swallowed so it
+ * never affects the pricing update itself.
+ * @param streamerId - DB row ID of the owning streamer.
+ * @param pricingRowId - DB row ID of the reward's pricing row.
+ * @param update - The recorded price update.
+ * @returns Resolves once both steps have been attempted.
+ */
+async function publishPricingSideEffects(
+  streamerId: number, pricingRowId: number, update: { rewardId: string; cost: number; demand: number; recordedAt: number },
+): Promise<void> {
   try {
-    await recordPricingHistory(row.id, newCost, newDemand, now);
+    await recordPricingHistory(pricingRowId, update.cost, update.demand, update.recordedAt);
   } catch (err) {
-    log.warn(`Failed to record price history for reward ${twitchRewardId}:`, err);
+    log.warn(`Failed to record price history for reward ${update.rewardId}:`, err);
   }
 
   try {
-    runtimeRegistry.get()?.pushPricingUpdate(streamerId, { rewardId: twitchRewardId, cost: newCost, demand: newDemand, recordedAt: now });
+    runtimeRegistry.get()?.pushPricingUpdate(streamerId, update);
   } catch (err) {
-    log.warn(`Failed to push live price update for reward ${twitchRewardId}:`, err);
+    log.warn(`Failed to push live price update for reward ${update.rewardId}:`, err);
   }
 }
 

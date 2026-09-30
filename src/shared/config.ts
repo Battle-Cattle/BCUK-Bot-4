@@ -1,6 +1,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+/**
+ * Reads a required environment variable.
+ * @param name - Environment variable name.
+ * @returns Its value.
+ * @throws If the variable is unset or empty.
+ */
 function require_env(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
@@ -25,8 +31,14 @@ export const DB_USER = require_env('DB_USER');
 export const DB_PASSWORD = require_env('DB_PASSWORD');
 export const DB_NAME = require_env('DB_NAME');
 
-// Use Number (not parseInt) so malformed values like `1024MB` or `1.5` fall back
-// to the safe default instead of being silently truncated to a valid-looking cap.
+/**
+ * Parses an env var as a positive integer. Uses Number (not parseInt) so malformed values like
+ * `1024MB` or `1.5` fall back to the safe default instead of being silently truncated to a
+ * valid-looking cap.
+ * @param envVar - Raw environment variable value.
+ * @param fallback - Value to use when `envVar` is missing or not a positive integer.
+ * @returns The parsed value, or `fallback`.
+ */
 function parsePositiveIntEnv(envVar: string | undefined, fallback: number): number {
   const parsed = Number(envVar);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;

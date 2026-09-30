@@ -1,10 +1,9 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import fs from 'fs';
 import { getAllSfxTriggers, getAllCategories, getSfxFileById, AccessLevel } from '../../db';
 import { csrfProtection } from '../csrf';
 import { SFX_FOLDER, SFX_MAX_FILE_MB, OPENAI_API_KEY } from '../../shared/config';
-import { safeResolve } from '../../shared/pathUtils';
+import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 import { filterQueryParam, parsePositiveIntId } from './validation';
 import { renderView } from './viewHelpers';
 import { renderOrError } from './errorHandling';
@@ -70,11 +69,14 @@ router.get('/sfx', csrfProtection, async (req, res) => {
  * playback on the SFX management page. Reachable by any logged-in user (this
  * router is mounted behind `requireAuth`, matching the read-only visibility of
  * the sounds table on the page itself). Resolves the DB row's stored filename
- * against `SFX_FOLDER` via `safeResolve` before touching the filesystem, so a
- * crafted id can't be used to read files outside that folder.
+ * against `SFX_FOLDER` via `safeResolve` before touching the filesystem, then
+ * follows symlinks and re-checks the real path is still inside it
+ * (`realPathWithin`), so neither a crafted stored path nor a link under the
+ * folder can be used to read files outside it.
  * @param req - Express request; reads the `id` route param (an `sfx` row id).
  * @param res - Express response; streams the file with `Content-Disposition:
- *   inline` on success, or replies 400/404 if the id is invalid or unresolved.
+ *   inline` on success, or replies 400/404 if the id is invalid or unresolved,
+ *   or 404 if the file is missing or its real path is outside `SFX_FOLDER`.
  */
 router.get('/sfx/file/:id/audio', async (req, res) => {
   const id = parsePositiveIntId(req.params.id);
@@ -93,14 +95,17 @@ router.get('/sfx/file/:id/audio', async (req, res) => {
   const resolved = safeResolve(SFX_FOLDER, row.file);
   if (!resolved) { res.status(404).end(); return; }
 
+  // Also follow symlinks and re-check containment (see the same check in overlaySource.ts):
+  // safeResolve is purely lexical and sendFile would follow a link out of the folder.
+  let realPath: string | null;
   try {
-    await fs.promises.access(resolved);
+    realPath = await realPathWithin(SFX_FOLDER, resolved);
   } catch {
-    res.status(404).end();
-    return;
+    realPath = null;
   }
+  if (!realPath) { res.status(404).end(); return; }
 
-  res.sendFile(resolved, { headers: { 'Content-Disposition': 'inline' } }, (err) => {
+  res.sendFile(realPath, { headers: { 'Content-Disposition': 'inline' } }, (err) => {
     if (err && !res.headersSent) {
       res.status(404).end();
     }

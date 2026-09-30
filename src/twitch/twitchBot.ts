@@ -422,9 +422,10 @@ export async function sayInChannel(channel: string, message: string): Promise<vo
   if (!normalized) throw new Error(`[Twitch] Invalid channel name: ${channel}`);
   if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
   for (const chunk of splitMessageOnSpaces(message, MAX_MESSAGE_LENGTH)) {
-    await throttledTwitchSend(normalized, () => isPrivilegedInChannel(normalized), async () => {
+    await throttledTwitchSend(normalized, () => isPrivilegedInChannel(normalized), () => {
       if (!client || !connected) throw new Error(`[Twitch] Cannot send message — not connected`);
       sendRawChatMessage(client, normalized, chunk);
+      return Promise.resolve();
     });
   }
 }

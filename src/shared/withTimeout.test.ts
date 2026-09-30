@@ -28,6 +28,37 @@ describe('withTimeout', () => {
     await assertion;
   });
 
+  it('rejects with a non-Error rejection reason unchanged', async () => {
+    const result = withTimeout(Promise.reject('plain string'), 1_000, 'test op');
+    await expect(result).rejects.toBe('plain string');
+  });
+
+  it('clears its timer once the wrapped promise settles, so no timeout fires afterwards', async () => {
+    await withTimeout(Promise.resolve('done'), 1_000, 'test op');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('still observes a wrapped promise that rejects after the timeout has already won', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      let rejectLate!: (err: Error) => void;
+      const late = new Promise<never>((_resolve, reject) => { rejectLate = reject; });
+      const result = withTimeout(late, 1_000, 'test op');
+      const assertion = expect(result).rejects.toThrow('test op timed out after 1000ms');
+      await vi.advanceTimersByTimeAsync(1_000);
+      await assertion;
+
+      rejectLate(new Error('late failure'));
+      // Unhandled rejections are reported after the microtask queue drains, so wait a real macrotask.
+      vi.useRealTimers();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
   it('unrefs its internal timer so a long-lived timeout cannot keep the event loop alive on its own', () => {
     const unref = vi.fn();
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
