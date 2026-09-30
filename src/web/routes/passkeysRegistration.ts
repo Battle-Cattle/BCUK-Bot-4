@@ -1,5 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
+import { escapeMarkdown } from 'discord.js';
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -11,12 +12,15 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { logAndRedirectError } from './errorHandling';
+import { checkEnrollmentCode } from './passkeysEnrollmentCode';
+import { sendDiscordDirectMessage } from '../../discord/discordBot';
 import {
   RP_NAME,
   RP_ID,
   EXPECTED_ORIGIN,
   chooseUserHandle,
   hasRecentDiscordAuth,
+  MAX_PASSKEYS_PER_USER,
   storeChallenge,
   takeRegistrationChallenge,
   isCredentialResponse,
@@ -26,19 +30,36 @@ import {
 const log = createLogger('Web');
 const router = Router();
 
-const MAX_PASSKEYS_PER_USER = 10;
 const CREDENTIAL_ID_PATTERN = /^[A-Za-z0-9_-]{1,512}$/;
 
 // ─── Registration (signed-in users add a passkey from User Settings) ─────────
 
 /**
+ * DMs the user a security notice that a passkey was added to their account, so an enrollment
+ * they didn't make can't go unnoticed. Best-effort: `sendDiscordDirectMessage` logs and returns
+ * false rather than rejecting, so callers can fire and forget.
+ * @param discordId - The account the passkey was added to.
+ * @param deviceLabel - The new passkey's (sanitised) name.
+ * @returns Resolves once the DM attempt finishes.
+ */
+async function notifyPasskeyAdded(discordId: string, deviceLabel: string): Promise<void> {
+  await sendDiscordDirectMessage(
+    discordId,
+    `A passkey named "${escapeMarkdown(deviceLabel)}" was just added to your BCUK Bot account. ` +
+      "If this wasn't you, remove it in the web panel's User Settings.",
+  );
+}
+
+/**
  * POST /auth/passkey/register/options — generates WebAuthn registration options for the
  * signed-in user, requiring a discoverable, user-verified (fingerprint/face/PIN) credential.
  * The session must have signed in with Discord within the last few minutes (step-up
- * re-authentication, see `hasRecentDiscordAuth`); /register/verify checks this again.
- * @param req - Express request; requires an authenticated session and CSRF token.
+ * re-authentication, see `hasRecentDiscordAuth`); /register/verify checks this again. It must
+ * also carry the one-time code DMed to the user by `POST /register/code`, which is consumed here.
+ * @param req - Express request; JSON body `{ code }`, requires an authenticated session and CSRF token.
  * @param res - Express response; JSON registration options, 403 `{ error: 'passkey_reauth_required' }`
- *   when the last Discord login is too old, 409 `{ error: 'passkey_limit' }` when the user already
+ *   when the last Discord login is too old, 400 `passkey_code_invalid` / `passkey_code_expired`
+ *   for a wrong or unusable code, 409 `{ error: 'passkey_limit' }` when the user already
  *   has the maximum number of passkeys, or 500 on failure.
  */
 router.post('/register/options', requireAuth, csrfProtection, async (req, res) => {
@@ -48,6 +69,7 @@ router.post('/register/options', requireAuth, csrfProtection, async (req, res) =
   }
   try {
     const user = getSessionUser(req);
+    if (!(await checkEnrollmentCode(req, res, user.discordId))) return;
     const existing = await listPasskeyDescriptorsForUser(user.discordId);
     if (existing.length >= MAX_PASSKEYS_PER_USER) {
       res.status(409).json({ ok: false, error: 'passkey_limit' });
@@ -131,6 +153,7 @@ router.post('/register/verify', requireAuth, csrfProtection, async (req, res) =>
 
   try {
     const { credential } = verification.registrationInfo;
+    const deviceLabel = sanitizeDeviceLabel(body.label);
     const result = await insertPasskey({
       credentialId: credential.id,
       discordId: user.discordId,
@@ -138,7 +161,7 @@ router.post('/register/verify', requireAuth, csrfProtection, async (req, res) =>
       publicKey: credential.publicKey,
       signCount: credential.counter,
       transports: credential.transports ?? [],
-      deviceLabel: sanitizeDeviceLabel(body.label),
+      deviceLabel,
     }, MAX_PASSKEYS_PER_USER);
     if (result !== 'inserted') {
       // 'limit' re-checks the count atomically with the insert, since the check in
@@ -148,6 +171,7 @@ router.post('/register/verify', requireAuth, csrfProtection, async (req, res) =>
     }
     log.info(`Passkey registered for ${user.discordId}`);
     res.json({ ok: true });
+    void notifyPasskeyAdded(user.discordId, deviceLabel);
   } catch (err) {
     log.error('Passkey registration save error:', err);
     res.status(500).json({ ok: false, error: 'passkey_register_failed' });

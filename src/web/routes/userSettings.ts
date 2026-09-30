@@ -31,6 +31,9 @@ const KNOWN_ERRORS = new Set([
   'passkey_exists',
   'passkey_limit',
   'passkey_delete_failed',
+  'passkey_code_invalid',
+  'passkey_code_expired',
+  'passkey_dm_failed',
 ]);
 const KNOWN_SUCCESSES = new Set(['twitch_connected', 'passkey_added', 'passkey_removed', 'passkey_reauthed']);
 
@@ -48,6 +51,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   passkey_exists:                'That passkey is already registered.',
   passkey_limit:                 'You have reached the maximum number of passkeys. Remove one before adding another.',
   passkey_delete_failed:         'Could not remove the passkey. Please try again.',
+  passkey_code_invalid:          'That confirmation code was incorrect. Please try adding the passkey again.',
+  passkey_code_expired:          'The confirmation code expired or had too many wrong attempts. Please try adding the passkey again.',
+  passkey_dm_failed:             'The bot could not DM you the confirmation code. Allow direct messages from members of a server the bot is in, then try again.',
 };
 
 /** Looks up a `userSettings` page error code in {@link ERROR_MESSAGES}, for use as an EJS template helper. */

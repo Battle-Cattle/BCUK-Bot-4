@@ -209,6 +209,37 @@ describe('fetchDiscordUserProfile', () => {
   });
 });
 
+// ─── sendDiscordDirectMessage ─────────────────────────────────────────────────
+
+describe('sendDiscordDirectMessage', () => {
+  async function readyBot() {
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+  }
+
+  it('returns false when client is not ready', async () => {
+    expect(await mod.sendDiscordDirectMessage('123', 'hi')).toBe(false);
+  });
+
+  it('DMs the user with mentions disabled', async () => {
+    const send = vi.fn().mockResolvedValue({});
+    mockInstance.users.fetch.mockResolvedValueOnce({ send });
+    await readyBot();
+
+    expect(await mod.sendDiscordDirectMessage('user123', 'your code')).toBe(true);
+    expect(mockInstance.users.fetch).toHaveBeenCalledWith('user123');
+    expect(send).toHaveBeenCalledWith({ content: 'your code', allowedMentions: { parse: [] } });
+  });
+
+  it('returns false when Discord refuses the DM', async () => {
+    mockInstance.users.fetch.mockResolvedValueOnce({ send: vi.fn().mockRejectedValue(new Error('Cannot send messages to this user')) });
+    await readyBot();
+
+    expect(await mod.sendDiscordDirectMessage('user123', 'your code')).toBe(false);
+  });
+});
+
 // ─── startDiscordBot — messageCreate handler ──────────────────────────────────
 
 describe('startDiscordBot — messageCreate handler', () => {

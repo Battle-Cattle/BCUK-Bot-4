@@ -285,6 +285,28 @@ export async function fetchDiscordUserProfile(
 }
 
 /**
+ * Sends a direct message from the bot to a user, with all mentions disabled. Used for passkey
+ * enrollment codes and security notices, which must reach the account owner rather than
+ * whoever holds a web session.
+ * @param discordId - Discord user ID to message.
+ * @param content - Message text.
+ * @returns True if the message was sent; false if the bot isn't ready or Discord refused it
+ *   (e.g. the user doesn't accept DMs from the bot).
+ */
+export async function sendDiscordDirectMessage(discordId: string, content: string): Promise<boolean> {
+  const client = getDiscordClient();
+  if (!client) return false;
+  try {
+    const user = await client.users.fetch(discordId);
+    await user.send({ content, allowedMentions: { parse: [] } });
+    return true;
+  } catch (err) {
+    log.warn(`Failed to send Discord DM to ${discordId}:`, err);
+    return false;
+  }
+}
+
+/**
  * Grants the Discord server's owner Admin access to a brand-new guild, creating
  * their whitelist `user` row first if they don't already have one. Only ever
  * called for a guild's first-ever appearance (see the `guildCreate` handler in

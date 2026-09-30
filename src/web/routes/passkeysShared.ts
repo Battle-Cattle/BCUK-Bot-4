@@ -11,6 +11,8 @@ export const RP_ID = new URL(PUBLIC_URL).hostname;
 export const EXPECTED_ORIGIN = PUBLIC_URL;
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const DEVICE_LABEL_MAX_LENGTH = 100;
+/** Most passkeys one user may register. */
+export const MAX_PASSKEYS_PER_USER = 10;
 /** How recently the user must have signed in with Discord (not a passkey) to add a passkey. */
 export const REAUTH_WINDOW_MS = 10 * 60 * 1000;
 

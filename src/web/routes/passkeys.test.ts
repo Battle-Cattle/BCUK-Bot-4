@@ -14,6 +14,9 @@ vi.mock('../../db', () => ({
   listPasskeyDescriptorsForUser: vi.fn(),
   saveWebauthnChallenge: vi.fn(),
   consumeWebauthnChallenge: vi.fn(),
+  savePasskeyEnrollmentCode: vi.fn(),
+  consumePasskeyEnrollmentCode: vi.fn(),
+  deletePasskeyEnrollmentCode: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('@simplewebauthn/server', () => ({
@@ -22,7 +25,7 @@ vi.mock('@simplewebauthn/server', () => ({
   generateAuthenticationOptions: vi.fn(),
   verifyAuthenticationResponse: vi.fn(),
 }));
-vi.mock('../../discord/discordBot', () => ({ fetchDiscordUserProfile: vi.fn() }));
+vi.mock('../../discord/discordBot', () => ({ fetchDiscordUserProfile: vi.fn(), sendDiscordDirectMessage: vi.fn() }));
 vi.mock('./auth', () => ({
   resolveAccessibleGuilds: vi.fn(),
   establishDashboardSession: vi.fn(),
@@ -47,6 +50,9 @@ import {
   listPasskeyDescriptorsForUser,
   saveWebauthnChallenge,
   consumeWebauthnChallenge,
+  savePasskeyEnrollmentCode,
+  consumePasskeyEnrollmentCode,
+  deletePasskeyEnrollmentCode,
 } from '../../db';
 import {
   generateRegistrationOptions,
@@ -54,7 +60,8 @@ import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
-import { fetchDiscordUserProfile } from '../../discord/discordBot';
+import { fetchDiscordUserProfile, sendDiscordDirectMessage } from '../../discord/discordBot';
+import { hashEnrollmentCode, generateEnrollmentCode } from './passkeysEnrollmentCode';
 import { resolveAccessibleGuilds, establishDashboardSession } from './auth';
 import { makeSessionUser } from '../../test-utils/fixtures';
 
@@ -92,6 +99,10 @@ beforeEach(() => {
   vi.mocked(generateAuthenticationOptions).mockResolvedValue({ challenge: 'auth-chal' } as any);
   vi.mocked(insertPasskey).mockResolvedValue('inserted');
   vi.mocked(recordPasskeyUse).mockResolvedValue(true);
+  vi.mocked(savePasskeyEnrollmentCode).mockResolvedValue(true);
+  vi.mocked(consumePasskeyEnrollmentCode).mockResolvedValue('ok');
+  vi.mocked(deletePasskeyEnrollmentCode).mockResolvedValue(undefined);
+  vi.mocked(sendDiscordDirectMessage).mockResolvedValue(true);
   vi.mocked(deletePasskey).mockResolvedValue(true);
   vi.mocked(fetchDiscordUserProfile).mockResolvedValue({ username: 'alice', avatar: 'av' });
   vi.mocked(resolveAccessibleGuilds).mockResolvedValue([{ guild_id: 'g1' }] as any);
@@ -128,7 +139,7 @@ describe('sanitizeDeviceLabel', () => {
 describe('POST /register/options', () => {
   it('redirects to login without a session user', async () => {
     const { app } = buildApp();
-    const res = await supertest(app).post('/register/options');
+    const res = await supertest(app).post('/register/options').send({ code: '123456' });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/auth/login');
   });
@@ -138,7 +149,7 @@ describe('POST /register/options', () => {
     vi.mocked(listPasskeyDescriptorsForUser).mockResolvedValue([{ credentialId: 'old', userHandle: handle, transports: ['internal'] }]);
     const { app, session } = buildApp({ user: USER, ...recentDiscordAuth() });
 
-    const res = await supertest(app).post('/register/options');
+    const res = await supertest(app).post('/register/options').send({ code: '123456' });
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ challenge: 'reg-chal' });
@@ -155,17 +166,18 @@ describe('POST /register/options', () => {
 
   it('requires a fresh Discord login when the session has no Discord login timestamp', async () => {
     const { app, session } = buildApp({ user: USER });
-    const res = await supertest(app).post('/register/options');
+    const res = await supertest(app).post('/register/options').send({ code: '123456' });
     expect(res.status).toBe(403);
     expect(res.body).toEqual({ ok: false, error: 'passkey_reauth_required' });
     expect(generateRegistrationOptions).not.toHaveBeenCalled();
+    expect(consumePasskeyEnrollmentCode).not.toHaveBeenCalled();
     expect(saveWebauthnChallenge).not.toHaveBeenCalled();
     expect(session.webauthnChallenge).toBeUndefined();
   });
 
   it('requires a fresh Discord login when the last one is older than 10 minutes', async () => {
     const { app } = buildApp({ user: USER, discordAuthAt: Date.now() - 10 * 60 * 1000 - 1000 });
-    const res = await supertest(app).post('/register/options');
+    const res = await supertest(app).post('/register/options').send({ code: '123456' });
     expect(res.status).toBe(403);
     expect(res.body.error).toBe('passkey_reauth_required');
     expect(generateRegistrationOptions).not.toHaveBeenCalled();
@@ -176,7 +188,7 @@ describe('POST /register/options', () => {
       Array.from({ length: 10 }, (_, i) => ({ credentialId: `c${i}`, userHandle: 'h', transports: [] })),
     );
     const { app } = buildApp({ user: USER, ...recentDiscordAuth() });
-    const res = await supertest(app).post('/register/options');
+    const res = await supertest(app).post('/register/options').send({ code: '123456' });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('passkey_limit');
     expect(generateRegistrationOptions).not.toHaveBeenCalled();
@@ -187,10 +199,123 @@ describe('POST /register/options — failures', () => {
   it('returns 500 passkey_register_failed when generating options throws', async () => {
     vi.mocked(generateRegistrationOptions).mockRejectedValueOnce(new Error('boom'));
     const { app, session } = buildApp({ user: USER, ...recentDiscordAuth() });
-    const res = await supertest(app).post('/register/options');
+    const res = await supertest(app).post('/register/options').send({ code: '123456' });
     expect(res.status).toBe(500);
     expect(res.body.error).toBe('passkey_register_failed');
     expect(session.webauthnChallenge).toBeUndefined();
+  });
+});
+
+describe('POST /register/options — Discord confirmation code', () => {
+  it('consumes the code (by hash) before issuing options', async () => {
+    const { app } = buildApp({ user: USER, ...recentDiscordAuth() });
+    const res = await supertest(app).post('/register/options').send({ code: '123456' });
+    expect(res.status).toBe(200);
+    expect(consumePasskeyEnrollmentCode).toHaveBeenCalledWith('42', hashEnrollmentCode('123456'), 5);
+  });
+
+  it.each([undefined, '12345', '1234567', 'abcdef', 123456])('rejects a missing or malformed code (%s) without spending an attempt', async (code) => {
+    const { app } = buildApp({ user: USER, ...recentDiscordAuth() });
+    const res = await supertest(app).post('/register/options').send({ code });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ ok: false, error: 'passkey_code_invalid' });
+    expect(consumePasskeyEnrollmentCode).not.toHaveBeenCalled();
+    expect(generateRegistrationOptions).not.toHaveBeenCalled();
+  });
+
+  it('rejects a wrong code', async () => {
+    vi.mocked(consumePasskeyEnrollmentCode).mockResolvedValueOnce('invalid');
+    const { app, session } = buildApp({ user: USER, ...recentDiscordAuth() });
+    const res = await supertest(app).post('/register/options').send({ code: '000000' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('passkey_code_invalid');
+    expect(generateRegistrationOptions).not.toHaveBeenCalled();
+    expect(session.webauthnChallenge).toBeUndefined();
+  });
+
+  it('rejects when no usable code is left (expired, never sent, or out of attempts)', async () => {
+    vi.mocked(consumePasskeyEnrollmentCode).mockResolvedValueOnce('expired');
+    const { app } = buildApp({ user: USER, ...recentDiscordAuth() });
+    const res = await supertest(app).post('/register/options').send({ code: '123456' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('passkey_code_expired');
+    expect(generateRegistrationOptions).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /register/code', () => {
+  it('stores a hashed 6-digit code and DMs it to the user', async () => {
+    const { app } = buildApp({ user: USER, ...recentDiscordAuth() });
+    const res = await supertest(app).post('/register/code');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    const [discordId, codeHash, ttl, cooldown] = vi.mocked(savePasskeyEnrollmentCode).mock.calls[0];
+    expect([discordId, ttl, cooldown]).toEqual(['42', 300, 60]);
+    const [dmTo, message] = vi.mocked(sendDiscordDirectMessage).mock.calls[0];
+    expect(dmTo).toBe('42');
+    const code = /\*\*(\d{6})\*\*/.exec(message)?.[1];
+    expect(code).toBeDefined();
+    expect(codeHash).toBe(hashEnrollmentCode(code!));
+    expect(message).toContain("If you didn't just try to add a passkey");
+  });
+
+  it('requires a recent Discord login before sending anything', async () => {
+    const { app } = buildApp({ user: USER });
+    const res = await supertest(app).post('/register/code');
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('passkey_reauth_required');
+    expect(savePasskeyEnrollmentCode).not.toHaveBeenCalled();
+    expect(sendDiscordDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not send a code to a user already at the passkey limit', async () => {
+    vi.mocked(listPasskeyDescriptorsForUser).mockResolvedValue(
+      Array.from({ length: 10 }, (_, i) => ({ credentialId: `c${i}`, userHandle: 'h', transports: [] })),
+    );
+    const { app } = buildApp({ user: USER, ...recentDiscordAuth() });
+    const res = await supertest(app).post('/register/code');
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('passkey_limit');
+    expect(sendDiscordDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses to send another code within the resend cooldown', async () => {
+    vi.mocked(savePasskeyEnrollmentCode).mockResolvedValueOnce(false);
+    const { app } = buildApp({ user: USER, ...recentDiscordAuth() });
+    const res = await supertest(app).post('/register/code');
+    expect(res.status).toBe(429);
+    expect(res.body.error).toBe('passkey_code_throttled');
+    expect(sendDiscordDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it('drops the code and reports passkey_dm_failed when the bot cannot DM the user', async () => {
+    vi.mocked(sendDiscordDirectMessage).mockResolvedValueOnce(false);
+    const { app } = buildApp({ user: USER, ...recentDiscordAuth() });
+    const res = await supertest(app).post('/register/code');
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe('passkey_dm_failed');
+    expect(deletePasskeyEnrollmentCode).toHaveBeenCalledWith('42');
+  });
+
+  it('returns 500 when storing the code fails', async () => {
+    vi.mocked(savePasskeyEnrollmentCode).mockRejectedValueOnce(new Error('db down'));
+    const { app } = buildApp({ user: USER, ...recentDiscordAuth() });
+    const res = await supertest(app).post('/register/code');
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('passkey_register_failed');
+    expect(sendDiscordDirectMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('enrollment code helpers', () => {
+  it('generates 6-digit codes, keeping leading zeros', () => {
+    for (let i = 0; i < 50; i++) expect(generateEnrollmentCode()).toMatch(/^\d{6}$/);
+  });
+
+  it('hashes codes with SHA-256', () => {
+    expect(hashEnrollmentCode('000000')).toMatch(/^[0-9a-f]{64}$/);
+    expect(hashEnrollmentCode('000000')).not.toBe(hashEnrollmentCode('000001'));
   });
 });
 
@@ -212,6 +337,14 @@ describe('POST /register/verify', () => {
     expect(consumeWebauthnChallenge).not.toHaveBeenCalled();
     expect(insertPasskey).not.toHaveBeenCalled();
     expect(session.webauthnChallenge).toBeDefined();
+  });
+
+  it('DMs the user a security notice naming the new passkey, with markdown escaped', async () => {
+    vi.mocked(verifyRegistrationResponse).mockResolvedValueOnce(verified as any);
+    const { app } = buildApp({ user: USER, ...recentDiscordAuth(), ...futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }) });
+    const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL, label: 'My *Phone*' });
+    expect(res.status).toBe(200);
+    expect(sendDiscordDirectMessage).toHaveBeenCalledWith('42', expect.stringContaining('"My \\*Phone\\*" was just added'));
   });
 
   it('stores the verified passkey with a sanitised label and consumes the challenge', async () => {

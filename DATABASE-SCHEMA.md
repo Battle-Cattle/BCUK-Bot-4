@@ -528,6 +528,23 @@ Expected constraints and behavior:
 - The challenge is also kept on the session, binding it to the browser that requested it; this table is what makes it single-use. `consumeWebauthnChallenge` (`src/db/webauthnChallenges.ts`) is one `DELETE ... WHERE challenge = ? AND purpose = ? AND expires_at > NOW()`, so of two concurrent verifications with the same challenge exactly one gets `affectedRows = 1`.
 - `saveWebauthnChallenge` prunes expired rows before each insert, so abandoned challenges don't accumulate (issuing is rate-limited by `authLimiter`).
 
+## `passkey_enrollment_codes`
+
+One-time confirmation codes the bot DMs to a user before they can add a passkey, proving they control the Discord account and not just a web session. Created by `migrations/webauthn_credentials.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `discord_id` | `BIGINT` PK | FK to `user.discord_id` ON DELETE CASCADE; one outstanding code per user |
+| `code_hash` | `CHAR(64)`, `ascii_bin` | SHA-256 hex digest of the 6-digit code; the code itself is never stored |
+| `attempts` | `TINYINT UNSIGNED` | Guesses spent on this code |
+| `sent_at` | `DATETIME` | When the code was issued (DB-side `NOW()`); drives the resend cooldown |
+| `expires_at` | `DATETIME` | DB-side `NOW() + 5 minutes` |
+
+Expected constraints and behavior:
+
+- `savePasskeyEnrollmentCode` (`src/db/passkeyEnrollmentCodes.ts`) prunes expired rows, replaces the user's code only if it is older than the 60-second resend cooldown, then does a plain `INSERT`; the primary key makes a concurrent second send fail as a duplicate, so the cooldown holds.
+- `consumePasskeyEnrollmentCode` first spends an attempt with `UPDATE ... SET attempts = attempts + 1 WHERE discord_id = ? AND expires_at > NOW() AND attempts < 5`, and only then compares, with a `DELETE ... WHERE discord_id = ? AND code_hash = ?` that consumes a matching code. Concurrent guesses therefore can't exceed 5 per code.
+
 ## `sessions`
 
 Managed automatically by `express-mysql-session`.

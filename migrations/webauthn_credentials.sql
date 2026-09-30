@@ -32,3 +32,17 @@ CREATE TABLE webauthn_challenges (
   PRIMARY KEY (challenge),
   KEY idx_webauthn_challenges_expires_at (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- One-time codes the bot DMs to a user to confirm they're the one adding a passkey (so a
+-- hijacked web session alone can't enrol one). One outstanding code per user; only a SHA-256
+-- digest of the code is stored.
+CREATE TABLE passkey_enrollment_codes (
+  discord_id  BIGINT           NOT NULL,
+  code_hash   CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  attempts    TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  sent_at     DATETIME         NOT NULL,
+  expires_at  DATETIME         NOT NULL,
+  PRIMARY KEY (discord_id),
+  KEY idx_passkey_enrollment_codes_expires_at (expires_at),
+  FOREIGN KEY (discord_id) REFERENCES `user`(discord_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

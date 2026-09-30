@@ -109,6 +109,10 @@ describe('GET / — passkeys', () => {
     expect(ok.body.success).toBe('passkey_added');
     const err = await supertest(buildApp()).get('/?error=passkey_limit');
     expect(err.body.error).toBe('passkey_limit');
+    for (const code of ['passkey_code_invalid', 'passkey_code_expired', 'passkey_dm_failed']) {
+      const res = await supertest(buildApp()).get('/?error=' + code);
+      expect(res.body.error).toBe(code);
+    }
   });
 });
 
