@@ -49,19 +49,39 @@
   }
 
   /**
+   * Asks the server to DM the user a one-time confirmation code. A "code sent recently" response
+   * counts as success: the code they already received is still usable.
+   * @returns {Promise<boolean>} True if the user should now be asked for the code; false if the
+   *   flow ended (redirected for re-authentication or an error banner shown).
+   */
+  async function requestDiscordCode() {
+    var codeRes = await window.BCUKPasskey.postJson('/auth/passkey/register/code', {}, csrfToken);
+    if (needsReauth(codeRes)) return false;
+    var failed = !codeRes.ok && errorOf(codeRes) !== 'passkey_code_throttled';
+    if (failed) finish('error', errorOf(codeRes) || 'passkey_register_failed');
+    return !failed;
+  }
+
+  /**
+   * Turns a final `/register/options` response into the options to use, or ends the flow.
+   * @param {{ ok: boolean, data?: object }} optionsRes - Result from `BCUKPasskey.postJson`.
+   * @returns {object|null} The successful response, or null if the flow ended.
+   */
+  function optionsOrFinish(optionsRes) {
+    if (needsReauth(optionsRes)) return null;
+    if (optionsRes.ok) return optionsRes;
+    finish('error', errorOf(optionsRes) || 'passkey_register_failed');
+    return null;
+  }
+
+  /**
    * Has the bot DM a one-time confirmation code, asks the user to type it in, and exchanges it
-   * for registration options. A mistyped code can be re-entered (the server limits attempts); a
-   * "code sent recently" response still lets the user enter the code they already received.
+   * for registration options. A mistyped code can be re-entered (the server limits attempts).
    * @returns {Promise<object|null>} The successful options response, or null if the flow ended
    *   (cancelled, redirected, or an error banner shown).
    */
   async function confirmWithDiscordCode() {
-    var codeRes = await window.BCUKPasskey.postJson('/auth/passkey/register/code', {}, csrfToken);
-    if (needsReauth(codeRes)) return null;
-    if (!codeRes.ok && errorOf(codeRes) !== 'passkey_code_throttled') {
-      finish('error', errorOf(codeRes) || 'passkey_register_failed');
-      return null;
-    }
+    if (!(await requestDiscordCode())) return null;
     var message = 'Enter the 6-digit confirmation code the bot just sent you in a Discord DM.';
     for (;;) {
       var code = window.prompt(message, '');
@@ -71,12 +91,7 @@
         { code: code.replace(/\s+/g, '') },
         csrfToken
       );
-      if (needsReauth(optionsRes)) return null;
-      if (optionsRes.ok) return optionsRes;
-      if (errorOf(optionsRes) !== 'passkey_code_invalid') {
-        finish('error', errorOf(optionsRes) || 'passkey_register_failed');
-        return null;
-      }
+      if (errorOf(optionsRes) !== 'passkey_code_invalid') return optionsOrFinish(optionsRes);
       message = 'That code was incorrect. Enter the 6-digit code from your Discord DM.';
     }
   }
