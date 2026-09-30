@@ -221,14 +221,16 @@ async function writeCustomCommandUpdate(
   assertNotReservedCommand(normalizedTriggerString);
 
   // Hold the command's id lock (the one assignUserToCommand/assignUsersToCommand take first) for
-  // the whole update, on its own connection, so a concurrent assignment can't validate the old
-  // trigger and then insert after a rename commits: it either finishes first or waits and reads
-  // the new trigger. Same id-then-trigger lock order as assignment, so the two can't deadlock.
+  // the whole update, so a concurrent assignment can't validate the old trigger and then insert
+  // after a rename commits: it either finishes first or waits and reads the new trigger. Same
+  // id-then-trigger lock order as assignment, so the two can't deadlock. The trigger-locked write
+  // runs on this same connection, so an update never holds one pool connection while waiting
+  // for a second.
   const idLockConnection = await getPool().getConnection();
   const idLockName = `bcuk_cmdid_${commandId}`;
   try {
     await acquireNamedLock(idLockConnection, idLockName);
-    await writeCustomCommandRow(commandId, normalizedTriggerString, normalizedOutput, fields, selfServiceDiscordId);
+    await writeCustomCommandRow(idLockConnection, commandId, { normalizedTriggerString, normalizedOutput, fields }, selfServiceDiscordId);
   } finally {
     await releaseNamedLock(idLockConnection, idLockName);
     idLockConnection.release();
@@ -236,25 +238,32 @@ async function writeCustomCommandUpdate(
 }
 
 /**
- * The trigger-locked part of {@link writeCustomCommandUpdate}: in one transaction, optionally
- * re-checks streamer ownership, checks conflicts and writes the row.
+ * The trigger-locked part of {@link writeCustomCommandUpdate}: on the caller's connection (which
+ * already holds the command's id lock), in one transaction, optionally re-checks streamer
+ * ownership, checks conflicts and writes the row.
+ * @param connection - The connection holding the command's id lock; the caller releases it.
  * @param commandId - ID of the command to update.
- * @param normalizedTriggerString - Validated, lowercased trigger.
- * @param normalizedOutput - Validated output.
- * @param fields - The Discord/multi-Twitch flags to write.
+ * @param row - The validated, lowercased trigger, the validated output, and the flags to write.
+ * @param row.normalizedTriggerString - Validated, lowercased trigger.
+ * @param row.normalizedOutput - Validated output.
+ * @param row.fields - The Discord/multi-Twitch flags to write.
  * @param selfServiceDiscordId - When set, the streamer who must own the command outright.
  */
 async function writeCustomCommandRow(
+  connection: mysql.PoolConnection,
   commandId: number,
-  normalizedTriggerString: string,
-  normalizedOutput: string,
-  fields: Pick<CustomCommandFields, 'isDiscordEnabled' | 'isMultiTwitch'>,
+  row: {
+    normalizedTriggerString: string;
+    normalizedOutput: string;
+    fields: Pick<CustomCommandFields, 'isDiscordEnabled' | 'isMultiTwitch'>;
+  },
   selfServiceDiscordId?: string,
 ): Promise<void> {
-  const { isDiscordEnabled, isMultiTwitch } = fields;
+  const { normalizedTriggerString, normalizedOutput } = row;
+  const { isDiscordEnabled, isMultiTwitch } = row.fields;
   await runSerializedCommandWrite(
     normalizedTriggerString,
-    { excludeCustomCommandId: commandId },
+    { excludeCustomCommandId: commandId, connection },
     async (connection) => {
       if (selfServiceDiscordId !== undefined) {
         await assertOwnershipWithinTransaction(connection, commandId, { discordId: selfServiceDiscordId, allows: isCommandSelfManageableBy });

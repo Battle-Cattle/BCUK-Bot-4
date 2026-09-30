@@ -287,6 +287,9 @@ describe('updateCustomCommand', () => {
 
     expect(order).toEqual(['acquire:bcuk_cmdid_7', 'write', 'release:bcuk_cmdid_7']);
     expect(vi.mocked(acquireNamedLock).mock.calls[0][0]).toBe(pool._conn);
+    // The trigger-locked write reuses the id-lock connection instead of taking a second one.
+    expect(vi.mocked(runSerializedCommandWrite).mock.calls[0][1]).toMatchObject({ excludeCustomCommandId: 7, connection: pool._conn });
+    expect(pool.getConnection).toHaveBeenCalledTimes(1);
     expect(pool._conn.release).toHaveBeenCalled();
   });
 

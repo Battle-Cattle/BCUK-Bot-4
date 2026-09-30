@@ -312,7 +312,10 @@ export async function commandExists(id: number, executor: SqlExecutor = getPool(
  * @param commandOrCommands - The command(s) this write claims; also used for the collision check.
  * @param options - Ids to exclude from the collision check, if updating an existing row, and
  *   `guildId` to scope the counter-table half of the check to one guild (see
- *   {@link isAnyCommandTakenAcrossTables}).
+ *   {@link isAnyCommandTakenAcrossTables}). `connection` runs the write on a connection the caller
+ *   already holds (e.g. one holding other named locks) instead of taking a second one from the
+ *   pool — which could otherwise starve the pool under load; the caller keeps ownership and
+ *   releases it, while the trigger locks taken here are still released here.
  * @param writeOperation - The transactional write to perform once locks are held and no collision exists.
  * @param checks - Which tables to include in the collision check; both default to enabled.
  * @returns The value returned by `writeOperation`.
@@ -320,7 +323,12 @@ export async function commandExists(id: number, executor: SqlExecutor = getPool(
  */
 export async function runSerializedCommandWrite<T>(
   commandOrCommands: string | string[],
-  options: { excludeCustomCommandId?: number; excludeCounterId?: number; guildId?: string } | undefined,
+  options: {
+    excludeCustomCommandId?: number;
+    excludeCounterId?: number;
+    guildId?: string;
+    connection?: mysql.PoolConnection;
+  } | undefined,
   writeOperation: (connection: mysql.PoolConnection) => Promise<T>,
   checks: { includeCustomCommandTable?: boolean; includeCounterTable?: boolean } = {
     includeCustomCommandTable: true,
@@ -329,10 +337,11 @@ export async function runSerializedCommandWrite<T>(
 ): Promise<T> {
   const normalizedCommands = normalizeCommandInputs(commandOrCommands);
   const lockNames = getSortedCommandLockNames(normalizedCommands);
+  const callerConnection = options?.connection;
   let connection: mysql.PoolConnection | null = null;
 
   try {
-    connection = await getPool().getConnection();
+    connection = callerConnection ?? await getPool().getConnection();
     const conn = connection;
     await acquireNamedLocks(conn, lockNames);
 
@@ -350,7 +359,7 @@ export async function runSerializedCommandWrite<T>(
   } finally {
     if (connection) {
       try { await releaseNamedLocks(connection, lockNames); } catch (err) { log.warn('Failed to release named locks:', err); }
-      connection.release();
+      if (!callerConnection) connection.release();
     }
   }
 }
