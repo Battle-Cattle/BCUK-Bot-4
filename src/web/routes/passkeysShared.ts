@@ -11,6 +11,8 @@ export const RP_ID = new URL(PUBLIC_URL).hostname;
 export const EXPECTED_ORIGIN = PUBLIC_URL;
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const DEVICE_LABEL_MAX_LENGTH = 100;
+/** How recently the user must have signed in with Discord (not a passkey) to add a passkey. */
+export const REAUTH_WINDOW_MS = 10 * 60 * 1000;
 
 type ChallengePurpose = 'register' | 'login';
 
@@ -25,6 +27,18 @@ type ChallengePurpose = 'register' | 'login';
  */
 export function chooseUserHandle(existing: { userHandle: string }[]): string {
   return existing[0]?.userHandle ?? randomBytes(32).toString('base64url');
+}
+
+/**
+ * Whether this session completed a Discord OAuth login within {@link REAUTH_WINDOW_MS}. Adding a
+ * passkey creates a long-lived credential, so it needs fresh proof of the Discord account rather
+ * than just a (possibly old, or passkey-created) session — a hijacked session alone can't enrol one.
+ * @param req - Express request whose session's `discordAuthAt` is checked.
+ * @returns True if the last Discord login is recent enough.
+ */
+export function hasRecentDiscordAuth(req: Request): boolean {
+  const at = req.session.discordAuthAt;
+  return typeof at === 'number' && Date.now() - at <= REAUTH_WINDOW_MS;
 }
 
 /**

@@ -36,6 +36,13 @@
     addButton.disabled = true;
     try {
       var optionsRes = await window.BCUKPasskey.postJson('/auth/passkey/register/options', {}, csrfToken);
+      if (optionsRes.data && optionsRes.data.error === 'passkey_reauth_required') {
+        // Adding a passkey needs a recent Discord login; come back to this page afterwards.
+        if (window.confirm('For security, please sign in with Discord again before adding a passkey.')) {
+          window.location.href = '/auth/discord?return=passkey';
+        }
+        return;
+      }
       if (!optionsRes.ok) {
         finish('error', (optionsRes.data && optionsRes.data.error) || 'passkey_register_failed');
         return;

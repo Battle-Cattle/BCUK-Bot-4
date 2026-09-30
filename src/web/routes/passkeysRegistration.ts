@@ -16,6 +16,7 @@ import {
   RP_ID,
   EXPECTED_ORIGIN,
   chooseUserHandle,
+  hasRecentDiscordAuth,
   storeChallenge,
   takeRegistrationChallenge,
   isCredentialResponse,
@@ -33,11 +34,19 @@ const CREDENTIAL_ID_PATTERN = /^[A-Za-z0-9_-]{1,512}$/;
 /**
  * POST /auth/passkey/register/options — generates WebAuthn registration options for the
  * signed-in user, requiring a discoverable, user-verified (fingerprint/face/PIN) credential.
+ * The session must have signed in with Discord within the last few minutes (step-up
+ * re-authentication, see `hasRecentDiscordAuth`); the challenge it issues then bounds how long
+ * /register/verify can follow.
  * @param req - Express request; requires an authenticated session and CSRF token.
- * @param res - Express response; JSON registration options, 409 `{ error: 'passkey_limit' }`
- *   when the user already has the maximum number of passkeys, or 500 on failure.
+ * @param res - Express response; JSON registration options, 403 `{ error: 'passkey_reauth_required' }`
+ *   when the last Discord login is too old, 409 `{ error: 'passkey_limit' }` when the user already
+ *   has the maximum number of passkeys, or 500 on failure.
  */
 router.post('/register/options', requireAuth, csrfProtection, async (req, res) => {
+  if (!hasRecentDiscordAuth(req)) {
+    res.status(403).json({ ok: false, error: 'passkey_reauth_required' });
+    return;
+  }
   try {
     const user = getSessionUser(req);
     const existing = await listPasskeyDescriptorsForUser(user.discordId);

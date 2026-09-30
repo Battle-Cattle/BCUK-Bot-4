@@ -75,6 +75,10 @@ function buildApp(initialSession: Record<string, unknown> = {}) {
   return { app, session };
 }
 
+function recentDiscordAuth() {
+  return { discordAuthAt: Date.now() - 60_000 };
+}
+
 function futureChallenge(purpose: 'register' | 'login', extra: Record<string, unknown> = {}) {
   return { webauthnChallenge: { purpose, value: 'chal', expiresAt: Date.now() + 60_000, ...extra } };
 }
@@ -131,7 +135,7 @@ describe('POST /register/options', () => {
   it('returns options requiring a user-verified discoverable credential and stores the challenge', async () => {
     const handle = Buffer.alloc(32, 7).toString('base64url');
     vi.mocked(listPasskeyDescriptorsForUser).mockResolvedValue([{ credentialId: 'old', userHandle: handle, transports: ['internal'] }]);
-    const { app, session } = buildApp({ user: USER });
+    const { app, session } = buildApp({ user: USER, ...recentDiscordAuth() });
 
     const res = await supertest(app).post('/register/options');
 
@@ -148,11 +152,29 @@ describe('POST /register/options', () => {
     expect(saveWebauthnChallenge).toHaveBeenCalledWith('reg-chal', 'register', 300);
   });
 
+  it('requires a fresh Discord login when the session has no Discord login timestamp', async () => {
+    const { app, session } = buildApp({ user: USER });
+    const res = await supertest(app).post('/register/options');
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ ok: false, error: 'passkey_reauth_required' });
+    expect(generateRegistrationOptions).not.toHaveBeenCalled();
+    expect(saveWebauthnChallenge).not.toHaveBeenCalled();
+    expect(session.webauthnChallenge).toBeUndefined();
+  });
+
+  it('requires a fresh Discord login when the last one is older than 10 minutes', async () => {
+    const { app } = buildApp({ user: USER, discordAuthAt: Date.now() - 10 * 60 * 1000 - 1000 });
+    const res = await supertest(app).post('/register/options');
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('passkey_reauth_required');
+    expect(generateRegistrationOptions).not.toHaveBeenCalled();
+  });
+
   it('refuses with passkey_limit once the user has 10 passkeys', async () => {
     vi.mocked(listPasskeyDescriptorsForUser).mockResolvedValue(
       Array.from({ length: 10 }, (_, i) => ({ credentialId: `c${i}`, userHandle: 'h', transports: [] })),
     );
-    const { app } = buildApp({ user: USER });
+    const { app } = buildApp({ user: USER, ...recentDiscordAuth() });
     const res = await supertest(app).post('/register/options');
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('passkey_limit');
@@ -163,7 +185,7 @@ describe('POST /register/options', () => {
 describe('POST /register/options — failures', () => {
   it('returns 500 passkey_register_failed when generating options throws', async () => {
     vi.mocked(generateRegistrationOptions).mockRejectedValueOnce(new Error('boom'));
-    const { app, session } = buildApp({ user: USER });
+    const { app, session } = buildApp({ user: USER, ...recentDiscordAuth() });
     const res = await supertest(app).post('/register/options');
     expect(res.status).toBe(500);
     expect(res.body.error).toBe('passkey_register_failed');
@@ -509,13 +531,13 @@ describe('POST /login/verify', () => {
     expect(establishDashboardSession).not.toHaveBeenCalled();
   });
 
-  it('still signs in when recording the counter fails after a verified assertion', async () => {
+  it('rejects the sign-in without creating a session when recording the counter fails', async () => {
     vi.mocked(recordPasskeyUse).mockRejectedValueOnce(new Error('db write failed'));
     const { app } = buildApp(futureChallenge('login'));
     const res = await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, redirect: '/' });
-    expect(establishDashboardSession).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ ok: false, error: 'passkey_failed' });
+    expect(establishDashboardSession).not.toHaveBeenCalled();
   });
 
   it('returns passkey_failed when the library reports the assertion as unverified', async () => {

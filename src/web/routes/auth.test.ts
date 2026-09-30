@@ -96,6 +96,21 @@ describe('GET /discord', () => {
     expect(res.headers.location).toContain('discord.com/oauth2/authorize');
   });
 
+  it.each([
+    ['passkey', '/user/settings?success=passkey_reauthed'],
+    ['https://evil.example', undefined],
+    ['constructor', undefined],
+  ])('maps ?return=%s to the allowlisted return path %s', async (key, expected) => {
+    const session: any = {};
+    const app = express();
+    app.use((req: any, _res: any, next: any) => { req.session = session; next(); });
+    app.use(router);
+    const res = await supertest(app).get('/discord').query({ return: key });
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('discord.com/oauth2/authorize');
+    expect(session.oauthState.returnTo).toBe(expected);
+  });
+
   it('includes client_id and state in the redirect URL', async () => {
     const res = await supertest(buildApp()).get('/discord');
     expect(res.headers.location).toContain('client_id=client_id');
@@ -290,6 +305,28 @@ describe('GET /discord/callback', () => {
       currentGuildId: '555',
       accessLevel: AccessLevel.MOD,
     });
+  });
+
+  it('records the Discord login time and honours the stored return path', async () => {
+    mockFetch([
+      { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
+      { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
+    ]);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER, is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: '555', name: 'Guild', voice_channel_id: null }] as any);
+
+    let capturedSession: any;
+    const before = Date.now();
+    const app = buildApp(
+      { oauthState: { value: 'state123', expiresAt: Date.now() + 60_000, returnTo: '/user/settings?success=passkey_reauthed' } },
+      (session) => { capturedSession = session; },
+    );
+    const res = await supertest(app).get('/discord/callback?code=code&state=state123');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/user/settings?success=passkey_reauthed');
+    expect(capturedSession.discordAuthAt).toBeGreaterThanOrEqual(before);
+    expect(capturedSession.discordAuthAt).toBeLessThanOrEqual(Date.now());
   });
 
   it('updates discord name when fetchMemberDisplayName returns a value', async () => {
@@ -510,6 +547,8 @@ describe('establishDashboardSession', () => {
 
     expect(regenerate).toHaveBeenCalled();
     expect(save).toHaveBeenCalled();
+    // Only the Discord OAuth callback passes discordAuthAt; passkey sign-in leaves it unset.
+    expect(req.session.discordAuthAt).toBeUndefined();
     expect(req.session.user).toEqual({
       discordId: '42',
       discordName: 'Alice',

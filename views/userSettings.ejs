@@ -26,6 +26,9 @@
     <% if (success === 'passkey_added') { %>
     <div class="card card-alert-success">Passkey added. You can now sign in with your fingerprint, face or device PIN.</div>
     <% } %>
+    <% if (success === 'passkey_reauthed') { %>
+    <div class="card card-alert-success">Signed in again with Discord. You can now add a passkey.</div>
+    <% } %>
     <% if (success === 'passkey_removed') { %>
     <div class="card card-alert-success">Passkey removed.</div>
     <% } %>

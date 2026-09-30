@@ -32,7 +32,7 @@ const KNOWN_ERRORS = new Set([
   'passkey_limit',
   'passkey_delete_failed',
 ]);
-const KNOWN_SUCCESSES = new Set(['twitch_connected', 'passkey_added', 'passkey_removed']);
+const KNOWN_SUCCESSES = new Set(['twitch_connected', 'passkey_added', 'passkey_removed', 'passkey_reauthed']);
 
 const ERROR_MESSAGES: Record<string, string> = {
   no_streamer_record:            'You are not configured as a monitored streamer.',

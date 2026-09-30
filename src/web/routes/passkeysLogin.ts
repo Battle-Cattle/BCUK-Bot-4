@@ -43,10 +43,12 @@ type AssertionResult =
 
 /**
  * Verifies a sign-in assertion against its stored passkey and the session's challenge, then
- * records the authenticator's new signature counter (best-effort: a failed write is logged, not fatal).
+ * records the authenticator's new signature counter. The counter write is required: if it fails,
+ * this throws rather than letting the sign-in through.
  * @param assertion - The browser's `navigator.credentials.get()` result.
  * @param expectedChallenge - The challenge taken from the session.
  * @returns The verified passkey, or the failure status/code to reply with.
+ * @throws If the passkey lookup or the counter/last-used write fails.
  */
 async function verifyAssertion(assertion: AuthenticationResponseJSON, expectedChallenge: string): Promise<AssertionResult> {
   const passkey = await findPasskey(assertion.id);
@@ -78,13 +80,10 @@ async function verifyAssertion(assertion: AuthenticationResponseJSON, expectedCh
   }
   if (!verification.verified) return { ok: false, status: 401, error: 'passkey_failed' };
 
-  // Best-effort: the assertion is already verified, so a failed bookkeeping write (counter,
-  // last_used_at) shouldn't turn a valid sign-in into an error.
-  try {
-    await recordPasskeyUse(passkey.credentialId, verification.authenticationInfo.newCounter);
-  } catch (err) {
-    log.warn(`Failed to record use of passkey ${passkey.credentialId}:`, err);
-  }
+  // Strict: the new signature counter must be persisted before the sign-in succeeds, or a cloned
+  // authenticator could replay against the stale counter. A failed write throws, and the route
+  // answers 500 `passkey_failed` without creating a session.
+  await recordPasskeyUse(passkey.credentialId, verification.authenticationInfo.newCounter);
   return { ok: true, passkey };
 }
 
