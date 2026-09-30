@@ -5,6 +5,7 @@ import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 vi.mock('../../db', () => {
   class CommandConflictError extends Error {}
   class CommandNotFoundError extends Error {}
+  class CommandSelfServiceDeniedError extends Error {}
   class ReservedCommandError extends Error {}
   return {
     addCustomCommand: vi.fn().mockResolvedValue(1),
@@ -13,9 +14,11 @@ vi.mock('../../db', () => {
     assignUsersToCommand: vi.fn().mockResolvedValue(undefined),
     findUsersByIds: vi.fn().mockResolvedValue(new Map()),
     findUser: vi.fn().mockResolvedValue(null),
-    getCustomCommandWithAssignments: vi.fn().mockResolvedValue(null),
+    updateOwnCustomCommand: vi.fn().mockResolvedValue(undefined),
+    removeOwnCustomCommand: vi.fn().mockResolvedValue(undefined),
     CommandConflictError,
     CommandNotFoundError,
+    CommandSelfServiceDeniedError,
     ReservedCommandError,
     isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
     AccessLevel: ACCESS_LEVEL_MOCK,
@@ -33,7 +36,7 @@ import supertest from 'supertest';
 import router from './commandMutations';
 import {
   addCustomCommand, updateCustomCommand, removeCustomCommand,
-  assignUsersToCommand, findUsersByIds, findUser, getCustomCommandWithAssignments,
+  assignUsersToCommand, findUsersByIds, findUser, updateOwnCustomCommand, removeOwnCustomCommand, CommandSelfServiceDeniedError,
   CommandConflictError, CommandNotFoundError, ReservedCommandError,
   isMysqlDuplicateEntryError,
 } from '../../db';
@@ -58,7 +61,8 @@ beforeEach(() => {
   vi.mocked(assignUsersToCommand).mockResolvedValue(undefined);
   vi.mocked(findUsersByIds).mockResolvedValue(new Map());
   vi.mocked(findUser).mockResolvedValue(null);
-  vi.mocked(getCustomCommandWithAssignments).mockResolvedValue(null);
+  vi.mocked(updateOwnCustomCommand).mockResolvedValue(undefined);
+  vi.mocked(removeOwnCustomCommand).mockResolvedValue(undefined);
   vi.mocked(isMysqlDuplicateEntryError).mockReturnValue(false);
 });
 
@@ -303,14 +307,6 @@ describe('streamer self-service (below Mod)', () => {
   const STREAMER_SESSION = { discordId: STREAMER_ID, discordName: 'Streamer', accessLevel: AccessLevel.USER };
   const streamerApp = () => buildApp(STREAMER_SESSION);
 
-  /** A command assigned to `assignees`, Twitch-only unless overridden. */
-  function commandFor(assignees: string[], overrides: Record<string, unknown> = {}): any {
-    return {
-      command_id: 5, trigger_string: '!hi', output: 'hi', is_discord_enabled: false, is_multi_twitch: false,
-      assigned_users: assignees.map((discord_id) => ({ discord_id })), ...overrides,
-    };
-  }
-
   describe('POST /commands/add', () => {
     it('redirects to ?error=twitch_not_linked without creating anything when the streamer has no Twitch account', async () => {
       vi.mocked(findUser).mockResolvedValue({ discord_id: STREAMER_ID, twitch_name: null } as any);
@@ -339,58 +335,56 @@ describe('streamer self-service (below Mod)', () => {
   });
 
   describe('POST /commands/update', () => {
-    it('updates a command the streamer owns outright, forcing the Discord/multi-Twitch flags off', async () => {
-      vi.mocked(getCustomCommandWithAssignments).mockResolvedValue(commandFor([STREAMER_ID]));
+    it("updates through updateOwnCustomCommand with the streamer's ID, so ownership is checked inside the write", async () => {
       const res = await supertest(streamerApp())
         .post('/commands/update')
         .send('command_id=5&trigger_string=!hey&output=hey&is_discord_enabled=on&is_multi_twitch=on');
       expect(res.headers.location).toBe('/commands');
-      expect(getCustomCommandWithAssignments).toHaveBeenCalledWith(5);
-      expect(updateCustomCommand).toHaveBeenCalledWith(5, '!hey', 'hey', false, false);
+      expect(updateOwnCustomCommand).toHaveBeenCalledWith(5, '!hey', 'hey', STREAMER_ID);
+      expect(updateCustomCommand).not.toHaveBeenCalled();
+    });
+
+    it('redirects to ?error=forbidden when the locked ownership check denies the update', async () => {
+      vi.mocked(updateOwnCustomCommand).mockRejectedValueOnce(new CommandSelfServiceDeniedError(5));
+      const res = await supertest(streamerApp()).post('/commands/update').send('command_id=5&trigger_string=!hey&output=hey');
+      expect(res.headers.location).toBe('/commands?error=forbidden');
     });
 
     it('redirects to ?error=command_not_found when the command does not exist', async () => {
+      vi.mocked(updateOwnCustomCommand).mockRejectedValueOnce(new CommandNotFoundError(5));
       const res = await supertest(streamerApp()).post('/commands/update').send('command_id=5&trigger_string=!hey&output=hey');
       expect(res.headers.location).toBe('/commands?error=command_not_found');
-      expect(updateCustomCommand).not.toHaveBeenCalled();
     });
 
-    it.each([
-      ['shared with another channel', commandFor([STREAMER_ID, OTHER_ID])],
-      ['assigned to someone else', commandFor([OTHER_ID])],
-      ['Discord-enabled', commandFor([STREAMER_ID], { is_discord_enabled: true })],
-      ['multi-Twitch', commandFor([STREAMER_ID], { is_multi_twitch: true })],
-    ])('redirects to ?error=forbidden when the command is %s', async (_label, command) => {
-      vi.mocked(getCustomCommandWithAssignments).mockResolvedValue(command);
-      const res = await supertest(streamerApp()).post('/commands/update').send('command_id=5&trigger_string=!hey&output=hey');
-      expect(res.headers.location).toBe('/commands?error=forbidden');
-      expect(updateCustomCommand).not.toHaveBeenCalled();
-    });
-
-    it('does not look up ownership for a Mod', async () => {
+    it('uses the unrestricted updateCustomCommand for a Mod', async () => {
       await supertest(buildApp()).post('/commands/update').send('command_id=5&trigger_string=!hey&output=hey');
-      expect(getCustomCommandWithAssignments).not.toHaveBeenCalled();
+      expect(updateOwnCustomCommand).not.toHaveBeenCalled();
       expect(updateCustomCommand).toHaveBeenCalled();
     });
   });
 
   describe('POST /commands/remove', () => {
-    it('deletes a command the streamer owns outright', async () => {
-      vi.mocked(getCustomCommandWithAssignments).mockResolvedValue(commandFor([STREAMER_ID]));
+    it("deletes through removeOwnCustomCommand with the streamer's ID", async () => {
       const res = await supertest(streamerApp()).post('/commands/remove').send('command_id=5');
       expect(res.headers.location).toBe('/commands');
-      expect(removeCustomCommand).toHaveBeenCalledWith(5);
-    });
-
-    it('redirects to ?error=forbidden for a shared command instead of deleting it', async () => {
-      vi.mocked(getCustomCommandWithAssignments).mockResolvedValue(commandFor([STREAMER_ID, OTHER_ID]));
-      const res = await supertest(streamerApp()).post('/commands/remove').send('command_id=5');
-      expect(res.headers.location).toBe('/commands?error=forbidden');
+      expect(removeOwnCustomCommand).toHaveBeenCalledWith(5, STREAMER_ID);
       expect(removeCustomCommand).not.toHaveBeenCalled();
     });
 
-    it('redirects to ?error=remove_failed when the ownership lookup throws', async () => {
-      vi.mocked(getCustomCommandWithAssignments).mockRejectedValueOnce(new Error('DB error'));
+    it('redirects to ?error=forbidden when the locked ownership check denies the delete', async () => {
+      vi.mocked(removeOwnCustomCommand).mockRejectedValueOnce(new CommandSelfServiceDeniedError(5));
+      const res = await supertest(streamerApp()).post('/commands/remove').send('command_id=5');
+      expect(res.headers.location).toBe('/commands?error=forbidden');
+    });
+
+    it('redirects to ?error=command_not_found when the command does not exist', async () => {
+      vi.mocked(removeOwnCustomCommand).mockRejectedValueOnce(new CommandNotFoundError(5));
+      const res = await supertest(streamerApp()).post('/commands/remove').send('command_id=5');
+      expect(res.headers.location).toBe('/commands?error=command_not_found');
+    });
+
+    it('redirects to ?error=remove_failed on an unexpected error', async () => {
+      vi.mocked(removeOwnCustomCommand).mockRejectedValueOnce(new Error('DB error'));
       const res = await supertest(streamerApp()).post('/commands/remove').send('command_id=5');
       expect(res.headers.location).toBe('/commands?error=remove_failed');
     });

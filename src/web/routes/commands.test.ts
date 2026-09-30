@@ -5,7 +5,8 @@ const { ACCESS_LEVEL_MOCK } = vi.hoisted(() => ({
   ACCESS_LEVEL_MOCK: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
-vi.mock('../../db', () => {
+vi.mock('../../db', async () => {
+  const { isCommandSelfManageableBy } = await vi.importActual<typeof import('../../db/commandSelfService')>('../../db/commandSelfService');
   class CommandConflictError extends Error {}
   class CommandNotFoundError extends Error {}
   class ReservedCommandError extends Error {}
@@ -20,7 +21,7 @@ vi.mock('../../db', () => {
     assignUsersToCommand: vi.fn().mockResolvedValue(undefined),
     unassignUserFromCommand: vi.fn().mockResolvedValue(undefined),
     findUser: vi.fn().mockResolvedValue(null),
-    getCustomCommandWithAssignments: vi.fn().mockResolvedValue(null),
+    isCommandSelfManageableBy,
     findUsersByIds: vi.fn().mockResolvedValue(new Map()),
     upsertOverride: vi.fn().mockResolvedValue(undefined),
     removeOverride: vi.fn().mockResolvedValue(undefined),

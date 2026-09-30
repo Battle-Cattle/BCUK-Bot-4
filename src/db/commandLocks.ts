@@ -15,6 +15,7 @@ import { rowExists } from './utils';
 export type { SqlExecutor } from './commandStringUtils';
 export {
   CommandNotFoundError,
+  CommandSelfServiceDeniedError,
   CommandConflictError,
   isMysqlDuplicateEntryError,
 } from './commandStringUtils';

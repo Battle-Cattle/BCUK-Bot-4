@@ -41,6 +41,8 @@ vi.mock('./db/customCommands', () => ({
   addCustomCommand: vi.fn(),
   updateCustomCommand: vi.fn(),
   removeCustomCommand: vi.fn(),
+  updateOwnCustomCommand: vi.fn(),
+  removeOwnCustomCommand: vi.fn(),
   assignUserToCommand: vi.fn(),
   assignUsersToCommand: vi.fn(),
   unassignUserFromCommand: vi.fn(),
@@ -182,6 +184,8 @@ import {
   addCustomCommand as addCustomCommandRecord,
   updateCustomCommand as updateCustomCommandRecord,
   removeCustomCommand as removeCustomCommandRecord,
+  updateOwnCustomCommand as updateOwnCustomCommandRecord,
+  removeOwnCustomCommand as removeOwnCustomCommandRecord,
   assignUserToCommand as assignUserToCommandRecord,
   assignUsersToCommand as assignUsersToCommandRecord,
   unassignUserFromCommand as unassignUserFromCommandRecord,
@@ -216,7 +220,7 @@ import {
 } from './db/sfx';
 import {
   upsertUser, updateTwitchBotEnabled, deleteUnlinkedUser, upsertOverride, removeOverride,
-  addCustomCommand, updateCustomCommand, removeCustomCommand,
+  addCustomCommand, updateCustomCommand, removeCustomCommand, updateOwnCustomCommand, removeOwnCustomCommand,
   assignUserToCommand, assignUsersToCommand, unassignUserFromCommand,
   addCounter, updateCounter, removeCounter, resetCounterCurrentValue,
   incrementCounter, archiveAndResetYearlyCounters,
@@ -398,6 +402,36 @@ describe('removeCustomCommand', () => {
     await removeCustomCommand(1);
     expect(removeCustomCommandRecord).toHaveBeenCalledWith(1);
     expect(invalidateCustomCommandLookupCache).toHaveBeenCalledOnce();
+  });
+});
+
+describe('updateOwnCustomCommand', () => {
+  it('calls the record function and invalidates the cache on success', async () => {
+    vi.mocked(updateOwnCustomCommandRecord).mockResolvedValueOnce(undefined);
+    await updateOwnCustomCommand(1, '!clap', 'Clap!', 'user1');
+    expect(updateOwnCustomCommandRecord).toHaveBeenCalledWith(1, '!clap', 'Clap!', 'user1');
+    expect(invalidateCustomCommandLookupCache).toHaveBeenCalledOnce();
+  });
+
+  it('does not invalidate the cache when the ownership check denies the update', async () => {
+    vi.mocked(updateOwnCustomCommandRecord).mockRejectedValueOnce(new Error('denied'));
+    await expect(updateOwnCustomCommand(1, '!clap', 'Clap!', 'user1')).rejects.toThrow('denied');
+    expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
+  });
+});
+
+describe('removeOwnCustomCommand', () => {
+  it('calls the record function and invalidates the cache on success', async () => {
+    vi.mocked(removeOwnCustomCommandRecord).mockResolvedValueOnce(undefined);
+    await removeOwnCustomCommand(1, 'user1');
+    expect(removeOwnCustomCommandRecord).toHaveBeenCalledWith(1, 'user1');
+    expect(invalidateCustomCommandLookupCache).toHaveBeenCalledOnce();
+  });
+
+  it('does not invalidate the cache when the ownership check denies the delete', async () => {
+    vi.mocked(removeOwnCustomCommandRecord).mockRejectedValueOnce(new Error('denied'));
+    await expect(removeOwnCustomCommand(1, 'user1')).rejects.toThrow('denied');
+    expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
   });
 });
 

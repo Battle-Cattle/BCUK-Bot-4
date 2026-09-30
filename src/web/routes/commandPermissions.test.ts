@@ -1,7 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
-vi.mock('../../db', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
+vi.mock('../../db', async () => ({
+  AccessLevel: ACCESS_LEVEL_MOCK,
+  // The real rule, so these tests pin the page-side wrapper to it.
+  isCommandSelfManageableBy: (await vi.importActual<typeof import('../../db/commandSelfService')>('../../db/commandSelfService')).isCommandSelfManageableBy,
+}));
 
 import { canManageCommandCatalog, isCommandAssignedTo, isCommandSelfManageable } from './commandPermissions';
 

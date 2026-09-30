@@ -5,7 +5,8 @@ import { getOrCreate } from '../shared/mapUtils';
 import { AccessLevel } from './users';
 import type { AccessLevelValue } from './users';
 import { assertNotReservedCommand } from './reservedCommands';
-import { requireTrimmedString, CommandNotFoundError, type SqlExecutor } from './commandStringUtils';
+import { requireTrimmedString, CommandNotFoundError, CommandSelfServiceDeniedError, type SqlExecutor } from './commandStringUtils';
+import { isCommandSelfManageableBy } from './commandSelfService';
 import { acquireNamedLock, releaseNamedLock, commandExists, runSerializedCommandWrite } from './commandLocks';
 import {
   assertDiscordTriggerAvailable, assertMultiTwitchTriggerAvailable, assertNoSingleTwitchAssignmentOverlap,
@@ -62,15 +63,8 @@ export async function getCustomCommandCount(): Promise<number> {
   return getRowCount('custom_command');
 }
 
-/**
- * Runs the command + assignment join, optionally narrowed to one command, and groups the rows
- * into one entry per command with its assigned users.
- * @param commandId - When given, only this command is returned; otherwise every command.
- * @returns Commands ordered by trigger string, each with its full list of assigned users.
- */
-async function queryCommandsWithAssignments(commandId?: number): Promise<DbCustomCommandWithAssignments[]> {
-  const whereClause = commandId === undefined ? '' : 'WHERE c.command_id = ?';
-  const params = commandId === undefined ? [] : [commandId];
+/** Return all custom commands, each with its full list of assigned users. */
+export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCommandWithAssignments[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT c.command_id, c.trigger_string, c.output, c.is_discord_enabled, c.is_multi_twitch,
             tuc.discord_id AS assigned_discord_id,
@@ -79,9 +73,7 @@ async function queryCommandsWithAssignments(commandId?: number): Promise<DbCusto
      FROM custom_command c
      LEFT JOIN twitch_user_commands tuc ON c.command_id = tuc.command_id
      LEFT JOIN \`user\` u ON tuc.discord_id = u.discord_id
-     ${whereClause}
      ORDER BY c.trigger_string, u.discord_name, tuc.discord_id`,
-    params,
   );
 
   const commandMap = new Map<number, DbCustomCommandWithAssignments>();
@@ -107,19 +99,42 @@ async function queryCommandsWithAssignments(commandId?: number): Promise<DbCusto
   return Array.from(commandMap.values());
 }
 
-/** Return all custom commands, each with its full list of assigned users. */
-export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCommandWithAssignments[]> {
-  return queryCommandsWithAssignments();
-}
+// ─── Streamer self-service ────────────────────────────────────────────────────
 
 /**
- * Return one custom command with its full list of assigned users.
- * @param commandId - ID of the command to look up.
- * @returns The command, or null if no command has that ID.
+ * Re-checks {@link isCommandSelfManageableBy} inside the caller's transaction, locking the command
+ * row and its assignment rows (`SELECT … FOR UPDATE`) so a concurrent assignment or flag change
+ * can't land between this check and the caller's write: it either commits first and is seen here,
+ * or waits for this transaction to finish.
+ * @param connection - Connection with an open transaction.
+ * @param commandId - ID of the command being changed.
+ * @param discordId - Discord ID of the streamer.
+ * @throws {CommandNotFoundError} If the command doesn't exist.
+ * @throws {CommandSelfServiceDeniedError} If the streamer doesn't own it outright.
  */
-export async function getCustomCommandWithAssignments(commandId: number): Promise<DbCustomCommandWithAssignments | null> {
-  const [command] = await queryCommandsWithAssignments(commandId);
-  return command ?? null;
+async function assertSelfManageableWithinTransaction(
+  connection: SqlExecutor,
+  commandId: number,
+  discordId: string,
+): Promise<void> {
+  const [commandRows] = await connection.execute<mysql.RowDataPacket[]>(
+    'SELECT is_discord_enabled, is_multi_twitch FROM custom_command WHERE command_id = ? FOR UPDATE',
+    [commandId],
+  );
+  if (commandRows.length === 0) throw new CommandNotFoundError(commandId);
+
+  const [assignmentRows] = await connection.execute<mysql.RowDataPacket[]>(
+    'SELECT discord_id FROM twitch_user_commands WHERE command_id = ? FOR UPDATE',
+    [commandId],
+  );
+  const flags = {
+    is_discord_enabled: fromBit(commandRows[0].is_discord_enabled),
+    is_multi_twitch: fromBit(commandRows[0].is_multi_twitch),
+  };
+  const assignedDiscordIds = assignmentRows.map((row) => String(row.discord_id));
+  if (!isCommandSelfManageableBy(flags, assignedDiscordIds, discordId)) {
+    throw new CommandSelfServiceDeniedError(commandId);
+  }
 }
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
@@ -171,26 +186,31 @@ export async function addCustomCommand(
   return commandId;
 }
 
+/** A custom command's editable fields, as written by {@link writeCustomCommandUpdate}. */
+interface CustomCommandFields {
+  triggerString: string;
+  output: string;
+  isDiscordEnabled: boolean;
+  isMultiTwitch: boolean;
+}
+
 /**
- * Update an existing custom command's trigger string, output, and flags.
- * Validates conflicts against other commands, throws {@link CommandNotFoundError}
- * if the command does not exist.
- *
+ * Shared body of {@link updateCustomCommand} and {@link updateOwnCustomCommand}: validates the
+ * trigger, then — under the trigger's command-write lock, in one transaction — optionally re-checks
+ * streamer ownership, checks conflicts and writes the row.
  * @param commandId - ID of the command to update.
- * @param triggerString - New trigger string; lowercased before storing.
- * @param output - New response text, max 2000 characters.
- * @param isDiscordEnabled - Whether the command responds in Discord.
- * @param isMultiTwitch - Whether the command can be assigned to multiple Twitch streamers.
+ * @param fields - New trigger (lowercased before storing), output (max 2000 characters) and flags.
+ * @param selfServiceDiscordId - When set, the update only goes ahead if this streamer owns the
+ *   command outright, checked inside the transaction ({@link assertSelfManageableWithinTransaction}).
  */
-export async function updateCustomCommand(
+async function writeCustomCommandUpdate(
   commandId: number,
-  triggerString: string,
-  output: string,
-  isDiscordEnabled: boolean,
-  isMultiTwitch: boolean,
+  fields: CustomCommandFields,
+  selfServiceDiscordId?: string,
 ): Promise<void> {
-  const normalizedTriggerString = requireTrimmedString(triggerString, 'trigger_string', 255).toLowerCase();
-  const normalizedOutput = requireTrimmedString(output, 'output', 2000);
+  const { isDiscordEnabled, isMultiTwitch } = fields;
+  const normalizedTriggerString = requireTrimmedString(fields.triggerString, 'trigger_string', 255).toLowerCase();
+  const normalizedOutput = requireTrimmedString(fields.output, 'output', 2000);
 
   assertNotReservedCommand(normalizedTriggerString);
 
@@ -198,6 +218,10 @@ export async function updateCustomCommand(
     normalizedTriggerString,
     { excludeCustomCommandId: commandId },
     async (connection) => {
+      if (selfServiceDiscordId !== undefined) {
+        await assertSelfManageableWithinTransaction(connection, commandId, selfServiceDiscordId);
+      }
+
       if (isDiscordEnabled) {
         await assertDiscordTriggerAvailable(normalizedTriggerString, connection, commandId);
       }
@@ -224,18 +248,67 @@ export async function updateCustomCommand(
 }
 
 /**
- * Delete a custom command and all its user assignments within a transaction.
- * Throws {@link CommandNotFoundError} if the command does not exist.
+ * Update an existing custom command's trigger string, output, and flags.
+ * Validates conflicts against other commands, throws {@link CommandNotFoundError}
+ * if the command does not exist.
  *
- * @param commandId - ID of the command to delete.
+ * @param commandId - ID of the command to update.
+ * @param triggerString - New trigger string; lowercased before storing.
+ * @param output - New response text, max 2000 characters.
+ * @param isDiscordEnabled - Whether the command responds in Discord.
+ * @param isMultiTwitch - Whether the command can be assigned to multiple Twitch streamers.
  */
-export async function removeCustomCommand(commandId: number): Promise<void> {
+export async function updateCustomCommand(
+  commandId: number,
+  triggerString: string,
+  output: string,
+  isDiscordEnabled: boolean,
+  isMultiTwitch: boolean,
+): Promise<void> {
+  await writeCustomCommandUpdate(commandId, { triggerString, output, isDiscordEnabled, isMultiTwitch });
+}
+
+/**
+ * Streamer self-service update: changes a command's trigger and output, keeping it Twitch-only
+ * (Discord and multi-Twitch off), but only if `discordId` owns it outright — re-checked inside the
+ * update's own transaction, so a concurrent assignment or flag change can't slip in between.
+ *
+ * @param commandId - ID of the command to update.
+ * @param triggerString - New trigger string; lowercased before storing.
+ * @param output - New response text, max 2000 characters.
+ * @param discordId - Discord ID of the streamer making the change.
+ * @throws {CommandNotFoundError} If the command doesn't exist.
+ * @throws {CommandSelfServiceDeniedError} If the streamer doesn't own it outright.
+ */
+export async function updateOwnCustomCommand(
+  commandId: number,
+  triggerString: string,
+  output: string,
+  discordId: string,
+): Promise<void> {
+  await writeCustomCommandUpdate(
+    commandId, { triggerString, output, isDiscordEnabled: false, isMultiTwitch: false }, discordId,
+  );
+}
+
+/**
+ * Shared body of {@link removeCustomCommand} and {@link removeOwnCustomCommand}: under the
+ * command's id lock, in one transaction, optionally re-checks streamer ownership, then deletes the
+ * command and its assignments.
+ * @param commandId - ID of the command to delete.
+ * @param selfServiceDiscordId - When set, the delete only goes ahead (and deletes nothing
+ *   otherwise) if this streamer owns the command outright, checked inside the transaction.
+ */
+async function deleteCustomCommand(commandId: number, selfServiceDiscordId?: string): Promise<void> {
   const connection = await getPool().getConnection();
   const lockName = `bcuk_cmdid_${commandId}`;
 
   try {
     await acquireNamedLock(connection, lockName);
     await runInTransaction(connection, async () => {
+      if (selfServiceDiscordId !== undefined) {
+        await assertSelfManageableWithinTransaction(connection, commandId, selfServiceDiscordId);
+      }
       await connection.execute(
         'DELETE FROM twitch_user_commands WHERE command_id = ?',
         [commandId],
@@ -252,6 +325,29 @@ export async function removeCustomCommand(commandId: number): Promise<void> {
     await releaseNamedLock(connection, lockName);
     connection.release();
   }
+}
+
+/**
+ * Delete a custom command and all its user assignments within a transaction.
+ * Throws {@link CommandNotFoundError} if the command does not exist.
+ *
+ * @param commandId - ID of the command to delete.
+ */
+export async function removeCustomCommand(commandId: number): Promise<void> {
+  await deleteCustomCommand(commandId);
+}
+
+/**
+ * Streamer self-service delete: deletes a command only if `discordId` owns it outright, re-checked
+ * inside the delete's own transaction. Deletes nothing when denied.
+ *
+ * @param commandId - ID of the command to delete.
+ * @param discordId - Discord ID of the streamer making the change.
+ * @throws {CommandNotFoundError} If the command doesn't exist.
+ * @throws {CommandSelfServiceDeniedError} If the streamer doesn't own it outright.
+ */
+export async function removeOwnCustomCommand(commandId: number, discordId: string): Promise<void> {
+  await deleteCustomCommand(commandId, discordId);
 }
 
 /**

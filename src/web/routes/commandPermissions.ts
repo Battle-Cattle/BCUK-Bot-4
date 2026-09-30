@@ -1,5 +1,5 @@
 import type { Request } from 'express';
-import { AccessLevel, type DbCustomCommandWithAssignments } from '../../db';
+import { AccessLevel, isCommandSelfManageableBy, type DbCustomCommandWithAssignments } from '../../db';
 
 /**
  * Whether the session user can manage the whole custom-command catalog (every command, every
@@ -25,17 +25,13 @@ export function isCommandAssignedTo(command: DbCustomCommandWithAssignments, dis
 }
 
 /**
- * Whether a streamer below Mod may edit or delete `command` themselves: it must be assigned to
- * them alone, and must not reach beyond their own channel — so not Discord-enabled (fires in every
- * server) and not multi-Twitch (fires in every active Twitch channel). Anything else is read-only
- * to them apart from removing it from their own channel.
+ * Whether a streamer below Mod may edit or delete `command` themselves — the page-side view of
+ * `isCommandSelfManageableBy` (assigned to them alone, not Discord-enabled, not multi-Twitch).
+ * Only decides what the page offers; the write itself re-checks the same rule under a lock.
  * @param command - The command with its assigned users.
  * @param discordId - Discord ID of the streamer.
  * @returns True when the streamer owns the command outright.
  */
 export function isCommandSelfManageable(command: DbCustomCommandWithAssignments, discordId: string): boolean {
-  return command.assigned_users.length === 1
-    && command.assigned_users[0].discord_id === discordId
-    && !command.is_discord_enabled
-    && !command.is_multi_twitch;
+  return isCommandSelfManageableBy(command, command.assigned_users.map((assigned) => assigned.discord_id), discordId);
 }

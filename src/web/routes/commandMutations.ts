@@ -5,18 +5,20 @@ import {
   assignUsersToCommand,
   CommandConflictError,
   CommandNotFoundError,
+  CommandSelfServiceDeniedError,
   isMysqlDuplicateEntryError,
   findUser,
   findUsersByIds,
-  getCustomCommandWithAssignments,
   removeCustomCommand,
+  removeOwnCustomCommand,
   updateCustomCommand,
+  updateOwnCustomCommand,
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
 import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parseCheckboxField, parseDiscordIdList } from './validation';
 import { logAndRedirectError, handleReservedOrConflictCommandError } from './errorHandling';
-import { canManageCommandCatalog, isCommandSelfManageable } from './commandPermissions';
+import { canManageCommandCatalog } from './commandPermissions';
 
 const log = createLogger('Web');
 const router = Router();
@@ -78,18 +80,14 @@ function readCommandForm(req: Request): CommandForm | null {
 }
 
 /**
- * Checks that the session user may edit or delete a command: always for Mod+, otherwise only a
- * command the streamer owns outright (see {@link isCommandSelfManageable}).
- * @param req - Express request; reads the session user.
- * @param commandId - ID of the command being changed.
- * @returns `command_not_found` or `forbidden` when the change isn't allowed, or null when it is.
+ * Maps the not-found/not-yours errors a command write can throw to their redirect codes.
+ * @param err - The error thrown by the write.
+ * @returns `command_not_found`, `forbidden`, or null for any other error.
  */
-async function getSelfServiceDenial(req: Request, commandId: number): Promise<string | null> {
-  if (canManageCommandCatalog(req)) return null;
-  const discordId = req.session.user!.discordId;
-  const command = await getCustomCommandWithAssignments(commandId);
-  if (!command) return 'command_not_found';
-  return isCommandSelfManageable(command, discordId) ? null : 'forbidden';
+function commandAccessErrorCode(err: unknown): string | null {
+  if (err instanceof CommandNotFoundError) return 'command_not_found';
+  if (err instanceof CommandSelfServiceDeniedError) return 'forbidden';
+  return null;
 }
 
 /**
@@ -146,13 +144,14 @@ router.post('/commands/add', requireGuildContext, csrfProtection, async (req, re
 /**
  * POST /commands/update — updates an existing custom command's trigger, output,
  * and Discord/multi-Twitch flags. A streamer below Mod may only update a command they own outright
- * (see {@link isCommandSelfManageable}), and it stays Twitch-only (flags forced off).
+ * (see `isCommandSelfManageableBy`), and it stays Twitch-only (flags forced off).
  * @param req - Express request; reads `command_id`, `trigger_string`, `output`,
  *   `is_discord_enabled`, and `is_multi_twitch` from `req.body`.
  * @param res - Express response; redirects to `/commands` on success, or to
  *   `/commands?error=<code>` if required fields are missing (`missing_fields`),
  *   `command_id` is malformed (`invalid_id`), the command no longer exists
- *   (`command_not_found`), a streamer doesn't own it outright (`forbidden`), the trigger is
+ *   (`command_not_found`), a streamer doesn't own it outright (`forbidden`, checked inside the
+ *   update's own transaction), the trigger is
  *   reserved (`reserved_command`) or already taken (`command_taken`), or the update fails
  *   (`update_failed`).
  */
@@ -166,13 +165,16 @@ router.post('/commands/update', requireGuildContext, csrfProtection, async (req,
   }
 
   try {
-    const denial = await getSelfServiceDenial(req, parsedCommandId);
-    if (denial) return res.redirect(`/commands?error=${denial}`);
-    await updateCustomCommand(parsedCommandId, form.triggerString, form.output, form.isDiscordEnabled, form.isMultiTwitch);
-  } catch (err) {
-    if (err instanceof CommandNotFoundError) {
-      return res.redirect('/commands?error=command_not_found');
+    // A streamer's update/delete goes through the *Own* variants, which re-check ownership inside
+    // the write's own transaction (a pre-read here could go stale before the write).
+    if (canManageCommandCatalog(req)) {
+      await updateCustomCommand(parsedCommandId, form.triggerString, form.output, form.isDiscordEnabled, form.isMultiTwitch);
+    } else {
+      await updateOwnCustomCommand(parsedCommandId, form.triggerString, form.output, req.session.user!.discordId);
     }
+  } catch (err) {
+    const accessErrorCode = commandAccessErrorCode(err);
+    if (accessErrorCode) return res.redirect(`/commands?error=${accessErrorCode}`);
     if (handleReservedOrConflictCommandError(err, res, COMMAND_WRITE_ERROR_OPTIONS)) return;
     return logAndRedirectError({ res, log, logLabel: 'Update custom command error:', err, basePath: '/commands', errorCode: 'update_failed' });
   }
@@ -182,13 +184,14 @@ router.post('/commands/update', requireGuildContext, csrfProtection, async (req,
 
 /**
  * POST /commands/remove — deletes a custom command. A streamer below Mod may only delete a command
- * they own outright (see {@link isCommandSelfManageable}); for a shared one they unassign
+ * they own outright (see `isCommandSelfManageableBy`); for a shared one they unassign
  * themselves via `/commands/unassign` instead.
  * @param req - Express request; reads `command_id` from `req.body`.
  * @param res - Express response; redirects to `/commands` on success or if
  *   `command_id` is absent, or to `/commands?error=<code>` if it's malformed
- *   (`invalid_id`), the command no longer exists (`command_not_found`, streamers only), a
- *   streamer doesn't own it outright (`forbidden`), or the delete fails (`remove_failed`).
+ *   (`invalid_id`), the command no longer exists (`command_not_found`), a streamer doesn't own
+ *   it outright (`forbidden`, checked under the delete's own lock), or the delete fails
+ *   (`remove_failed`).
  */
 router.post('/commands/remove', requireGuildContext, csrfProtection, async (req, res) => {
   const { command_id } = req.body as { command_id?: string };
@@ -200,10 +203,14 @@ router.post('/commands/remove', requireGuildContext, csrfProtection, async (req,
   }
 
   try {
-    const denial = await getSelfServiceDenial(req, parsedCommandId);
-    if (denial) return res.redirect(`/commands?error=${denial}`);
-    await removeCustomCommand(parsedCommandId);
+    if (canManageCommandCatalog(req)) {
+      await removeCustomCommand(parsedCommandId);
+    } else {
+      await removeOwnCustomCommand(parsedCommandId, req.session.user!.discordId);
+    }
   } catch (err) {
+    const accessErrorCode = commandAccessErrorCode(err);
+    if (accessErrorCode) return res.redirect(`/commands?error=${accessErrorCode}`);
     return logAndRedirectError({ res, log, logLabel: 'Remove custom command error:', err, basePath: '/commands', errorCode: 'remove_failed' });
   }
 
