@@ -295,7 +295,8 @@ describe('POST /register/code', () => {
     const res = await supertest(app).post('/register/code');
     expect(res.status).toBe(502);
     expect(res.body.error).toBe('passkey_dm_failed');
-    expect(deletePasskeyEnrollmentCode).toHaveBeenCalledWith('42');
+    const [, codeHash] = vi.mocked(savePasskeyEnrollmentCode).mock.calls[0];
+    expect(deletePasskeyEnrollmentCode).toHaveBeenCalledWith('42', codeHash);
   });
 
   it('returns 500 when storing the code fails', async () => {

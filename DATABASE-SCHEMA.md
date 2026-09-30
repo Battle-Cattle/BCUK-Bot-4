@@ -544,6 +544,7 @@ Expected constraints and behavior:
 
 - `savePasskeyEnrollmentCode` (`src/db/passkeyEnrollmentCodes.ts`) prunes expired rows, replaces the user's code only if it is older than the 60-second resend cooldown, then does a plain `INSERT`; the primary key makes a concurrent second send fail as a duplicate, so the cooldown holds.
 - `consumePasskeyEnrollmentCode` first spends an attempt with `UPDATE ... SET attempts = attempts + 1 WHERE discord_id = ? AND expires_at > NOW() AND attempts < 5`, and only then compares, with a `DELETE ... WHERE discord_id = ? AND code_hash = ?` that consumes a matching code. Concurrent guesses therefore can't exceed 5 per code.
+- If the DM carrying a code can't be delivered, `deletePasskeyEnrollmentCode` removes that code by `discord_id` **and** `code_hash`, so a late cleanup never deletes a newer code issued to the same user.
 
 ## `sessions`
 

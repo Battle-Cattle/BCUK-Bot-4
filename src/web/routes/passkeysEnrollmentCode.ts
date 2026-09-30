@@ -63,7 +63,8 @@ router.post('/register/code', requireAuth, csrfProtection, async (req, res) => {
       return;
     }
     const code = generateEnrollmentCode();
-    if (!(await savePasskeyEnrollmentCode(discordId, hashEnrollmentCode(code), CODE_TTL_SECONDS, CODE_RESEND_COOLDOWN_SECONDS))) {
+    const codeHash = hashEnrollmentCode(code);
+    if (!(await savePasskeyEnrollmentCode(discordId, codeHash, CODE_TTL_SECONDS, CODE_RESEND_COOLDOWN_SECONDS))) {
       res.status(429).json({ ok: false, error: 'passkey_code_throttled' });
       return;
     }
@@ -74,8 +75,9 @@ router.post('/register/code', requireAuth, csrfProtection, async (req, res) => {
         'someone else may have access to your panel session. Sign out of the panel and sign back in.',
     );
     if (!sent) {
-      // Drop the undeliverable code so the user can retry right away once they allow DMs.
-      await deletePasskeyEnrollmentCode(discordId);
+      // Drop the undeliverable code (only this one, never a newer code) so the user can retry
+      // right away once they allow DMs.
+      await deletePasskeyEnrollmentCode(discordId, codeHash);
       res.status(502).json({ ok: false, error: 'passkey_dm_failed' });
       return;
     }

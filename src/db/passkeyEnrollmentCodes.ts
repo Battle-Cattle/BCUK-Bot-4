@@ -73,10 +73,16 @@ export async function consumePasskeyEnrollmentCode(
 }
 
 /**
- * Removes a user's outstanding enrollment code, e.g. when the DM carrying it couldn't be sent, so
- * they can request a new one straight away instead of waiting out the resend cooldown.
- * @param discordId - The user whose code to remove.
+ * Removes one specific enrollment code, e.g. when the DM carrying it couldn't be sent, so the user
+ * can request a new one straight away instead of waiting out the resend cooldown. Matching on the
+ * code's hash as well as the user means a late cleanup for an older code can never delete a newer
+ * code issued to the same user in the meantime.
+ * @param discordId - The user the code was issued to.
+ * @param codeHash - SHA-256 hex digest of the code to remove.
  */
-export async function deletePasskeyEnrollmentCode(discordId: string): Promise<void> {
-  await getPool().execute('DELETE FROM passkey_enrollment_codes WHERE discord_id = ?', [discordId]);
+export async function deletePasskeyEnrollmentCode(discordId: string, codeHash: string): Promise<void> {
+  await getPool().execute(
+    'DELETE FROM passkey_enrollment_codes WHERE discord_id = ? AND code_hash = ?',
+    [discordId, codeHash],
+  );
 }

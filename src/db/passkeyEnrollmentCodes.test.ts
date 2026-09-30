@@ -87,12 +87,15 @@ describe('consumePasskeyEnrollmentCode', () => {
 });
 
 describe('deletePasskeyEnrollmentCode', () => {
-  it("deletes the user's outstanding code", async () => {
+  it('deletes only the given code, so a newer code for the same user survives', async () => {
     const pool = makeMockPool({ executeResult: [{ affectedRows: 1 }, []] });
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    await deletePasskeyEnrollmentCode('42');
+    await deletePasskeyEnrollmentCode('42', 'hash');
 
-    expect(pool.execute).toHaveBeenCalledWith('DELETE FROM passkey_enrollment_codes WHERE discord_id = ?', ['42']);
+    expect(pool.execute).toHaveBeenCalledWith(
+      'DELETE FROM passkey_enrollment_codes WHERE discord_id = ? AND code_hash = ?',
+      ['42', 'hash'],
+    );
   });
 });
