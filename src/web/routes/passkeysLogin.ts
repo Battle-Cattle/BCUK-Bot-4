@@ -43,8 +43,9 @@ type AssertionResult =
 
 /**
  * Verifies a sign-in assertion against its stored passkey and the session's challenge, then
- * records the authenticator's new signature counter. The counter write is required: if it fails,
- * this throws rather than letting the sign-in through.
+ * atomically records the authenticator's new signature counter. The counter must be accepted:
+ * a stale counter (another sign-in claimed it first) or a since-deleted passkey fails the sign-in,
+ * and a failed write throws rather than letting it through.
  * @param assertion - The browser's `navigator.credentials.get()` result.
  * @param expectedChallenge - The challenge taken from the session.
  * @returns The verified passkey, or the failure status/code to reply with.
@@ -80,10 +81,14 @@ async function verifyAssertion(assertion: AuthenticationResponseJSON, expectedCh
   }
   if (!verification.verified) return { ok: false, status: 401, error: 'passkey_failed' };
 
-  // Strict: the new signature counter must be persisted before the sign-in succeeds, or a cloned
-  // authenticator could replay against the stale counter. A failed write throws, and the route
-  // answers 500 `passkey_failed` without creating a session.
-  await recordPasskeyUse(passkey.credentialId, verification.authenticationInfo.newCounter);
+  // Strict: the new signature counter must be accepted atomically before the sign-in succeeds. A
+  // failed write throws (the route answers 500 `passkey_failed`); a rejected one means another
+  // sign-in already claimed this counter value (a possible cloned authenticator) or the passkey
+  // was deleted meanwhile. Either way, no session is created.
+  if (!(await recordPasskeyUse(passkey.credentialId, verification.authenticationInfo.newCounter))) {
+    log.warn(`Passkey ${passkey.credentialId} sign-in rejected: counter already used or passkey removed`);
+    return { ok: false, status: 401, error: 'passkey_failed' };
+  }
   return { ok: true, passkey };
 }
 

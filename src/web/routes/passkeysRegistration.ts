@@ -35,8 +35,7 @@ const CREDENTIAL_ID_PATTERN = /^[A-Za-z0-9_-]{1,512}$/;
  * POST /auth/passkey/register/options — generates WebAuthn registration options for the
  * signed-in user, requiring a discoverable, user-verified (fingerprint/face/PIN) credential.
  * The session must have signed in with Discord within the last few minutes (step-up
- * re-authentication, see `hasRecentDiscordAuth`); the challenge it issues then bounds how long
- * /register/verify can follow.
+ * re-authentication, see `hasRecentDiscordAuth`); /register/verify checks this again.
  * @param req - Express request; requires an authenticated session and CSRF token.
  * @param res - Express response; JSON registration options, 403 `{ error: 'passkey_reauth_required' }`
  *   when the last Discord login is too old, 409 `{ error: 'passkey_limit' }` when the user already
@@ -83,12 +82,19 @@ router.post('/register/options', requireAuth, csrfProtection, async (req, res) =
  * the session's pending challenge and stores the new passkey.
  * @param req - Express request; JSON body `{ response, label }`, requires an authenticated
  *   session and CSRF token.
- * @param res - Express response; `{ ok: true }` on success, 400 `{ error: 'passkey_register_failed' }`
+ * @param res - Express response; `{ ok: true }` on success, 403 `{ error: 'passkey_reauth_required' }`
+ *   when the last Discord login is no longer recent, 400 `{ error: 'passkey_register_failed' }`
  *   when the challenge or response is invalid, 409 `{ error: 'passkey_exists' }` for an
  *   already-registered credential, 409 `{ error: 'passkey_limit' }` if the user reached the
  *   passkey limit since requesting options, or 500 on an unexpected failure.
  */
 router.post('/register/verify', requireAuth, csrfProtection, async (req, res) => {
+  // Re-checked here, not only at /register/options, so the recent-Discord-login requirement
+  // holds when the credential is actually persisted.
+  if (!hasRecentDiscordAuth(req)) {
+    res.status(403).json({ ok: false, error: 'passkey_reauth_required' });
+    return;
+  }
   const user = getSessionUser(req);
   const body = req.body as { response?: unknown; label?: unknown } | undefined;
   let challenge;

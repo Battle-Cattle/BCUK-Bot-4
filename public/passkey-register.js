@@ -26,6 +26,20 @@
   }
 
   /**
+   * Handles the server asking for a fresh Discord login before a passkey can be added: offers to
+   * sign in with Discord again, returning to this page afterwards.
+   * @param {{ data?: { error?: string } }} res - Result from `BCUKPasskey.postJson`.
+   * @returns {boolean} True if re-authentication was required (the caller should stop).
+   */
+  function needsReauth(res) {
+    if (!res.data || res.data.error !== 'passkey_reauth_required') return false;
+    if (window.confirm('For security, please sign in with Discord again before adding a passkey.')) {
+      window.location.href = '/auth/discord?return=passkey';
+    }
+    return true;
+  }
+
+  /**
    * Runs the full registration ceremony: fetch options, prompt the authenticator
    * (fingerprint/face/PIN), then send the result back for verification.
    */
@@ -36,13 +50,7 @@
     addButton.disabled = true;
     try {
       var optionsRes = await window.BCUKPasskey.postJson('/auth/passkey/register/options', {}, csrfToken);
-      if (optionsRes.data && optionsRes.data.error === 'passkey_reauth_required') {
-        // Adding a passkey needs a recent Discord login; come back to this page afterwards.
-        if (window.confirm('For security, please sign in with Discord again before adding a passkey.')) {
-          window.location.href = '/auth/discord?return=passkey';
-        }
-        return;
-      }
+      if (needsReauth(optionsRes)) return;
       if (!optionsRes.ok) {
         finish('error', (optionsRes.data && optionsRes.data.error) || 'passkey_register_failed');
         return;
@@ -64,6 +72,7 @@
         { response: attestation, label: label },
         csrfToken
       );
+      if (needsReauth(verifyRes)) return;
       if (verifyRes.ok) finish('success', 'passkey_added');
       else finish('error', (verifyRes.data && verifyRes.data.error) || 'passkey_register_failed');
     } catch (_err) {

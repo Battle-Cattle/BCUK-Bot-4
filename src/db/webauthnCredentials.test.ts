@@ -171,16 +171,22 @@ describe('insertPasskey', () => {
 });
 
 describe('recordPasskeyUse', () => {
-  it('only ever raises the counter (GREATEST) and stamps last-used time', async () => {
+  it('accepts only a strictly higher counter (or 0 on a counterless authenticator) and stamps last-used time', async () => {
     const pool = makeMockPool({ executeResult: [{ affectedRows: 1 }, []] });
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    await recordPasskeyUse('cred1', 5);
+    await expect(recordPasskeyUse('cred1', 5)).resolves.toBe(true);
 
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain('sign_count = GREATEST(sign_count, ?)');
-    expect(sql).toContain('last_used_at = NOW()');
-    expect(params).toEqual([5, 'cred1']);
+    expect(sql).toContain('SET sign_count = ?, last_used_at = NOW()');
+    expect(sql).toContain('WHERE credential_id = ? AND (sign_count < ? OR (? = 0 AND sign_count = 0))');
+    expect(params).toEqual([5, 'cred1', 5, 5]);
+  });
+
+  it('reports a stale counter or a deleted passkey as not accepted', async () => {
+    const pool = makeMockPool({ executeResult: [{ affectedRows: 0 }, []] });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(recordPasskeyUse('cred1', 5)).resolves.toBe(false);
   });
 });
 

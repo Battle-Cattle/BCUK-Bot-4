@@ -144,18 +144,24 @@ export async function insertPasskey(passkey: NewPasskey, maxPerUser: number): Pr
 }
 
 /**
- * Records a successful sign-in with a passkey: raises the stored signature counter to the
- * authenticator's new value (never lowers it) and stamps `last_used_at`.
+ * Atomically accepts a sign-in's signature counter and stamps `last_used_at`. The update only
+ * matches if the credential still exists and the new counter is strictly greater than the stored
+ * one (or both are 0, for authenticators that don't implement counters). So when two overlapping
+ * sign-ins verified against the same stored counter report the same next value, only the first
+ * is accepted, and a passkey deleted mid-sign-in is rejected rather than silently "recorded".
  * @param credentialId - The passkey that was used.
  * @param signCount - The new signature counter reported by the authenticator.
+ * @returns True if the use was accepted; false if the counter was stale or the passkey is gone.
  */
-export async function recordPasskeyUse(credentialId: string, signCount: number): Promise<void> {
-  await getPool().execute(
-    // GREATEST keeps the counter monotonic: two sign-ins racing each other can't write an older
-    // value over a newer one, which would weaken the library's cloned-authenticator check.
-    'UPDATE webauthn_credentials SET sign_count = GREATEST(sign_count, ?), last_used_at = NOW() WHERE credential_id = ?',
-    [signCount, credentialId],
+export async function recordPasskeyUse(credentialId: string, signCount: number): Promise<boolean> {
+  // affectedRows counts matched rows here (mysql2 sets CLIENT_FOUND_ROWS by default), so a
+  // zero-counter sign-in within the same second as the last one still reports 1.
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    `UPDATE webauthn_credentials SET sign_count = ?, last_used_at = NOW()
+     WHERE credential_id = ? AND (sign_count < ? OR (? = 0 AND sign_count = 0))`,
+    [signCount, credentialId, signCount, signCount],
   );
+  return result.affectedRows === 1;
 }
 
 /**
