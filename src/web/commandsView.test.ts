@@ -53,11 +53,11 @@ describe('views/commands.ejs', () => {
     expect(html).not.toContain('action="/commands/remove"');
   });
 
-  it('offers no "Remove from my channel" for a multi-Twitch command, since unassigning would not stop it', async () => {
+  it('offers "Remove from my channel" for a multi-Twitch command, since it only fires on assigned channels', async () => {
     const html = await render({ commands: [command({ canEdit: false, is_multi_twitch: true })] });
-    expect(html).toContain('Runs in every Twitch channel');
-    expect(html).not.toContain('Remove from my channel');
-    expect(html).not.toContain('action="/commands/unassign"');
+    expect(html).toContain('Remove from my channel');
+    expect(html).toContain('action="/commands/unassign"');
+    expect(html).not.toContain('action="/commands/update"');
   });
 
   it('asks a streamer without a linked Twitch account to link one instead of showing the add form', async () => {

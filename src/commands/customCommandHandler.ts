@@ -155,7 +155,8 @@ export async function resolveSharedChatSessionId(userId: string): Promise<string
 
 /**
  * Sends a multi-twitch custom command's output to every active channel that has the
- * command registered and is part of the source channel's multi-twitch group (falling
+ * command registered (i.e. whose streamer is assigned to it) and is part of the source
+ * channel's multi-twitch group (falling
  * back to the source channel only if it isn't currently in a group). Channels that
  * share a Twitch shared-chat session are de-duplicated via {@link sendDedupedBySession}
  * so only one message is sent per session. Returns true if at least one channel

@@ -37,7 +37,7 @@
       <% } %>
 
       <% if (!canManageCatalog) { %>
-      <p class="hint">These are the commands on your Twitch channel. Commands you add here run in your Twitch chat only. Commands shared with other channels, or enabled on Discord, are managed by the mods &mdash; you can remove them from your channel. Multi-Twitch commands run in every channel, so only a Mod can change them.</p>
+      <p class="hint">These are the commands on your Twitch channel. Commands you add here run in your Twitch chat only. Commands shared with other channels, multi-Twitch commands, and commands enabled on Discord are managed by the mods &mdash; you can remove them from your channel.</p>
       <% } %>
 
       <% if (!canManageCatalog && !twitchLinked) { %>
@@ -155,9 +155,6 @@
                       <input type="hidden" name="command_id" value="<%= command.command_id %>">
                       <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                     </form>
-                    <% } else if (command.is_multi_twitch) { %>
-                    <%# A multi-Twitch command fires in every active channel regardless of assignment, so unassigning wouldn't stop it here. %>
-                    <span class="muted">Runs in every Twitch channel &mdash; ask a Mod to change it</span>
                     <% } else { %>
                     <form method="POST" action="/commands/unassign" class="inline-form-sm">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
