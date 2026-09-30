@@ -275,6 +275,32 @@ describe('updateCustomCommand', () => {
     vi.mocked(runSerializedCommandWrite).mockImplementation(async (_cmds, _opts, writeFn) => writeFn(conn as any));
   }
 
+  it("holds the command's id lock on its own connection around the trigger-locked write, so a concurrent assignment can't validate a stale trigger", async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const order: string[] = [];
+    vi.mocked(acquireNamedLock).mockImplementationOnce(async (_conn, name) => { order.push(`acquire:${name}`); });
+    vi.mocked(releaseNamedLock).mockImplementationOnce(async (_conn, name) => { order.push(`release:${name}`); });
+    vi.mocked(runSerializedCommandWrite).mockImplementationOnce(async () => { order.push('write'); });
+
+    await updateCustomCommand(7, '!clap', 'Clap!', false, false);
+
+    expect(order).toEqual(['acquire:bcuk_cmdid_7', 'write', 'release:bcuk_cmdid_7']);
+    expect(vi.mocked(acquireNamedLock).mock.calls[0][0]).toBe(pool._conn);
+    expect(pool._conn.release).toHaveBeenCalled();
+  });
+
+  it('releases the id lock and connection even when the write fails', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    vi.mocked(runSerializedCommandWrite).mockRejectedValueOnce(new Error('conflict'));
+
+    await expect(updateCustomCommand(7, '!clap', 'Clap!', false, false)).rejects.toThrow('conflict');
+
+    expect(releaseNamedLock).toHaveBeenCalledWith(pool._conn, 'bcuk_cmdid_7');
+    expect(pool._conn.release).toHaveBeenCalled();
+  });
+
   it('calls assertDiscordTriggerAvailable with excludeCommandId when isDiscordEnabled=true', async () => {
     const conn = makeWriteConn([[{ affectedRows: 1 }, []]]);
     setupRunSerializedCommandWrite(conn);
