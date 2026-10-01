@@ -47,8 +47,8 @@ export async function getBotChatToken(): Promise<BotChatToken | null> {
     `SELECT twitch_user_id, access_token, refresh_token, token_expiry, connection_id
      FROM twitch_bot_chat_token WHERE id = 1`,
   );
-  if (rows.length === 0) return null;
   const row = rows[0];
+  if (!row) return null;
   const accessToken = maybeDecrypt(row.access_token ?? null);
   const refreshToken = maybeDecrypt(row.refresh_token ?? null);
   if (!row.twitch_user_id || !accessToken || !refreshToken) return null;
@@ -119,8 +119,9 @@ export async function saveBotChatTokenIfLatestAttempt(
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     'SELECT connection_id, attempt_started_at FROM twitch_bot_chat_token WHERE id = 1',
   );
-  if (rows.length === 0 || Number(rows[0].attempt_started_at) !== attemptId) return null;
-  return Number(rows[0].connection_id);
+  const row = rows[0];
+  if (!row || Number(row.attempt_started_at) !== attemptId) return null;
+  return Number(row.connection_id);
 }
 
 /**

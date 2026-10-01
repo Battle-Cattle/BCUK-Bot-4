@@ -73,7 +73,7 @@ function mockFetch(responses: { ok: boolean; json?: () => Promise<unknown>; stat
   let callIndex = 0;
   return vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
     const r = responses[callIndex++];
-    return Promise.resolve({ ok: r.ok, status: r.status ?? 200, json: r.json ?? (() => Promise.resolve({})) } as Response);
+    return Promise.resolve({ ok: r!.ok, status: r!.status ?? 200, json: r!.json ?? (() => Promise.resolve({})) } as Response);
   });
 }
 
@@ -535,6 +535,15 @@ describe('POST /logout', () => {
 // ─── establishDashboardSession / resolveAccessibleGuilds (shared with passkey login) ──
 
 describe('establishDashboardSession', () => {
+  it('rejects an empty guild list without touching the session', async () => {
+    const regenerate = vi.fn();
+    const req: any = { session: { regenerate } };
+    const dbUser = { discord_id: '42', discord_name: 'Alice', is_owner: false } as any;
+    await expect(establishDashboardSession(req, { id: '42', username: 'alice', avatar: null }, dbUser, []))
+      .rejects.toThrow('accessibleGuilds must be non-empty');
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
   it('regenerates the session and stores the same user payload the Discord callback builds', async () => {
     const guild = { guild_id: 'g1', name: 'Guild One', voice_channel_id: null };
     vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.MANAGER);

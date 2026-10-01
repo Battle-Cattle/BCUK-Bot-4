@@ -107,7 +107,7 @@ export async function getStreamerByDiscordId(discordId: string): Promise<DbStrea
      WHERE s.discord_id = ?`,
     [discordId],
   );
-  return rows.length === 0 ? null : mapStreamerEventSub(rows[0]);
+  return rows[0] ? mapStreamerEventSub(rows[0]) : null;
 }
 
 /**
@@ -124,7 +124,7 @@ export async function getStreamerById(id: number): Promise<DbStreamerEventSub | 
      WHERE s.id = ?`,
     [id],
   );
-  return rows.length === 0 ? null : mapStreamerEventSub(rows[0]);
+  return rows[0] ? mapStreamerEventSub(rows[0]) : null;
 }
 
 /**

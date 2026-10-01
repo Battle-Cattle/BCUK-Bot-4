@@ -128,15 +128,16 @@ async function assertOwnershipWithinTransaction(
     'SELECT is_discord_enabled, is_multi_twitch FROM custom_command WHERE command_id = ? FOR UPDATE',
     [commandId],
   );
-  if (commandRows.length === 0) throw new CommandNotFoundError(commandId);
+  const commandRow = commandRows[0];
+  if (!commandRow) throw new CommandNotFoundError(commandId);
 
   const [assignmentRows] = await connection.execute<mysql.RowDataPacket[]>(
     'SELECT discord_id FROM twitch_user_commands WHERE command_id = ? FOR UPDATE',
     [commandId],
   );
   const flags = {
-    is_discord_enabled: fromBit(commandRows[0].is_discord_enabled),
-    is_multi_twitch: fromBit(commandRows[0].is_multi_twitch),
+    is_discord_enabled: fromBit(commandRow.is_discord_enabled),
+    is_multi_twitch: fromBit(commandRow.is_multi_twitch),
   };
   const assignedDiscordIds = assignmentRows.map((row) => String(row.discord_id));
   if (!check.allows(flags, assignedDiscordIds, check.discordId)) {

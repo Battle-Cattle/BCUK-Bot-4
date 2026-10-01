@@ -170,10 +170,11 @@ export async function createEventSubSubscription(
     throw new Error(`[TwitchAPI] createEventSubSubscription (${type}) failed: ${res.status} ${errBody}`);
   }
   const data = await res.json() as { data: Array<{ id: string }> };
-  if (!Array.isArray(data.data) || data.data.length === 0) {
+  const subscription = Array.isArray(data.data) ? data.data[0] : undefined;
+  if (!subscription) {
     throw new Error(`[TwitchAPI] createEventSubSubscription (${type}) returned empty data`);
   }
-  return data.data[0].id;
+  return subscription.id;
 }
 
 /** Lists EventSub subscriptions. With a user token returns the broadcaster's subscriptions —

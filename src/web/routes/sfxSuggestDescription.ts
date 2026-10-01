@@ -57,7 +57,8 @@ export function sampleFilesForSuggestion(files: SfxFile[], maxSample: number = M
     const idx = Math.round((i * (innerCount + 1)) / (remaining + 1));
     selected.add(Math.min(Math.max(idx, 1), innerCount));
   }
-  return Array.from(selected).sort((a, b) => a - b).map((i) => sorted[i]);
+  // Every index in `selected` is within 0..lastIndex, so each lookup hits.
+  return Array.from(selected).sort((a, b) => a - b).map((i) => sorted[i]!);
 }
 
 /**
@@ -168,7 +169,7 @@ export async function requestDescriptionSuggestion(
     ],
   });
 
-  const text = completion.choices[0]?.message?.content?.trim();
+  const text = completion.choices[0]?.message.content?.trim();
   if (!text) throw new Error('OpenAI returned an empty description');
   return text.length > MAX_DESCRIPTION_LENGTH ? text.slice(0, MAX_DESCRIPTION_LENGTH) : text;
 }

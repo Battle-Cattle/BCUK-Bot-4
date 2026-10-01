@@ -26,7 +26,7 @@ export async function getMemberAccessLevel(guildId: string, discordId: string): 
     'SELECT access_level FROM guild_member WHERE guild_id = ? AND discord_id = ? LIMIT 1',
     [guildId, discordId],
   );
-  return rows.length === 0 ? null : (rows[0].access_level as number);
+  return rows[0] ? (rows[0].access_level as number) : null;
 }
 
 // ─── Mutations ─────────────────────────────────────────────────────────────────

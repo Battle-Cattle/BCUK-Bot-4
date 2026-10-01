@@ -57,7 +57,7 @@ export async function findUser(discordId: string): Promise<DbUser | null> {
     `SELECT ${USER_SELECT} FROM \`user\` WHERE discord_id = ?`,
     [discordId],
   );
-  return rows.length === 0 ? null : mapUser(rows[0]);
+  return rows[0] ? mapUser(rows[0]) : null;
 }
 
 /**
@@ -105,7 +105,7 @@ export async function findUserByTwitchName(twitchName: string, excludeDiscordId?
     ? [normalizedTwitchName, excludeDiscordId]
     : [normalizedTwitchName];
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(sql, params);
-  return rows.length === 0 ? null : mapUser(rows[0]);
+  return rows[0] ? mapUser(rows[0]) : null;
 }
 
 /**
@@ -116,7 +116,7 @@ export async function findOwnerUser(): Promise<DbUser | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT ${USER_SELECT} FROM \`user\` WHERE is_owner = 1 LIMIT 1`,
   );
-  return rows.length === 0 ? null : mapUser(rows[0]);
+  return rows[0] ? mapUser(rows[0]) : null;
 }
 
 /** Returns every user row, ordered by access level (highest first) then name. */

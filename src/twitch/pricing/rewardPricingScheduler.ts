@@ -16,7 +16,7 @@ let currentTickPromise: Promise<void> = Promise.resolve();
 
 /** True if `error` is MySQL's `ER_SERVER_SHUTDOWN` (errno 1053) — the DB server itself is restarting/shutting down. */
 function isServerShutdownError(error: unknown): boolean {
-  const err = error as { code?: string; errno?: number };
+  const err = error as { code?: string; errno?: number } | null | undefined;
   return err?.code === 'ER_SERVER_SHUTDOWN' || err?.errno === 1053;
 }
 

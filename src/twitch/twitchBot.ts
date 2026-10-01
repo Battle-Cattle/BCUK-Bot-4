@@ -176,6 +176,9 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
 
     recordChatMessage(normalizedChannel);
 
+    // Twurple types displayName as always set (it falls back to the login itself); the extra
+    // fallback is kept, and tested, as a guard against an unset value.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     const displayName = msg.userInfo.displayName ?? user ?? null;
     const isMod = msg.userInfo.isMod || msg.userInfo.isBroadcaster;
     // Parsed once and threaded into every handler below instead of each one re-parsing

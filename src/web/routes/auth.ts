@@ -197,7 +197,7 @@ async function resolveInitialGuildAndAccessLevel(
   accessibleGuilds: DbGuild[],
   dbUser: DbUser,
 ): Promise<{ currentGuildId: string | null; accessLevel: SessionUser['accessLevel'] }> {
-  const currentGuildId = accessibleGuilds.length === 1 ? accessibleGuilds[0].guild_id : null;
+  const currentGuildId = accessibleGuilds.length === 1 ? accessibleGuilds[0]!.guild_id : null; // length checked
   const accessLevel = currentGuildId
     ? ((await getEffectiveAccessLevelForUser(currentGuildId, dbUser)) as SessionUser['accessLevel'])
     : AccessLevel.USER;
@@ -262,6 +262,7 @@ async function saveSessionUser(req: Request, userData: SessionUser, discordAuthA
  * @param options - `discordAuthAt`: set only by the Discord OAuth callback, recording when the
  *   user last proved control of their Discord account (checked before adding a passkey).
  * @returns Resolves once the new session has been saved.
+ * @throws If `accessibleGuilds` is empty (callers reject that case before calling).
  */
 export async function establishDashboardSession(
   req: Request,
@@ -270,7 +271,9 @@ export async function establishDashboardSession(
   accessibleGuilds: DbGuild[],
   options: { discordAuthAt?: number } = {},
 ): Promise<void> {
-  const syncedDiscordName = await syncDiscordName(profile, dbUser, accessibleGuilds[0].guild_id);
+  const firstGuild = accessibleGuilds[0];
+  if (!firstGuild) throw new Error('establishDashboardSession: accessibleGuilds must be non-empty');
+  const syncedDiscordName = await syncDiscordName(profile, dbUser, firstGuild.guild_id);
   const guildAndAccessLevel = await resolveInitialGuildAndAccessLevel(accessibleGuilds, dbUser);
   const userData = buildSessionUser(profile, dbUser, syncedDiscordName, accessibleGuilds, guildAndAccessLevel);
   await saveSessionUser(req, userData, options.discordAuthAt);

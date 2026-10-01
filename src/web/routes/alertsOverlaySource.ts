@@ -105,7 +105,7 @@ router.get('/assets/:streamerId/:filename', async (req, res) => {
   }
   if (!realPath) { res.status(404).end(); return; }
 
-  const ext = match[1].toLowerCase();
+  const ext = match[1]!.toLowerCase(); // FILENAME_RE always captures the extension
   res.setHeader('Content-Type', CONTENT_TYPES[ext] ?? 'application/octet-stream');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   // A TOCTOU race is possible here: the file can be removed (e.g. via the delete-asset route)

@@ -94,7 +94,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
       ? { ...streamer, eventsub_access_token: null, eventsub_refresh_token: null }
       : null;
 
-    const needsReconnect = isConnected && !!(streamer?.twitch_name) && hasAuthFailedSubs(streamer.twitch_name);
+    const needsReconnect = isConnected && !!streamer.twitch_name && hasAuthFailedSubs(streamer.twitch_name);
 
     renderView(res, 'userSettings', {
       user: req.session.user,

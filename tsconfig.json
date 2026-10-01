@@ -9,6 +9,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,

@@ -63,7 +63,7 @@ function formatMonitorLine(snapshot: HealthSnapshot): string {
 
 /** Formats one line per tracked scheduler, or `[]` if none are tracked yet. */
 function formatSchedulerLines(snapshot: HealthSnapshot): string[] {
-  const entries = Object.entries(snapshot.schedulers).filter(([, health]) => health !== undefined);
+  const entries = Object.entries(snapshot.schedulers);
   if (entries.length === 0) return [];
   return [
     'Schedulers:',

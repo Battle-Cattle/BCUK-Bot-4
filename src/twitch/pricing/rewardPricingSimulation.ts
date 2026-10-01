@@ -122,6 +122,6 @@ export function simulateConstantUsageCycle(config: SimulationConfig): Simulation
     peakDemand,
     peakCost,
     peakAtMs,
-    totalDurationMs: points[points.length - 1].t,
+    totalDurationMs: points.at(-1)?.t ?? 0,
   };
 }

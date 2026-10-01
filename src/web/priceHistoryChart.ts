@@ -19,7 +19,7 @@ const HTML_ESCAPE_PATTERN = /[&<>"']/g;
 
 /** Escapes HTML/XML special characters so a value is safe to embed as SVG text or an attribute value. */
 function escapeHtml(value: string | number): string {
-  return String(value).replace(HTML_ESCAPE_PATTERN, (char) => HTML_ESCAPES[char]);
+  return String(value).replace(HTML_ESCAPE_PATTERN, (char) => HTML_ESCAPES[char] ?? char);
 }
 
 /**
@@ -97,7 +97,7 @@ export function renderPriceHistoryChart(
 
   const pixelPoints = sorted.map((p) => ({ x: toX(p.t), y: toY(p.cost), t: p.t, cost: p.cost }));
   const polyline = pixelPoints.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-  const last = pixelPoints[pixelPoints.length - 1];
+  const last = pixelPoints[pixelPoints.length - 1]!; // `points` is non-empty: checked above
 
   const dataPoints = JSON.stringify(sorted.map((p) => [p.t, p.cost]));
   const ariaLabel = escapeHtml(

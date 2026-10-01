@@ -9,7 +9,7 @@ export interface WeightedFile { file: string; weight: number }
  */
 export function pickWeightedRandom(files: WeightedFile[]): string {
   if (files.length === 0) throw new Error('No files to pick from');
-  if (files.length === 1) return files[0].file;
+  if (files.length === 1) return files[0]!.file;
 
   const totalWeight = files.reduce((sum, f) => sum + (f.weight > 0 ? f.weight : 1), 0);
   let rand = Math.random() * totalWeight;
@@ -21,5 +21,5 @@ export function pickWeightedRandom(files: WeightedFile[]): string {
   }
 
   // Fallback (floating point edge case)
-  return files[files.length - 1].file;
+  return files[files.length - 1]!.file; // non-empty: checked above
 }

@@ -73,8 +73,9 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
       res.redirect('/auth/login');
       return;
     }
-    if (user.guilds.length === 1) {
-      user.currentGuildId = user.guilds[0].guildId;
+    const [onlyGuild] = user.guilds;
+    if (user.guilds.length === 1 && onlyGuild) {
+      user.currentGuildId = onlyGuild.guildId;
     } else {
       res.redirect('/guild/select');
       return;
@@ -103,7 +104,7 @@ function requireAccessLevel(level: number, label: string): (req: Request, res: R
       renderView(res, 'error', {
         message: `Access denied — ${label} required.`,
         user: req.session.user ?? null,
-        csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
+        csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
       });
     }
   };
@@ -228,7 +229,7 @@ export function requireOwner(req: Request, res: Response, next: NextFunction): v
     renderView(res, 'error', {
       message: 'Access denied — Owner required.',
       user: req.session.user ?? null,
-      csrfToken: req.session?.user ? ensureSessionCsrfToken(req) : '',
+      csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
     });
   }
 }

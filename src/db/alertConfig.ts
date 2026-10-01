@@ -106,7 +106,7 @@ export async function getAlertConfig(streamerId: number, eventType: AlertEventTy
      WHERE streamer_id = ? AND event_type = ?`,
     [streamerId, eventType],
   );
-  return rows.length === 0 ? null : mapRow(rows[0]);
+  return rows[0] ? mapRow(rows[0]) : null;
 }
 
 /**
@@ -203,7 +203,7 @@ async function setAlertAssetColumn(
       );
       return null;
     }
-    const previous: string | null = rows[0][column] ?? null;
+    const previous: string | null = rows[0]?.[column] ?? null;
     await conn.execute(
       `UPDATE alert_config SET ${column} = ? WHERE streamer_id = ? AND event_type = ?`,
       [filename, streamerId, eventType],

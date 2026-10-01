@@ -85,8 +85,8 @@ export async function findPasskey(credentialId: string): Promise<StoredPasskey |
      FROM webauthn_credentials WHERE credential_id = ?`,
     [credentialId],
   );
-  if (rows.length === 0) return null;
   const r = rows[0];
+  if (!r) return null;
   return {
     credentialId: String(r.credential_id),
     discordId: String(r.discord_id),
@@ -119,7 +119,7 @@ export async function insertPasskey(passkey: NewPasskey, maxPerUser: number): Pr
       );
       // COUNT(*) comes back as a BIGINT string (bigNumberStrings), but it's bounded by the per-user
       // passkey limit (single digits), so parsing it to a number here is safe.
-      if (Number.parseInt(String(countRows[0].count), 10) >= maxPerUser) return 'limit';
+      if (Number.parseInt(String(countRows[0]!.count), 10) >= maxPerUser) return 'limit'; // COUNT(*) always returns one row
 
       await conn.execute(
         `INSERT INTO webauthn_credentials

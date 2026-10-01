@@ -162,7 +162,7 @@ export async function getCounterCount(guildId: string): Promise<number> {
   // COUNT(*) is protocol-typed BIGINT, so bigNumberStrings stringifies it — but like
   // getRowCount in utils.ts, this value is bounded by how many counters a human configures in
   // one guild's admin panel, nowhere near Number.MAX_SAFE_INTEGER, so parsing it back is safe.
-  return Number.parseInt(rows[0].count, 10);
+  return Number.parseInt(rows[0]!.count, 10); // COUNT(*) always returns exactly one row
 }
 
 /**
@@ -259,9 +259,9 @@ export async function getCounterHistory(
      LIMIT 1`,
     [id, guildId],
   );
-  if (rows.length === 0) return null;
-
   const row = rows[0];
+  if (!row) return null;
+
   const counter = mapCounter(row);
   const existingColumnSet = new Set(existingColumns);
   const history: CounterHistoryEntry[] = Array.from(ARCHIVE_YEAR_COLUMNS.entries())
@@ -339,8 +339,9 @@ async function getCounterCommandsById(
     'SELECT trigger_command, check_command FROM counter WHERE id = ? AND guild_id = ? LIMIT 1',
     [id, guildId],
   );
-  if (rows.length === 0) return null;
-  return { trigger_command: rows[0].trigger_command, check_command: rows[0].check_command };
+  const row = rows[0];
+  if (!row) return null;
+  return { trigger_command: row.trigger_command, check_command: row.check_command };
 }
 
 /**
@@ -464,7 +465,7 @@ export async function incrementCounter(id: number): Promise<number> {
     // application counter incremented one chat message at a time, nowhere near
     // Number.MAX_SAFE_INTEGER (unlike a Discord snowflake, which is why that case is never
     // parsed back this way elsewhere in this codebase).
-    return Number(rows[0].current_value);
+    return Number(rows[0]!.current_value); // SELECT LAST_INSERT_ID() always returns one row
   });
   return newValue;
 }
