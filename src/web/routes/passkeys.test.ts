@@ -153,7 +153,7 @@ describe('POST /register/options', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ challenge: 'reg-chal' });
-    const opts = vi.mocked(generateRegistrationOptions).mock.calls[0][0];
+    const opts = vi.mocked(generateRegistrationOptions).mock.calls[0]![0];
     expect(opts.rpID).toBe('panel.example.com');
     expect(opts.authenticatorSelection).toEqual({ residentKey: 'required', userVerification: 'required' });
     expect(opts.excludeCredentials).toEqual([{ id: 'old', transports: ['internal'] }]);
@@ -250,9 +250,9 @@ describe('POST /register/code', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true });
-    const [discordId, codeHash, ttl, cooldown] = vi.mocked(savePasskeyEnrollmentCode).mock.calls[0];
+    const [discordId, codeHash, ttl, cooldown] = vi.mocked(savePasskeyEnrollmentCode).mock.calls[0]!;
     expect([discordId, ttl, cooldown]).toEqual(['42', 300, 60]);
-    const [dmTo, message] = vi.mocked(sendDiscordDirectMessage).mock.calls[0];
+    const [dmTo, message] = vi.mocked(sendDiscordDirectMessage).mock.calls[0]!;
     expect(dmTo).toBe('42');
     const code = /\*\*(\d{6})\*\*/.exec(message)?.[1];
     expect(code).toBeDefined();
@@ -295,7 +295,7 @@ describe('POST /register/code', () => {
     const res = await supertest(app).post('/register/code');
     expect(res.status).toBe(502);
     expect(res.body.error).toBe('passkey_dm_failed');
-    const [, codeHash] = vi.mocked(savePasskeyEnrollmentCode).mock.calls[0];
+    const [, codeHash] = vi.mocked(savePasskeyEnrollmentCode).mock.calls[0]!;
     expect(deletePasskeyEnrollmentCode).toHaveBeenCalledWith('42', codeHash);
   });
 
@@ -356,7 +356,7 @@ describe('POST /register/verify', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true });
-    expect(vi.mocked(verifyRegistrationResponse).mock.calls[0][0]).toMatchObject({
+    expect(vi.mocked(verifyRegistrationResponse).mock.calls[0]![0]).toMatchObject({
       expectedChallenge: 'chal',
       expectedOrigin: 'https://panel.example.com',
       expectedRPID: 'panel.example.com',
@@ -458,7 +458,7 @@ describe('POST /register/verify', () => {
     const { app } = buildApp({ user: USER, ...recentDiscordAuth(), ...futureChallenge('register', { discordId: '42', userHandle: 'user-handle' }) });
     const res = await supertest(app).post('/register/verify').send({ response: CREDENTIAL });
     expect(res.status).toBe(200);
-    expect(vi.mocked(insertPasskey).mock.calls[0][0].transports).toEqual([]);
+    expect(vi.mocked(insertPasskey).mock.calls[0]![0].transports).toEqual([]);
   });
 
   it('returns 500 when saving the passkey throws', async () => {
@@ -579,7 +579,7 @@ describe('POST /login/verify', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true, redirect: '/' });
-    expect(vi.mocked(verifyAuthenticationResponse).mock.calls[0][0]).toMatchObject({
+    expect(vi.mocked(verifyAuthenticationResponse).mock.calls[0]![0]).toMatchObject({
       expectedChallenge: 'chal',
       expectedOrigin: 'https://panel.example.com',
       expectedRPID: 'panel.example.com',
@@ -600,7 +600,7 @@ describe('POST /login/verify', () => {
     vi.mocked(fetchDiscordUserProfile).mockResolvedValue(null);
     const { app } = buildApp(futureChallenge('login'));
     await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
-    expect(vi.mocked(establishDashboardSession).mock.calls[0][1]).toEqual({ id: '42', username: 'Alice', avatar: null });
+    expect(vi.mocked(establishDashboardSession).mock.calls[0]![1]).toEqual({ id: '42', username: 'Alice', avatar: null });
   });
 
   it('rejects without a pending login challenge', async () => {
@@ -713,7 +713,7 @@ describe('POST /login/verify', () => {
     vi.mocked(findUser).mockResolvedValueOnce({ ...dbUser, discord_name: null } as any);
     const { app } = buildApp(futureChallenge('login'));
     await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
-    expect(vi.mocked(establishDashboardSession).mock.calls[0][1]).toEqual({ id: '42', username: '42', avatar: null });
+    expect(vi.mocked(establishDashboardSession).mock.calls[0]![1]).toEqual({ id: '42', username: '42', avatar: null });
   });
 
   it('returns not_whitelisted when the user has since been removed', async () => {

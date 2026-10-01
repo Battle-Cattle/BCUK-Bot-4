@@ -73,24 +73,24 @@ describe('getStreamGroupsForGuild', () => {
     const row = { id: 1, guild_id: 1n, name: 'G', discord_channel: '123', live_message: 'live', new_game_message: 'game', multi_twitch: 1, delete_old_posts: 0 };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [group] = await getStreamGroupsForGuild(GUILD_ID);
-    expect(group.multi_twitch).toBe(true);
-    expect(group.delete_old_posts).toBe(false);
-    expect(group.guild_id).toBe('1');
+    expect(group!.multi_twitch).toBe(true);
+    expect(group!.delete_old_posts).toBe(false);
+    expect(group!.guild_id).toBe('1');
   });
 
   it('maps multi_twitch as Buffer 0x01 → true', async () => {
     const row = { id: 1, guild_id: GUILD_ID, name: 'G', discord_channel: '123', live_message: 'l', new_game_message: 'g', multi_twitch: Buffer.from([1]), delete_old_posts: Buffer.from([0]) };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [group] = await getStreamGroupsForGuild(GUILD_ID);
-    expect(group.multi_twitch).toBe(true);
-    expect(group.delete_old_posts).toBe(false);
+    expect(group!.multi_twitch).toBe(true);
+    expect(group!.delete_old_posts).toBe(false);
   });
 
   it('coerces discord_channel to string', async () => {
     const row = { id: 1, guild_id: GUILD_ID, name: 'G', discord_channel: 99999n, live_message: 'l', new_game_message: 'g', multi_twitch: 0, delete_old_posts: 0 };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [group] = await getStreamGroupsForGuild(GUILD_ID);
-    expect(group.discord_channel).toBe('99999');
+    expect(group!.discord_channel).toBe('99999');
   });
 
   it('maps multiple rows', async () => {
@@ -101,8 +101,8 @@ describe('getStreamGroupsForGuild', () => {
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const result = await getStreamGroupsForGuild(GUILD_ID);
     expect(result).toHaveLength(2);
-    expect(result[1].id).toBe(2);
-    expect(result[1].multi_twitch).toBe(true);
+    expect(result[1]!.id).toBe(2);
+    expect(result[1]!.multi_twitch).toBe(true);
   });
 });
 
@@ -113,7 +113,7 @@ describe('addStreamGroup', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await addStreamGroup({ guildId: GUILD_ID, name: 'G', discordChannel: '123', liveMessage: 'l', newGameMessage: 'g', multiTwitch: true, deleteOldPosts: false });
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params[0]).toBe(GUILD_ID);
     expect(params).toContain(1);  // multiTwitch
     expect(params).toContain(0);  // deleteOldPosts
@@ -123,7 +123,7 @@ describe('addStreamGroup', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await addStreamGroup({ guildId: GUILD_ID, name: 'MyGroup', discordChannel: 'chan1', liveMessage: 'is live', newGameMessage: 'new game', multiTwitch: false, deleteOldPosts: true });
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params).toContain('MyGroup');
     expect(params).toContain('chan1');
     expect(params).toContain('is live');
@@ -187,7 +187,7 @@ describe('updateStreamGroup', () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
     await updateStreamGroup({ id: 42, guildId: GUILD_ID, name: 'G', discordChannel: 'c', liveMessage: 'l', newGameMessage: 'g', multiTwitch: false, deleteOldPosts: false });
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params[params.length - 2]).toBe(42);
     expect(params[params.length - 1]).toBe(GUILD_ID);
   });
@@ -196,7 +196,7 @@ describe('updateStreamGroup', () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
     await updateStreamGroup({ id: 1, guildId: GUILD_ID, name: 'G', discordChannel: 'c', liveMessage: 'l', newGameMessage: 'g', multiTwitch: false, deleteOldPosts: false });
-    const sql = (pool.execute.mock.calls[0][0] as string).toLowerCase();
+    const sql = (pool.execute.mock.calls[0]![0] as string).toLowerCase();
     expect(sql).toContain('update');
     expect(sql).toContain('guild_id=?');
   });
@@ -290,17 +290,17 @@ describe('getStreamersForGuild', () => {
     const row = { id: 1, discord_id: 123n, group_id: 5, twitch_name: 'alice', discord_name: 'Alice', group_name: 'Group A' };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getStreamersForGuild(GUILD_ID);
-    expect(s.discord_id).toBe('123');
-    expect(s.twitch_name).toBe('alice');
-    expect(s.group_name).toBe('Group A');
+    expect(s!.discord_id).toBe('123');
+    expect(s!.twitch_name).toBe('alice');
+    expect(s!.group_name).toBe('Group A');
   });
 
   it('maps null twitch_name and discord_name to null', async () => {
     const row = { id: 2, discord_id: '456', group_id: 1, twitch_name: null, discord_name: null, group_name: 'G' };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getStreamersForGuild(GUILD_ID);
-    expect(s.twitch_name).toBeNull();
-    expect(s.discord_name).toBeNull();
+    expect(s!.twitch_name).toBeNull();
+    expect(s!.discord_name).toBeNull();
   });
 });
 
@@ -330,12 +330,12 @@ describe('getAllStreamersWithGroups', () => {
     };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getAllStreamersWithGroups();
-    expect(s.live_game).toBe('Minecraft');
-    expect(s.discord_message_id).toBe('msg1');
-    expect(s.group.id).toBe(2);
-    expect(s.group.guild_id).toBe(GUILD_ID);
-    expect(s.group.multi_twitch).toBe(true);
-    expect(s.group.delete_old_posts).toBe(false);
+    expect(s!.live_game).toBe('Minecraft');
+    expect(s!.discord_message_id).toBe('msg1');
+    expect(s!.group.id).toBe(2);
+    expect(s!.group.guild_id).toBe(GUILD_ID);
+    expect(s!.group.multi_twitch).toBe(true);
+    expect(s!.group.delete_old_posts).toBe(false);
   });
 
   it('coerces discord_channel_id to string when set', async () => {
@@ -347,7 +347,7 @@ describe('getAllStreamersWithGroups', () => {
     };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getAllStreamersWithGroups();
-    expect(s.discord_channel_id).toBe('99999');
+    expect(s!.discord_channel_id).toBe('99999');
   });
 
   it('maps null discord_channel_id to null', async () => {
@@ -359,7 +359,7 @@ describe('getAllStreamersWithGroups', () => {
     };
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getAllStreamersWithGroups();
-    expect(s.discord_channel_id).toBeNull();
+    expect(s!.discord_channel_id).toBeNull();
   });
 });
 
@@ -408,7 +408,7 @@ describe('setStreamerLive', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await setStreamerLive(1, 'msg42', 'chan99', 'Fortnite');
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params).toContain('msg42');
     expect(params).toContain('chan99');
     expect(params).toContain('Fortnite');

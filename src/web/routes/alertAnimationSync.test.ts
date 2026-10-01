@@ -71,12 +71,12 @@ function extractBracketBlock(source: string, marker: string): string {
 
 /** Extracts object-literal key names (quoted or bare) from a `{ ... }` block's inner text. */
 function extractObjectKeys(objectBody: string): string[] {
-  return [...objectBody.matchAll(/(?:'([^']+)'|(\w[\w-]*))\s*:/g)].map((m) => m[1] ?? m[2]);
+  return [...objectBody.matchAll(/(?:'([^']+)'|(\w[\w-]*))\s*:/g)].map((m) => (m[1] ?? m[2])!);
 }
 
 /** Extracts single-quoted string literals from an array-literal block's inner text. */
 function extractQuotedStrings(arrayBody: string): string[] {
-  return [...arrayBody.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  return [...arrayBody.matchAll(/'([^']+)'/g)].map((m) => m[1]!);
 }
 
 // Every alert text animation other than 'none' (which renders as plain unrecognised/no-op text,

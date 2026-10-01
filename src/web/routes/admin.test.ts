@@ -353,7 +353,7 @@ describe('POST /users/update', () => {
 
     const [runOrder] = mockQueueRunMany.mock.invocationCallOrder;
     const [checkOrder] = vi.mocked(getMemberAccessLevel).mock.invocationCallOrder;
-    expect(runOrder).toBeLessThan(checkOrder);
+    expect(runOrder).toBeLessThan(checkOrder!);
   });
 });
 

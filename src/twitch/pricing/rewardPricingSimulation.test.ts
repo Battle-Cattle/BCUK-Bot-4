@@ -35,7 +35,7 @@ describe('simulateConstantUsageCycle', () => {
     // a real cooldown-gated ramp should dip (decay) at least once before the next redemption.
     const result = simulateConstantUsageCycle(config);
     const ramp = result.points.filter((p) => p.t <= result.peakAtMs);
-    const hasDip = ramp.some((p, i) => i > 0 && p.cost < ramp[i - 1].cost);
+    const hasDip = ramp.some((p, i) => i > 0 && p.cost < ramp[i - 1]!.cost);
     expect(hasDip).toBe(true);
   });
 
@@ -54,7 +54,7 @@ describe('simulateConstantUsageCycle', () => {
     });
     expect(jumps.length).toBeGreaterThan(1);
     for (let i = 1; i < jumps.length; i++) {
-      expect(jumps[i].cost).toBeGreaterThanOrEqual(jumps[i - 1].cost);
+      expect(jumps[i]!.cost).toBeGreaterThanOrEqual(jumps[i - 1]!.cost);
     }
   });
 
@@ -70,16 +70,16 @@ describe('simulateConstantUsageCycle', () => {
     const result = simulateConstantUsageCycle(config);
     const cooldown = result.points.filter((p) => p.t >= result.peakAtMs);
     for (let i = 1; i < cooldown.length; i++) {
-      expect(cooldown[i].cost).toBeLessThanOrEqual(cooldown[i - 1].cost);
+      expect(cooldown[i]!.cost).toBeLessThanOrEqual(cooldown[i - 1]!.cost);
     }
-    expect(cooldown[cooldown.length - 1].cost).toBeLessThan(cooldown[0].cost);
+    expect(cooldown[cooldown.length - 1]!.cost).toBeLessThan(cooldown[0]!.cost);
   });
 
   it('starts at baseCost and ends within 1% of baseCost', () => {
     const result = simulateConstantUsageCycle(config);
-    expect(result.points[0].cost).toBe(config.baseCost);
+    expect(result.points[0]!.cost).toBe(config.baseCost);
     const last = result.points[result.points.length - 1];
-    expect(last.cost).toBeLessThan(config.baseCost * 1.01);
+    expect(last!.cost).toBeLessThan(config.baseCost * 1.01);
   });
 
   it("every point's cost matches computePrice for its implied demand", () => {

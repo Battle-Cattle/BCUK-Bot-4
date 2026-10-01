@@ -19,10 +19,10 @@ describe('saveWebauthnChallenge', () => {
     await saveWebauthnChallenge('chal', 'login', 300);
 
     const calls = pool.execute.mock.calls as [string, unknown[]?][];
-    expect(calls[0][0]).toContain('DELETE FROM webauthn_challenges WHERE expires_at <= NOW()');
-    expect(calls[1][0]).toContain('INSERT INTO webauthn_challenges');
-    expect(calls[1][0]).toContain('DATE_ADD(NOW(), INTERVAL ? SECOND)');
-    expect(calls[1][1]).toEqual(['chal', 'login', 300]);
+    expect(calls[0]![0]).toContain('DELETE FROM webauthn_challenges WHERE expires_at <= NOW()');
+    expect(calls[1]![0]).toContain('INSERT INTO webauthn_challenges');
+    expect(calls[1]![0]).toContain('DATE_ADD(NOW(), INTERVAL ? SECOND)');
+    expect(calls[1]![1]).toEqual(['chal', 'login', 300]);
   });
 });
 

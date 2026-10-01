@@ -49,7 +49,7 @@ describe('getGuildsForMember', () => {
     const result = await getGuildsForMember('555');
 
     expect(result).toEqual([{ guild_id: '111', name: 'Alpha', voice_channel_id: '222', access_level: 2 }]);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('JOIN guild_member');
     expect(sql).toContain('gm.access_level');
     expect(params).toEqual(['555']);
@@ -71,7 +71,7 @@ describe('getProvisionedGuilds', () => {
     const result = await getProvisionedGuilds();
 
     expect(result).toEqual([{ guild_id: '111', name: 'Alpha', voice_channel_id: '222' }]);
-    const [sql] = pool.execute.mock.calls[0];
+    const [sql] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('EXISTS');
     expect(sql).toContain('guild_member');
   });
@@ -105,7 +105,7 @@ describe('upsertGuild', () => {
   it('inserts with a name-only conflict update so existing config is preserved', async () => {
     await upsertGuild('111', 'Alpha');
 
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('INSERT INTO guild');
     expect(sql).toContain('ON DUPLICATE KEY UPDATE name = new_guild.name');
     expect(sql).not.toContain('voice_channel_id =');

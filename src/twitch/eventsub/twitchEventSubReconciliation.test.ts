@@ -45,7 +45,7 @@ function mockFulfilledOnly(...pages: Array<{ redemptions: ReturnType<typeof rede
   let call = 0;
   vi.mocked(getRewardRedemptions).mockImplementation(async (_uid, _rewardId, status) => {
     if (status !== 'FULFILLED') return { redemptions: [], cursor: null };
-    const page = pages[Math.min(call, pages.length - 1)];
+    const page = pages[Math.min(call, pages.length - 1)]!;
     call++;
     return page;
   });
@@ -485,7 +485,7 @@ describe('runReconciliationTick', () => {
     // Only 2 pages fetched for the FULFILLED status — page 2's cutoff redemption stopped a 3rd page fetch.
     const fulfilledCalls = vi.mocked(getRewardRedemptions).mock.calls.filter(([, , status]) => status === 'FULFILLED');
     expect(fulfilledCalls).toHaveLength(2);
-    expect(fulfilledCalls[1][4]).toBe('page-2-cursor'); // second call passed the first page's cursor as `after`
+    expect(fulfilledCalls[1]![4]).toBe('page-2-cursor'); // second call passed the first page's cursor as `after`
   });
 
   it('does not advance the cursor past a redemption that fails to handle, so it is retried on the next tick', async () => {
@@ -504,7 +504,7 @@ describe('runReconciliationTick', () => {
     await runReconciliationTick();
 
     expect(handleRedemption).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(handleRedemption).mock.calls[1][1]).toEqual(expect.objectContaining({ id: 'r1' }));
+    expect(vi.mocked(handleRedemption).mock.calls[1]![1]).toEqual(expect.objectContaining({ id: 'r1' }));
   });
 
   it('advances the cursor past redemptions that succeeded even when a later one in the same tick fails', async () => {
@@ -533,7 +533,7 @@ describe('runReconciliationTick', () => {
     await runReconciliationTick();
 
     expect(handleRedemption).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(handleRedemption).mock.calls[0][1]).toEqual(expect.objectContaining({ id: 'r3' }));
+    expect(vi.mocked(handleRedemption).mock.calls[0]![1]).toEqual(expect.objectContaining({ id: 'r3' }));
   });
 
   it('logs a "caught" warning only when handleRedemption reports it actually processed the redemption', async () => {

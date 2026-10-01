@@ -176,7 +176,7 @@ describe('findUserByTwitchName', () => {
     const pool = makePool([[]]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await findUserByTwitchName('alice', '999');
-    const sql: string = vi.mocked(pool.execute).mock.calls[0][0] as string;
+    const sql: string = vi.mocked(pool.execute).mock.calls[0]![0] as string;
     expect(sql).toContain('discord_id <> ?');
   });
 
@@ -184,7 +184,7 @@ describe('findUserByTwitchName', () => {
     const pool = makePool([[]]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await findUserByTwitchName('alice');
-    const sql: string = vi.mocked(pool.execute).mock.calls[0][0] as string;
+    const sql: string = vi.mocked(pool.execute).mock.calls[0]![0] as string;
     expect(sql).not.toContain('discord_id <> ?');
   });
 });
@@ -217,7 +217,7 @@ describe('findOwnerUser', () => {
     const pool = makePool([[]]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await findOwnerUser();
-    const sql: string = vi.mocked(pool.execute).mock.calls[0][0] as string;
+    const sql: string = vi.mocked(pool.execute).mock.calls[0]![0] as string;
     expect(sql).toContain('is_owner = 1');
   });
 });
@@ -239,10 +239,10 @@ describe('getAllUsers', () => {
     vi.mocked(getPool).mockReturnValue(makePool([rows]) as any);
     const result = await getAllUsers();
     expect(result).toHaveLength(2);
-    expect(result[0].discord_id).toBe('1');
-    expect(result[1].is_twitch_bot_enabled).toBe(true);
-    expect(result[0].is_owner).toBe(true);
-    expect(result[1].is_owner).toBe(false);
+    expect(result[0]!.discord_id).toBe('1');
+    expect(result[1]!.is_twitch_bot_enabled).toBe(true);
+    expect(result[0]!.is_owner).toBe(true);
+    expect(result[1]!.is_owner).toBe(false);
   });
 });
 
@@ -264,8 +264,8 @@ describe('getGuildMemberUsers', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getGuildMemberUsers('900000000000000001');
     expect(result).toHaveLength(1);
-    expect(result[0].discord_id).toBe('1');
-    expect(result[0].access_level).toBe(3);
+    expect(result[0]!.discord_id).toBe('1');
+    expect(result[0]!.access_level).toBe(3);
     const [sql, params] = vi.mocked(pool.execute).mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('guild_member');
     expect(params).toEqual(['900000000000000001']);
@@ -322,7 +322,7 @@ describe('upsertUserRecord', () => {
     const result = await upsertUserRecord('1', 'Alice', 0, '  SomeChannel ');
     expect(result).toBe(true);
     expect(normalizeTwitchChannelName).toHaveBeenCalledWith('SomeChannel');
-    const params = pool._conn.execute.mock.calls[1][1] as unknown[];
+    const params = pool._conn.execute.mock.calls[1]![1] as unknown[];
     expect(params[3]).toBe('somechannel');
     expect(params[4]).toBe(1); // twitchNameProvided → overwrite the stored name
   });
@@ -331,7 +331,7 @@ describe('upsertUserRecord', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await upsertUserRecord('1', '   ', 0);
-    const params = pool._conn.execute.mock.calls[1][1] as unknown[];
+    const params = pool._conn.execute.mock.calls[1]![1] as unknown[];
     expect(params[1]).toBeNull();
   });
 });
@@ -422,7 +422,7 @@ describe('setTwitchBotEnabledRecord', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await setTwitchBotEnabledRecord('1', true);
-    const params = pool._conn.execute.mock.calls[1][1] as unknown[];
+    const params = pool._conn.execute.mock.calls[1]![1] as unknown[];
     expect(params[0]).toBe(1);
   });
 
@@ -430,7 +430,7 @@ describe('setTwitchBotEnabledRecord', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await setTwitchBotEnabledRecord('1', false);
-    const params = pool._conn.execute.mock.calls[1][1] as unknown[];
+    const params = pool._conn.execute.mock.calls[1]![1] as unknown[];
     expect(params[0]).toBe(0);
   });
 });
@@ -458,7 +458,7 @@ describe('deleteUnlinkedUserRecord', () => {
     const schema = readFileSync(path.join(__dirname, '../../schema.sql'), 'utf8');
     const referencing: string[] = [];
     for (const [, table, body] of schema.matchAll(/CREATE TABLE IF NOT EXISTS `?(\w+)`?\s*\(([\s\S]*?)\)\s*ENGINE/g)) {
-      for (const [, column] of body.matchAll(/FOREIGN KEY \((\w+)\) REFERENCES `?user`?\s*\(discord_id\)/g)) {
+      for (const [, column] of body!.matchAll(/FOREIGN KEY \((\w+)\) REFERENCES `?user`?\s*\(discord_id\)/g)) {
         referencing.push(`${table}.${column}`);
       }
     }

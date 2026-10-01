@@ -87,35 +87,35 @@ describe('getAllEventSubStreamers', () => {
   it('maps a row with no config (follow_enabled=null) to config=null', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([makeRow()]) as any);
     const [s] = await getAllEventSubStreamers();
-    expect(s.config).toBeNull();
+    expect(s!.config).toBeNull();
   });
 
   it('maps a row with config correctly, including BIT flags', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([makeRowWithConfig()]) as any);
     const [s] = await getAllEventSubStreamers();
-    expect(s.config).not.toBeNull();
-    expect(s.config!.follow_enabled).toBe(true);
-    expect(s.config!.sub_enabled).toBe(false);
-    expect(s.config!.raid_enabled).toBe(true);
-    expect(s.config!.raid_shoutout_enabled).toBe(true);
+    expect(s!.config).not.toBeNull();
+    expect(s!.config!.follow_enabled).toBe(true);
+    expect(s!.config!.sub_enabled).toBe(false);
+    expect(s!.config!.raid_enabled).toBe(true);
+    expect(s!.config!.raid_shoutout_enabled).toBe(true);
   });
 
   it('maps BIT(1) config flags as Buffer correctly', async () => {
     const row = makeRowWithConfig({ follow_enabled: Buffer.from([1]), sub_enabled: Buffer.from([0]), raid_enabled: Buffer.from([0]), raid_shoutout_enabled: Buffer.from([1]) });
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getAllEventSubStreamers();
-    expect(s.config!.follow_enabled).toBe(true);
-    expect(s.config!.sub_enabled).toBe(false);
-    expect(s.config!.raid_enabled).toBe(false);
-    expect(s.config!.raid_shoutout_enabled).toBe(true);
+    expect(s!.config!.follow_enabled).toBe(true);
+    expect(s!.config!.sub_enabled).toBe(false);
+    expect(s!.config!.raid_enabled).toBe(false);
+    expect(s!.config!.raid_shoutout_enabled).toBe(true);
   });
 
   it('decrypts access and refresh tokens via maybeDecrypt', async () => {
     const row = makeRow({ eventsub_access_token: 'enc:accessabc', eventsub_refresh_token: 'enc:refreshxyz' });
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getAllEventSubStreamers();
-    expect(s.eventsub_access_token).toBe('accessabc');
-    expect(s.eventsub_refresh_token).toBe('refreshxyz');
+    expect(s!.eventsub_access_token).toBe('accessabc');
+    expect(s!.eventsub_refresh_token).toBe('refreshxyz');
   });
 
   it('returns null tokens when decryptToken throws', async () => {
@@ -123,28 +123,28 @@ describe('getAllEventSubStreamers', () => {
     const row = makeRow({ eventsub_access_token: 'corrupted', eventsub_refresh_token: 'bad' });
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getAllEventSubStreamers();
-    expect(s.eventsub_access_token).toBeNull();
-    expect(s.eventsub_refresh_token).toBeNull();
+    expect(s!.eventsub_access_token).toBeNull();
+    expect(s!.eventsub_refresh_token).toBeNull();
   });
 
   it('coerces discord_id to string', async () => {
     const row = makeRow({ discord_id: 12345n });
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getAllEventSubStreamers();
-    expect(s.discord_id).toBe('12345');
+    expect(s!.discord_id).toBe('12345');
   });
 
   it('preserves eventsub_token_expiry as a string (BIGINT — no Number coercion)', async () => {
     const row = makeRow({ eventsub_token_expiry: '9007199254740993' });
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getAllEventSubStreamers();
-    expect(s.eventsub_token_expiry).toBe('9007199254740993');
+    expect(s!.eventsub_token_expiry).toBe('9007199254740993');
   });
 
   it('maps eventsub_token_expiry=null to null', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([makeRow()]) as any);
     const [s] = await getAllEventSubStreamers();
-    expect(s.eventsub_token_expiry).toBeNull();
+    expect(s!.eventsub_token_expiry).toBeNull();
   });
 
   it('returns null for token when EVENTSUB_TOKEN_SECRET is absent but token value is present', async () => {
@@ -152,7 +152,7 @@ describe('getAllEventSubStreamers', () => {
     const row = makeRow({ eventsub_access_token: 'some-encrypted-token' });
     vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
     const [s] = await getAllEventSubStreamers();
-    expect(s.eventsub_access_token).toBeNull();
+    expect(s!.eventsub_access_token).toBeNull();
   });
 });
 
@@ -174,7 +174,7 @@ describe('getStreamerByDiscordId', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getStreamerByDiscordId('abc');
-    expect(pool.execute.mock.calls[0][1]).toContain('abc');
+    expect(pool.execute.mock.calls[0]![1]).toContain('abc');
   });
 });
 
@@ -190,7 +190,7 @@ describe('getStreamerById', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getStreamerById(42);
-    expect(pool.execute.mock.calls[0][1]).toContain(42);
+    expect(pool.execute.mock.calls[0]![1]).toContain(42);
   });
 
   it('maps and returns the found row', async () => {
@@ -217,7 +217,7 @@ describe('saveStreamerToken', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveStreamerToken(1, 'uid', 'myaccess', 'myrefresh', 1234567890);
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params).toContain('enc:myaccess');
     expect(params).toContain('enc:myrefresh');
     expect(params).not.toContain('myaccess');
@@ -228,7 +228,7 @@ describe('saveStreamerToken', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveStreamerToken(7, 'u123', 'a', 'r', 9999);
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params).toContain('u123');
     expect(params).toContain(9999);
     expect(params).toContain(7);
@@ -276,7 +276,7 @@ describe('initEventConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await initEventConfig(3);
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql.toUpperCase()).toContain('INSERT IGNORE');
   });
 
@@ -284,7 +284,7 @@ describe('initEventConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await initEventConfig(42);
-    expect(pool.execute.mock.calls[0][1]).toContain(42);
+    expect(pool.execute.mock.calls[0]![1]).toContain(42);
   });
 
   it('includes raid_shoutout_enabled (defaulting to disabled/0) in the SQL and params', async () => {
@@ -316,7 +316,7 @@ describe('saveEventConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveEventConfig(1, eventConfig);
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql.toUpperCase()).toContain('ON DUPLICATE KEY UPDATE');
   });
 
@@ -324,7 +324,7 @@ describe('saveEventConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveEventConfig(1, eventConfig);
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     // follow_enabled=true → 1, sub_enabled=false → 0
     expect(params).toContain(1);
     expect(params).toContain(0);
@@ -334,7 +334,7 @@ describe('saveEventConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveEventConfig(1, eventConfig);
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params).toContain('follow!');
     expect(params).toContain('sub!');
     expect(params).toContain('resub!');
@@ -350,7 +350,7 @@ describe('saveEventConfig', () => {
     expect(sql).toContain('raid_shoutout_enabled');
 
     await saveEventConfig(1, { ...eventConfig, raid_shoutout_enabled: false });
-    const paramsOff: unknown[] = pool.execute.mock.calls[1][1];
+    const paramsOff: unknown[] = pool.execute.mock.calls[1]![1];
     expect(params[params.length - 1]).toBe(1);
     expect(paramsOff[paramsOff.length - 1]).toBe(0);
   });

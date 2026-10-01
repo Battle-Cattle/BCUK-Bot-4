@@ -119,7 +119,7 @@ describe('saveBotChatTokenIfLatestAttempt', () => {
     const pool = makeAttemptPool(1000);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'myaccess', 'myrefresh', 1234567890);
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params).toContain('enc:myaccess');
     expect(params).toContain('enc:myrefresh');
     expect(params).not.toContain('myaccess');
@@ -130,7 +130,7 @@ describe('saveBotChatTokenIfLatestAttempt', () => {
     const pool = makeAttemptPool(1000);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveBotChatTokenIfLatestAttempt(1000, 'u123', 'a', 'r', 9999);
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params).toEqual(['u123', 'enc:a', 'enc:r', 9999, 1000]);
   });
 
@@ -138,7 +138,7 @@ describe('saveBotChatTokenIfLatestAttempt', () => {
     const pool = makeAttemptPool(1000);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null);
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql.toUpperCase()).toContain('ON DUPLICATE KEY UPDATE');
   });
 
@@ -146,7 +146,7 @@ describe('saveBotChatTokenIfLatestAttempt', () => {
     const pool = makeAttemptPool(1000);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null);
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql).toContain('twitch_bot_chat_token.connection_id + 1');
   });
 
@@ -154,7 +154,7 @@ describe('saveBotChatTokenIfLatestAttempt', () => {
     const pool = makeAttemptPool(1000);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null);
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     const updateClause = sql.slice(sql.toUpperCase().indexOf('ON DUPLICATE KEY UPDATE'));
     for (const column of ['twitch_user_id', 'access_token', 'refresh_token', 'token_expiry', 'connection_id', 'attempt_started_at']) {
       // Only the assignment target itself may appear unqualified (i.e. not preceded by `.`).

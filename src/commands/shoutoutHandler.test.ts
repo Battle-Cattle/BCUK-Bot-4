@@ -84,7 +84,7 @@ describe('executeShoutoutForTwitch', () => {
       '#chan',
       expect.stringContaining('Go give @newbie a follow'),
     );
-    const msg: string = mockRuntime.send.mock.calls[0][1];
+    const msg: string = mockRuntime.send.mock.calls[0]![1];
     expect(msg).not.toContain('last seen playing');
   });
 

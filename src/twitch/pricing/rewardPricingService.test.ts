@@ -329,7 +329,7 @@ describe('applyDecayTick', () => {
       last_pushed_cost: null,
     }));
     await applyDecayTick(1, 'rwd1');
-    const [, , fieldsArg] = vi.mocked(recordPricingUpdate).mock.calls[0];
+    const [, , fieldsArg] = vi.mocked(recordPricingUpdate).mock.calls[0]!;
     const demandArg = fieldsArg.demand;
     // decay(0.5, ~300s elapsed, half_life=1800s) = 0.5 * 2^(-300/1800)
     expect(demandArg).toBeCloseTo(0.5 * Math.pow(2, -300 / 1800), 2);
@@ -352,7 +352,7 @@ describe('applyDecayTick', () => {
     await applyDecayTick(1, 'rwd1', hintSettings);
 
     expect(getPricingSettingsForStreamer).not.toHaveBeenCalled();
-    const [, , fieldsArg] = vi.mocked(recordPricingUpdate).mock.calls[0];
+    const [, , fieldsArg] = vi.mocked(recordPricingUpdate).mock.calls[0]!;
     const demandArg = fieldsArg.demand;
     // decay(0.5, ~300s elapsed, half_life=60s from the hint, not the default 1800s) ≈ 0
     expect(demandArg).toBeCloseTo(0.5 * Math.pow(2, -300 / 60), 4);
@@ -398,7 +398,7 @@ describe('resetAndDeletePricing', () => {
     expect(deletePricingConfig).toHaveBeenCalledWith(42, 1);
     const [resetOrder] = vi.mocked(updateRewardCost).mock.invocationCallOrder;
     const [deleteOrder] = vi.mocked(deletePricingConfig).mock.invocationCallOrder;
-    expect(resetOrder).toBeLessThan(deleteOrder);
+    expect(resetOrder).toBeLessThan(deleteOrder!);
   });
 
   it('skips the reset (but still deletes) when the reward is marked unsupported', async () => {
@@ -462,7 +462,7 @@ describe('deleteRewardAndPricing', () => {
     expect(deletePricingConfig).toHaveBeenCalledWith(42, 1);
     const [deleteRewardOrder] = vi.mocked(deleteCustomReward).mock.invocationCallOrder;
     const [deleteConfigOrder] = vi.mocked(deletePricingConfig).mock.invocationCallOrder;
-    expect(deleteRewardOrder).toBeLessThan(deleteConfigOrder);
+    expect(deleteRewardOrder).toBeLessThan(deleteConfigOrder!);
   });
 
   it('deletes the reward on Twitch without touching the local config when none exists', async () => {

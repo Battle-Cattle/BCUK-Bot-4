@@ -378,8 +378,8 @@ describe('reconnect', () => {
       await firstRejection;
 
       // The stale failure destroys only the connection it created — not the still-live one.
-      expect(firstConn.destroy).toHaveBeenCalled();
-      expect(liveConn.destroy).not.toHaveBeenCalled();
+      expect(firstConn!.destroy).toHaveBeenCalled();
+      expect(liveConn!.destroy).not.toHaveBeenCalled();
       expect(mod.isConnected('guild-A')).toBe(true);
 
       // Nor does it schedule a reconnect that would supersede the in-flight attempt.
@@ -390,7 +390,7 @@ describe('reconnect', () => {
       finishSecondReady();
       await secondConnect;
       expect(mod.getCurrentChannelId('guild-A')).toBe('chan-2');
-      expect(secondConn.destroy).not.toHaveBeenCalled();
+      expect(secondConn!.destroy).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -442,11 +442,11 @@ describe('reconnect', () => {
 
         failFirstReady(new Error('ready timeout'));
         await firstRejection;
-        expect(sharedConn.destroy).not.toHaveBeenCalled();
+        expect(sharedConn!.destroy).not.toHaveBeenCalled();
 
         finishSecondReady();
         await secondConnect;
-        expect(sharedConn.destroy).not.toHaveBeenCalled();
+        expect(sharedConn!.destroy).not.toHaveBeenCalled();
         expect(mod.isConnected('guild-A')).toBe(true);
         expect(mod.getCurrentChannelId('guild-A')).toBe('chan-2');
       } finally {
@@ -475,13 +475,13 @@ describe('reconnect', () => {
 
         failFirstReady(new Error('ready timeout'));
         await firstRejection;
-        expect(sharedConn.destroy).not.toHaveBeenCalled();
+        expect(sharedConn!.destroy).not.toHaveBeenCalled();
 
         finishSecondReady();
         await secondConnect;
         expect(mod.isConnected('guild-A')).toBe(true);
         expect(mod.getCurrentChannelId('guild-A')).toBe('chan-2');
-        expect(sharedConn.destroy).not.toHaveBeenCalled();
+        expect(sharedConn!.destroy).not.toHaveBeenCalled();
       } finally {
         vi.useRealTimers();
       }
@@ -502,7 +502,7 @@ describe('reconnect', () => {
       finishReady();
       await pending;
 
-      expect(conn.destroy).toHaveBeenCalledOnce();
+      expect(conn!.destroy).toHaveBeenCalledOnce();
       expect(mod.isConnected('guild-A')).toBe(false);
     });
   });
@@ -538,7 +538,7 @@ describe('reconnect', () => {
       expect(mod.isConnected('guild-A')).toBe(true);
 
       const conn = createdConnections[0];
-      const dropHandler = conn.on.mock.calls.find(([e]) => e === 'disconnected')?.[1] as () => Promise<void>;
+      const dropHandler = conn!.on.mock.calls.find(([e]) => e === 'disconnected')?.[1] as () => Promise<void>;
       vi.mocked(status.setVoiceDisconnected).mockClear();
       // The Signalling/Connecting recovery race fails → the connection is torn down.
       vi.mocked(voice.entersState).mockRejectedValue(new Error('gone'));
@@ -546,7 +546,7 @@ describe('reconnect', () => {
       await dropHandler();
 
       expect(mod.isConnected('guild-A')).toBe(false);
-      expect(conn.destroy).toHaveBeenCalled();
+      expect(conn!.destroy).toHaveBeenCalled();
       expect(vi.mocked(status.setVoiceDisconnected)).toHaveBeenCalledWith('guild-A');
     } finally {
       vi.useRealTimers();
@@ -604,7 +604,7 @@ describe('per-guild audio player', () => {
     mod.startPlayback({} as never, 'guild-B');
     vi.mocked(status.setVoiceIdle).mockClear();
 
-    const idleHandlerA = players[0].on.mock.calls.find(([e]) => e === 'idle')?.[1] as () => void;
+    const idleHandlerA = players[0]!.on.mock.calls.find(([e]) => e === 'idle')?.[1] as () => void;
     idleHandlerA();
 
     expect(mod.isPlaying('guild-A')).toBe(false);
@@ -645,7 +645,7 @@ describe('per-guild audio player', () => {
     mod.startPlayback({} as never, 'guild-B');
     vi.mocked(status.setVoiceIdle).mockClear();
 
-    const errorHandlerA = players[0].on.mock.calls.find(([e]) => e === 'error')?.[1] as (err: Error) => void;
+    const errorHandlerA = players[0]!.on.mock.calls.find(([e]) => e === 'error')?.[1] as (err: Error) => void;
     errorHandlerA(new Error('decode failed'));
 
     expect(mod.isPlaying('guild-A')).toBe(false);
@@ -668,7 +668,7 @@ describe('per-guild audio player', () => {
     mod.startPlayback({} as never, 'guild-A');
     expect(mod.isPlaying('guild-A')).toBe(true);
     expect(mod.isPlaying('guild-B')).toBe(false);
-    expect(players[0].play).toHaveBeenCalledTimes(1);
-    expect(players[1].play).not.toHaveBeenCalled();
+    expect(players[0]!.play).toHaveBeenCalledTimes(1);
+    expect(players[1]!.play).not.toHaveBeenCalled();
   });
 });

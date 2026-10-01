@@ -158,7 +158,7 @@ describe('POST /voice/join', () => {
     expect(vi.mocked(connect)).toHaveBeenCalledWith(client, 'guild-123', '123456789012345678');
     expect(vi.mocked(isKeyApprovedForGuild)).toHaveBeenCalledWith(API_KEY_OWNER, 'guild-123');
     expect(vi.mocked(disconnect).mock.invocationCallOrder[0])
-      .toBeLessThan(vi.mocked(connect).mock.invocationCallOrder[0]);
+      .toBeLessThan(vi.mocked(connect).mock.invocationCallOrder[0]!);
   });
 
   it('returns 400 when the channel does not resolve to any guild', async () => {

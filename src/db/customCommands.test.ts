@@ -130,10 +130,10 @@ describe('getAllCustomCommandsWithAssignments', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
     expect(result).toHaveLength(1);
-    expect(result[0].trigger_string).toBe('!clap');
-    expect(result[0].assigned_users).toHaveLength(0);
-    expect(result[0].is_discord_enabled).toBe(true);
-    expect(result[0].is_multi_twitch).toBe(false);
+    expect(result[0]!.trigger_string).toBe('!clap');
+    expect(result[0]!.assigned_users).toHaveLength(0);
+    expect(result[0]!.is_discord_enabled).toBe(true);
+    expect(result[0]!.is_multi_twitch).toBe(false);
   });
 
   it('groups multiple rows for the same command into one entry with multiple assigned users', async () => {
@@ -146,9 +146,9 @@ describe('getAllCustomCommandsWithAssignments', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
     expect(result).toHaveLength(1);
-    expect(result[0].assigned_users).toHaveLength(2);
-    expect(result[0].assigned_users[0].discord_id).toBe('u1');
-    expect(result[0].assigned_users[1].discord_id).toBe('u2');
+    expect(result[0]!.assigned_users).toHaveLength(2);
+    expect(result[0]!.assigned_users[0]!.discord_id).toBe('u1');
+    expect(result[0]!.assigned_users[1]!.discord_id).toBe('u2');
   });
 
   it('handles multiple distinct commands', async () => {
@@ -161,7 +161,7 @@ describe('getAllCustomCommandsWithAssignments', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
     expect(result).toHaveLength(2);
-    expect(result[1].is_multi_twitch).toBe(true);
+    expect(result[1]!.is_multi_twitch).toBe(true);
   });
 
   it('maps BIT(1) Buffer([1]) fields for is_discord_enabled and is_multi_twitch as true', async () => {
@@ -170,8 +170,8 @@ describe('getAllCustomCommandsWithAssignments', () => {
     pool.execute.mockResolvedValue([[row], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
-    expect(result[0].is_discord_enabled).toBe(true);
-    expect(result[0].is_multi_twitch).toBe(true);
+    expect(result[0]!.is_discord_enabled).toBe(true);
+    expect(result[0]!.is_multi_twitch).toBe(true);
   });
 
   it('maps BIT(1) Buffer([0]) fields for is_discord_enabled and is_multi_twitch as false', async () => {
@@ -180,8 +180,8 @@ describe('getAllCustomCommandsWithAssignments', () => {
     pool.execute.mockResolvedValue([[row], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
-    expect(result[0].is_discord_enabled).toBe(false);
-    expect(result[0].is_multi_twitch).toBe(false);
+    expect(result[0]!.is_discord_enabled).toBe(false);
+    expect(result[0]!.is_multi_twitch).toBe(false);
   });
 
   it('maps null fields for is_discord_enabled and is_multi_twitch as false', async () => {
@@ -190,8 +190,8 @@ describe('getAllCustomCommandsWithAssignments', () => {
     pool.execute.mockResolvedValue([[row], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
-    expect(result[0].is_discord_enabled).toBe(false);
-    expect(result[0].is_multi_twitch).toBe(false);
+    expect(result[0]!.is_discord_enabled).toBe(false);
+    expect(result[0]!.is_multi_twitch).toBe(false);
   });
 
   it('marks user as orphaned when user_discord_id is null', async () => {
@@ -200,7 +200,7 @@ describe('getAllCustomCommandsWithAssignments', () => {
     pool.execute.mockResolvedValue([[row], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
-    expect(result[0].assigned_users[0].is_orphaned_user).toBe(true);
+    expect(result[0]!.assigned_users[0]!.is_orphaned_user).toBe(true);
   });
 
   it('marks user as not orphaned when user_discord_id matches', async () => {
@@ -209,7 +209,7 @@ describe('getAllCustomCommandsWithAssignments', () => {
     pool.execute.mockResolvedValue([[row], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
-    expect(result[0].assigned_users[0].is_orphaned_user).toBe(false);
+    expect(result[0]!.assigned_users[0]!.is_orphaned_user).toBe(false);
   });
 });
 
@@ -286,9 +286,9 @@ describe('updateCustomCommand', () => {
     await updateCustomCommand(7, '!clap', 'Clap!', false, false);
 
     expect(order).toEqual(['acquire:bcuk_cmdid_7', 'write', 'release:bcuk_cmdid_7']);
-    expect(vi.mocked(acquireNamedLock).mock.calls[0][0]).toBe(pool._conn);
+    expect(vi.mocked(acquireNamedLock).mock.calls[0]![0]).toBe(pool._conn);
     // The trigger-locked write reuses the id-lock connection instead of taking a second one.
-    expect(vi.mocked(runSerializedCommandWrite).mock.calls[0][1]).toMatchObject({ excludeCustomCommandId: 7, connection: pool._conn });
+    expect(vi.mocked(runSerializedCommandWrite).mock.calls[0]![1]).toMatchObject({ excludeCustomCommandId: 7, connection: pool._conn });
     expect(pool.getConnection).toHaveBeenCalledTimes(1);
     expect(pool._conn.release).toHaveBeenCalled();
   });
@@ -358,10 +358,10 @@ describe('updateOwnCustomCommand', () => {
 
     await updateOwnCustomCommand(7, '!clap', 'Clap!', STREAMER_ID);
 
-    expect(conn.execute.mock.calls[0][0]).toMatch(/FROM custom_command WHERE command_id = \? FOR UPDATE/);
-    expect(conn.execute.mock.calls[1][0]).toMatch(/FROM twitch_user_commands WHERE command_id = \? FOR UPDATE/);
-    expect(conn.execute.mock.calls[2][0]).toContain('UPDATE custom_command');
-    expect(conn.execute.mock.calls[2][1]).toEqual(['!clap', 'Clap!', 0, 0, 7]);
+    expect(conn.execute.mock.calls[0]![0]).toMatch(/FROM custom_command WHERE command_id = \? FOR UPDATE/);
+    expect(conn.execute.mock.calls[1]![0]).toMatch(/FROM twitch_user_commands WHERE command_id = \? FOR UPDATE/);
+    expect(conn.execute.mock.calls[2]![0]).toContain('UPDATE custom_command');
+    expect(conn.execute.mock.calls[2]![1]).toEqual(['!clap', 'Clap!', 0, 0, 7]);
   });
 
   it.each([
@@ -401,8 +401,8 @@ describe('removeOwnCustomCommand', () => {
     await removeOwnCustomCommand(5, STREAMER_ID);
 
     expect(acquireNamedLock).toHaveBeenCalledWith(conn, 'bcuk_cmdid_5');
-    expect(conn.execute.mock.calls[0][0]).toContain('FOR UPDATE');
-    expect(conn.execute.mock.calls[3][0]).toContain('DELETE FROM custom_command');
+    expect(conn.execute.mock.calls[0]![0]).toContain('FOR UPDATE');
+    expect(conn.execute.mock.calls[3]![0]).toContain('DELETE FROM custom_command');
     expect(conn.commit).toHaveBeenCalled();
   });
 
@@ -435,8 +435,8 @@ describe('discardOwnNewCustomCommand', () => {
 
     await discardOwnNewCustomCommand(5, STREAMER_ID);
 
-    expect(conn.execute.mock.calls[0][0]).toContain('FOR UPDATE');
-    expect(conn.execute.mock.calls[3][0]).toContain('DELETE FROM custom_command');
+    expect(conn.execute.mock.calls[0]![0]).toContain('FOR UPDATE');
+    expect(conn.execute.mock.calls[3]![0]).toContain('DELETE FROM custom_command');
     expect(conn.commit).toHaveBeenCalled();
   });
 

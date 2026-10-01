@@ -123,7 +123,7 @@ describe('findTrigger', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await findTrigger('!BANG');
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params[0]).toBe('!bang');
   });
 });
@@ -145,18 +145,18 @@ describe('findSoundFiles', () => {
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const result = await findSoundFiles(1n);
     expect(result).toHaveLength(2);
-    expect(result[0].file).toBe('bang.mp3');
-    expect(result[0].hidden).toBe(false);
-    expect(result[0].trigger_id).toBe(1n);
-    expect(result[1].hidden).toBe(true);
-    expect(result[1].category_id).toBe(3);
+    expect(result[0]!.file).toBe('bang.mp3');
+    expect(result[0]!.hidden).toBe(false);
+    expect(result[0]!.trigger_id).toBe(1n);
+    expect(result[1]!.hidden).toBe(true);
+    expect(result[1]!.category_id).toBe(3);
   });
 
   it('passes triggerId as string to the query', async () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await findSoundFiles(42n);
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params[0]).toBe('42');
   });
 });
@@ -202,9 +202,9 @@ describe('getAllSfxTriggers', () => {
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const result = await getAllSfxTriggers();
     expect(result).toHaveLength(1);
-    expect(result[0].files).toHaveLength(2);
-    expect(result[0].files[0].file).toBe('a.mp3');
-    expect(result[0].files[1].hidden).toBe(true);
+    expect(result[0]!.files).toHaveLength(2);
+    expect(result[0]!.files[0]!.file).toBe('a.mp3');
+    expect(result[0]!.files[1]!.hidden).toBe(true);
   });
 
   it('handles multiple distinct triggers', async () => {
@@ -215,9 +215,9 @@ describe('getAllSfxTriggers', () => {
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const result = await getAllSfxTriggers();
     expect(result).toHaveLength(2);
-    expect(result[1].triggerCommand).toBe('!clap');
-    expect(result[1].hidden).toBe(true);
-    expect(result[1].categoryName).toBe('Reactions');
+    expect(result[1]!.triggerCommand).toBe('!clap');
+    expect(result[1]!.hidden).toBe(true);
+    expect(result[1]!.categoryName).toBe('Reactions');
   });
 
   it('skips adding to files array when sfxId is null (trigger with no files)', async () => {
@@ -227,7 +227,7 @@ describe('getAllSfxTriggers', () => {
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const result = await getAllSfxTriggers();
     expect(result).toHaveLength(1);
-    expect(result[0].files).toHaveLength(0);
+    expect(result[0]!.files).toHaveLength(0);
   });
 
   it('maps triggerHidden as Buffer correctly', async () => {
@@ -236,7 +236,7 @@ describe('getAllSfxTriggers', () => {
     ];
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const result = await getAllSfxTriggers();
-    expect(result[0].hidden).toBe(true);
+    expect(result[0]!.hidden).toBe(true);
   });
 
   it('exposes categoryId for edit-form preselection', async () => {
@@ -245,7 +245,7 @@ describe('getAllSfxTriggers', () => {
     ];
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const result = await getAllSfxTriggers();
-    expect(result[0].categoryId).toBe(7);
+    expect(result[0]!.categoryId).toBe(7);
   });
 });
 
@@ -263,7 +263,7 @@ describe('categories', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const id = await createCategory('Memes');
     expect(id).toBe(9);
-    expect(pool.execute.mock.calls[0][1]).toEqual(['Memes']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['Memes']);
   });
 
   it('renameCategory passes name then id and returns true when a row matched', async () => {
@@ -271,7 +271,7 @@ describe('categories', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const ok = await renameCategory(3, 'Renamed');
     expect(ok).toBe(true);
-    expect(pool.execute.mock.calls[0][1]).toEqual(['Renamed', 3]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['Renamed', 3]);
   });
 
   it('renameCategory returns false when no row matched and the id does not exist', async () => {
@@ -297,7 +297,7 @@ describe('categories', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const ok = await deleteCategory(4);
     expect(ok).toBe(true);
-    expect(pool.execute.mock.calls[0][1]).toEqual([4]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([4]);
   });
 
   it('deleteCategory returns false when no row matched', async () => {
@@ -315,14 +315,14 @@ describe('createSfxTrigger', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const id = await createSfxTrigger('!clap', 3, 'Clap', true);
     expect(id).toBe(42n);
-    expect(pool.execute.mock.calls[0][1]).toEqual(['!clap', 3, 'Clap', 1]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['!clap', 3, 'Clap', 1]);
   });
 
   it('passes null category/description and hidden=0', async () => {
     const pool = makeResultPool({ insertId: 1 });
     vi.mocked(getPool).mockReturnValue(pool as any);
     await createSfxTrigger('!bang', null, null, false);
-    expect(pool.execute.mock.calls[0][1]).toEqual(['!bang', null, null, 0]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['!bang', null, null, 0]);
   });
 });
 
@@ -332,7 +332,7 @@ describe('updateSfxTrigger', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const ok = await updateSfxTrigger(5n, '!clap', 2, 'desc', false);
     expect(ok).toBe(true);
-    expect(pool.execute.mock.calls[0][1]).toEqual(['!clap', 2, 'desc', 0, '5']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['!clap', 2, 'desc', 0, '5']);
   });
 
   it('returns false when no row matched (stale id)', async () => {
@@ -368,8 +368,8 @@ describe('deleteSfxTrigger', () => {
     expect(result).toEqual({ files: ['a.mp3', 'b.mp3'] });
     // Both reads must lock their rows — the trigger first, then its child sound files —
     // so a concurrent addSfxFile/deleteSfxFile can't change the set after the snapshot.
-    expect(pool._conn.execute.mock.calls[0][0]).toContain('FOR UPDATE');
-    expect(pool._conn.execute.mock.calls[1][0]).toContain('FOR UPDATE');
+    expect(pool._conn.execute.mock.calls[0]![0]).toContain('FOR UPDATE');
+    expect(pool._conn.execute.mock.calls[1]![0]).toContain('FOR UPDATE');
     expect(pool._conn.commit).toHaveBeenCalled();
     expect(pool._conn.release).toHaveBeenCalled();
   });
@@ -407,7 +407,7 @@ describe('addSfxFile', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const id = await addSfxFile(7n, 'clap.mp3', 2, false);
     expect(id).toBe(100);
-    expect(pool.execute.mock.calls[0][1]).toEqual(['7', 'clap.mp3', 2, 0]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['7', 'clap.mp3', 2, 0]);
   });
 });
 
@@ -417,7 +417,7 @@ describe('updateSfxFile', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const ok = await updateSfxFile(11, 3, true);
     expect(ok).toBe(true);
-    expect(pool.execute.mock.calls[0][1]).toEqual([3, 1, 11]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([3, 1, 11]);
   });
 
   it('returns false when no row matched (stale id)', async () => {
@@ -444,7 +444,7 @@ describe('getSfxFileById', () => {
     const pool = makePool([{ file: 'clap.mp3' }]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await getSfxFileById(11)).toEqual({ file: 'clap.mp3' });
-    expect(pool.execute.mock.calls[0][1]).toEqual([11]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([11]);
   });
 
   it('returns null when no row matches', async () => {

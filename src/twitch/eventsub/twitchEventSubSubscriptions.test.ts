@@ -245,7 +245,7 @@ describe('loadStreamersForEventSub', () => {
 
     expect(getUsers).toHaveBeenCalledWith(['raidOnly']);
     expect(result).toHaveLength(1);
-    expect(result[0].uid).toBe('uid-raid');
+    expect(result[0]!.uid).toBe('uid-raid');
   });
 
   it('falls back to Helix getUsers for shoutout-only streamers (raid_enabled off, raid_shoutout_enabled on) without stored UID', async () => {
@@ -263,7 +263,7 @@ describe('loadStreamersForEventSub', () => {
 
     expect(getUsers).toHaveBeenCalledWith(['shoutoutOnly']);
     expect(result).toHaveLength(1);
-    expect(result[0].uid).toBe('uid-shoutout');
+    expect(result[0]!.uid).toBe('uid-shoutout');
   });
 
   it('builds enabledAlerts from the batched enabled-alert-types lookup', async () => {
@@ -282,7 +282,7 @@ describe('loadStreamersForEventSub', () => {
     const result = await loadStreamersForEventSub();
 
     expect(getEnabledAlertEventTypesBatch).toHaveBeenCalledWith([14]);
-    expect(result[0].enabledAlerts).toEqual(new Set(['raid', 'giftsub']));
+    expect(result[0]!.enabledAlerts).toEqual(new Set(['raid', 'giftsub']));
   });
 
   it('fetches enabled alert types for all streamers in a single batched call, not one per streamer', async () => {
@@ -334,7 +334,7 @@ describe('loadStreamersForEventSub', () => {
 
     const result = await loadStreamersForEventSub();
 
-    expect(result[0].enabledAlerts).toEqual(new Set());
+    expect(result[0]!.enabledAlerts).toEqual(new Set());
   });
 });
 

@@ -157,7 +157,7 @@ describe('POST /settings/:eventType/image', () => {
       .post('/settings/follow/image')
       .attach('image', PNG_BUF, { filename: 'test.png', contentType: 'image/png' });
     expect(res.headers.location).toBe('/alerts/settings?error=upload_failed');
-    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0][0] as string;
+    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0]![0] as string;
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
   });
 

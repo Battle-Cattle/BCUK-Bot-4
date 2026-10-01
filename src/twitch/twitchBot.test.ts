@@ -694,7 +694,7 @@ describe('startTwitchBot', () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     await startTwitchBot();
 
-    await authProviderHandlers.refreshHandlers[0]('bot-uid', {
+    await authProviderHandlers.refreshHandlers[0]!('bot-uid', {
       accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
     });
 
@@ -709,7 +709,7 @@ describe('startTwitchBot', () => {
     vi.mocked(saveBotChatTokenIfOwnedBy).mockResolvedValue(false);
     await startTwitchBot();
 
-    await expect(authProviderHandlers.refreshHandlers[0]('bot-uid', {
+    await expect(authProviderHandlers.refreshHandlers[0]!('bot-uid', {
       accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
     })).resolves.toBeUndefined();
   });
@@ -723,7 +723,7 @@ describe('startTwitchBot', () => {
       statusCode: 401,
       body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
     });
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
 
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
   });
@@ -745,7 +745,7 @@ describe('startTwitchBot', () => {
     vi.mocked(saveBotChatTokenIfOwnedBy).mockResolvedValue(false);
     await startTwitchBot();
 
-    await authProviderHandlers.refreshHandlers[0]('bot-uid', {
+    await authProviderHandlers.refreshHandlers[0]!('bot-uid', {
       accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
     });
 
@@ -760,7 +760,7 @@ describe('startTwitchBot', () => {
       statusCode: 401,
       body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
     });
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
 
     expect(vi.mocked(clearBotChatTokenIfOwnedBy)).toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
@@ -780,7 +780,7 @@ describe('startTwitchBot', () => {
       statusCode: 401,
       body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
     });
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
 
     // Leaving the dead session connected until Twitch eventually rejects it would misrepresent
     // the bot's actual state — restartTwitchBot() (not a bare disconnect) tears it down and, since
@@ -803,7 +803,7 @@ describe('startTwitchBot', () => {
       statusCode: 401,
       body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
     });
-    await expect(authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error)).resolves.toBeUndefined();
+    await expect(authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error)).resolves.toBeUndefined();
 
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
   });
@@ -818,7 +818,7 @@ describe('startTwitchBot', () => {
       statusCode: 401,
       body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
     });
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
 
     expect(mockClient.quit).not.toHaveBeenCalled();
   });
@@ -831,7 +831,7 @@ describe('startTwitchBot', () => {
       statusCode: 400,
       body: JSON.stringify({ status: 400, message: 'Invalid refresh token' }),
     });
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
 
     expect(vi.mocked(clearBotChatTokenIfOwnedBy)).toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
@@ -845,7 +845,7 @@ describe('startTwitchBot', () => {
       statusCode: 400,
       body: JSON.stringify({ status: 400, message: 'Refresh token has been revoked' }),
     });
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
 
     expect(vi.mocked(clearBotChatTokenIfOwnedBy)).toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('/admin/bot-auth'));
@@ -861,7 +861,7 @@ describe('startTwitchBot', () => {
       statusCode: 400,
       body: JSON.stringify({ status: 400, message: 'Invalid client secret' }),
     });
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
 
     expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
@@ -877,7 +877,7 @@ describe('startTwitchBot', () => {
       statusCode: 400,
       body: JSON.stringify({ status: 400, message: 'Missing refresh token parameter' }),
     });
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
 
     expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
@@ -888,7 +888,7 @@ describe('startTwitchBot', () => {
     await startTwitchBot();
 
     const error = Object.assign(new Error('Encountered HTTP status code 401'), { statusCode: 401, body: 'not json' });
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
 
     expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
@@ -898,7 +898,7 @@ describe('startTwitchBot', () => {
     vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
     await startTwitchBot();
 
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', new Error('fetch failed'));
+    await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', new Error('fetch failed'));
 
     expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
@@ -912,7 +912,7 @@ describe('startTwitchBot', () => {
       statusCode: 503,
       body: JSON.stringify({ status: 503, message: 'Internal server error' }),
     });
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
 
     expect(vi.mocked(clearBotChatTokenIfOwnedBy)).not.toHaveBeenCalled();
     expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
@@ -933,7 +933,7 @@ describe('startTwitchBot', () => {
       statusCode: 503,
       body: JSON.stringify({ status: 503, message: 'Internal server error' }),
     });
-    await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
 
     expect(mockClient.quit).toHaveBeenCalled();
     expect(mockClient.connect).toHaveBeenCalled();
@@ -956,7 +956,7 @@ describe('startTwitchBot', () => {
       statusCode: 503,
       body: JSON.stringify({ status: 503, message: 'Internal server error' }),
     });
-    const result = authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    const result = authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
     await vi.runAllTimersAsync();
     await expect(result).resolves.toBeUndefined();
 
@@ -986,7 +986,7 @@ describe('startTwitchBot', () => {
       statusCode: 503,
       body: JSON.stringify({ status: 503, message: 'Internal server error' }),
     });
-    const result = authProviderHandlers.refreshFailureHandlers[0]('bot-uid', error);
+    const result = authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', error);
     await vi.runAllTimersAsync();
     await expect(result).resolves.toBeUndefined();
 

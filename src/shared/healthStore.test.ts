@@ -75,32 +75,32 @@ describe('EventSub connections', () => {
     mod.recordEventSubReconnectAttempt('streamerA');
     mod.recordEventSubConnected('streamerA', true);
     const entry = mod.getHealthSnapshot().eventsub['streamerA'];
-    expect(entry.connected).toBe(true);
-    expect(entry.lastConnectedAt).toBeInstanceOf(Date);
-    expect(entry.reconnectAttempts).toBe(0);
+    expect(entry!.connected).toBe(true);
+    expect(entry!.lastConnectedAt).toBeInstanceOf(Date);
+    expect(entry!.reconnectAttempts).toBe(0);
   });
 
   it('recordEventSubConnected(false, error) stamps lastDisconnectedAt and records the error', () => {
     mod.recordEventSubConnected('streamerA', true);
     mod.recordEventSubConnected('streamerA', false, 'socket closed');
     const entry = mod.getHealthSnapshot().eventsub['streamerA'];
-    expect(entry.connected).toBe(false);
-    expect(entry.lastDisconnectedAt).toBeInstanceOf(Date);
-    expect(entry.lastError).toBe('socket closed');
+    expect(entry!.connected).toBe(false);
+    expect(entry!.lastDisconnectedAt).toBeInstanceOf(Date);
+    expect(entry!.lastError).toBe('socket closed');
   });
 
   it('recordEventSubReconnectAttempt increments the counter, creating a record on first use', () => {
     mod.recordEventSubReconnectAttempt('streamerB');
     mod.recordEventSubReconnectAttempt('streamerB');
-    expect(mod.getHealthSnapshot().eventsub['streamerB'].reconnectAttempts).toBe(2);
+    expect(mod.getHealthSnapshot().eventsub['streamerB']!.reconnectAttempts).toBe(2);
   });
 
   it('tracks multiple streamers independently', () => {
     mod.recordEventSubConnected('streamerA', true);
     mod.recordEventSubConnected('streamerB', false, 'err');
     const snap = mod.getHealthSnapshot();
-    expect(snap.eventsub['streamerA'].connected).toBe(true);
-    expect(snap.eventsub['streamerB'].connected).toBe(false);
+    expect(snap.eventsub['streamerA']!.connected).toBe(true);
+    expect(snap.eventsub['streamerB']!.connected).toBe(false);
   });
 
   it('removeEventSubHealth deletes the record entirely, rather than leaving it reported as disconnected', () => {
@@ -176,17 +176,17 @@ describe('Error ring buffer', () => {
     mod.recordError('Discord', 'boom');
     const { errors } = mod.getHealthSnapshot();
     expect(errors).toHaveLength(1);
-    expect(errors[0].module).toBe('Discord');
-    expect(errors[0].message).toBe('boom');
-    expect(errors[0].timestamp).toBeInstanceOf(Date);
+    expect(errors[0]!.module).toBe('Discord');
+    expect(errors[0]!.message).toBe('boom');
+    expect(errors[0]!.timestamp).toBeInstanceOf(Date);
   });
 
   it('trims to the newest 50 entries, evicting the oldest first', () => {
     for (let i = 0; i < 55; i++) mod.recordError('Mod', `err-${i}`);
     const { errors } = mod.getHealthSnapshot();
     expect(errors).toHaveLength(50);
-    expect(errors[0].message).toBe('err-5');
-    expect(errors[49].message).toBe('err-54');
+    expect(errors[0]!.message).toBe('err-5');
+    expect(errors[49]!.message).toBe('err-54');
   });
 });
 
@@ -237,7 +237,7 @@ describe('getHealthSnapshot returns copies', () => {
     mod.recordEventSubConnected('streamerA', true);
     const snap = mod.getHealthSnapshot();
     (snap.eventsub['streamerA'] as unknown as Record<string, unknown>).connected = false;
-    expect(mod.getHealthSnapshot().eventsub['streamerA'].connected).toBe(true);
+    expect(mod.getHealthSnapshot().eventsub['streamerA']!.connected).toBe(true);
   });
 
   it('mutating the returned errors array does not affect internal state', () => {

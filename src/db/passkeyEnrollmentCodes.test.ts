@@ -23,12 +23,12 @@ describe('savePasskeyEnrollmentCode', () => {
     expect(await savePasskeyEnrollmentCode('42', 'hash', 300, 60)).toBe(true);
 
     const calls = pool.execute.mock.calls as [string, unknown[]?][];
-    expect(calls[0][0]).toContain('DELETE FROM passkey_enrollment_codes WHERE expires_at <= NOW()');
-    expect(calls[1][0]).toContain('sent_at <= DATE_SUB(NOW(), INTERVAL ? SECOND)');
-    expect(calls[1][1]).toEqual(['42', 60]);
-    expect(calls[2][0]).toContain('INSERT INTO passkey_enrollment_codes');
-    expect(calls[2][0]).toContain('DATE_ADD(NOW(), INTERVAL ? SECOND)');
-    expect(calls[2][1]).toEqual(['42', 'hash', 300]);
+    expect(calls[0]![0]).toContain('DELETE FROM passkey_enrollment_codes WHERE expires_at <= NOW()');
+    expect(calls[1]![0]).toContain('sent_at <= DATE_SUB(NOW(), INTERVAL ? SECOND)');
+    expect(calls[1]![1]).toEqual(['42', 60]);
+    expect(calls[2]![0]).toContain('INSERT INTO passkey_enrollment_codes');
+    expect(calls[2]![0]).toContain('DATE_ADD(NOW(), INTERVAL ? SECOND)');
+    expect(calls[2]![1]).toEqual(['42', 'hash', 300]);
   });
 
   it('reports a code sent within the cooldown (duplicate key) as not stored', async () => {
@@ -62,11 +62,11 @@ describe('consumePasskeyEnrollmentCode', () => {
     expect(await consumePasskeyEnrollmentCode('42', 'hash', 5)).toBe('ok');
 
     const calls = pool.execute.mock.calls as [string, unknown[]][];
-    expect(calls[0][0]).toContain('SET attempts = attempts + 1');
-    expect(calls[0][0]).toContain('expires_at > NOW() AND attempts < ?');
-    expect(calls[0][1]).toEqual(['42', 5]);
-    expect(calls[1][0]).toContain('DELETE FROM passkey_enrollment_codes WHERE discord_id = ? AND code_hash = ?');
-    expect(calls[1][1]).toEqual(['42', 'hash']);
+    expect(calls[0]![0]).toContain('SET attempts = attempts + 1');
+    expect(calls[0]![0]).toContain('expires_at > NOW() AND attempts < ?');
+    expect(calls[0]![1]).toEqual(['42', 5]);
+    expect(calls[1]![0]).toContain('DELETE FROM passkey_enrollment_codes WHERE discord_id = ? AND code_hash = ?');
+    expect(calls[1]![1]).toEqual(['42', 'hash']);
   });
 
   it('reports a wrong code as invalid after spending the attempt', async () => {

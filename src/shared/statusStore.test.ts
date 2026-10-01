@@ -104,17 +104,17 @@ describe('Twitch channel status', () => {
   it('setTwitchChannel connected records lastConnectedAt', () => {
     mod.setTwitchChannel('mychan', true);
     const entry = mod.getStatus(null).twitch['mychan'];
-    expect(entry.connected).toBe(true);
-    expect(entry.lastConnectedAt).toBeInstanceOf(Date);
-    expect(entry.lastDisconnectedAt).toBeNull();
+    expect(entry!.connected).toBe(true);
+    expect(entry!.lastConnectedAt).toBeInstanceOf(Date);
+    expect(entry!.lastDisconnectedAt).toBeNull();
   });
 
   it('setTwitchChannel disconnected records lastDisconnectedAt', () => {
     mod.setTwitchChannel('mychan', true);
     mod.setTwitchChannel('mychan', false);
     const entry = mod.getStatus(null).twitch['mychan'];
-    expect(entry.connected).toBe(false);
-    expect(entry.lastDisconnectedAt).toBeInstanceOf(Date);
+    expect(entry!.connected).toBe(false);
+    expect(entry!.lastDisconnectedAt).toBeInstanceOf(Date);
   });
 
   it('strips leading # from channel name', () => {
@@ -129,17 +129,17 @@ describe('Twitch channel status', () => {
 
   it('reconnecting does not overwrite lastConnectedAt again', () => {
     mod.setTwitchChannel('mychan', true);
-    const first = mod.getStatus(null).twitch['mychan'].lastConnectedAt;
+    const first = mod.getStatus(null).twitch['mychan']!.lastConnectedAt;
     mod.setTwitchChannel('mychan', true); // already connected — no change
-    expect(mod.getStatus(null).twitch['mychan'].lastConnectedAt).toEqual(first);
+    expect(mod.getStatus(null).twitch['mychan']!.lastConnectedAt).toEqual(first);
   });
 
   it('setTwitchChannelLive updates isLive for an existing channel', () => {
     mod.setTwitchChannel('mychan', true);
     mod.setTwitchChannelLive('mychan', true);
-    expect(mod.getStatus(null).twitch['mychan'].isLive).toBe(true);
+    expect(mod.getStatus(null).twitch['mychan']!.isLive).toBe(true);
     mod.setTwitchChannelLive('mychan', false);
-    expect(mod.getStatus(null).twitch['mychan'].isLive).toBe(false);
+    expect(mod.getStatus(null).twitch['mychan']!.isLive).toBe(false);
   });
 
   it('setTwitchChannelLive is a no-op for unknown channels', () => {
@@ -150,7 +150,7 @@ describe('Twitch channel status', () => {
   it('trims stray whitespace so it keys the same channel as an already-normalized name', () => {
     mod.setTwitchChannel('mychan', true);
     mod.setTwitchChannel(' mychan ', false);
-    expect(mod.getStatus(null).twitch['mychan'].connected).toBe(false);
+    expect(mod.getStatus(null).twitch['mychan']!.connected).toBe(false);
     expect(mod.getStatus(null).twitch[' mychan ']).toBeUndefined();
   });
 
@@ -162,7 +162,7 @@ describe('Twitch channel status', () => {
   it('setTwitchChannelLive is a no-op for a name that fails Twitch login validation', () => {
     mod.setTwitchChannel('mychan', true);
     mod.setTwitchChannelLive('a', true);
-    expect(mod.getStatus(null).twitch['mychan'].isLive).toBe(false);
+    expect(mod.getStatus(null).twitch['mychan']!.isLive).toBe(false);
   });
 });
 

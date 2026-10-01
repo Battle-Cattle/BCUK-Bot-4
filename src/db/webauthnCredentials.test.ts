@@ -50,8 +50,8 @@ describe('listPasskeysForUser', () => {
     const result = await listPasskeysForUser('123');
 
     expect(result).toEqual([{ credentialId: 'cred1', deviceLabel: 'Phone', createdAt: created, lastUsedAt: null }]);
-    expect(pool.execute.mock.calls[0][1]).toEqual(['123']);
-    expect(pool.execute.mock.calls[0][0]).not.toContain('public_key');
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['123']);
+    expect(pool.execute.mock.calls[0]![0]).not.toContain('public_key');
   });
 });
 
@@ -132,11 +132,11 @@ describe('insertPasskey', () => {
     expect(await insertPasskey(NEW, 10)).toBe('inserted');
 
     const calls = pool._conn.execute.mock.calls as [string, unknown[]][];
-    expect(calls[0][0]).toContain('FOR UPDATE');
-    expect(calls[0][1]).toEqual(['123']);
-    expect(calls[1][0]).toContain('COUNT(*)');
-    expect(calls[2][0]).toContain('INSERT INTO webauthn_credentials');
-    expect(calls[2][1]).toEqual(['cred1', '123', 'handle-b64', Buffer.from([9, 8]), 0, 'internal,hybrid', 'Laptop']);
+    expect(calls[0]![0]).toContain('FOR UPDATE');
+    expect(calls[0]![1]).toEqual(['123']);
+    expect(calls[1]![0]).toContain('COUNT(*)');
+    expect(calls[2]![0]).toContain('INSERT INTO webauthn_credentials');
+    expect(calls[2]![1]).toEqual(['cred1', '123', 'handle-b64', Buffer.from([9, 8]), 0, 'internal,hybrid', 'Laptop']);
     expect(pool._conn.commit).toHaveBeenCalledTimes(1);
   });
 
@@ -166,7 +166,7 @@ describe('insertPasskey', () => {
 
     await insertPasskey({ ...NEW, transports: [] }, 10);
 
-    expect((pool._conn.execute.mock.calls[2][1] as unknown[])[5]).toBeNull();
+    expect((pool._conn.execute.mock.calls[2]![1] as unknown[])[5]).toBeNull();
   });
 });
 
@@ -196,7 +196,7 @@ describe('deletePasskey', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     expect(await deletePasskey('123', 'cred1')).toBe(true);
-    expect(pool.execute.mock.calls[0][1]).toEqual(['123', 'cred1']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['123', 'cred1']);
   });
 
   it('returns false when the user has no passkey with that ID', async () => {
