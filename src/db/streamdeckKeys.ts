@@ -172,15 +172,30 @@ export async function findKeyByHash(hash: string): Promise<{ discordId: string }
 }
 
 /**
+ * SQL predicate (over `streamdeck_key_guild_status` aliased `s`) requiring the key owner to
+ * still have access to the row's guild: a current `guild_member` row, or the global
+ * `user.is_owner` flag — the same rule `requireGuildContext` applies to web sessions (an
+ * owner sees every guild without a membership row). An approval row alone is not enough:
+ * `removeGuildMember` doesn't revoke Streamdeck approvals, so without this a removed member
+ * would keep Bearer access to that guild indefinitely.
+ */
+const KEY_OWNER_HAS_GUILD_ACCESS_SQL = `(
+  EXISTS (SELECT 1 FROM guild_member gm WHERE gm.guild_id = s.guild_id AND gm.discord_id = s.discord_id)
+  OR EXISTS (SELECT 1 FROM \`user\` u WHERE u.discord_id = s.discord_id AND u.is_owner = 1)
+)`;
+
+/**
  * Lists every guild ID a Discord user's Streamdeck key is currently approved
- * for. Used to browse voice channels across all of a key's approved guilds
- * without needing to guess which single guild the key targets.
+ * for and the user still has access to (see {@link KEY_OWNER_HAS_GUILD_ACCESS_SQL}).
+ * Used to browse voice channels across all of a key's approved guilds without
+ * needing to guess which single guild the key targets.
  *
  * @param discordId Key owner's Discord snowflake.
  */
 export async function getApprovedGuildIdsForKey(discordId: string): Promise<string[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT guild_id FROM streamdeck_key_guild_status WHERE discord_id = ? AND status = 'approved'`,
+    `SELECT s.guild_id FROM streamdeck_key_guild_status s
+     WHERE s.discord_id = ? AND s.status = 'approved' AND ${KEY_OWNER_HAS_GUILD_ACCESS_SQL}`,
     [discordId],
   );
   return rows.map((r) => String(r.guild_id));
@@ -188,14 +203,17 @@ export async function getApprovedGuildIdsForKey(discordId: string): Promise<stri
 
 /**
  * Returns true if the given Discord user's Streamdeck key is approved for the
- * given guild specifically.
+ * given guild specifically and the user still has access to that guild (a current
+ * `guild_member` row, or `user.is_owner`) — a member removed from the guild loses
+ * Streamdeck access there even though their approval row remains.
  *
  * @param discordId Key owner's Discord snowflake.
  * @param guildId Guild to check approval for.
  */
 export async function isKeyApprovedForGuild(discordId: string, guildId: string): Promise<boolean> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT 1 FROM streamdeck_key_guild_status WHERE discord_id = ? AND guild_id = ? AND status = 'approved'`,
+    `SELECT 1 FROM streamdeck_key_guild_status s
+     WHERE s.discord_id = ? AND s.guild_id = ? AND s.status = 'approved' AND ${KEY_OWNER_HAS_GUILD_ACCESS_SQL}`,
     [discordId, guildId],
   );
   return rows.length > 0;
