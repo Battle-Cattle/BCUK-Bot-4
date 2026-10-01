@@ -53,6 +53,7 @@ import {
   clearAuthFailedSubs,
   loadStreamersForEventSub,
   subscribeForStreamer,
+  removeSessionSubscriptions,
 } from './twitchEventSubSubscriptions';
 import { getAllEventSubStreamers, getEnabledAlertEventTypesBatch } from '../../db';
 import { getValidToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
@@ -1027,5 +1028,48 @@ describe('error handling in subscription setup', () => {
       'Failed to subscribe to channel.follow for errStreamer:', expect.any(Error),
     );
     expect(hasAuthFailedSubs('errStreamer')).toBe(false);
+  });
+});
+
+describe('removeSessionSubscriptions', () => {
+  const data = { uid: 'uid-1', token: 'tok-1', name: 'stoppedStreamer', config: null, streamerId: 1 };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(deleteEventSubSubscription).mockResolvedValue(undefined);
+  });
+
+  it("deletes only this streamer's subscriptions bound to the stopped session", async () => {
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      { id: 'on-stopped', type: 'channel.follow', condition: { broadcaster_user_id: 'uid-1' }, sessionId: 'sess-stopped', status: 'enabled' },
+      { id: 'on-other', type: 'channel.subscribe', condition: { broadcaster_user_id: 'uid-1' }, sessionId: 'sess-live', status: 'enabled' },
+      { id: 'not-own', type: 'channel.follow', condition: { broadcaster_user_id: 'uid-2' }, sessionId: 'sess-stopped', status: 'enabled' },
+    ]);
+
+    await removeSessionSubscriptions('sess-stopped', data);
+
+    expect(deleteEventSubSubscription).toHaveBeenCalledExactlyOnceWith('on-stopped', 'tok-1');
+  });
+
+  it('does nothing without a token', async () => {
+    await removeSessionSubscriptions('sess-stopped', { ...data, token: null });
+
+    expect(listEventSubSubscriptions).not.toHaveBeenCalled();
+    expect(deleteEventSubSubscription).not.toHaveBeenCalled();
+  });
+
+  it('logs a failed delete without throwing or skipping the others', async () => {
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      { id: 'a', type: 'channel.follow', condition: { broadcaster_user_id: 'uid-1' }, sessionId: 'sess-stopped', status: 'enabled' },
+      { id: 'b', type: 'channel.raid', condition: { to_broadcaster_user_id: 'uid-1' }, sessionId: 'sess-stopped', status: 'enabled' },
+    ]);
+    vi.mocked(deleteEventSubSubscription).mockRejectedValueOnce(new Error('boom'));
+
+    await expect(removeSessionSubscriptions('sess-stopped', data)).resolves.toBeUndefined();
+
+    expect(deleteEventSubSubscription).toHaveBeenCalledTimes(2);
+    expect(logMock.error).toHaveBeenCalledWith(
+      'Failed to delete subscription a (channel.follow) left on stopped session for stoppedStreamer:', expect.any(Error),
+    );
   });
 });
