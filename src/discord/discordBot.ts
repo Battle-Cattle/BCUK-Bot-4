@@ -207,21 +207,39 @@ function stopGatewayWatchdog(): void {
   }
 }
 
-/** Resolve callbacks awaiting the next `clientReady` — see {@link onceDiscordReady}. */
+/** Resolve callbacks awaiting the next `clientReady` — see {@link waitForDiscordReady}. */
 let readyWaiters: Array<() => void> = [];
 
 /**
- * Resolves once the Discord client has fired `clientReady` (immediately, if it already has by
- * the time this is called). Lets a caller that needs the client to actually be usable — e.g.
- * `index.ts`'s `announceStartup()`, which sends a DM through it — wait for that without
- * `startDiscordBot()` itself becoming blocking (it stays fire-and-forget, matching the rest of
- * the boot sequence). Never resolves if the client fails to connect and is never retried; pair
- * with `withTimeout` at the call site if that matters there.
- * @returns Resolves with no value once the client is ready.
+ * Resolves once the Discord client has fired `clientReady` (immediately, if it already has), so a
+ * caller that needs the client to actually be usable — e.g. an owner-alert DM raised during
+ * startup — can wait for it without `startDiscordBot()` itself becoming blocking. Rejects if that
+ * doesn't happen within `timeoutMs`, and on that timeout removes its own entry from the
+ * ready-waiter list, so repeated callers during a prolonged Discord outage can't pile up waiters
+ * that only a later successful connect would ever drain.
+ * @param timeoutMs - How long to wait for the client to become ready.
+ * @returns Resolves once the client is ready; rejects with a timeout error otherwise.
  */
-export function onceDiscordReady(): Promise<void> {
+export function waitForDiscordReady(timeoutMs: number): Promise<void> {
   if (getDiscordClient()) return Promise.resolve();
-  return new Promise((resolve) => { readyWaiters.push(resolve); });
+  return new Promise((resolve, reject) => {
+    /** Resolves this wait once `clientReady` fires, cancelling its timeout. */
+    const waiter = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      readyWaiters = readyWaiters.filter((w) => w !== waiter);
+      reject(new Error(`Discord ready timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    timer.unref();
+    readyWaiters.push(waiter);
+  });
+}
+
+/** Test-only: how many {@link waitForDiscordReady} callers are still waiting on `clientReady`. */
+export function __getReadyWaiterCountForTests(): number {
+  return readyWaiters.length;
 }
 
 /**

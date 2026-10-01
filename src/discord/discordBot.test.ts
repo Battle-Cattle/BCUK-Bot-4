@@ -119,43 +119,6 @@ describe('getDiscordClient', () => {
   });
 });
 
-// ─── onceDiscordReady ───────────────────────────────────────────────────────────
-
-describe('onceDiscordReady', () => {
-  it('resolves immediately when the client is already ready', async () => {
-    mod.startDiscordBot();
-    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await readyCb(mockInstance);
-
-    await expect(mod.onceDiscordReady()).resolves.toBeUndefined();
-  });
-
-  it('resolves once clientReady fires, not before', async () => {
-    mod.startDiscordBot();
-    let resolved = false;
-    const waiter = mod.onceDiscordReady().then(() => { resolved = true; });
-
-    await flushMicrotasks();
-    expect(resolved).toBe(false);
-
-    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await readyCb(mockInstance);
-    await waiter;
-    expect(resolved).toBe(true);
-  });
-
-  it('resolves every waiter registered before clientReady fires', async () => {
-    mod.startDiscordBot();
-    const waiterA = mod.onceDiscordReady();
-    const waiterB = mod.onceDiscordReady();
-
-    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await readyCb(mockInstance);
-
-    await expect(Promise.all([waiterA, waiterB])).resolves.toEqual([undefined, undefined]);
-  });
-});
-
 // ─── fetchMemberDisplayName ───────────────────────────────────────────────────
 
 describe('fetchMemberDisplayName', () => {
@@ -237,6 +200,74 @@ describe('sendDiscordDirectMessage', () => {
     await readyBot();
 
     expect(await mod.sendDiscordDirectMessage('user123', 'your code')).toBe(false);
+  });
+});
+
+// ─── waitForDiscordReady ──────────────────────────────────────────────────────
+
+describe('waitForDiscordReady', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('resolves immediately when the client is already ready', async () => {
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    await expect(mod.waitForDiscordReady(1_000)).resolves.toBeUndefined();
+  });
+
+  it('resolves every waiter registered before clientReady fires', async () => {
+    mod.startDiscordBot();
+    const waiterA = mod.waitForDiscordReady(30_000);
+    const waiterB = mod.waitForDiscordReady(30_000);
+
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    await expect(Promise.all([waiterA, waiterB])).resolves.toEqual([undefined, undefined]);
+    expect(mod.__getReadyWaiterCountForTests()).toBe(0);
+  });
+
+  it('resolves once clientReady fires within the timeout', async () => {
+    mod.startDiscordBot();
+    let resolved = false;
+    const waiter = mod.waitForDiscordReady(30_000).then(() => { resolved = true; });
+
+    await flushMicrotasks();
+    expect(resolved).toBe(false);
+
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    await waiter;
+    expect(resolved).toBe(true);
+  });
+
+  it('rejects if the client never becomes ready within the timeout', async () => {
+    vi.useFakeTimers();
+    mod.startDiscordBot();
+    const pending = mod.waitForDiscordReady(1_000);
+    const assertion = expect(pending).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
+  });
+
+  it('removes its waiter on timeout, so a later clientReady only resolves still-pending waiters', async () => {
+    vi.useFakeTimers();
+    mod.startDiscordBot();
+    const timedOut = mod.waitForDiscordReady(1_000);
+    const timedOutAssertion = expect(timedOut).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await timedOutAssertion;
+    expect(mod.__getReadyWaiterCountForTests()).toBe(0);
+
+    // A fresh waiter registered after the timeout still resolves normally on clientReady.
+    const fresh = mod.waitForDiscordReady(30_000);
+    expect(mod.__getReadyWaiterCountForTests()).toBe(1);
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    await expect(fresh).resolves.toBeUndefined();
   });
 });
 
