@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { recordEventSubConnected, recordEventSubReconnectAttempt, removeEventSubHealth } from '../../shared/healthStore';
-import { subscribeForStreamer, removeStreamerFromMap, dispatchNotification, handleRevocation, StreamerEventSubData } from './twitchEventSubSubscriptions';
+import { subscribeForStreamer, removeSessionSubscriptions, removeStreamerFromMap, dispatchNotification, handleRevocation, StreamerEventSubData } from './twitchEventSubSubscriptions';
 
 const log = createLogger('EventSub');
 
@@ -185,16 +185,21 @@ export class StreamerConnection {
   /**
    * Subscribes for the current streamer data on the given session id and stops the
    * connection (notifying onSelfStop) if zero subscriptions result. Shared by doReload()
-   * and the deferred reload applied after a session migration completes. No-ops (both
-   * before and after the subscribe call) if the connection was stopped while this was
-   * in flight — e.g. `stop()` called from `twitchEventSub.ts` on shutdown or when a
-   * streamer is removed — so a zombie API call can't resurrect an already-closed
-   * connection or double-fire `onSelfStop`.
+   * and the deferred reload applied after a session migration completes. No-ops if the
+   * connection was already stopped. If it's stopped while the subscribe call is in flight —
+   * e.g. `stop()` called from `twitchEventSub.ts` on shutdown or when a streamer is removed —
+   * it deletes whatever that call created on the now-closed session (see
+   * {@link removeSessionSubscriptions}) and returns without the zero-count handling, so a
+   * zombie API call can't leave live subscriptions behind or double-fire `onSelfStop`.
    */
   private async subscribeAndHandleEmpty(sessionId: string, emptyLogMessage: string): Promise<void> {
     if (this.stopped) return;
-    const count = await subscribeForStreamer(sessionId, this.currentData);
-    if (this.isStopped()) return;
+    const data = this.currentData;
+    const count = await subscribeForStreamer(sessionId, data);
+    if (this.isStopped()) {
+      if (count > 0) await removeSessionSubscriptions(sessionId, data);
+      return;
+    }
     if (count === 0) {
       log.info(`[${this.name}] ${emptyLogMessage}`);
       this.stop();

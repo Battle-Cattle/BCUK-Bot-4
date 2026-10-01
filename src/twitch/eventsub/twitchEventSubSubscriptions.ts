@@ -299,6 +299,31 @@ export async function subscribeForStreamer(
   return created.size;
 }
 
+/**
+ * Deletes this streamer's subscriptions bound to `sessionId`. Used when a `StreamerConnection` is
+ * stopped while its {@link subscribeForStreamer} call is still in flight: that call can finish
+ * creating subscriptions for the now-closed session, which would otherwise stay enabled on Twitch
+ * (delivering into a dispatch map that no longer routes them) until Twitch itself notices the
+ * socket is gone. Best-effort — a failed listing or delete is logged, never thrown, and each
+ * delete is isolated so one failure doesn't skip the rest.
+ * @param sessionId - The stopped connection's EventSub session id.
+ * @param data - The streamer data the in-flight subscribe call used.
+ * @returns Resolves once every delete attempt has settled.
+ */
+export async function removeSessionSubscriptions(sessionId: string, data: StreamerEventSubData): Promise<void> {
+  const { uid, token, name } = data;
+  if (!token) return;
+  const ownSubscriptions = await listOwnSubscriptions(token, uid, name);
+  await Promise.allSettled(
+    ownSubscriptions
+      .filter((sub) => sub.sessionId === sessionId)
+      .map((sub) =>
+        deleteEventSubSubscription(sub.id, token).catch((err: unknown) => {
+          log.error(`Failed to delete subscription ${sub.id} (${sub.type}) left on stopped session for ${name}:`, err);
+        })),
+  );
+}
+
 /** Creates a single EventSub subscription. Returns the created subscription's id, or null if
  *  it was skipped (previously auth-failed), Twitch reported it already exists (409), or the
  *  create call failed — callers use a non-null id to identify "the subscription created this

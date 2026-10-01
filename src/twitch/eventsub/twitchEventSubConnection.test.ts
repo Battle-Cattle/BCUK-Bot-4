@@ -5,6 +5,7 @@ const mockLog = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn()
 vi.mock('../../shared/logger', () => ({ createLogger: () => mockLog }));
 vi.mock('./twitchEventSubSubscriptions', () => ({
   subscribeForStreamer: vi.fn().mockResolvedValue(1),
+  removeSessionSubscriptions: vi.fn().mockResolvedValue(undefined),
   removeStreamerFromMap: vi.fn(),
   dispatchNotification: vi.fn(),
   handleRevocation: vi.fn(),
@@ -27,6 +28,7 @@ import {
 } from './twitchEventSubConnection';
 import {
   subscribeForStreamer,
+  removeSessionSubscriptions,
   dispatchNotification,
   handleRevocation,
   removeStreamerFromMap,
@@ -265,6 +267,36 @@ describe('StreamerConnection.handleMessage', () => {
     await Promise.resolve();
     expect(onSelfStop).not.toHaveBeenCalled();
     expect(removeStreamerFromMap).not.toHaveBeenCalled();
+    // Nothing was created, so there's nothing on the closed session to clean up.
+    expect(removeSessionSubscriptions).not.toHaveBeenCalled();
+  });
+
+  it('deletes subscriptions a subscribe call created after the connection was stopped mid-flight', async () => {
+    let resolveSubscribe!: (value: number) => void;
+    vi.mocked(subscribeForStreamer).mockReturnValue(new Promise((resolve) => { resolveSubscribe = resolve; }));
+    const data = makeStreamerData();
+    const conn = new StreamerConnection(data);
+    const onSelfStop = vi.fn();
+    conn.setSelfStopCallback(onSelfStop);
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-abc'));
+
+    conn.stop();
+    resolveSubscribe(3);
+
+    await vi.waitFor(() => expect(removeSessionSubscriptions).toHaveBeenCalledWith('sess-abc', data));
+    expect(onSelfStop).not.toHaveBeenCalled();
+  });
+
+  it('does not clean up subscriptions when the connection is still live', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValue(2);
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-live'));
+
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-live', expect.anything()));
+    await Promise.resolve();
+    expect(removeSessionSubscriptions).not.toHaveBeenCalled();
   });
 
   it('session_welcome when isReconnecting: does NOT call subscribeForStreamer', async () => {
