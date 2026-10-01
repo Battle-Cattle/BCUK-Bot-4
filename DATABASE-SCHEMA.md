@@ -511,6 +511,61 @@ Expected constraints and behavior:
 - Consuming a code (`consumeCodeOnConnection` in `src/db/companionOAuthCodes.ts`) is a single `UPDATE ... WHERE used_at IS NULL AND expires_at > NOW()`, so concurrent redemption attempts of the same code cannot both succeed.
 - `exchangeCodeForToken()` marks the code used and issues the companion token in one DB transaction, so a failure issuing the token rolls back the "used" mark instead of permanently burning the code.
 
+## `webauthn_credentials`
+
+Passkeys (WebAuthn credentials) for fingerprint / face / device-PIN sign-in to the web panel. A user adds one from User Settings after signing in with Discord; afterwards the login page's passkey button signs them in directly. Created by `migrations/webauthn_credentials.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `credential_id` | `VARCHAR(512)` PK, `ascii_bin` | base64url credential ID from the authenticator; binary collation because IDs are case-sensitive |
+| `discord_id` | `BIGINT` | FK to `user.discord_id` ON DELETE CASCADE; the passkey's owner |
+| `user_handle` | `VARCHAR(128)`, `ascii_bin` | base64url WebAuthn user handle: random 32 bytes chosen at a user's first registration and reused for their later passkeys. Sign-in checks the assertion's `userHandle` against it. Stored (not derived from an app secret) so secret rotation never invalidates passkeys |
+| `public_key` | `VARBINARY(1024)` | COSE-encoded credential public key |
+| `sign_count` | `INT UNSIGNED` | WebAuthn signature counter (32-bit by spec, so read as a plain number); updated on each sign-in |
+| `transports` | `VARCHAR(255)` nullable | Comma-separated transport hints (`internal`, `hybrid`, ...) |
+| `device_label` | `VARCHAR(100)` | User-chosen name shown in User Settings |
+| `created_at` | `DATETIME` | Defaults to `CURRENT_TIMESTAMP` |
+| `last_used_at` | `DATETIME` nullable | Last successful sign-in with this passkey |
+
+Expected constraints and behavior:
+
+- `KEY idx_webauthn_credentials_discord_id (discord_id)` for the per-user listing on the settings page.
+- Deleting a passkey (`deletePasskey` in `src/db/webauthnCredentials.ts`) is scoped by `discord_id`, so a user can only remove their own.
+- A passkey never bypasses the whitelist: sign-in re-checks the `user` row and guild access exactly like the Discord OAuth callback, so removing a user (which cascades here) or all their guild memberships locks them out.
+
+## `webauthn_challenges`
+
+Outstanding WebAuthn (passkey) challenges, one row per issued challenge. Created by `migrations/webauthn_credentials.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `challenge` | `VARCHAR(128)` PK, `ascii_bin` | base64url challenge from the generated registration/authentication options |
+| `purpose` | `ENUM('register','login')` | The ceremony it was issued for; a login challenge can't complete a registration or vice versa |
+| `expires_at` | `DATETIME` | Computed DB-side as `NOW() + 5 minutes` at creation |
+
+Expected constraints and behavior:
+
+- The challenge is also kept on the session, binding it to the browser that requested it; this table is what makes it single-use. `consumeWebauthnChallenge` (`src/db/webauthnChallenges.ts`) is one `DELETE ... WHERE challenge = ? AND purpose = ? AND expires_at > NOW()`, so of two concurrent verifications with the same challenge exactly one gets `affectedRows = 1`.
+- `saveWebauthnChallenge` prunes expired rows before each insert, so abandoned challenges don't accumulate (issuing is rate-limited by `authLimiter`).
+
+## `passkey_enrollment_codes`
+
+One-time confirmation codes the bot DMs to a user before they can add a passkey, proving they control the Discord account and not just a web session. Created by `migrations/webauthn_credentials.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `discord_id` | `BIGINT` PK | FK to `user.discord_id` ON DELETE CASCADE; one outstanding code per user |
+| `code_hash` | `CHAR(64)`, `ascii_bin` | SHA-256 hex digest of the 6-digit code; the code itself is never stored |
+| `attempts` | `TINYINT UNSIGNED` | Guesses spent on this code |
+| `sent_at` | `DATETIME` | When the code was issued (DB-side `NOW()`); drives the resend cooldown |
+| `expires_at` | `DATETIME` | DB-side `NOW() + 5 minutes` |
+
+Expected constraints and behavior:
+
+- `savePasskeyEnrollmentCode` (`src/db/passkeyEnrollmentCodes.ts`) prunes expired rows, replaces the user's code only if it is older than the 60-second resend cooldown, then does a plain `INSERT`; the primary key makes a concurrent second send fail as a duplicate, so the cooldown holds.
+- `consumePasskeyEnrollmentCode` first spends an attempt with `UPDATE ... SET attempts = attempts + 1 WHERE discord_id = ? AND expires_at > NOW() AND attempts < 5`, and only then compares, with a `DELETE ... WHERE discord_id = ? AND code_hash = ?` that consumes a matching code. Concurrent guesses therefore can't exceed 5 per code.
+- If the DM carrying a code can't be delivered, `deletePasskeyEnrollmentCode` removes that code by `discord_id` **and** `code_hash`, so a late cleanup never deletes a newer code issued to the same user.
+
 ## `sessions`
 
 Managed automatically by `express-mysql-session`.

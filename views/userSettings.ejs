@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/style.css">
   <%- include('partials/pwa-head') %>
 </head>
-<body>
+<body data-csrf-token="<%= csrfToken %>">
   <%- include('partials/nav') %>
 
   <main class="container">
@@ -22,6 +22,15 @@
     <% } %>
     <% if (success === 'twitch_connected') { %>
     <div class="card card-alert-success">Twitch account connected successfully.</div>
+    <% } %>
+    <% if (success === 'passkey_added') { %>
+    <div class="card card-alert-success">Passkey added. You can now sign in with your fingerprint, face or device PIN.</div>
+    <% } %>
+    <% if (success === 'passkey_reauthed') { %>
+    <div class="card card-alert-success">Signed in again with Discord. You can now add a passkey.</div>
+    <% } %>
+    <% if (success === 'passkey_removed') { %>
+    <div class="card card-alert-success">Passkey removed.</div>
     <% } %>
 
     <!-- ── Profile ────────────────────────────────────────────────── -->
@@ -45,6 +54,43 @@
             </div>
             <% } %>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Passkeys ───────────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Passkeys</h2>
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">Sign in with your fingerprint, face or device PIN instead of going through Discord each time. Add a passkey on each device you use. To confirm it's you, the bot will DM you a code on Discord.</p>
+          <% if (passkeys.length > 0) { %>
+          <div class="table-scroll">
+          <table class="table">
+            <thead><tr><th>Device</th><th>Added</th><th>Last used</th><th></th></tr></thead>
+            <tbody>
+              <% passkeys.forEach(function (pk) { %>
+              <tr>
+                <td><%= pk.deviceLabel %></td>
+                <td><%= new Date(pk.createdAt).toLocaleDateString('en-GB') %></td>
+                <td><%= pk.lastUsedAt ? new Date(pk.lastUsedAt).toLocaleDateString('en-GB') : 'Never' %></td>
+                <td>
+                  <form method="POST" action="/auth/passkey/delete" class="inline-form-sm js-confirm-remove-passkey" data-passkey-label="<%= pk.deviceLabel %>">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" name="credentialId" value="<%= pk.credentialId %>">
+                    <button type="submit" class="btn btn-ghost btn-sm" aria-label="Remove passkey <%= pk.deviceLabel %>">Remove</button>
+                  </form>
+                </td>
+              </tr>
+              <% }) %>
+            </tbody>
+          </table>
+          </div>
+          <% } %>
+          <div class="button-row-wrap is-hidden" id="passkey-add-row">
+            <button type="button" class="btn btn-sm" id="passkey-add">Add a passkey on this device</button>
+          </div>
+          <p class="hint is-hidden" id="passkey-unsupported">This browser or device doesn't support passkeys.</p>
         </div>
       </div>
     </section>
@@ -150,6 +196,9 @@
 
   </main>
 
+  <script src="/vendor/simplewebauthn/index.umd.min.js" defer></script>
+  <script src="/passkey-shared.js" defer></script>
+  <script src="/passkey-register.js" defer></script>
   <%- include('partials/pwa-register') %>
   <%- include('partials/footer') %>
 </body>

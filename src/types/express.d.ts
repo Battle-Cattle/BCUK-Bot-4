@@ -28,7 +28,13 @@ export interface SessionUser {
 declare module 'express-session' {
   interface SessionData {
     user?: SessionUser;
-    oauthState?: { value: string; expiresAt: number };
+    /** Pending Discord OAuth login; `returnTo` is a fixed, allowlisted path to land on afterwards. */
+    oauthState?: { value: string; expiresAt: number; returnTo?: string };
+    /**
+     * When (ms epoch) this session last completed a Discord OAuth login. Passkey sign-in doesn't
+     * set it, so adding a passkey can require a recent Discord login (step-up re-authentication).
+     */
+    discordAuthAt?: number;
     csrfToken?: string;
     eventsubOAuthState?: { value: string; expiresAt: number };
     eventsubStreamerId?: number;
@@ -43,6 +49,15 @@ declare module 'express-session' {
     botOAuthState?: { value: string; expiresAt: number; attemptStartedAt: number };
     /** Pending companion-app loopback OAuth login, set by /companion/login. */
     companionOAuth?: { redirectUri: string; appState: string; expiresAt: number };
+    /** Pending WebAuthn (passkey) challenge, set by the /auth/passkey options routes and consumed by verify. */
+    webauthnChallenge?: {
+      purpose: 'register' | 'login';
+      value: string;
+      discordId?: string;
+      /** base64url user handle put in the registration options, stored with the new passkey. */
+      userHandle?: string;
+      expiresAt: number;
+    };
   }
 }
 
