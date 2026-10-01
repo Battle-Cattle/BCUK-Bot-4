@@ -14,7 +14,6 @@ import { sendOwnerAlert } from './ownerAlerts';
 import { upsertGuild, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
 import { runUserMutation } from '../web/routes/adminUserMutationQueue';
 import { createLogger } from '../shared/logger';
-import { withTimeout } from '../shared/withTimeout';
 import { getDiscordClient, setDiscordClient } from './discordClientStore';
 
 const log = createLogger('Discord');
@@ -208,21 +207,39 @@ function stopGatewayWatchdog(): void {
   }
 }
 
-/** Resolve callbacks awaiting the next `clientReady` — see {@link onceDiscordReady}. */
+/** Resolve callbacks awaiting the next `clientReady` — see {@link waitForDiscordReady}. */
 let readyWaiters: Array<() => void> = [];
 
 /**
- * Resolves once the Discord client has fired `clientReady` (immediately, if it already has by
- * the time this is called). Lets a caller that needs the client to actually be usable — e.g.
- * `index.ts`'s `announceStartup()`, which sends a DM through it — wait for that without
- * `startDiscordBot()` itself becoming blocking (it stays fire-and-forget, matching the rest of
- * the boot sequence). Never resolves if the client fails to connect and is never retried; pair
- * with `withTimeout` at the call site if that matters there.
- * @returns Resolves with no value once the client is ready.
+ * Resolves once the Discord client has fired `clientReady` (immediately, if it already has), so a
+ * caller that needs the client to actually be usable — e.g. an owner-alert DM raised during
+ * startup — can wait for it without `startDiscordBot()` itself becoming blocking. Rejects if that
+ * doesn't happen within `timeoutMs`, and on that timeout removes its own entry from the
+ * ready-waiter list, so repeated callers during a prolonged Discord outage can't pile up waiters
+ * that only a later successful connect would ever drain.
+ * @param timeoutMs - How long to wait for the client to become ready.
+ * @returns Resolves once the client is ready; rejects with a timeout error otherwise.
  */
-export function onceDiscordReady(): Promise<void> {
+export function waitForDiscordReady(timeoutMs: number): Promise<void> {
   if (getDiscordClient()) return Promise.resolve();
-  return new Promise((resolve) => { readyWaiters.push(resolve); });
+  return new Promise((resolve, reject) => {
+    /** Resolves this wait once `clientReady` fires, cancelling its timeout. */
+    const waiter = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      readyWaiters = readyWaiters.filter((w) => w !== waiter);
+      reject(new Error(`Discord ready timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    timer.unref();
+    readyWaiters.push(waiter);
+  });
+}
+
+/** Test-only: how many {@link waitForDiscordReady} callers are still waiting on `clientReady`. */
+export function __getReadyWaiterCountForTests(): number {
+  return readyWaiters.length;
 }
 
 /**
@@ -305,25 +322,6 @@ export async function sendDiscordDirectMessage(discordId: string, content: strin
     log.warn(`Failed to send Discord DM to ${discordId}:`, err);
     return false;
   }
-}
-
-/**
- * Sends a direct message from the bot to a user, first waiting (up to `readyTimeoutMs`) for the
- * Discord client to fire `clientReady` if it hasn't yet. Used for owner alerts, which can be
- * raised during startup (e.g. Twitch reporting a missing bot token) before Discord has finished
- * connecting — without the wait those alerts would fail with "client is not ready" and be lost.
- * @param discordId - Discord user ID to message.
- * @param content - Message text.
- * @param readyTimeoutMs - How long to wait for the client to become ready before giving up.
- * @returns Resolves once the DM has been sent; rejects if the client doesn't become ready in
- *   time or Discord refuses the DM.
- */
-export async function sendDiscordDirectMessageWhenReady(discordId: string, content: string, readyTimeoutMs: number): Promise<void> {
-  await withTimeout(onceDiscordReady(), readyTimeoutMs, 'Discord ready for DM');
-  const client = getDiscordClient();
-  if (!client) throw new Error('Discord client is not ready');
-  const user = await client.users.fetch(discordId);
-  await user.send(content);
 }
 
 /**

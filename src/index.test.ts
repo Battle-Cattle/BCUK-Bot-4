@@ -30,8 +30,8 @@ vi.mock('./discord/ownerAlerts', () => ({
 vi.mock('./discord/discordBot', () => ({
   startDiscordBot: vi.fn(),
   stopDiscordBot: vi.fn(),
-  onceDiscordReady: vi.fn().mockResolvedValue(undefined),
-  sendDiscordDirectMessageWhenReady: vi.fn().mockResolvedValue(undefined),
+  getDiscordClient: vi.fn(),
+  waitForDiscordReady: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./discord/guildRegistry', () => ({
   reloadGuildRegistry: vi.fn().mockResolvedValue(undefined),
@@ -227,7 +227,7 @@ describe('startup — guild registry preload', () => {
     await runMain();
 
     expect(vi.mocked(recordDbPing)).toHaveBeenCalledWith(true);
-    expect(vi.mocked(registerOwnerAlertRuntime)).toHaveBeenCalledWith({ send: expect.any(Function) });
+    expect(vi.mocked(registerOwnerAlertRuntime)).toHaveBeenCalledWith({ send: expect.any(Function), waitUntilReady: expect.any(Function) });
     expect(vi.mocked(primeOwnerAlertBaseline)).toHaveBeenCalledOnce();
     expect(vi.mocked(startOwnerAlertWatcher)).toHaveBeenCalledOnce();
     // primeOwnerAlertBaseline must run before the watcher starts listening — otherwise its
@@ -309,36 +309,16 @@ describe('startup — reward pricing scheduler', () => {
 // ─── Owner "back online" startup DM ────────────────────────────────────────────
 
 describe('startup — owner back-online DM', () => {
-  it('waits for Discord readiness before sending the announceStartup DM', async () => {
-    const { onceDiscordReady } = await import('./discord/discordBot.js');
+  it('sends the announceStartup DM once every startup step has run', async () => {
     const { announceStartup } = await import('./discord/ownerAlerts.js');
+    const { startEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
 
     await runMain();
 
-    expect(vi.mocked(onceDiscordReady)).toHaveBeenCalledOnce();
     expect(vi.mocked(announceStartup)).toHaveBeenCalledOnce();
-    const [readyCallOrder] = vi.mocked(onceDiscordReady).mock.invocationCallOrder;
+    const [reconciliationCallOrder] = vi.mocked(startEventSubReconciliation).mock.invocationCallOrder;
     const [announceCallOrder] = vi.mocked(announceStartup).mock.invocationCallOrder;
-    expect(readyCallOrder).toBeLessThan(announceCallOrder);
-  });
-
-  it('skips the DM (without crashing the process) when Discord never becomes ready in time', async () => {
-    const { onceDiscordReady } = await import('./discord/discordBot.js');
-    const { announceStartup } = await import('./discord/ownerAlerts.js');
-    vi.mocked(onceDiscordReady).mockReturnValueOnce(new Promise(() => { /* never resolves */ }));
-
-    vi.useFakeTimers();
-    try {
-      const mainPromise = import('./index.js');
-      await vi.advanceTimersByTimeAsync(30_000);
-      await mainPromise;
-      await vi.advanceTimersByTimeAsync(0);
-    } finally {
-      vi.useRealTimers();
-    }
-
-    expect(vi.mocked(announceStartup)).not.toHaveBeenCalled();
-    expect(exitSpy).not.toHaveBeenCalled();
+    expect(reconciliationCallOrder).toBeLessThan(announceCallOrder);
   });
 });
 
@@ -395,28 +375,43 @@ describe('DB health check interval', () => {
   });
 });
 
-describe('owner-alert DM send callback', () => {
-  it('sends via the wait-for-ready DM helper so startup alerts are not dropped', async () => {
+describe('owner-alert runtime', () => {
+  it('waits for Discord readiness with the owner-DM timeout', async () => {
     const { registerOwnerAlertRuntime } = await import('./discord/ownerAlerts.js');
-    const { sendDiscordDirectMessageWhenReady } = await import('./discord/discordBot.js');
+    const { waitForDiscordReady } = await import('./discord/discordBot.js');
+
+    await runMain();
+
+    const { waitUntilReady } = vi.mocked(registerOwnerAlertRuntime).mock.calls[0][0];
+    await waitUntilReady!();
+    expect(vi.mocked(waitForDiscordReady)).toHaveBeenCalledWith(30_000);
+  });
+
+  it('send throws when the Discord client is not ready', async () => {
+    const { registerOwnerAlertRuntime } = await import('./discord/ownerAlerts.js');
+    const { getDiscordClient } = await import('./discord/discordBot.js');
+    vi.mocked(getDiscordClient).mockReturnValue(undefined as any);
+
+    await runMain();
+
+    const send = vi.mocked(registerOwnerAlertRuntime).mock.calls[0][0].send;
+    await expect(send('123', 'hi')).rejects.toThrow('Discord client is not ready');
+  });
+
+  it('send fetches the user and DMs them when the client is ready', async () => {
+    const { registerOwnerAlertRuntime } = await import('./discord/ownerAlerts.js');
+    const { getDiscordClient } = await import('./discord/discordBot.js');
+    const userSend = vi.fn().mockResolvedValue(undefined);
+    const fetch = vi.fn().mockResolvedValue({ send: userSend });
+    vi.mocked(getDiscordClient).mockReturnValue({ users: { fetch } } as any);
 
     await runMain();
 
     const send = vi.mocked(registerOwnerAlertRuntime).mock.calls[0][0].send;
     await send('123', 'hi');
 
-    expect(vi.mocked(sendDiscordDirectMessageWhenReady)).toHaveBeenCalledWith('123', 'hi', 30_000);
-  });
-
-  it('propagates a failed send as a rejection', async () => {
-    const { registerOwnerAlertRuntime } = await import('./discord/ownerAlerts.js');
-    const { sendDiscordDirectMessageWhenReady } = await import('./discord/discordBot.js');
-    vi.mocked(sendDiscordDirectMessageWhenReady).mockRejectedValueOnce(new Error('Discord ready for DM timed out after 30000ms'));
-
-    await runMain();
-
-    const send = vi.mocked(registerOwnerAlertRuntime).mock.calls[0][0].send;
-    await expect(send('123', 'hi')).rejects.toThrow('timed out');
+    expect(fetch).toHaveBeenCalledWith('123');
+    expect(userSend).toHaveBeenCalledWith('hi');
   });
 });
 
