@@ -23,9 +23,11 @@ import { assignUserToTimer, unassignUserFromTimer, findUser } from '../../db';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-/** Builds a supertest-ready app: the timer assignments router with a urlencoded body parser (no session or render stub needed). */
-function buildApp() {
-  return buildTestApp({ router, bodyParser: 'urlencoded' });
+const MOD_SESSION_USER = { discordId: '1', discordName: 'Mod', accessLevel: ACCESS_LEVEL_MOCK.MOD };
+
+/** Builds a supertest-ready app: the timer assignments router with a urlencoded body parser and a Mod session user by default. */
+function buildApp(sessionUser: unknown = MOD_SESSION_USER) {
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
 }
 
 const VALID_TIMER_ID = '5';
@@ -131,5 +133,27 @@ describe('POST /timers/unassign', () => {
       .post('/timers/unassign')
       .send(`timer_id=${VALID_TIMER_ID}&discord_id=${VALID_DISCORD_ID}`);
     expect(res.headers.location).toBe('/timers?error=unassign_failed');
+  });
+});
+
+// ─── Streamer self-unassign ───────────────────────────────────────────────────
+
+describe('POST /timers/unassign as a streamer below Mod', () => {
+  const STREAMER = { discordId: VALID_DISCORD_ID, discordName: 'Alice', accessLevel: ACCESS_LEVEL_MOCK.USER };
+
+  it('lets a streamer remove themselves from a shared timer', async () => {
+    const res = await supertest(buildApp(STREAMER))
+      .post('/timers/unassign')
+      .send(`timer_id=${VALID_TIMER_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/timers');
+    expect(vi.mocked(unassignUserFromTimer)).toHaveBeenCalledWith(5, VALID_DISCORD_ID);
+  });
+
+  it('redirects to ?error=forbidden when a streamer tries to unassign someone else', async () => {
+    const res = await supertest(buildApp(STREAMER))
+      .post('/timers/unassign')
+      .send(`timer_id=${VALID_TIMER_ID}&discord_id=999999999999999999`);
+    expect(res.headers.location).toBe('/timers?error=forbidden');
+    expect(vi.mocked(unassignUserFromTimer)).not.toHaveBeenCalled();
   });
 });

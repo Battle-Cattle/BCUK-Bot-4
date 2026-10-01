@@ -1,14 +1,19 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import {
-  addTimerCommand, assignUsersToTimer, findUsersByIds, removeTimerCommand, updateTimerCommand,
-  setTimerCommandEnabled, TimerCommandNotFoundError,
-} from '../../db';
+import { addTimerCommand, assignUsersToTimer, findUsersByIds } from '../../db';
 import type { TimerCommandInput } from '../../db';
 import { csrfProtection } from '../csrf';
-import { requireGuildContext, requireMod } from '../middleware';
-import { parseDiscordIdList, normalizeRequiredText, parseCheckboxField, parsePositiveIntId } from './validation';
+import { requireGuildContext } from '../middleware';
+import { normalizeRequiredText, parseCheckboxField, parsePositiveIntId } from './validation';
 import { logAndRedirectError } from './errorHandling';
+import {
+  discardNewTimerAsSessionUser,
+  removeTimerAsSessionUser,
+  resolveNewTimerAssignees,
+  setTimerEnabledAsSessionUser,
+  timerAccessErrorCode,
+  updateTimerAsSessionUser,
+} from './timerWriteAccess';
 
 const log = createLogger('Web');
 const router = Router();
@@ -63,10 +68,18 @@ function parseTimerCommandFields(body: Record<string, string | string[] | undefi
 
 /**
  * Assigns Twitch-linked users to a newly created timer, filtering out any id with no
- * linked Twitch name. On any failure, deletes the timer to avoid leaving it in a
- * partially-assigned state. Returns an error code, or null on success.
+ * linked Twitch name. On any failure, cleans the timer up via `discard` to avoid leaving it in a
+ * partially-assigned state.
+ * @param timerId - ID of the just-created timer.
+ * @param discordIds - Discord IDs to assign (users without a Twitch name are skipped).
+ * @param discard - Deletes the timer on failure (see `discardNewTimerAsSessionUser`).
+ * @returns An error code, or null on success.
  */
-async function assignUsersToNewTimer(timerId: number, discordIds: string[]): Promise<string | null> {
+async function assignUsersToNewTimer(
+  timerId: number,
+  discordIds: string[],
+  discard: (timerId: number) => Promise<void>,
+): Promise<string | null> {
   try {
     const users = await findUsersByIds(discordIds);
     const eligibleDiscordIds = discordIds.filter((discordId) => {
@@ -76,7 +89,7 @@ async function assignUsersToNewTimer(timerId: number, discordIds: string[]): Pro
     await assignUsersToTimer(timerId, eligibleDiscordIds);
   } catch (err) {
     try {
-      await removeTimerCommand(timerId);
+      await discard(timerId);
     } catch (cleanupErr) {
       log.error('Cleanup after failed timer assign error:', cleanupErr);
     }
@@ -87,45 +100,50 @@ async function assignUsersToNewTimer(timerId: number, discordIds: string[]): Pro
 }
 
 /**
- * POST /timers/add — creates a new timer command and optionally assigns it to one or more
- * Twitch-linked Discord users. If any assignment fails, the just-created timer is deleted
- * to avoid a partially-assigned state.
+ * POST /timers/add — creates a new timer command and assigns it. Mod+ may assign any
+ * Twitch-linked Discord users (optionally none); a streamer below Mod creates a timer on their own
+ * channel (`discord_ids` ignored). If any assignment fails, the just-created timer is deleted to
+ * avoid a partially-assigned state.
  * @param req - Express request; reads `name`, `message`, `interval_seconds`, `min_messages`,
  *   `require_live`, `enabled`, and `discord_ids` from `req.body`.
  * @param res - Express response; redirects to `/timers` on success, or to
  *   `/timers?error=<code>` if a field is invalid (`missing_fields`, `invalid_interval`,
- *   `invalid_min_messages`), the insert fails (`add_failed`), or an assignment fails
- *   (`assign_failed`).
+ *   `invalid_min_messages`), a streamer has no linked Twitch account (`twitch_not_linked`), the
+ *   insert fails (`add_failed`), or an assignment fails (`assign_failed`).
  */
-router.post('/timers/add', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
+router.post('/timers/add', requireGuildContext, csrfProtection, async (req, res) => {
   const body = req.body as Record<string, string | string[] | undefined>;
   const result = parseTimerCommandFields(body);
   if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
 
   let timerId: number;
+  let discordIds: string[];
   try {
+    const assignees = await resolveNewTimerAssignees(req);
+    if ('error' in assignees) return res.redirect(`/timers?error=${assignees.error}`);
+    discordIds = assignees.discordIds;
     timerId = await addTimerCommand(result.input);
   } catch (err) {
     return logAndRedirectError({ res, log, logLabel: 'Add timer command error:', err, basePath: '/timers', errorCode: 'add_failed' });
   }
 
-  const discordIds = parseDiscordIdList(body.discord_ids);
-
-  const assignError = await assignUsersToNewTimer(timerId, discordIds);
+  const assignError = await assignUsersToNewTimer(timerId, discordIds, (id) => discardNewTimerAsSessionUser(req, id));
   if (assignError) return res.redirect(`/timers?error=${assignError}`);
 
   res.redirect('/timers');
 });
 
 /**
- * POST /timers/update — updates an existing timer command's fields.
+ * POST /timers/update — updates an existing timer command's fields. A streamer below Mod may only
+ * update a timer assigned to them alone (see `isTimerSelfManageableBy`).
  * @param req - Express request; reads `id`, plus the same fields as `/timers/add`, from `req.body`.
  * @param res - Express response; redirects to `/timers` on success, or to
  *   `/timers?error=<code>` if `id` is malformed (`invalid_id`), a field is invalid
  *   (`missing_fields`, `invalid_interval`, `invalid_min_messages`), the timer doesn't exist
- *   (`timer_not_found`), or the update fails (`update_failed`).
+ *   (`timer_not_found`), a streamer doesn't own it outright (`forbidden`, checked inside the
+ *   update's own transaction), or the update fails (`update_failed`).
  */
-router.post('/timers/update', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
+router.post('/timers/update', requireGuildContext, csrfProtection, async (req, res) => {
   const body = req.body as Record<string, string | string[] | undefined>;
   const id = parsePositiveIntId(body.id);
   if (id === null) return res.redirect('/timers?error=invalid_id');
@@ -134,11 +152,10 @@ router.post('/timers/update', requireGuildContext, requireMod, csrfProtection, a
   if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
 
   try {
-    await updateTimerCommand(id, result.input);
+    await updateTimerAsSessionUser(req, id, result.input);
   } catch (err) {
-    if (err instanceof TimerCommandNotFoundError) {
-      return res.redirect('/timers?error=timer_not_found');
-    }
+    const accessErrorCode = timerAccessErrorCode(err);
+    if (accessErrorCode) return res.redirect(`/timers?error=${accessErrorCode}`);
     return logAndRedirectError({ res, log, logLabel: 'Update timer command error:', err, basePath: '/timers', errorCode: 'update_failed' });
   }
 
@@ -146,20 +163,24 @@ router.post('/timers/update', requireGuildContext, requireMod, csrfProtection, a
 });
 
 /**
- * POST /timers/remove — deletes a timer command and all its streamer assignments.
- * No-ops (still redirects to success) if the id doesn't exist.
+ * POST /timers/remove — deletes a timer command and all its streamer assignments. For Mod+ this
+ * no-ops (still redirects to success) if the id doesn't exist. A streamer below Mod may only delete
+ * a timer assigned to them alone; for a shared one they unassign themselves via `/timers/unassign`.
  * @param req - Express request; reads `id` from `req.body`.
  * @param res - Express response; redirects to `/timers` on success, or to
- *   `/timers?error=<code>` if `id` is malformed (`invalid_id`) or the delete fails
- *   (`remove_failed`).
+ *   `/timers?error=<code>` if `id` is malformed (`invalid_id`), a streamer's timer no longer
+ *   exists (`timer_not_found`) or isn't theirs alone (`forbidden`, checked inside the delete's own
+ *   transaction), or the delete fails (`remove_failed`).
  */
-router.post('/timers/remove', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
+router.post('/timers/remove', requireGuildContext, csrfProtection, async (req, res) => {
   const id = parsePositiveIntId((req.body as Record<string, string | string[] | undefined>).id);
   if (id === null) return res.redirect('/timers?error=invalid_id');
 
   try {
-    await removeTimerCommand(id);
+    await removeTimerAsSessionUser(req, id);
   } catch (err) {
+    const accessErrorCode = timerAccessErrorCode(err);
+    if (accessErrorCode) return res.redirect(`/timers?error=${accessErrorCode}`);
     return logAndRedirectError({ res, log, logLabel: 'Remove timer command error:', err, basePath: '/timers', errorCode: 'remove_failed' });
   }
 
@@ -168,23 +189,23 @@ router.post('/timers/remove', requireGuildContext, requireMod, csrfProtection, a
 
 /**
  * POST /timers/toggle — flips a timer command's `enabled` flag, for a one-click
- * enable/disable control in the timer list without opening the full edit form.
+ * enable/disable control in the timer list without opening the full edit form. A streamer below
+ * Mod may only toggle a timer assigned to them alone.
  * @param req - Express request; reads `id` and `enabled` (`'true'`/`'false'`) from `req.body`.
  * @param res - Express response; redirects to `/timers` on success, or to `/timers?error=<code>`
- *   if `id` is malformed (`invalid_id`), the timer doesn't exist (`timer_not_found`), or the
- *   update fails (`toggle_failed`).
+ *   if `id` is malformed (`invalid_id`), the timer doesn't exist (`timer_not_found`), a streamer
+ *   doesn't own it outright (`forbidden`), or the update fails (`toggle_failed`).
  */
-router.post('/timers/toggle', requireGuildContext, requireMod, csrfProtection, async (req, res) => {
+router.post('/timers/toggle', requireGuildContext, csrfProtection, async (req, res) => {
   const body = req.body as Record<string, string | string[] | undefined>;
   const id = parsePositiveIntId(body.id);
   if (id === null) return res.redirect('/timers?error=invalid_id');
 
   try {
-    await setTimerCommandEnabled(id, body.enabled === 'true');
+    await setTimerEnabledAsSessionUser(req, id, body.enabled === 'true');
   } catch (err) {
-    if (err instanceof TimerCommandNotFoundError) {
-      return res.redirect('/timers?error=timer_not_found');
-    }
+    const accessErrorCode = timerAccessErrorCode(err);
+    if (accessErrorCode) return res.redirect(`/timers?error=${accessErrorCode}`);
     return logAndRedirectError({ res, log, logLabel: 'Toggle timer command error:', err, basePath: '/timers', errorCode: 'toggle_failed' });
   }
 

@@ -168,6 +168,7 @@ import {
 } from './db/customCommands';
 export { getAllCustomCommandsWithAssignments, getCustomCommandCount } from './db/customCommands';
 export { isCommandSelfManageableBy } from './db/commandSelfService';
+export { isTimerSelfManageableBy } from './db/timerSelfService';
 export type {
   DbCustomCommand, DbCustomCommandAssignedUser, DbCustomCommandWithAssignments,
 } from './db/customCommands';
@@ -674,7 +675,8 @@ export type {
   TimerCommandInput, TimerCommandForScheduler,
 } from './db/timerCommands';
 export {
-  TimerCommandNotFoundError,
+  TimerCommandNotFoundError, TimerSelfServiceDeniedError,
+  updateOwnTimerCommand, setOwnTimerCommandEnabled, removeOwnTimerCommand, discardOwnNewTimerCommand,
   getAllTimerCommandsWithAssignments, addTimerCommand, updateTimerCommand,
   removeTimerCommand, setTimerCommandEnabled, getAllEnabledTimerCommandsWithChannel,
   assignUserToTimer, assignUsersToTimer, unassignUserFromTimer,

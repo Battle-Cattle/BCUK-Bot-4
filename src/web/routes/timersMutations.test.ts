@@ -4,6 +4,7 @@ import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => {
   class TimerCommandNotFoundError extends Error {}
+  class TimerSelfServiceDeniedError extends Error {}
   return {
     addTimerCommand: vi.fn().mockResolvedValue(1),
     updateTimerCommand: vi.fn().mockResolvedValue(undefined),
@@ -11,7 +12,13 @@ vi.mock('../../db', () => {
     setTimerCommandEnabled: vi.fn().mockResolvedValue(undefined),
     assignUsersToTimer: vi.fn().mockResolvedValue(undefined),
     findUsersByIds: vi.fn().mockResolvedValue(new Map()),
+    findUser: vi.fn().mockResolvedValue(null),
+    updateOwnTimerCommand: vi.fn().mockResolvedValue(undefined),
+    setOwnTimerCommandEnabled: vi.fn().mockResolvedValue(undefined),
+    removeOwnTimerCommand: vi.fn().mockResolvedValue(undefined),
+    discardOwnNewTimerCommand: vi.fn().mockResolvedValue(undefined),
     TimerCommandNotFoundError,
+    TimerSelfServiceDeniedError,
     AccessLevel: ACCESS_LEVEL_MOCK,
   };
 });
@@ -27,14 +34,19 @@ import supertest from 'supertest';
 import router from './timersMutations';
 import {
   addTimerCommand, updateTimerCommand, removeTimerCommand, setTimerCommandEnabled,
-  assignUsersToTimer, findUsersByIds, TimerCommandNotFoundError,
+  assignUsersToTimer, findUsersByIds, findUser, TimerCommandNotFoundError, TimerSelfServiceDeniedError,
+  updateOwnTimerCommand, setOwnTimerCommandEnabled, removeOwnTimerCommand, discardOwnNewTimerCommand,
 } from '../../db';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-/** Builds a supertest-ready app: the timer mutations router with a urlencoded body parser (no session or render stub needed). */
-function buildApp() {
-  return buildTestApp({ router, bodyParser: 'urlencoded' });
+const MOD_SESSION_USER = { discordId: '1', discordName: 'Mod', accessLevel: ACCESS_LEVEL_MOCK.MOD };
+const STREAMER_ID = '111111111111111111';
+const STREAMER_SESSION_USER = { discordId: STREAMER_ID, discordName: 'Streamer', accessLevel: ACCESS_LEVEL_MOCK.USER };
+
+/** Builds a supertest-ready app: the timer mutations router with a urlencoded body parser and a Mod session user by default. */
+function buildApp(sessionUser: unknown = MOD_SESSION_USER) {
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
 }
 
 const VALID_DISCORD_ID = '123456789012345678';
@@ -48,6 +60,11 @@ beforeEach(() => {
   vi.mocked(setTimerCommandEnabled).mockResolvedValue(undefined);
   vi.mocked(assignUsersToTimer).mockResolvedValue(undefined);
   vi.mocked(findUsersByIds).mockResolvedValue(new Map());
+  vi.mocked(findUser).mockResolvedValue(null);
+  vi.mocked(updateOwnTimerCommand).mockResolvedValue(undefined);
+  vi.mocked(setOwnTimerCommandEnabled).mockResolvedValue(undefined);
+  vi.mocked(removeOwnTimerCommand).mockResolvedValue(undefined);
+  vi.mocked(discardOwnNewTimerCommand).mockResolvedValue(undefined);
 });
 
 const VALID_FIELDS = 'name=Discord+plug&message=Join+our+Discord&interval_seconds=600&min_messages=0';
@@ -55,9 +72,9 @@ const VALID_FIELDS = 'name=Discord+plug&message=Join+our+Discord&interval_second
 // ─── POST /timers/add ─────────────────────────────────────────────────────────
 
 describe('POST /timers/add', () => {
-  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+  it('runs requireGuildContext (not requireMod), so the handler sees a fresh access level and can allow streamer self-service', async () => {
     await supertest(buildApp()).post('/timers/add').send(VALID_FIELDS);
-    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext']);
   });
 
   it('redirects to /timers on success', async () => {
@@ -144,14 +161,42 @@ describe('POST /timers/add', () => {
     expect(res.headers.location).toBe('/timers?error=assign_failed');
     expect(removeTimerCommand).toHaveBeenCalledWith(1);
   });
+
+  it('assigns a streamer\'s new timer to their own channel only, ignoring discord_ids', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: STREAMER_ID, twitch_name: 'streamer' } as any);
+    vi.mocked(findUsersByIds).mockResolvedValue(new Map([
+      [STREAMER_ID, { discord_id: STREAMER_ID, twitch_name: 'streamer' } as any],
+      [VALID_DISCORD_ID, { discord_id: VALID_DISCORD_ID, twitch_name: 'alice' } as any],
+    ]));
+    const res = await supertest(buildApp(STREAMER_SESSION_USER)).post('/timers/add').send(`${VALID_FIELDS}&discord_ids=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/timers');
+    expect(findUsersByIds).toHaveBeenCalledWith([STREAMER_ID]);
+    expect(assignUsersToTimer).toHaveBeenCalledWith(1, [STREAMER_ID]);
+  });
+
+  it('redirects a streamer with no linked Twitch account to ?error=twitch_not_linked without creating a timer', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: STREAMER_ID, twitch_name: null } as any);
+    const res = await supertest(buildApp(STREAMER_SESSION_USER)).post('/timers/add').send(VALID_FIELDS);
+    expect(res.headers.location).toBe('/timers?error=twitch_not_linked');
+    expect(addTimerCommand).not.toHaveBeenCalled();
+  });
+
+  it('cleans up a streamer\'s failed new timer with the unclaimed-only discard, not the unrestricted delete', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: STREAMER_ID, twitch_name: 'streamer' } as any);
+    vi.mocked(findUsersByIds).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp(STREAMER_SESSION_USER)).post('/timers/add').send(VALID_FIELDS);
+    expect(res.headers.location).toBe('/timers?error=assign_failed');
+    expect(discardOwnNewTimerCommand).toHaveBeenCalledWith(1, STREAMER_ID);
+    expect(removeTimerCommand).not.toHaveBeenCalled();
+  });
 });
 
 // ─── POST /timers/update ──────────────────────────────────────────────────────
 
 describe('POST /timers/update', () => {
-  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+  it('runs requireGuildContext (not requireMod), so the handler sees a fresh access level and can allow streamer self-service', async () => {
     await supertest(buildApp()).post('/timers/update').send(`id=1&${VALID_FIELDS}`);
-    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext']);
   });
 
   it('redirects to /timers on success', async () => {
@@ -189,14 +234,27 @@ describe('POST /timers/update', () => {
       requireLive: true, enabled: true,
     });
   });
+
+  it('routes a streamer\'s update through the owner-checked write', async () => {
+    const res = await supertest(buildApp(STREAMER_SESSION_USER)).post('/timers/update').send(`id=1&${VALID_FIELDS}`);
+    expect(res.headers.location).toBe('/timers');
+    expect(updateOwnTimerCommand).toHaveBeenCalledWith(1, expect.objectContaining({ name: 'Discord plug' }), STREAMER_ID);
+    expect(updateTimerCommand).not.toHaveBeenCalled();
+  });
+
+  it('redirects a streamer to ?error=forbidden when they don\'t own the timer outright', async () => {
+    vi.mocked(updateOwnTimerCommand).mockRejectedValueOnce(new (TimerSelfServiceDeniedError as any)(1));
+    const res = await supertest(buildApp(STREAMER_SESSION_USER)).post('/timers/update').send(`id=1&${VALID_FIELDS}`);
+    expect(res.headers.location).toBe('/timers?error=forbidden');
+  });
 });
 
 // ─── POST /timers/remove ──────────────────────────────────────────────────────
 
 describe('POST /timers/remove', () => {
-  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+  it('runs requireGuildContext (not requireMod), so the handler sees a fresh access level and can allow streamer self-service', async () => {
     await supertest(buildApp()).post('/timers/remove').send('id=5');
-    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext']);
   });
 
   it('redirects to /timers on success', async () => {
@@ -215,14 +273,33 @@ describe('POST /timers/remove', () => {
     const res = await supertest(buildApp()).post('/timers/remove').send('id=5');
     expect(res.headers.location).toBe('/timers?error=remove_failed');
   });
+
+  it('routes a streamer\'s delete through the owner-checked write', async () => {
+    const res = await supertest(buildApp(STREAMER_SESSION_USER)).post('/timers/remove').send('id=5');
+    expect(res.headers.location).toBe('/timers');
+    expect(removeOwnTimerCommand).toHaveBeenCalledWith(5, STREAMER_ID);
+    expect(removeTimerCommand).not.toHaveBeenCalled();
+  });
+
+  it('redirects a streamer to ?error=forbidden when they don\'t own the timer outright', async () => {
+    vi.mocked(removeOwnTimerCommand).mockRejectedValueOnce(new (TimerSelfServiceDeniedError as any)(5));
+    const res = await supertest(buildApp(STREAMER_SESSION_USER)).post('/timers/remove').send('id=5');
+    expect(res.headers.location).toBe('/timers?error=forbidden');
+  });
+
+  it('redirects a streamer to ?error=timer_not_found when the timer is gone', async () => {
+    vi.mocked(removeOwnTimerCommand).mockRejectedValueOnce(new (TimerCommandNotFoundError as any)(5));
+    const res = await supertest(buildApp(STREAMER_SESSION_USER)).post('/timers/remove').send('id=5');
+    expect(res.headers.location).toBe('/timers?error=timer_not_found');
+  });
 });
 
 // ─── POST /timers/toggle ──────────────────────────────────────────────────────
 
 describe('POST /timers/toggle', () => {
-  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+  it('runs requireGuildContext (not requireMod), so the handler sees a fresh access level and can allow streamer self-service', async () => {
     await supertest(buildApp()).post('/timers/toggle').send('id=1&enabled=true');
-    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext']);
   });
 
   it('redirects to /timers on success', async () => {
@@ -247,5 +324,18 @@ describe('POST /timers/toggle', () => {
     vi.mocked(setTimerCommandEnabled).mockRejectedValueOnce(new Error('DB error'));
     const res = await supertest(buildApp()).post('/timers/toggle').send('id=1&enabled=true');
     expect(res.headers.location).toBe('/timers?error=toggle_failed');
+  });
+
+  it('routes a streamer\'s toggle through the owner-checked write', async () => {
+    const res = await supertest(buildApp(STREAMER_SESSION_USER)).post('/timers/toggle').send('id=1&enabled=false');
+    expect(res.headers.location).toBe('/timers');
+    expect(setOwnTimerCommandEnabled).toHaveBeenCalledWith(1, false, STREAMER_ID);
+    expect(setTimerCommandEnabled).not.toHaveBeenCalled();
+  });
+
+  it('redirects a streamer to ?error=forbidden when they don\'t own the timer outright', async () => {
+    vi.mocked(setOwnTimerCommandEnabled).mockRejectedValueOnce(new (TimerSelfServiceDeniedError as any)(1));
+    const res = await supertest(buildApp(STREAMER_SESSION_USER)).post('/timers/toggle').send('id=1&enabled=true');
+    expect(res.headers.location).toBe('/timers?error=forbidden');
   });
 });

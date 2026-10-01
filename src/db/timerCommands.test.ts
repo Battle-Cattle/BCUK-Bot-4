@@ -1,6 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('./pool', () => ({ getPool: vi.fn() }));
+// `withTransaction` is reimplemented on top of the mocked `getPool()` so the owner-checked writes
+// run their SQL against the test's fake connection.
+vi.mock('./pool', () => {
+  const getPool = vi.fn();
+  return {
+    getPool,
+    withTransaction: async (work: (conn: unknown) => Promise<unknown>) => {
+      const conn = await getPool().getConnection();
+      try {
+        await conn.beginTransaction();
+        const result = await work(conn);
+        await conn.commit();
+        return result;
+      } catch (err) {
+        await conn.rollback();
+        throw err;
+      } finally {
+        conn.release();
+      }
+    },
+  };
+});
 vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
@@ -15,10 +36,14 @@ import {
   unassignUserFromTimer,
   getAllEnabledTimerCommandsWithChannel,
   TimerCommandNotFoundError,
+  updateOwnTimerCommand,
+  setOwnTimerCommandEnabled,
+  removeOwnTimerCommand,
+  discardOwnNewTimerCommand,
   type TimerCommandInput,
 } from './timerCommands';
 import { AccessLevel } from './users';
-import { makeMockPool } from '../test-utils/mockMysqlPool';
+import { makeMockConnection, makeMockPool } from '../test-utils/mockMysqlPool';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -302,5 +327,74 @@ describe('getAllEnabledTimerCommandsWithChannel', () => {
     vi.mocked(getPool).mockReturnValue(makeMockPool({ rows }) as any);
     const result = await getAllEnabledTimerCommandsWithChannel();
     expect(result.map((r) => r.id)).toEqual([1]);
+  });
+});
+
+// ─── Streamer self-service ───────────────────────────────────────────────────
+
+describe('owner-checked timer writes', () => {
+  const STREAMER_ID = '111111111111111111';
+  const OTHER_ID = '222222222222222222';
+
+  /** A fake pool whose connection returns the timer row (or none), then its assignment rows, then a write result. */
+  function poolWithTimer(exists: boolean, assignedIds: string[]) {
+    const connection = makeMockConnection();
+    connection.execute
+      .mockResolvedValueOnce([exists ? [{ id: 7 }] : [], []])
+      .mockResolvedValueOnce([assignedIds.map((discord_id) => ({ discord_id })), []])
+      .mockResolvedValue([{ affectedRows: 1 }, []]);
+    const pool = makeMockPool({ connection });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    return connection;
+  }
+
+  it('locks the timer and its assignments before an update, then writes and commits', async () => {
+    const connection = poolWithTimer(true, [STREAMER_ID]);
+    await updateOwnTimerCommand(7, sampleInput, STREAMER_ID);
+    const sqls = connection.execute.mock.calls.map((call) => String(call[0]));
+    expect(sqls[0]).toContain('FROM timer_command WHERE id = ? FOR UPDATE');
+    expect(sqls[1]).toContain('FROM timer_command_streamer WHERE timer_id = ? FOR UPDATE');
+    expect(sqls[2]).toContain('UPDATE timer_command');
+    expect(connection.execute.mock.calls[2]![1]).toEqual(['Discord plug', 'Join our Discord!', 600, 5, 1, 1, 7]);
+    expect(connection.commit).toHaveBeenCalled();
+    expect(connection.release).toHaveBeenCalled();
+  });
+
+  it('denies an update on a shared timer and writes nothing', async () => {
+    const connection = poolWithTimer(true, [STREAMER_ID, OTHER_ID]);
+    await expect(updateOwnTimerCommand(7, sampleInput, STREAMER_ID)).rejects.toThrow('Timer not self-manageable: 7');
+    expect(connection.execute).toHaveBeenCalledTimes(2);
+    expect(connection.rollback).toHaveBeenCalled();
+  });
+
+  it('throws TimerCommandNotFoundError when the timer is gone', async () => {
+    poolWithTimer(false, []);
+    await expect(setOwnTimerCommandEnabled(7, true, STREAMER_ID)).rejects.toBeInstanceOf(TimerCommandNotFoundError);
+  });
+
+  it('toggles a timer the streamer owns outright', async () => {
+    const connection = poolWithTimer(true, [STREAMER_ID]);
+    await setOwnTimerCommandEnabled(7, false, STREAMER_ID);
+    expect(connection.execute.mock.calls[2]).toEqual(['UPDATE timer_command SET enabled = ? WHERE id = ?', [0, 7]]);
+  });
+
+  it('deletes a timer the streamer owns outright, but not someone else\'s', async () => {
+    const owned = poolWithTimer(true, [STREAMER_ID]);
+    await removeOwnTimerCommand(7, STREAMER_ID);
+    expect(owned.execute.mock.calls[2]).toEqual(['DELETE FROM timer_command WHERE id = ?', [7]]);
+
+    const other = poolWithTimer(true, [OTHER_ID]);
+    await expect(removeOwnTimerCommand(7, STREAMER_ID)).rejects.toThrow('Timer not self-manageable: 7');
+    expect(other.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('discards a just-created timer with no assignees yet, but leaves one a Mod has adopted', async () => {
+    const unclaimed = poolWithTimer(true, []);
+    await discardOwnNewTimerCommand(7, STREAMER_ID);
+    expect(unclaimed.execute.mock.calls[2]).toEqual(['DELETE FROM timer_command WHERE id = ?', [7]]);
+
+    const adopted = poolWithTimer(true, [OTHER_ID]);
+    await expect(discardOwnNewTimerCommand(7, STREAMER_ID)).rejects.toThrow('Timer not self-manageable: 7');
+    expect(adopted.execute).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,10 +1,12 @@
 import mysql from 'mysql2/promise';
-import { getPool } from './pool';
+import type { PoolConnection } from 'mysql2/promise';
+import { getPool, withTransaction } from './pool';
 import { fromBit, affectedOrExists, rowExists } from './utils';
 import { AccessLevel } from './users';
 import type { AccessLevelValue } from './users';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import { getOrCreate } from '../shared/mapUtils';
+import { isTimerSelfManageableBy, isTimerUnclaimedBy } from './timerSelfService';
 
 /** A timer command row from the database. */
 export interface DbTimerCommand {
@@ -56,6 +58,17 @@ export class TimerCommandNotFoundError extends Error {
   constructor(id: number) {
     super(`Timer command not found: ${id}`);
     this.name = 'TimerCommandNotFoundError';
+  }
+}
+
+/**
+ * Thrown when a streamer below Mod tries to change a timer they don't own outright
+ * (see `isTimerSelfManageableBy`).
+ */
+export class TimerSelfServiceDeniedError extends Error {
+  constructor(id: number) {
+    super(`Timer not self-manageable: ${id}`);
+    this.name = 'TimerSelfServiceDeniedError';
   }
 }
 
@@ -231,6 +244,117 @@ export async function unassignUserFromTimer(timerId: number, discordId: string):
     `DELETE FROM timer_command_streamer WHERE timer_id = ? AND discord_id = ?`,
     [timerId, discordId],
   );
+}
+
+// ─── Streamer self-service ────────────────────────────────────────────────────
+
+/** A streamer-ownership rule checked under lock: the streamer, and the predicate their write needs. */
+interface TimerOwnershipCheck {
+  discordId: string;
+  /** {@link isTimerSelfManageableBy} for edits/toggles/deletes, {@link isTimerUnclaimedBy} for failed-create cleanup. */
+  allows: typeof isTimerSelfManageableBy;
+}
+
+/**
+ * Runs `write` in a transaction after re-checking a streamer-ownership rule, locking the timer row
+ * and its assignment rows (`SELECT … FOR UPDATE`) so a concurrent assignment can't land between the
+ * check and the write: it either commits first and is seen here, or waits for this transaction.
+ * @param timerId - ID of the timer being changed.
+ * @param check - The streamer and the rule their write must satisfy.
+ * @param write - The write to run once the rule holds, on the same connection.
+ * @throws {TimerCommandNotFoundError} If the timer doesn't exist.
+ * @throws {TimerSelfServiceDeniedError} If the rule doesn't hold (nothing is written).
+ */
+async function writeOwnedTimer(
+  timerId: number,
+  check: TimerOwnershipCheck,
+  write: (connection: PoolConnection) => Promise<void>,
+): Promise<void> {
+  await withTransaction(async (connection) => {
+    const [timerRows] = await connection.execute<mysql.RowDataPacket[]>(
+      'SELECT id FROM timer_command WHERE id = ? FOR UPDATE',
+      [timerId],
+    );
+    if (timerRows.length === 0) throw new TimerCommandNotFoundError(timerId);
+
+    const [assignmentRows] = await connection.execute<mysql.RowDataPacket[]>(
+      'SELECT discord_id FROM timer_command_streamer WHERE timer_id = ? FOR UPDATE',
+      [timerId],
+    );
+    const assignedDiscordIds = assignmentRows.map((row) => String(row.discord_id));
+    if (!check.allows(assignedDiscordIds, check.discordId)) {
+      throw new TimerSelfServiceDeniedError(timerId);
+    }
+
+    await write(connection);
+  });
+}
+
+/**
+ * Streamer self-service update: changes a timer's fields, but only if `discordId` owns it outright
+ * — re-checked inside the update's own transaction, so a concurrent assignment can't slip in.
+ * @param id - Primary key of the `timer_command` row.
+ * @param input - The timer's new fields.
+ * @param discordId - Discord ID of the streamer making the change.
+ * @throws {TimerCommandNotFoundError} If the timer doesn't exist.
+ * @throws {TimerSelfServiceDeniedError} If the streamer doesn't own it outright.
+ */
+export async function updateOwnTimerCommand(id: number, input: TimerCommandInput, discordId: string): Promise<void> {
+  await writeOwnedTimer(id, { discordId, allows: isTimerSelfManageableBy }, async (connection) => {
+    await connection.execute(
+      `UPDATE timer_command
+       SET name = ?, message = ?, interval_seconds = ?, min_messages = ?, require_live = ?, enabled = ?
+       WHERE id = ?`,
+      [
+        input.name, input.message, input.intervalSeconds, input.minMessages,
+        input.requireLive ? 1 : 0, input.enabled ? 1 : 0, id,
+      ],
+    );
+  });
+}
+
+/**
+ * Streamer self-service toggle: sets a timer's `enabled` flag only if `discordId` owns it
+ * outright, re-checked inside the update's own transaction.
+ * @param id - Primary key of the `timer_command` row.
+ * @param enabled - The new enabled state.
+ * @param discordId - Discord ID of the streamer making the change.
+ * @throws {TimerCommandNotFoundError} If the timer doesn't exist.
+ * @throws {TimerSelfServiceDeniedError} If the streamer doesn't own it outright.
+ */
+export async function setOwnTimerCommandEnabled(id: number, enabled: boolean, discordId: string): Promise<void> {
+  await writeOwnedTimer(id, { discordId, allows: isTimerSelfManageableBy }, async (connection) => {
+    await connection.execute(`UPDATE timer_command SET enabled = ? WHERE id = ?`, [enabled ? 1 : 0, id]);
+  });
+}
+
+/**
+ * Streamer self-service delete: deletes a timer (and its assignments, cascaded by the FK) only if
+ * `discordId` owns it outright, re-checked inside the delete's own transaction.
+ * @param id - Primary key of the `timer_command` row.
+ * @param discordId - Discord ID of the streamer making the change.
+ * @throws {TimerCommandNotFoundError} If the timer doesn't exist.
+ * @throws {TimerSelfServiceDeniedError} If the streamer doesn't own it outright.
+ */
+export async function removeOwnTimerCommand(id: number, discordId: string): Promise<void> {
+  await writeOwnedTimer(id, { discordId, allows: isTimerSelfManageableBy }, async (connection) => {
+    await connection.execute(`DELETE FROM timer_command WHERE id = ?`, [id]);
+  });
+}
+
+/**
+ * Cleans up a streamer's just-created timer after its self-assignment failed, but only while it is
+ * still unclaimed ({@link isTimerUnclaimedBy}), re-checked inside the delete's own transaction. If
+ * a Mod adopted it in the meantime, it is left in place.
+ * @param id - Primary key of the `timer_command` row.
+ * @param discordId - Discord ID of the streamer who created it.
+ * @throws {TimerCommandNotFoundError} If the timer doesn't exist.
+ * @throws {TimerSelfServiceDeniedError} If a Mod has since adopted it.
+ */
+export async function discardOwnNewTimerCommand(id: number, discordId: string): Promise<void> {
+  await writeOwnedTimer(id, { discordId, allows: isTimerUnclaimedBy }, async (connection) => {
+    await connection.execute(`DELETE FROM timer_command WHERE id = ?`, [id]);
+  });
 }
 
 /**
