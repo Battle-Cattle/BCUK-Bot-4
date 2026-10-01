@@ -97,6 +97,8 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 
 **Custom Commands exception:** any user with a linked Twitch account can manage the commands on their own channel. They can add Twitch-only commands, edit/delete commands assigned to them alone, and remove themselves from shared ones. Mod+ manage the whole catalog: Discord/multi-Twitch flags, assignments and server overrides. The rules live in `src/web/routes/commandPermissions.ts`.
 
+**Timers exception:** the same self-service model applies to Timers. A user with a linked Twitch account can add timers to their own channel, edit/toggle/delete timers assigned to them alone, and remove themselves from shared ones. Mod+ manage the whole catalog and its assignments. The rules live in `src/web/routes/timerPermissions.ts`, and streamer writes go through the owner-checked `*OwnTimerCommand*` DB functions.
+
 ---
 
 ## Design Decisions

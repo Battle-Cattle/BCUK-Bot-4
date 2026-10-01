@@ -30,12 +30,25 @@
         assign_failed:       'Failed to assign that user to the timer.',
         unassign_failed:     'Failed to unassign that user from the timer.',
         invalid_assignment_user: 'The selected user cannot be assigned to this timer.',
+        forbidden:           'You can only change timers that run on your own Twitch channel alone.',
+        twitch_not_linked:   'Link your Twitch account in Settings before adding timers.',
       }; %>
       <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
         <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
       </div>
       <% } %>
 
+      <% if (!canManageCatalog) { %>
+      <p class="hint">These are the timers on your Twitch channel. Timers you add here post in your Twitch chat only. Timers shared with other channels are managed by the mods &mdash; you can remove them from your channel.</p>
+      <% } %>
+
+      <% if (!canManageCatalog && !twitchLinked) { %>
+      <div class="card card-spaced">
+        <div class="card-body">
+          <p>Link your Twitch account in <a href="/user/settings">Settings</a> to add timers to your channel.</p>
+        </div>
+      </div>
+      <% } else { %>
       <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add Timer</span></div>
         <div class="card-body">
@@ -80,6 +93,7 @@
           </form>
         </div>
       </div>
+      <% } %>
 
       <div class="card">
         <div class="table-scroll">
@@ -105,6 +119,7 @@
                 <td><%= timer.min_messages %></td>
                 <td><span class="badge <%= timer.require_live ? 'badge-active' : 'badge-offline' %>"><%= timer.require_live ? 'Yes' : 'No' %></span></td>
                 <td>
+                  <% if (timer.canEdit) { %>
                   <form method="POST" action="/timers/toggle" class="inline-form-sm">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <input type="hidden" name="id" value="<%= timer.id %>">
@@ -113,6 +128,9 @@
                       <span class="badge <%= timer.enabled ? 'badge-active' : 'badge-offline' %>"><%= timer.enabled ? 'Enabled' : 'Off' %></span>
                     </button>
                   </form>
+                  <% } else { %>
+                  <span class="badge <%= timer.enabled ? 'badge-active' : 'badge-offline' %>"><%= timer.enabled ? 'Enabled' : 'Off' %></span>
+                  <% } %>
                 </td>
                 <td class="assigned-users-cell">
                   <% if (timer.assigned_users.length > 0) { %>
@@ -135,15 +153,25 @@
                 </td>
                 <td>
                   <div class="actions">
+                    <% if (timer.canEdit) { %>
                     <button type="button" class="btn btn-sm btn-ghost btn-toggle-timer-edit" data-timer-id="<%= timer.id %>" aria-controls="timer-edit-<%= timer.id %>" aria-expanded="false">✏️ Edit</button>
                     <form method="POST" action="/timers/remove" class="inline-form-sm js-confirm-remove-timer" data-timer-name="<%= timer.name %>">
                       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                       <input type="hidden" name="id" value="<%= timer.id %>">
                       <button type="submit" class="btn btn-danger btn-sm">Remove</button>
                     </form>
+                    <% } else { %>
+                    <form method="POST" action="/timers/unassign" class="inline-form-sm">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <input type="hidden" name="timer_id" value="<%= timer.id %>">
+                      <input type="hidden" name="discord_id" value="<%= user.discordId %>">
+                      <button type="submit" class="btn btn-danger btn-sm">Remove from my channel</button>
+                    </form>
+                    <% } %>
                   </div>
                 </td>
               </tr>
+              <% if (timer.canEdit) { %>
               <tr class="files-row is-hidden" id="timer-edit-<%= timer.id %>">
                 <td colspan="8">
                   <div class="command-edit-panel">
@@ -180,6 +208,7 @@
                       </div>
                     </form>
 
+                    <% if (canManageCatalog) { %>
                     <div class="command-assignment-shell">
                       <h3 class="command-assignment-title">Streamer Assignments</h3>
                       <% if (timer.unassigned_users.length > 0) { %>
@@ -221,13 +250,15 @@
                       <div class="empty-msg">No users with a Twitch name are available for assignment.</div>
                       <% } %>
                     </div>
+                    <% } %>
                   </div>
                 </td>
               </tr>
+              <% } %>
               <% }) %>
               <% if (timers.length === 0) { %>
               <tr>
-                <td colspan="8" class="empty-msg">No timers configured yet.</td>
+                <td colspan="8" class="empty-msg"><%= canManageCatalog ? 'No timers configured yet.' : 'Your channel has no timers yet.' %></td>
               </tr>
               <% } %>
             </tbody>

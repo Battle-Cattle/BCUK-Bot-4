@@ -80,13 +80,13 @@ describe('views/commands.ejs', () => {
 });
 
 describe('views/partials/nav.ejs', () => {
-  it('shows the Commands link to a plain user but keeps Counters/Timers at Manager+', async () => {
+  it('shows the Commands and Timers links to a plain user but keeps Counters at Manager+', async () => {
     const html = await ejs.renderFile(path.join(__dirname, '../../views/partials/nav.ejs'), {
       user: { discordId: STREAMER_ID, discordName: 'Streamer', accessLevel: 0, isOwner: false, currentGuildId: null, guilds: [] },
       csrfToken: 'tok',
     });
     expect(html).toContain('href="/commands"');
+    expect(html).toContain('href="/timers"');
     expect(html).not.toContain('href="/counters"');
-    expect(html).not.toContain('href="/timers"');
   });
 });
