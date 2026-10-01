@@ -178,7 +178,7 @@ describe('isAnyCommandTakenAcrossTables', () => {
     const pool = { execute: vi.fn().mockResolvedValue([[]]  ) };
     vi.mocked(getPool).mockReturnValue(pool as any);
     await isAnyCommandTakenAcrossTables('!test', undefined, pool as any, { includeCustomCommandTable: false, includeCounterTable: true });
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql).toContain('counter');
     expect(sql).not.toContain('custom_command');
   });
@@ -188,7 +188,7 @@ describe('isAnyCommandTakenAcrossTables', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await isAnyCommandTakenAcrossTables('!test', undefined, pool as any, { includeCustomCommandTable: true, includeCounterTable: false });
     expect(pool.execute).toHaveBeenCalledOnce();
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql).toContain('custom_command');
   });
 
@@ -244,7 +244,7 @@ describe('commandExists', () => {
     const pool = { execute: vi.fn().mockResolvedValue([[], []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
     await commandExists(42);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('custom_command');
     expect(sql).toContain('command_id');
     expect(params).toEqual([42]);

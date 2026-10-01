@@ -97,36 +97,36 @@ describe('getAlertConfigsForStreamer', () => {
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const configs = await getAlertConfigsForStreamer(1);
     expect(configs).toHaveLength(2);
-    expect(configs[0].enabled).toBe(true);
-    expect(configs[1].enabled).toBe(false);
-    expect(configs[1].event_type).toBe('raid');
+    expect(configs[0]!.enabled).toBe(true);
+    expect(configs[1]!.enabled).toBe(false);
+    expect(configs[1]!.event_type).toBe('raid');
   });
 
   it('maps BIT(1) enabled flag as Buffer correctly', async () => {
     const rows = [makeRow({ enabled: Buffer.from([1]) })];
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const [config] = await getAlertConfigsForStreamer(1);
-    expect(config.enabled).toBe(true);
+    expect(config!.enabled).toBe(true);
   });
 
   it('maps null image/sound filenames', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([makeRow()]) as any);
     const [config] = await getAlertConfigsForStreamer(1);
-    expect(config.image_filename).toBeNull();
-    expect(config.sound_filename).toBeNull();
+    expect(config!.image_filename).toBeNull();
+    expect(config!.sound_filename).toBeNull();
   });
 
   it('maps the text_animation column', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([makeRow({ text_animation: 'wave' })]) as any);
     const [config] = await getAlertConfigsForStreamer(1);
-    expect(config.text_animation).toBe('wave');
+    expect(config!.text_animation).toBe('wave');
   });
 
   it('queries with the given streamerId', async () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getAlertConfigsForStreamer(42);
-    expect(pool.execute.mock.calls[0][1]).toContain(42);
+    expect(pool.execute.mock.calls[0]![1]).toContain(42);
   });
 });
 
@@ -150,7 +150,7 @@ describe('getAlertConfig', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getAlertConfig(7, 'raid');
-    expect(pool.execute.mock.calls[0][1]).toEqual([7, 'raid']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([7, 'raid']);
   });
 });
 
@@ -172,10 +172,10 @@ describe('getAllAlertConfigs', () => {
     const rows = await getAllAlertConfigs();
 
     expect(rows).toHaveLength(2);
-    expect(rows[0].streamer_id).toBe(1);
-    expect(rows[1].streamer_id).toBe(2);
-    expect(rows[1].enabled).toBe(true);
-    expect(pool.execute.mock.calls[0][0]).not.toContain('WHERE');
+    expect(rows[0]!.streamer_id).toBe(1);
+    expect(rows[1]!.streamer_id).toBe(2);
+    expect(rows[1]!.enabled).toBe(true);
+    expect(pool.execute.mock.calls[0]![0]).not.toContain('WHERE');
   });
 });
 
@@ -207,7 +207,7 @@ describe('getEnabledAlertEventTypesBatch', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getEnabledAlertEventTypesBatch([5, 6, 7]);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('IN (?, ?, ?)');
     expect(sql).toContain('enabled = 1');
     expect(params).toEqual([5, 6, 7]);
@@ -228,7 +228,7 @@ describe('initAlertConfigs', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await initAlertConfigs(3);
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql.toUpperCase()).toContain('INSERT IGNORE');
   });
 
@@ -236,7 +236,7 @@ describe('initAlertConfigs', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await initAlertConfigs(5);
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     for (const eventType of ALERT_EVENT_TYPES) {
       expect(params).toContain(eventType);
     }
@@ -251,7 +251,7 @@ describe('saveAlertConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveAlertConfig(1, 'follow', { enabled: true, message_template: 'hi {display_name}', duration_ms: 5000, text_animation: 'none' });
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql.toUpperCase()).toContain('ON DUPLICATE KEY UPDATE');
   });
 
@@ -259,7 +259,7 @@ describe('saveAlertConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveAlertConfig(1, 'follow', { enabled: true, message_template: 'hi', duration_ms: 5000, text_animation: 'none' });
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql).not.toContain('image_filename=');
     expect(sql).not.toContain('sound_filename=');
   });
@@ -268,7 +268,7 @@ describe('saveAlertConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveAlertConfig(1, 'follow', { enabled: true, message_template: 'hi', duration_ms: 5000, text_animation: 'pulse' });
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql).toContain('text_animation');
   });
 
@@ -276,7 +276,7 @@ describe('saveAlertConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await saveAlertConfig(1, 'sub', { enabled: false, message_template: 'msg', duration_ms: 4000, text_animation: 'glitch' });
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params).toEqual([1, 'sub', 0, 'msg', 4000, 'glitch']);
   });
 });
@@ -290,7 +290,7 @@ describe('setAlertImage', () => {
     const result = await setAlertImage(1, 'follow', 'new.png');
     expect(result).toBeNull();
     expect(conn.execute).toHaveBeenCalledTimes(2);
-    const [insertSql, insertParams] = conn.execute.mock.calls[1];
+    const [insertSql, insertParams] = conn.execute.mock.calls[1]!;
     expect(insertSql.toUpperCase()).toContain('INSERT');
     expect(insertParams).toEqual([1, 'follow', 'Thanks {display_name} for the follow!', 'new.png']);
   });
@@ -304,9 +304,9 @@ describe('setAlertImage', () => {
     vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
     const result = await setAlertImage(1, 'follow', 'new.png');
     expect(result).toBe('old.png');
-    const [selectSql] = conn.execute.mock.calls[0];
+    const [selectSql] = conn.execute.mock.calls[0]!;
     expect(selectSql.toUpperCase()).toContain('FOR UPDATE');
-    const [updateSql, updateParams] = conn.execute.mock.calls[1];
+    const [updateSql, updateParams] = conn.execute.mock.calls[1]!;
     expect(updateSql.toUpperCase()).toContain('UPDATE');
     expect(updateParams).toEqual(['new.png', 1, 'follow']);
   });
@@ -329,7 +329,7 @@ describe('setAlertSound', () => {
     const result = await setAlertSound(1, 'raid', 'air.mp3');
     expect(result).toBeNull();
     expect(conn.execute).toHaveBeenCalledTimes(2);
-    const [insertSql, insertParams] = conn.execute.mock.calls[1];
+    const [insertSql, insertParams] = conn.execute.mock.calls[1]!;
     expect(insertSql.toUpperCase()).toContain('INSERT');
     expect(insertParams).toEqual([1, 'raid', 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!', 'air.mp3']);
   });
@@ -343,7 +343,7 @@ describe('setAlertSound', () => {
     vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
     const result = await setAlertSound(1, 'raid', 'air.mp3');
     expect(result).toBe('old.mp3');
-    const [updateSql, updateParams] = conn.execute.mock.calls[1];
+    const [updateSql, updateParams] = conn.execute.mock.calls[1]!;
     expect(updateSql.toUpperCase()).toContain('UPDATE');
     expect(updateParams).toEqual(['air.mp3', 1, 'raid']);
   });

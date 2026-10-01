@@ -18,6 +18,10 @@ describe('parseEventType', () => {
   it('returns null for a repeated field arriving as an array', () => {
     expect(parseEventType(['follow', 'sub'])).toBeNull();
   });
+
+  it('returns null for a missing param', () => {
+    expect(parseEventType(undefined)).toBeNull();
+  });
 });
 
 describe('parseEnumField', () => {

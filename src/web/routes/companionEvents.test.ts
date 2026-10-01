@@ -122,9 +122,9 @@ describe('GET /events — keepalive ping and connection close cleanup', () => {
     const { status } = await connect('user1');
     expect(status).toBe(200);
 
-    const keepaliveCallback = setIntervalSpy.mock.calls[0][0] as () => void;
+    const keepaliveCallback = setIntervalSpy.mock.calls[0]![0] as () => void;
     const [res] = Array.from(connections.get('user1')!);
-    res.write = vi.fn(() => {
+    res!.write = vi.fn(() => {
       throw new Error('client gone');
     });
 
@@ -138,9 +138,9 @@ describe('GET /events — keepalive ping and connection close cleanup', () => {
 
     const { status: status1 } = await connect('user1');
     expect(status1).toBe(200);
-    const keepaliveCallback1 = setIntervalSpy.mock.calls[0][0] as () => void;
+    const keepaliveCallback1 = setIntervalSpy.mock.calls[0]![0] as () => void;
     const [deadRes] = Array.from(connections.get('user1')!);
-    deadRes.write = vi.fn(() => {
+    deadRes!.write = vi.fn(() => {
       throw new Error('client gone');
     });
 
@@ -150,7 +150,7 @@ describe('GET /events — keepalive ping and connection close cleanup', () => {
     keepaliveCallback1();
 
     const remaining = connections.get('user1');
-    expect(remaining?.has(deadRes)).toBe(false);
+    expect(remaining?.has(deadRes!)).toBe(false);
     expect(remaining?.size).toBe(1);
 
     close2();
@@ -162,7 +162,7 @@ describe('GET /events — keepalive ping and connection close cleanup', () => {
     expect(connections.has('user1')).toBe(true);
 
     const [res] = Array.from(connections.get('user1')!);
-    (res.req as any).emit('close');
+    (res!.req as any).emit('close');
 
     expect(connections.has('user1')).toBe(false);
   });
@@ -174,7 +174,7 @@ describe('GET /events — keepalive ping and connection close cleanup', () => {
     const [res] = Array.from(connections.get('user1')!);
     connections.delete('user1');
 
-    expect(() => (res.req as any).emit('close')).not.toThrow();
+    expect(() => (res!.req as any).emit('close')).not.toThrow();
     expect(connections.has('user1')).toBe(false);
   });
 });

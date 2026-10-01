@@ -136,7 +136,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
   try {
     const streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
     const isConnected = !!streamer?.eventsub_access_token;
-    const needsReconnect = isConnected && !!streamer?.twitch_name && hasAuthFailedSubs(streamer.twitch_name);
+    const needsReconnect = isConnected && !!streamer.twitch_name && hasAuthFailedSubs(streamer.twitch_name);
 
     const [pricingConfigs, twitchRewards, pricingSettings] = streamer && isConnected && !needsReconnect
       ? await Promise.all([getPricingConfigsForStreamer(streamer.id), fetchTwitchRewards(streamer), getPricingSettingsForStreamer(streamer.id)])

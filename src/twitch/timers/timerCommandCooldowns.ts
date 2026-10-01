@@ -140,7 +140,7 @@ function applyCommandSessionCooldown(
   }
 
   for (const [key, rows] of bySessionAndTimer) {
-    const cooldownMs = rows[0].interval_seconds * 1000;
+    const cooldownMs = rows[0]!.interval_seconds * 1000; // each group is created with its first row
     const entry = commandSessionLastFiredAt.get(key);
     if (entry && now - entry.firedAt < cooldownMs) continue;
 

@@ -102,7 +102,7 @@ describe('getPricingForReward', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getPricingForReward(7, 'rwd-abc');
-    expect(pool.execute.mock.calls[0][1]).toEqual([7, 'rwd-abc']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([7, 'rwd-abc']);
   });
 
   it('maps a null last_pushed_cost as null', async () => {
@@ -129,7 +129,7 @@ describe('getPricingConfigById', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getPricingConfigById(1, 7);
-    expect(pool.execute.mock.calls[0][1]).toEqual([1, 7]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([1, 7]);
   });
 });
 
@@ -147,7 +147,7 @@ describe('getAllEnabledPricingRows', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const rows = await getAllEnabledPricingRows();
     expect(rows).toHaveLength(1);
-    expect(pool.execute.mock.calls[0][0]).toContain('enabled = 1');
+    expect(pool.execute.mock.calls[0]![0]).toContain('enabled = 1');
   });
 });
 
@@ -156,7 +156,7 @@ describe('upsertPricingConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await upsertPricingConfig(7, 'rwd-abc', { enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5, round_to_nearest: 0 });
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql).toContain('AS new_row');
     expect(sql).toContain('ON DUPLICATE KEY UPDATE');
   });
@@ -165,7 +165,7 @@ describe('upsertPricingConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await upsertPricingConfig(7, 'rwd-abc', { enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5, round_to_nearest: 0 });
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     const setClause = sql.split('ON DUPLICATE KEY UPDATE')[1];
     expect(setClause).not.toContain('demand=');
     expect(setClause).not.toContain('demand_updated_at=');
@@ -176,7 +176,7 @@ describe('upsertPricingConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await upsertPricingConfig(7, 'rwd-abc', { enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5, round_to_nearest: 0 });
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     const setClause = sql.split('ON DUPLICATE KEY UPDATE')[1];
     expect(setClause).toContain('twitch_unsupported=0');
   });
@@ -185,7 +185,7 @@ describe('upsertPricingConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await upsertPricingConfig(7, 'rwd-abc', { enabled: true, base_cost: 200, cooldown_seconds: 300, max_multiplier: 4, curve: 1.5, round_to_nearest: 5 });
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql).toContain('round_to_nearest');
     const setClause = sql.split('ON DUPLICATE KEY UPDATE')[1];
     expect(setClause).toContain('round_to_nearest=new_row.round_to_nearest');
@@ -195,7 +195,7 @@ describe('upsertPricingConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await upsertPricingConfig(7, 'rwd-abc', { enabled: false, base_cost: 100, cooldown_seconds: 60, max_multiplier: 2, curve: 1, round_to_nearest: 10 });
-    const params: unknown[] = pool.execute.mock.calls[0][1];
+    const params: unknown[] = pool.execute.mock.calls[0]![1];
     expect(params[0]).toBe(7);
     expect(params[1]).toBe('rwd-abc');
     expect(params[2]).toBe(0);
@@ -212,9 +212,9 @@ describe('recordPricingUpdate', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await recordPricingUpdate(7, 'rwd-abc', { demand: 0.75, demandUpdatedAtMs: 1700000000000, lastPushedCost: 350, lastRedemptionId: 'redemption-abc' });
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql).toContain('SET demand = ?, demand_updated_at = ?, last_pushed_cost = ?, last_redemption_id = ?');
-    expect(pool.execute.mock.calls[0][1]).toEqual([0.75, 1700000000000, 350, 'redemption-abc', 7, 'rwd-abc']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([0.75, 1700000000000, 350, 'redemption-abc', 7, 'rwd-abc']);
   });
 
   it('writes the reward update and the redemption\'s pricing_applied ledger flag in one transaction', async () => {
@@ -227,10 +227,10 @@ describe('recordPricingUpdate', () => {
     expect(pool.execute).not.toHaveBeenCalled();
     const conn = pool._conn;
     expect(conn.beginTransaction).toHaveBeenCalled();
-    expect(conn.execute.mock.calls[0][0]).toContain('UPDATE reward_pricing');
-    expect(conn.execute.mock.calls[0][1]).toEqual([0.75, 1700000000000, 350, 'redemption-abc', 7, 'rwd-abc']);
-    expect(conn.execute.mock.calls[1][0]).toContain('INSERT INTO redemption_handled (redemption_id, streamer_id, pricing_applied)');
-    expect(conn.execute.mock.calls[1][1]).toEqual(['redemption-abc', 7]);
+    expect(conn.execute.mock.calls[0]![0]).toContain('UPDATE reward_pricing');
+    expect(conn.execute.mock.calls[0]![1]).toEqual([0.75, 1700000000000, 350, 'redemption-abc', 7, 'rwd-abc']);
+    expect(conn.execute.mock.calls[1]![0]).toContain('INSERT INTO redemption_handled (redemption_id, streamer_id, pricing_applied)');
+    expect(conn.execute.mock.calls[1]![1]).toEqual(['redemption-abc', 7]);
     expect(conn.commit).toHaveBeenCalled();
   });
 
@@ -251,14 +251,14 @@ describe('recordPricingUpdate', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await recordPricingUpdate(7, 'rwd-abc', { demand: 0.1, demandUpdatedAtMs: 1700000000000, lastPushedCost: null, lastRedemptionId: 'redemption-abc' });
-    expect(pool.execute.mock.calls[0][1]).toEqual([0.1, 1700000000000, null, 'redemption-abc', 7, 'rwd-abc']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([0.1, 1700000000000, null, 'redemption-abc', 7, 'rwd-abc']);
   });
 
   it('accepts a null lastRedemptionId (a decay-only tick preserving the unchanged value)', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await recordPricingUpdate(7, 'rwd-abc', { demand: 0.1, demandUpdatedAtMs: 1700000000000, lastPushedCost: 350, lastRedemptionId: null });
-    expect(pool.execute.mock.calls[0][1]).toEqual([0.1, 1700000000000, 350, null, 7, 'rwd-abc']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([0.1, 1700000000000, 350, null, 7, 'rwd-abc']);
   });
 });
 
@@ -267,9 +267,9 @@ describe('markPricingUnsupported', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await markPricingUnsupported(7, 'rwd-abc');
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql).toContain('SET enabled = 0, twitch_unsupported = 1');
-    expect(pool.execute.mock.calls[0][1]).toEqual([7, 'rwd-abc']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([7, 'rwd-abc']);
   });
 });
 
@@ -278,7 +278,7 @@ describe('deletePricingConfig', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await deletePricingConfig(3, 7);
-    expect(pool.execute.mock.calls[0][1]).toEqual([3, 7]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([3, 7]);
   });
 });
 
@@ -287,9 +287,9 @@ describe('updatePricingCooldownForReward', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await updatePricingCooldownForReward(7, 'rwd-abc', 120);
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql).toContain('SET cooldown_seconds = ?');
-    expect(pool.execute.mock.calls[0][1]).toEqual([120, 7, 'rwd-abc']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([120, 7, 'rwd-abc']);
   });
 });
 
@@ -310,7 +310,7 @@ describe('getPricingSettingsForStreamer', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getPricingSettingsForStreamer(7);
-    expect(pool.execute.mock.calls[0][1]).toEqual([7]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([7]);
   });
 });
 
@@ -347,7 +347,7 @@ describe('getPricingSettingsForStreamers', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getPricingSettingsForStreamers([1, 2, 3]);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('streamer_id IN (?, ?, ?)');
     expect(params).toEqual([1, 2, 3]);
   });
@@ -358,9 +358,9 @@ describe('savePricingSettingsForStreamer', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await savePricingSettingsForStreamer(7, { half_life_seconds: 600, time_to_max_multiplier: 1.5 });
-    const sql: string = pool.execute.mock.calls[0][0];
+    const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql).toContain('AS new_row');
     expect(sql).toContain('ON DUPLICATE KEY UPDATE');
-    expect(pool.execute.mock.calls[0][1]).toEqual([7, 600, 1.5]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([7, 600, 1.5]);
   });
 });

@@ -42,8 +42,8 @@ export async function findTrigger(command: string): Promise<SfxTrigger | null> {
      WHERE LOWER(trigger_command) = ?`,
     [command.toLowerCase()],
   );
-  if (rows.length === 0) return null;
   const row = rows[0];
+  if (!row) return null;
   return {
     id: BigInt(row.id),
     trigger_command: row.trigger_command,
@@ -271,8 +271,9 @@ export async function getSfxFileById(id: number): Promise<{ file: string } | nul
     `SELECT file FROM sfx WHERE id = ?`,
     [id],
   );
-  if (rows.length === 0) return null;
-  return { file: rows[0].file };
+  const row = rows[0];
+  if (!row) return null;
+  return { file: row.file };
 }
 
 /**
@@ -310,10 +311,11 @@ export async function deleteSfxFile(id: number): Promise<string | null> {
       `SELECT file FROM sfx WHERE id = ? FOR UPDATE`,
       [id],
     );
-    if (rows.length === 0) {
-      notFound();
+    const row = rows[0];
+    if (!row) {
+      return notFound();
     }
-    const file: string = rows[0].file;
+    const file: string = row.file;
     const [result] = await conn.execute<mysql.ResultSetHeader>(`DELETE FROM sfx WHERE id = ?`, [id]);
     if (result.affectedRows === 0) {
       notFound();

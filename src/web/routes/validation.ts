@@ -155,7 +155,7 @@ const REWARD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
  * @param value - The `:twitchRewardId` route param or form field value.
  * @returns The validated UUID, or null if malformed or repeated (an array value).
  */
-export function parseRewardIdParam(value: string | string[]): string | null {
-  if (Array.isArray(value)) return null;
+export function parseRewardIdParam(value: string | string[] | undefined): string | null {
+  if (value === undefined || Array.isArray(value)) return null;
   return REWARD_ID_RE.test(value) ? value : null;
 }

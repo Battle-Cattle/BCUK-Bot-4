@@ -290,6 +290,10 @@ describe('parseRewardIdParam', () => {
     expect(parseRewardIdParam([VALID_REWARD_ID, VALID_REWARD_ID])).toBeNull();
   });
 
+  it('rejects a missing param', () => {
+    expect(parseRewardIdParam(undefined)).toBeNull();
+  });
+
   it('rejects a malformed string', () => {
     expect(parseRewardIdParam('not-a-uuid')).toBeNull();
   });

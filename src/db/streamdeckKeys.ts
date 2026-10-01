@@ -166,8 +166,9 @@ export async function findKeyByHash(hash: string): Promise<{ discordId: string }
     'SELECT discord_id, key_hash FROM streamdeck_api_keys WHERE key_hash = ? LIMIT 1',
     [hash],
   );
-  if (rows.length === 0 || !hashesMatch(String(rows[0].key_hash), hash)) return null;
-  return { discordId: String(rows[0].discord_id) };
+  const row = rows[0];
+  if (!row || !hashesMatch(String(row.key_hash), hash)) return null;
+  return { discordId: String(row.discord_id) };
 }
 
 /**
@@ -214,7 +215,7 @@ export async function getGuildStatusForKey(discordId: string, guildId: string): 
      WHERE discord_id = ? AND guild_id = ?`,
     [discordId, guildId],
   );
-  return rows.length === 0 ? null : mapStatusRow(rows[0]);
+  return rows[0] ? mapStatusRow(rows[0]) : null;
 }
 
 /**

@@ -105,7 +105,7 @@ describe('POST /settings/videos/upload', () => {
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
     expect(vi.mocked(fs.promises.writeFile)).toHaveBeenCalled();
-    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0][0] as string;
+    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0]![0] as string;
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
   });
 

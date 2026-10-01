@@ -431,7 +431,9 @@ export async function createCustomReward(broadcasterId: string, userToken: strin
   });
   throwForRewardManagementFailure(res, 'createCustomReward');
   const data = await res.json() as { data: TwitchCustomReward[] };
-  return data.data[0];
+  const reward = data.data[0];
+  if (!reward) throw new Error('[TwitchAPI] createCustomReward returned empty data');
+  return reward;
 }
 
 /**
@@ -459,7 +461,9 @@ export async function updateCustomReward(
   });
   throwForRewardManagementFailure(res, 'updateCustomReward', rewardId);
   const data = await res.json() as { data: TwitchCustomReward[] };
-  return data.data[0];
+  const reward = data.data[0];
+  if (!reward) throw new Error('[TwitchAPI] updateCustomReward returned empty data');
+  return reward;
 }
 
 /**

@@ -76,8 +76,8 @@ describe('findCachedSfxTrigger', () => {
     expect(result!.trigger.id).toBe(1n);
     expect(result!.trigger.trigger_command).toBe('!bang');
     expect(result!.files).toHaveLength(1);
-    expect(result!.files[0].file).toBe('bang.mp3');
-    expect(result!.files[0].trigger_id).toBe(1n);
+    expect(result!.files[0]!.file).toBe('bang.mp3');
+    expect(result!.files[0]!.trigger_id).toBe(1n);
   });
 
   it('performs a case-insensitive lookup', async () => {
@@ -118,7 +118,7 @@ describe('findCachedSfxTrigger', () => {
 
     expect(result).not.toBeNull();
     expect(result!.trigger.hidden).toBe(true);
-    expect(result!.files[0].hidden).toBe(true);
+    expect(result!.files[0]!.hidden).toBe(true);
   });
 
   it('returns the cache entry directly (frozen), not a defensive copy — mutating it throws', async () => {
@@ -131,7 +131,7 @@ describe('findCachedSfxTrigger', () => {
     expect(Object.isFrozen(result!.trigger)).toBe(true);
     expect(Object.isFrozen(result!.files)).toBe(true);
     expect(Object.isFrozen(result!.files[0])).toBe(true);
-    expect(() => { result!.files[0].weight = 999; }).toThrow();
+    expect(() => { result!.files[0]!.weight = 999; }).toThrow();
   });
 
   it('collision — lower id wins when two triggers normalize to the same command', async () => {
@@ -154,7 +154,7 @@ describe('findCachedSfxTrigger', () => {
 
     const bangCalls = vi.mocked(registerFirstWinsWithWarning).mock.calls.filter((call) => call[1] === '!bang');
     expect(bangCalls).toHaveLength(2);
-    const describeCollision = bangCalls[1][3] as (existing: unknown) => string;
+    const describeCollision = bangCalls[1]![3] as (existing: unknown) => string;
     expect(describeCollision({ trigger: { id: 1n } })).toBe(
       "SFX trigger collision: '!bang' is already registered (trigger id=1); ignoring duplicate from trigger id=2.",
     );

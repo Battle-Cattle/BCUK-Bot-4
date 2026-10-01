@@ -73,8 +73,10 @@ function delay(ms: number): Promise<void> {
 
 /** Drops entries older than the rolling window from {@link sentTimestamps} (mutated in place). */
 function pruneExpired(now: number): void {
-  while (sentTimestamps.length > 0 && now - sentTimestamps[0] >= WINDOW_MS) {
+  let oldest = sentTimestamps[0];
+  while (oldest !== undefined && now - oldest >= WINDOW_MS) {
     sentTimestamps.shift();
+    oldest = sentTimestamps[0];
   }
 }
 
@@ -86,8 +88,9 @@ async function waitForWindowRoom(limit: number): Promise<void> {
   for (;;) {
     const now = Date.now();
     pruneExpired(now);
-    if (sentTimestamps.length < limit) return;
-    await delay(WINDOW_MS - (now - sentTimestamps[0]));
+    const oldest = sentTimestamps[0];
+    if (sentTimestamps.length < limit || oldest === undefined) return;
+    await delay(WINDOW_MS - (now - oldest));
   }
 }
 

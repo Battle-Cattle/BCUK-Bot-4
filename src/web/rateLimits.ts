@@ -3,6 +3,16 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Request } from 'express';
 
 /**
+ * Returns `req.session`, typed as possibly absent: express-session continues without attaching a
+ * session when it can't reach its store, and these limiters run on every request regardless.
+ * @param req - Express request object
+ * @returns The request's session, or undefined if none was attached
+ */
+function maybeSession(req: Request): Request['session'] | undefined {
+  return req.session;
+}
+
+/**
  * Tighter limit for auth endpoints to protect against OAuth quota exhaustion.
  * Shared between `/auth/*` (mounted as a path-scoped middleware in server.ts) and
  * the companion app's OAuth routes (applied per-route in companionAuth.ts, since
@@ -25,7 +35,7 @@ export const authLimiter = rateLimit({
  * @returns IP-based rate-limit key
  */
 export function ipKey(req: Request): string {
-  return ipKeyGenerator(req.ip ?? req.socket?.remoteAddress ?? 'unknown');
+  return ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? 'unknown');
 }
 
 /**
@@ -36,7 +46,7 @@ export function ipKey(req: Request): string {
  * @returns true if the general limiter should be skipped
  */
 export function generalLimiterSkip(req: Request): boolean {
-  return req.path.startsWith('/api/streamdeck') || !!req.session?.user;
+  return req.path.startsWith('/api/streamdeck') || !!maybeSession(req)?.user;
 }
 
 /**
@@ -48,7 +58,7 @@ export function generalLimiterSkip(req: Request): boolean {
  * @returns Discord ID for authenticated users, or "__unauthenticated__" fallback
  */
 export function sessionLimiterKey(req: Request): string {
-  return req.session?.user?.discordId ?? '__unauthenticated__';
+  return maybeSession(req)?.user?.discordId ?? '__unauthenticated__';
 }
 
 /**
@@ -58,7 +68,7 @@ export function sessionLimiterKey(req: Request): string {
  * @returns true if the session limiter should be skipped
  */
 export function sessionLimiterSkip(req: Request): boolean {
-  return req.path.startsWith('/api/streamdeck') || !req.session?.user;
+  return req.path.startsWith('/api/streamdeck') || !maybeSession(req)?.user;
 }
 
 /**
@@ -74,5 +84,5 @@ export function streamdeckLimiterKey(req: Request): string {
   const auth = req.headers['authorization'];
   const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
   if (token) return createHash('sha256').update(token).digest('hex');
-  return ipKeyGenerator(req.ip ?? req.socket?.remoteAddress ?? 'unknown');
+  return ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? 'unknown');
 }

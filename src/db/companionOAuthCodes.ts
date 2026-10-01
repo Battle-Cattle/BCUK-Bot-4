@@ -50,7 +50,7 @@ async function consumeCodeOnConnection(executor: mysql.Pool | mysql.PoolConnecti
     `SELECT discord_id FROM companion_oauth_codes WHERE code_hash = ?`,
     [hash],
   );
-  return rows.length === 0 ? null : String(rows[0].discord_id);
+  return rows[0] ? String(rows[0].discord_id) : null;
 }
 
 /** A newly-issued companion app token, plaintext, plus who it belongs to. */

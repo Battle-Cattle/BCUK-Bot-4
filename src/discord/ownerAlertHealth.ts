@@ -55,7 +55,6 @@ function addMonitorOk(snapshot: HealthSnapshot, result: Map<string, ComponentOk>
 function addSchedulerOks(snapshot: HealthSnapshot, result: Map<string, ComponentOk>): void {
   const now = Date.now();
   for (const [name, health] of Object.entries(snapshot.schedulers)) {
-    if (!health) continue;
     const stale = health.lastRunAt !== null && now - health.lastRunAt.getTime() > SCHEDULER_STALE_MS;
     const ok = health.lastRunOk && !stale;
     result.set(`scheduler:${name}`, {

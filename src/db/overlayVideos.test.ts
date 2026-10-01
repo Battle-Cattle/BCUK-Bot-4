@@ -71,17 +71,17 @@ describe('getVideosForStreamer', () => {
     const rows = [{ id: 10, streamer_id: 1, name: 'Intro', filename: 'intro.mp4', created_at: now }];
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const [v] = await getVideosForStreamer(1);
-    expect(v.id).toBe(10);
-    expect(v.name).toBe('Intro');
-    expect(v.filename).toBe('intro.mp4');
-    expect(v.created_at).toBe(now);
+    expect(v!.id).toBe(10);
+    expect(v!.name).toBe('Intro');
+    expect(v!.filename).toBe('intro.mp4');
+    expect(v!.created_at).toBe(now);
   });
 
   it('queries with the given streamerId', async () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getVideosForStreamer(42);
-    expect(pool.execute.mock.calls[0][1]).toContain(42);
+    expect(pool.execute.mock.calls[0]![1]).toContain(42);
   });
 });
 
@@ -101,7 +101,7 @@ describe('addVideo', () => {
     pool.execute.mockResolvedValue([{ insertId: 1 }, []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await addVideo(5, 'MyVid', 'vid.mp4');
-    expect(pool.execute.mock.calls[0][1]).toEqual([5, 'MyVid', 'vid.mp4']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([5, 'MyVid', 'vid.mp4']);
   });
 });
 
@@ -126,7 +126,7 @@ describe('getVideoById', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getVideoById(7, 3);
-    expect(pool.execute.mock.calls[0][1]).toEqual([7, 3]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([7, 3]);
   });
 });
 
@@ -193,9 +193,9 @@ describe('getRewardsForStreamer', () => {
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const result = await getRewardsForStreamer(1);
     expect(result).toHaveLength(1);
-    expect(result[0].twitch_reward_id).toBe('rwdA');
-    expect(result[0].videos).toHaveLength(2);
-    expect(result[0].videos[0].weight).toBe(2);
+    expect(result[0]!.twitch_reward_id).toBe('rwdA');
+    expect(result[0]!.videos).toHaveLength(2);
+    expect(result[0]!.videos[0]!.weight).toBe(2);
   });
 
   it('handles multiple rewards', async () => {
@@ -213,7 +213,7 @@ describe('getRewardsForStreamer', () => {
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const result = await getRewardsForStreamer(1);
     expect(result).toHaveLength(1);
-    expect(result[0].videos).toHaveLength(0);
+    expect(result[0]!.videos).toHaveLength(0);
   });
 });
 
@@ -232,7 +232,7 @@ describe('upsertReward', () => {
     pool.execute.mockResolvedValue([{ insertId: 1 }, []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await upsertReward(7, 'rewardXYZ');
-    expect(pool.execute.mock.calls[0][1]).toEqual([7, 'rewardXYZ']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([7, 'rewardXYZ']);
   });
 });
 
@@ -295,7 +295,7 @@ describe('setRewardVideos', () => {
       .mockResolvedValueOnce([{ affectedRows: 1 }, []]); // INSERT
     vi.mocked(getPool).mockReturnValue(pool as any);
     await setRewardVideos(1, 1, [{ videoId: 5, weight: 0 }]);
-    const insertParams: unknown[] = conn.execute.mock.calls[3][1];
+    const insertParams: unknown[] = conn.execute.mock.calls[3]![1];
     expect(insertParams[2]).toBe(1);  // Math.max(1, 0) = 1
   });
 
@@ -337,7 +337,7 @@ describe('deleteReward', () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await deleteReward(3, 7);
-    expect(pool.execute.mock.calls[0][1]).toEqual([3, 7]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([3, 7]);
   });
 });
 
@@ -361,6 +361,6 @@ describe('getVideosForReward', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getVideosForReward('rwdABC', 5);
-    expect(pool.execute.mock.calls[0][1]).toEqual(['rwdABC', 5]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['rwdABC', 5]);
   });
 });

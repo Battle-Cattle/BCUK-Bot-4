@@ -272,8 +272,8 @@ describe('startDiscordBot — guildCreate handler', () => {
     const [upsertOrder] = vi.mocked(guilds.upsertGuild).mock.invocationCallOrder;
     const [grantOrder] = vi.mocked(guilds.setMemberAccessLevel).mock.invocationCallOrder;
     const [reloadOrder] = vi.mocked(registry.reloadGuildRegistry).mock.invocationCallOrder;
-    expect(upsertOrder).toBeLessThan(grantOrder);
-    expect(grantOrder).toBeLessThan(reloadOrder);
+    expect(upsertOrder).toBeLessThan(grantOrder!);
+    expect(grantOrder).toBeLessThan(reloadOrder!);
   });
 
   it('does not overwrite an already-whitelisted owner, but still grants them guild access', async () => {
@@ -591,7 +591,7 @@ describe('startDiscordBot — gateway watchdog', () => {
     expect(vi.mocked(audioPlayer.disconnect)).toHaveBeenCalledWith();
     const [disconnectOrder] = vi.mocked(audioPlayer.disconnect).mock.invocationCallOrder;
     const [destroyOrder] = mockInstance.destroy.mock.invocationCallOrder;
-    expect(disconnectOrder).toBeLessThan(destroyOrder);
+    expect(disconnectOrder).toBeLessThan(destroyOrder!);
   });
 });
 

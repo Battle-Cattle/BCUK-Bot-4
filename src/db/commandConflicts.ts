@@ -185,11 +185,12 @@ export async function getCommandTriggerStringById(executor: SqlExecutor, command
     'SELECT trigger_string FROM custom_command WHERE command_id = ? LIMIT 1',
     [commandId],
   );
-  if (commandRows.length === 0) {
+  const commandRow = commandRows[0];
+  if (!commandRow) {
     throw new Error(`Custom command not found: ${commandId}`);
   }
 
-  return normalizeCommand(String(commandRows[0].trigger_string)) ?? '';
+  return normalizeCommand(String(commandRow.trigger_string)) ?? '';
 }
 
 export interface UserTwitchEligibility {
@@ -210,14 +211,15 @@ export async function getUserTwitchEligibility(executor: SqlExecutor, discordId:
     'SELECT twitch_name, is_twitch_bot_enabled FROM `user` WHERE discord_id = ? LIMIT 1',
     [discordId],
   );
-  if (userRows.length === 0) {
+  const userRow = userRows[0];
+  if (!userRow) {
     throw new Error(`User not found: ${discordId}`);
   }
 
-  const twitchName = userRows[0].twitch_name ? String(userRows[0].twitch_name) : null;
+  const twitchName = userRow.twitch_name ? String(userRow.twitch_name) : null;
   return {
     normalizedTwitchName: twitchName ? normalizeTwitchChannelName(twitchName) : null,
-    isTwitchBotEnabled: fromBit(userRows[0].is_twitch_bot_enabled),
+    isTwitchBotEnabled: fromBit(userRow.is_twitch_bot_enabled),
   };
 }
 
@@ -360,7 +362,9 @@ async function withDeadlockRetryAndTriggerLock(
 ): Promise<void> {
   // The named lock is session-scoped: acquire it once and release it in the outer finally,
   // so deadlock retries on the inner transaction still hold the lock between attempts.
-  let lockNameByTrigger: string | null = null;
+  // Declared via `as` so flow analysis doesn't pin it to `null`: it's assigned inside the retry
+  // callback below, which TypeScript can't see from the `finally` that releases it.
+  let lockNameByTrigger = null as string | null;
 
   try {
     await runWithDeadlockRetry(

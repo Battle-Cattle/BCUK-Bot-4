@@ -73,7 +73,7 @@ function mockFetch(responses: { ok: boolean; json?: () => Promise<unknown>; stat
   let callIndex = 0;
   return vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
     const r = responses[callIndex++];
-    return Promise.resolve({ ok: r.ok, status: r.status ?? 200, json: r.json ?? (() => Promise.resolve({})) } as Response);
+    return Promise.resolve({ ok: r!.ok, status: r!.status ?? 200, json: r!.json ?? (() => Promise.resolve({})) } as Response);
   });
 }
 

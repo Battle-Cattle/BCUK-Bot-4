@@ -19,7 +19,7 @@ function makeMethods() {
 
 /** Retrieves the shared 'raw' handler registered on `client`. */
 function getRawHandler(client: ReturnType<typeof makeClient>): (packet: unknown) => void {
-  return client.on.mock.calls[0][1] as (packet: unknown) => void;
+  return client.on.mock.calls[0]![1] as (packet: unknown) => void;
 }
 
 describe('createVoiceAdapterFactory', () => {

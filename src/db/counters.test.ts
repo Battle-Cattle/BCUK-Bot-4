@@ -125,7 +125,7 @@ describe('getCounterCount', () => {
     const pool = makePool([{ count: '0' }]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getCounterCount('guild-1');
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('WHERE guild_id = ?');
     expect(params).toEqual(['guild-1']);
   });
@@ -147,9 +147,9 @@ describe('getAllCounters', () => {
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const result = await getAllCounters();
     expect(result).toHaveLength(2);
-    expect(result[0].reset_yearly).toBe(true);
-    expect(result[1].reset_yearly).toBe(false);
-    expect(result[0].current_value).toBe(5);
+    expect(result[0]!.reset_yearly).toBe(true);
+    expect(result[1]!.reset_yearly).toBe(false);
+    expect(result[0]!.current_value).toBe(5);
   });
 });
 
@@ -160,7 +160,7 @@ describe('getCountersForGuild', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getCountersForGuild('guild-1');
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('WHERE guild_id = ?');
     expect(params).toEqual(['guild-1']);
   });
@@ -171,7 +171,7 @@ describe('getCountersForGuild', () => {
     ];
     vi.mocked(getPool).mockReturnValue(makePool(rows) as any);
     const result = await getCountersForGuild('900000000000000001');
-    expect(result[0].guild_id).toBe('900000000000000001');
+    expect(result[0]!.guild_id).toBe('900000000000000001');
   });
 });
 
@@ -187,7 +187,7 @@ describe('getCounterHistory', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getCounterHistory('guild-1', 1);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('WHERE id = ? AND guild_id = ?');
     expect(params).toEqual([1, 'guild-1']);
   });
@@ -259,7 +259,7 @@ describe('getCounterHistory', () => {
     const result = await getCounterHistory('guild-1', 3);
 
     expect(result!.history).toEqual([{ year: 2025, value: 7 }]);
-    const [sql] = pool.execute.mock.calls[0];
+    const [sql] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('`value2025`');
     expect(sql).not.toContain('value2026');
     expect(sql).not.toContain('value2100');
@@ -271,7 +271,7 @@ describe('getCounterHistory', () => {
 
     await getCounterHistory('guild-1', 1);
 
-    const [sql] = pool.query.mock.calls[0];
+    const [sql] = pool.query.mock.calls[0]!;
     expect(sql).toContain('information_schema.COLUMNS');
     expect(sql).toContain("TABLE_NAME = 'counter'");
   });
@@ -315,7 +315,7 @@ describe('getCounterHistory', () => {
     const result = await getCounterHistory('guild-1', 4);
 
     expect(result!.history).toEqual([{ year: lastYear, value: 42 }]);
-    const [sql] = pool.execute.mock.calls[0];
+    const [sql] = pool.execute.mock.calls[0]!;
     expect(sql).toContain(`\`value${lastYear}\``);
     expect(sql).not.toContain(`value${currentYear}`);
   });
@@ -356,7 +356,7 @@ describe('addCounter', () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
     mockConnection.execute.mockResolvedValue([{}, []]);
     await addCounter('guild-1', newCounter({ resetYearly: true }));
-    const [sql, params] = mockConnection.execute.mock.calls[0];
+    const [sql, params] = mockConnection.execute.mock.calls[0]!;
     expect(sql).toContain('INSERT INTO counter (guild_id,');
     expect(params).toEqual(['guild-1', '!hits', '!checkhits', 'msg', 'inc', 1]);
   });
@@ -398,7 +398,7 @@ describe('updateCounter', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(updateCounter('guild-1', { id: 1, triggerCommand: '!new', checkCommand: '!newcheck', message: 'm', incrementMessage: 'i', resetYearly: false }))
       .rejects.toBeInstanceOf(CounterNotFoundError);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('AND guild_id = ?');
     expect(params).toEqual([1, 'guild-1']);
   });
@@ -407,7 +407,7 @@ describe('updateCounter', () => {
     vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!old', check_command: '!oldcheck' }]) as any);
     mockConnection.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
     await updateCounter('guild-1', { id: 1, triggerCommand: '!new', checkCommand: '!newcheck', message: 'm', incrementMessage: 'i', resetYearly: false });
-    const [sql, params] = mockConnection.execute.mock.calls[0];
+    const [sql, params] = mockConnection.execute.mock.calls[0]!;
     expect(sql).toContain('WHERE id = ? AND guild_id = ?');
     expect(params).toEqual(['!new', '!newcheck', 'm', 'i', 0, 1, 'guild-1']);
   });
@@ -436,7 +436,7 @@ describe('removeCounter', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(removeCounter('guild-1', 1)).rejects.toBeInstanceOf(CounterNotFoundError);
-    const [, params] = pool.execute.mock.calls[0];
+    const [, params] = pool.execute.mock.calls[0]!;
     expect(params).toEqual([1, 'guild-1']);
   });
 
@@ -444,7 +444,7 @@ describe('removeCounter', () => {
     vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!hits', check_command: '!checkhits' }]) as any);
     mockConnection.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
     await removeCounter('guild-1', 1);
-    const [sql, params] = mockConnection.execute.mock.calls[0];
+    const [sql, params] = mockConnection.execute.mock.calls[0]!;
     expect(sql).toContain('WHERE id = ? AND guild_id = ?');
     expect(params).toEqual([1, 'guild-1']);
   });
@@ -474,7 +474,7 @@ describe('resetCounterCurrentValue', () => {
     pool.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await resetCounterCurrentValue('guild-1', 1);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('WHERE id = ? AND guild_id = ?');
     expect(params).toEqual([1, 'guild-1']);
   });
@@ -525,8 +525,8 @@ describe('incrementCounter', () => {
       .mockResolvedValueOnce([[{ current_value: 3 }], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await incrementCounter(1);
-    const [updateSql] = conn.execute.mock.calls[0];
-    const [selectSql, selectParams] = conn.execute.mock.calls[1];
+    const [updateSql] = conn.execute.mock.calls[0]!;
+    const [selectSql, selectParams] = conn.execute.mock.calls[1]!;
     expect(updateSql).toContain('LAST_INSERT_ID(current_value + 1)');
     expect(selectSql).toBe('SELECT LAST_INSERT_ID() AS current_value');
     expect(selectParams).toBeUndefined();

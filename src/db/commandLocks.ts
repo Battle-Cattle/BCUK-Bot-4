@@ -111,8 +111,8 @@ async function acquireNamedLocks(connection: mysql.PoolConnection, lockNames: st
  * @returns Resolves once every release attempt has completed.
  */
 async function releaseNamedLocks(connection: mysql.PoolConnection, lockNames: string[]): Promise<void> {
-  for (let index = lockNames.length - 1; index >= 0; index -= 1) {
-    await releaseNamedLock(connection, lockNames[index]);
+  for (const lockName of [...lockNames].reverse()) {
+    await releaseNamedLock(connection, lockName);
   }
 }
 

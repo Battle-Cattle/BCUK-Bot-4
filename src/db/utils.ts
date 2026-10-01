@@ -53,7 +53,7 @@ export async function rowExists(
 export async function getRowCount(table: string): Promise<number> {
   if (!IDENTIFIER_PATTERN.test(table)) throw new Error('Invalid input');
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(`SELECT COUNT(*) AS count FROM ${table}`);
-  return Number.parseInt(rows[0].count, 10);
+  return Number.parseInt(rows[0]!.count, 10); // COUNT(*) always returns exactly one row
 }
 
 /**

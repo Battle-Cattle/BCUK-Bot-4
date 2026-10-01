@@ -87,6 +87,15 @@ export class StreamerConnection {
   // now would hit a doomed session. Consumed once onSessionWelcome() lands the new session id.
   private reloadPendingAfterMigration = false;
   private stopped = false;
+
+  /**
+   * Reads `stopped` through a call so a check after an `await` isn't treated as still narrowed
+   * to `false` by the check before it — `stop()` can run while that `await` is pending.
+   * @returns Whether `stop()` has been called since the last `start()`.
+   */
+  private isStopped(): boolean {
+    return this.stopped;
+  }
   private reloadChain: Promise<void> = Promise.resolve();
 
   constructor(data: StreamerEventSubData) {
@@ -185,7 +194,7 @@ export class StreamerConnection {
   private async subscribeAndHandleEmpty(sessionId: string, emptyLogMessage: string): Promise<void> {
     if (this.stopped) return;
     const count = await subscribeForStreamer(sessionId, this.currentData);
-    if (this.stopped) return;
+    if (this.isStopped()) return;
     if (count === 0) {
       log.info(`[${this.name}] ${emptyLogMessage}`);
       this.stop();

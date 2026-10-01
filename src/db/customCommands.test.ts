@@ -124,10 +124,10 @@ describe('getAllCustomCommandsWithAssignments', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
     expect(result).toHaveLength(1);
-    expect(result[0].trigger_string).toBe('!clap');
-    expect(result[0].assigned_users).toHaveLength(0);
-    expect(result[0].is_discord_enabled).toBe(true);
-    expect(result[0].is_multi_twitch).toBe(false);
+    expect(result[0]!.trigger_string).toBe('!clap');
+    expect(result[0]!.assigned_users).toHaveLength(0);
+    expect(result[0]!.is_discord_enabled).toBe(true);
+    expect(result[0]!.is_multi_twitch).toBe(false);
   });
 
   it('groups multiple rows for the same command into one entry with multiple assigned users', async () => {
@@ -140,9 +140,9 @@ describe('getAllCustomCommandsWithAssignments', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
     expect(result).toHaveLength(1);
-    expect(result[0].assigned_users).toHaveLength(2);
-    expect(result[0].assigned_users[0].discord_id).toBe('u1');
-    expect(result[0].assigned_users[1].discord_id).toBe('u2');
+    expect(result[0]!.assigned_users).toHaveLength(2);
+    expect(result[0]!.assigned_users[0]!.discord_id).toBe('u1');
+    expect(result[0]!.assigned_users[1]!.discord_id).toBe('u2');
   });
 
   it('handles multiple distinct commands', async () => {
@@ -155,7 +155,7 @@ describe('getAllCustomCommandsWithAssignments', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
     expect(result).toHaveLength(2);
-    expect(result[1].is_multi_twitch).toBe(true);
+    expect(result[1]!.is_multi_twitch).toBe(true);
   });
 
   it('maps BIT(1) Buffer([1]) fields for is_discord_enabled and is_multi_twitch as true', async () => {
@@ -164,8 +164,8 @@ describe('getAllCustomCommandsWithAssignments', () => {
     pool.execute.mockResolvedValue([[row], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
-    expect(result[0].is_discord_enabled).toBe(true);
-    expect(result[0].is_multi_twitch).toBe(true);
+    expect(result[0]!.is_discord_enabled).toBe(true);
+    expect(result[0]!.is_multi_twitch).toBe(true);
   });
 
   it('maps BIT(1) Buffer([0]) fields for is_discord_enabled and is_multi_twitch as false', async () => {
@@ -174,8 +174,8 @@ describe('getAllCustomCommandsWithAssignments', () => {
     pool.execute.mockResolvedValue([[row], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
-    expect(result[0].is_discord_enabled).toBe(false);
-    expect(result[0].is_multi_twitch).toBe(false);
+    expect(result[0]!.is_discord_enabled).toBe(false);
+    expect(result[0]!.is_multi_twitch).toBe(false);
   });
 
   it('maps null fields for is_discord_enabled and is_multi_twitch as false', async () => {
@@ -184,8 +184,8 @@ describe('getAllCustomCommandsWithAssignments', () => {
     pool.execute.mockResolvedValue([[row], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
-    expect(result[0].is_discord_enabled).toBe(false);
-    expect(result[0].is_multi_twitch).toBe(false);
+    expect(result[0]!.is_discord_enabled).toBe(false);
+    expect(result[0]!.is_multi_twitch).toBe(false);
   });
 
   it('marks user as orphaned when user_discord_id is null', async () => {
@@ -194,7 +194,7 @@ describe('getAllCustomCommandsWithAssignments', () => {
     pool.execute.mockResolvedValue([[row], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
-    expect(result[0].assigned_users[0].is_orphaned_user).toBe(true);
+    expect(result[0]!.assigned_users[0]!.is_orphaned_user).toBe(true);
   });
 
   it('marks user as not orphaned when user_discord_id matches', async () => {
@@ -203,7 +203,7 @@ describe('getAllCustomCommandsWithAssignments', () => {
     pool.execute.mockResolvedValue([[row], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllCustomCommandsWithAssignments();
-    expect(result[0].assigned_users[0].is_orphaned_user).toBe(false);
+    expect(result[0]!.assigned_users[0]!.is_orphaned_user).toBe(false);
   });
 });
 

@@ -102,8 +102,8 @@ export async function tryDeleteDiscordMessage(channelId: string, messageId: stri
       return;
     } catch (err) {
       if (isDiscordNotFoundError(err)) return;
-      if (isTransientDiscordError(err) && attempt < TRANSIENT_ERROR_RETRY_DELAYS_MS.length) {
-        const wait = TRANSIENT_ERROR_RETRY_DELAYS_MS[attempt];
+      const wait = TRANSIENT_ERROR_RETRY_DELAYS_MS[attempt];
+      if (isTransientDiscordError(err) && wait !== undefined) {
         log.warn(`Transient error deleting Discord message ${messageId} in channel ${channelId} (attempt ${attempt + 1}), retrying in ${wait}ms:`, err);
         await delay(wait);
         continue;

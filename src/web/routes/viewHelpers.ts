@@ -77,6 +77,8 @@ export function renderView(res: Response, view: string, data?: Record<string, un
     throw new Error(`renderView: unknown view "${view}"`);
   }
   if (data !== undefined) {
+    // Runtime guard for callers passing loosely-typed (`any`) data; the static type can't see that.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (typeof data !== 'object' || data === null || Array.isArray(data)) {
       throw new Error('renderView: data must be a plain object');
     }
@@ -116,7 +118,7 @@ export function renderError(
  */
 export function getFriendlyErrorMessage(messages: Record<string, string>, key: string): string {
   return Object.prototype.hasOwnProperty.call(messages, key)
-    ? messages[key]
+    ? messages[key]!
     : `An error occurred (${key}).`;
 }
 

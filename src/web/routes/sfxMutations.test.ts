@@ -290,7 +290,7 @@ describe('POST /sfx/file/upload', () => {
       .field('weight', '3')
       .attach('sound', MP3_ID3, { filename: 'airhorn.mp3', contentType: 'audio/mpeg' });
     expect(res.headers.location).toBe('/sfx?success=file_uploaded');
-    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0][0] as string;
+    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0]![0] as string;
     expect(writtenPath).toContain('airhorn.mp3');
     expect(vi.mocked(addSfxFile)).toHaveBeenCalledWith(5n, 'airhorn.mp3', 3, false);
   });
@@ -327,7 +327,7 @@ describe('POST /sfx/file/upload', () => {
       .field('weight', '1')
       .attach('sound', OGG_BUF, { filename: 'clap.ogg', contentType: 'audio/ogg' });
     expect(res.headers.location).toBe('/sfx?error=upload_failed');
-    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0][0] as string;
+    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0]![0] as string;
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
   });
 

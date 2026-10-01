@@ -28,7 +28,7 @@ export async function resolveGuildIdFromChannelId(client: Client, channelId: str
   try {
     const channel = await client.channels.fetch(channelId);
     if (!channel || !('guildId' in channel)) return null;
-    return channel.guildId ?? null;
+    return channel.guildId;
   } catch {
     return null;
   }

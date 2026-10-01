@@ -37,7 +37,8 @@ function isValidId3Header(buf: Buffer): boolean {
   if (buf.length < 10) return false;
   if (!buf.subarray(0, 3).equals(Buffer.from([0x49, 0x44, 0x33]))) return false;
   if (buf[3] === 0xff || buf[4] === 0xff) return false;
-  return (buf[6] & 0x80) === 0 && (buf[7] & 0x80) === 0 && (buf[8] & 0x80) === 0 && (buf[9] & 0x80) === 0;
+  // buf.length >= 10 is checked above, so bytes 6-9 exist.
+  return (buf[6]! & 0x80) === 0 && (buf[7]! & 0x80) === 0 && (buf[8]! & 0x80) === 0 && (buf[9]! & 0x80) === 0;
 }
 
 const RIFF_MAGIC = Buffer.from([0x52, 0x49, 0x46, 0x46]); // "RIFF"
@@ -61,11 +62,13 @@ export function startsWithBytes(buf: Buffer, bytes: Buffer, offset = 0): boolean
  * sync — isn't mistaken for MP3.
  */
 export function isValidMpegFrameHeader(buf: Buffer): boolean {
-  if (buf.length < 4 || buf[0] !== 0xff || (buf[1] & 0xe0) !== 0xe0) return false;
-  const versionBits = (buf[1] >> 3) & 0x03; // 0x01 = reserved MPEG version
-  const layerBits = (buf[1] >> 1) & 0x03; // 0x00 = reserved layer
-  const bitrateBits = (buf[2] >> 4) & 0x0f; // 0x0f = bad/invalid bitrate
-  const sampleRateBits = (buf[2] >> 2) & 0x03; // 0x03 = reserved sample rate
+  if (buf.length < 4) return false;
+  const byte0 = buf[0]!, byte1 = buf[1]!, byte2 = buf[2]!; // length >= 4 checked above
+  if (byte0 !== 0xff || (byte1 & 0xe0) !== 0xe0) return false;
+  const versionBits = (byte1 >> 3) & 0x03; // 0x01 = reserved MPEG version
+  const layerBits = (byte1 >> 1) & 0x03; // 0x00 = reserved layer
+  const bitrateBits = (byte2 >> 4) & 0x0f; // 0x0f = bad/invalid bitrate
+  const sampleRateBits = (byte2 >> 2) & 0x03; // 0x03 = reserved sample rate
   return versionBits !== 0x01 && layerBits !== 0x00 && bitrateBits !== 0x0f && sampleRateBits !== 0x03;
 }
 

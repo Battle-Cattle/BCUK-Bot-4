@@ -94,7 +94,7 @@ export async function getPricingForReward(streamerId: number, twitchRewardId: st
     `SELECT ${REWARD_PRICING_SELECT} FROM reward_pricing WHERE streamer_id = ? AND twitch_reward_id = ?`,
     [streamerId, twitchRewardId],
   );
-  return rows.length === 0 ? null : mapRow(rows[0]);
+  return rows[0] ? mapRow(rows[0]) : null;
 }
 
 /**
@@ -109,7 +109,7 @@ export async function getPricingConfigById(id: number, streamerId: number): Prom
     `SELECT ${REWARD_PRICING_SELECT} FROM reward_pricing WHERE id = ? AND streamer_id = ?`,
     [id, streamerId],
   );
-  return rows.length === 0 ? null : mapRow(rows[0]);
+  return rows[0] ? mapRow(rows[0]) : null;
 }
 
 /**
@@ -279,10 +279,11 @@ export async function getPricingSettingsForStreamer(streamerId: number): Promise
     `SELECT half_life_seconds, time_to_max_multiplier FROM reward_pricing_settings WHERE streamer_id = ?`,
     [streamerId],
   );
-  if (rows.length === 0) return { ...DEFAULT_STREAMER_PRICING_SETTINGS };
+  const row = rows[0];
+  if (!row) return { ...DEFAULT_STREAMER_PRICING_SETTINGS };
   return {
-    half_life_seconds: Number(rows[0].half_life_seconds),
-    time_to_max_multiplier: Number(rows[0].time_to_max_multiplier),
+    half_life_seconds: Number(row.half_life_seconds),
+    time_to_max_multiplier: Number(row.time_to_max_multiplier),
   };
 }
 

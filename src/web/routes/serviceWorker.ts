@@ -53,7 +53,7 @@ function listFilesRecursive(
     ) {
       continue;
     }
-    const topLevelSegment = relativePath.split(path.sep)[0];
+    const topLevelSegment = relativePath.split(path.sep)[0]!; // split() always returns at least one element
     if (HASH_EXCLUDED_TOP_LEVEL_ENTRIES.has(topLevelSegment)) continue;
     if (entry.isDirectory()) files.push(...listFilesRecursive(rootDir, absolutePath, realRoot));
     else files.push(relativePath);

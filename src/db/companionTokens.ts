@@ -64,8 +64,9 @@ export async function findDiscordIdByTokenHash(hash: string): Promise<string | n
     `SELECT discord_id, key_hash FROM companion_app_tokens WHERE key_hash = ? AND revoked_at IS NULL`,
     [hash],
   );
-  if (rows.length === 0 || !hashesMatch(String(rows[0].key_hash), hash)) return null;
-  return String(rows[0].discord_id);
+  const row = rows[0];
+  if (!row || !hashesMatch(String(row.key_hash), hash)) return null;
+  return String(row.discord_id);
 }
 
 /**
@@ -79,8 +80,9 @@ export async function getTokenStatus(discordId: string): Promise<CompanionTokenS
     `SELECT created_at, revoked_at FROM companion_app_tokens WHERE discord_id = ?`,
     [discordId],
   );
-  if (rows.length === 0) return null;
-  return { hasToken: rows[0].revoked_at === null, createdAt: rows[0].created_at };
+  const row = rows[0];
+  if (!row) return null;
+  return { hasToken: row.revoked_at === null, createdAt: row.created_at };
 }
 
 /**

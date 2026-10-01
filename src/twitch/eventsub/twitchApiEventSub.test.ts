@@ -331,8 +331,8 @@ describe('listEventSubSubscriptions', () => {
 
     const result = await listEventSubSubscriptions('token');
 
-    expect(result[0].status).toBe('enabled');
-    expect(result[1].status).toBe('authorization_revoked');
+    expect(result[0]!.status).toBe('enabled');
+    expect(result[1]!.status).toBe('authorization_revoked');
   });
 
   it('paginates when a cursor is present', async () => {
@@ -347,7 +347,7 @@ describe('listEventSubSubscriptions', () => {
   it('passes userId as query param when provided', async () => {
     vi.mocked(twitchFetch).mockResolvedValue(mockFetch(200, { data: [] }));
     await listEventSubSubscriptions('token', 'u123');
-    const [[url]] = vi.mocked(twitchFetch).mock.calls;
+    const [url] = vi.mocked(twitchFetch).mock.calls[0]!;
     expect(url).toContain('user_id=u123');
   });
 

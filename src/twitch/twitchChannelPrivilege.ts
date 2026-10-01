@@ -34,7 +34,7 @@ export function clearPrivilegeState(): void {
  */
 function parseBadgeNames(rawBadges: string | undefined): Set<string> {
   if (!rawBadges) return new Set();
-  return new Set(rawBadges.split(',').map((entry) => entry.split('/')[0]));
+  return new Set(rawBadges.split(',').map((entry) => entry.split('/')[0] ?? ''));
 }
 
 /**

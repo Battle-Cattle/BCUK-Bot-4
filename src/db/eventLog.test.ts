@@ -33,7 +33,7 @@ describe('recordStreamerEvent', () => {
     await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(1);
 
     expect(pool.execute).toHaveBeenCalledTimes(1);
-    const [insertSql, insertParams] = pool.execute.mock.calls[0];
+    const [insertSql, insertParams] = pool.execute.mock.calls[0]!;
     expect(insertSql).toContain('INSERT INTO streamer_event_log');
     expect(insertParams).toEqual([5, 'follow', 'someviewer', null, null]);
   });
@@ -50,7 +50,7 @@ describe('recordStreamerEvent', () => {
     await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(1);
 
     expect(pool.execute).toHaveBeenCalledTimes(2);
-    const [deleteSql, deleteParams] = pool.execute.mock.calls[1];
+    const [deleteSql, deleteParams] = pool.execute.mock.calls[1]!;
     expect(deleteSql).toContain('DELETE FROM streamer_event_log');
     expect(deleteSql).toContain('LIMIT 200');
     expect(deleteParams).toEqual([5, 5]);
@@ -79,7 +79,7 @@ describe('recordStreamerEvent', () => {
     await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(1);
 
     expect(pool.execute).toHaveBeenCalledTimes(2);
-    const [deleteSql] = pool.execute.mock.calls[1];
+    const [deleteSql] = pool.execute.mock.calls[1]!;
     expect(deleteSql).toContain('DELETE FROM streamer_event_log');
   });
 
@@ -189,7 +189,7 @@ describe('recordStreamerEvent', () => {
 
     await recordStreamerEvent(5, 'redemption', 'someviewer', 'Redeemed Hydrate: drink water!');
 
-    const [, insertParams] = pool.execute.mock.calls[0];
+    const [, insertParams] = pool.execute.mock.calls[0]!;
     expect(insertParams).toEqual([5, 'redemption', 'someviewer', 'Redeemed Hydrate: drink water!', null]);
   });
 
@@ -199,7 +199,7 @@ describe('recordStreamerEvent', () => {
 
     await recordStreamerEvent(5, 'redemption', 'someviewer', 'Redeemed Hydrate', 'redemption-abc');
 
-    const [, insertParams] = pool.execute.mock.calls[0];
+    const [, insertParams] = pool.execute.mock.calls[0]!;
     expect(insertParams).toEqual([5, 'redemption', 'someviewer', 'Redeemed Hydrate', 'redemption-abc']);
   });
 
@@ -283,7 +283,7 @@ describe('getRecentStreamerEvents', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getRecentStreamerEvents(5, 20);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('SELECT id, event_type, display_name, detail, occurred_at');
     expect(sql).toContain('ORDER BY occurred_at DESC, id DESC');
     expect(sql).toContain('LIMIT 20');

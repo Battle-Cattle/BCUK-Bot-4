@@ -182,7 +182,7 @@ async function resolveInitialGuildAndAccessLevel(
   accessibleGuilds: DbGuild[],
   dbUser: DbUser,
 ): Promise<{ currentGuildId: string | null; accessLevel: SessionUser['accessLevel'] }> {
-  const currentGuildId = accessibleGuilds.length === 1 ? accessibleGuilds[0].guild_id : null;
+  const currentGuildId = accessibleGuilds.length === 1 ? accessibleGuilds[0]!.guild_id : null; // length checked
   const accessLevel = currentGuildId
     ? ((await getEffectiveAccessLevelForUser(currentGuildId, dbUser)) as SessionUser['accessLevel'])
     : AccessLevel.USER;
@@ -295,7 +295,7 @@ router.get('/discord/callback', async (req, res) => {
     if (await tryCompleteCompanionLogin(req, res, profile.id)) return;
     delete req.session.companionOAuth;
 
-    const syncedDiscordName = await syncDiscordName(profile, dbUser, accessibleGuilds[0].guild_id);
+    const syncedDiscordName = await syncDiscordName(profile, dbUser, accessibleGuilds[0]!.guild_id); // non-empty: checked above
     const guildAndAccessLevel = await resolveInitialGuildAndAccessLevel(accessibleGuilds, dbUser);
     const userData = buildSessionUser(profile, dbUser, syncedDiscordName, accessibleGuilds, guildAndAccessLevel);
     await saveSessionUser(req, userData);

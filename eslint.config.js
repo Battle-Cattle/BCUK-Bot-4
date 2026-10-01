@@ -67,6 +67,9 @@ module.exports = tseslint.config(
       '@typescript-eslint/prefer-reduce-type-parameter': 'error',
       '@typescript-eslint/no-misused-spread': 'error',
       '@typescript-eslint/no-unnecessary-type-assertion': 'error',
+      // Relies on tsconfig's noUncheckedIndexedAccess: without it, `rows[0]` is typed as always
+      // defined and this rule would flag real `if (!row)` guards as dead code.
+      '@typescript-eslint/no-unnecessary-condition': 'error',
       // `.catch((err) => …)` gets `err: any` by default; this makes it `unknown`, matching what
       // `strict`'s useUnknownInCatchVariables already does for try/catch.
       '@typescript-eslint/use-unknown-in-catch-callback-variable': 'error',
@@ -143,6 +146,7 @@ module.exports = tseslint.config(
       'max-lines': 'off',
       // Tests cast mocks (`as any`, `as ReturnType<…>`) deliberately for readability.
       '@typescript-eslint/no-unnecessary-type-assertion': 'off',
+      '@typescript-eslint/no-unnecessary-condition': 'off',
     },
   },
   {

@@ -75,7 +75,7 @@ export async function getGuildById(guildId: string): Promise<DbGuild | null> {
     'SELECT guild_id, name, voice_channel_id FROM guild WHERE guild_id = ? LIMIT 1',
     [guildId],
   );
-  return rows.length === 0 ? null : mapGuild(rows[0]);
+  return rows[0] ? mapGuild(rows[0]) : null;
 }
 
 /**

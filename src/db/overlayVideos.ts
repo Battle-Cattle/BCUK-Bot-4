@@ -80,7 +80,7 @@ export async function getVideoById(videoId: number, streamerId: number): Promise
      WHERE id = ? AND streamer_id = ?`,
     [videoId, streamerId],
   );
-  return rows.length === 0 ? null : mapVideo(rows[0]);
+  return rows[0] ? mapVideo(rows[0]) : null;
 }
 
 /**
@@ -95,10 +95,11 @@ export async function deleteVideo(videoId: number, streamerId: number): Promise<
       `SELECT filename FROM overlay_video WHERE id = ? AND streamer_id = ?`,
       [videoId, streamerId],
     );
-    if (rows.length === 0) {
-      notFound();
+    const row = rows[0];
+    if (!row) {
+      return notFound();
     }
-    const filename: string = rows[0].filename;
+    const filename: string = row.filename;
     const [del] = await conn.execute<mysql.ResultSetHeader>(
       `DELETE FROM overlay_video WHERE id = ? AND streamer_id = ?`, [videoId, streamerId],
     );

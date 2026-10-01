@@ -50,10 +50,10 @@ describe('getAllTimerCommandsWithAssignments', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllTimerCommandsWithAssignments();
     expect(result).toHaveLength(1);
-    expect(result[0].name).toBe('Discord plug');
-    expect(result[0].assigned_users).toHaveLength(0);
-    expect(result[0].require_live).toBe(true);
-    expect(result[0].enabled).toBe(true);
+    expect(result[0]!.name).toBe('Discord plug');
+    expect(result[0]!.assigned_users).toHaveLength(0);
+    expect(result[0]!.require_live).toBe(true);
+    expect(result[0]!.enabled).toBe(true);
   });
 
   it('groups multiple rows for the same timer into one entry with multiple assigned users', async () => {
@@ -73,9 +73,9 @@ describe('getAllTimerCommandsWithAssignments', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllTimerCommandsWithAssignments();
     expect(result).toHaveLength(1);
-    expect(result[0].assigned_users).toHaveLength(2);
-    expect(result[0].assigned_users[0].discord_id).toBe('u1');
-    expect(result[0].assigned_users[1].discord_id).toBe('u2');
+    expect(result[0]!.assigned_users).toHaveLength(2);
+    expect(result[0]!.assigned_users[0]!.discord_id).toBe('u1');
+    expect(result[0]!.assigned_users[1]!.discord_id).toBe('u2');
   });
 
   it('handles multiple distinct timers', async () => {
@@ -95,7 +95,7 @@ describe('getAllTimerCommandsWithAssignments', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllTimerCommandsWithAssignments();
     expect(result).toHaveLength(2);
-    expect(result[1].enabled).toBe(false);
+    expect(result[1]!.enabled).toBe(false);
   });
 
   it('marks user as orphaned when user_discord_id is null, falling back access_level to USER', async () => {
@@ -107,8 +107,8 @@ describe('getAllTimerCommandsWithAssignments', () => {
     const pool = makeMockPool({ rows: [row] });
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllTimerCommandsWithAssignments();
-    expect(result[0].assigned_users[0].is_orphaned_user).toBe(true);
-    expect(result[0].assigned_users[0].access_level).toBe(AccessLevel.USER);
+    expect(result[0]!.assigned_users[0]!.is_orphaned_user).toBe(true);
+    expect(result[0]!.assigned_users[0]!.access_level).toBe(AccessLevel.USER);
   });
 
   it('marks user as not orphaned when user_discord_id matches', async () => {
@@ -120,7 +120,7 @@ describe('getAllTimerCommandsWithAssignments', () => {
     const pool = makeMockPool({ rows: [row] });
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllTimerCommandsWithAssignments();
-    expect(result[0].assigned_users[0].is_orphaned_user).toBe(false);
+    expect(result[0]!.assigned_users[0]!.is_orphaned_user).toBe(false);
   });
 });
 
@@ -130,7 +130,7 @@ describe('addTimerCommand', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const id = await addTimerCommand(sampleInput);
     expect(id).toBe(42);
-    expect(pool.execute.mock.calls[0][1]).toEqual(['Discord plug', 'Join our Discord!', 600, 5, 1, 1]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['Discord plug', 'Join our Discord!', 600, 5, 1, 1]);
   });
 });
 
@@ -139,7 +139,7 @@ describe('updateTimerCommand', () => {
     const pool = makeMockPool({ executeResult: [{ affectedRows: 1 }] });
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(updateTimerCommand(1, sampleInput)).resolves.toBeUndefined();
-    expect(pool.execute.mock.calls[0][1]).toEqual(['Discord plug', 'Join our Discord!', 600, 5, 1, 1, 1]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['Discord plug', 'Join our Discord!', 600, 5, 1, 1, 1]);
     // affectedRows > 0 already proves the row exists — no need for a follow-up existence check.
     expect(pool.execute).toHaveBeenCalledTimes(1);
   });
@@ -168,7 +168,7 @@ describe('removeTimerCommand', () => {
     const pool = makeMockPool({ executeResult: [{ affectedRows: 1 }] });
     vi.mocked(getPool).mockReturnValue(pool as any);
     await removeTimerCommand(1);
-    expect(pool.execute.mock.calls[0][1]).toEqual([1]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([1]);
   });
 
   it('no-ops without throwing when nothing matched', async () => {
@@ -183,7 +183,7 @@ describe('setTimerCommandEnabled', () => {
     const pool = makeMockPool({ executeResult: [{ affectedRows: 1 }] });
     vi.mocked(getPool).mockReturnValue(pool as any);
     await setTimerCommandEnabled(1, false);
-    expect(pool.execute.mock.calls[0][1]).toEqual([0, 1]);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([0, 1]);
   });
 
   it('does not throw when affectedRows is 0 but the row exists already in the requested state', async () => {
@@ -210,7 +210,7 @@ describe('assignUserToTimer', () => {
     const pool = makeMockPool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await assignUserToTimer(1, 'u1');
-    expect(pool.execute.mock.calls[0][1]).toEqual([1, 'u1']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([1, 'u1']);
   });
 });
 
@@ -227,8 +227,8 @@ describe('assignUsersToTimer', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await assignUsersToTimer(1, ['u1', 'u2']);
     expect(pool.execute).toHaveBeenCalledTimes(1);
-    expect(pool.execute.mock.calls[0][0]).toContain('VALUES (?, ?), (?, ?) AS new_row');
-    expect(pool.execute.mock.calls[0][1]).toEqual([1, 'u1', 1, 'u2']);
+    expect(pool.execute.mock.calls[0]![0]).toContain('VALUES (?, ?), (?, ?) AS new_row');
+    expect(pool.execute.mock.calls[0]![1]).toEqual([1, 'u1', 1, 'u2']);
   });
 });
 
@@ -237,7 +237,7 @@ describe('unassignUserFromTimer', () => {
     const pool = makeMockPool();
     vi.mocked(getPool).mockReturnValue(pool as any);
     await unassignUserFromTimer(1, 'u1');
-    expect(pool.execute.mock.calls[0][1]).toEqual([1, 'u1']);
+    expect(pool.execute.mock.calls[0]![1]).toEqual([1, 'u1']);
   });
 });
 
@@ -278,7 +278,7 @@ describe('getAllEnabledTimerCommandsWithChannel', () => {
     const pool = makeMockPool({ rows: [] });
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getAllEnabledTimerCommandsWithChannel();
-    expect(pool.execute.mock.calls[0][1]).toBeUndefined();
+    expect(pool.execute.mock.calls[0]![1]).toBeUndefined();
   });
 
   it('normalizes the channel so it matches the lowercased key chat activity is recorded under', async () => {

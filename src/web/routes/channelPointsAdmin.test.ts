@@ -252,7 +252,7 @@ describe('GET /', () => {
 
       expect(res.body.historyHours).toBe(3);
       expect(getPricingHistoryForRewards).toHaveBeenCalledWith([1], expect.any(Number));
-      const sinceMs = vi.mocked(getPricingHistoryForRewards).mock.calls[0][1];
+      const sinceMs = vi.mocked(getPricingHistoryForRewards).mock.calls[0]![1];
       expect(sinceMs).toBeGreaterThanOrEqual(before - 3 * 60 * 60 * 1000);
       expect(sinceMs).toBeLessThanOrEqual(after - 3 * 60 * 60 * 1000);
     });
@@ -260,7 +260,7 @@ describe('GET /', () => {
     it('respects a valid hours query param', async () => {
       const res = await supertest(buildApp()).get('/?hours=6');
       expect(res.body.historyHours).toBe(6);
-      const sinceMs = vi.mocked(getPricingHistoryForRewards).mock.calls[0][1];
+      const sinceMs = vi.mocked(getPricingHistoryForRewards).mock.calls[0]![1];
       expect(Date.now() - sinceMs).toBeCloseTo(6 * 60 * 60 * 1000, -3);
     });
 

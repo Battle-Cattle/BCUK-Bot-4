@@ -161,7 +161,7 @@ describe('startup — guild registry preload', () => {
 
     const [registryCallOrder] = vi.mocked(reloadGuildRegistry).mock.invocationCallOrder;
     const [botCallOrder] = vi.mocked(startDiscordBot).mock.invocationCallOrder;
-    expect(registryCallOrder).toBeLessThan(botCallOrder);
+    expect(registryCallOrder).toBeLessThan(botCallOrder!);
   });
 
   it('registers the companion event runtime with pushCompanionEvent on a clean startup', async () => {
@@ -234,7 +234,7 @@ describe('startup — guild registry preload', () => {
     // first health-changed notification compares against an empty baseline (see
     // ownerAlerts.ts's primeOwnerAlertBaseline JSDoc for why that causes false "down" alerts).
     expect(vi.mocked(primeOwnerAlertBaseline).mock.invocationCallOrder[0])
-      .toBeLessThan(vi.mocked(startOwnerAlertWatcher).mock.invocationCallOrder[0]);
+      .toBeLessThan(vi.mocked(startOwnerAlertWatcher).mock.invocationCallOrder[0]!);
   });
 
   it('calls process.exit(1) and does not start the bot when the redemption_handled migration is missing', async () => {
@@ -302,7 +302,7 @@ describe('startup — reward pricing scheduler', () => {
 
     const [webPanelCallOrder] = vi.mocked(startWebPanel).mock.invocationCallOrder;
     const [reconciliationCallOrder] = vi.mocked(startChannelReconciliationPoll).mock.invocationCallOrder;
-    expect(webPanelCallOrder).toBeLessThan(reconciliationCallOrder);
+    expect(webPanelCallOrder).toBeLessThan(reconciliationCallOrder!);
   });
 });
 
@@ -319,7 +319,7 @@ describe('startup — owner back-online DM', () => {
     expect(vi.mocked(announceStartup)).toHaveBeenCalledOnce();
     const [readyCallOrder] = vi.mocked(onceDiscordReady).mock.invocationCallOrder;
     const [announceCallOrder] = vi.mocked(announceStartup).mock.invocationCallOrder;
-    expect(readyCallOrder).toBeLessThan(announceCallOrder);
+    expect(readyCallOrder).toBeLessThan(announceCallOrder!);
   });
 
   it('skips the DM (without crashing the process) when Discord never becomes ready in time', async () => {
@@ -403,7 +403,7 @@ describe('owner-alert DM send callback', () => {
 
     await runMain();
 
-    const send = vi.mocked(registerOwnerAlertRuntime).mock.calls[0][0].send;
+    const send = vi.mocked(registerOwnerAlertRuntime).mock.calls[0]![0].send;
     await expect(send('123', 'hi')).rejects.toThrow('Discord client is not ready');
   });
 
@@ -416,7 +416,7 @@ describe('owner-alert DM send callback', () => {
 
     await runMain();
 
-    const send = vi.mocked(registerOwnerAlertRuntime).mock.calls[0][0].send;
+    const send = vi.mocked(registerOwnerAlertRuntime).mock.calls[0]![0].send;
     await send('123', 'hi');
 
     expect(fetch).toHaveBeenCalledWith('123');
@@ -458,9 +458,9 @@ describe('shutdown', () => {
     const [stopDiscordOrder] = vi.mocked(stopDiscordBot).mock.invocationCallOrder;
     const [stopTwitchOrder] = vi.mocked(stopTwitchBot).mock.invocationCallOrder;
 
-    expect(stopWatcherOrder).toBeLessThan(announceOrder);
-    expect(announceOrder).toBeLessThan(stopDiscordOrder);
-    expect(announceOrder).toBeLessThan(stopTwitchOrder);
+    expect(stopWatcherOrder).toBeLessThan(announceOrder!);
+    expect(announceOrder).toBeLessThan(stopDiscordOrder!);
+    expect(announceOrder).toBeLessThan(stopTwitchOrder!);
   });
 
   it('still closes the pool and exits(0) when a teardown step rejects', async () => {

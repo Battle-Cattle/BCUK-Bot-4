@@ -165,7 +165,7 @@ describe('getCustomRewards', () => {
 
     const result = await getCustomRewards('bc1', 'user-token');
 
-    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
     expect(String(url)).toContain('broadcaster_id=bc1');
     expect(init?.method).toBeUndefined(); // defaults to GET
     expect(result).toEqual(rewards);
@@ -210,7 +210,7 @@ describe('getRewardRedemptions', () => {
 
     const result = await getRewardRedemptions('bc1', 'rwd1', 'UNFULFILLED', 'user-token');
 
-    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
     expect(String(url)).toContain('broadcaster_id=bc1');
     expect(String(url)).toContain('reward_id=rwd1');
     expect(String(url)).toContain('status=UNFULFILLED');
@@ -225,7 +225,7 @@ describe('getRewardRedemptions', () => {
 
     await getRewardRedemptions('bc1', 'rwd1', 'UNFULFILLED', 'user-token', 'cursor-abc');
 
-    const [url] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const [url] = vi.mocked(globalThis.fetch).mock.calls[0]!;
     expect(String(url)).toContain('after=cursor-abc');
   });
 
@@ -272,7 +272,7 @@ describe('updateRewardCost', () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: [{ id: 'rwd1', cost: 500 }] }));
     await updateRewardCost('bc1', 'rwd1', 500, 'user-token');
 
-    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
     expect(String(url)).toContain('broadcaster_id=bc1');
     expect(String(url)).toContain('id=rwd1');
     expect(init?.method).toBe('PATCH');
@@ -321,7 +321,7 @@ describe('createCustomReward', () => {
 
     const result = await createCustomReward('bc1', 'user-token', input);
 
-    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
     expect(String(url)).toContain('broadcaster_id=bc1');
     expect(init?.method).toBe('POST');
     expect(init?.body).toBe(JSON.stringify(input));
@@ -343,6 +343,11 @@ describe('createCustomReward', () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
     await expect(createCustomReward('bc1', 'user-token', input)).rejects.toThrow('createCustomReward failed: 500');
   });
+
+  it('throws when a 200 response carries no reward', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: [] }));
+    await expect(createCustomReward('bc1', 'user-token', input)).rejects.toThrow('createCustomReward returned empty data');
+  });
 });
 
 describe('updateCustomReward', () => {
@@ -352,12 +357,17 @@ describe('updateCustomReward', () => {
 
     const result = await updateCustomReward('bc1', 'rwd1', 'user-token', { title: 'New Title' });
 
-    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
     expect(String(url)).toContain('broadcaster_id=bc1');
     expect(String(url)).toContain('id=rwd1');
     expect(init?.method).toBe('PATCH');
     expect(init?.body).toBe(JSON.stringify({ title: 'New Title' }));
     expect(result).toEqual(updated);
+  });
+
+  it('throws when a 200 response carries no reward', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: [] }));
+    await expect(updateCustomReward('bc1', 'rwd1', 'user-token', { title: 'x' })).rejects.toThrow('updateCustomReward returned empty data');
   });
 
   it('throws TwitchRewardUnsupportedError on a 403 response', async () => {
@@ -381,7 +391,7 @@ describe('deleteCustomReward', () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(204, {}));
     await deleteCustomReward('bc1', 'rwd1', 'user-token');
 
-    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
     expect(String(url)).toContain('broadcaster_id=bc1');
     expect(String(url)).toContain('id=rwd1');
     expect(init?.method).toBe('DELETE');
