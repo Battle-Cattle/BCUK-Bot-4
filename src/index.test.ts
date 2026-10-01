@@ -304,6 +304,23 @@ describe('startup — reward pricing scheduler', () => {
     const [reconciliationCallOrder] = vi.mocked(startChannelReconciliationPoll).mock.invocationCallOrder;
     expect(webPanelCallOrder).toBeLessThan(reconciliationCallOrder!);
   });
+
+  it('logs and still starts the web panel and schedulers when startTwitchBot rejects', async () => {
+    const { startTwitchBot } = await import('./twitch/twitchBot.js');
+    const { startWebPanel } = await import('./web/server.js');
+    const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
+    const { announceStartup } = await import('./discord/ownerAlerts.js');
+    const err = new Error('Twitch chat authentication failed: invalid token');
+    vi.mocked(startTwitchBot).mockRejectedValueOnce(err);
+
+    await runMain();
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(lastBotLogger!.error).toHaveBeenCalledWith('Twitch bot failed to start — continuing without Twitch chat:', err);
+    expect(vi.mocked(startWebPanel)).toHaveBeenCalledOnce();
+    expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
+    expect(vi.mocked(announceStartup)).toHaveBeenCalledOnce();
+  });
 });
 
 // ─── Owner "back online" startup DM ────────────────────────────────────────────
@@ -372,6 +389,28 @@ describe('DB health check interval', () => {
     vi.mocked(pingDb).mockResolvedValueOnce(true);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(vi.mocked(pingDb)).toHaveBeenCalledOnce();
+  });
+
+  it('records a failed ping and releases the in-flight guard when pingDb hangs past the timeout', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    const { pingDb } = await import('./db.js');
+    const { recordDbPing } = await import('./shared/healthStore.js');
+    vi.mocked(pingDb).mockImplementation(() => new Promise<boolean>(() => {}));
+
+    await runMain();
+    vi.mocked(pingDb).mockClear();
+    vi.mocked(recordDbPing).mockClear();
+
+    // Interval tick starts a probe that never settles; the 10s timeout then fails it.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(vi.mocked(pingDb)).toHaveBeenCalledOnce();
+    expect(vi.mocked(recordDbPing)).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(vi.mocked(recordDbPing)).toHaveBeenCalledWith(false, 'DB health check ping timed out after 10000ms');
+
+    // The guard was released, so the next tick starts a fresh probe.
+    await vi.advanceTimersByTimeAsync(50_000);
+    expect(vi.mocked(pingDb)).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -474,6 +513,23 @@ describe('shutdown', () => {
       'Error stopping Twitch monitor during shutdown:', expect.any(Error),
     );
   });
+
+  it('ignores a second signal while shutdown is already in progress', async () => {
+    const { closePool } = await import('./db.js');
+    const { announceShutdown } = await import('./discord/ownerAlerts.js');
+
+    await runMain();
+    // No-op exit so the harness's throw-on-first-exit doesn't add a .catch → exit(1) call.
+    exitSpy.mockImplementation((() => {}) as never);
+    process.emit('SIGINT');
+    process.emit('SIGTERM');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(announceShutdown)).toHaveBeenCalledOnce();
+    expect(vi.mocked(closePool)).toHaveBeenCalledOnce();
+    expect(exitSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
 });
 
 // ─── Global unhandled error handlers ──────────────────────────────────────────
@@ -489,6 +545,33 @@ describe('global error handlers', () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(lastBotLogger?.error).toHaveBeenCalledWith('Unhandled promise rejection:', reason);
+  });
+
+  it('wraps a non-Error rejection reason in an Error so it is not dropped from the log', async () => {
+    await runMain();
+
+    expect(() => {
+      process.emit('unhandledRejection', 'socket hang up', Promise.reject(new Error('x')).catch(() => {}));
+    }).toThrow('process.exit');
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(lastBotLogger?.error).toHaveBeenCalledWith(
+      'Unhandled promise rejection:', expect.objectContaining({ message: 'socket hang up' }),
+    );
+    const [, logged] = lastBotLogger!.error.mock.calls.at(-1)!;
+    expect(logged).toBeInstanceOf(Error);
+  });
+
+  it('wraps a non-Error thrown value in an Error on an uncaught exception', async () => {
+    await runMain();
+
+    expect(() => {
+      process.emit('uncaughtException', 'thrown string' as unknown as Error);
+    }).toThrow('process.exit');
+
+    expect(lastBotLogger?.error).toHaveBeenCalledWith(
+      'Uncaught exception:', expect.objectContaining({ message: 'thrown string' }),
+    );
   });
 
   it('logs and exits the process on an uncaught exception', async () => {
