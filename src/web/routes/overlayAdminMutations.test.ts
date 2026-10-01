@@ -109,6 +109,31 @@ describe('POST /settings/videos/upload', () => {
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
   });
 
+  it('removes a partially written file and skips the DB insert when the write fails', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(fs.promises.writeFile).mockRejectedValueOnce(Object.assign(new Error('no space'), { code: 'ENOSPC' }));
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .field('name', 'Test Video')
+      .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
+    expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
+    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0]![0] as string;
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
+  it('still redirects with upload_failed when cleanup of a partial write also fails', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(fs.promises.writeFile).mockRejectedValueOnce(Object.assign(new Error('no space'), { code: 'ENOSPC' }));
+    vi.mocked(fs.promises.rm).mockRejectedValueOnce(new Error('EACCES'));
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .field('name', 'Test Video')
+      .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
+    expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
   it('successfully uploads a valid mp4 file', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const res = await supertest(buildApp())

@@ -49,6 +49,28 @@ export function detectVideoType(buf: Buffer): 'webm' | 'mp4' | null {
 }
 
 /**
+ * Writes `buffer` to `fullPath`; if the write fails partway (e.g. `ENOSPC`), best-effort removes
+ * the partial file — logging, not throwing, if that removal also fails — and rethrows the
+ * original write error so the caller's `upload_failed` handling still applies.
+ * @param fullPath - Absolute destination path (already safe-resolved).
+ * @param buffer - File contents to write.
+ * @returns Resolves once the file is fully written.
+ * @throws The original write error, after attempting cleanup.
+ */
+async function writeFileOrCleanup(fullPath: string, buffer: Buffer): Promise<void> {
+  try {
+    await fs.promises.writeFile(fullPath, buffer);
+  } catch (err) {
+    try {
+      await fs.promises.rm(fullPath, { force: true });
+    } catch (rmErr) {
+      log.error(`Failed to remove partially written file ${fullPath}:`, rmErr);
+    }
+    throw err;
+  }
+}
+
+/**
  * Writes an uploaded overlay video to the streamer's folder under a random name and records it
  * in the DB, deleting the file again if the DB insert fails.
  * @param streamer - Owning streamer.
@@ -65,7 +87,7 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.
   const filename = `${randomUUID()}.${ext}`;
   await fs.promises.mkdir(dir, { recursive: true });
   const fullPath = path.join(dir, filename);
-  await fs.promises.writeFile(fullPath, file.buffer);
+  await writeFileOrCleanup(fullPath, file.buffer);
   try {
     await addVideo(streamer.id, name, filename);
   } catch (e) {

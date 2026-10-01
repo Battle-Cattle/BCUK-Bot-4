@@ -127,6 +127,29 @@ describe('POST /settings/:eventType/image', () => {
     expect(res.headers.location).toBe('/alerts/settings?error=invalid_file');
   });
 
+  it('removes a partially written file and skips the DB update when the write fails', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(fs.promises.writeFile).mockRejectedValueOnce(Object.assign(new Error('no space'), { code: 'ENOSPC' }));
+    const res = await supertest(buildApp())
+      .post('/settings/follow/image')
+      .attach('image', PNG_BUF, { filename: 'test.png', contentType: 'image/png' });
+    expect(res.headers.location).toBe('/alerts/settings?error=upload_failed');
+    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0]![0] as string;
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
+    expect(vi.mocked(setAlertImage)).not.toHaveBeenCalled();
+  });
+
+  it('still redirects with upload_failed when cleanup of a partial write also fails', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(fs.promises.writeFile).mockRejectedValueOnce(Object.assign(new Error('no space'), { code: 'ENOSPC' }));
+    vi.mocked(fs.promises.rm).mockRejectedValueOnce(new Error('EACCES'));
+    const res = await supertest(buildApp())
+      .post('/settings/follow/image')
+      .attach('image', PNG_BUF, { filename: 'test.png', contentType: 'image/png' });
+    expect(res.headers.location).toBe('/alerts/settings?error=upload_failed');
+    expect(vi.mocked(setAlertImage)).not.toHaveBeenCalled();
+  });
+
   it('successfully uploads a valid png and removes the previous image', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(setAlertImage).mockResolvedValue('follow-old.png');

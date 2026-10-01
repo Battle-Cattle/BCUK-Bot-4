@@ -71,6 +71,28 @@ async function removeOldAsset(streamerId: number, filename: string | null): Prom
   }
 }
 
+/**
+ * Writes `buffer` to `fullPath`; if the write fails partway (e.g. `ENOSPC`), best-effort removes
+ * the partial file — logging, not throwing, if that removal also fails — and rethrows the
+ * original write error so the caller's `upload_failed` handling still applies.
+ * @param fullPath - Absolute destination path (already safe-resolved).
+ * @param buffer - File contents to write.
+ * @returns Resolves once the file is fully written.
+ * @throws The original write error, after attempting cleanup.
+ */
+async function writeFileOrCleanup(fullPath: string, buffer: Buffer): Promise<void> {
+  try {
+    await fs.promises.writeFile(fullPath, buffer);
+  } catch (err) {
+    try {
+      await fs.promises.rm(fullPath, { force: true });
+    } catch (rmErr) {
+      log.error(`Failed to remove partially written file ${fullPath}:`, rmErr);
+    }
+    throw err;
+  }
+}
+
 /** Persists a new asset filename for a streamer's alert config row (`setAlertImage`/`setAlertSound`). */
 type AssetSetter = (streamerId: number, eventType: AlertEventType, filename: string | null) => Promise<string | null>;
 
@@ -114,7 +136,7 @@ async function saveUploadedAsset(
   await fs.promises.mkdir(dir, { recursive: true });
   const fullPath = safeResolve(ALERT_ASSETS_FOLDER, String(streamer.id), filename);
   if (!fullPath) return { errorCode: 'invalid_path' };
-  await fs.promises.writeFile(fullPath, file.buffer);
+  await writeFileOrCleanup(fullPath, file.buffer);
 
   let previous: string | null;
   try {

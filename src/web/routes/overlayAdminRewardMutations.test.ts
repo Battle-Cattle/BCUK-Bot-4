@@ -7,8 +7,7 @@ vi.mock('../../shared/logger', () => ({
 
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
-  upsertReward: vi.fn(),
-  setRewardVideos: vi.fn(),
+  saveRewardWithVideos: vi.fn(),
   deleteReward: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
@@ -27,7 +26,7 @@ vi.mock('../middleware', () => ({
 
 import supertest from 'supertest';
 import { router } from './overlayAdminRewardMutations';
-import { getStreamerByDiscordId, upsertReward, setRewardVideos, deleteReward } from '../../db';
+import { getStreamerByDiscordId, saveRewardWithVideos, deleteReward } from '../../db';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
@@ -49,8 +48,7 @@ function buildApp(sessionUser: SessionUser = USER) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
-  vi.mocked(upsertReward).mockResolvedValue(99);
-  vi.mocked(setRewardVideos).mockResolvedValue(undefined);
+  vi.mocked(saveRewardWithVideos).mockResolvedValue(99);
   vi.mocked(deleteReward).mockResolvedValue(undefined);
 });
 
@@ -94,18 +92,27 @@ describe('POST /settings/rewards', () => {
 
   it('saves a reward and redirects to success', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(upsertReward).mockResolvedValue(42);
+    vi.mocked(saveRewardWithVideos).mockResolvedValue(42);
     const res = await supertest(buildApp())
       .post('/settings/rewards')
       .type('form')
       .send({ twitch_reward_id: '12345678-1234-1234-8234-123456789abc', video_ids: ['7', '8'], weight_7: '3', weight_8: '1' });
     expect(res.headers.location).toBe('/overlay/settings?success=reward_saved');
-    expect(vi.mocked(upsertReward)).toHaveBeenCalledWith(MOCK_STREAMER.id, '12345678-1234-1234-8234-123456789abc');
-    expect(vi.mocked(setRewardVideos)).toHaveBeenCalledWith(
-      42,
+    expect(vi.mocked(saveRewardWithVideos)).toHaveBeenCalledWith(
       MOCK_STREAMER.id,
+      '12345678-1234-1234-8234-123456789abc',
       [{ videoId: 7, weight: 3 }, { videoId: 8, weight: 1 }],
     );
+  });
+
+  it('redirects with save_failed when the atomic save throws (e.g. a video not owned by the streamer)', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(saveRewardWithVideos).mockRejectedValue(new Error('Video 999 does not belong to streamer 123'));
+    const res = await supertest(buildApp())
+      .post('/settings/rewards')
+      .type('form')
+      .send({ twitch_reward_id: '12345678-1234-1234-8234-123456789abc', video_ids: ['999'] });
+    expect(res.headers.location).toBe('/overlay/settings?error=save_failed');
   });
 });
 
