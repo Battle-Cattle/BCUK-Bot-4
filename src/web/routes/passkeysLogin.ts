@@ -4,7 +4,6 @@ import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
   type AuthenticationResponseJSON,
-  type AuthenticatorTransport,
 } from '@simplewebauthn/server';
 import { findUser, findPasskey, recordPasskeyUse, type DbUser, type StoredPasskey } from '../../db';
 import { fetchDiscordUserProfile } from '../../discord/discordBot';
@@ -68,7 +67,7 @@ async function verifySignature(
         id: passkey.credentialId,
         publicKey: passkey.publicKey,
         counter: passkey.signCount,
-        transports: passkey.transports as AuthenticatorTransport[],
+        transports: passkey.transports,
       },
       requireUserVerification: true,
     });
