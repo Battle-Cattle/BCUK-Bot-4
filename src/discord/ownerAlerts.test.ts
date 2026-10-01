@@ -322,6 +322,20 @@ describe('ownerAlerts', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('drops a "down" DM when the component recovers while the owner lookup is still pending', async () => {
+    healthStore.recordDbPing(false, 'connection refused');
+    let resolveOwner!: (row: unknown) => void;
+    vi.mocked(findOwnerUser).mockReturnValueOnce(new Promise((resolve) => { resolveOwner = resolve; }) as any);
+    await advanceGrace();
+    // The down DM is now waiting on findOwnerUser(); the component recovers before it resolves.
+    healthStore.recordDbPing(true);
+    await flush();
+    resolveOwner(OWNER_ROW);
+    await flush();
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('still delivers a waiting "down" DM once the runtime is ready if the component is still failing', async () => {
     let markReady!: () => void;
     const ready = new Promise<void>((resolve) => { markReady = resolve; });
