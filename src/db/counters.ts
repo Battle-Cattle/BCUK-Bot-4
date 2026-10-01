@@ -1,7 +1,7 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
-import { requireTrimmedString, normalizeCommand, type SqlExecutor } from './commandStringUtils';
-import { runSerializedCommandWrite } from './commandLocks';
+import { requireTrimmedString, normalizeCommand, CommandConflictError, type SqlExecutor } from './commandStringUtils';
+import { runSerializedCommandWrite, isAnyCommandTakenAcrossTables } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
 import { fromBit, affectedOrExists } from './utils';
 import {
@@ -195,7 +195,7 @@ const archiveColumnsCacheState = createManagedLookupCache<ArchiveColumnsCache>({
     );
     // The current year (and any future year) can never have valid archived data —
     // archiveAndResetYearlyCounters only ever writes into the *previous* completed
-    // year's column, on Jan 1. Exclude them even if the column already physically
+    // year's column (from 1 January onward). Exclude them even if the column already physically
     // exists (e.g. pre-provisioned ahead of the year rolling over) and even if it
     // somehow holds a non-null value, rather than relying solely on the NULL
     // filter in getCounterHistory to hide it.
@@ -344,9 +344,14 @@ async function getCounterCommandsById(
   return { trigger_command: row.trigger_command, check_command: row.check_command };
 }
 
+/** Disables `runSerializedCommandWrite`'s built-in collision check, leaving it to lock only. */
+const LOCK_ONLY_CHECKS = { includeCustomCommandTable: false, includeCounterTable: false } as const;
+
 /**
  * Updates an existing counter's fields, locking both its old and new trigger/check commands
- * so concurrent writes can't create a conflict during the transition.
+ * so concurrent writes can't create a conflict during the transition. Only the new commands the
+ * counter doesn't already own are collision-checked, so a counter whose existing command already
+ * collides (pre-existing data) can still be edited or renamed away from the collision.
  * @param guildId The guild the counter must belong to.
  * @param input The counter's id and updated fields.
  * @throws {CounterNotFoundError} If no counter with the given id exists in this guild.
@@ -378,8 +383,20 @@ export async function updateCounter(guildId: string, input: UpdateCounterInput):
 
   await runSerializedCommandWrite(
     commandsToLock,
-    { excludeCounterId: id, guildId },
+    { guildId },
     async (connection) => {
+      // Re-read under the locks, then collision-check only the commands this counter is
+      // gaining; re-checking ones it already holds would block every edit of a counter that
+      // already collides with something.
+      const locked = await getCounterCommandsById(guildId, id, connection);
+      if (!locked) throw new CounterNotFoundError(id);
+      const owned = new Set([normalizeCommand(locked.trigger_command), normalizeCommand(locked.check_command)]);
+      const added = [fields.triggerCommand, fields.checkCommand].filter((command) => !owned.has(command));
+      if (added.length > 0
+        && await isAnyCommandTakenAcrossTables(added, { excludeCounterId: id, guildId }, connection)) {
+        throw new CommandConflictError(added);
+      }
+
       const [result] = await connection.execute<mysql.ResultSetHeader>(
         `UPDATE counter
          SET trigger_command = ?,
@@ -395,11 +412,14 @@ export async function updateCounter(guildId: string, input: UpdateCounterInput):
         throw new CounterNotFoundError(id);
       }
     },
+    LOCK_ONLY_CHECKS,
   );
 }
 
 /**
- * Deletes a counter by id, locking its trigger/check commands during the delete.
+ * Deletes a counter by id, locking its trigger/check commands during the delete. No collision
+ * check runs — deleting only releases commands — so a counter that already collides with another
+ * command can still be removed.
  * @param guildId The guild the counter must belong to.
  * @param id The counter's numeric id.
  * @throws {CounterNotFoundError} If no counter with the given id exists in this guild.
@@ -410,7 +430,7 @@ export async function removeCounter(guildId: string, id: number): Promise<void> 
 
   await runSerializedCommandWrite(
     [current.trigger_command, current.check_command],
-    { excludeCounterId: id, guildId },
+    { guildId },
     async (connection) => {
       const [result] = await connection.execute<mysql.ResultSetHeader>(
         'DELETE FROM counter WHERE id = ? AND guild_id = ?',
@@ -418,6 +438,7 @@ export async function removeCounter(guildId: string, id: number): Promise<void> 
       );
       if (result.affectedRows === 0) throw new CounterNotFoundError(id);
     },
+    LOCK_ONLY_CHECKS,
   );
 }
 
@@ -472,18 +493,33 @@ export async function incrementCounter(id: number): Promise<number> {
 
 /**
  * Archives the current value of every yearly-reset counter into that year's `value<year>`
- * column (only for counters where the column is still `NULL`), then resets `current_value` to 0.
+ * column (only for counters where the column is still `NULL`), then resets `current_value` to 0 —
+ * at most once per `year`, tracked by a persistent `counter_archive_run` marker row.
+ *
+ * Runs in one transaction: first claims `year` by inserting its marker row (`INSERT IGNORE`);
+ * if the row already existed, that year was already archived and this returns 0 without touching
+ * any counter. Otherwise runs the archive/reset `UPDATE`. Any failure (including a missing
+ * `counter_archive_run` table or `value<year>` column) rolls back the marker too, so the next
+ * scheduler tick retries. The marker is what lets the scheduler attempt archival on every tick
+ * (catching up after downtime spanning 1 January) without re-resetting counters mid-year.
  * @param year Calendar year to archive into; must be a key of `ARCHIVE_YEAR_COLUMNS`.
- * @returns The number of counters archived and reset.
- * @throws If `year` is not a valid archive year.
+ * @returns The number of counters archived and reset (0 if `year` was already archived).
+ * @throws If `year` is not a valid archive year, or the transaction fails.
  */
 export async function archiveAndResetYearlyCounters(year: number): Promise<number> {
   const columnName = ARCHIVE_YEAR_COLUMNS.get(year);
   if (!columnName) {
     throw new Error(`[DB] Invalid archive year: ${year}`);
   }
-  const [result] = await getPool().execute<mysql.ResultSetHeader>(
-    `UPDATE counter SET \`${columnName}\` = current_value, current_value = 0 WHERE reset_yearly = 1 AND \`${columnName}\` IS NULL`,
-  );
-  return result.affectedRows;
+  return withTransaction(async (conn) => {
+    const [claim] = await conn.execute<mysql.ResultSetHeader>(
+      'INSERT IGNORE INTO counter_archive_run (archive_year) VALUES (?)',
+      [year],
+    );
+    if (claim.affectedRows === 0) return 0; // marker already present — year already archived
+    const [result] = await conn.execute<mysql.ResultSetHeader>(
+      `UPDATE counter SET \`${columnName}\` = current_value, current_value = 0 WHERE reset_yearly = 1 AND \`${columnName}\` IS NULL`,
+    );
+    return result.affectedRows;
+  });
 }

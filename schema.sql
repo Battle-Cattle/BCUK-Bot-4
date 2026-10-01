@@ -258,6 +258,20 @@ CREATE TABLE IF NOT EXISTS counter (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- counter_archive_run
+-- One row per year whose yearly counter archive/reset has run (claimed in the
+-- same transaction as the archive UPDATE). Seeded with the previous year so a
+-- fresh install doesn't immediately "archive" last year. See DATABASE-SCHEMA.md.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS counter_archive_run (
+  archive_year SMALLINT UNSIGNED NOT NULL,
+  archived_at  DATETIME          NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (archive_year)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO counter_archive_run (archive_year) VALUES (YEAR(CURDATE()) - 1);
+
+-- ---------------------------------------------------------------------------
 -- overlay_video
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS overlay_video (
