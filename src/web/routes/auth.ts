@@ -26,15 +26,24 @@ import type { SessionUser } from '../../types/express';
 const log = createLogger('Web');
 const router = Router();
 
-/** Discord's minimal `@me` profile shape used by the OAuth2 callback. */
-interface DiscordProfile {
+/** Discord's minimal `@me` profile shape used by the OAuth2 callback (and rebuilt from the bot client by passkey login). */
+export interface DiscordProfile {
   id: string;
   username: string;
   avatar: string | null;
 }
 
-/** Error codes `GET /auth/login` accepts via `?error=`, both originating from `POST /guild/select`. */
-const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds']);
+/**
+ * Error codes `GET /auth/login` accepts via `?error=`: `user_not_found`/`no_guilds` originate from
+ * `POST /guild/select`; the `passkey_*`/`not_whitelisted` codes from a failed passkey sign-in (see passkeys.ts).
+ */
+const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds', 'not_whitelisted', 'passkey_failed', 'passkey_unknown']);
+
+// Where `GET /auth/discord?return=<key>` may send the user after logging in. A fixed map rather
+// than a caller-supplied path, so the parameter can't be used as an open redirect.
+const LOGIN_RETURN_PATHS: Record<string, string> = {
+  passkey: '/user/settings?success=passkey_reauthed',
+};
 
 // ─── Redirect to Discord OAuth2 ─────────────────────────────────────────────
 
@@ -42,12 +51,18 @@ const LOGIN_KNOWN_ERRORS = new Set(['user_not_found', 'no_guilds']);
  * GET /auth/discord — starts the Discord OAuth2 flow. Generates a CSRF state
  * token, stores it on the session with a 10-minute expiry, then redirects the
  * browser to Discord's authorize URL.
- * @param req - Express request; receives the generated `oauthState` on its session.
+ * @param req - Express request; receives the generated `oauthState` on its session. An optional
+ *   `return` query key picks a post-login destination from {@link LOGIN_RETURN_PATHS}; unknown
+ *   keys are ignored.
  * @param res - Express response; redirects to discord.com's OAuth2 authorize endpoint.
  */
 router.get('/discord', (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
-  req.session.oauthState = { value: state, expiresAt: Date.now() + 10 * 60 * 1000 };
+  const returnKey = req.query.return;
+  const returnTo = typeof returnKey === 'string' && Object.hasOwn(LOGIN_RETURN_PATHS, returnKey)
+    ? LOGIN_RETURN_PATHS[returnKey]
+    : undefined;
+  req.session.oauthState = { value: state, expiresAt: Date.now() + 10 * 60 * 1000, returnTo };
 
   const params = new URLSearchParams({
     client_id: DISCORD_CLIENT_ID,
@@ -109,7 +124,7 @@ async function fetchDiscordProfile(accessToken: string): Promise<DiscordProfile>
  * @param dbUser - The whitelisted user row from `findUser`.
  * @returns The user's accessible guilds (empty if not provisioned anywhere).
  */
-async function resolveAccessibleGuilds(dbUser: DbUser): Promise<DbGuild[]> {
+export async function resolveAccessibleGuilds(dbUser: DbUser): Promise<DbGuild[]> {
   return dbUser.is_owner ? getAllGuilds() : getGuildsForMember(dbUser.discord_id);
 }
 
@@ -223,13 +238,45 @@ function buildSessionUser(
  * given user payload onto the fresh session.
  * @param req - Express request whose session is regenerated and saved.
  * @param userData - The `SessionUser` payload to store.
+ * @param discordAuthAt - When the user completed Discord OAuth, for a Discord login; omitted for
+ *   a passkey sign-in, so the new session carries no recent-Discord-login timestamp.
  * @returns Resolves once the regenerated session has been saved.
  */
-async function saveSessionUser(req: Request, userData: SessionUser): Promise<void> {
+async function saveSessionUser(req: Request, userData: SessionUser, discordAuthAt: number | undefined): Promise<void> {
   await promisify(req.session.regenerate.bind(req.session))();
   // regenerate() replaces req.session, so read it again only after it has finished.
   req.session.user = userData;
+  if (discordAuthAt !== undefined) req.session.discordAuthAt = discordAuthAt;
   await promisify(req.session.save.bind(req.session))();
+}
+
+/**
+ * Creates the dashboard session for a whitelisted user with at least one accessible guild:
+ * syncs their display name, picks the initial guild/access level, then regenerates and saves
+ * the session. Shared by the Discord OAuth callback and passkey sign-in so both produce an
+ * identical session.
+ * @param req - Express request whose session is regenerated and populated.
+ * @param profile - The user's Discord profile (id, username, avatar hash).
+ * @param dbUser - The whitelisted user row from `findUser`.
+ * @param accessibleGuilds - Non-empty result of `resolveAccessibleGuilds`.
+ * @param options - `discordAuthAt`: set only by the Discord OAuth callback, recording when the
+ *   user last proved control of their Discord account (checked before adding a passkey).
+ * @returns Resolves once the new session has been saved.
+ * @throws If `accessibleGuilds` is empty (callers reject that case before calling).
+ */
+export async function establishDashboardSession(
+  req: Request,
+  profile: DiscordProfile,
+  dbUser: DbUser,
+  accessibleGuilds: DbGuild[],
+  options: { discordAuthAt?: number } = {},
+): Promise<void> {
+  const firstGuild = accessibleGuilds[0];
+  if (!firstGuild) throw new Error('establishDashboardSession: accessibleGuilds must be non-empty');
+  const syncedDiscordName = await syncDiscordName(profile, dbUser, firstGuild.guild_id);
+  const guildAndAccessLevel = await resolveInitialGuildAndAccessLevel(accessibleGuilds, dbUser);
+  const userData = buildSessionUser(profile, dbUser, syncedDiscordName, accessibleGuilds, guildAndAccessLevel);
+  await saveSessionUser(req, userData, options.discordAuthAt);
 }
 
 /**
@@ -249,8 +296,8 @@ async function saveSessionUser(req: Request, userData: SessionUser): Promise<voi
  * user row.
  * @param req - Express request; reads `code`/`state` query params and the stored
  *   `oauthState` session value.
- * @param res - Express response; redirects to `/` on success, or to the
- *   companion app's `redirectUri` for the loopback flow. Renders a 400 error
+ * @param res - Express response; redirects to `/` (or the allowlisted `oauthState.returnTo`)
+ *   on success, or to the companion app's `redirectUri` for the loopback flow. Renders a 400 error
  *   page when the OAuth state is invalid/missing or the companion redirectUri
  *   fails the loopback re-validation check (defense-in-depth), a 403 error page
  *   when the user is not whitelisted or has no accessible guild, or a 500 error
@@ -295,12 +342,9 @@ router.get('/discord/callback', async (req, res) => {
     if (await tryCompleteCompanionLogin(req, res, profile.id)) return;
     delete req.session.companionOAuth;
 
-    const syncedDiscordName = await syncDiscordName(profile, dbUser, accessibleGuilds[0]!.guild_id); // non-empty: checked above
-    const guildAndAccessLevel = await resolveInitialGuildAndAccessLevel(accessibleGuilds, dbUser);
-    const userData = buildSessionUser(profile, dbUser, syncedDiscordName, accessibleGuilds, guildAndAccessLevel);
-    await saveSessionUser(req, userData);
+    await establishDashboardSession(req, profile, dbUser, accessibleGuilds, { discordAuthAt: Date.now() });
 
-    res.redirect('/');
+    res.redirect(storedOAuth.returnTo ?? '/');
   } catch (err) {
     log.error('Auth error:', err);
     renderError(res, 500, 'Authentication failed — please try again.', undefined);

@@ -160,6 +160,7 @@ a:hover { text-decoration: underline; }
 .btn-danger:hover { background: #c53030; }
 .btn-discord { background: var(--discord); font-size: 1rem; padding: .65rem 1.5rem; width: 100%; justify-content: center; }
 .btn-discord:hover { background: var(--primary-h); }
+.btn-passkey { font-size: 1rem; padding: .65rem 1.5rem; width: 100%; justify-content: center; margin-top: .75rem; }
 
 /* ── Tables ────────────────────────────────────────────── */
 .table-scroll { overflow-x: auto; }

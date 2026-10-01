@@ -15,6 +15,13 @@ interface OwnerAlertRuntime {
    * @returns Resolves once the DM has been sent; rejects if delivery fails.
    */
   send: (discordId: string, message: string) => Promise<void>;
+  /**
+   * Waits until {@link send} can deliver — alerts can be raised during startup (e.g. Twitch
+   * reporting a missing bot token) before Discord has finished connecting. Omitted means "always
+   * ready".
+   * @returns Resolves once ready; rejects if the runtime doesn't become ready in time.
+   */
+  waitUntilReady?: () => Promise<void>;
 }
 
 const runtimeRegistry = createRuntimeRegistry<OwnerAlertRuntime>();
@@ -118,19 +125,48 @@ async function resolveOwnerDiscordId(): Promise<string | null> {
 }
 
 /**
- * Sends a DM alert to the bot owner via the registered runtime. Never throws — a failed DM is
- * logged and swallowed so it can never crash the process (see {@link registerOwnerAlertRuntime}).
- * @param message - The alert text to send.
- * @returns Whether the DM was actually delivered — false if no runtime is registered, the owner
- *   ID couldn't be resolved, or the send itself failed.
+ * Waits for `runtime` to be ready (see {@link OwnerAlertRuntime.waitUntilReady}), resolves the
+ * owner's Discord ID, then — as the last step before the caller sends — confirms the alert is
+ * still relevant, so a component that recovered during either wait doesn't get a stale DM. Logs
+ * the reason whenever it gives up.
+ * @param runtime - The registered owner-alert runtime.
+ * @param message - The alert text, used only for logging.
+ * @param isStillRelevant - Optional staleness check, run after both waits.
+ * @returns The owner's Discord ID to DM, or null if the alert shouldn't be sent.
  */
-export async function sendOwnerAlert(message: string): Promise<boolean> {
+async function resolveAlertRecipient(runtime: OwnerAlertRuntime, message: string, isStillRelevant?: () => boolean): Promise<string | null> {
+  try {
+    await runtime.waitUntilReady?.();
+  } catch (err) {
+    log.error('Owner-alert runtime never became ready — skipping alert:', message, err);
+    return null;
+  }
+  const discordId = await resolveOwnerDiscordId();
+  if (discordId && isStillRelevant && !isStillRelevant()) {
+    log.info('Owner alert no longer relevant — skipping:', message);
+    return null;
+  }
+  return discordId;
+}
+
+/**
+ * Sends a DM alert to the bot owner via the registered runtime, first waiting for the runtime to
+ * be ready (see {@link resolveAlertRecipient}). Never throws — a failed DM is logged and
+ * swallowed so it can never crash the process (see {@link registerOwnerAlertRuntime}).
+ * @param message - The alert text to send.
+ * @param isStillRelevant - Optional check run immediately before sending (after every wait); if
+ *   it returns false the alert is dropped as stale (e.g. a "down" alert for a component that
+ *   recovered while this send was waiting on Discord or the owner lookup).
+ * @returns Whether the DM was actually delivered — false if no runtime is registered, it never
+ *   became ready, the alert went stale, the owner ID couldn't be resolved, or the send failed.
+ */
+export async function sendOwnerAlert(message: string, isStillRelevant?: () => boolean): Promise<boolean> {
   const runtime = runtimeRegistry.get();
   if (!runtime) {
     log.warn('No owner-alert runtime registered — skipping alert:', message);
     return false;
   }
-  const discordId = await resolveOwnerDiscordId();
+  const discordId = await resolveAlertRecipient(runtime, message, isStillRelevant);
   if (!discordId) return false;
   try {
     await runtime.send(discordId, message);
@@ -165,8 +201,9 @@ export async function announceStartup(): Promise<void> {
 }
 
 /**
- * Sends a "down" (or, for a cooldown re-notification, "still down") DM for a component and, only
- * once delivery is confirmed, marks {@link ComponentAlertState.downAlertSent} — so a component
+ * Sends a "down" (or, for a cooldown re-notification, "still down") DM for a component — dropped
+ * if the component has left this failure episode before the send goes out — and, only once
+ * delivery is confirmed, marks {@link ComponentAlertState.downAlertSent} — so a component
  * whose down DM never reached the owner (no runtime, owner lookup failure, or a rejected send)
  * doesn't later fire a false "recovered" DM. Guards against a delayed delivery result from an
  * earlier failure episode incorrectly marking a newer one, via {@link ComponentAlertState.generation}.
@@ -180,7 +217,11 @@ export async function announceStartup(): Promise<void> {
 function dispatchDownAlert(componentId: string, error: string | null, state: ComponentAlertState, stillDown: boolean): void {
   const generation = state.generation;
   const label = stillDown ? 'is still down' : 'is down';
-  void sendOwnerAlert(`🔴 ${componentId} ${label}: ${error ?? 'unknown error'}`).then((delivered) => {
+  // Dropped if the component has moved past this failure episode while the send waited for
+  // Discord or the owner lookup — otherwise a recovery in that window (which sends no "recovered" DM, since no down
+  // DM had been delivered yet) would leave the owner looking at a stale "down" DM.
+  const stillCurrent = (): boolean => state.generation === generation;
+  void sendOwnerAlert(`🔴 ${componentId} ${label}: ${error ?? 'unknown error'}`, stillCurrent).then((delivered) => {
     if (delivered && state.generation === generation) {
       state.downAlertSent = true;
     }

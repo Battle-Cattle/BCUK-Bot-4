@@ -68,6 +68,7 @@ function makeMockClient() {
     login: vi.fn().mockResolvedValue(undefined),
     destroy: vi.fn().mockResolvedValue(undefined),
     user: { tag: 'Bot#1234' },
+    users: { fetch: vi.fn().mockResolvedValue({ username: 'alice', avatar: 'abc123' }) },
     guilds: {
       cache: { get: vi.fn().mockReturnValue(null) },
       fetch: vi.fn().mockResolvedValue(mockGuild),
@@ -118,43 +119,6 @@ describe('getDiscordClient', () => {
   });
 });
 
-// ─── onceDiscordReady ───────────────────────────────────────────────────────────
-
-describe('onceDiscordReady', () => {
-  it('resolves immediately when the client is already ready', async () => {
-    mod.startDiscordBot();
-    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await readyCb(mockInstance);
-
-    await expect(mod.onceDiscordReady()).resolves.toBeUndefined();
-  });
-
-  it('resolves once clientReady fires, not before', async () => {
-    mod.startDiscordBot();
-    let resolved = false;
-    const waiter = mod.onceDiscordReady().then(() => { resolved = true; });
-
-    await flushMicrotasks();
-    expect(resolved).toBe(false);
-
-    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await readyCb(mockInstance);
-    await waiter;
-    expect(resolved).toBe(true);
-  });
-
-  it('resolves every waiter registered before clientReady fires', async () => {
-    mod.startDiscordBot();
-    const waiterA = mod.onceDiscordReady();
-    const waiterB = mod.onceDiscordReady();
-
-    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await readyCb(mockInstance);
-
-    await expect(Promise.all([waiterA, waiterB])).resolves.toEqual([undefined, undefined]);
-  });
-});
-
 // ─── fetchMemberDisplayName ───────────────────────────────────────────────────
 
 describe('fetchMemberDisplayName', () => {
@@ -179,6 +143,131 @@ describe('fetchMemberDisplayName', () => {
 
     const result = await mod.fetchMemberDisplayName('missing', 'guild-id', false);
     expect(result).toBeNull();
+  });
+});
+
+// ─── fetchDiscordUserProfile ──────────────────────────────────────────────────
+
+describe('fetchDiscordUserProfile', () => {
+  it('returns null when client is not ready', async () => {
+    expect(await mod.fetchDiscordUserProfile('123')).toBeNull();
+  });
+
+  it('returns the username and avatar hash when the fetch succeeds', async () => {
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    expect(await mod.fetchDiscordUserProfile('user123')).toEqual({ username: 'alice', avatar: 'abc123' });
+    expect(mockInstance.users.fetch).toHaveBeenCalledWith('user123');
+  });
+
+  it('returns null when the user fetch throws', async () => {
+    mockInstance.users.fetch.mockRejectedValueOnce(new Error('unknown user'));
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    expect(await mod.fetchDiscordUserProfile('missing')).toBeNull();
+  });
+});
+
+// ─── sendDiscordDirectMessage ─────────────────────────────────────────────────
+
+describe('sendDiscordDirectMessage', () => {
+  async function readyBot() {
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+  }
+
+  it('returns false when client is not ready', async () => {
+    expect(await mod.sendDiscordDirectMessage('123', 'hi')).toBe(false);
+  });
+
+  it('DMs the user with mentions disabled', async () => {
+    const send = vi.fn().mockResolvedValue({});
+    mockInstance.users.fetch.mockResolvedValueOnce({ send });
+    await readyBot();
+
+    expect(await mod.sendDiscordDirectMessage('user123', 'your code')).toBe(true);
+    expect(mockInstance.users.fetch).toHaveBeenCalledWith('user123');
+    expect(send).toHaveBeenCalledWith({ content: 'your code', allowedMentions: { parse: [] } });
+  });
+
+  it('returns false when Discord refuses the DM', async () => {
+    mockInstance.users.fetch.mockResolvedValueOnce({ send: vi.fn().mockRejectedValue(new Error('Cannot send messages to this user')) });
+    await readyBot();
+
+    expect(await mod.sendDiscordDirectMessage('user123', 'your code')).toBe(false);
+  });
+});
+
+// ─── waitForDiscordReady ──────────────────────────────────────────────────────
+
+describe('waitForDiscordReady', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('resolves immediately when the client is already ready', async () => {
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    await expect(mod.waitForDiscordReady(1_000)).resolves.toBeUndefined();
+  });
+
+  it('resolves every waiter registered before clientReady fires', async () => {
+    mod.startDiscordBot();
+    const waiterA = mod.waitForDiscordReady(30_000);
+    const waiterB = mod.waitForDiscordReady(30_000);
+
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    await expect(Promise.all([waiterA, waiterB])).resolves.toEqual([undefined, undefined]);
+    expect(mod.__getReadyWaiterCountForTests()).toBe(0);
+  });
+
+  it('resolves once clientReady fires within the timeout', async () => {
+    mod.startDiscordBot();
+    let resolved = false;
+    const waiter = mod.waitForDiscordReady(30_000).then(() => { resolved = true; });
+
+    await flushMicrotasks();
+    expect(resolved).toBe(false);
+
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    await waiter;
+    expect(resolved).toBe(true);
+  });
+
+  it('rejects if the client never becomes ready within the timeout', async () => {
+    vi.useFakeTimers();
+    mod.startDiscordBot();
+    const pending = mod.waitForDiscordReady(1_000);
+    const assertion = expect(pending).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
+  });
+
+  it('removes its waiter on timeout, so a later clientReady only resolves still-pending waiters', async () => {
+    vi.useFakeTimers();
+    mod.startDiscordBot();
+    const timedOut = mod.waitForDiscordReady(1_000);
+    const timedOutAssertion = expect(timedOut).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await timedOutAssertion;
+    expect(mod.__getReadyWaiterCountForTests()).toBe(0);
+
+    // A fresh waiter registered after the timeout still resolves normally on clientReady.
+    const fresh = mod.waitForDiscordReady(30_000);
+    expect(mod.__getReadyWaiterCountForTests()).toBe(1);
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    await expect(fresh).resolves.toBeUndefined();
   });
 });
 

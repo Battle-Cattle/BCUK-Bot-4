@@ -30,7 +30,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import express from 'express';
 import supertest from 'supertest';
-import router from './auth';
+import router, { establishDashboardSession, resolveAccessibleGuilds } from './auth';
 import {
   findUser,
   updateDiscordName,
@@ -94,6 +94,21 @@ describe('GET /discord', () => {
     const res = await supertest(buildApp()).get('/discord');
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('discord.com/oauth2/authorize');
+  });
+
+  it.each([
+    ['passkey', '/user/settings?success=passkey_reauthed'],
+    ['https://evil.example', undefined],
+    ['constructor', undefined],
+  ])('maps ?return=%s to the allowlisted return path %s', async (key, expected) => {
+    const session: any = {};
+    const app = express();
+    app.use((req: any, _res: any, next: any) => { req.session = session; next(); });
+    app.use(router);
+    const res = await supertest(app).get('/discord').query({ return: key });
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('discord.com/oauth2/authorize');
+    expect(session.oauthState.returnTo).toBe(expected);
   });
 
   it('includes client_id and state in the redirect URL', async () => {
@@ -292,6 +307,28 @@ describe('GET /discord/callback', () => {
     });
   });
 
+  it('records the Discord login time and honours the stored return path', async () => {
+    mockFetch([
+      { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
+      { ok: true, json: () => Promise.resolve({ id: '111', username: 'alice', avatar: null }) },
+    ]);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: '111', discord_name: 'alice', is_twitch_bot_enabled: false, twitch_name: null, access_level: AccessLevel.USER, is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: '555', name: 'Guild', voice_channel_id: null }] as any);
+
+    let capturedSession: any;
+    const before = Date.now();
+    const app = buildApp(
+      { oauthState: { value: 'state123', expiresAt: Date.now() + 60_000, returnTo: '/user/settings?success=passkey_reauthed' } },
+      (session) => { capturedSession = session; },
+    );
+    const res = await supertest(app).get('/discord/callback?code=code&state=state123');
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/user/settings?success=passkey_reauthed');
+    expect(capturedSession.discordAuthAt).toBeGreaterThanOrEqual(before);
+    expect(capturedSession.discordAuthAt).toBeLessThanOrEqual(Date.now());
+  });
+
   it('updates discord name when fetchMemberDisplayName returns a value', async () => {
     mockFetch([
       { ok: true, json: () => Promise.resolve({ access_token: 'tok' }) },
@@ -471,6 +508,11 @@ describe('GET /login', () => {
     expect((res.body as any).locals.error).toBe('no_guilds');
   });
 
+  it.each(['not_whitelisted', 'passkey_failed', 'passkey_unknown'])('passes the passkey sign-in error code %s through to the view', async (code) => {
+    const res = await supertest(buildApp()).get(`/login?error=${code}`);
+    expect((res.body as any).locals.error).toBe(code);
+  });
+
   it('filters out an unrecognized ?error= code', async () => {
     const res = await supertest(buildApp()).get('/login?error=not_a_real_code');
     expect(res.status).toBe(200);
@@ -487,5 +529,53 @@ describe('POST /logout', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/auth/login');
     expect(destroy).toHaveBeenCalled();
+  });
+});
+
+// ─── establishDashboardSession / resolveAccessibleGuilds (shared with passkey login) ──
+
+describe('establishDashboardSession', () => {
+  it('rejects an empty guild list without touching the session', async () => {
+    const regenerate = vi.fn();
+    const req: any = { session: { regenerate } };
+    const dbUser = { discord_id: '42', discord_name: 'Alice', is_owner: false } as any;
+    await expect(establishDashboardSession(req, { id: '42', username: 'alice', avatar: null }, dbUser, []))
+      .rejects.toThrow('accessibleGuilds must be non-empty');
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  it('regenerates the session and stores the same user payload the Discord callback builds', async () => {
+    const guild = { guild_id: 'g1', name: 'Guild One', voice_channel_id: null };
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.MANAGER);
+    const dbUser = { discord_id: '42', discord_name: 'Alice', is_owner: false } as any;
+    const regenerate = vi.fn((cb: (err: null) => void) => cb(null));
+    const save = vi.fn((cb: (err: null) => void) => cb(null));
+    const req: any = { session: { regenerate, save } };
+    // regenerate() replaces req.session in real express-session; the stub keeps the same object.
+    await establishDashboardSession(req, { id: '42', username: 'alice', avatar: 'abc' }, dbUser, [guild as any]);
+
+    expect(regenerate).toHaveBeenCalled();
+    expect(save).toHaveBeenCalled();
+    // Only the Discord OAuth callback passes discordAuthAt; passkey sign-in leaves it unset.
+    expect(req.session.discordAuthAt).toBeUndefined();
+    expect(req.session.user).toEqual({
+      discordId: '42',
+      discordName: 'Alice',
+      discordAvatar: 'https://cdn.discordapp.com/avatars/42/abc.png',
+      isOwner: false,
+      currentGuildId: 'g1',
+      accessLevel: AccessLevel.MANAGER,
+      guilds: [{ guildId: 'g1', name: 'Guild One' }],
+    });
+  });
+});
+
+describe('resolveAccessibleGuilds', () => {
+  it('returns every guild for an owner and memberships otherwise', async () => {
+    vi.mocked(getAllGuilds).mockResolvedValue([{ guild_id: 'all' }] as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: 'mine' }] as any);
+    expect(await resolveAccessibleGuilds({ discord_id: '1', is_owner: true } as any)).toEqual([{ guild_id: 'all' }]);
+    expect(await resolveAccessibleGuilds({ discord_id: '1', is_owner: false } as any)).toEqual([{ guild_id: 'mine' }]);
+    expect(getGuildsForMember).toHaveBeenCalledWith('1');
   });
 });

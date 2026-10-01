@@ -12,9 +12,12 @@ const log = createLogger('Web');
 
 const isProduction = process.env.NODE_ENV === 'production';
 import authRouter from './routes/auth';
+import passkeysRouter from './routes/passkeys';
 import guildRouter from './routes/guild';
 import eventsubCallbackRouter from './routes/eventsubCallback';
 import eventsubAdminRouter from './routes/eventsubAdmin';
+import botAuthRouter from './routes/botAuth';
+import botAuthCallbackRouter from './routes/botAuthCallback';
 import dashboardRouter from './routes/dashboard';
 import dashboardEventsRouter from './routes/dashboardEvents';
 import dashboardStatusEventsRouter from './routes/dashboardStatusEvents';
@@ -93,6 +96,18 @@ app.set('views', path.join(__dirname, '../../views'));
 // Served ahead of the static middleware below so its cache-version substitution (see
 // serviceWorker.ts) takes effect instead of the raw, unsubstituted file on disk.
 app.use(serviceWorkerRouter);
+
+// Browser half of the passkey (WebAuthn) flow, served straight from the installed package so
+// it always matches the server library's version. Must be same-origin: CSP is script-src 'self'.
+app.use(
+  '/vendor/simplewebauthn',
+  express.static(path.join(__dirname, '../../node_modules/@simplewebauthn/browser/dist/bundle'), {
+    /** Forces revalidation on every response, matching the public/ static assets below. */
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-cache');
+    },
+  }),
+);
 
 // Static assets. `Cache-Control: no-cache` forces revalidation (via the ETag express.static
 // already sends) on every request rather than letting browsers serve a stale copy from
@@ -178,9 +193,12 @@ app.use((req, res, next) => {
 });
 
 // Routes
+app.use('/auth/passkey', authLimiter, passkeysRouter);
 app.use('/auth', authLimiter, authRouter);
 // EventSub OAuth callback — must be outside requireAuth (Twitch redirects here without session)
 app.use('/auth', authLimiter, eventsubCallbackRouter);
+// Bot chat OAuth callback — same reasoning, Twitch redirects here without session (see #550).
+app.use('/auth', authLimiter, botAuthCallbackRouter);
 app.use('/api/streamdeck', streamdeckLimiter, streamdeckRouter);
 app.use('/', sfxPublicRouter);
 app.use('/', privacyRouter);
@@ -204,6 +222,8 @@ app.use('/api', requireAuth, apiRouter);
 // admin.ts's per-route convention) rather than router-level here.
 app.use('/admin/health', requireAuth, healthRouter);
 app.use('/admin/health', requireAuth, healthStatusEventsRouter);
+// Bot chat account connect page (see #550) — same not-guild-scoped, owner-gated pattern as health above.
+app.use('/admin/bot-auth', requireAuth, botAuthRouter);
 
 // All of the routers below share the same '/' mount point, so registering each one
 // behind its own app.use(path, ...middleware, router) call made requireAuth (and, for

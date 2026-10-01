@@ -77,8 +77,11 @@ function errorTriggerRouter() {
 }
 
 vi.mock('./routes/auth', () => ({ default: emptyRouter() }));
+vi.mock('./routes/passkeys', () => ({ default: emptyRouter() }));
 vi.mock('./routes/guild', () => ({ default: markerRouter('guild') }));
 vi.mock('./routes/eventsubCallback', () => ({ default: emptyRouter() }));
+vi.mock('./routes/botAuth', () => ({ default: markerRouter('botAuth') }));
+vi.mock('./routes/botAuthCallback', () => ({ default: emptyRouter() }));
 vi.mock('./routes/eventsubAdmin', () => ({ default: markerRouter('eventsubAdmin') }));
 vi.mock('./routes/dashboard', () => ({
   default: (() => {
@@ -169,6 +172,14 @@ describe('server route wiring', () => {
     expect(requireGuildContext).not.toHaveBeenCalled();
   });
 
+  it('mounts /admin/bot-auth behind requireAuth only, without requireGuildContext (bot chat auth is not guild-scoped)', async () => {
+    const res = await request(app).get('/admin/bot-auth/__marker_botAuth');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ label: 'botAuth' });
+    expect(requireAuth).toHaveBeenCalled();
+    expect(requireGuildContext).not.toHaveBeenCalled();
+  });
+
   it('mounts the dashboard root behind both requireAuth and requireGuildContext', async () => {
     const res = await request(app).get('/__marker_dashboard');
     expect(res.status).toBe(200);
@@ -193,6 +204,16 @@ describe('static assets', () => {
     const res = await request(app).get('/style.css');
     expect(res.status).toBe(200);
     expect(res.headers['cache-control']).toBe('no-cache');
+  });
+});
+
+describe('passkey browser bundle', () => {
+  it('serves the @simplewebauthn/browser bundle same-origin with no-cache', async () => {
+    const res = await request(app).get('/vendor/simplewebauthn/index.umd.min.js');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('javascript');
+    expect(res.headers['cache-control']).toBe('no-cache');
+    expect(res.text).toContain('SimpleWebAuthnBrowser');
   });
 });
 

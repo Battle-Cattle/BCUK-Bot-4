@@ -5,7 +5,6 @@ vi.mock('dotenv', () => ({ default: { config: vi.fn() } }));
 const REQUIRED_ENV: Record<string, string> = {
   DISCORD_TOKEN: 'discord-token',
   TWITCH_USERNAME: 'bot-user',
-  TWITCH_OAUTH_TOKEN: 'oauth:token',
   TWITCH_CLIENT_ID: 'twitch-client-id',
   TWITCH_CLIENT_SECRET: 'twitch-client-secret',
   DB_USER: 'root',
@@ -44,7 +43,6 @@ describe('config — required env vars', () => {
     const config = await loadConfig();
     expect(config.DISCORD_TOKEN).toBe('discord-token');
     expect(config.TWITCH_USERNAME).toBe('bot-user');
-    expect(config.TWITCH_OAUTH_TOKEN).toBe('oauth:token');
     expect(config.TWITCH_CLIENT_ID).toBe('twitch-client-id');
     expect(config.TWITCH_CLIENT_SECRET).toBe('twitch-client-secret');
     expect(config.DB_USER).toBe('root');
@@ -58,7 +56,6 @@ describe('config — required env vars', () => {
   it.each([
     'DISCORD_TOKEN',
     'TWITCH_USERNAME',
-    'TWITCH_OAUTH_TOKEN',
     'TWITCH_CLIENT_ID',
     'TWITCH_CLIENT_SECRET',
     'DB_USER',
@@ -258,6 +255,16 @@ describe('config — Twitch EventSub / encryption settings', () => {
   it('passes through TWITCH_EVENTSUB_REDIRECT_URI when set', async () => {
     const config = await loadConfig({ TWITCH_EVENTSUB_REDIRECT_URI: 'https://example.com/callback' });
     expect(config.TWITCH_EVENTSUB_REDIRECT_URI).toBe('https://example.com/callback');
+  });
+
+  it('defaults TWITCH_BOT_OAUTH_REDIRECT_URI to an empty string when unset', async () => {
+    const config = await loadConfig({ TWITCH_BOT_OAUTH_REDIRECT_URI: undefined });
+    expect(config.TWITCH_BOT_OAUTH_REDIRECT_URI).toBe('');
+  });
+
+  it('passes through TWITCH_BOT_OAUTH_REDIRECT_URI when set', async () => {
+    const config = await loadConfig({ TWITCH_BOT_OAUTH_REDIRECT_URI: 'https://example.com/auth/twitch/bot/callback' });
+    expect(config.TWITCH_BOT_OAUTH_REDIRECT_URI).toBe('https://example.com/auth/twitch/bot/callback');
   });
 
   it('defaults EVENTSUB_TOKEN_SECRET to an empty string when unset', async () => {

@@ -13,7 +13,8 @@ import { createAssignmentRouter } from './assignmentRoutes';
  * Discord user's association with a custom command. See {@link createAssignmentRouter} for the
  * shared route shape; a command assignment conflict (`CommandConflictError` or a raw MySQL
  * duplicate-entry error) redirects to `?error=command_taken` instead of the generic
- * `assign_failed`.
+ * `assign_failed`. Assign is Mod+; unassign also lets a streamer below Mod remove themselves, so
+ * they can drop a shared command from their own channel.
  */
 export default createAssignmentRouter({
   basePath: '/commands',
@@ -24,5 +25,6 @@ export default createAssignmentRouter({
   mapAssignError: (err) => (
     err instanceof CommandConflictError || isMysqlDuplicateEntryError(err) ? 'command_taken' : null
   ),
+  allowSelfUnassign: true,
   log: createLogger('Web'),
 });

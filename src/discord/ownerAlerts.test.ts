@@ -304,6 +304,59 @@ describe('ownerAlerts', () => {
       await flush();
     }
   });
+
+  it('drops a "down" DM that was waiting on the runtime when the component recovered meanwhile', async () => {
+    let markReady!: () => void;
+    const ready = new Promise<void>((resolve) => { markReady = resolve; });
+    registerOwnerAlertRuntime({ send, waitUntilReady: () => ready });
+
+    healthStore.recordDbPing(false, 'connection refused');
+    await advanceGrace();
+    // The down DM is now waiting for the runtime; the component recovers before it's ready.
+    healthStore.recordDbPing(true);
+    await flush();
+    markReady();
+    await flush();
+
+    // Neither the stale "down" DM nor a "recovered" DM (no down DM was ever delivered).
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('drops a "down" DM when the component recovers while the owner lookup is still pending', async () => {
+    healthStore.recordDbPing(false, 'connection refused');
+    let resolveOwner!: (row: unknown) => void;
+    vi.mocked(findOwnerUser).mockReturnValueOnce(new Promise((resolve) => { resolveOwner = resolve; }) as any);
+    await advanceGrace();
+    // The down DM is now waiting on findOwnerUser(); the component recovers before it resolves.
+    healthStore.recordDbPing(true);
+    await flush();
+    resolveOwner(OWNER_ROW);
+    await flush();
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('still delivers a waiting "down" DM once the runtime is ready if the component is still failing', async () => {
+    let markReady!: () => void;
+    const ready = new Promise<void>((resolve) => { markReady = resolve; });
+    registerOwnerAlertRuntime({ send, waitUntilReady: () => ready });
+
+    healthStore.recordDbPing(false, 'connection refused');
+    await advanceGrace();
+    expect(send).not.toHaveBeenCalled();
+    markReady();
+    await flush();
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('connection refused'));
+  });
+
+  it('skips the alert without throwing when the runtime never becomes ready', async () => {
+    registerOwnerAlertRuntime({ send, waitUntilReady: () => Promise.reject(new Error('Discord ready timed out after 30000ms')) });
+
+    await expect(announceStartup()).resolves.toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
+  });
 });
 
 describe('sendOwnerAlert with no runtime registered', () => {

@@ -6,6 +6,7 @@ import {
   normalizeCommandInputs,
   isMysqlDuplicateEntryError,
   CommandNotFoundError,
+  CommandSelfServiceDeniedError,
   CommandConflictError,
 } from './commandStringUtils';
 
@@ -109,6 +110,14 @@ describe('CommandNotFoundError', () => {
   it('has the correct name and message', () => {
     const err = new CommandNotFoundError(42);
     expect(err.name).toBe('CommandNotFoundError');
+    expect(err.message).toContain('42');
+  });
+});
+
+describe('CommandSelfServiceDeniedError', () => {
+  it('has the correct name and message', () => {
+    const err = new CommandSelfServiceDeniedError(42);
+    expect(err.name).toBe('CommandSelfServiceDeniedError');
     expect(err.message).toContain('42');
   });
 });

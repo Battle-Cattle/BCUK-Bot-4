@@ -1,7 +1,7 @@
 import { ChatClient, type ChatMessage, UserState } from '@twurple/chat';
 import { onOwnUserState, isPrivilegedInChannel, clearPrivilegeState } from './twitchChannelPrivilege';
-import { StaticAuthProvider } from '@twurple/auth';
-import { TWITCH_OAUTH_TOKEN, TWITCH_CLIENT_ID } from '../shared/config';
+import { buildBotAuthProvider, BOT_AUTH_CONNECT_URL } from './twitchBotAuthProvider';
+import { sendOwnerAlert } from '../discord/ownerAlerts';
 import { handleCommand } from '../commands/commandRouter';
 import { executeCustomCommandForTwitch } from '../commands/customCommandHandler';
 import { executeCounterCommandForTwitch } from '../commands/counterHandler';
@@ -21,6 +21,7 @@ import {
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
   getAllTwitchLinkedUsers,
   findUserByTwitchName,
+  getBotChatToken,
   type RefreshingLookupCache,
 } from '../db';
 import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
@@ -250,16 +251,6 @@ function onDisconnected(manually: boolean, reason?: Error): void {
 }
 
 /**
- * Strips tmi.js-style `oauth:` prefixes from an access token — Twurple's auth providers expect the
- * raw token.
- * @param token - The configured access token, with or without an `oauth:` prefix.
- * @returns The token without a leading `oauth:` prefix.
- */
-function stripOauthPrefix(token: string): string {
-  return token.startsWith('oauth:') ? token.slice('oauth:'.length) : token;
-}
-
-/**
  * Wraps `ChatClient#connect()` — which itself returns `void` and reports outcome only via events —
  * in a promise that resolves once `onAuthenticationSuccess` fires, or rejects on an authentication
  * or token fetch failure. Resolves on authentication rather than the earlier `onConnect` (raw IRC
@@ -289,26 +280,28 @@ function connectAndWait(c: ChatClient): Promise<void> {
 }
 
 /**
- * Starts the Twitch bot: initializes the active-channel set, creates and
- * configures the Twurple chat client (static auth from the bot's own OAuth
- * token, auto-reconnect), wires up message/connect/disconnect handlers, and
- * connects.
- * @returns Resolves once the client has authenticated; rejects if the connection attempt fails.
+ * Starts the Twitch bot: initializes the active-channel set, then creates and configures the
+ * Twurple chat client using the bot's own OAuth-connected, auto-refreshing account (see #550)
+ * — falling back to a no-op if no account has been connected yet (see {@link BOT_AUTH_CONNECT_URL})
+ * rather than crashing the whole process, since Discord and the web panel don't depend on Twitch
+ * chat being up. Wires up message/connect/disconnect handlers and connects.
+ * @returns Resolves once the client has authenticated, or once it's given up because no bot
+ *   chat account is connected; rejects if a connection attempt is actually made and fails.
  */
 export async function startTwitchBot(): Promise<void> {
   await initializeActiveChannels();
 
-  const authProvider = new StaticAuthProvider(TWITCH_CLIENT_ID, stripOauthPrefix(TWITCH_OAUTH_TOKEN));
+  const stored = await getBotChatToken();
+  if (!stored) {
+    log.error(`No bot chat token connected — visit ${BOT_AUTH_CONNECT_URL} to connect the bot account. Chat bot will not start.`);
+    void sendOwnerAlert(`🔴 Twitch chat bot has no connected account. Reconnect it at ${BOT_AUTH_CONNECT_URL}`);
+    return;
+  }
+
+  const authProvider = buildBotAuthProvider(stored, restartTwitchBot);
   const newClient = new ChatClient({
     authProvider,
     channels: [],
-    // TWITCH_OAUTH_TOKEN currently carries the legacy `chat_login` scope rather than the modern
-    // `chat:read`/`chat:edit` ChatClient normally requires — tmi.js never checked scopes at all,
-    // so this went unnoticed until the Twurple migration. Without this, ChatClient rejects the
-    // token outright (surfaced only as a generic "None of the queried intents (chat) are known
-    // by the auth provider" — the real "missing scopes" error is swallowed internally). Tracked
-    // for a proper fix (a refreshing, modern-scoped token) in #550.
-    legacyScopes: true,
   });
   client = newClient;
   setChatClient(client);
@@ -451,6 +444,35 @@ function quitAndWait(c: ChatClient): { promise: Promise<void>; unbind: () => voi
   /** Removes the `onDisconnect` listener registered above without waiting for it to fire. */
   const unbind = (): void => { listener.unbind(); };
   return { promise, unbind };
+}
+
+/**
+ * Chains successive {@link restartTwitchBot} calls so they run one at a time — see that
+ * function's doc for why.
+ */
+let restartChain: Promise<void> = Promise.resolve();
+
+/**
+ * Stops and restarts the Twitch chat client, serialized behind a module-level promise chain so
+ * overlapping calls (e.g. the owner submitting the `/admin/bot-auth` connect form twice, or from
+ * two tabs) can't both call {@link stopTwitchBot} before either calls {@link startTwitchBot}.
+ * Without this, `stopTwitchBot`/`startTwitchBot` assign the same module-level `client`/listener
+ * references, so an overlapping pair would silently overwrite them mid-flight: the first
+ * `ChatClient` gets abandoned still connected (nothing left holds a reference to stop it), while
+ * its `RefreshingAuthProvider` keeps trying to refresh in the background — harmlessly dropped at
+ * the DB level by the `connection_id` compare-and-swap (see `twitchBotAuthProvider.ts`'s
+ * `buildBotAuthProvider`), but the orphaned IRC connection itself is never closed.
+ * @returns Resolves once this restart's `startTwitchBot()` has settled; rejects if it throws.
+ */
+export function restartTwitchBot(): Promise<void> {
+  const next = restartChain.then(async () => {
+    await stopTwitchBot();
+    await startTwitchBot();
+  });
+  // Swallow so one failed restart doesn't permanently poison the chain for later callers — each
+  // caller still observes its own rejection via the `next` promise returned to it.
+  restartChain = next.catch(() => {});
+  return next;
 }
 
 /**

@@ -20,9 +20,11 @@ import { createAssignmentRouter } from './assignmentRoutes';
 import { findUser } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-/** Builds a supertest-ready app mounting a `createAssignmentRouter` instance with a urlencoded body parser. */
-function buildApp(router: ReturnType<typeof createAssignmentRouter>) {
-  return buildTestApp({ router, bodyParser: 'urlencoded' });
+/** Builds a supertest-ready app mounting a `createAssignmentRouter` instance with a urlencoded body parser (and a session user, when given). */
+function buildApp(router: ReturnType<typeof createAssignmentRouter>, sessionUser?: unknown) {
+  return sessionUser === undefined
+    ? buildTestApp({ router, bodyParser: 'urlencoded' })
+    : buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
 }
 
 const VALID_ID = '5';
@@ -205,5 +207,53 @@ describe('createAssignmentRouter — unassign', () => {
       .send(`thing_id=${VALID_ID}&discord_id=${VALID_DISCORD_ID}`);
     expect(res.headers.location).toBe('/things?error=unassign_failed');
     expect(log.error).toHaveBeenCalled();
+  });
+});
+
+describe('createAssignmentRouter — unassign with allowSelfUnassign', () => {
+  const OTHER_DISCORD_ID = '999999999999999999';
+
+  function selfUnassignRouter(unassign = vi.fn().mockResolvedValue(undefined)) {
+    return createAssignmentRouter({
+      basePath: '/things', idField: 'thing_id', parseId, assign: vi.fn(), unassign, allowSelfUnassign: true, log: mockLogger() as any,
+    });
+  }
+
+  it('drops requireMod from the unassign route but keeps it on assign', async () => {
+    const router = selfUnassignRouter();
+    const app = buildApp(router, { discordId: VALID_DISCORD_ID, accessLevel: ACCESS_LEVEL_MOCK.USER });
+    await supertest(app).post('/things/unassign').send(`thing_id=${VALID_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext']);
+
+    middlewareCallOrder.length = 0;
+    await supertest(app).post('/things/assign').send(`thing_id=${VALID_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+  });
+
+  it('lets a user below Mod unassign themselves', async () => {
+    const unassign = vi.fn().mockResolvedValue(undefined);
+    const res = await supertest(buildApp(selfUnassignRouter(unassign), { discordId: VALID_DISCORD_ID, accessLevel: ACCESS_LEVEL_MOCK.USER }))
+      .post('/things/unassign')
+      .send(`thing_id=${VALID_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/things');
+    expect(unassign).toHaveBeenCalledWith(5, VALID_DISCORD_ID);
+  });
+
+  it('redirects a user below Mod to ?error=forbidden when unassigning someone else', async () => {
+    const unassign = vi.fn().mockResolvedValue(undefined);
+    const res = await supertest(buildApp(selfUnassignRouter(unassign), { discordId: OTHER_DISCORD_ID, accessLevel: ACCESS_LEVEL_MOCK.USER }))
+      .post('/things/unassign')
+      .send(`thing_id=${VALID_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/things?error=forbidden');
+    expect(unassign).not.toHaveBeenCalled();
+  });
+
+  it('lets a Mod unassign anyone', async () => {
+    const unassign = vi.fn().mockResolvedValue(undefined);
+    const res = await supertest(buildApp(selfUnassignRouter(unassign), { discordId: OTHER_DISCORD_ID, accessLevel: ACCESS_LEVEL_MOCK.MOD }))
+      .post('/things/unassign')
+      .send(`thing_id=${VALID_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/things');
+    expect(unassign).toHaveBeenCalledWith(5, VALID_DISCORD_ID);
   });
 });
