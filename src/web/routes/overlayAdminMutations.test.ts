@@ -141,6 +141,25 @@ describe('POST /settings/videos/upload', () => {
     expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
   });
 
+  it('rejects a non-streamer before Multer buffers the upload (oversized body gets not_a_streamer, not file_too_large)', async () => {
+    const oversized = Buffer.alloc(1024 * 1024 + 1024, 1);
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', oversized, { filename: 'big.mp4', contentType: 'video/mp4' });
+    expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');
+    expect(vi.mocked(getStreamerByDiscordId)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+  });
+
+  it('redirects with upload_failed when the pre-upload streamer lookup fails', async () => {
+    vi.mocked(getStreamerByDiscordId).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', WEBM_BUF, 'test.webm');
+    expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
   // End-to-end: locks the uploadVideo → handleUploadError wiring so the route still
   // redirects (rather than 500s) if the middleware chain or ordering ever changes.
   it('redirects an oversized upload to file_too_large via the route middleware', async () => {

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { createLogger } from '../../shared/logger';
-import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser, AccessLevel } from '../../db';
+import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser, getGuildsForMember, AccessLevel } from '../../db';
 import { trimField, normalizeDiscordId } from './validation';
 import { getSessionUser } from '../session';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
@@ -188,13 +188,69 @@ export async function checkRemoveAuth(
 }
 
 /**
+ * Checks whether `actorId` outranks `targetId` in **every** guild the target is a member of:
+ * in each such guild the actor must also be a member, and either be an Admin there or sit
+ * strictly above the target's level there. A target with no memberships passes vacuously.
+ *
+ * Used to gate writes to *global* user state (the `user` row's name/level/Twitch name and the
+ * Twitch-bot flag), which affect every guild the target belongs to — so authority in just the
+ * current guild isn't enough. Bot owners are not special-cased here; callers exempt them.
+ *
+ * @param actorId The acting user's discordId.
+ * @param targetId The user whose global state would be changed.
+ * @returns True when the actor outranks the target in all of the target's guilds.
+ */
+export async function actorOutranksTargetInAllGuilds(actorId: string, targetId: string): Promise<boolean> {
+  const [actorGuilds, targetGuilds] = await Promise.all([getGuildsForMember(actorId), getGuildsForMember(targetId)]);
+  const actorLevels = new Map(actorGuilds.map((g) => [g.guild_id, g.access_level]));
+  return targetGuilds.every((g) => {
+    const actorLevel = actorLevels.get(g.guild_id);
+    return actorLevel !== undefined && (actorLevel >= AccessLevel.ADMIN || actorLevel > g.access_level);
+  });
+}
+
+/**
+ * Decides whether a `/users/add` submission may rewrite the target's *global* user row
+ * (Discord name, legacy global access level, Twitch name — including clearing it, which disables
+ * the bot for them and parts their channel). When it may not, the route only grants membership
+ * of the current guild and leaves the global row untouched.
+ *
+ * Permitted when the target has no user row yet (this request creates it), when the actor is a
+ * bot owner, or when the target is already a member of `guildId` *and* the actor outranks them in
+ * every guild they belong to (see {@link actorOutranksTargetInAllGuilds}). An existing user who
+ * isn't a member of the current guild is therefore never rewritten by a guild-local Manager/Admin.
+ *
+ * Like {@link checkManagerEditAuth}, callers must run this inside the queued mutation callback so
+ * it reads the latest committed state.
+ *
+ * @param sessionUser The acting user's identity (owner flag is re-read from the DB).
+ * @param targetDiscordId The user being added.
+ * @param guildId The guild the add applies to.
+ * @returns True when the global user fields may be written.
+ */
+export async function canEditGlobalUserFields(
+  sessionUser: { discordId: string },
+  targetDiscordId: string,
+  guildId: string,
+): Promise<boolean> {
+  const targetUser = await findUser(targetDiscordId);
+  if (!targetUser) return true;
+  const actingUser = await findUser(sessionUser.discordId);
+  if (actingUser?.is_owner) return true;
+  if ((await getMemberAccessLevel(guildId, targetDiscordId)) === null) return false;
+  return actorOutranksTargetInAllGuilds(sessionUser.discordId, targetDiscordId);
+}
+
+/**
  * Authorizes a Manager/Admin toggling a user's Twitch-bot participation within a guild.
  * Returns an error code string, or null when the toggle is permitted.
  *
  * Checks that the target is a member of the current guild, that only an owner may toggle
  * another owner's Twitch state, and that the acting user outranks the target (mirrors
  * `checkManagerEditAuth`'s rules: a non-Admin actor may not modify a target already at or
- * above their own level).
+ * above their own level). Because the Twitch-bot flag is global, a non-owner actor must also
+ * outrank the target in every other guild the target belongs to (see
+ * {@link actorOutranksTargetInAllGuilds}) — authority in the current guild alone isn't enough.
  *
  * Callers must run this *inside* the `runUserMutation` callback for `targetDiscordId` (throwing
  * a {@link ManagerEditAuthError} on a non-null result) — see `checkManagerEditAuth`'s doc comment
@@ -220,10 +276,9 @@ export async function checkToggleTwitchAuth(
   // Bot owners are global super-admins — only another owner may touch them, even an Admin.
   const existingUser = await findUser(targetDiscordId);
   if (existingUser?.is_owner && !actingIsOwner) return 'target_above_level';
-  if (!actingIsOwner && actingAccessLevel < AccessLevel.ADMIN && memberLevel >= actingAccessLevel) {
-    return 'target_above_level';
-  }
-  return null;
+  if (actingIsOwner) return null;
+  if (actingAccessLevel < AccessLevel.ADMIN && memberLevel >= actingAccessLevel) return 'target_above_level';
+  return (await actorOutranksTargetInAllGuilds(sessionUser.discordId, targetDiscordId)) ? null : 'target_above_level';
 }
 
 /**

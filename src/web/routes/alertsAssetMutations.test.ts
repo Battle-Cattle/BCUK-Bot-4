@@ -161,6 +161,25 @@ describe('POST /settings/:eventType/image', () => {
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
   });
 
+  it('rejects a non-streamer before Multer buffers the upload (oversized body gets not_a_streamer, not file_too_large)', async () => {
+    const oversized = Buffer.concat([PNG_BUF, Buffer.alloc(1024 * 1024 + 1024, 1)]);
+    const res = await supertest(buildApp())
+      .post('/settings/follow/image')
+      .attach('image', oversized, 'big.png');
+    expect(res.headers.location).toBe('/alerts/settings?error=not_a_streamer');
+    expect(vi.mocked(getStreamerByDiscordId)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+  });
+
+  it('redirects with upload_failed when the pre-upload streamer lookup fails', async () => {
+    vi.mocked(getStreamerByDiscordId).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp())
+      .post('/settings/follow/image')
+      .attach('image', PNG_BUF, 'test.png');
+    expect(res.headers.location).toBe('/alerts/settings?error=upload_failed');
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+  });
+
   it('redirects an oversized upload to file_too_large via the route middleware', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const oversized = Buffer.concat([PNG_BUF, Buffer.alloc(1024 * 1024 + 1024, 1)]);
@@ -204,6 +223,8 @@ describe('POST /settings/:eventType/sound', () => {
       .post('/settings/raid/sound')
       .attach('sound', MP3_BUF, 'test.mp3');
     expect(res.headers.location).toBe('/alerts/settings?error=not_a_streamer');
+    // Rejected by the pre-upload check, before the route handler's own re-check runs.
+    expect(vi.mocked(getStreamerByDiscordId)).toHaveBeenCalledTimes(1);
   });
 
   it('redirects with error for an invalid event type', async () => {

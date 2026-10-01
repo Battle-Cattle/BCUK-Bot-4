@@ -6,6 +6,7 @@ vi.mock('../../db', () => ({
   addStreamer: vi.fn(),
   removeStreamer: vi.fn(),
   findUser: vi.fn(),
+  getMemberAccessLevel: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
@@ -28,7 +29,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import supertest from 'supertest';
 import router from './streamStreamers';
-import { addStreamer, removeStreamer, findUser } from '../../db';
+import { addStreamer, removeStreamer, findUser, getMemberAccessLevel } from '../../db';
 import { restartTwitchMonitor } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel, AccessLevelValue } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -45,6 +46,7 @@ function buildApp(sessionUser: SessionUser = MANAGER) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(findUser).mockResolvedValue(null);
+  vi.mocked(getMemberAccessLevel).mockResolvedValue(AccessLevel.USER);
   vi.mocked(addStreamer).mockResolvedValue(undefined);
   vi.mocked(removeStreamer).mockResolvedValue(true);
   vi.mocked(restartTwitchMonitor).mockResolvedValue(undefined);
@@ -116,6 +118,30 @@ describe('POST /streams/streamers/add — failure path', () => {
       .send('discord_id=100000000000000001&group_id=1');
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('error=add_streamer_failed');
+  });
+});
+
+describe('POST /streams/streamers/add — guild membership', () => {
+  it('redirects with streamer_not_member and does not add when the user is not a member of the current guild', async () => {
+    vi.mocked(findUser).mockResolvedValue({ twitch_name: 'streamer', discord_id: '100000000000000001' } as any);
+    vi.mocked(getMemberAccessLevel).mockResolvedValueOnce(null);
+    const res = await supertest(buildApp())
+      .post('/streams/streamers/add')
+      .send('discord_id=100000000000000001&group_id=1');
+    expect(res.headers.location).toContain('error=streamer_not_member');
+    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, '100000000000000001');
+    expect(addStreamer).not.toHaveBeenCalled();
+    await flushRestartChain();
+    expect(restartTwitchMonitor).not.toHaveBeenCalled();
+  });
+
+  it('adds the streamer when the user is a member of the current guild', async () => {
+    vi.mocked(findUser).mockResolvedValue({ twitch_name: 'streamer', discord_id: '100000000000000001' } as any);
+    const res = await supertest(buildApp())
+      .post('/streams/streamers/add')
+      .send('discord_id=100000000000000001&group_id=1');
+    expect(res.headers.location).toBe('/admin/streams');
+    expect(addStreamer).toHaveBeenCalledWith('100000000000000001', 1, GUILD_ID);
   });
 });
 

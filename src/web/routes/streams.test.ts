@@ -7,13 +7,14 @@ vi.mock('../../db', () => ({
   getStreamGroupsForGuild: vi.fn(),
   getStreamersForGuild: vi.fn(),
   getAllEventSubStreamers: vi.fn(),
-  getAllUsers: vi.fn(),
+  getGuildMemberUsers: vi.fn(),
   addStreamGroup: vi.fn(),
   updateStreamGroup: vi.fn(),
   removeStreamGroupAndStreamers: vi.fn(),
   addStreamer: vi.fn(),
   removeStreamer: vi.fn(),
   findUser: vi.fn(),
+  getMemberAccessLevel: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
@@ -36,12 +37,18 @@ vi.mock('../../twitch/monitor/twitchMonitor', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
+vi.mock('../../discord/discordClientStore', () => ({
+  getDiscordClient: () => ({
+    channels: { fetch: () => Promise.resolve({ guildId: '900000000000000001', isTextBased: () => true }) },
+  }),
+}));
+
 import express from 'express';
 import supertest from 'supertest';
 import router from './streams';
 import {
-  getStreamGroupsForGuild, getStreamersForGuild, getAllUsers, getAllEventSubStreamers,
-  addStreamGroup, addStreamer, findUser,
+  getStreamGroupsForGuild, getStreamersForGuild, getGuildMemberUsers, getAllEventSubStreamers,
+  addStreamGroup, addStreamer, findUser, getMemberAccessLevel,
 } from '../../db';
 import { getLiveStates } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel, AccessLevelValue } from '../../db';
@@ -61,12 +68,13 @@ beforeEach(() => {
   middlewareCallOrder.length = 0;
   vi.mocked(getStreamGroupsForGuild).mockResolvedValue([]);
   vi.mocked(getStreamersForGuild).mockResolvedValue([]);
-  vi.mocked(getAllUsers).mockResolvedValue([]);
+  vi.mocked(getGuildMemberUsers).mockResolvedValue([]);
   vi.mocked(getAllEventSubStreamers).mockResolvedValue([]);
   vi.mocked(getLiveStates).mockReturnValue([]);
   vi.mocked(addStreamGroup).mockResolvedValue(true);
   vi.mocked(addStreamer).mockResolvedValue(undefined);
   vi.mocked(findUser).mockResolvedValue(null);
+  vi.mocked(getMemberAccessLevel).mockResolvedValue(AccessLevel.USER);
 });
 
 describe('GET /streams — query param filtering', () => {
@@ -113,7 +121,7 @@ describe('GET /streams/live', () => {
 describe('GET /streams — eligible users and admin EventSub status', () => {
   it('includes users with a Twitch name who are not already streamers, excluding the rest', async () => {
     vi.mocked(getStreamersForGuild).mockResolvedValue([{ discord_id: '1', twitch_name: 'existing' }] as any);
-    vi.mocked(getAllUsers).mockResolvedValue([
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([
       { discord_id: '1', twitch_name: 'existing' }, // already a streamer
       { discord_id: '2', twitch_name: 'eligible' }, // eligible
       { discord_id: '3', twitch_name: null }, // no Twitch name
@@ -123,6 +131,11 @@ describe('GET /streams — eligible users and admin EventSub status', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.eligibleUsers).toEqual([{ discord_id: '2', twitch_name: 'eligible' }]);
+  });
+
+  it('sources eligible users from the current guild\'s members only', async () => {
+    await supertest(buildApp()).get('/streams');
+    expect(getGuildMemberUsers).toHaveBeenCalledWith(GUILD_ID);
   });
 
   it('builds eventSubById keyed by streamer row id for admin users, and skips the lookup for non-admins', async () => {
@@ -167,7 +180,7 @@ describe('streams router composition', () => {
   it('mounts the groups sub-router', async () => {
     const res = await supertest(buildApp())
       .post('/streams/groups/add')
-      .send('name=n&discord_channel=chan&live_message=live&new_game_message=game');
+      .send('name=n&discord_channel=800000000000000001&live_message=live&new_game_message=game');
     expect(res.status).toBe(302);
     expect(addStreamGroup).toHaveBeenCalled();
   });

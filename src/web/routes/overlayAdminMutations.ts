@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -90,10 +90,28 @@ export const handleUploadError = createMulterErrorRedirectHandler('/overlay/sett
 const uploadVideo = makeUploadMiddleware(upload, 'video', handleUploadError);
 
 /**
+ * Express middleware that redirects non-streamers (`not_a_streamer`) *before* Multer buffers the
+ * upload into memory, so an authenticated non-streamer can't force a full-size in-memory upload
+ * only to be rejected afterwards. The route handler still re-checks via `requireStreamer`.
+ * @param req - Express request; reads `session.user.discordId`.
+ * @param res - Express response; redirected when the requester isn't a streamer, or to
+ *   `?error=upload_failed` if the lookup fails.
+ * @param next - Called to continue to the upload middleware when the requester is a streamer.
+ * @returns Resolves once the request has been redirected or passed on.
+ */
+async function requireStreamerBeforeUpload(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT)) next();
+  } catch (err) {
+    logAndRedirectError({ res, log, logLabel: 'Overlay video upload streamer check error:', err, basePath: '/overlay/settings', errorCode: 'upload_failed' });
+  }
+}
+
+/**
  * POST /overlay/settings/videos/upload — uploads a video file (webm/mp4,
- * validated by magic bytes) for the requesting streamer. csrfProtection runs
- * BEFORE uploadVideo so a bad token is rejected before Multer buffers the
- * file; the client (overlayAdmin.js) sends the token in an X-CSRF-Token
+ * validated by magic bytes) for the requesting streamer. csrfProtection and
+ * requireStreamerBeforeUpload run BEFORE uploadVideo so a bad token or a
+ * non-streamer is rejected before Multer buffers the file; the client (overlayAdmin.js) sends the token in an X-CSRF-Token
  * header — available before body parsing and never placed in the URL.
  * @param req - Express request; reads `name` and the `video` file from
  *   `req.body`/`req.file`.
@@ -104,7 +122,7 @@ const uploadVideo = makeUploadMiddleware(upload, 'video', handleUploadError);
  *   (`invalid_path`), the file exceeds the size limit (`file_too_large`,
  *   redirected by `handleUploadError`), or saving fails (`upload_failed`).
  */
-router.post('/settings/videos/upload', requireAuth, csrfProtection, uploadVideo, async (req, res) => {
+router.post('/settings/videos/upload', requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadVideo, async (req, res) => {
   try {
     const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
     if (!streamer) return;
