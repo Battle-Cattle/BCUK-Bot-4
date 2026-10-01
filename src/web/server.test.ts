@@ -79,6 +79,8 @@ function errorTriggerRouter() {
 vi.mock('./routes/auth', () => ({ default: emptyRouter() }));
 vi.mock('./routes/guild', () => ({ default: markerRouter('guild') }));
 vi.mock('./routes/eventsubCallback', () => ({ default: emptyRouter() }));
+vi.mock('./routes/botAuth', () => ({ default: markerRouter('botAuth') }));
+vi.mock('./routes/botAuthCallback', () => ({ default: emptyRouter() }));
 vi.mock('./routes/eventsubAdmin', () => ({ default: markerRouter('eventsubAdmin') }));
 vi.mock('./routes/dashboard', () => ({
   default: (() => {
@@ -165,6 +167,14 @@ describe('server route wiring', () => {
     const res = await request(app).get('/admin/health/__marker_health');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ label: 'health' });
+    expect(requireAuth).toHaveBeenCalled();
+    expect(requireGuildContext).not.toHaveBeenCalled();
+  });
+
+  it('mounts /admin/bot-auth behind requireAuth only, without requireGuildContext (bot chat auth is not guild-scoped)', async () => {
+    const res = await request(app).get('/admin/bot-auth/__marker_botAuth');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ label: 'botAuth' });
     expect(requireAuth).toHaveBeenCalled();
     expect(requireGuildContext).not.toHaveBeenCalled();
   });

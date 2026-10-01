@@ -32,6 +32,15 @@ declare module 'express-session' {
     csrfToken?: string;
     eventsubOAuthState?: { value: string; expiresAt: number };
     eventsubStreamerId?: number;
+    /**
+     * Pending owner-only Twitch chat bot account connect flow (see #550), set by
+     * /admin/bot-auth/connect. `attemptStartedAt` is this attempt's identifier from
+     * `mintBotConnectAttemptId()` — ordered by when the owner started it (not when its callback
+     * later completes), with a built-in tiebreaker so two attempts started in the same millisecond
+     * can't collide — passed through to `saveBotChatTokenIfLatestAttempt()` so two
+     * independently-completing connect attempts are ordered correctly against each other.
+     */
+    botOAuthState?: { value: string; expiresAt: number; attemptStartedAt: number };
     /** Pending companion-app loopback OAuth login, set by /companion/login. */
     companionOAuth?: { redirectUri: string; appState: string; expiresAt: number };
   }

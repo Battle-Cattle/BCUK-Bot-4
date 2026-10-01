@@ -99,6 +99,15 @@ vi.mock('./db/eventSub', () => ({
   saveEventConfig: vi.fn(),
 }));
 
+vi.mock('./db/twitchBotAuth', () => ({
+  getBotChatToken: vi.fn(),
+  saveBotChatTokenIfLatestAttempt: vi.fn(),
+  restoreBotChatTokenIfOwnedByConnection: vi.fn(),
+  clearBotChatToken: vi.fn(),
+  saveBotChatTokenIfOwnedBy: vi.fn(),
+  clearBotChatTokenIfOwnedBy: vi.fn(),
+}));
+
 vi.mock('./db/sfx', () => ({
   findTrigger: vi.fn(),
   findSoundFiles: vi.fn(),

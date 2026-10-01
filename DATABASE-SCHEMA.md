@@ -171,6 +171,26 @@ Expected constraints:
 
 Apply `migrations/consolidate_streamer_user.sql` to migrate from the previous schema (which stored `name VARCHAR` instead of `discord_id BIGINT`).
 
+## `twitch_bot_chat_token`
+
+Single global row (`id` pinned to 1) holding the refreshing OAuth token for the bot's own Twitch chat account — see issue #550. Distinct from `streamer.eventsub_*` above: those are per-streamer broadcaster tokens used for EventSub, one row per streamer; this is one bot-wide credential for the account the chat bot itself logs in as, so it doesn't fit the per-streamer `streamer` table.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `TINYINT` PK | Always `1` — singleton row |
+| `twitch_user_id` | `VARCHAR(50)` nullable | Twitch numeric user ID of the connected bot account |
+| `access_token` | `TEXT` nullable | AES-256-GCM encrypted OAuth access token |
+| `refresh_token` | `TEXT` nullable | AES-256-GCM encrypted refresh token |
+| `token_expiry` | `BIGINT` nullable | Token expiry as Unix milliseconds |
+| `connection_id` | `BIGINT` | Increments on every save (initial connect or reconnect, same account or not); used as the compare-and-swap key so a write from a superseded in-process auth provider is dropped instead of clobbering a newer connection — see `src/twitch/twitchBot.ts` |
+| `attempt_started_at` | `BIGINT` nullable | Unix milliseconds; when the OAuth connect flow that produced the current row was *initiated* (not when its callback completed). Orders two independently-completing OAuth callbacks so the most recently *started* attempt always wins the row, regardless of which callback's network round trip finishes first — see `saveBotChatTokenIfLatestAttempt()` in `src/db/twitchBotAuth.ts` |
+
+Expected constraints:
+
+- `CONSTRAINT chk_twitch_bot_chat_token_singleton CHECK (id = 1)` — enforces exactly one row.
+
+Created by `migrations/twitch_bot_chat_token.sql`. Connected/reconnected via the owner-only `/admin/bot-auth` web flow, not manually.
+
 ## `streamer_event_config`
 
 Per-streamer EventSub notification message configuration. Applied once the streamer has connected their Twitch OAuth token.

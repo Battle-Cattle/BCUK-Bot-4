@@ -10,7 +10,6 @@ import path from 'path';
 vi.mock('../../shared/config', () => ({
   DISCORD_TOKEN: 'mock-token',
   TWITCH_USERNAME: 'mock-user',
-  TWITCH_OAUTH_TOKEN: 'oauth:mock',
   TWITCH_CLIENT_ID: 'mock-client-id',
   TWITCH_CLIENT_SECRET: 'mock-client-secret',
   DB_HOST: 'localhost',

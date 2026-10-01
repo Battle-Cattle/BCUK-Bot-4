@@ -15,6 +15,8 @@ import authRouter from './routes/auth';
 import guildRouter from './routes/guild';
 import eventsubCallbackRouter from './routes/eventsubCallback';
 import eventsubAdminRouter from './routes/eventsubAdmin';
+import botAuthRouter from './routes/botAuth';
+import botAuthCallbackRouter from './routes/botAuthCallback';
 import dashboardRouter from './routes/dashboard';
 import dashboardEventsRouter from './routes/dashboardEvents';
 import dashboardStatusEventsRouter from './routes/dashboardStatusEvents';
@@ -181,6 +183,8 @@ app.use((req, res, next) => {
 app.use('/auth', authLimiter, authRouter);
 // EventSub OAuth callback — must be outside requireAuth (Twitch redirects here without session)
 app.use('/auth', authLimiter, eventsubCallbackRouter);
+// Bot chat OAuth callback — same reasoning, Twitch redirects here without session (see #550).
+app.use('/auth', authLimiter, botAuthCallbackRouter);
 app.use('/api/streamdeck', streamdeckLimiter, streamdeckRouter);
 app.use('/', sfxPublicRouter);
 app.use('/', privacyRouter);
@@ -204,6 +208,8 @@ app.use('/api', requireAuth, apiRouter);
 // admin.ts's per-route convention) rather than router-level here.
 app.use('/admin/health', requireAuth, healthRouter);
 app.use('/admin/health', requireAuth, healthStatusEventsRouter);
+// Bot chat account connect page (see #550) — same not-guild-scoped, owner-gated pattern as health above.
+app.use('/admin/bot-auth', requireAuth, botAuthRouter);
 
 // All of the routers below share the same '/' mount point, so registering each one
 // behind its own app.use(path, ...middleware, router) call made requireAuth (and, for
