@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createLogger } from '../../shared/logger';
-import { getAllEventSubStreamers, getEnabledAlertEventTypesBatch } from '../../db';
+import { getAllEventSubStreamers, getEnabledAlertEventTypesBatch, getStreamerById } from '../../db';
 import type { DbStreamerEventSub, EventSubConfig, AlertEventType } from '../../db';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
@@ -280,6 +280,20 @@ export async function loadStreamersForEventSub(): Promise<StreamerEventSubData[]
     return { uid, token, name: streamer.twitch_name ?? '', config, streamerId: streamer.id, enabledAlerts };
   }));
   return resolved.filter((r): r is StreamerEventSubData => r !== null);
+}
+
+/**
+ * Re-reads one streamer's stored EventSub token from the DB and returns a currently-valid one,
+ * refreshing (and persisting) it via `getValidToken` if it's expired or about to expire — the same
+ * token resolution {@link loadStreamersForEventSub} does at startup/reload. Used by a long-lived
+ * `StreamerConnection` before re-subscribing on a fresh session, since the token it was handed at
+ * construction/reload time can have expired since (user tokens last ~4h).
+ * @param streamerId - DB row id of the streamer.
+ * @returns A valid access token, or null if the streamer no longer exists or has no usable token.
+ */
+export async function fetchValidEventSubToken(streamerId: number): Promise<string | null> {
+  const streamer = await getStreamerById(streamerId);
+  return streamer ? getValidToken(streamer) : null;
 }
 
 /** Creates all subscriptions for one streamer on their dedicated session, updates the

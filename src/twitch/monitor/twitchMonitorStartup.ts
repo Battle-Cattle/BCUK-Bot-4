@@ -50,7 +50,9 @@ export async function tryEditStartupMessage(
  * Handles a streamer found to already be live at bot startup: if a previous
  * announcement message is recorded, tries to edit it in place via
  * {@link tryEditStartupMessage}; otherwise (or if the edit isn't possible)
- * falls back to posting a fresh announcement via {@link postAnnouncement}.
+ * falls back to posting a fresh announcement via {@link postAnnouncement}. If the edit
+ * throws a non-not-found error, no new announcement is posted; the stored message is
+ * tracked in `liveStates` so subsequent polls keep editing it.
  * @param liveStates - Map of live streamer states, keyed by streamer DB row id.
  * @param streamer - Full streamer record (including its stream group) from the database.
  * @param liveStream - The current live Twitch stream data.
@@ -74,7 +76,10 @@ export async function handleLiveStreamerOnStartup(
         return;
       }
     } catch {
-      // Edit failed (already logged) — skip postAnnouncement for this streamer
+      // Edit failed (already logged) — skip postAnnouncement for this streamer, but still track
+      // the stored message as live (as the no-client branch above does) so later polls edit it
+      // via editAnnouncement instead of posting a duplicate and orphaning the original.
+      liveStates.set(String(streamer.id), makeLiveState(streamer, liveStream, streamer.discord_message_id, streamer.discord_channel_id));
       return;
     }
   }

@@ -5,6 +5,7 @@ const mockLog = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn()
 vi.mock('../../shared/logger', () => ({ createLogger: () => mockLog }));
 vi.mock('./twitchEventSubSubscriptions', () => ({
   subscribeForStreamer: vi.fn().mockResolvedValue(1),
+  fetchValidEventSubToken: vi.fn().mockResolvedValue('token-abc'),
   removeSessionSubscriptions: vi.fn().mockResolvedValue(undefined),
   removeStreamerFromMap: vi.fn(),
   dispatchNotification: vi.fn(),
@@ -28,6 +29,7 @@ import {
 } from './twitchEventSubConnection';
 import {
   subscribeForStreamer,
+  fetchValidEventSubToken,
   removeSessionSubscriptions,
   dispatchNotification,
   handleRevocation,
@@ -228,7 +230,7 @@ describe('StreamerConnection.handleMessage', () => {
   it('session_welcome (non-reconnecting): sets sessionId and calls subscribeForStreamer', async () => {
     const conn = new StreamerConnection(makeStreamerData());
     await (conn as any).handleMessage(makeWelcomeMsg('sess-abc'));
-    expect(subscribeForStreamer).toHaveBeenCalledWith('sess-abc', expect.objectContaining({ uid: 'uid-123' }));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-abc', expect.objectContaining({ uid: 'uid-123' })));
   });
 
   it('session_welcome (non-reconnecting): calls onSelfStop when subscribeForStreamer returns 0', async () => {
@@ -253,7 +255,7 @@ describe('StreamerConnection.handleMessage', () => {
     // The welcome's subscribeForStreamer call is now in flight (pending). Stop the
     // connection externally — e.g. twitchEventSub.ts removing this streamer — while it's
     // still awaiting Twitch's response.
-    expect(subscribeForStreamer).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(1));
     conn.stop();
     vi.mocked(removeStreamerFromMap).mockClear();
 
@@ -280,6 +282,7 @@ describe('StreamerConnection.handleMessage', () => {
     conn.setSelfStopCallback(onSelfStop);
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-abc'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(1));
 
     conn.stop();
     resolveSubscribe(3);
@@ -297,6 +300,50 @@ describe('StreamerConnection.handleMessage', () => {
     await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-live', expect.anything()));
     await Promise.resolve();
     expect(removeSessionSubscriptions).not.toHaveBeenCalled();
+  });
+
+  it('ignores a zero-count result from a session superseded mid-subscribe instead of stopping the healthy replacement', async () => {
+    let resolveFirst!: (value: number) => void;
+    vi.mocked(subscribeForStreamer)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce(2);
+    const conn = new StreamerConnection(makeStreamerData());
+    const onSelfStop = vi.fn();
+    conn.setSelfStopCallback(onSelfStop);
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-A'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-A', expect.anything()));
+
+    // Socket A dies and a replacement socket B welcomes while A's subscribe is still in flight.
+    (conn as any).forceReconnect((conn as any).ws);
+    (conn as any).connect();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-B'));
+
+    // A's creates all failed against the dead session.
+    resolveFirst(0);
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-B', expect.anything()));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onSelfStop).not.toHaveBeenCalled();
+    expect(removeStreamerFromMap).not.toHaveBeenCalled();
+    expect((conn as any).sessionId).toBe('sess-B');
+    expect((conn as any).ws).not.toBeNull();
+  });
+
+  it('session_welcome (non-reconnecting): re-resolves a valid token before subscribing', async () => {
+    vi.mocked(fetchValidEventSubToken).mockResolvedValueOnce('fresh-token');
+    const conn = new StreamerConnection({ ...makeStreamerData(), token: 'expired-token' });
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-fresh'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-fresh', expect.objectContaining({ token: 'fresh-token' })));
+    expect(fetchValidEventSubToken).toHaveBeenCalledWith(1);
+  });
+
+  it('session_welcome (non-reconnecting): keeps the existing token and still subscribes if the token lookup fails', async () => {
+    vi.mocked(fetchValidEventSubToken).mockRejectedValueOnce(new Error('db down'));
+    const conn = new StreamerConnection({ ...makeStreamerData(), token: 'old-token' });
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-err'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-err', expect.objectContaining({ token: 'old-token' })));
+    expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('Failed to refresh EventSub token'), expect.any(Error));
   });
 
   it('session_welcome when isReconnecting: does NOT call subscribeForStreamer', async () => {
@@ -761,6 +808,8 @@ describe('StreamerConnection lifecycle', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-old'));
+    // Let the welcome's own (token-refresh-then-subscribe) chain land before measuring the reload.
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-old', expect.anything()));
 
     // Enter the migration window: session_reconnect swaps in a new socket, but sessionId
     // is still 'sess-old' until the new session's welcome arrives.

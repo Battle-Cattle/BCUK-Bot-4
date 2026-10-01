@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { recordEventSubConnected, recordEventSubReconnectAttempt, removeEventSubHealth } from '../../shared/healthStore';
-import { subscribeForStreamer, removeSessionSubscriptions, removeStreamerFromMap, dispatchNotification, handleRevocation, StreamerEventSubData } from './twitchEventSubSubscriptions';
+import { subscribeForStreamer, fetchValidEventSubToken, removeSessionSubscriptions, removeStreamerFromMap, dispatchNotification, handleRevocation, StreamerEventSubData } from './twitchEventSubSubscriptions';
 
 const log = createLogger('EventSub');
 
@@ -191,19 +191,53 @@ export class StreamerConnection {
    * it deletes whatever that call created on the now-closed session (see
    * {@link removeSessionSubscriptions}) and returns without the zero-count handling, so a
    * zombie API call can't leave live subscriptions behind or double-fire `onSelfStop`.
+   * Likewise, if `sessionId` is no longer this connection's live session by the time the call
+   * resolves (its socket died and was replaced, or a migration landed a new session), the result
+   * is ignored: a zero count from a dead session says nothing about the current one, and acting
+   * on it would `stop()` a healthy replacement socket.
+   * @param sessionId - The session to subscribe on.
+   * @param emptyLogMessage - Logged when zero subscriptions result and the connection self-stops.
+   * @param refreshToken - Re-resolve a valid token (see {@link refreshToken}) before subscribing.
+   * @returns Resolves once subscribing (and any zero-count handling) is done.
    */
-  private async subscribeAndHandleEmpty(sessionId: string, emptyLogMessage: string): Promise<void> {
+  private async subscribeAndHandleEmpty(sessionId: string, emptyLogMessage: string, refreshToken = false): Promise<void> {
     if (this.stopped) return;
+    if (refreshToken) {
+      await this.refreshToken();
+      if (this.isStopped() || this.sessionId !== sessionId) return;
+    }
     const data = this.currentData;
     const count = await subscribeForStreamer(sessionId, data);
     if (this.isStopped()) {
       if (count > 0) await removeSessionSubscriptions(sessionId, data);
       return;
     }
+    if (this.sessionId !== sessionId) {
+      log.info(`[${this.name}] Session ${sessionId} superseded while subscribing — ignoring its result`);
+      return;
+    }
     if (count === 0) {
       log.info(`[${this.name}] ${emptyLogMessage}`);
       this.stop();
       this.onSelfStop?.(this.uid);
+    }
+  }
+
+  /**
+   * Replaces `currentData.token` with a currently-valid token from the DB (refreshing it if
+   * expired) via {@link fetchValidEventSubToken}. The token handed over at construction/reload can
+   * be hours old by the time a non-migration reconnect re-subscribes, and an expired one would
+   * fail every create with a 401. Skipped if a reload() replaced `currentData` meanwhile (that data
+   * already carries a freshly-resolved token); on a lookup error the existing token is kept.
+   * @returns Resolves once the token has been refreshed (or the attempt logged as failed).
+   */
+  private async refreshToken(): Promise<void> {
+    const data = this.currentData;
+    try {
+      const token = await fetchValidEventSubToken(data.streamerId);
+      if (this.currentData === data) this.currentData = { ...data, token };
+    } catch (err) {
+      log.error(`[${this.name}] Failed to refresh EventSub token before subscribing:`, err);
     }
   }
 
@@ -370,6 +404,7 @@ export class StreamerConnection {
    * subscribes for the current streamer data. On a reconnect (session migration), existing
    * subscriptions carry over automatically — but if a reload() was deferred because it ran
    * while the old session id was still stale, it's applied now against the new session id.
+   * A fresh (non-migration) session re-resolves the token first, since it may have expired.
    */
   private onSessionWelcome(msg: EventSubMessage): void {
     const session = msg.payload.session!;
@@ -390,7 +425,7 @@ export class StreamerConnection {
     }
     log.info(`[${this.name}] Session established: ${this.sessionId}`);
     this.reloadChain = this.reloadChain
-      .then(() => this.subscribeAndHandleEmpty(session.id, 'No subscriptions — disconnecting'))
+      .then(() => this.subscribeAndHandleEmpty(session.id, 'No subscriptions — disconnecting', true))
       .catch((err: unknown) => { log.error(`[${this.name}] Subscribe error:`, err); });
   }
 

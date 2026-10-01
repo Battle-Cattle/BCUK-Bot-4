@@ -12,6 +12,7 @@ vi.mock('../../shared/config', () => ({}));
 // subscribeForStreamer/loadStreamersForEventSub, not dispatch.
 vi.mock('../../db', () => ({
   getAllEventSubStreamers: vi.fn(),
+  getStreamerById: vi.fn(),
   clearStreamerToken: vi.fn().mockResolvedValue(undefined),
   getEnabledAlertEventTypesBatch: vi.fn().mockResolvedValue(new Map()),
   DEFAULT_EVENT_CONFIG: {
@@ -54,8 +55,9 @@ import {
   loadStreamersForEventSub,
   subscribeForStreamer,
   removeSessionSubscriptions,
+  fetchValidEventSubToken,
 } from './twitchEventSubSubscriptions';
-import { getAllEventSubStreamers, getEnabledAlertEventTypesBatch } from '../../db';
+import { getAllEventSubStreamers, getEnabledAlertEventTypesBatch, getStreamerById } from '../../db';
 import { getValidToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
@@ -1071,5 +1073,27 @@ describe('removeSessionSubscriptions', () => {
     expect(logMock.error).toHaveBeenCalledWith(
       'Failed to delete subscription a (channel.follow) left on stopped session for stoppedStreamer:', expect.any(Error),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchValidEventSubToken
+// ---------------------------------------------------------------------------
+describe('fetchValidEventSubToken', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('re-reads the streamer row and returns the token getValidToken resolves (refreshing if expired)', async () => {
+    const row = { id: 7, eventsub_access_token: 'old' } as any;
+    vi.mocked(getStreamerById).mockResolvedValueOnce(row);
+    vi.mocked(getValidToken).mockResolvedValueOnce('refreshed');
+    await expect(fetchValidEventSubToken(7)).resolves.toBe('refreshed');
+    expect(getStreamerById).toHaveBeenCalledWith(7);
+    expect(getValidToken).toHaveBeenCalledWith(row);
+  });
+
+  it('returns null when the streamer row no longer exists', async () => {
+    vi.mocked(getStreamerById).mockResolvedValueOnce(null);
+    await expect(fetchValidEventSubToken(7)).resolves.toBeNull();
+    expect(getValidToken).not.toHaveBeenCalled();
   });
 });

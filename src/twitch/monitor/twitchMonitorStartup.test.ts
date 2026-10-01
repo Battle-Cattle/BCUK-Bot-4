@@ -177,6 +177,15 @@ describe('handleLiveStreamerOnStartup', () => {
     await handleLiveStreamerOnStartup(new Map(), makeStreamer({ discord_message_id: 'msg1', discord_channel_id: 'ch1' }), makeStream(), new Set());
     expect(postAnnouncement).not.toHaveBeenCalled();
   });
+
+  it('still tracks the stored message as live when tryEditStartupMessage throws, so later polls edit it instead of reposting', async () => {
+    const channel = { isTextBased: () => true, messages: { fetch: vi.fn().mockRejectedValue(new Error('network')) } };
+    vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: vi.fn().mockResolvedValue(channel) } } as any);
+    vi.mocked(isDiscordNotFoundError).mockReturnValue(false);
+    const liveStates = new Map<string, LiveState>();
+    await handleLiveStreamerOnStartup(liveStates, makeStreamer({ id: 42, discord_message_id: 'msg1', discord_channel_id: 'ch1' }), makeStream(), new Set());
+    expect(liveStates.get('42')).toEqual(expect.objectContaining({ messageId: 'msg1', channelId: 'ch1' }));
+  });
 });
 
 // ─── handleOfflineStreamerOnStartup ───────────────────────────────────────────
