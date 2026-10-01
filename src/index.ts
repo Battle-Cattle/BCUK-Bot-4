@@ -5,7 +5,7 @@ import { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatc
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startChannelReconciliationPoll, stopChannelReconciliationPoll } from './twitch/twitchChannelReconciliationPoll';
-import { startDiscordBot, stopDiscordBot, getDiscordClient, onceDiscordReady } from './discord/discordBot';
+import { startDiscordBot, stopDiscordBot, onceDiscordReady, sendDiscordDirectMessageWhenReady } from './discord/discordBot';
 import { reloadGuildRegistry } from './discord/guildRegistry';
 import { resolveGuildIdForDiscordId } from './discord/voicePresence';
 import { registerTwitchGuildResolutionRuntime } from './twitch/twitchGuildResolutionRuntime';
@@ -41,13 +41,13 @@ const log = createLogger('Bot');
 const DB_HEALTH_CHECK_INTERVAL_MS = 60_000;
 
 /**
- * How long `main()` waits for Discord to fire `clientReady` before giving up on sending the
- * `announceStartup()` DM. `startDiscordBot()` is fire-and-forget — `getDiscordClient()` stays
+ * How long an owner-alert DM (including `main()`'s `announceStartup()` DM) waits for Discord to
+ * fire `clientReady` before giving up. `startDiscordBot()` is fire-and-forget — `getDiscordClient()` stays
  * null until `clientReady` fires, which can still be pending by the time `main()` reaches its
  * last line — so `announceStartup()` needs to wait for it explicitly rather than finding no
  * client and silently failing to deliver (see `discordBot.ts`'s `onceDiscordReady`).
  */
-const DISCORD_READY_FOR_STARTUP_DM_TIMEOUT_MS = 30_000;
+const DISCORD_READY_FOR_OWNER_DM_TIMEOUT_MS = 30_000;
 
 let dbHealthCheckTimer: ReturnType<typeof setInterval> | null = null;
 // Guards against overlapping probes: pingDb()'s getConnection() has no timeout of its own, so
@@ -164,7 +164,7 @@ process.on('uncaughtException', (err) => {
  * schedulers, in that order (see the Startup Sequence section of `CLAUDE.md`), finishing with
  * an owner DM (see `ownerAlerts.ts`'s `announceStartup`) confirming the bot is back online —
  * paired with `shutdown()`'s `announceShutdown` DM. Waits (up to
- * {@link DISCORD_READY_FOR_STARTUP_DM_TIMEOUT_MS}) for Discord to actually be ready before that
+ * {@link DISCORD_READY_FOR_OWNER_DM_TIMEOUT_MS}) for Discord to actually be ready before that
  * DM, since `startDiscordBot()` itself doesn't block on it.
  * @returns Resolves once every component has started; rejects (and exits the process,
  *   via the `.catch` below) if DB connectivity, the `redemption_handled` migration check, or the
@@ -234,12 +234,9 @@ async function main(): Promise<void> {
   setChannelJoinedHook(() => reloadEventSubSubscriptions());
   startDiscordBot();
   registerOwnerAlertRuntime({
-    send: async (discordId, message) => {
-      const client = getDiscordClient();
-      if (!client) throw new Error('Discord client is not ready');
-      const user = await client.users.fetch(discordId);
-      await user.send(message);
-    },
+    // Alerts can fire before Discord finishes connecting (e.g. startTwitchBot() reporting a
+    // missing bot token), so wait for clientReady rather than dropping them.
+    send: (discordId, message) => sendDiscordDirectMessageWhenReady(discordId, message, DISCORD_READY_FOR_OWNER_DM_TIMEOUT_MS),
   });
   await primeOwnerAlertBaseline();
   startOwnerAlertWatcher();
@@ -256,7 +253,7 @@ async function main(): Promise<void> {
   startEventSubReconciliation();
 
   try {
-    await withTimeout(onceDiscordReady(), DISCORD_READY_FOR_STARTUP_DM_TIMEOUT_MS, 'Discord ready for startup DM');
+    await withTimeout(onceDiscordReady(), DISCORD_READY_FOR_OWNER_DM_TIMEOUT_MS, 'Discord ready for startup DM');
     await announceStartup();
   } catch (err) {
     log.error('Discord never became ready — skipping the "back online" owner DM:', err);

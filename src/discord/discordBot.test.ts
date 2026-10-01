@@ -240,6 +240,49 @@ describe('sendDiscordDirectMessage', () => {
   });
 });
 
+// ─── sendDiscordDirectMessageWhenReady ────────────────────────────────────────
+
+describe('sendDiscordDirectMessageWhenReady', () => {
+  it('waits for clientReady before sending a DM requested during startup', async () => {
+    const send = vi.fn().mockResolvedValue({});
+    mockInstance.users.fetch.mockResolvedValueOnce({ send });
+    mod.startDiscordBot();
+
+    const pending = mod.sendDiscordDirectMessageWhenReady('owner1', 'alert', 30_000);
+    await flushMicrotasks();
+    expect(send).not.toHaveBeenCalled();
+
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+    await pending;
+
+    expect(mockInstance.users.fetch).toHaveBeenCalledWith('owner1');
+    expect(send).toHaveBeenCalledWith('alert');
+  });
+
+  it('rejects if the client never becomes ready within the timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      mod.startDiscordBot();
+      const pending = mod.sendDiscordDirectMessageWhenReady('owner1', 'alert', 1_000);
+      const assertion = expect(pending).rejects.toThrow('timed out');
+      await vi.advanceTimersByTimeAsync(1_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('propagates a refused DM as a rejection', async () => {
+    mockInstance.users.fetch.mockResolvedValueOnce({ send: vi.fn().mockRejectedValue(new Error('Cannot send messages to this user')) });
+    mod.startDiscordBot();
+    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
+    await readyCb(mockInstance);
+
+    await expect(mod.sendDiscordDirectMessageWhenReady('owner1', 'alert', 30_000)).rejects.toThrow('Cannot send messages');
+  });
+});
+
 // ─── startDiscordBot — messageCreate handler ──────────────────────────────────
 
 describe('startDiscordBot — messageCreate handler', () => {

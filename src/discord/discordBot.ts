@@ -14,6 +14,7 @@ import { sendOwnerAlert } from './ownerAlerts';
 import { upsertGuild, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
 import { runUserMutation } from '../web/routes/adminUserMutationQueue';
 import { createLogger } from '../shared/logger';
+import { withTimeout } from '../shared/withTimeout';
 import { getDiscordClient, setDiscordClient } from './discordClientStore';
 
 const log = createLogger('Discord');
@@ -304,6 +305,25 @@ export async function sendDiscordDirectMessage(discordId: string, content: strin
     log.warn(`Failed to send Discord DM to ${discordId}:`, err);
     return false;
   }
+}
+
+/**
+ * Sends a direct message from the bot to a user, first waiting (up to `readyTimeoutMs`) for the
+ * Discord client to fire `clientReady` if it hasn't yet. Used for owner alerts, which can be
+ * raised during startup (e.g. Twitch reporting a missing bot token) before Discord has finished
+ * connecting — without the wait those alerts would fail with "client is not ready" and be lost.
+ * @param discordId - Discord user ID to message.
+ * @param content - Message text.
+ * @param readyTimeoutMs - How long to wait for the client to become ready before giving up.
+ * @returns Resolves once the DM has been sent; rejects if the client doesn't become ready in
+ *   time or Discord refuses the DM.
+ */
+export async function sendDiscordDirectMessageWhenReady(discordId: string, content: string, readyTimeoutMs: number): Promise<void> {
+  await withTimeout(onceDiscordReady(), readyTimeoutMs, 'Discord ready for DM');
+  const client = getDiscordClient();
+  if (!client) throw new Error('Discord client is not ready');
+  const user = await client.users.fetch(discordId);
+  await user.send(content);
 }
 
 /**
