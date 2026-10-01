@@ -17,8 +17,9 @@ vi.mock('./commandStringUtils', () => ({
 }));
 
 import { getPool } from './pool';
-import { isDeadlockError, getCommandWriteLockName, acquireNamedLock, isAnyCommandTakenAcrossTables, runSerializedCommandWrite, commandExists, MAX_DEADLOCK_RETRIES } from './commandLocks';
+import { isDeadlockError, getCommandWriteLockName, acquireNamedLock, releaseNamedLock, isAnyCommandTakenAcrossTables, runSerializedCommandWrite, commandExists, MAX_DEADLOCK_RETRIES } from './commandLocks';
 import { CommandConflictError } from './commandStringUtils';
+import { makeMockConnection } from '../test-utils/mockMysqlPool';
 
 describe('isDeadlockError', () => {
   it('returns true when code is ER_LOCK_DEADLOCK', () => {
@@ -131,6 +132,22 @@ describe('acquireNamedLock', () => {
 });
 
 // ─── isAnyCommandTakenAcrossTables ────────────────────────────────────────────
+
+describe('releaseNamedLock', () => {
+  it('runs RELEASE_LOCK and leaves the connection alive on success', async () => {
+    const conn = makeMockConnection();
+    await expect(releaseNamedLock(conn as any, 'lock_a')).resolves.toBeUndefined();
+    expect(conn.execute).toHaveBeenCalledWith('SELECT RELEASE_LOCK(?)', ['lock_a']);
+    expect(conn.destroy).not.toHaveBeenCalled();
+  });
+
+  it('destroys the connection (instead of letting it go back to the pool) when RELEASE_LOCK fails', async () => {
+    const conn = makeMockConnection({ execute: vi.fn().mockRejectedValue(new Error('connection lost')) });
+    await expect(releaseNamedLock(conn as any, 'lock_a')).resolves.toBeUndefined();
+    expect(conn.destroy).toHaveBeenCalledOnce();
+    expect(conn.release).not.toHaveBeenCalled();
+  });
+});
 
 describe('isAnyCommandTakenAcrossTables', () => {
   beforeEach(() => {
@@ -364,6 +381,20 @@ describe('runSerializedCommandWrite', () => {
     await expect(runSerializedCommandWrite('!test', undefined, writeOp)).rejects.toThrow('Duplicate entry');
     expect(writeOp).toHaveBeenCalledOnce();
     expect(conn.release).toHaveBeenCalled();
+  });
+
+  it('destroys rather than releases the connection when RELEASE_LOCK fails', async () => {
+    const conn = { ...makeSerializedWriteConnection(), destroy: vi.fn() };
+    const baseExecute = conn.execute.getMockImplementation()!;
+    conn.execute.mockImplementation(async (sql: string) => {
+      if (sql.startsWith('SELECT RELEASE_LOCK')) throw new Error('connection lost');
+      return baseExecute(sql);
+    });
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    await expect(runSerializedCommandWrite('!test', undefined, vi.fn().mockResolvedValue('ok'))).resolves.toBe('ok');
+    expect(conn.destroy).toHaveBeenCalledOnce();
+    expect(conn.release).not.toHaveBeenCalled();
   });
 
   it('releases connection even when acquireNamedLock throws', async () => {

@@ -13,6 +13,12 @@ let dbShutdownRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let awaitingDbRecovery = false;
 let tickRunning = false;
 let currentTickPromise: Promise<void> = Promise.resolve();
+/**
+ * Set by `stopRewardPricingScheduler` (cleared by `startRewardPricingScheduler`) so an in-flight
+ * tick that finishes after stop — e.g. a DB-recovery probe that succeeds — can't restart the
+ * interval or schedule another probe behind the shutdown's back.
+ */
+let schedulerStopped = false;
 
 /** True if `error` is MySQL's `ER_SERVER_SHUTDOWN` (errno 1053) — the DB server itself is restarting/shutting down. */
 function isServerShutdownError(error: unknown): boolean {
@@ -23,10 +29,10 @@ function isServerShutdownError(error: unknown): boolean {
 /**
  * Starts (or no-ops if already running) the interval that fires `runDecayTick` on a fixed
  * cadence. Shared by `startRewardPricingScheduler` and DB-shutdown recovery so both paths
- * track the same `tickTimer` handle.
+ * track the same `tickTimer` handle. No-ops once the scheduler has been stopped.
  */
 function startTickTimer(): void {
-  if (tickTimer) return;
+  if (tickTimer || schedulerStopped) return;
   /** Interval callback: fires a decay tick and logs (rather than throws) if the returned promise ever rejects. */
   tickTimer = setInterval(() => {
     runDecayTick().catch((err: unknown) => log.error('Decay tick error:', err));
@@ -39,12 +45,13 @@ function startTickTimer(): void {
  * shutting down, so the scheduler stops hammering it every 30s and instead waits for it to
  * come back. No-ops if a probe is already pending. `runDecayTick` resumes normal polling
  * (via `resumeAfterDbRecovery`) once it manages to fetch rows again, whether that happens
- * on the scheduled probe or an externally-triggered call.
+ * on the scheduled probe or an externally-triggered call. Never schedules a probe once the
+ * scheduler has been stopped.
  */
 function pauseForDbShutdown(): void {
   awaitingDbRecovery = true;
   if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
-  if (dbShutdownRetryTimer) return;
+  if (dbShutdownRetryTimer || schedulerStopped) return;
   /** Probe callback: retries the tick once; `runDecayTick` reschedules another probe itself if it's still failing while `awaitingDbRecovery` is true. */
   dbShutdownRetryTimer = setTimeout(() => {
     dbShutdownRetryTimer = null;
@@ -129,15 +136,18 @@ export async function runDecayTick(): Promise<void> {
  * No-ops if already started, so a second call can't leak the original interval handle.
  */
 export function startRewardPricingScheduler(): void {
+  schedulerStopped = false;
   startTickTimer();
   log.info(`Started — decay tick every ${DECAY_POLL_INTERVAL_MS / 1000}s`);
 }
 
 /**
  * Stops the periodic decay-tick interval (and any pending DB-shutdown recovery probe) and
- * awaits any in-flight tick before returning.
+ * awaits any in-flight tick before returning. Marks the scheduler stopped first, so that in-flight
+ * tick can't restart polling (via DB-recovery resume) or schedule a new probe once it settles.
  */
 export async function stopRewardPricingScheduler(): Promise<void> {
+  schedulerStopped = true;
   if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
   await currentTickPromise;
   if (dbShutdownRetryTimer) { clearTimeout(dbShutdownRetryTimer); dbShutdownRetryTimer = null; }

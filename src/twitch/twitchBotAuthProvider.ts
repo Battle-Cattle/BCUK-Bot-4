@@ -139,6 +139,42 @@ async function rebuildAfterTransientRefreshFailure(userId: string, connectionId:
 }
 
 /**
+ * Body of {@link buildBotAuthProvider}'s `onRefreshFailure` listener: on a transient failure,
+ * rebuilds the connection (see {@link rebuildAfterTransientRefreshFailure}); on a confirmed
+ * invalid/revoked refresh token, clears the stored token (if this connection still owns it),
+ * restarts chat, and alerts the owner. May reject on a DB error — the listener catches it.
+ * @param userId - The Twitch user ID the failure fired for.
+ * @param error - The refresh error Twurple reported.
+ * @param connectionId - The `connection_id` the provider was built for.
+ * @param restart - `restartTwitchBot`, injected by the caller.
+ */
+async function handleRefreshFailure(userId: string, error: Error, connectionId: number, restart: () => Promise<void>): Promise<void> {
+  log.error(`Failed to refresh chat token for ${userId}: ${error.message}`);
+  if (!isInvalidRefreshTokenError(error)) {
+    await rebuildAfterTransientRefreshFailure(userId, connectionId, restart);
+    return;
+  }
+  const cleared = await clearBotChatTokenIfOwnedBy(connectionId);
+  if (!cleared) {
+    log.warn(`Not clearing the stored token for ${userId} — a reconnect replaced this connection first.`);
+    return;
+  }
+  // Disconnect the now-credential-less chat session immediately rather than leaving it running
+  // on its last-known (still-live-for-now) access token until Twitch eventually rejects it —
+  // restart() is used (not a bare stop) so this serializes against a concurrent /admin/bot-auth
+  // reconnect instead of racing it: if a newer connection has already been saved by the time
+  // this runs, it just reconnects with that current token instead of leaving chat down. Failure
+  // here is logged but never suppresses the owner alert below — the DB is already cleared
+  // either way, so the owner must be told.
+  try {
+    await restart();
+  } catch (restartErr) {
+    log.error(`Failed to disconnect the chat client after clearing ${userId}'s revoked token:`, restartErr);
+  }
+  void sendOwnerAlert(`🔴 Twitch chat bot's token was revoked/expired and could not refresh. Reconnect it at ${BOT_AUTH_CONNECT_URL}`);
+}
+
+/**
  * Builds a `RefreshingAuthProvider` seeded with the bot's own stored chat token, wired to
  * persist a refreshed token back to the DB (`onRefresh`) and, on a refresh failure that looks
  * like a genuinely invalid/revoked refresh token (see {@link isInvalidRefreshTokenError}), to
@@ -157,7 +193,8 @@ async function rebuildAfterTransientRefreshFailure(userId: string, connectionId:
  * reconnect but completes after it finds `connection_id` already bumped past that value and is
  * dropped as a no-op instead of clobbering the newer connection's token. Keyed on `connection_id`
  * rather than the Twitch user ID specifically so a reconnect to the *same* account is covered
- * too, not just a reconnect to a different one — see the discussion on PR #666.
+ * too, not just a reconnect to a different one — see the discussion on PR #666. Both callbacks
+ * catch and log their own errors, since Twurple drops the promise a listener returns.
  * @param stored - The bot's decrypted chat token, as loaded from the DB.
  * @param restart - `twitchBot.ts`'s `restartTwitchBot`, injected by the caller rather than
  *   imported directly — this module builds the auth provider `twitchBot.ts` uses, so importing
@@ -168,35 +205,27 @@ export function buildBotAuthProvider(stored: BotChatToken, restart: () => Promis
   const authProvider = new RefreshingAuthProvider({ clientId: TWITCH_CLIENT_ID, clientSecret: TWITCH_CLIENT_SECRET });
   const { connectionId } = stored;
 
+  // Twurple's event emitter calls these listeners synchronously and drops the returned promise, so
+  // any rejection escaping them (a DB error in the save/clear, or getBotChatToken inside the
+  // rebuild loop) would surface as an unhandledRejection and exit the process. Each listener
+  // therefore catches and logs everything itself.
+  /** Persists a refreshed token for this connection; never rejects (see above). */
   authProvider.onRefresh(async (userId, newToken) => {
-    const expiryMs = newToken.expiresIn != null ? Date.now() + newToken.expiresIn * 1000 - 60_000 : null;
-    const saved = await saveBotChatTokenIfOwnedBy(connectionId, newToken.accessToken, newToken.refreshToken!, expiryMs);
-    if (!saved) log.warn(`Dropped a refreshed token for ${userId} — a reconnect replaced this connection first.`);
-  });
-  authProvider.onRefreshFailure(async (userId, error) => {
-    log.error(`Failed to refresh chat token for ${userId}: ${error.message}`);
-    if (!isInvalidRefreshTokenError(error)) {
-      await rebuildAfterTransientRefreshFailure(userId, connectionId, restart);
-      return;
-    }
-    const cleared = await clearBotChatTokenIfOwnedBy(connectionId);
-    if (!cleared) {
-      log.warn(`Not clearing the stored token for ${userId} — a reconnect replaced this connection first.`);
-      return;
-    }
-    // Disconnect the now-credential-less chat session immediately rather than leaving it running
-    // on its last-known (still-live-for-now) access token until Twitch eventually rejects it —
-    // restart() is used (not a bare stop) so this serializes against a concurrent /admin/bot-auth
-    // reconnect instead of racing it: if a newer connection has already been saved by the time
-    // this runs, it just reconnects with that current token instead of leaving chat down. Failure
-    // here is logged but never suppresses the owner alert below — the DB is already cleared
-    // either way, so the owner must be told.
     try {
-      await restart();
-    } catch (restartErr) {
-      log.error(`Failed to disconnect the chat client after clearing ${userId}'s revoked token:`, restartErr);
+      const expiryMs = newToken.expiresIn != null ? Date.now() + newToken.expiresIn * 1000 - 60_000 : null;
+      const saved = await saveBotChatTokenIfOwnedBy(connectionId, newToken.accessToken, newToken.refreshToken!, expiryMs);
+      if (!saved) log.warn(`Dropped a refreshed token for ${userId} — a reconnect replaced this connection first.`);
+    } catch (err) {
+      log.error(`Failed to persist the refreshed chat token for ${userId}:`, err);
     }
-    void sendOwnerAlert(`🔴 Twitch chat bot's token was revoked/expired and could not refresh. Reconnect it at ${BOT_AUTH_CONNECT_URL}`);
+  });
+  /** Handles a refresh failure (rebuild on transient, clear + restart + alert on revoked); never rejects (see above). */
+  authProvider.onRefreshFailure(async (userId, error) => {
+    try {
+      await handleRefreshFailure(userId, error, connectionId, restart);
+    } catch (err) {
+      log.error(`Failed to handle the chat token refresh failure for ${userId}:`, err);
+    }
   });
 
   const now = Date.now();
