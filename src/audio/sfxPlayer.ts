@@ -36,7 +36,8 @@ function getRealSfxRoot(): string {
 
 /**
  * Play a local sound file into the given guild's connected voice channel.
- * Throws if that guild isn't connected or the file does not exist.
+ * Throws if that guild isn't connected (checked both before and after resolving the
+ * file) or the file does not exist.
  *
  * @param filePath - Sound file path, relative to the SFX folder.
  * @param guildId - Guild whose voice connection to play the file into.
@@ -69,6 +70,13 @@ export async function playFile(filePath: string, guildId: string): Promise<void>
   const fileStats = await fs.promises.stat(resolved);
   if (!fileStats.isFile()) {
     throw new Error(`Sound path is not a file: ${resolved}`);
+  }
+
+  // Re-check after the realpath/stat awaits: the guild may have disconnected (or been
+  // forgotten) meanwhile, and startPlayback would otherwise recreate its state and play
+  // into a player no connection is subscribed to.
+  if (!isConnected(guildId)) {
+    throw new VoiceNotConnectedError();
   }
 
   startPlayback(createAudioResource(resolved), guildId);

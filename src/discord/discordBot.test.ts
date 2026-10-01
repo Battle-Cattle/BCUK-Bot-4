@@ -922,6 +922,27 @@ describe('startDiscordBot — login failure reconnect backoff', () => {
     expect(mockInstance.login).toHaveBeenCalledTimes(4);
   });
 
+  it('does not let the stall watchdog cut short a pending login backoff longer than the stall threshold', async () => {
+    const ownerAlerts = await import('./ownerAlerts.js');
+    mockInstance.login.mockRejectedValue(new Error('still down'));
+    mod.startDiscordBot();
+    await flushMicrotasks();
+
+    // Attempts at 0, 5s, 15s, 35s, 75s, 155s; the next backoff is 160s (retry at 315s).
+    await vi.advanceTimersByTimeAsync(155_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(6);
+
+    // Well past the 120s stall threshold since the last attempt, but the backoff is still pending.
+    await vi.advanceTimersByTimeAsync(159_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(6);
+    expect(mockLog.error).not.toHaveBeenCalledWith(expect.stringContaining('reconnect loop appears stuck'));
+    expect(vi.mocked(ownerAlerts.sendOwnerAlert)).not.toHaveBeenCalledWith(expect.stringContaining('reconnect appears stuck'));
+
+    // The backoff retry itself still fires on schedule.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(mockInstance.login).toHaveBeenCalledTimes(7);
+  });
+
   it('does not stack a second pending retry when two login failures happen in quick succession', async () => {
     // Two failures back-to-back (e.g. two shardDisconnect events) must not schedule two
     // independent timers — that would double the reconnect attempts once both fire.
