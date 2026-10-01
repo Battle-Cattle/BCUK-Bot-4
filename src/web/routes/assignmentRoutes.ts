@@ -1,8 +1,9 @@
 import { Router, type Request, type Response } from 'express';
 import type { Logger } from 'winston';
-import { AccessLevel, findUser } from '../../db';
+import { AccessLevel, findUser, getMemberAccessLevel } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext, requireMod } from '../middleware';
+import { getCurrentGuildId } from '../session';
 import { normalizeDiscordId } from './validation';
 import { logAndRedirectError } from './errorHandling';
 
@@ -49,13 +50,14 @@ function readAssignmentFields(req: Request, idField: string): AssignmentRequestF
 }
 
 /**
- * POST `{basePath}/assign` handler — assigns a Twitch-linked Discord user to the entity
- * identified by `idField`.
+ * POST `{basePath}/assign` handler — assigns a Twitch-linked Discord user who is a member of the
+ * session's current guild to the entity identified by `idField`.
  * @param req - Express request; reads `idField` and `discord_id` from `req.body`.
  * @param res - Express response; redirects to `basePath` on success, or to
  *   `basePath?error=<code>` if fields are missing (`missing_fields`), IDs are malformed
  *   (`invalid_id`), the user doesn't exist or has no linked Twitch name
- *   (`invalid_assignment_user`), `mapAssignError` maps a thrown error to a specific code, or the
+ *   (`invalid_assignment_user`), the user isn't a member of the current guild
+ *   (`assignee_not_in_guild`), `mapAssignError` maps a thrown error to a specific code, or the
  *   assignment write fails for any other reason (`assign_failed`).
  * @param options - See {@link AssignmentRouterOptions}.
  */
@@ -79,6 +81,11 @@ async function handleAssign<TId>(req: Request, res: Response, options: Assignmen
     const user = await findUser(normalizedDiscordId);
     if (!user || !user.twitch_name) {
       res.redirect(`${basePath}?error=invalid_assignment_user`);
+      return;
+    }
+    // A Mod may only assign members of the guild they're managing, not streamers elsewhere.
+    if (await getMemberAccessLevel(getCurrentGuildId(req), normalizedDiscordId) === null) {
+      res.redirect(`${basePath}?error=assignee_not_in_guild`);
       return;
     }
 
