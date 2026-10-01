@@ -53,6 +53,7 @@ import { ensureSessionCsrfToken } from './csrf';
 import { renderView } from './routes/viewHelpers';
 import {
   authLimiter,
+  streamdeckAuthFailureLimiter,
   ipKey,
   generalLimiterSkip,
   sessionLimiterKey,
@@ -204,7 +205,9 @@ app.use('/auth', authRouter);
 app.use('/auth', eventsubCallbackRouter);
 // Bot chat OAuth callback — same reasoning, Twitch redirects here without session (see #550).
 app.use('/auth', botAuthCallbackRouter);
-app.use('/api/streamdeck', streamdeckLimiter, streamdeckRouter);
+// streamdeckAuthFailureLimiter (IP-keyed, counts only 401s) runs first: the token-keyed
+// streamdeckLimiter alone gives every random unverified token its own fresh bucket.
+app.use('/api/streamdeck', streamdeckAuthFailureLimiter, streamdeckLimiter, streamdeckRouter);
 app.use('/', sfxPublicRouter);
 app.use('/', privacyRouter);
 app.use('/', tosRouter);

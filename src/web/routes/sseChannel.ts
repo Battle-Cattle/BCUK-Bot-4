@@ -1,7 +1,12 @@
 import type { Request, Response, NextFunction } from 'express';
 import { SSE_MAX_TOTAL_CONNECTIONS } from '../../shared/config';
-import { getStreamerByDiscordId, type DbStreamerEventSub } from '../../db';
+import {
+  getStreamerByDiscordId, getAllStreamersWithGroups, createManagedLookupCache,
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS, DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
+  type DbStreamerEventSub, type RefreshingLookupCache,
+} from '../../db';
 import { getSessionUser } from '../session';
+import { ipKey } from '../rateLimits';
 import type { createLogger } from '../../shared/logger';
 
 const KEEPALIVE_INTERVAL_MS = 25_000;
@@ -11,6 +16,99 @@ const KEEPALIVE_INTERVAL_MS = 25_000;
 // this, an unauthenticated caller could exhaust sockets/timers/memory by opening connections under
 // many distinct regex-valid-but-unregistered keys, each well under its own per-key cap.
 let totalConnections = 0;
+
+/**
+ * A sub-pool of the process-wide cap with its own total and per-IP limits, for SSE endpoints
+ * that anyone can open without authenticating (the OBS browser-source overlays). Keeps those
+ * callers from consuming the slots the authenticated streams (companion, dashboard, health,
+ * settings status) rely on, and stops a single IP from taking the whole sub-pool.
+ */
+export interface SseConnectionPool {
+  /** Maximum concurrent connections across the whole pool. */
+  readonly maxConnections: number;
+  /** Maximum concurrent connections in the pool from any one client IP (see `ipKey`). */
+  readonly maxPerIp: number;
+  /** Current number of connections attached under this pool. */
+  count: number;
+  /** Current connection count per client IP key; entries are deleted when they reach zero. */
+  readonly byIp: Map<string, number>;
+}
+
+/**
+ * Creates an empty {@link SseConnectionPool}.
+ * @param maxConnections - Pool-wide concurrent connection limit.
+ * @param maxPerIp - Per-client-IP concurrent connection limit within the pool.
+ * @returns A new pool with no connections counted.
+ */
+export function createSseConnectionPool(maxConnections: number, maxPerIp: number): SseConnectionPool {
+  return { maxConnections, maxPerIp, count: 0, byIp: new Map() };
+}
+
+/**
+ * Sub-cap for every unauthenticated overlay SSE connection (reward-video + alerts overlays
+ * combined): 40% of the process-wide cap (200 at the default 500), so the remaining slots stay
+ * available to authenticated streams even when the overlay pool is full.
+ */
+export const UNAUTH_OVERLAY_SSE_MAX_CONNECTIONS = Math.max(1, Math.floor(SSE_MAX_TOTAL_CONNECTIONS * 0.4));
+
+/**
+ * Per-IP limit within the unauthenticated overlay pool — generous enough for one streamer's OBS
+ * running several overlay/alerts browser sources (across scenes) from the same machine.
+ */
+export const UNAUTH_OVERLAY_SSE_MAX_PER_IP = 20;
+
+/** The shared pool both unauthenticated overlay SSE endpoints attach under. */
+export const unauthenticatedOverlayPool = createSseConnectionPool(
+  UNAUTH_OVERLAY_SSE_MAX_CONNECTIONS,
+  UNAUTH_OVERLAY_SSE_MAX_PER_IP,
+);
+
+/** How long the known-streamer-login set is served before a background refresh. */
+const KNOWN_LOGIN_CACHE_TTL_MS = 60_000;
+
+interface KnownStreamerLoginCache extends RefreshingLookupCache {
+  logins: Set<string>;
+}
+
+type KnownStreamerLoginLookup = ReturnType<typeof createManagedLookupCache<KnownStreamerLoginCache>>;
+
+let knownStreamerLoginCache: KnownStreamerLoginLookup | null = null;
+
+/**
+ * Lazily creates the cached set of lowercased Twitch logins belonging to registered streamers, so
+ * the unauthenticated overlay SSE routes can reject unknown logins without a DB hit per connect.
+ * Created on first use rather than at import so modules that only import this file don't build
+ * it. Stale-while-revalidate: a just-registered streamer may be 404'd until the next refresh,
+ * which the overlay's `connectSse` client recovers from on its own via its reconnect backoff.
+ * @returns The shared known-streamer-login cache.
+ */
+function getKnownStreamerLoginCache(): KnownStreamerLoginLookup {
+  knownStreamerLoginCache ??= createManagedLookupCache<KnownStreamerLoginCache>({
+    cacheName: 'known streamer login cache',
+    ttlMs: KNOWN_LOGIN_CACHE_TTL_MS,
+    refreshFailureBackoffMs: DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
+    refreshFailureMaxBackoffMs: DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
+    createEmptyCache: () => ({ loadedAt: 0, logins: new Set() }),
+    loadCache: async () => {
+      const streamers = await getAllStreamersWithGroups();
+      const logins = new Set<string>();
+      for (const s of streamers) if (s.twitch_name) logins.add(s.twitch_name.toLowerCase());
+      return { loadedAt: Date.now(), logins };
+    },
+  });
+  return knownStreamerLoginCache;
+}
+
+/**
+ * Reports whether `login` belongs to a registered streamer (any streamer row with a linked
+ * Twitch name), via a short-TTL in-memory cache.
+ * @param login - Already-lowercased Twitch login.
+ * @returns true if a registered streamer has this login.
+ */
+export async function isKnownStreamerLogin(login: string): Promise<boolean> {
+  const cache = await getKnownStreamerLoginCache().getCache();
+  return cache.logins.has(login);
+}
 
 /**
  * Maps a live SSE `Response` to its idempotent teardown (clears its keepalive interval, releases
@@ -101,6 +199,11 @@ export interface AttachSseConnectionOptions<K> {
   key: K;
   /** Maximum concurrent SSE connections permitted for this key. */
   maxPerChannel: number;
+  /**
+   * Optional sub-pool (see {@link SseConnectionPool}) whose total and per-IP limits also apply,
+   * for endpoints reachable without authentication. Omit for authenticated streams.
+   */
+  pool?: SseConnectionPool;
 }
 
 /**
@@ -116,17 +219,23 @@ export interface AttachSseConnectionOptions<K> {
  * @param res - Express response to register and stream to; also listened to for 'close'/'error'
  *   (an abrupt socket failure can fire these without `req` ever emitting 'close').
  * @param options - See {@link AttachSseConnectionOptions}.
- * @returns false if the process-wide cap (`SSE_MAX_TOTAL_CONNECTIONS`) or the key was already at
- *   `maxPerChannel` (a 429 has already been sent to `res` and the caller should stop handling the
- *   request); true once the connection is attached.
+ * @returns false if the process-wide cap (`SSE_MAX_TOTAL_CONNECTIONS`), the `pool`'s total or
+ *   per-IP limit, or the key's `maxPerChannel` was already reached (a 429 has already been sent to
+ *   `res` and the caller should stop handling the request); true once the connection is attached.
  */
 export function attachSseConnection<K>(
   req: Request,
   res: Response,
   options: AttachSseConnectionOptions<K>,
 ): boolean {
-  const { connections, key, maxPerChannel } = options;
+  const { connections, key, maxPerChannel, pool } = options;
   if (totalConnections >= SSE_MAX_TOTAL_CONNECTIONS) {
+    res.status(429).end();
+    return false;
+  }
+
+  const ip = pool ? ipKey(req) : '';
+  if (pool && (pool.count >= pool.maxConnections || (pool.byIp.get(ip) ?? 0) >= pool.maxPerIp)) {
     res.status(429).end();
     return false;
   }
@@ -141,6 +250,10 @@ export function attachSseConnection<K>(
   }
 
   totalConnections++;
+  if (pool) {
+    pool.count++;
+    pool.byIp.set(ip, (pool.byIp.get(ip) ?? 0) + 1);
+  }
 
   let cleaned = false;
   let keepalive: NodeJS.Timeout | null = null;
@@ -155,6 +268,12 @@ export function attachSseConnection<K>(
     cleaned = true;
     connectionCleanups.delete(res);
     totalConnections--;
+    if (pool) {
+      pool.count--;
+      const remaining = (pool.byIp.get(ip) ?? 1) - 1;
+      if (remaining > 0) pool.byIp.set(ip, remaining);
+      else pool.byIp.delete(ip);
+    }
     if (keepalive) clearInterval(keepalive);
     removeClient(connections, key, res);
   };
@@ -201,27 +320,52 @@ export interface SseEventsHandlerOptions {
   isValidLogin: (login: string) => string | null;
   /** Maximum concurrent SSE connections permitted per channel. */
   maxPerChannel: number;
+  /** Whether a normalized login belongs to a registered streamer. Defaults to {@link isKnownStreamerLogin}. */
+  isKnownLogin?: (login: string) => Promise<boolean>;
+  /** Unauthenticated sub-pool these connections count against. Defaults to {@link unauthenticatedOverlayPool}. */
+  pool?: SseConnectionPool;
 }
 
 /**
  * Builds a `/:login/events`-style SSE route handler, shared by the reward-video overlay and the
  * alerts overlay (each keeps its own `connections` map and push function, since those differ in
  * payload shape — this only factors out the identical connection lifecycle via
- * {@link attachSseConnection}).
+ * {@link attachSseConnection}). These endpoints are opened unauthenticated by OBS, so a login
+ * must belong to a registered streamer, and every connection counts against the shared
+ * unauthenticated `pool` (total and per-IP limits) rather than only the process-wide cap.
  * @param options - See {@link SseEventsHandlerOptions}.
- * @returns An Express route handler: on a valid, non-reserved login, upgrades the response to
- *   `text/event-stream`; replies 429 if `maxPerChannel` is exceeded; calls `next()` if the login
- *   is malformed or reserved.
+ * @returns An Express route handler: on a valid, non-reserved login of a registered streamer,
+ *   upgrades the response to `text/event-stream`; replies 404 for a well-formed login that isn't a
+ *   registered streamer, 503 if that lookup fails, 429 if `maxPerChannel` or a pool limit is
+ *   exceeded; calls `next()` if the login is malformed or reserved.
  */
 export function createSseEventsHandler(
   options: SseEventsHandlerOptions,
-): (req: Request<{ login: string }>, res: Response, next: NextFunction) => void {
-  const { connections, isValidLogin, maxPerChannel } = options;
+): (req: Request<{ login: string }>, res: Response, next: NextFunction) => Promise<void> {
+  const {
+    connections, isValidLogin, maxPerChannel,
+    isKnownLogin = isKnownStreamerLogin,
+    pool = unauthenticatedOverlayPool,
+  } = options;
 
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const key = isValidLogin(req.params.login);
     if (key === null) { next(); return; }
-    attachSseConnection(req, res, { connections, key, maxPerChannel });
+    let known: boolean;
+    try {
+      known = await isKnownLogin(key);
+    } catch {
+      res.status(503).end();
+      return;
+    }
+    if (!known) {
+      res.status(404).end();
+      return;
+    }
+    // The client may have gone away while the lookup above was awaited (a cold cache load hits
+    // the DB); attaching now would register close listeners that never fire and leak the slots.
+    if (res.closed || req.destroyed) return;
+    attachSseConnection(req, res, { connections, key, maxPerChannel, pool });
   };
 }
 

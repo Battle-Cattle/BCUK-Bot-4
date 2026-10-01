@@ -2,14 +2,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../shared/config', () => ({ SSE_MAX_TOTAL_CONNECTIONS: 10 }));
-vi.mock('../../db', () => ({ getStreamerByDiscordId: vi.fn() }));
+vi.mock('../../db', () => ({
+  getStreamerByDiscordId: vi.fn(),
+  getAllStreamersWithGroups: vi.fn(),
+  // Pass-through cache: every getCache() call reloads, so each test controls the result via the mock above.
+  createManagedLookupCache: (opts: { loadCache: () => Promise<unknown> }) => ({ getCache: () => opts.loadCache(), invalidate: () => {} }),
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS: 5000,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60000,
+}));
 vi.mock('../session', () => ({ getSessionUser: vi.fn() }));
 
 import {
   createSseEventsHandler, createLoginValidator, attachSseConnection, broadcastToChannel,
   createStreamerSseEventsHandler, createOverlayStatusEventsHandler,
+  createSseConnectionPool, isKnownStreamerLogin, unauthenticatedOverlayPool,
+  UNAUTH_OVERLAY_SSE_MAX_CONNECTIONS, UNAUTH_OVERLAY_SSE_MAX_PER_IP,
 } from './sseChannel';
-import { getStreamerByDiscordId } from '../../db';
+import { getStreamerByDiscordId, getAllStreamersWithGroups } from '../../db';
 import { getSessionUser } from '../session';
 
 const log = mockLogger() as any;
@@ -35,11 +44,12 @@ function makeRes() {
   };
 }
 
-function makeReq(login: string) {
+function makeReq(login: string, ip = '10.0.0.1') {
   const closeCbs: Array<() => void> = [];
   return {
     req: {
       params: { login },
+      ip,
       on: (event: string, cb: () => void) => {
         if (event === 'close') closeCbs.push(cb);
       },
@@ -57,8 +67,8 @@ beforeEach(() => {
 
 const isValidLogin = createLoginValidator(LOGIN_RE, RESERVED_LOGINS);
 
-function buildHandler(maxPerChannel = 10) {
-  return createSseEventsHandler({ connections, isValidLogin, maxPerChannel });
+function buildHandler(maxPerChannel = 10, pool = createSseConnectionPool(100, 100)) {
+  return createSseEventsHandler({ connections, isValidLogin, maxPerChannel, pool, isKnownLogin: async () => true });
 }
 
 describe('createLoginValidator', () => {
@@ -77,28 +87,28 @@ describe('createLoginValidator', () => {
 });
 
 describe('createSseEventsHandler', () => {
-  it('calls next() for a malformed login', () => {
+  it('calls next() for a malformed login', async () => {
     const handler = buildHandler();
     const next = vi.fn();
     const { req } = makeReq('not-valid!');
-    handler(req as any, makeRes() as any, next);
+    await handler(req as any, makeRes() as any, next);
     expect(next).toHaveBeenCalled();
   });
 
-  it('calls next() for a reserved login', () => {
+  it('calls next() for a reserved login', async () => {
     const handler = buildHandler();
     const next = vi.fn();
     const { req } = makeReq('settings');
-    handler(req as any, makeRes() as any, next);
+    await handler(req as any, makeRes() as any, next);
     expect(next).toHaveBeenCalled();
   });
 
-  it('registers the connection and sends the SSE handshake for a valid login', () => {
+  it('registers the connection and sends the SSE handshake for a valid login', async () => {
     const handler = buildHandler();
     const res = makeRes();
     const { req, triggerClose } = makeReq('freshchannel');
 
-    handler(req as any, res as any, vi.fn());
+    await handler(req as any, res as any, vi.fn());
 
     expect(connections.get('freshchannel')?.has(res as any)).toBe(true);
     expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream');
@@ -108,37 +118,37 @@ describe('createSseEventsHandler', () => {
     triggerClose();
   });
 
-  it('lowercases the login before using it as a connection key', () => {
+  it('lowercases the login before using it as a connection key', async () => {
     const handler = buildHandler();
     const res = makeRes();
     const { req, triggerClose } = makeReq('SomeChannel');
 
-    handler(req as any, res as any, vi.fn());
+    await handler(req as any, res as any, vi.fn());
 
     expect(connections.has('somechannel')).toBe(true);
     triggerClose();
   });
 
-  it('returns 429 when the per-channel connection limit is exceeded', () => {
+  it('returns 429 when the per-channel connection limit is exceeded', async () => {
     const handler = buildHandler(2);
     connections.set('full', new Set([{}, {}] as any));
     const res = makeRes();
     const { req } = makeReq('full');
 
-    handler(req as any, res as any, vi.fn());
+    await handler(req as any, res as any, vi.fn());
 
     expect(res.status).toHaveBeenCalledWith(429);
     expect(connections.get('full')?.has(res as any)).toBe(false);
   });
 
-  it('sends a ping every 25 seconds', () => {
+  it('sends a ping every 25 seconds', async () => {
     vi.useFakeTimers();
     try {
       const handler = buildHandler();
       const res = makeRes();
       const { req, triggerClose } = makeReq('pingchannel');
 
-      handler(req as any, res as any, vi.fn());
+      await handler(req as any, res as any, vi.fn());
       res.write.mockClear();
 
       vi.advanceTimersByTime(25_000);
@@ -149,14 +159,14 @@ describe('createSseEventsHandler', () => {
     }
   });
 
-  it('evicts the client and clears the interval when a ping write fails', () => {
+  it('evicts the client and clears the interval when a ping write fails', async () => {
     vi.useFakeTimers();
     try {
       const handler = buildHandler();
       const res = makeRes();
       const { req } = makeReq('brokenpipe');
 
-      handler(req as any, res as any, vi.fn());
+      await handler(req as any, res as any, vi.fn());
       res.write.mockImplementation(() => {
         throw new Error('broken pipe');
       });
@@ -169,32 +179,189 @@ describe('createSseEventsHandler', () => {
     }
   });
 
-  it('removes the client (and empty Set) when the request closes', () => {
+  it('removes the client (and empty Set) when the request closes', async () => {
     const handler = buildHandler();
     const res = makeRes();
     const { req, triggerClose } = makeReq('closingchannel');
 
-    handler(req as any, res as any, vi.fn());
+    await handler(req as any, res as any, vi.fn());
     expect(connections.get('closingchannel')?.has(res as any)).toBe(true);
 
     triggerClose();
     expect(connections.get('closingchannel')).toBeUndefined();
   });
 
-  it('removes only the closing client, keeping the channel entry when others remain', () => {
+  it('removes only the closing client, keeping the channel entry when others remain', async () => {
     const handler = buildHandler();
     const res1 = makeRes();
     const res2 = makeRes();
     const { req: req1, triggerClose: closeReq1 } = makeReq('sharedchannel');
     const { req: req2, triggerClose: closeReq2 } = makeReq('sharedchannel');
 
-    handler(req1 as any, res1 as any, vi.fn());
-    handler(req2 as any, res2 as any, vi.fn());
+    await handler(req1 as any, res1 as any, vi.fn());
+    await handler(req2 as any, res2 as any, vi.fn());
 
     closeReq1();
     expect(connections.get('sharedchannel')?.has(res1 as any)).toBe(false);
     expect(connections.get('sharedchannel')?.has(res2 as any)).toBe(true);
     closeReq2();
+  });
+});
+
+describe('createSseEventsHandler — unauthenticated overlay protections', () => {
+  it('replies 404 without attaching for a well-formed login that is not a registered streamer', async () => {
+    const pool = createSseConnectionPool(100, 100);
+    const handler = createSseEventsHandler({
+      connections, isValidLogin, maxPerChannel: 10, pool, isKnownLogin: async () => false,
+    });
+    const res = makeRes();
+    const next = vi.fn();
+    const { req } = makeReq('nobodyhere');
+
+    await handler(req as any, res as any, next);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(next).not.toHaveBeenCalled();
+    expect(connections.has('nobodyhere')).toBe(false);
+    expect(res.flushHeaders).not.toHaveBeenCalled();
+    expect(pool.count).toBe(0);
+  });
+
+  it('replies 503 when the known-login lookup fails', async () => {
+    const handler = createSseEventsHandler({
+      connections, isValidLogin, maxPerChannel: 10, pool: createSseConnectionPool(100, 100),
+      isKnownLogin: async () => { throw new Error('db down'); },
+    });
+    const res = makeRes();
+    const { req } = makeReq('somechannel');
+
+    await handler(req as any, res as any, vi.fn());
+
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(connections.has('somechannel')).toBe(false);
+  });
+
+  it('does not attach when the client disconnected while the lookup was pending', async () => {
+    const pool = createSseConnectionPool(100, 100);
+    const handler = buildHandler(10, pool);
+    const res = Object.assign(makeRes(), { closed: true });
+    const { req } = makeReq('gonechannel');
+
+    await handler(req as any, res as any, vi.fn());
+
+    expect(connections.has('gonechannel')).toBe(false);
+    expect(pool.count).toBe(0);
+  });
+
+  it('replies 429 once the unauthenticated sub-cap is reached, while an authenticated stream still attaches', async () => {
+    const pool = createSseConnectionPool(2, 100);
+    const handler = buildHandler(10, pool);
+    const closers: Array<() => void> = [];
+    for (let i = 0; i < 2; i++) {
+      const { req, triggerClose } = makeReq(`chan${i}`, `10.0.0.${i + 1}`);
+      await handler(req as any, makeRes() as any, vi.fn());
+      closers.push(triggerClose);
+    }
+
+    const overflowRes = makeRes();
+    const { req: overflowReq } = makeReq('chan9', '10.0.0.99');
+    await handler(overflowReq as any, overflowRes as any, vi.fn());
+    expect(overflowRes.status).toHaveBeenCalledWith(429);
+    expect(connections.has('chan9')).toBe(false);
+
+    const authRes = makeRes();
+    const { req: authReq, triggerClose: closeAuth } = makeReq('unused');
+    const attached = attachSseConnection(authReq as any, authRes as any, { connections, key: 'companion', maxPerChannel: 10 });
+    expect(attached).toBe(true);
+
+    closeAuth();
+    closers.forEach((close) => close());
+  });
+
+  it('replies 429 once one IP reaches the per-IP cap, while another IP still attaches', async () => {
+    const pool = createSseConnectionPool(100, 2);
+    const handler = buildHandler(10, pool);
+    const closers: Array<() => void> = [];
+    for (let i = 0; i < 2; i++) {
+      const { req, triggerClose } = makeReq('streamer', '203.0.113.5');
+      await handler(req as any, makeRes() as any, vi.fn());
+      closers.push(triggerClose);
+    }
+
+    const sameIpRes = makeRes();
+    const { req: sameIpReq } = makeReq('streamer', '203.0.113.5');
+    await handler(sameIpReq as any, sameIpRes as any, vi.fn());
+    expect(sameIpRes.status).toHaveBeenCalledWith(429);
+
+    const otherIpRes = makeRes();
+    const { req: otherIpReq, triggerClose } = makeReq('streamer', '198.51.100.7');
+    await handler(otherIpReq as any, otherIpRes as any, vi.fn());
+    expect(otherIpRes.status).not.toHaveBeenCalled();
+    expect(connections.get('streamer')?.has(otherIpRes as any)).toBe(true);
+
+    triggerClose();
+    closers.forEach((close) => close());
+  });
+
+  it('decrements the pool and per-IP counters on close, freeing the slot for a new connection', async () => {
+    const pool = createSseConnectionPool(1, 1);
+    const handler = buildHandler(10, pool);
+    const res = makeRes();
+    const { req, triggerClose } = makeReq('streamer', '203.0.113.5');
+    await handler(req as any, res as any, vi.fn());
+    expect(pool.count).toBe(1);
+    expect(pool.byIp.size).toBe(1);
+
+    triggerClose();
+    res.triggerResClose(); // idempotent: a second close event must not double-decrement
+    expect(pool.count).toBe(0);
+    expect(pool.byIp.size).toBe(0);
+
+    const res2 = makeRes();
+    const { req: req2, triggerClose: close2 } = makeReq('streamer', '203.0.113.5');
+    await handler(req2 as any, res2 as any, vi.fn());
+    expect(res2.status).not.toHaveBeenCalled();
+    expect(pool.count).toBe(1);
+    close2();
+  });
+
+  it('releases pool counters when a broadcast write fails', async () => {
+    const pool = createSseConnectionPool(100, 100);
+    const handler = buildHandler(10, pool);
+    const res = makeRes();
+    const { req } = makeReq('streamer');
+    await handler(req as any, res as any, vi.fn());
+    res.write.mockImplementation(() => { throw new Error('broken pipe'); });
+
+    broadcastToChannel(connections, 'streamer', { hi: 1 });
+
+    expect(pool.count).toBe(0);
+    expect(pool.byIp.size).toBe(0);
+  });
+
+  it('defaults to the shared unauthenticated overlay pool sized from the process-wide cap', async () => {
+    // SSE_MAX_TOTAL_CONNECTIONS is mocked to 10 at the top of this file → 40% = 4.
+    expect(UNAUTH_OVERLAY_SSE_MAX_CONNECTIONS).toBe(4);
+    expect(UNAUTH_OVERLAY_SSE_MAX_PER_IP).toBe(20);
+    expect(unauthenticatedOverlayPool.maxConnections).toBe(4);
+
+    const handler = createSseEventsHandler({ connections, isValidLogin, maxPerChannel: 10, isKnownLogin: async () => true });
+    const { req, triggerClose } = makeReq('streamer');
+    await handler(req as any, makeRes() as any, vi.fn());
+    expect(unauthenticatedOverlayPool.count).toBe(1);
+    triggerClose();
+    expect(unauthenticatedOverlayPool.count).toBe(0);
+  });
+});
+
+describe('isKnownStreamerLogin', () => {
+  it('matches registered streamer logins case-insensitively and ignores streamers without a Twitch name', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      { twitch_name: 'KnownStreamer' }, { twitch_name: null },
+    ] as any);
+
+    await expect(isKnownStreamerLogin('knownstreamer')).resolves.toBe(true);
+    await expect(isKnownStreamerLogin('someoneelse')).resolves.toBe(false);
   });
 });
 
