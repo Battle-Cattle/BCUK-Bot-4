@@ -259,7 +259,7 @@ async function maybePruneRedemptionLedger(now: number): Promise<void> {
 export function startEventSubReconciliation(): void {
   if (tickTimer) return;
   tickTimer = setInterval(() => {
-    runReconciliationTick().catch((err) => log.error('Reconciliation tick error:', err));
+    runReconciliationTick().catch((err: unknown) => log.error('Reconciliation tick error:', err));
   }, RECONCILIATION_POLL_INTERVAL_MS);
   log.info(`Started — redemption reconciliation every ${RECONCILIATION_POLL_INTERVAL_MS / 1000}s`);
 }

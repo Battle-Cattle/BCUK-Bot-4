@@ -69,7 +69,7 @@ function formatSchedulerLines(snapshot: HealthSnapshot): string[] {
     'Schedulers:',
     ...entries.map(
       ([name, health]) =>
-        `  ${name}: ${health!.lastRunOk ? '🟢 ok' : '🔴 failing'} (last run ${formatDate(health!.lastRunAt)})`,
+        `  ${name}: ${health.lastRunOk ? '🟢 ok' : '🔴 failing'} (last run ${formatDate(health.lastRunAt)})`,
     ),
   ];
 }

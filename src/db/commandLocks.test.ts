@@ -118,8 +118,7 @@ describe('acquireNamedLock', () => {
   });
 
   it('includes the lock name in the error message', async () => {
-    const error = await acquireNamedLock(makeConn('0') as any, 'bcuk_cmd_abc123').catch((e) => e);
-    expect(error.message).toContain('bcuk_cmd_abc123');
+    await expect(acquireNamedLock(makeConn('0') as any, 'bcuk_cmd_abc123')).rejects.toThrow('bcuk_cmd_abc123');
   });
 
   it('calls GET_LOCK with the lock name and timeout', async () => {

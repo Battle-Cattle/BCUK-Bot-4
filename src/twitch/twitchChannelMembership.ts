@@ -163,7 +163,7 @@ function isChannelJoined(channel: string): boolean {
 function cacheChannelUserId(channel: string): void {
   getUsers([channel])
     .then(([u]) => { if (u && activeChannels.has(channel)) activeChannelUserIds.set(channel, u.id); })
-    .catch((err) => { log.warn(`Failed to cache user ID for channel ${channel}:`, err); });
+    .catch((err: unknown) => { log.warn(`Failed to cache user ID for channel ${channel}:`, err); });
 }
 
 /**

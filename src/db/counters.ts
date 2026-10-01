@@ -162,7 +162,7 @@ export async function getCounterCount(guildId: string): Promise<number> {
   // COUNT(*) is protocol-typed BIGINT, so bigNumberStrings stringifies it — but like
   // getRowCount in utils.ts, this value is bounded by how many counters a human configures in
   // one guild's admin panel, nowhere near Number.MAX_SAFE_INTEGER, so parsing it back is safe.
-  return Number.parseInt((rows[0] as mysql.RowDataPacket).count, 10);
+  return Number.parseInt(rows[0].count, 10);
 }
 
 /**
@@ -464,7 +464,7 @@ export async function incrementCounter(id: number): Promise<number> {
     // application counter incremented one chat message at a time, nowhere near
     // Number.MAX_SAFE_INTEGER (unlike a Discord snowflake, which is why that case is never
     // parsed back this way elsewhere in this codebase).
-    return Number((rows[0] as mysql.RowDataPacket).current_value);
+    return Number(rows[0].current_value);
   });
   return newValue;
 }

@@ -124,7 +124,7 @@ export function compensateIfStale(deps: MembershipDeps, channel: string, call: P
         log.warn(`[Twitch] Stale part for ${channel} landed while it was still desired active — rejoining`);
         await throttledJoin(client, channel, (joinCall) => compensateIfStale(deps, channel, joinCall, 'join'));
       }
-    }).catch((err) => log.error(`Failed to reconcile stale ${kind} for ${channel}:`, err));
+    }).catch((err: unknown) => log.error(`Failed to reconcile stale ${kind} for ${channel}:`, err));
   }, () => {});
 }
 

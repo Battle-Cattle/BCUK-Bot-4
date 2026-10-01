@@ -53,7 +53,7 @@ async function tick(myGeneration: number): Promise<void> {
   // newer run than the one this tick belongs to).
   if (started && myGeneration === runGeneration) {
     schedulerTimer = setTimeout(
-      () => tick(myGeneration).catch((err) => log.error('Unhandled error:', err)),
+      () => tick(myGeneration).catch((err: unknown) => log.error('Unhandled error:', err)),
       POLL_INTERVAL_MS,
     );
   }
@@ -68,7 +68,7 @@ export function startCounterScheduler(): void {
   if (started) return;
   started = true;
   runGeneration += 1;
-  tick(runGeneration).catch((err) => log.error('Startup error:', err));
+  tick(runGeneration).catch((err: unknown) => log.error('Startup error:', err));
   const hoursUntil = Math.round(msUntilNextJan1() / 3_600_000);
   log.info(`Started — polling hourly, next yearly archive in ~${hoursUntil}h.`);
 }

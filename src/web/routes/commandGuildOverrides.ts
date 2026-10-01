@@ -26,7 +26,7 @@ router.post('/commands/guild-override', requireGuildContext, requireMod, csrfPro
 
   const isDisabled = body.is_disabled === '1';
   const clearOutput = body.clear_output === '1';
-  const rawOutput = trimField(Array.isArray(body.output) ? (body.output as string[])[0] : body.output as string | undefined);
+  const rawOutput = trimField(Array.isArray(body.output) ? (body.output as string[])[0] : body.output);
   const output = clearOutput || !rawOutput ? null : rawOutput;
 
   try {

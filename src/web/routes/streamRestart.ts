@@ -12,5 +12,5 @@ let restartChain: Promise<void> = Promise.resolve();
 export function triggerRestart(): void {
   restartChain = restartChain
     .then(() => restartTwitchMonitor())
-    .catch((err) => { log.error('TwitchMonitor restart error:', err); });
+    .catch((err: unknown) => { log.error('TwitchMonitor restart error:', err); });
 }

@@ -92,7 +92,7 @@ async function deleteStaleSubscriptions(
   });
   await Promise.allSettled(
     staleSubs.map((sub) =>
-      deleteEventSubSubscription(sub.id, userToken).catch((err) => {
+      deleteEventSubSubscription(sub.id, userToken).catch((err: unknown) => {
         log.error(`Failed to delete subscription ${sub.id} (${sub.type}) for uid ${uid}:`, err);
       })),
   );
