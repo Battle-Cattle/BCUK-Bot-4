@@ -9,7 +9,6 @@ import {
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
 } from './lookupCache';
 import { normalizeCommand } from './commandStringUtils';
-import { getTwitchEnabledChannels } from './users';
 import {
   getAllCustomCommandsWithAssignments,
   type DbCustomCommand,
@@ -32,7 +31,7 @@ interface CustomCommandLookupCache extends RefreshingLookupCache {
 
 interface TwitchCommandCandidate {
   command: DbCustomCommand;
-  source: 'assigned' | 'multi';
+  source: 'assigned';
   priority: number;
   owner: string;
 }
@@ -91,17 +90,6 @@ function getTwitchCommandCacheKey(channelName: string, triggerString: string): s
   }
 
   return `${normalizedChannelName}::${normalizedTriggerString}`;
-}
-
-/**
- * Normalizes a list of Twitch channel names, dropping any that fail to normalize.
- * @param activeTwitchChannels Raw Twitch channel names.
- * @returns The normalized channel names.
- */
-function normalizeActiveTwitchChannels(activeTwitchChannels: string[]): string[] {
-  return activeTwitchChannels
-    .map((channel) => normalizeTwitchChannelName(channel))
-    .filter((channel): channel is string => channel !== null);
 }
 
 /**
@@ -202,43 +190,10 @@ function registerTwitchCandidate(
 }
 
 /**
- * Registers a multi-Twitch command as a candidate on every active Twitch channel. No-ops if the
- * command isn't multi-Twitch.
- * @param context Mutable candidate map being built.
- * @param activeChannels Normalized names of currently active Twitch channels.
- * @param triggerString Normalized trigger string.
- * @param command Command to register.
- * @param isMultiTwitch Whether the command is flagged as multi-Twitch.
- */
-function registerMultiTwitchCandidates(
-  context: TwitchCandidateContext,
-  activeChannels: string[],
-  triggerString: string,
-  command: DbCustomCommand,
-  isMultiTwitch: boolean,
-): void {
-  if (!isMultiTwitch) {
-    return;
-  }
-
-  for (const activeChannel of activeChannels) {
-    const cacheKey = getTwitchCommandCacheKey(activeChannel, triggerString);
-    if (!cacheKey) {
-      continue;
-    }
-
-    registerTwitchCandidate(context, cacheKey, triggerString, activeChannel, {
-      command,
-      source: 'multi',
-      priority: 1,
-      owner: 'multi_twitch',
-    });
-  }
-}
-
-/**
  * Registers a command as a candidate on each assigned user's Twitch channel, skipping users
- * without a Twitch name or with Twitch bot disabled.
+ * without a Twitch name or with Twitch bot disabled. This is the only way a command reaches a
+ * Twitch channel, multi-Twitch ones included: a multi-Twitch command fires (and broadcasts) only
+ * on the channels of streamers it's assigned to, so a streamer can opt out by unassigning.
  * @param context Mutable candidate map being built.
  * @param assignedUsers Users the command is individually assigned to.
  * @param triggerString Normalized trigger string.
@@ -271,23 +226,20 @@ function registerAssignedTwitchCandidates(
 
 /**
  * Builds the full custom command lookup cache: indexes Discord-enabled commands by trigger,
- * resolves the winning Twitch command per channel+trigger among multi-Twitch and per-user
- * assigned candidates, and indexes per-guild overrides. Commands are processed in ascending
- * `command_id` order so collisions resolve deterministically.
+ * resolves the winning Twitch command per channel+trigger among the per-user assigned
+ * candidates (multi-Twitch commands included), and indexes per-guild overrides. Commands are
+ * processed in ascending `command_id` order so collisions resolve deterministically.
  * @param commands All custom commands with their assigned users.
- * @param activeTwitchChannels Names of currently active Twitch channels.
  * @param overrides All per-guild command overrides.
  * @returns The populated `CustomCommandLookupCache`.
  */
 function buildCustomCommandLookupCache(
   commands: DbCustomCommandWithAssignments[],
-  activeTwitchChannels: string[],
   overrides: DbGuildCommandOverride[],
 ): CustomCommandLookupCache {
   const discordByTrigger = new Map<string, DbCustomCommand>();
   const twitchCandidateByChannelAndTrigger = new Map<string, TwitchCommandCandidate>();
   const sortedCommands = [...commands].sort((left, right) => left.command_id - right.command_id);
-  const normalizedActiveTwitchChannels = normalizeActiveTwitchChannels(activeTwitchChannels);
   const twitchCandidateContext: TwitchCandidateContext = {
     candidateByCacheKey: twitchCandidateByChannelAndTrigger,
   };
@@ -311,13 +263,6 @@ function buildCustomCommandLookupCache(
     });
 
     registerDiscordCommand(discordByTrigger, normalizedTriggerString, baseCommand);
-    registerMultiTwitchCandidates(
-      twitchCandidateContext,
-      normalizedActiveTwitchChannels,
-      normalizedTriggerString,
-      baseCommand,
-      command.is_multi_twitch,
-    );
     registerAssignedTwitchCandidates(
       twitchCandidateContext,
       command.assigned_users,
@@ -348,12 +293,11 @@ const customCommandLookupCacheState = createManagedLookupCache<CustomCommandLook
   refreshFailureMaxBackoffMs: DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
   createEmptyCache: createEmptyCustomCommandLookupCache,
   loadCache: async () => {
-    const [commands, activeTwitchChannels, overrides] = await Promise.all([
+    const [commands, overrides] = await Promise.all([
       getAllCustomCommandsWithAssignments(),
-      getTwitchEnabledChannels(),
       getAllOverrides(),
     ]);
-    return buildCustomCommandLookupCache(commands, activeTwitchChannels, overrides);
+    return buildCustomCommandLookupCache(commands, overrides);
   },
 });
 

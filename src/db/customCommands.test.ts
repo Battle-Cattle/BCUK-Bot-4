@@ -44,6 +44,9 @@ vi.mock('./commandStringUtils', () => ({
     id: number;
     constructor(id: number) { super(`Command not found: ${id}`); this.id = id; }
   },
+  CommandSelfServiceDeniedError: class CommandSelfServiceDeniedError extends Error {
+    constructor(id: number) { super(`Command not self-manageable: ${id}`); }
+  },
 }));
 
 import { getPool } from './pool';
@@ -53,6 +56,9 @@ import {
   addCustomCommand,
   updateCustomCommand,
   removeCustomCommand,
+  updateOwnCustomCommand,
+  removeOwnCustomCommand,
+  discardOwnNewCustomCommand,
   assignUserToCommand,
   assignUsersToCommand,
   unassignUserFromCommand,
@@ -269,6 +275,35 @@ describe('updateCustomCommand', () => {
     vi.mocked(runSerializedCommandWrite).mockImplementation(async (_cmds, _opts, writeFn) => writeFn(conn as any));
   }
 
+  it("holds the command's id lock on its own connection around the trigger-locked write, so a concurrent assignment can't validate a stale trigger", async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const order: string[] = [];
+    vi.mocked(acquireNamedLock).mockImplementationOnce(async (_conn, name) => { order.push(`acquire:${name}`); });
+    vi.mocked(releaseNamedLock).mockImplementationOnce(async (_conn, name) => { order.push(`release:${name}`); });
+    vi.mocked(runSerializedCommandWrite).mockImplementationOnce(async () => { order.push('write'); });
+
+    await updateCustomCommand(7, '!clap', 'Clap!', false, false);
+
+    expect(order).toEqual(['acquire:bcuk_cmdid_7', 'write', 'release:bcuk_cmdid_7']);
+    expect(vi.mocked(acquireNamedLock).mock.calls[0][0]).toBe(pool._conn);
+    // The trigger-locked write reuses the id-lock connection instead of taking a second one.
+    expect(vi.mocked(runSerializedCommandWrite).mock.calls[0][1]).toMatchObject({ excludeCustomCommandId: 7, connection: pool._conn });
+    expect(pool.getConnection).toHaveBeenCalledTimes(1);
+    expect(pool._conn.release).toHaveBeenCalled();
+  });
+
+  it('releases the id lock and connection even when the write fails', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    vi.mocked(runSerializedCommandWrite).mockRejectedValueOnce(new Error('conflict'));
+
+    await expect(updateCustomCommand(7, '!clap', 'Clap!', false, false)).rejects.toThrow('conflict');
+
+    expect(releaseNamedLock).toHaveBeenCalledWith(pool._conn, 'bcuk_cmdid_7');
+    expect(pool._conn.release).toHaveBeenCalled();
+  });
+
   it('calls assertDiscordTriggerAvailable with excludeCommandId when isDiscordEnabled=true', async () => {
     const conn = makeWriteConn([[{ affectedRows: 1 }, []]]);
     setupRunSerializedCommandWrite(conn);
@@ -300,6 +335,124 @@ describe('updateCustomCommand', () => {
 });
 
 // ─── removeCustomCommand ──────────────────────────────────────────────────────
+
+const STREAMER_ID = '111111111111111111';
+const OTHER_ID = '222222222222222222';
+
+/** `SELECT … FOR UPDATE` results for the locked ownership check: the command row, then its assignment rows. */
+function ownershipRows(flags: { is_discord_enabled: number; is_multi_twitch: number } | null, assignees: string[]) {
+  return [
+    [flags ? [flags] : [], []],
+    [assignees.map((discord_id) => ({ discord_id })), []],
+  ];
+}
+
+describe('updateOwnCustomCommand', () => {
+  function setupRunSerializedCommandWrite(conn: ReturnType<typeof makeWriteConn>) {
+    vi.mocked(runSerializedCommandWrite).mockImplementation(async (_cmds, _opts, writeFn) => writeFn(conn as any));
+  }
+
+  it('locks the command and assignment rows, then writes a Twitch-only update when the streamer owns it outright', async () => {
+    const conn = makeWriteConn([...ownershipRows({ is_discord_enabled: 0, is_multi_twitch: 0 }, [STREAMER_ID]), [{ affectedRows: 1 }, []]]);
+    setupRunSerializedCommandWrite(conn);
+
+    await updateOwnCustomCommand(7, '!clap', 'Clap!', STREAMER_ID);
+
+    expect(conn.execute.mock.calls[0][0]).toMatch(/FROM custom_command WHERE command_id = \? FOR UPDATE/);
+    expect(conn.execute.mock.calls[1][0]).toMatch(/FROM twitch_user_commands WHERE command_id = \? FOR UPDATE/);
+    expect(conn.execute.mock.calls[2][0]).toContain('UPDATE custom_command');
+    expect(conn.execute.mock.calls[2][1]).toEqual(['!clap', 'Clap!', 0, 0, 7]);
+  });
+
+  it.each([
+    ['shared with another channel', { is_discord_enabled: 0, is_multi_twitch: 0 }, [STREAMER_ID, OTHER_ID]],
+    ['assigned to someone else', { is_discord_enabled: 0, is_multi_twitch: 0 }, [OTHER_ID]],
+    ['Discord-enabled', { is_discord_enabled: 1, is_multi_twitch: 0 }, [STREAMER_ID]],
+    ['multi-Twitch', { is_discord_enabled: 0, is_multi_twitch: 1 }, [STREAMER_ID]],
+  ])('throws CommandSelfServiceDeniedError without writing when the command is %s', async (_label, flags, assignees) => {
+    const conn = makeWriteConn(ownershipRows(flags, assignees));
+    setupRunSerializedCommandWrite(conn);
+
+    await expect(updateOwnCustomCommand(7, '!clap', 'Clap!', STREAMER_ID)).rejects.toThrow('Command not self-manageable: 7');
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws CommandNotFoundError when the command row is gone', async () => {
+    const conn = makeWriteConn(ownershipRows(null, []));
+    setupRunSerializedCommandWrite(conn);
+
+    await expect(updateOwnCustomCommand(7, '!clap', 'Clap!', STREAMER_ID)).rejects.toThrow('Command not found: 7');
+    expect(conn.execute).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('removeOwnCustomCommand', () => {
+  it('deletes, under the id lock and transaction, a command the streamer owns outright', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    for (const result of ownershipRows({ is_discord_enabled: 0, is_multi_twitch: 0 }, [STREAMER_ID])) {
+      conn.execute.mockResolvedValueOnce(result);
+    }
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])  // DELETE twitch_user_commands
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]);  // DELETE custom_command
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await removeOwnCustomCommand(5, STREAMER_ID);
+
+    expect(acquireNamedLock).toHaveBeenCalledWith(conn, 'bcuk_cmdid_5');
+    expect(conn.execute.mock.calls[0][0]).toContain('FOR UPDATE');
+    expect(conn.execute.mock.calls[3][0]).toContain('DELETE FROM custom_command');
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('deletes nothing and rolls back when the command is shared', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    for (const result of ownershipRows({ is_discord_enabled: 0, is_multi_twitch: 0 }, [STREAMER_ID, OTHER_ID])) {
+      conn.execute.mockResolvedValueOnce(result);
+    }
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(removeOwnCustomCommand(5, STREAMER_ID)).rejects.toThrow('Command not self-manageable: 5');
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+    expect(conn.rollback).toHaveBeenCalled();
+    expect(releaseNamedLock).toHaveBeenCalledWith(conn, 'bcuk_cmdid_5');
+  });
+});
+
+describe('discardOwnNewCustomCommand', () => {
+  it('deletes the new command when it is still unclaimed (the failed assignment left no assignees)', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    for (const result of ownershipRows({ is_discord_enabled: 0, is_multi_twitch: 0 }, [])) {
+      conn.execute.mockResolvedValueOnce(result);
+    }
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []])  // DELETE twitch_user_commands
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]);  // DELETE custom_command
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await discardOwnNewCustomCommand(5, STREAMER_ID);
+
+    expect(conn.execute.mock.calls[0][0]).toContain('FOR UPDATE');
+    expect(conn.execute.mock.calls[3][0]).toContain('DELETE FROM custom_command');
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('leaves the command alone when a Mod adopted it in the meantime', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    for (const result of ownershipRows({ is_discord_enabled: 0, is_multi_twitch: 0 }, [OTHER_ID])) {
+      conn.execute.mockResolvedValueOnce(result);
+    }
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(discardOwnNewCustomCommand(5, STREAMER_ID)).rejects.toThrow('Command not self-manageable: 5');
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+    expect(conn.rollback).toHaveBeenCalled();
+  });
+});
 
 describe('removeCustomCommand', () => {
   it('acquires lock, begins transaction, deletes assignments and command, commits', async () => {

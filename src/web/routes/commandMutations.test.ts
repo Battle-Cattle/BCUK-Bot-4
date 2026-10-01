@@ -5,6 +5,7 @@ import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 vi.mock('../../db', () => {
   class CommandConflictError extends Error {}
   class CommandNotFoundError extends Error {}
+  class CommandSelfServiceDeniedError extends Error {}
   class ReservedCommandError extends Error {}
   return {
     addCustomCommand: vi.fn().mockResolvedValue(1),
@@ -12,8 +13,13 @@ vi.mock('../../db', () => {
     removeCustomCommand: vi.fn().mockResolvedValue(undefined),
     assignUsersToCommand: vi.fn().mockResolvedValue(undefined),
     findUsersByIds: vi.fn().mockResolvedValue(new Map()),
+    findUser: vi.fn().mockResolvedValue(null),
+    updateOwnCustomCommand: vi.fn().mockResolvedValue(undefined),
+    removeOwnCustomCommand: vi.fn().mockResolvedValue(undefined),
+    discardOwnNewCustomCommand: vi.fn().mockResolvedValue(undefined),
     CommandConflictError,
     CommandNotFoundError,
+    CommandSelfServiceDeniedError,
     ReservedCommandError,
     isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
     AccessLevel: ACCESS_LEVEL_MOCK,
@@ -31,16 +37,18 @@ import supertest from 'supertest';
 import router from './commandMutations';
 import {
   addCustomCommand, updateCustomCommand, removeCustomCommand,
-  assignUsersToCommand, findUsersByIds,
+  assignUsersToCommand, findUsersByIds, findUser, updateOwnCustomCommand, removeOwnCustomCommand, discardOwnNewCustomCommand, CommandSelfServiceDeniedError,
   CommandConflictError, CommandNotFoundError, ReservedCommandError,
   isMysqlDuplicateEntryError,
 } from '../../db';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-/** Builds a supertest-ready app: the command mutations router with a urlencoded body parser (no session or render stub needed). */
-function buildApp() {
-  return buildTestApp({ router, bodyParser: 'urlencoded' });
+const MOD_SESSION_USER = { discordId: '1', discordName: 'Mod', accessLevel: ACCESS_LEVEL_MOCK.MOD };
+
+/** Builds a supertest-ready app: the command mutations router with a urlencoded body parser and a Mod session user by default. */
+function buildApp(sessionUser: unknown = MOD_SESSION_USER) {
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
 }
 
 const VALID_DISCORD_ID = '123456789012345678';
@@ -53,17 +61,21 @@ beforeEach(() => {
   vi.mocked(removeCustomCommand).mockResolvedValue(undefined);
   vi.mocked(assignUsersToCommand).mockResolvedValue(undefined);
   vi.mocked(findUsersByIds).mockResolvedValue(new Map());
+  vi.mocked(findUser).mockResolvedValue(null);
+  vi.mocked(updateOwnCustomCommand).mockResolvedValue(undefined);
+  vi.mocked(removeOwnCustomCommand).mockResolvedValue(undefined);
+  vi.mocked(discardOwnNewCustomCommand).mockResolvedValue(undefined);
   vi.mocked(isMysqlDuplicateEntryError).mockReturnValue(false);
 });
 
 // ─── POST /commands/add ───────────────────────────────────────────────────────
 
 describe('POST /commands/add', () => {
-  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+  it('runs requireGuildContext (not requireMod), so the handler sees a fresh access level and can allow streamer self-service', async () => {
     await supertest(buildApp())
       .post('/commands/add')
       .send('trigger_string=!clap&output=Clap%21');
-    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext']);
   });
 
   it('redirects to /commands on success', async () => {
@@ -203,11 +215,11 @@ describe('POST /commands/add', () => {
 // ─── POST /commands/update ────────────────────────────────────────────────────
 
 describe('POST /commands/update', () => {
-  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+  it('runs requireGuildContext (not requireMod), so the handler sees a fresh access level and can allow streamer self-service', async () => {
     await supertest(buildApp())
       .post('/commands/update')
       .send('command_id=1&trigger_string=!clap&output=Clap');
-    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext']);
   });
 
   it('redirects to /commands on success', async () => {
@@ -260,9 +272,9 @@ describe('POST /commands/update', () => {
 // ─── POST /commands/remove ────────────────────────────────────────────────────
 
 describe('POST /commands/remove', () => {
-  it('runs requireGuildContext before requireMod, so a demoted session is re-checked with a fresh access level', async () => {
+  it('runs requireGuildContext (not requireMod), so the handler sees a fresh access level and can allow streamer self-service', async () => {
     await supertest(buildApp()).post('/commands/remove').send('command_id=5');
-    expect(middlewareCallOrder).toEqual(['requireGuildContext', 'requireMod']);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext']);
   });
 
   it('redirects to /commands on success', async () => {
@@ -286,5 +298,107 @@ describe('POST /commands/remove', () => {
     vi.mocked(removeCustomCommand).mockRejectedValueOnce(new Error('DB error'));
     const res = await supertest(buildApp()).post('/commands/remove').send('command_id=5');
     expect(res.headers.location).toBe('/commands?error=remove_failed');
+  });
+});
+
+// ─── Streamer self-service (below Mod) ────────────────────────────────────────
+
+describe('streamer self-service (below Mod)', () => {
+  const STREAMER_ID = '111111111111111111';
+  const OTHER_ID = '222222222222222222';
+  const STREAMER_SESSION = { discordId: STREAMER_ID, discordName: 'Streamer', accessLevel: AccessLevel.USER };
+  const streamerApp = () => buildApp(STREAMER_SESSION);
+
+  describe('POST /commands/add', () => {
+    it('redirects to ?error=twitch_not_linked without creating anything when the streamer has no Twitch account', async () => {
+      vi.mocked(findUser).mockResolvedValue({ discord_id: STREAMER_ID, twitch_name: null } as any);
+      const res = await supertest(streamerApp()).post('/commands/add').send('trigger_string=!hi&output=hi');
+      expect(res.headers.location).toBe('/commands?error=twitch_not_linked');
+      expect(addCustomCommand).not.toHaveBeenCalled();
+    });
+
+    it('creates a Twitch-only command assigned to the streamer alone, ignoring flags and discord_ids', async () => {
+      vi.mocked(findUser).mockResolvedValue({ discord_id: STREAMER_ID, twitch_name: 'streamer' } as any);
+      vi.mocked(findUsersByIds).mockResolvedValue(new Map([[STREAMER_ID, { discord_id: STREAMER_ID, twitch_name: 'streamer' } as any]]));
+      const res = await supertest(streamerApp())
+        .post('/commands/add')
+        .send(`trigger_string=!hi&output=hi&is_discord_enabled=on&is_multi_twitch=on&discord_ids=${OTHER_ID}`);
+      expect(res.headers.location).toBe('/commands');
+      expect(addCustomCommand).toHaveBeenCalledWith('!hi', 'hi', false, false);
+      expect(findUsersByIds).toHaveBeenCalledWith([STREAMER_ID]);
+      expect(assignUsersToCommand).toHaveBeenCalledWith(1, [STREAMER_ID]);
+    });
+
+    it('cleans up with the unclaimed-only discard (not the unrestricted delete) when self-assignment fails', async () => {
+      vi.mocked(findUser).mockResolvedValue({ discord_id: STREAMER_ID, twitch_name: 'streamer' } as any);
+      vi.mocked(findUsersByIds).mockResolvedValue(new Map([[STREAMER_ID, { discord_id: STREAMER_ID, twitch_name: 'streamer' } as any]]));
+      vi.mocked(assignUsersToCommand).mockRejectedValueOnce(new Error('DB error'));
+      const res = await supertest(streamerApp()).post('/commands/add').send('trigger_string=!hi&output=hi');
+      expect(res.headers.location).toBe('/commands?error=assign_failed');
+      expect(discardOwnNewCustomCommand).toHaveBeenCalledWith(1, STREAMER_ID);
+      expect(removeCustomCommand).not.toHaveBeenCalled();
+    });
+
+    it('redirects to ?error=add_failed when the streamer lookup throws', async () => {
+      vi.mocked(findUser).mockRejectedValueOnce(new Error('DB error'));
+      const res = await supertest(streamerApp()).post('/commands/add').send('trigger_string=!hi&output=hi');
+      expect(res.headers.location).toBe('/commands?error=add_failed');
+    });
+  });
+
+  describe('POST /commands/update', () => {
+    it("updates through updateOwnCustomCommand with the streamer's ID, so ownership is checked inside the write", async () => {
+      const res = await supertest(streamerApp())
+        .post('/commands/update')
+        .send('command_id=5&trigger_string=!hey&output=hey&is_discord_enabled=on&is_multi_twitch=on');
+      expect(res.headers.location).toBe('/commands');
+      expect(updateOwnCustomCommand).toHaveBeenCalledWith(5, '!hey', 'hey', STREAMER_ID);
+      expect(updateCustomCommand).not.toHaveBeenCalled();
+    });
+
+    it('redirects to ?error=forbidden when the locked ownership check denies the update', async () => {
+      vi.mocked(updateOwnCustomCommand).mockRejectedValueOnce(new CommandSelfServiceDeniedError(5));
+      const res = await supertest(streamerApp()).post('/commands/update').send('command_id=5&trigger_string=!hey&output=hey');
+      expect(res.headers.location).toBe('/commands?error=forbidden');
+    });
+
+    it('redirects to ?error=command_not_found when the command does not exist', async () => {
+      vi.mocked(updateOwnCustomCommand).mockRejectedValueOnce(new CommandNotFoundError(5));
+      const res = await supertest(streamerApp()).post('/commands/update').send('command_id=5&trigger_string=!hey&output=hey');
+      expect(res.headers.location).toBe('/commands?error=command_not_found');
+    });
+
+    it('uses the unrestricted updateCustomCommand for a Mod', async () => {
+      await supertest(buildApp()).post('/commands/update').send('command_id=5&trigger_string=!hey&output=hey');
+      expect(updateOwnCustomCommand).not.toHaveBeenCalled();
+      expect(updateCustomCommand).toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /commands/remove', () => {
+    it("deletes through removeOwnCustomCommand with the streamer's ID", async () => {
+      const res = await supertest(streamerApp()).post('/commands/remove').send('command_id=5');
+      expect(res.headers.location).toBe('/commands');
+      expect(removeOwnCustomCommand).toHaveBeenCalledWith(5, STREAMER_ID);
+      expect(removeCustomCommand).not.toHaveBeenCalled();
+    });
+
+    it('redirects to ?error=forbidden when the locked ownership check denies the delete', async () => {
+      vi.mocked(removeOwnCustomCommand).mockRejectedValueOnce(new CommandSelfServiceDeniedError(5));
+      const res = await supertest(streamerApp()).post('/commands/remove').send('command_id=5');
+      expect(res.headers.location).toBe('/commands?error=forbidden');
+    });
+
+    it('redirects to ?error=command_not_found when the command does not exist', async () => {
+      vi.mocked(removeOwnCustomCommand).mockRejectedValueOnce(new CommandNotFoundError(5));
+      const res = await supertest(streamerApp()).post('/commands/remove').send('command_id=5');
+      expect(res.headers.location).toBe('/commands?error=command_not_found');
+    });
+
+    it('redirects to ?error=remove_failed on an unexpected error', async () => {
+      vi.mocked(removeOwnCustomCommand).mockRejectedValueOnce(new Error('DB error'));
+      const res = await supertest(streamerApp()).post('/commands/remove').send('command_id=5');
+      expect(res.headers.location).toBe('/commands?error=remove_failed');
+    });
   });
 });

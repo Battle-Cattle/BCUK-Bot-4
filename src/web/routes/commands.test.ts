@@ -5,7 +5,8 @@ const { ACCESS_LEVEL_MOCK } = vi.hoisted(() => ({
   ACCESS_LEVEL_MOCK: { USER: 0, MOD: 1, MANAGER: 2, ADMIN: 3 },
 }));
 
-vi.mock('../../db', () => {
+vi.mock('../../db', async () => {
+  const { isCommandSelfManageableBy } = await vi.importActual<typeof import('../../db/commandSelfService')>('../../db/commandSelfService');
   class CommandConflictError extends Error {}
   class CommandNotFoundError extends Error {}
   class ReservedCommandError extends Error {}
@@ -20,6 +21,7 @@ vi.mock('../../db', () => {
     assignUsersToCommand: vi.fn().mockResolvedValue(undefined),
     unassignUserFromCommand: vi.fn().mockResolvedValue(undefined),
     findUser: vi.fn().mockResolvedValue(null),
+    isCommandSelfManageableBy,
     findUsersByIds: vi.fn().mockResolvedValue(new Map()),
     upsertOverride: vi.fn().mockResolvedValue(undefined),
     removeOverride: vi.fn().mockResolvedValue(undefined),
@@ -75,7 +77,7 @@ function buildApp() {
   return buildTestApp({
     router,
     bodyParser: 'urlencoded',
-    sessionUser: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER },
+    sessionUser: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER, currentGuildId: null },
     mockRender: 'text',
   });
 }
@@ -117,7 +119,7 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER } };
+      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER } };
       next();
     });
     app.use(router);
@@ -137,7 +139,7 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER } };
+      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER } };
       next();
     });
     app.use(router);
@@ -154,7 +156,7 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER } };
+      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER } };
       next();
     });
     app.use(router);
@@ -182,7 +184,7 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER, currentGuildId: '900000000000000001' } };
+      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER, currentGuildId: '900000000000000001' } };
       next();
     });
     app.use(router);
@@ -225,7 +227,7 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discord_id: '1', discord_name: 'TestUser', access_level: AccessLevel.MANAGER } };
+      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER } };
       next();
     });
     app.use(router);
@@ -273,5 +275,78 @@ describe('commands router composition', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/commands');
     expect(vi.mocked(removeOverride)).toHaveBeenCalledWith('900000000000000001', 1);
+  });
+});
+
+// --- GET /commands as a streamer (below Mod) ---
+
+describe('GET /commands — streamer self-service view', () => {
+  const STREAMER_ID = '111111111111111111';
+  const OTHER_ID = '222222222222222222';
+
+  /** Renders GET /commands for a streamer session and returns the captured view locals. */
+  async function renderAsStreamer(): Promise<any> {
+    let capturedLocals: any;
+    const app = express();
+    app.use((_req: any, res: any, next: any) => {
+      res.render = (_view: string, locals: any) => {
+        capturedLocals = locals;
+        res.send('ok');
+      };
+      next();
+    });
+    app.use((req: any, _res: any, next: any) => {
+      req.session = { user: { discordId: STREAMER_ID, discordName: 'Streamer', accessLevel: AccessLevel.USER, currentGuildId: null } };
+      next();
+    });
+    app.use(router);
+    await supertest(app).get('/commands');
+    return capturedLocals;
+  }
+
+  beforeEach(() => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
+      { command_id: 1, trigger_string: '!mine', output: 'm', is_discord_enabled: false, is_multi_twitch: false, assigned_users: [{ discord_id: STREAMER_ID }] } as any,
+      { command_id: 2, trigger_string: '!shared', output: 's', is_discord_enabled: false, is_multi_twitch: false, assigned_users: [{ discord_id: STREAMER_ID }, { discord_id: OTHER_ID }] } as any,
+      { command_id: 3, trigger_string: '!discord', output: 'd', is_discord_enabled: true, is_multi_twitch: false, assigned_users: [{ discord_id: STREAMER_ID }] } as any,
+      { command_id: 4, trigger_string: '!theirs', output: 't', is_discord_enabled: false, is_multi_twitch: false, assigned_users: [{ discord_id: OTHER_ID }] } as any,
+    ]);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: STREAMER_ID, twitch_name: 'streamer' } as any);
+  });
+
+  it("shows only the streamer's own commands, editable only when they own them outright", async () => {
+    const locals = await renderAsStreamer();
+    expect(locals.canManageCatalog).toBe(false);
+    expect(locals.commands.map((c: any) => [c.trigger_string, c.canEdit])).toEqual([
+      ['!mine', true],
+      ['!shared', false],
+      ['!discord', false],
+    ]);
+  });
+
+  it('does not load or expose the user list for assignment', async () => {
+    const locals = await renderAsStreamer();
+    expect(getAllUsers).not.toHaveBeenCalled();
+    expect(locals.assignableUsers).toEqual([]);
+    expect(locals.commands[0].unassigned_users).toEqual([]);
+  });
+
+  it('reports whether the streamer has a linked Twitch account', async () => {
+    expect((await renderAsStreamer()).twitchLinked).toBe(true);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: STREAMER_ID, twitch_name: null } as any);
+    expect((await renderAsStreamer()).twitchLinked).toBe(false);
+  });
+
+  it('gives a Mod the full catalog, all editable', async () => {
+    let capturedLocals: any;
+    const app = buildTestApp({
+      router,
+      sessionUser: { discordId: STREAMER_ID, accessLevel: AccessLevel.MOD, currentGuildId: null },
+      mockRender: (_view, locals, res) => { capturedLocals = locals; res.send('ok'); },
+    });
+    await supertest(app).get('/commands');
+    expect(capturedLocals.canManageCatalog).toBe(true);
+    expect(capturedLocals.commands).toHaveLength(4);
+    expect(capturedLocals.commands.every((c: any) => c.canEdit)).toBe(true);
   });
 });

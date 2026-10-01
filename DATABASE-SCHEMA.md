@@ -300,7 +300,7 @@ Stores custom text commands managed through the admin panel. This is a **global 
 | `trigger_string` | `VARCHAR(255)` | Full command token including prefix; application normalizes this to lowercase |
 | `output` | `TEXT` | Response text |
 | `is_discord_enabled` | `TINYINT(1)` | Whether the command is enabled for Discord-side usage |
-| `is_multi_twitch` | `TINYINT(1)` | Whether the command is treated as a multi-Twitch broadcast command |
+| `is_multi_twitch` | `TINYINT(1)` | Whether the command is a multi-Twitch broadcast command: when triggered, its output goes to every channel in the sender's active multi-Twitch group that also has the command. Like any command, it only fires on the channels of streamers it's assigned to (`twitch_user_commands`), so a streamer opts out by unassigning |
 
 Recommended index (run once):
 

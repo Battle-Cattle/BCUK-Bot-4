@@ -34,17 +34,12 @@ vi.mock('./customCommands', () => ({
   getAllCustomCommandsWithAssignments: vi.fn(),
 }));
 
-vi.mock('./users', () => ({
-  getTwitchEnabledChannels: vi.fn(),
-}));
-
 vi.mock('./guildCommandOverrides', () => ({
   getAllOverrides: vi.fn(),
 }));
 
 import { getCustomCommandForDiscord, getCustomCommandForTwitchChannel, invalidateCustomCommandLookupCache } from './customCommandCache';
 import { getAllCustomCommandsWithAssignments } from './customCommands';
-import { getTwitchEnabledChannels } from './users';
 import { getAllOverrides } from './guildCommandOverrides';
 
 const GUILD = 'guild-1';
@@ -77,7 +72,6 @@ function makeCommand(overrides: Partial<MockCommand> = {}): MockCommand {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([]);
-  vi.mocked(getTwitchEnabledChannels).mockResolvedValue([]);
   vi.mocked(getAllOverrides).mockResolvedValue([]);
 });
 
@@ -237,47 +231,36 @@ describe('getCustomCommandForTwitchChannel', () => {
     expect(await getCustomCommandForTwitchChannel('mychan', '!clap')).toBeNull();
   });
 
-  it('finds a multi-twitch command in an active channel', async () => {
-    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['mychan']);
+  it('finds a multi-twitch command on an assigned channel', async () => {
     vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
-      makeCommand({ is_multi_twitch: true }),
+      makeCommand({
+        is_multi_twitch: true,
+        assigned_users: [{ discord_id: '111', twitch_name: 'mychan', is_twitch_bot_enabled: true }],
+      }),
     ] as any);
     const result = await getCustomCommandForTwitchChannel('mychan', '!clap');
-    expect(result).not.toBeNull();
+    expect(result?.is_multi_twitch).toBe(true);
   });
 
-  it('multi-twitch command is absent for channels not in active list', async () => {
-    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['otherchan']);
+  it('does not register a multi-twitch command on a channel it is not assigned to', async () => {
     vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
-      makeCommand({ is_multi_twitch: true }),
+      makeCommand({
+        is_multi_twitch: true,
+        assigned_users: [{ discord_id: '222', twitch_name: 'otherchan', is_twitch_bot_enabled: true }],
+      }),
+    ] as any);
+    expect(await getCustomCommandForTwitchChannel('mychan', '!clap')).toBeNull();
+    expect(await getCustomCommandForTwitchChannel('otherchan', '!clap')).not.toBeNull();
+  });
+
+  it('does not register an unassigned multi-twitch command anywhere', async () => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
+      makeCommand({ is_multi_twitch: true, assigned_users: [] }),
     ] as any);
     expect(await getCustomCommandForTwitchChannel('mychan', '!clap')).toBeNull();
   });
 
-  it('assigned (priority 2) beats multi-twitch (priority 1) for the same key', async () => {
-    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['mychan']);
-    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
-      makeCommand({
-        command_id: 1,
-        output: 'multi',
-        is_multi_twitch: true,
-        assigned_users: [],
-      }),
-      makeCommand({
-        command_id: 2,
-        output: 'assigned',
-        is_multi_twitch: false,
-        assigned_users: [
-          { discord_id: '111', twitch_name: 'mychan', is_twitch_bot_enabled: true },
-        ],
-      }),
-    ] as any);
-    const result = await getCustomCommandForTwitchChannel('mychan', '!clap');
-    expect(result?.output).toBe('assigned');
-  });
-
   it('same-priority collision: lower command_id wins', async () => {
-    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['mychan']);
     vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
       makeCommand({
         command_id: 2,

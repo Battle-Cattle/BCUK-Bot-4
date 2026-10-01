@@ -294,6 +294,23 @@ describe('runSerializedCommandWrite', () => {
     expect(result).toBe('result');
   });
 
+  it("runs on the caller's connection without taking one from the pool, and leaves releasing it to the caller", async () => {
+    const conn = makeSerializedWriteConnection();
+    const getConnection = vi.fn();
+    vi.mocked(getPool).mockReturnValue({ getConnection } as any);
+
+    const writeOp = vi.fn().mockResolvedValue('result');
+    const result = await runSerializedCommandWrite('!test', { connection: conn as any }, writeOp);
+
+    expect(result).toBe('result');
+    expect(getConnection).not.toHaveBeenCalled();
+    expect(writeOp).toHaveBeenCalledWith(conn);
+    expect(conn.commit).toHaveBeenCalledOnce();
+    // Its own trigger lock is still released; the connection itself is not.
+    expect(conn.execute.mock.calls.some((call) => String(call[0]).startsWith('SELECT RELEASE_LOCK'))).toBe(true);
+    expect(conn.release).not.toHaveBeenCalled();
+  });
+
   it('throws CommandConflictError immediately (no retry) when command is taken', async () => {
     // First exists check returns a row (trigger taken); second check not reached
     const conn = makeSerializedWriteConnection([[{ '1': 1 }], []]);
