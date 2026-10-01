@@ -100,16 +100,20 @@ export async function saveBotChatTokenIfLatestAttempt(
   if (!EVENTSUB_TOKEN_SECRET) throw new Error('EVENTSUB_TOKEN_SECRET is not configured — refusing to persist plaintext OAuth tokens');
   const storedAccess = encryptToken(accessToken, EVENTSUB_TOKEN_SECRET);
   const storedRefresh = encryptToken(refreshToken, EVENTSUB_TOKEN_SECRET);
+  // Existing-row columns must be qualified with the table name: with the `AS new_row` alias, a bare
+  // column name is ambiguous between the existing row and `new_row`, and MySQL rejects it.
+  // attempt_started_at is assigned last so every earlier IF() still compares against the old value.
+  const wins = 'twitch_bot_chat_token.attempt_started_at IS NULL OR new_row.attempt_started_at >= twitch_bot_chat_token.attempt_started_at';
   await getPool().execute(
     `INSERT INTO twitch_bot_chat_token (id, twitch_user_id, access_token, refresh_token, token_expiry, connection_id, attempt_started_at)
      VALUES (1, ?, ?, ?, ?, 1, ?) AS new_row
      ON DUPLICATE KEY UPDATE
-       twitch_user_id = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, new_row.twitch_user_id, twitch_user_id),
-       access_token   = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, new_row.access_token, access_token),
-       refresh_token  = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, new_row.refresh_token, refresh_token),
-       token_expiry   = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, new_row.token_expiry, token_expiry),
-       connection_id  = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, twitch_bot_chat_token.connection_id + 1, twitch_bot_chat_token.connection_id),
-       attempt_started_at = IF(attempt_started_at IS NULL OR new_row.attempt_started_at >= attempt_started_at, new_row.attempt_started_at, attempt_started_at)`,
+       twitch_user_id = IF(${wins}, new_row.twitch_user_id, twitch_bot_chat_token.twitch_user_id),
+       access_token   = IF(${wins}, new_row.access_token, twitch_bot_chat_token.access_token),
+       refresh_token  = IF(${wins}, new_row.refresh_token, twitch_bot_chat_token.refresh_token),
+       token_expiry   = IF(${wins}, new_row.token_expiry, twitch_bot_chat_token.token_expiry),
+       connection_id  = IF(${wins}, twitch_bot_chat_token.connection_id + 1, twitch_bot_chat_token.connection_id),
+       attempt_started_at = IF(${wins}, new_row.attempt_started_at, twitch_bot_chat_token.attempt_started_at)`,
     [twitchUserId, storedAccess, storedRefresh, expiryMs, attemptId],
   );
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(

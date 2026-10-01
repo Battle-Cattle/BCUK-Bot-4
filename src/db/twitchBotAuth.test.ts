@@ -150,6 +150,19 @@ describe('saveBotChatTokenIfLatestAttempt', () => {
     expect(sql).toContain('twitch_bot_chat_token.connection_id + 1');
   });
 
+  it('qualifies every existing-row column reference in the update clause (bare names are ambiguous with the new_row alias)', async () => {
+    const pool = makeAttemptPool(1000);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await saveBotChatTokenIfLatestAttempt(1000, 'uid', 'a', 'r', null);
+    const sql: string = pool.execute.mock.calls[0][0];
+    const updateClause = sql.slice(sql.toUpperCase().indexOf('ON DUPLICATE KEY UPDATE'));
+    for (const column of ['twitch_user_id', 'access_token', 'refresh_token', 'token_expiry', 'connection_id', 'attempt_started_at']) {
+      // Only the assignment target itself may appear unqualified (i.e. not preceded by `.`).
+      const bare = updateClause.match(new RegExp(`(?<![.\\w])${column}\\b`, 'g')) ?? [];
+      expect(bare, column).toHaveLength(1);
+    }
+  });
+
   it('returns the row\'s connection_id when this attempt won (its attempt_started_at is now stored)', async () => {
     const pool = makeAttemptPool(1000, 5);
     vi.mocked(getPool).mockReturnValue(pool as any);
