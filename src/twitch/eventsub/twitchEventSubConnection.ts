@@ -138,7 +138,7 @@ export class StreamerConnection {
     this.currentData = newData;
     this.reloadChain = this.reloadChain
       .then(() => this.doReload())
-      .catch((err) => { log.error(`[${this.name}] EventSub reload error:`, err); });
+      .catch((err: unknown) => { log.error(`[${this.name}] EventSub reload error:`, err); });
   }
 
   /**
@@ -370,14 +370,14 @@ export class StreamerConnection {
         log.info(`[${this.name}] Applying reload deferred during session migration`);
         this.reloadChain = this.reloadChain
           .then(() => this.subscribeAndHandleEmpty(session.id, 'No subscriptions after reload — disconnecting'))
-          .catch((err) => { log.error(`[${this.name}] Deferred reload error:`, err); });
+          .catch((err: unknown) => { log.error(`[${this.name}] Deferred reload error:`, err); });
       }
       return;
     }
     log.info(`[${this.name}] Session established: ${this.sessionId}`);
     this.reloadChain = this.reloadChain
       .then(() => this.subscribeAndHandleEmpty(session.id, 'No subscriptions — disconnecting'))
-      .catch((err) => { log.error(`[${this.name}] Subscribe error:`, err); });
+      .catch((err: unknown) => { log.error(`[${this.name}] Subscribe error:`, err); });
   }
 
   /**

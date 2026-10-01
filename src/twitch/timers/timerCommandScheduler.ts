@@ -167,7 +167,7 @@ export async function runTimerCommandTick(): Promise<void> {
 export function startTimerCommandScheduler(): void {
   if (tickTimer) return;
   tickTimer = setInterval(() => {
-    runTimerCommandTick().catch((err) => log.error('Timer command tick error:', err));
+    runTimerCommandTick().catch((err: unknown) => log.error('Timer command tick error:', err));
   }, TICK_INTERVAL_MS);
   log.info(`Started — timer command tick every ${TICK_INTERVAL_MS / 1000}s`);
 }

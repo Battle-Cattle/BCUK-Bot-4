@@ -181,7 +181,7 @@ function applyChannelFloor(layer1Survivors: readonly PickedRow[], now: number, l
     const floorActive = !!lastPoster && now - lastPoster.firedAt < CHANNEL_MIN_SPACING_MS;
 
     const candidatePick = floorActive
-      ? picks.find((p) => p.row.id === lastPoster!.timerId)
+      ? picks.find((p) => p.row.id === lastPoster.timerId)
       : picks.find((p) => p.row === pickLongestWaiting(picks.map((p2) => p2.row), lastFiredAtOf));
 
     for (const pick of picks) {

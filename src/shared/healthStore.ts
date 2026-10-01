@@ -253,11 +253,11 @@ export function getHealthSnapshot(): HealthSnapshot {
         lastConnectedAt: cloneDate(value.lastConnectedAt),
         lastDisconnectedAt: cloneDate(value.lastDisconnectedAt),
       }]),
-    ) as Record<string, EventSubHealth>,
+    ),
     monitor: { ...state.monitor, lastPollAt: cloneDate(state.monitor.lastPollAt) },
     schedulers: Object.fromEntries(
       Array.from(state.schedulers, ([key, value]) => [key, { ...value, lastRunAt: cloneDate(value.lastRunAt) }]),
-    ) as Partial<Record<SchedulerName, SchedulerHealth>>,
+    ),
     errors: state.errors.map((e) => ({ ...e, timestamp: cloneDate(e.timestamp) as Date })),
   };
 }

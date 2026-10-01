@@ -29,7 +29,7 @@ function startTickTimer(): void {
   if (tickTimer) return;
   /** Interval callback: fires a decay tick and logs (rather than throws) if the returned promise ever rejects. */
   tickTimer = setInterval(() => {
-    runDecayTick().catch((err) => log.error('Decay tick error:', err));
+    runDecayTick().catch((err: unknown) => log.error('Decay tick error:', err));
   }, DECAY_POLL_INTERVAL_MS);
 }
 
@@ -48,7 +48,7 @@ function pauseForDbShutdown(): void {
   /** Probe callback: retries the tick once; `runDecayTick` reschedules another probe itself if it's still failing while `awaitingDbRecovery` is true. */
   dbShutdownRetryTimer = setTimeout(() => {
     dbShutdownRetryTimer = null;
-    runDecayTick().catch((err) => log.error('Decay tick error while probing DB availability:', err));
+    runDecayTick().catch((err: unknown) => log.error('Decay tick error while probing DB availability:', err));
   }, DB_SHUTDOWN_RETRY_INTERVAL_MS);
 }
 
@@ -95,7 +95,7 @@ export async function runDecayTick(): Promise<void> {
 
       await Promise.allSettled(
         rows.map((row) =>
-          applyDecayTick(row.streamer_id, row.twitch_reward_id, settingsByStreamerId.get(row.streamer_id)).catch((err) => {
+          applyDecayTick(row.streamer_id, row.twitch_reward_id, settingsByStreamerId.get(row.streamer_id)).catch((err: unknown) => {
             log.error(`Decay tick failed for reward ${row.twitch_reward_id} (streamer ${row.streamer_id}):`, err);
           }),
         ),

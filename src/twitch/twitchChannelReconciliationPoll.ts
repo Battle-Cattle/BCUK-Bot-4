@@ -24,7 +24,7 @@ let reconcileTickTimer: ReturnType<typeof setInterval> | null = null;
 export function startChannelReconciliationPoll(): void {
   if (reconcileTickTimer) return;
   reconcileTickTimer = setInterval(() => {
-    reconcileJoinedChannels().catch((err) => log.error('Periodic channel reconciliation error:', err));
+    reconcileJoinedChannels().catch((err: unknown) => log.error('Periodic channel reconciliation error:', err));
   }, RECONCILE_POLL_INTERVAL_MS);
   log.info(`Started periodic channel-membership reconciliation every ${RECONCILE_POLL_INTERVAL_MS / 1000}s`);
 }

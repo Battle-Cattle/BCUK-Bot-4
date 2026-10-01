@@ -53,12 +53,12 @@ export async function executeCountdownForTwitch(
   const runtime = countdownRuntime.get();
   if (!runtime) return;
   if (!countdownCooldown.tryClaim(`twitch:${channel}`)) return;
-  for (let i = 0; i < STEPS.length; i++) {
+  for (const [i, step] of STEPS.entries()) {
     if (i > 0) await sleep(DELAY_MS);
     try {
-      await runtime.send(channel, STEPS[i]!);
+      await runtime.send(channel, step);
     } catch (err) {
-      log.error(`Countdown failed at '${STEPS[i]}' in ${channel}:`, err);
+      log.error(`Countdown failed at '${step}' in ${channel}:`, err);
       return;
     }
   }

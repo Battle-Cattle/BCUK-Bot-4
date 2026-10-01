@@ -151,7 +151,7 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
 
       const promiseForFinally = this.inFlightPromise;
       void promiseForFinally
-        .catch((err) => this.applyRefreshError(requestVersion, err))
+        .catch((err: unknown) => this.applyRefreshError(requestVersion, err))
         .finally(() => {
           this.clearInFlightIfCurrent(promiseForFinally);
         });

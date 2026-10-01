@@ -85,7 +85,7 @@ export function dispatchNotification(type: string, event: Record<string, unknown
     return;
   }
   handler(info.login, event, config, info.streamerId)
-    .catch((err) => log.error(`${type} handler error:`, err));
+    .catch((err: unknown) => log.error(`${type} handler error:`, err));
 }
 
 /**
@@ -125,7 +125,7 @@ export function handleRevocation(sub: { type: string; status: string; condition:
             log.warn(`Cleared token for ${info.login} (${sub.status})`);
             eventSubReloadRuntimeRegistry.get()?.triggerReload();
           })
-          .catch((err) => log.error('Clear token error:', err));
+          .catch((err: unknown) => log.error('Clear token error:', err));
       }
     }
     return;
