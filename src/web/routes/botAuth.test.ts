@@ -194,7 +194,7 @@ describe('GET /admin/bot-auth/connect', () => {
   it('redirects to Twitch authorize with chat:read chat:edit scope', async () => {
     const res = await supertest(buildApp(OWNER_SESSION_USER)).get('/connect');
     expect(res.status).toBe(302);
-    const location = new URL(res.headers.location);
+    const location = new URL(res.headers.location!);
     expect(location.origin + location.pathname).toBe('https://id.twitch.tv/oauth2/authorize');
     expect(location.searchParams.get('scope')).toBe('chat:read chat:edit');
     expect(location.searchParams.get('client_id')).toBe('test-client-id');

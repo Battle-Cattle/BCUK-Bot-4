@@ -524,7 +524,7 @@ describe('attachSseConnection — process-wide connection cap', () => {
       opened.push(triggerClose);
     }
 
-    opened[0]();
+    opened[0]!();
 
     const res = makeRes();
     const { req, triggerClose } = makeReq('unused');

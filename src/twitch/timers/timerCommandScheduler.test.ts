@@ -268,7 +268,7 @@ describe('Per-command Shared Chat cooldown', () => {
       await vi.advanceTimersByTimeAsync(60_000); // clears both each channel's own interval and the command's own session cooldown
       await runTimerCommandTick();
       expect(send).toHaveBeenCalledTimes(1);
-      fired.push(send.mock.calls[0][0]); // channel arg, since the message is identical across all three
+      fired.push(send.mock.calls[0]![0]); // channel arg, since the message is identical across all three
       send.mockClear();
     }
 

@@ -244,7 +244,7 @@ describe('POST /guild/select', () => {
     expect(res.headers.location).toBe('/guild/select?error=guild_not_found');
     expect(user.guilds).toEqual([{ guildId: '100000000000000001', name: 'Alpha' }]);
 
-    const followUp = await supertest(app).get(res.headers.location);
+    const followUp = await supertest(app).get(res.headers.location!);
     expect(followUp.status).toBe(200);
     expect((followUp.body as any).view).toBe('guildSelect');
     expect((followUp.body as any).locals.error).toBe('guild_not_found');

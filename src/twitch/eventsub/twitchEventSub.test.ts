@@ -63,8 +63,8 @@ describe('startEventSub', () => {
     await flushMicrotasks();
 
     expect(connectionInstances).toHaveLength(2);
-    expect(connectionInstances[0].start).toHaveBeenCalledTimes(1);
-    expect(connectionInstances[1].start).toHaveBeenCalledTimes(1);
+    expect(connectionInstances[0]!.start).toHaveBeenCalledTimes(1);
+    expect(connectionInstances[1]!.start).toHaveBeenCalledTimes(1);
   });
 
   it('does not create a duplicate connection for a uid that already exists', async () => {
@@ -94,8 +94,8 @@ describe('stopEventSub', () => {
     expect(connectionInstances).toHaveLength(2);
 
     stopEventSub();
-    expect(connectionInstances[0].stop).toHaveBeenCalledTimes(1);
-    expect(connectionInstances[1].stop).toHaveBeenCalledTimes(1);
+    expect(connectionInstances[0]!.stop).toHaveBeenCalledTimes(1);
+    expect(connectionInstances[1]!.stop).toHaveBeenCalledTimes(1);
   });
 
   it('prevents a subsequent reload from doing anything until startEventSub runs again', async () => {
@@ -119,7 +119,7 @@ describe('reloadEventSubSubscriptions', () => {
     await flushMicrotasks();
 
     expect(connectionInstances).toHaveLength(1);
-    expect(connectionInstances[0].start).toHaveBeenCalledTimes(1);
+    expect(connectionInstances[0]!.start).toHaveBeenCalledTimes(1);
   });
 
   it('reloads an existing connection rather than recreating it', async () => {
@@ -135,8 +135,8 @@ describe('reloadEventSubSubscriptions', () => {
     await flushMicrotasks();
 
     expect(connectionInstances).toHaveLength(1);
-    expect(connectionInstances[0].reload).toHaveBeenCalledWith(updatedStreamer);
-    expect(connectionInstances[0].start).toHaveBeenCalledTimes(1);
+    expect(connectionInstances[0]!.reload).toHaveBeenCalledWith(updatedStreamer);
+    expect(connectionInstances[0]!.start).toHaveBeenCalledTimes(1);
   });
 
   it('stops and removes a connection whose streamer is no longer present', async () => {
@@ -149,8 +149,8 @@ describe('reloadEventSubSubscriptions', () => {
     reloadEventSubSubscriptions();
     await flushMicrotasks();
 
-    expect(connectionInstances[0].stop).toHaveBeenCalledTimes(1);
-    expect(connectionInstances[1].stop).not.toHaveBeenCalled();
+    expect(connectionInstances[0]!.stop).toHaveBeenCalledTimes(1);
+    expect(connectionInstances[1]!.stop).not.toHaveBeenCalled();
   });
 
   it('is a no-op when stopped globally', async () => {

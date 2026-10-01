@@ -13,7 +13,7 @@ function mockResponses(responses: { ok: boolean; status?: number }[]) {
     const r = responses[callIndex++];
     const cancel = vi.fn().mockResolvedValue(undefined);
     cancelFns.push(cancel);
-    return Promise.resolve({ ok: r.ok, status: r.status ?? 200, body: { cancel } } as unknown as Response);
+    return Promise.resolve({ ok: r!.ok, status: r!.status ?? 200, body: { cancel } } as unknown as Response);
   });
   return { fetchSpy, cancelFns };
 }

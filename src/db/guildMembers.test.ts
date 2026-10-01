@@ -42,7 +42,7 @@ describe('getMemberAccessLevel', () => {
 describe('setMemberAccessLevel', () => {
   it('upserts the membership row', async () => {
     await setMemberAccessLevel('111', '222', 2);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('INSERT INTO guild_member');
     expect(sql).toContain('ON DUPLICATE KEY UPDATE access_level = new_member.access_level');
     expect(params).toEqual(['111', '222', 2]);
@@ -92,7 +92,7 @@ describe('getEffectiveAccessLevel', () => {
     vi.mocked(findUser).mockResolvedValueOnce({ ...baseUser });
     pool.execute.mockResolvedValueOnce([[{ access_level: 2 }], []]);
     expect(await getEffectiveAccessLevel('g1', '222')).toBe(AccessLevel.MANAGER);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('FROM guild_member');
     expect(params).toEqual(['g1', '222']);
   });
@@ -122,7 +122,7 @@ describe('getEffectiveAccessLevelForUser', () => {
   it('reads the per-guild level from guild_member for a non-owner', async () => {
     pool.execute.mockResolvedValueOnce([[{ access_level: 2 }], []]);
     expect(await getEffectiveAccessLevelForUser('g1', { ...baseUser })).toBe(AccessLevel.MANAGER);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('FROM guild_member');
     expect(params).toEqual(['g1', '222']);
   });

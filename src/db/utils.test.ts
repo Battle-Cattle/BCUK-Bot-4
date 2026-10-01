@@ -83,7 +83,7 @@ describe('rowExists', () => {
   it('builds SQL from the given table/column and passes value as the only param', async () => {
     const executor = { execute: vi.fn().mockResolvedValue([[], []]) };
     await rowExists(executor as any, 'custom_command', 'command_id', 42);
-    const [sql, params] = executor.execute.mock.calls[0];
+    const [sql, params] = executor.execute.mock.calls[0]!;
     expect(sql).toBe('SELECT 1 FROM custom_command WHERE command_id = ? LIMIT 1');
     expect(params).toEqual([42]);
   });
@@ -92,7 +92,7 @@ describe('rowExists', () => {
     const executor = { execute: vi.fn().mockResolvedValue([[{ '1': 1 }], []]) };
     const result = await rowExists(executor as any, 'sfxtrigger', 'id', '123456789012345');
     expect(result).toBe(true);
-    expect(executor.execute.mock.calls[0][1]).toEqual(['123456789012345']);
+    expect(executor.execute.mock.calls[0]![1]).toEqual(['123456789012345']);
   });
 
   it('rejects a table name containing non-identifier characters without querying', async () => {
@@ -130,7 +130,7 @@ describe('getRowCount', () => {
     const pool = { execute: vi.fn().mockResolvedValue([[{ count: '0' }], []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getRowCount('custom_command');
-    expect(pool.execute.mock.calls[0][0]).toBe('SELECT COUNT(*) AS count FROM custom_command');
+    expect(pool.execute.mock.calls[0]![0]).toBe('SELECT COUNT(*) AS count FROM custom_command');
   });
 
   it('rejects a table name containing non-identifier characters without querying', async () => {

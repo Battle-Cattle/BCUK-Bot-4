@@ -111,7 +111,7 @@ describe('addOrUpdateUserMutation — handleClearTwitchChannel rollback', () => 
     // First call: the main upsert (null to clear); second call: rollback (restores channel)
     expect(upsertCalls.length).toBeGreaterThanOrEqual(2);
     const rollbackCall = upsertCalls[upsertCalls.length - 1];
-    expect(rollbackCall[3]).toBe('streamerchan');
+    expect(rollbackCall![3]).toBe('streamerchan');
   });
 });
 
@@ -149,7 +149,7 @@ describe('addOrUpdateUserMutation — handleChangeTwitchChannel rollback', () =>
     const upsertCalls = vi.mocked(upsertUser).mock.calls;
     const rollbackCall = upsertCalls[upsertCalls.length - 1];
     // previousChannel was null — rollback must use null, not ''
-    expect(rollbackCall[3]).toBeNull();
+    expect(rollbackCall![3]).toBeNull();
   });
 });
 
@@ -605,7 +605,7 @@ describe('addOrUpdateUserMutation — new-user rollback deletes the inserted row
 
     expect(deleteUnlinkedUser).toHaveBeenCalledWith('111');
     const rollbackCall = vi.mocked(upsertUser).mock.calls[1];
-    expect(rollbackCall[3]).toBeNull();
+    expect(rollbackCall![3]).toBeNull();
     expect(updateTwitchBotEnabled).toHaveBeenCalledWith('111', false);
   });
 
@@ -630,7 +630,7 @@ describe('addOrUpdateUserMutation — new-user rollback deletes the inserted row
     await expect(addOrUpdateUserMutation(NEW_USER_PARAMS)).rejects.toThrow('DB unavailable');
 
     expect(deleteUnlinkedUser).not.toHaveBeenCalled();
-    expect(vi.mocked(upsertUser).mock.calls[1][3]).toBeNull();
+    expect(vi.mocked(upsertUser).mock.calls[1]![3]).toBeNull();
     expect(updateTwitchBotEnabled).toHaveBeenCalledWith('111', true);
   });
 });

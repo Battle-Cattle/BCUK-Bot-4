@@ -377,9 +377,9 @@ describe('getPendingRequests', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getPendingRequests('g1');
     expect(result).toHaveLength(1);
-    expect(result[0].guild_id).toBe('g1');
-    expect(result[0].status).toBe('pending');
-    expect(result[0].user_name).toBe('Alice');
+    expect(result[0]!.guild_id).toBe('g1');
+    expect(result[0]!.status).toBe('pending');
+    expect(result[0]!.user_name).toBe('Alice');
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('s.guild_id = ?');
     expect(params).toEqual(['g1']);
@@ -404,10 +404,10 @@ describe('getAllApiKeys', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllApiKeys('g1');
     expect(result).toHaveLength(2);
-    expect(result[0].guild_id).toBe('g1');
-    expect(result[0].status).toBe('approved');
-    expect(result[1].guild_id).toBe('g1');
-    expect(result[1].status).toBe('revoked');
+    expect(result[0]!.guild_id).toBe('g1');
+    expect(result[0]!.status).toBe('approved');
+    expect(result[1]!.guild_id).toBe('g1');
+    expect(result[1]!.status).toBe('revoked');
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('s.guild_id = ?');
     expect(params).toEqual(['g1']);

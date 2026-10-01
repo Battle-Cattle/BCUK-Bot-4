@@ -37,8 +37,8 @@ describe('pickRowsToFire', () => {
     const result = pickRowsToFire([rowA, rowB], sessionIdByChannel, 10_000, lastFiredAtOf);
 
     expect(result).toHaveLength(1);
-    expect(result[0].row).toBe(rowB);
-    expect(result[0].sessionKey).toBe('1::s1');
+    expect(result[0]!.row).toBe(rowB);
+    expect(result[0]!.sessionKey).toBe('1::s1');
   });
 
   it('withholds a command-session group still inside its own cooldown window', () => {
@@ -113,7 +113,7 @@ describe('releaseReservations', () => {
     const sessionIdByChannel = new Map([['chA', 's1'], ['chB', 's1']]);
 
     const [picked] = pickRowsToFire([rowA, rowB], sessionIdByChannel, 0, () => 0);
-    releaseReservations(picked.sessionKey, picked.row.channel, picked.row.id, 0);
+    releaseReservations(picked!.sessionKey, picked!.row.channel, picked!.row.id, 0);
 
     // Well inside the original 600s cooldown, but the reservation was released.
     const retry = pickRowsToFire([rowA, rowB], sessionIdByChannel, 1000, () => 0);

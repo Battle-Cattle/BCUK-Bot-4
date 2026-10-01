@@ -24,11 +24,11 @@ describe('recordPricingHistory', () => {
     await recordPricingHistory(5, 350, 0.42, 1_700_100_000_000);
 
     expect(pool.execute).toHaveBeenCalledTimes(2);
-    const [insertSql, insertParams] = pool.execute.mock.calls[0];
+    const [insertSql, insertParams] = pool.execute.mock.calls[0]!;
     expect(insertSql).toContain('INSERT INTO reward_pricing_history');
     expect(insertParams).toEqual([5, 1_700_100_000_000, 350, 0.42]);
 
-    const [deleteSql, deleteParams] = pool.execute.mock.calls[1];
+    const [deleteSql, deleteParams] = pool.execute.mock.calls[1]!;
     expect(deleteSql).toContain('DELETE FROM reward_pricing_history');
     expect(deleteParams[0]).toBe(5);
     expect(deleteParams[1]).toBe(1_700_100_000_000 - 25 * 60 * 60 * 1000);
@@ -52,8 +52,8 @@ describe('getPricingHistory', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getPricingHistory(5, 1_700_000_000_000);
-    expect(pool.execute.mock.calls[0][1]).toEqual([5, 1_700_000_000_000]);
-    expect(pool.execute.mock.calls[0][0]).toContain('ORDER BY recorded_at ASC');
+    expect(pool.execute.mock.calls[0]![1]).toEqual([5, 1_700_000_000_000]);
+    expect(pool.execute.mock.calls[0]![0]).toContain('ORDER BY recorded_at ASC');
   });
 });
 
@@ -94,7 +94,7 @@ describe('getPricingHistoryForRewards', () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await getPricingHistoryForRewards([5, 9, 12], 1_700_000_000_000);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('reward_pricing_id IN (?, ?, ?)');
     expect(params).toEqual([5, 9, 12, 1_700_000_000_000]);
   });

@@ -105,8 +105,8 @@ describe('triggerImmediateLiveCheck', () => {
     expect(getStreams).toHaveBeenCalledWith(['uid-5']);
     const states = getLiveStates('guild-1');
     expect(states).toHaveLength(1);
-    expect(states[0].login).toBe('teststreamer');
-    expect(states[0].currentGame).toBe('Just Chatting');
+    expect(states[0]!.login).toBe('teststreamer');
+    expect(states[0]!.currentGame).toBe('Just Chatting');
   });
 
   it('is case-insensitive on the login', async () => {
@@ -150,7 +150,7 @@ describe('triggerImmediateLiveCheck', () => {
     expect(editAnnouncementSpy).toHaveBeenCalledWith(
       expect.anything(), expect.anything(), expect.objectContaining({ title: 'New title' }), 'live_message', expect.any(Function),
     );
-    expect(getLiveStates('guild-1')[0].title).toBe('New title');
+    expect(getLiveStates('guild-1')[0]!.title).toBe('New title');
   });
 
   it('edits the announcement with the new_game_message template on a game change', async () => {
@@ -232,7 +232,7 @@ describe('60s poll interval', () => {
     expect(getStreams).toHaveBeenCalledWith(['uid-5']);
     const states = getLiveStates('guild-1');
     expect(states).toHaveLength(1);
-    expect(states[0].login).toBe('teststreamer');
+    expect(states[0]!.login).toBe('teststreamer');
   });
 
   it('logs and recovers when getStreams rejects during a poll tick', async () => {

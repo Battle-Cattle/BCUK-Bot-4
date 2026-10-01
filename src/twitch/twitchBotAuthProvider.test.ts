@@ -78,7 +78,7 @@ afterEach(() => {
 
 /** Awaits a refresh-failure handler while also flushing any pending backoff timers it started. */
 async function runRefreshFailureHandler(...args: Parameters<Handler>): Promise<void> {
-  const result = authProviderHandlers.refreshFailureHandlers[0](...args);
+  const result = authProviderHandlers.refreshFailureHandlers[0]!(...args);
   await vi.runAllTimersAsync();
   await result;
 }
@@ -104,7 +104,7 @@ describe('buildBotAuthProvider', () => {
     it('persists a refreshed token, scoped to the connection it was built for', async () => {
       buildBotAuthProvider(STORED_BOT_TOKEN as any, vi.fn());
 
-      await authProviderHandlers.refreshHandlers[0]('bot-uid', {
+      await authProviderHandlers.refreshHandlers[0]!('bot-uid', {
         accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
       });
 
@@ -115,7 +115,7 @@ describe('buildBotAuthProvider', () => {
       vi.mocked(saveBotChatTokenIfOwnedBy).mockResolvedValue(false);
       buildBotAuthProvider(STORED_BOT_TOKEN as any, vi.fn());
 
-      await expect(authProviderHandlers.refreshHandlers[0]('bot-uid', {
+      await expect(authProviderHandlers.refreshHandlers[0]!('bot-uid', {
         accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
       })).resolves.toBeUndefined();
     });
@@ -131,7 +131,7 @@ describe('buildBotAuthProvider', () => {
       const restart = vi.fn().mockResolvedValue(undefined);
       buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
 
-      await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', invalidTokenError);
+      await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', invalidTokenError);
 
       expect(vi.mocked(clearBotChatTokenIfOwnedBy)).toHaveBeenCalledWith(1);
       expect(restart).toHaveBeenCalled();
@@ -143,7 +143,7 @@ describe('buildBotAuthProvider', () => {
       const restart = vi.fn();
       buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
 
-      await authProviderHandlers.refreshFailureHandlers[0]('bot-uid', invalidTokenError);
+      await authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', invalidTokenError);
 
       expect(restart).not.toHaveBeenCalled();
       expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
@@ -153,7 +153,7 @@ describe('buildBotAuthProvider', () => {
       const restart = vi.fn().mockRejectedValue(new Error('reconnect failed'));
       buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
 
-      await expect(authProviderHandlers.refreshFailureHandlers[0]('bot-uid', invalidTokenError)).resolves.toBeUndefined();
+      await expect(authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', invalidTokenError)).resolves.toBeUndefined();
 
       expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining(BOT_AUTH_CONNECT_URL));
     });
@@ -227,8 +227,8 @@ describe('buildBotAuthProvider', () => {
       const restart = vi.fn(() => new Promise<void>((resolve) => { resolveRestart = resolve; }));
       buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
 
-      const first = authProviderHandlers.refreshFailureHandlers[0]('bot-uid', transientError);
-      const second = authProviderHandlers.refreshFailureHandlers[0]('bot-uid', transientError);
+      const first = authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', transientError);
+      const second = authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', transientError);
       // Flush the microtasks between `first`'s synchronous in-flight guard check and its `await
       // restart()` call (it awaits `getBotChatToken()` first), so `restart` has actually been
       // invoked — and `resolveRestart` assigned — before we resolve it.

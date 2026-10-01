@@ -159,7 +159,7 @@ describe('buildCounterLookupCache (via findCounterByCommand)', () => {
 
     const hitsCalls = vi.mocked(registerFirstWinsWithWarning).mock.calls.filter((call) => call[1] === 'guild-1:!hits');
     expect(hitsCalls).toHaveLength(2);
-    const describeCollision = hitsCalls[1][3] as (existing: unknown) => string;
+    const describeCollision = hitsCalls[1]![3] as (existing: unknown) => string;
     expect(describeCollision({ ...winner, matchType: 'trigger' })).toBe(
       "Counter trigger_command collision: '!hits' in guild guild-1 is already registered (counter id=1); ignoring duplicate from counter id=2.",
     );

@@ -96,7 +96,7 @@ describe('requireMod', () => {
     const req = makeReq({ session: {} });
     const res = makeRes();
     requireMod(req, res, next);
-    const [template, data] = res.render.mock.calls[0];
+    const [template, data] = res.render.mock.calls[0]!;
     expect(template).toBe('error');
     expect(data.message).toContain('Mod');
   });
@@ -136,7 +136,7 @@ describe('requireManager', () => {
     const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER } } });
     const res = makeRes();
     requireManager(req, res, next);
-    const [template, data] = res.render.mock.calls[0];
+    const [template, data] = res.render.mock.calls[0]!;
     expect(template).toBe('error');
     expect(data.message).toContain('Manager');
   });
@@ -170,7 +170,7 @@ describe('requireAdmin', () => {
     const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER } } });
     const res = makeRes();
     requireAdmin(req, res, next);
-    const [, data] = res.render.mock.calls[0];
+    const [, data] = res.render.mock.calls[0]!;
     expect(data.message).toContain('Admin');
   });
 });
@@ -210,7 +210,7 @@ describe('requireOwner', () => {
     const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN, isOwner: false } } });
     const res = makeRes();
     requireOwner(req, res, next);
-    const [, data] = res.render.mock.calls[0];
+    const [, data] = res.render.mock.calls[0]!;
     expect(data.message).toContain('Owner');
   });
 });
@@ -382,7 +382,7 @@ describe('requireApiKey', () => {
     vi.mocked(findKeyByHash).mockResolvedValue({ discordId: 'u1' } as any);
     const req = makeReq({ headers: { authorization: 'Bearer mytoken' } });
     await requireApiKey(req, makeRes(), next);
-    const passedHash: string = vi.mocked(findKeyByHash).mock.calls[0][0];
+    const passedHash: string = vi.mocked(findKeyByHash).mock.calls[0]![0];
     // SHA256 of 'mytoken' is a 64-char hex string
     expect(passedHash).toMatch(/^[0-9a-f]{64}$/);
     expect(passedHash).not.toBe('mytoken');
@@ -449,7 +449,7 @@ describe('requireCompanionKey', () => {
     vi.mocked(findDiscordIdByTokenHash).mockResolvedValue('u1');
     const req = makeReq({ headers: { authorization: 'Bearer mytoken' } });
     await requireCompanionKey(req, makeRes(), next);
-    const passedHash: string = vi.mocked(findDiscordIdByTokenHash).mock.calls[0][0];
+    const passedHash: string = vi.mocked(findDiscordIdByTokenHash).mock.calls[0]![0];
     expect(passedHash).toBe(createHash('sha256').update('mytoken').digest('hex'));
     expect(passedHash).not.toBe('mytoken');
   });

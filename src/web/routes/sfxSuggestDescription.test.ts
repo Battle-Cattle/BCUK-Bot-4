@@ -176,7 +176,7 @@ describe('requestDescriptionSuggestion', () => {
     const result = await requestDescriptionSuggestion(clips, '!airhorn', 2);
 
     expect(result).toBe('A loud air horn blast.');
-    const call = mockCreate.mock.calls[0][0];
+    const call = mockCreate.mock.calls[0]![0];
     expect(call.model).toBe('gpt-audio-mini');
     const content = call.messages[0].content;
     expect(content[0].type).toBe('text');
@@ -187,19 +187,19 @@ describe('requestDescriptionSuggestion', () => {
   it('mentions the sample size in the prompt when clips are a subset of the total files', async () => {
     mockCreate.mockResolvedValue({ choices: [{ message: { content: 'desc' } }] });
     await requestDescriptionSuggestion([{ buffer: Buffer.from('a'), format: 'mp3' }], '!meme', 8);
-    expect(mockCreate.mock.calls[0][0].messages[0].content[0].text).toMatch(/sample of 1 of them/);
+    expect(mockCreate.mock.calls[0]![0].messages[0].content[0].text).toMatch(/sample of 1 of them/);
   });
 
   it('omits sample language when all files were analysed', async () => {
     mockCreate.mockResolvedValue({ choices: [{ message: { content: 'desc' } }] });
     await requestDescriptionSuggestion([{ buffer: Buffer.from('a'), format: 'mp3' }], '!clap', 1);
-    expect(mockCreate.mock.calls[0][0].messages[0].content[0].text).not.toMatch(/sample of/);
+    expect(mockCreate.mock.calls[0]![0].messages[0].content[0].text).not.toMatch(/sample of/);
   });
 
   it('single-clip prompt asks for a verbatim quote gated on recognizability, with a no-speech fallback', async () => {
     mockCreate.mockResolvedValue({ choices: [{ message: { content: 'desc' } }] });
     await requestDescriptionSuggestion([{ buffer: Buffer.from('a'), format: 'mp3' }], '!clap', 1);
-    const text = mockCreate.mock.calls[0][0].messages[0].content[0].text;
+    const text = mockCreate.mock.calls[0]![0].messages[0].content[0].text;
     expect(text).toMatch(/recognizable spoken words/);
     expect(text).toMatch(/transcribe them verbatim/);
     expect(text).toMatch(/Otherwise describe what's audible/);
@@ -208,7 +208,7 @@ describe('requestDescriptionSuggestion', () => {
   it('sampled prompt asks for a verbatim quote gated on recognizability, with a general-theme fallback', async () => {
     mockCreate.mockResolvedValue({ choices: [{ message: { content: 'desc' } }] });
     await requestDescriptionSuggestion([{ buffer: Buffer.from('a'), format: 'mp3' }], '!meme', 8);
-    const text = mockCreate.mock.calls[0][0].messages[0].content[0].text;
+    const text = mockCreate.mock.calls[0]![0].messages[0].content[0].text;
     expect(text).toMatch(/recognizable spoken words/);
     expect(text).toMatch(/include a representative quote verbatim/);
     expect(text).toMatch(/Otherwise describe the general theme or variety/);
@@ -272,7 +272,7 @@ describe('POST /sfx/trigger/suggest-description', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ description: 'A cheerful clap.' });
     expect(fs.promises.readFile).toHaveBeenCalledWith('/app/sfx/clap.wav');
-    expect(mockCreate.mock.calls[0][0].messages[0].content[0].text).toMatch(/!clap/);
+    expect(mockCreate.mock.calls[0]![0].messages[0].content[0].text).toMatch(/!clap/);
   });
 
   it('samples down to MAX_SAMPLE files and transcodes ogg clips before sending', async () => {
@@ -303,9 +303,9 @@ describe('POST /sfx/trigger/suggest-description', () => {
 
     const res = await createPromise;
     expect(res.status).toBe(200);
-    const content = mockCreate.mock.calls[0][0].messages[0].content;
+    const content = mockCreate.mock.calls[0]![0].messages[0].content;
     expect(content.filter((c: any) => c.type === 'input_audio')).toHaveLength(5);
-    expect(mockCreate.mock.calls[0][0].messages[0].content[0].text).toMatch(/sample of 5 of them/);
+    expect(mockCreate.mock.calls[0]![0].messages[0].content[0].text).toMatch(/sample of 5 of them/);
   });
 
   it('returns 502 when a file has an unrecognised stored extension', async () => {

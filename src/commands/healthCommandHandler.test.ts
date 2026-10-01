@@ -100,7 +100,7 @@ describe('executeHealthCommandForDiscord', () => {
     const message = makeMockMessage('!health', OWNER_ID);
     await executeHealthCommandForDiscord(message as any);
     expect(message.author.send).toHaveBeenCalledOnce();
-    const dmText = message.author.send.mock.calls[0][0] as string;
+    const dmText = message.author.send.mock.calls[0]![0] as string;
     expect(dmText).toContain('Bot Health');
     expect(dmText).toContain('Discord');
     expect(dmText).toContain('Twitch chat');
@@ -112,10 +112,10 @@ describe('executeHealthCommandForDiscord', () => {
     const message = makeMockMessage('!health', OWNER_ID, { guild: { id: 'guild-1' } });
     await executeHealthCommandForDiscord(message as any);
     expect(message.author.send).toHaveBeenCalledOnce();
-    const dmText = message.author.send.mock.calls[0][0] as string;
+    const dmText = message.author.send.mock.calls[0]![0] as string;
     expect(dmText).toContain('Bot Health');
     expect(message.reply).toHaveBeenCalledOnce();
-    const replyText = message.reply.mock.calls[0][0] as string;
+    const replyText = message.reply.mock.calls[0]![0] as string;
     expect(replyText).not.toContain('Bot Health');
     expect(replyText).not.toContain('DB');
   });
@@ -164,7 +164,7 @@ describe('executeHealthCommandForDiscord', () => {
     } as any);
     const message = makeMockMessage('!health', OWNER_ID);
     await executeHealthCommandForDiscord(message as any);
-    const dmText = message.author.send.mock.calls[0][0] as string;
+    const dmText = message.author.send.mock.calls[0]![0] as string;
     const firstIndex = dmText.indexOf('first');
     const secondIndex = dmText.indexOf('second');
     expect(secondIndex).toBeGreaterThan(-1);
@@ -184,7 +184,7 @@ describe('executeHealthCommandForDiscord', () => {
     } as any);
     const message = makeMockMessage('!health', OWNER_ID);
     await executeHealthCommandForDiscord(message as any);
-    const dmText = message.author.send.mock.calls[0][0] as string;
+    const dmText = message.author.send.mock.calls[0]![0] as string;
     expect(dmText).toContain('EventSub:');
     expect(dmText).toContain('streamerA');
     expect(dmText).toContain('Schedulers:');
@@ -202,7 +202,7 @@ describe('executeHealthCommandForDiscord', () => {
     vi.mocked(getHealthSnapshot).mockReturnValue({ ...EMPTY_SNAPSHOT, eventsub: manyEventSubEntries } as any);
     const message = makeMockMessage('!health', OWNER_ID);
     await executeHealthCommandForDiscord(message as any);
-    const dmText = message.author.send.mock.calls[0][0] as string;
+    const dmText = message.author.send.mock.calls[0]![0] as string;
     expect(dmText.length).toBeLessThanOrEqual(2000);
     expect(dmText.endsWith('\n… (truncated)')).toBe(true);
   });

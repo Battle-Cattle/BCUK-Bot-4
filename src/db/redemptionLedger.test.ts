@@ -17,7 +17,7 @@ describe('getRedemptionProgress', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     await expect(getRedemptionProgress('r1')).resolves.toBeNull();
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('FROM redemption_handled WHERE redemption_id = ?');
     expect(params).toEqual(['r1']);
   });
@@ -44,7 +44,7 @@ describe('markRedemptionEffect', () => {
 
     await markRedemptionEffect('r1', 5, effect);
 
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain(`INSERT INTO redemption_handled (redemption_id, streamer_id, ${column}) VALUES (?, ?, ${value}) AS new_row`);
     expect(sql).toContain(`ON DUPLICATE KEY UPDATE ${column} = new_row.${column}`);
     expect(params).toEqual(['r1', 5]);
@@ -69,7 +69,7 @@ describe('isRedemptionLedgerReady', () => {
     const pool = makeMockPool({ rows: [] });
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(isRedemptionLedgerReady()).resolves.toBe(true);
-    expect(pool.execute.mock.calls[0][0]).toBe('SELECT 1 FROM redemption_handled LIMIT 1');
+    expect(pool.execute.mock.calls[0]![0]).toBe('SELECT 1 FROM redemption_handled LIMIT 1');
   });
 
   it('returns false when the table does not exist (migration not applied)', async () => {
@@ -93,7 +93,7 @@ describe('pruneRedemptionLedger', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     await expect(pruneRedemptionLedger(6 * 60 * 60 * 1000 + 1)).resolves.toBe(3);
-    const [sql, params] = pool.execute.mock.calls[0];
+    const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('DELETE FROM redemption_handled WHERE created_at < (NOW() - INTERVAL ? SECOND)');
     expect(params).toEqual([6 * 60 * 60 + 1]);
   });
