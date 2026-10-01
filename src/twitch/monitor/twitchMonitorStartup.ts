@@ -9,6 +9,7 @@ import { LiveState, makeLiveState } from './twitchMonitorTypes';
 import { buildEmbed, templateVars } from './twitchMonitorEmbed';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
 import { postAnnouncement } from './twitchMonitorAnnouncements';
+import { withLoginLock } from './twitchMonitorLoginLock';
 import { fillTemplate } from '../../shared/textTemplate';
 
 /**
@@ -118,7 +119,8 @@ export async function handleOfflineStreamerOnStartup(
  * Runs the one-time live-status reconciliation performed when the bot starts:
  * fetches current live streams for all tracked streamers, reconciles each
  * streamer's announcement state via {@link handleLiveStreamerOnStartup} or
- * {@link handleOfflineStreamerOnStartup}, then refreshes MultiTwitch fields for
+ * {@link handleOfflineStreamerOnStartup} (each inside that login's {@link withLoginLock}, so it
+ * can't race an EventSub-triggered immediate check for the same login), then refreshes MultiTwitch fields for
  * every stream group that changed.
  * @param liveStates - Map of live streamer states, keyed by streamer DB row id (mutated in place).
  * @param loginToUserId - Map of lowercased Twitch login to Twitch user ID for all tracked streamers.
@@ -149,19 +151,23 @@ export async function performStartupLiveCheck(
 
   // Each streamer's reconciliation (a different Discord message/channel) is independent, and
   // handleLiveStreamerOnStartup/handleOfflineStreamerOnStartup already isolate their own
-  // errors internally — so these run concurrently instead of one streamer at a time.
+  // errors internally — so these run concurrently instead of one streamer at a time. Each runs
+  // behind its login's withLoginLock, the same lock triggerImmediateLiveCheck and the poll loop
+  // use: during restartTwitchMonitor an EventSub stream.online can trigger an immediate check
+  // while this startup pass is still posting/editing that streamer's announcement, and without
+  // the lock both could see no liveStates entry and each post a "now live" message.
   await Promise.allSettled(
     streamersData.map(async (streamer) => {
       const loginKey = streamer.twitch_name?.toLowerCase();
       const userId = loginKey ? loginToUserId.get(loginKey) : undefined;
-      if (!userId) return;
+      if (!loginKey || !userId) return;
 
       const liveStream = liveByUserId.get(userId);
 
       if (liveStream) {
-        await handleLiveStreamerOnStartup(liveStates, streamer, liveStream, groupsWithChanges);
+        await withLoginLock(loginKey, () => handleLiveStreamerOnStartup(liveStates, streamer, liveStream, groupsWithChanges));
       } else if (streamer.discord_message_id) {
-        await handleOfflineStreamerOnStartup(streamer, groupsWithChanges);
+        await withLoginLock(loginKey, () => handleOfflineStreamerOnStartup(streamer, groupsWithChanges));
       }
     }).map((work) => work.catch((err: unknown) => log.error('Startup reconciliation failed for a streamer:', err))),
   );

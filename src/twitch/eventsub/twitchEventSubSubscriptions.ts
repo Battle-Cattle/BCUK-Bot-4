@@ -127,22 +127,47 @@ export interface StreamerEventSubData {
 }
 
 /** Desired subscription types alongside the ones freshly created this round, keyed by type,
- *  and this streamer's own existing subscriptions as already fetched (see
- *  {@link createSubscriptionsForStreamer}). */
+ *  the count of specs that ended up live (created, kept, or reported by Twitch as already existing
+ *  via a 409), the count that failed for a transient (non-auth) reason, and this streamer's own
+ *  existing subscriptions as already fetched (see {@link createSubscriptionsForStreamer}). */
 interface SubscriptionResult {
   desired: Set<string>;
   created: Map<string, string>;
+  live: number;
+  transientFailures: number;
   ownSubscriptions: Array<{ id: string; type: string; condition: Record<string, string> }>;
 }
 
-/** True if `a` and `b` have exactly the same keys and values — used to tell "the subscription
- *  this spec wants" apart from a same-type subscription with a different condition (e.g. a
- *  leftover from an older API version whose condition shape has since changed), which type-only
- *  matching would otherwise mistake for it. */
+/**
+ * Outcome of one {@link subscribeForStreamer} pass, used by `StreamerConnection` to decide between
+ * keeping the connection, retrying the subscribe step, or stopping itself.
+ * - `desired`: subscription specs wanted for this streamer (0 = nothing to do — e.g. bot not in
+ *   channel, no token, or every group disabled).
+ * - `live`: specs created, confirmed already-live on this session, or reported by Twitch as
+ *   already existing (409 Conflict).
+ * - `transientFailures`: specs whose create failed for a reason other than an auth/scope error
+ *   (`TwitchAuthError` — 401/403 or a previously auth-failed token+type), e.g. a 5xx, 429, network
+ *   error or timeout — worth retrying, unlike an auth failure, which needs the user to reconnect.
+ */
+export interface SubscribeOutcome {
+  desired: number;
+  live: number;
+  transientFailures: number;
+}
+
+/** True if `a` and `b` describe the same condition, treating a missing key and an empty-string
+ *  value as equal — Twitch's list response can echo a spec's unused optional condition keys back
+ *  as `""` (e.g. `reward_id`, `from_broadcaster_user_id`), which must not stop an existing
+ *  subscription from matching (the create would then 409 against it). Any key with a non-empty
+ *  value on either side must match exactly, so a same-type subscription with a genuinely different
+ *  condition (e.g. a leftover from an older API version whose condition shape has since changed)
+ *  is still told apart from the one this spec wants. */
 function conditionsEqual(a: Record<string, string>, b: Record<string, string>): boolean {
-  const aKeys = Object.keys(a);
-  if (aKeys.length !== Object.keys(b).length) return false;
-  return aKeys.every((key) => a[key] === b[key]);
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if ((a[key] ?? '') !== (b[key] ?? '')) return false;
+  }
+  return true;
 }
 
 /**
@@ -155,8 +180,10 @@ function conditionsEqual(a: Record<string, string>, b: Record<string, string>): 
  * (e.g. `authorization_revoked`) — it's deleted first so the fresh create can't 409 against it and
  * leave the *new* session with no working subscription for that spec.
  * @returns The desired-types set, a type → id map of subscriptions actually created (or
- *   confirmed already-live on this session) this round (a type is absent from `created` only on a
- *   genuine race — see {@link deleteStaleSubscriptions}), and this streamer's own existing
+ *   confirmed already-live on this session) this round (a type is absent from `created` on a
+ *   genuine race — see {@link deleteStaleSubscriptions} — or when the create 409'd, since Twitch
+ *   doesn't return the existing id), the live/transient-failure counts (see
+ *   {@link SubscribeOutcome}), and this streamer's own existing
  *   subscriptions as fetched at the start of this call (with any id already deleted above removed)
  *   — reused by {@link deleteStaleSubscriptions} instead of it re-fetching the same listing.
  */
@@ -170,12 +197,14 @@ async function createSubscriptionsForStreamer(
   // unnormalized key that would just fail the same `.has()` check anyway.
   if (normalizedName === null || !getActiveChannels().has(normalizedName)) {
     log.info(`Skipping EventSub subscriptions for ${name} — bot not in channel`);
-    return { desired: new Set(), created: new Map(), ownSubscriptions: [] };
+    return { desired: new Set(), created: new Map(), live: 0, transientFailures: 0, ownSubscriptions: [] };
   }
 
   const desired = new Set<string>();
   const created = new Map<string, string>();
-  if (!token) return { desired, created, ownSubscriptions: [] };
+  if (!token) return { desired, created, live: 0, transientFailures: 0, ownSubscriptions: [] };
+  // Per-outcome count of this round's specs (see SubscribeAttempt).
+  const tally: Record<SubscribeAttempt['kind'], number> = { live: 0, auth: 0, transient: 0 };
 
   const ownSubscriptions = await listOwnSubscriptions(token, uid, name);
   // Tracks ids ensureSubscription already deleted this round (a stale-session duplicate deleted
@@ -190,13 +219,17 @@ async function createSubscriptionsForStreamer(
       const match = ownSubscriptions.find(
         (sub) => sub.type === spec.type && conditionsEqual(sub.condition, spec.condition),
       );
-      const { id, deleted } = await ensureSubscription(sessionId, spec, token, name, match);
+      const { result, deleted } = await ensureSubscription(sessionId, spec, token, name, match);
       if (deleted && match) deletedThisRound.add(match.id);
-      if (id !== null) created.set(spec.type, id);
+      if (result.kind === 'live' && result.id !== null) created.set(spec.type, result.id);
+      tally[result.kind]++;
     }
   }
 
-  return { desired, created, ownSubscriptions: ownSubscriptions.filter((sub) => !deletedThisRound.has(sub.id)) };
+  return {
+    desired, created, live: tally.live, transientFailures: tally.transient,
+    ownSubscriptions: ownSubscriptions.filter((sub) => !deletedThisRound.has(sub.id)),
+  };
 }
 
 /** Fetches existing EventSub subscriptions and filters out any that Twitch returned only because
@@ -226,16 +259,18 @@ async function listOwnSubscriptions(
  * fresh if none exists. Logs the deletion at WARN when it's still bound to the live session (a
  * genuine anomaly), or at INFO when it's bound to a different session (routine post-reconnect
  * cleanup — see {@link deleteStaleSubscriptions}).
- * @returns The live subscription's id (or null if creation failed — see {@link subscribe}), and
- *   whether a stale `existing` subscription was actually deleted here — `false` on a failed delete
+ * @returns The create outcome (see {@link subscribe}; an existing live subscription counts as
+ *   `live` with its id), and whether a stale `existing` subscription was actually deleted here — `false` on a failed delete
  *   attempt, so the caller knows not to treat that id as already gone (it must remain eligible for
  *   {@link deleteStaleSubscriptions} to retry in the same round).
  */
 async function ensureSubscription(
   sessionId: string, spec: SubSpec, token: string, name: string,
   existing: { id: string; sessionId?: string; status?: string } | undefined,
-): Promise<{ id: string | null; deleted: boolean }> {
-  if (existing && existing.sessionId === sessionId && existing.status === 'enabled') return { id: existing.id, deleted: false };
+): Promise<{ result: SubscribeAttempt; deleted: boolean }> {
+  if (existing && existing.sessionId === sessionId && existing.status === 'enabled') {
+    return { result: { kind: 'live', id: existing.id }, deleted: false };
+  }
   let deleted = false;
   if (existing) {
     if (existing.sessionId === sessionId) {
@@ -256,8 +291,8 @@ async function ensureSubscription(
       log.error(`Failed to delete stale ${spec.type} subscription for ${name}:`, err);
     }
   }
-  const id = await subscribe(sessionId, spec, token, name);
-  return { id, deleted };
+  const result = await subscribe(sessionId, spec, token, name);
+  return { result, deleted };
 }
 
 /**
@@ -297,20 +332,20 @@ export async function fetchValidEventSubToken(streamerId: number): Promise<strin
 }
 
 /** Creates all subscriptions for one streamer on their dedicated session, updates the
- *  dispatch-side streamer map, and cleans up stale subscriptions. Returns the count of
- *  subscriptions actually created or confirmed already-live this round — not merely desired —
- *  since callers (e.g. `StreamerConnection`'s zero-subscriptions self-stop check) rely on this
- *  to detect a connection with no working subscriptions, which `desired`'s count alone can't:
- *  every desired type could still fail to subscribe (e.g. a missing OAuth scope) while `desired`
- *  stays non-empty. */
+ *  dispatch-side streamer map, and cleans up stale subscriptions. Returns how many specs were
+ *  desired, how many are actually live, and how many failed transiently (see
+ *  {@link SubscribeOutcome}) — `StreamerConnection` needs all three to tell "nothing wanted" or
+ *  "every create failed on auth/scope" (stop: retrying can't help until the user reconnects
+ *  Twitch) apart from "creates failed on a transient Twitch outage" (keep the connection and retry),
+ *  which a single live count would conflate. */
 export async function subscribeForStreamer(
   sessionId: string, data: StreamerEventSubData,
-): Promise<number> {
+): Promise<SubscribeOutcome> {
   const { uid, token, name, config, streamerId } = data;
   setStreamerInfo(uid, { login: name, streamerId, config });
-  const { desired, created, ownSubscriptions } = await createSubscriptionsForStreamer(sessionId, data);
+  const { desired, created, live, transientFailures, ownSubscriptions } = await createSubscriptionsForStreamer(sessionId, data);
   await deleteStaleSubscriptions(uid, desired, created, token, ownSubscriptions);
-  return created.size;
+  return { desired: desired.size, live, transientFailures };
 }
 
 /**
@@ -338,27 +373,35 @@ export async function removeSessionSubscriptions(sessionId: string, data: Stream
   );
 }
 
-/** Creates a single EventSub subscription. Returns the created subscription's id, or null if
- *  it was skipped (previously auth-failed), Twitch reported it already exists (409), or the
- *  create call failed — callers use a non-null id to identify "the subscription created this
- *  round" when pruning stale duplicates in {@link deleteStaleSubscriptions}. */
-async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<string | null> {
+/** Result of one subscription create attempt: `live` (created — with its id — or already
+ *  existing per a 409, with `id: null` since Twitch doesn't return it), `auth` (auth/scope failure,
+ *  or skipped because this token+type already auth-failed), or `transient` (any other failure). */
+type SubscribeAttempt = { kind: 'live'; id: string | null } | { kind: 'auth' } | { kind: 'transient' };
+
+/** Creates a single EventSub subscription and classifies the outcome (see {@link SubscribeAttempt}).
+ *  A 409 Conflict (`createEventSubSubscription` returns null) means an identical subscription
+ *  already exists, so it counts as live — but with no id, so {@link deleteStaleSubscriptions} won't
+ *  prune other same-type subscriptions on its account (it can't tell which one is the live one).
+ *  Callers use a non-null id to identify "the subscription created this round" when pruning. */
+async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<SubscribeAttempt> {
   const skipKey = `${login}:${spec.type}:${hashToken(token)}`;
-  if (authFailedSubs.has(skipKey)) return null;
+  if (authFailedSubs.has(skipKey)) return { kind: 'auth' };
   try {
     const id = await createEventSubSubscription(spec.type, spec.version, spec.condition, sessionId, token);
+    authFailedSubs.delete(skipKey);
     if (id !== null) {
-      authFailedSubs.delete(skipKey);
       log.info(`Subscribed to ${spec.type} for ${login}`);
+    } else {
+      log.info(`${spec.type} for ${login} already exists (409) — treating as live`);
     }
-    return id;
+    return { kind: 'live', id };
   } catch (err) {
     if (err instanceof TwitchAuthError) {
       authFailedSubs.add(skipKey);
       log.warn(`Skipping ${spec.type} for ${login} — authorization missing, user must reconnect Twitch`);
-    } else {
-      log.error(`Failed to subscribe to ${spec.type} for ${login}:`, err);
+      return { kind: 'auth' };
     }
-    return null;
+    log.error(`Failed to subscribe to ${spec.type} for ${login}:`, err);
+    return { kind: 'transient' };
   }
 }
