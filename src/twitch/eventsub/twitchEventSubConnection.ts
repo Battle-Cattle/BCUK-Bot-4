@@ -511,8 +511,11 @@ export class StreamerConnection {
    * subscriptions carry over automatically — but if a reload() was deferred because it ran
    * while the old session id was still stale, it's applied now against the new session id.
    * A fresh (non-migration) session re-resolves the token first, since it may have expired, and
-   * cancels any pending subscribe retry (this welcome's own subscribe pass supersedes it); the
-   * retry counter is kept, so repeated fresh sessions that keep failing transiently stay bounded.
+   * resets the subscribe retry (this welcome's own subscribe pass supersedes any pending retry, and
+   * the new session gets its own retry budget — otherwise a budget exhausted on an earlier session
+   * would leave a partially-subscribed replacement, kept open by its live subscriptions, with no
+   * retries at all). Repeated failing fresh sessions stay bounded by the reconnect backoff, which
+   * only resets once a pass gets something live.
    * A migration welcome resets the reconnect backoff (see {@link onOpen}) and leaves a pending
    * retry in place to run against the new session.
    */
@@ -535,7 +538,7 @@ export class StreamerConnection {
     }
     log.info(`[${this.name}] Session established: ${this.sessionId}`);
     this.freshSessionGeneration++;
-    this.subscribeRetry.cancel();
+    this.subscribeRetry.reset();
     this.queueSubscribePass(session.id, 'No subscriptions — disconnecting', 'Subscribe error', true);
   }
 

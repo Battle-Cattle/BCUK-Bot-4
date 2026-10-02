@@ -688,6 +688,28 @@ describe('StreamerConnection lifecycle', () => {
     expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('giving up'));
   });
 
+  it('gives a fresh session its own retry budget after an earlier session exhausted it', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(1, 1));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-budget-a'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    // Exhaust the budget on the first session.
+    (conn as any).subscribeRetry.cancel();
+    (conn as any).subscribeRetry.attemptCount = 8;
+
+    // The socket is replaced by a fresh connection whose pass is again only partially live.
+    (conn as any).forceReconnect((conn as any).ws);
+    (conn as any).connect();
+    vi.mocked(subscribeForStreamer).mockClear();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-budget-b'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-budget-b', expect.anything()));
+
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+    expect((conn as any).subscribeRetry.attempts).toBe(1);
+  });
+
   it('cancels a pending subscribe retry on stop()', async () => {
     vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(0, 1));
     const conn = new StreamerConnection(makeStreamerData());
