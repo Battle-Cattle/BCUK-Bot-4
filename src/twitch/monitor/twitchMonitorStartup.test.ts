@@ -144,6 +144,28 @@ describe('tryEditStartupMessage', () => {
     vi.mocked(isDiscordNotFoundError).mockReturnValue(false);
     await expect(tryEditStartupMessage(new Map(), makeStreamer({ discord_message_id: 'msg1', discord_channel_id: 'ch1' }), makeStream())).rejects.toThrow('network');
   });
+
+  it('returns false without editing when superseded while resolving the channel', async () => {
+    const channel = makeChannel();
+    vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: vi.fn().mockResolvedValue(channel) } } as any);
+    const liveStates = new Map<string, LiveState>();
+    const result = await tryEditStartupMessage(liveStates, makeStreamer({ discord_message_id: 'msg1', discord_channel_id: 'ch1' }), makeStream(), () => false);
+    expect(result).toBe(false);
+    expect(channel._message.edit).not.toHaveBeenCalled();
+    expect(liveStates.size).toBe(0);
+  });
+
+  it('records no state when superseded while the edit was in flight', async () => {
+    const channel = makeChannel();
+    vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: vi.fn().mockResolvedValue(channel) } } as any);
+    const liveStates = new Map<string, LiveState>();
+    const isCurrent = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    const result = await tryEditStartupMessage(liveStates, makeStreamer({ discord_message_id: 'msg1', discord_channel_id: 'ch1' }), makeStream(), isCurrent);
+    expect(result).toBe(false);
+    expect(channel._message.edit).toHaveBeenCalled();
+    expect(liveStates.size).toBe(0);
+    expect(setStreamerLive).not.toHaveBeenCalled();
+  });
 });
 
 // ─── handleLiveStreamerOnStartup ──────────────────────────────────────────────
@@ -187,6 +209,22 @@ describe('handleLiveStreamerOnStartup', () => {
     await handleLiveStreamerOnStartup(liveStates, makeStreamer({ id: 42, discord_message_id: 'msg1', discord_channel_id: 'ch1' }), makeStream(), new Set());
     expect(liveStates.get('42')).toEqual(expect.objectContaining({ messageId: 'msg1', channelId: 'ch1' }));
   });
+
+  it('does not track the stored message when the edit throws after this run was superseded', async () => {
+    const channel = { isTextBased: () => true, messages: { fetch: vi.fn().mockRejectedValue(new Error('network')) } };
+    vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: vi.fn().mockResolvedValue(channel) } } as any);
+    vi.mocked(isDiscordNotFoundError).mockReturnValue(false);
+    const liveStates = new Map<string, LiveState>();
+    const isCurrent = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    await handleLiveStreamerOnStartup(liveStates, makeStreamer({ id: 42, discord_message_id: 'msg1', discord_channel_id: 'ch1' }), makeStream(), new Set(), isCurrent);
+    expect(liveStates.has('42')).toBe(false);
+  });
+
+  it('passes isCurrent through to postAnnouncement', async () => {
+    const isCurrent = () => true;
+    await handleLiveStreamerOnStartup(new Map(), makeStreamer({ discord_message_id: null }), makeStream(), new Set(), isCurrent);
+    expect(postAnnouncement).toHaveBeenCalledWith(expect.any(Map), expect.anything(), expect.anything(), isCurrent);
+  });
 });
 
 // ─── handleOfflineStreamerOnStartup ───────────────────────────────────────────
@@ -208,6 +246,14 @@ describe('handleOfflineStreamerOnStartup', () => {
     vi.mocked(tryDeleteDiscordMessage).mockRejectedValueOnce(new Error('delete failed'));
     await handleOfflineStreamerOnStartup(makeStreamer({ discord_message_id: 'msg1', discord_channel_id: 'ch1' }), new Set());
     expect(clearStreamerLive).not.toHaveBeenCalled();
+  });
+
+  it('skips clearStreamerLive when superseded while deleting the message', async () => {
+    const groupsWithChanges = new Set<number>();
+    await handleOfflineStreamerOnStartup(makeStreamer({ discord_message_id: 'msg1', discord_channel_id: 'ch1' }), groupsWithChanges, () => false);
+    expect(tryDeleteDiscordMessage).toHaveBeenCalled();
+    expect(clearStreamerLive).not.toHaveBeenCalled();
+    expect(groupsWithChanges.size).toBe(0);
   });
 });
 
