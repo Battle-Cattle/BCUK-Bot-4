@@ -12,10 +12,10 @@ vi.mock('../../db', () => ({
 }));
 vi.mock('../session', () => ({ getSessionUser: vi.fn() }));
 
+import { attachSseConnection, broadcastToChannel, chainConnectionCleanup } from './sseChannel';
 import {
-  createSseEventsHandler, createLoginValidator, attachSseConnection, broadcastToChannel,
-  createStreamerSseEventsHandler, createOverlayStatusEventsHandler,
-} from './sseChannel';
+  createSseEventsHandler, createLoginValidator, createStreamerSseEventsHandler, createOverlayStatusEventsHandler,
+} from './sseEventsHandlers';
 import {
   createSseConnectionPool, isKnownStreamerLogin, unauthenticatedOverlayPool,
   UNAUTH_OVERLAY_SSE_MAX_CONNECTIONS, UNAUTH_OVERLAY_SSE_MAX_PER_IP,
@@ -848,5 +848,26 @@ describe('tryReservePoolSlot / releasePoolSlot', () => {
     releasePoolSlot(pool, ip);
     expect(pool.byIp.has(ip)).toBe(false);
     expect(pool.count).toBe(0);
+  });
+});
+
+describe('chainConnectionCleanup', () => {
+  it('returns false and chains nothing for a response that was never attached', () => {
+    const extra = vi.fn();
+    expect(chainConnectionCleanup(makeRes() as any, extra)).toBe(false);
+    expect(extra).not.toHaveBeenCalled();
+  });
+
+  it('runs the extra teardown once when a failed broadcast evicts the connection', () => {
+    const connections = new Map<string, Set<any>>();
+    const { req } = makeReq('k');
+    const res = makeRes() as any;
+    attachSseConnection(req as any, res, { connections, key: 'k', maxPerChannel: 5 });
+    const extra = vi.fn();
+    expect(chainConnectionCleanup(res, extra)).toBe(true);
+    res.write.mockImplementation(() => { throw new Error('socket gone'); });
+    broadcastToChannel(connections, 'k', { hi: 1 });
+    expect(extra).toHaveBeenCalledTimes(1);
+    expect(connections.has('k')).toBe(false);
   });
 });

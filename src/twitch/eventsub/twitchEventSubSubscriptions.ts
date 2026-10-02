@@ -7,6 +7,9 @@ import { normalizeTwitchChannelName } from '../twitchChannelName';
 import { listEventSubSubscriptions, deleteEventSubSubscription, getValidToken } from './twitchApiEventSub';
 import { SUBSCRIPTION_GROUPS, isGroupEnabled } from './twitchEventSubSubscriptionGroups';
 import { conditionsEqual, ensureSubscription, type SubscribeAttempt } from './twitchEventSubCreate';
+import type { SubscribeOutcome } from './subscribeOutcome';
+
+export type { SubscribeOutcome } from './subscribeOutcome';
 import { setStreamerInfo } from './twitchEventSubDispatch';
 
 const log = createLogger('EventSub');
@@ -114,22 +117,6 @@ interface SubscriptionResult {
   ownSubscriptions: Array<{ id: string; type: string; condition: Record<string, string> }>;
 }
 
-/**
- * Outcome of one {@link subscribeForStreamer} pass, used by `StreamerConnection` to decide between
- * keeping the connection, retrying the subscribe step, or stopping itself.
- * - `desired`: subscription specs wanted for this streamer (0 = nothing to do — e.g. bot not in
- *   channel, no token, or every group disabled).
- * - `live`: specs created, confirmed already-live on this session, or reported by Twitch as
- *   already existing (409 Conflict).
- * - `transientFailures`: specs whose create failed for a reason other than an auth/scope error
- *   (`TwitchAuthError` — 401/403 or a previously auth-failed token+type), e.g. a 5xx, 429, network
- *   error or timeout — worth retrying, unlike an auth failure, which needs the user to reconnect.
- */
-export interface SubscribeOutcome {
-  desired: number;
-  live: number;
-  transientFailures: number;
-}
 
 
 /**

@@ -1,7 +1,9 @@
 import { createLogger } from '../../shared/logger';
 import { BackoffRetry } from './backoffRetry';
+import { shouldSelfStop, type SubscribeOutcome } from './subscribeOutcome';
 import { recordEventSubConnected, recordEventSubReconnectAttempt, removeEventSubHealth } from '../../shared/healthStore';
-import { subscribeForStreamer, fetchValidEventSubToken, SubscribeOutcome, removeSessionSubscriptions, removeStreamerFromMap, dispatchNotification, handleRevocation, StreamerEventSubData } from './twitchEventSubSubscriptions';
+import { subscribeForStreamer, fetchValidEventSubToken, removeSessionSubscriptions, removeStreamerFromMap, StreamerEventSubData } from './twitchEventSubSubscriptions';
+import { buildReconnectUrl, rejectionReason, routeEventSubMessage, type EventSubMessage } from './twitchEventSubMessages';
 
 const log = createLogger('EventSub');
 
@@ -15,8 +17,6 @@ const RECONNECT_BACKOFF_MAX_MS = 30_000;
  *  subscription and nothing in the logs to explain why — unlike every other failure path here
  *  (keepalive timeout, socket error, socket close), which already force-reconnects. */
 const CONNECT_TIMEOUT_MS = 30_000;
-/** How long a message ID is remembered for deduplication (ms). */
-export const MESSAGE_TTL_MS = 10 * 60 * 1000;
 /** Grace period before closing the old WebSocket during a session migration (Twitch-specified window). */
 const SESSION_MIGRATION_CLOSE_DELAY_MS = 5_000;
 /** Base delay before retrying a subscribe pass whose creates failed transiently (5xx, 429, network,
@@ -29,48 +29,6 @@ const SUBSCRIBE_RETRY_MAX_MS = 5 * 60_000;
  *  the backed-off reconnect path keeps re-trying on a fresh session regardless). */
 const SUBSCRIBE_RETRY_MAX_ATTEMPTS = 8;
 
-/** Metadata fields present on every EventSub WebSocket message. */
-export interface EventSubMetadata {
-  message_type: string;
-  message_id: string;
-  message_timestamp: string;
-}
-
-/** A single EventSub WebSocket message. */
-export interface EventSubMessage {
-  metadata: EventSubMetadata;
-  payload: {
-    session?: { id: string; keepalive_timeout_seconds: number; reconnect_url?: string | null };
-    subscription?: { type: string; status: string; condition: Record<string, string> };
-    event?: Record<string, unknown>;
-  };
-}
-
-/** Validates the Twitch-supplied reconnect URL against a strict allowlist. */
-export function buildReconnectUrl(reconnectUrl: string): string | null {
-  let parsed: URL;
-  try { parsed = new URL(reconnectUrl); } catch { return null; }
-  const validPorts = new Set(['', '443']);
-  const checkResults = {
-    protocol: parsed.protocol === 'wss:',
-    hostname: parsed.hostname === 'eventsub.wss.twitch.tv' || parsed.hostname.endsWith('.eventsub.wss.twitch.tv'),
-    username: !parsed.username,
-    password: !parsed.password,
-    port: validPorts.has(parsed.port),
-    pathname: parsed.pathname.replace(/\/$/, '') === '/ws',
-  };
-  const failed = Object.entries(checkResults).filter(([, v]) => !v).map(([k]) => k);
-  if (failed.length > 0) {
-    log.error(`Invalid reconnect URL — failed checks: ${failed.join(', ')} — url: ${reconnectUrl}`);
-    return null;
-  }
-  // Reconstruct from validated components so taint analysis sees a clean value
-  const safe = new URL(`wss://${parsed.hostname}/ws`);
-  safe.search = parsed.search;
-  return safe.href;
-}
-
-/** Manages a per-streamer EventSub WebSocket connection with reconnection and keepalive logic. */
 export class StreamerConnection {
   readonly uid: string;
   private readonly name: string;
@@ -248,7 +206,7 @@ export class StreamerConnection {
    * @param emptyLogMessage - Logged when the connection self-stops.
    */
   private handleSubscribeOutcome(outcome: SubscribeOutcome, emptyLogMessage: string): void {
-    if (outcome.desired === 0 || (outcome.live === 0 && outcome.transientFailures === 0)) {
+    if (shouldSelfStop(outcome)) {
       log.info(`[${this.name}] ${emptyLogMessage}`);
       this.stop();
       this.onSelfStop?.(this.uid);
@@ -463,24 +421,13 @@ export class StreamerConnection {
    */
   private handleMessage(msg: EventSubMessage): void {
     const { message_type, message_id, message_timestamp } = msg.metadata;
-    if (isStale(message_timestamp)) { log.warn(`[${this.name}] Stale message (${message_type}) — ignoring`); return; }
-    if (isDuplicate(message_id)) { log.warn(`[${this.name}] Duplicate message (${message_type}) — ignoring`); return; }
-    this.resetKeepaliveTimer();
-
-    if (message_type === 'session_welcome') {
-      this.onSessionWelcome(msg);
-    } else if (message_type === 'session_reconnect') {
-      const reconnectUrl = msg.payload.session?.reconnect_url;
-      if (reconnectUrl) this.handleSessionReconnect(reconnectUrl);
-    } else if (message_type === 'notification') {
-      const sub = msg.payload.subscription;
-      const event = msg.payload.event;
-      if (sub && event) dispatchNotification(sub.type, event, sub.condition);
-    } else if (message_type === 'revocation') {
-      const sub = msg.payload.subscription;
-      if (sub) handleRevocation(sub);
-    }
-    // session_keepalive: timer already reset above
+    const rejection = rejectionReason(message_id, message_timestamp);
+    if (rejection) { log.warn(`[${this.name}] ${rejection} message (${message_type}) — ignoring`); return; }
+    this.resetKeepaliveTimer(); // also covers session_keepalive, which needs nothing else
+    routeEventSubMessage(msg, {
+      onWelcome: (welcome) => { this.onSessionWelcome(welcome); },
+      onReconnect: (reconnectUrl) => { this.handleSessionReconnect(reconnectUrl); },
+    });
   }
 
   /**
@@ -596,33 +543,4 @@ export class StreamerConnection {
       this.forceReconnect(socket);
     }, (this.keepaliveTimeoutSecs + 10) * 1_000);
   }
-}
-
-// TTL-based dedup: messageId → expiry timestamp (shared across all per-streamer connections)
-export const seenMessageIds = new Map<string, number>();
-
-/** Removes all expired entries from the deduplication map. */
-export function purgeExpiredMessageIds(): void {
-  const now = Date.now();
-  for (const [id, expiry] of seenMessageIds) {
-    if (expiry < now) seenMessageIds.delete(id);
-  }
-}
-
-// Purge expired entries on a fixed interval so isDuplicate stays O(1).
-setInterval(purgeExpiredMessageIds, MESSAGE_TTL_MS).unref();
-
-/** Returns true if messageId has been seen within MESSAGE_TTL_MS; records it otherwise. */
-export function isDuplicate(messageId: string): boolean {
-  const now = Date.now();
-  const expiry = seenMessageIds.get(messageId);
-  if (expiry !== undefined && now <= expiry) return true;
-  seenMessageIds.set(messageId, now + MESSAGE_TTL_MS);
-  return false;
-}
-
-/** Returns true if the ISO timestamp is older than MESSAGE_TTL_MS or unparseable. */
-export function isStale(timestamp: string): boolean {
-  const ts = Date.parse(timestamp);
-  return !Number.isFinite(ts) || Date.now() - ts > MESSAGE_TTL_MS;
 }

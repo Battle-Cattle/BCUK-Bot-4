@@ -4,7 +4,8 @@ import type { AlertPayload } from '../../twitch/eventsub/twitchEventSubRuntime';
 import { ALERT_ASSETS_FOLDER, ALERT_MAX_SSE_PER_CHANNEL } from '../../shared/config';
 import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 import { renderView } from './viewHelpers';
-import { createSseEventsHandler, createLoginValidator, broadcastToChannel } from './sseChannel';
+import { broadcastToChannel } from './sseChannel';
+import { createSseEventsHandler, createLoginValidator } from './sseEventsHandlers';
 
 const log = createLogger('AlertsOverlaySource');
 const router = Router();

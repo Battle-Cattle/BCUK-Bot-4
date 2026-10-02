@@ -17,6 +17,7 @@ vi.mock('../../shared/healthStore', () => ({
   removeEventSubHealth: vi.fn(),
 }));
 
+import { StreamerConnection } from './twitchEventSubConnection';
 import {
   buildReconnectUrl,
   isDuplicate,
@@ -24,9 +25,8 @@ import {
   MESSAGE_TTL_MS,
   purgeExpiredMessageIds,
   seenMessageIds,
-  StreamerConnection,
-  EventSubMessage,
-} from './twitchEventSubConnection';
+  type EventSubMessage,
+} from './twitchEventSubMessages';
 import {
   subscribeForStreamer,
   fetchValidEventSubToken,
