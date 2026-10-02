@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { findCachedSfxTrigger } from '../db';
+import { findCachedSfxTrigger, type SfxLookupResult } from '../db';
 import { pickWeightedRandom } from './soundSelector';
 import { isPlaying } from '../audio/audioPlayer';
 import { playFile, VoiceNotConnectedError } from '../audio/sfxPlayer';
@@ -36,22 +36,22 @@ export function forgetGuildCommandState(guildId: string): void {
 }
 
 /**
- * Looks up a trigger command's sound files, picks one, and plays it into the
+ * Picks one of an already-looked-up trigger's sound files and plays it into the
  * given guild, recording the play time on that guild's cooldown state on success.
  *
- * @param command - Lowercased trigger command to look up.
+ * @param command - Lowercased trigger command, used for logging/status.
+ * @param lookup - The trigger's lookup result (from `findCachedSfxTrigger`).
  * @param source - Where the command came from, used for logging/status.
  * @param guildId - Guild to play the sound into.
  * @param state - The guild's cooldown/in-flight state; `lastPlayedAt` is updated on success.
  */
-async function lookupAndPlay(
+async function playTrigger(
   command: string,
+  lookup: SfxLookupResult,
   source: 'twitch' | 'discord',
   guildId: string,
   state: GuildCommandState,
 ): Promise<void> {
-  const lookup = await findCachedSfxTrigger(command);
-  if (!lookup) return;
   const { files } = lookup;
   if (files.length === 0) {
     log.warn(`[${source}] Trigger '${command}' has no sound files in DB`);
@@ -110,14 +110,17 @@ function tryClaimGuildSlot(
     return false;
   }
 
-  // Claim the slot before any await so concurrent message handlers see the flag.
+  // Claim the slot before any further await so concurrent message handlers see the flag.
   state.inFlight = true;
   return true;
 }
 
 /**
  * Handle a raw chat message from Twitch or Discord.
- * Performs all checks (prefix, cooldown, playing state, DB lookup) before playing.
+ * Looks the first word up as an SFX trigger first and returns quietly if it isn't one,
+ * so ordinary chat never claims the guild's in-flight slot (which would silently drop a
+ * concurrent real trigger) or logs cooldown noise. Only then checks cooldown/playing state
+ * and claims the slot before playing.
  * Cooldown and in-flight state are tracked per guild so a trigger in one guild
  * never blocks or cools down a trigger in another.
  *
@@ -142,10 +145,11 @@ export async function handleCommand(
   const command = resolveCommand(rawMessage, precomputedCommand);
   if (!command) return;
 
+  const lookup = await findCachedSfxTrigger(command);
+  if (!lookup) return;
+
   if (guildId === null) {
-    if (await findCachedSfxTrigger(command)) {
-      log.warn(`[${source}] No active guild resolved for command '${command}', skipping`);
-    }
+    log.warn(`[${source}] No active guild resolved for command '${command}', skipping`);
     return;
   }
 
@@ -153,7 +157,7 @@ export async function handleCommand(
   if (!tryClaimGuildSlot(guildId, source, command, state)) return;
 
   try {
-    await lookupAndPlay(command, source, guildId, state);
+    await playTrigger(command, lookup, source, guildId, state);
   } finally {
     state.inFlight = false;
   }

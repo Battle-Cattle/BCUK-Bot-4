@@ -108,4 +108,38 @@ describe('countdown cooldown', () => {
 
     expect(mockRuntime.send).toHaveBeenCalledTimes(8);
   });
+
+  it('blocks a second !321 while the first countdown is still running, even after the cooldown expires', async () => {
+    // Make the first countdown's sends slow so it outlasts the 3s cooldown window.
+    mockRuntime.send.mockImplementation(() => new Promise<void>((resolve) => setTimeout(resolve, 500)));
+
+    const first = executeCountdownForTwitch('#chan-slow', '!321');
+    await vi.advanceTimersByTimeAsync(COOLDOWN_MS + 1);
+    // Cooldown has elapsed but the first countdown hasn't sent 'Go!' yet.
+    expect(mockRuntime.send).toHaveBeenCalledTimes(3);
+    const second = executeCountdownForTwitch('#chan-slow', '!321');
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await Promise.all([first, second]);
+    expect(mockRuntime.send).toHaveBeenCalledTimes(4);
+
+    // Once the first finished (and the cooldown has passed), a new countdown can start.
+    await vi.advanceTimersByTimeAsync(COOLDOWN_MS + 1);
+    const third = executeCountdownForTwitch('#chan-slow', '!321');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await third;
+    expect(mockRuntime.send).toHaveBeenCalledTimes(8);
+  });
+
+  it('releases the in-progress guard when a step fails', async () => {
+    mockRuntime.send.mockRejectedValueOnce(new Error('boom'));
+    await executeCountdownForTwitch('#chan-fail', '!321');
+    expect(mockRuntime.send).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(COOLDOWN_MS + 1);
+    const retry = executeCountdownForTwitch('#chan-fail', '!321');
+    await vi.advanceTimersByTimeAsync(3000);
+    await retry;
+    expect(mockRuntime.send).toHaveBeenCalledTimes(5);
+  });
 });

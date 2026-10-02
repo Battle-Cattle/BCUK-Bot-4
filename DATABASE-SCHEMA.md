@@ -478,6 +478,22 @@ Deployment note:
 
 For now, the recommended migration is the two separate UNIQUE constraints above; the application-layer atomic checks provide sufficient protection for typical operations.
 
+## `counter_archive_run`
+
+Persistent marker for the yearly counter archive/reset (`archiveAndResetYearlyCounters` in `src/db/counters.ts`, driven hourly by `src/commands/counterScheduler.ts`). Added by `migrations/counter_archive_runs.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `archive_year` | `SMALLINT UNSIGNED` PK | Calendar year whose `value<year>` archive + `current_value` reset has run |
+| `archived_at` | `DATETIME` | When the archive ran; defaults to `CURRENT_TIMESTAMP` |
+
+Behavior:
+
+- The archive claims its year with `INSERT IGNORE` in the **same transaction** as the archive `UPDATE`; if the row already exists the `UPDATE` is skipped. A failed `UPDATE` rolls the marker back, so the next tick retries.
+- This makes the archive idempotent, so the scheduler attempts the previous year's archive on every tick (not only on 1 January) and catches up after downtime spanning the year boundary.
+- **Seeded with the previous calendar year** (`INSERT IGNORE ... VALUES (YEAR(CURDATE()) - 1)`) by both the migration and `schema.sql`, so deploying mid-year doesn't immediately re-archive/reset last year (which would zero this year's progress). Delete that row by hand only if last year's archive was genuinely missed and should run now.
+- If the table is missing, each tick logs an error and records a failed `counter` scheduler run instead of archiving.
+
 ## `companion_app_tokens`
 
 Self-service bearer tokens for the companion app: one active token per user, no approval queue, used only for read-only delivery of the user's own Twitch channel-point redemption events. Created by `migrations/companion_app_tokens.sql`.

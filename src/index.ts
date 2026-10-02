@@ -33,11 +33,19 @@ import { startRewardPricingScheduler, stopRewardPricingScheduler } from './twitc
 import { registerRewardPricingRuntime } from './twitch/pricing/rewardPricingService';
 import { startTimerCommandScheduler, stopTimerCommandScheduler, registerTimerCommandsRuntime } from './twitch/timers/timerCommandScheduler';
 import { createLogger } from './shared/logger';
+import { withTimeout } from './shared/withTimeout';
 
 const log = createLogger('Bot');
 
 /** How often the DB-connectivity health check pings the pool (see {@link startDbHealthCheck}). */
 const DB_HEALTH_CHECK_INTERVAL_MS = 60_000;
+
+/**
+ * Upper bound on a single health-check {@link pingDb} call. `pingDb()`'s `getConnection()` has no
+ * timeout of its own, so without this a wedged pool would leave the probe (and the in-flight
+ * guard) pending forever while `healthStore` kept reporting the last successful ping.
+ */
+const DB_HEALTH_CHECK_TIMEOUT_MS = 10_000;
 
 /**
  * How long an owner-alert DM (including `main()`'s `announceStartup()` DM) waits for Discord to
@@ -49,25 +57,32 @@ const DB_HEALTH_CHECK_INTERVAL_MS = 60_000;
 const DISCORD_READY_FOR_OWNER_DM_TIMEOUT_MS = 30_000;
 
 let dbHealthCheckTimer: ReturnType<typeof setInterval> | null = null;
-// Guards against overlapping probes: pingDb()'s getConnection() has no timeout of its own, so
-// a pool that's exhausted/wedged could in principle keep a probe in flight past the next
-// interval tick — this flag makes an overlap a no-op instead of stacking probes.
+// Guards against overlapping probes: each probe is bounded by DB_HEALTH_CHECK_TIMEOUT_MS, which
+// is well under the interval, but this flag still makes any overlap a no-op instead of
+// stacking probes.
 let dbHealthCheckInFlight = false;
 
 /**
  * Starts the periodic DB-connectivity health check: pings the pool every
  * {@link DB_HEALTH_CHECK_INTERVAL_MS} and records the outcome in `healthStore`, so the owner
  * health dashboard/`!health` command/owner-alert watcher reflect live DB reachability, not just
- * the one-off ping `main()` already does at startup. No-ops if already started.
+ * the one-off ping `main()` already does at startup. Each ping is bounded by
+ * {@link DB_HEALTH_CHECK_TIMEOUT_MS}; a timeout or rejection is recorded as a failed ping.
+ * No-ops if already started.
  */
 function startDbHealthCheck(): void {
   if (dbHealthCheckTimer) return;
   dbHealthCheckTimer = setInterval(() => {
     if (dbHealthCheckInFlight) return;
     dbHealthCheckInFlight = true;
-    void pingDb()
+    void withTimeout(pingDb(), DB_HEALTH_CHECK_TIMEOUT_MS, 'DB health check ping')
       .then((ok) => recordDbPing(ok, ok ? undefined : 'DB ping failed'))
-      .catch((err: unknown) => log.error('Unexpected error during DB health check:', err))
+      .catch((err: unknown) => {
+        log.error('Unexpected error during DB health check:', err);
+        // A hung or rejected ping is a DB failure too — record it so healthStore doesn't keep
+        // reporting the last successful ping.
+        recordDbPing(false, err instanceof Error ? err.message : String(err));
+      })
       .finally(() => { dbHealthCheckInFlight = false; });
   }, DB_HEALTH_CHECK_INTERVAL_MS);
   // Doesn't keep the process alive on its own — same reasoning as this codebase's other
@@ -81,6 +96,9 @@ function startDbHealthCheck(): void {
 function stopDbHealthCheck(): void {
   if (dbHealthCheckTimer) { clearInterval(dbHealthCheckTimer); dbHealthCheckTimer = null; }
 }
+
+/** Set by the first {@link shutdown} call so a second SIGINT/SIGTERM can't run a concurrent teardown. */
+let shuttingDown = false;
 
 /**
  * Runs one shutdown teardown step, logging and swallowing any failure so it can't prevent later
@@ -102,9 +120,15 @@ async function safeStop(name: string, fn: () => void | Promise<void>): Promise<v
  * `ownerAlerts.ts`'s `stopOwnerAlertWatcher`/`announceShutdown`) before anything actually
  * disconnects. Each teardown step is isolated via {@link safeStop} so a failure in one component
  * (e.g. the Twitch monitor) can't skip the rest — `closePool()` and `process.exit(0)` always run.
+ * Re-entrant calls (a second signal while teardown is still running) are logged and ignored.
  * @param signal - The name of the signal that triggered shutdown (e.g. `SIGINT`).
  */
 async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) {
+    log.info(`${signal} received — shutdown already in progress, ignoring.`);
+    return;
+  }
+  shuttingDown = true;
   log.info(`${signal} received — disconnecting from voice and shutting down.`);
   // Before anything else — every stop* call below disconnects a component (Twitch chat, EventSub,
   // etc.), and none of that is a real outage the owner needs a DM about.
@@ -136,13 +160,24 @@ process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err: unknown) => { log.
 // it, so we log loudly and exit deliberately instead, making the failure visible and diagnosable.
 
 /**
+ * Wraps a non-`Error` rejection/throw value in an `Error`, since winston (no `format.splat()`)
+ * silently drops a non-object second argument — a bare string reason would otherwise vanish
+ * from the log. `Error` values are returned unchanged.
+ * @param value - The rejection reason or thrown value.
+ * @returns `value` itself if it's an `Error`, otherwise a new `Error` of its string form.
+ */
+function toError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
+
+/**
  * Logs an unhandled promise rejection and exits, rather than letting Node's default
  * (process termination without a clean log line) or silently continuing.
  * @param reason - The rejection reason (typically an `Error`, but not guaranteed to be).
  * @returns Never returns — always calls `process.exit(1)`.
  */
 process.on('unhandledRejection', (reason) => {
-  log.error('Unhandled promise rejection:', reason);
+  log.error('Unhandled promise rejection:', toError(reason));
   process.exit(1);
 });
 
@@ -153,7 +188,7 @@ process.on('unhandledRejection', (reason) => {
  * @returns Never returns — always calls `process.exit(1)`.
  */
 process.on('uncaughtException', (err) => {
-  log.error('Uncaught exception:', err);
+  log.error('Uncaught exception:', toError(err));
   process.exit(1);
 });
 
@@ -167,7 +202,7 @@ process.on('uncaughtException', (err) => {
  * `startDiscordBot()` itself doesn't block on it.
  * @returns Resolves once every component has started; rejects (and exits the process,
  *   via the `.catch` below) if DB connectivity, the `redemption_handled` migration check, or the
- *   guild registry load fails.
+ *   guild registry load fails. A `startTwitchBot()` failure is logged and startup continues.
  */
 async function main(): Promise<void> {
   log.info('Starting BCUK Bot 4...');
@@ -245,7 +280,13 @@ async function main(): Promise<void> {
   });
   await primeOwnerAlertBaseline();
   startOwnerAlertWatcher();
-  await startTwitchBot();
+  // Don't let a Twitch chat failure (e.g. a revoked bot token or an IRC outage) abort startup —
+  // the web panel must still come up so the owner can reconnect the bot via /admin/bot-auth.
+  try {
+    await startTwitchBot();
+  } catch (err) {
+    log.error('Twitch bot failed to start — continuing without Twitch chat:', err);
+  }
   startWebPanel();
   startChannelReconciliationPoll();
   startCounterScheduler();

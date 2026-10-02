@@ -121,6 +121,69 @@ describe('buildBotAuthProvider', () => {
     });
   });
 
+  describe('listener error containment (Twurple drops the listener promise, so a rejection would be unhandled)', () => {
+    const invalidTokenError = Object.assign(new Error('Encountered HTTP status code 401'), {
+      statusCode: 401,
+      body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
+    });
+
+    it('onRefresh resolves (does not reject) when saving the refreshed token fails', async () => {
+      vi.mocked(saveBotChatTokenIfOwnedBy).mockRejectedValue(new Error('db down'));
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, vi.fn());
+
+      await expect(authProviderHandlers.refreshHandlers[0]!('bot-uid', {
+        accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
+      })).resolves.toBeUndefined();
+    });
+
+    it('onRefreshFailure resolves (does not reject) when clearing a revoked token fails', async () => {
+      vi.mocked(clearBotChatTokenIfOwnedBy).mockRejectedValue(new Error('db down'));
+      const restart = vi.fn();
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
+
+      await expect(authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', invalidTokenError)).resolves.toBeUndefined();
+      expect(restart).not.toHaveBeenCalled();
+      // The owner is still told to reconnect even though the DB couldn't be cleared.
+      expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining(BOT_AUTH_CONNECT_URL));
+    });
+
+    it('onRefreshFailure resolves (does not reject) even if raising the owner alert itself throws', async () => {
+      vi.mocked(clearBotChatTokenIfOwnedBy).mockRejectedValue(new Error('db down'));
+      vi.mocked(sendOwnerAlert).mockImplementationOnce(() => { throw new Error('alert failed'); });
+      const restart = vi.fn();
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
+
+      await expect(authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', invalidTokenError)).resolves.toBeUndefined();
+      expect(restart).not.toHaveBeenCalled();
+    });
+
+    it('onRefreshFailure resolves (does not reject) when the transient rebuild loop hits a DB error', async () => {
+      vi.mocked(getBotChatToken).mockRejectedValue(new Error('db down'));
+      const restart = vi.fn();
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
+
+      await expect(runRefreshFailureHandler('bot-uid', new Error('network blip'))).resolves.toBeUndefined();
+      expect(restart).not.toHaveBeenCalled();
+      // Every attempt's lookup failed, so the owner is told recovery stopped.
+      expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining(BOT_AUTH_CONNECT_URL));
+    });
+
+    it('keeps retrying after a failed token lookup and rebuilds once the DB recovers', async () => {
+      vi.mocked(getBotChatToken)
+        .mockRejectedValueOnce(new Error('db down'))
+        .mockResolvedValue(STORED_BOT_TOKEN as any);
+      const restart = vi.fn().mockResolvedValue(undefined);
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
+
+      await runRefreshFailureHandler('bot-uid', new Error('network blip'));
+      expect(getBotChatToken).toHaveBeenCalledTimes(2);
+      expect(restart).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
+    });
+  });
+
   describe('onRefreshFailure — confirmed invalid/revoked refresh token', () => {
     const invalidTokenError = Object.assign(new Error('Encountered HTTP status code 401'), {
       statusCode: 401,

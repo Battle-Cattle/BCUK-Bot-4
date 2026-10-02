@@ -22,14 +22,25 @@ const log = createLogger('GuildRegistry');
 
 let registry = new Map<string, DbGuild>();
 
+// Bumped by every reloadGuildRegistry() call so a slower, earlier-started reload
+// can't overwrite the result of a newer one that finished first.
+let reloadGeneration = 0;
+
 /**
  * Reloads the in-memory guild registry from the database. Call once at startup
  * and after any change to the served set (members provisioned/removed). Loads
  * only provisioned guilds (≥1 member). On failure the previous registry is left
- * intact so a transient DB error cannot blank the whitelist.
+ * intact so a transient DB error cannot blank the whitelist. When reloads overlap,
+ * only the most recently started one's result is applied; a superseded reload's
+ * (possibly stale) read is discarded.
  */
 export async function reloadGuildRegistry(): Promise<void> {
+  const generation = ++reloadGeneration;
   const guilds = await getProvisionedGuilds();
+  if (generation !== reloadGeneration) {
+    log.debug('Discarding superseded guild registry reload.');
+    return;
+  }
   const next = new Map<string, DbGuild>();
   for (const guild of guilds) {
     next.set(guild.guild_id, guild);

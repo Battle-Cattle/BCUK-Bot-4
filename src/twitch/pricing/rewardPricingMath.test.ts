@@ -57,6 +57,19 @@ describe('computePrice', () => {
     expect(computePrice(1, { baseCost: 100, maxMultiplier: 0.53, curve: 1, roundToNearest: 5 })).toBe(153);
   });
 
+  it('clamps to a whole-number max when the raw max is fractional', () => {
+    // baseCost=101, maxMultiplier=0.55 -> raw max=156.55; round(156.55/10)*10 = 160 would otherwise clamp to 156.55, which Twitch rejects.
+    const price = computePrice(1, { baseCost: 101, maxMultiplier: 0.55, curve: 1, roundToNearest: 10 });
+    expect(price).toBe(156);
+    expect(Number.isInteger(price)).toBe(true);
+  });
+
+  it('does not lose a point to float error when snapping the max to an integer', () => {
+    // 100 * (1 + 0.15) evaluates to 114.99999999999999 in floating point; the max must still be 115.
+    // round(114.99../4)*4 = 116 exceeds the max, so it clamps to the max — which must be 115, not 114.
+    expect(computePrice(1, { baseCost: 100, maxMultiplier: 0.15, curve: 1, roundToNearest: 4 })).toBe(115);
+  });
+
   it('is unaffected by a missing roundToNearest', () => {
     expect(computePrice(0.5, config)).toBe(483);
   });

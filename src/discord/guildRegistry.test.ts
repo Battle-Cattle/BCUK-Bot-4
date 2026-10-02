@@ -60,6 +60,23 @@ describe('reloadGuildRegistry', () => {
 
     expect(isRegisteredGuild('111')).toBe(true);
   });
+
+  it('applies the newest reload when an earlier-started reload finishes last', async () => {
+    let resolveStale!: (rows: Awaited<ReturnType<typeof getProvisionedGuilds>>) => void;
+    vi.mocked(getProvisionedGuilds)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveStale = resolve; }))
+      .mockResolvedValueOnce([{ guild_id: '999', name: 'Fresh', voice_channel_id: null }]);
+
+    const stale = reloadGuildRegistry();
+    await reloadGuildRegistry();
+    expect(isRegisteredGuild('999')).toBe(true);
+
+    resolveStale([{ guild_id: '111', name: 'Stale', voice_channel_id: null }]);
+    await stale;
+
+    expect(isRegisteredGuild('999')).toBe(true);
+    expect(isRegisteredGuild('111')).toBe(false);
+  });
 });
 
 describe('isRegisteredGuild', () => {

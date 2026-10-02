@@ -250,6 +250,26 @@ describe('startRewardPricingScheduler / stopRewardPricingScheduler', () => {
     expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
   });
 
+  it('does not restart polling when an in-flight recovery probe succeeds after stop', async () => {
+    const shutdownError = Object.assign(new Error('Server shutdown in progress'), { code: 'ER_SERVER_SHUTDOWN', errno: 1053 });
+    vi.mocked(getAllEnabledPricingRows).mockRejectedValueOnce(shutdownError);
+    startRewardPricingScheduler();
+    await vi.advanceTimersByTimeAsync(30_000); // shutdown error pauses polling and schedules a 60s probe
+
+    let resolveProbe!: (rows: never[]) => void;
+    vi.mocked(getAllEnabledPricingRows).mockImplementationOnce(() => new Promise((resolve) => { resolveProbe = resolve; }));
+    await vi.advanceTimersByTimeAsync(60_000); // probe starts and blocks on the DB
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(2);
+
+    vi.mocked(getAllEnabledPricingRows).mockResolvedValue([]);
+    const stopping = stopRewardPricingScheduler();
+    resolveProbe([]); // probe succeeds after stop began — would previously resume the interval
+    await stopping;
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(2);
+  });
+
   it('a reentrancy guard prevents overlapping ticks', async () => {
     let resolveFirst!: () => void;
     const gate = new Promise<void>((resolve) => { resolveFirst = resolve; });

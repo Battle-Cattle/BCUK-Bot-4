@@ -151,7 +151,8 @@ export async function getGuildMemberUsers(guildId: string): Promise<DbUser[]> {
 /**
  * Runs `fn` on a dedicated connection with a short (5s) `innodb_lock_wait_timeout`, so callers
  * fail fast instead of hanging up to the default 50s under lock contention. The timeout is reset
- * to the session default and the connection released before returning.
+ * to the session default and the connection released before returning; if that reset fails, the
+ * connection is destroyed instead of being returned to the pool.
  * @param fn Callback that receives the connection and performs the work.
  * @returns The value returned by `fn`.
  */
@@ -161,10 +162,15 @@ async function withShortLockTimeout<T>(fn: (conn: mysql.PoolConnection) => Promi
     await connection.execute('SET SESSION innodb_lock_wait_timeout = 5');
     return await fn(connection);
   } finally {
-    try { await connection.execute('SET SESSION innodb_lock_wait_timeout = DEFAULT'); } catch (e) {
-      log.warn('connection.execute: failed to reset innodb_lock_wait_timeout to DEFAULT:', e);
+    try {
+      await connection.execute('SET SESSION innodb_lock_wait_timeout = DEFAULT');
+      connection.release();
+    } catch (e) {
+      // Don't hand a connection still carrying the 5s timeout back to the shared pool, or an
+      // unrelated transaction that later picks it up would fail fast under normal contention.
+      log.warn('connection.execute: failed to reset innodb_lock_wait_timeout to DEFAULT; destroying connection:', e);
+      connection.destroy();
     }
-    connection.release();
   }
 }
 
@@ -223,7 +229,7 @@ export async function upsertUserRecord(
  * `user` delete (or null out) their rows along with the user, so {@link deleteUnlinkedUserRecord}
  * refuses to delete a user while any of these still point at them. `streamdeck_api_keys` has no
  * foreign key but is still owned by a user. Keep in sync with DATABASE-SCHEMA.md; a test checks
- * every foreign key to `user` in schema.sql is listed here.
+ * every foreign key to `user` declared in schema.sql or migrations/ is listed here.
  */
 export const USER_REFERENCING_COLUMNS: ReadonlyArray<readonly [table: string, column: string]> = [
   ['guild_member', 'discord_id'],
@@ -234,6 +240,8 @@ export const USER_REFERENCING_COLUMNS: ReadonlyArray<readonly [table: string, co
   ['companion_oauth_codes', 'discord_id'],
   ['streamdeck_api_keys', 'discord_id'],
   ['streamdeck_key_guild_status', 'approved_by'],
+  ['webauthn_credentials', 'discord_id'],
+  ['passkey_enrollment_codes', 'discord_id'],
 ];
 
 const DELETE_UNLINKED_USER_SQL = `DELETE FROM \`user\`

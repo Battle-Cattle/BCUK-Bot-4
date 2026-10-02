@@ -51,12 +51,45 @@ describe('counterScheduler', () => {
     expect(archiveAndResetYearlyCounters).toHaveBeenCalledWith(2024);
   });
 
-  it('does not trigger archive on a non-Jan-1 date', async () => {
-    vi.setSystemTime(new Date(2025, 1, 15)); // Feb 15, 2025
+  it('catches up on a missed archive on a non-Jan-1 date (bot was down on Jan 1)', async () => {
+    vi.setSystemTime(new Date(2025, 1, 15)); // Feb 15, 2025 — marker for 2024 absent
+    archiveAndResetYearlyCounters.mockResolvedValueOnce(4);
     startCounterScheduler();
     await flushAsync();
 
-    expect(archiveAndResetYearlyCounters).not.toHaveBeenCalled();
+    expect(archiveAndResetYearlyCounters).toHaveBeenCalledTimes(1);
+    expect(archiveAndResetYearlyCounters).toHaveBeenCalledWith(2024);
+    expect(recordSchedulerRun).toHaveBeenCalledWith('counter', true);
+  });
+
+  it('treats an already-archived year (marker present, returns 0) as success and stops re-polling the DB', async () => {
+    vi.setSystemTime(new Date(2025, 5, 15)); // June 15, 2025
+    archiveAndResetYearlyCounters.mockResolvedValue(0);
+    startCounterScheduler();
+    await flushAsync();
+
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    await flushAsync();
+
+    // First tick consults the DB marker; later ticks short-circuit in memory.
+    expect(archiveAndResetYearlyCounters).toHaveBeenCalledTimes(1);
+    expect(recordSchedulerRun).toHaveBeenCalledTimes(2);
+    expect(recordSchedulerRun).toHaveBeenNthCalledWith(2, 'counter', true);
+  });
+
+  it('records a failed run (without crashing) when the marker table is missing, and retries next poll', async () => {
+    vi.setSystemTime(new Date(2025, 5, 15));
+    archiveAndResetYearlyCounters
+      .mockRejectedValueOnce(new Error("Table 'bcuk.counter_archive_run' doesn't exist"))
+      .mockResolvedValueOnce(0);
+    startCounterScheduler();
+    await flushAsync();
+
+    expect(recordSchedulerRun).toHaveBeenCalledWith('counter', false, "Table 'bcuk.counter_archive_run' doesn't exist");
+
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    await flushAsync();
+    expect(archiveAndResetYearlyCounters).toHaveBeenCalledTimes(2);
   });
 
   it('is idempotent — archive fires only once even after hourly re-polls on Jan 1', async () => {
@@ -169,11 +202,15 @@ describe('counterScheduler', () => {
   });
 
   it('records a successful scheduler run on the non-archive poll path', async () => {
-    vi.setSystemTime(new Date(2025, 1, 15)); // Feb 15, 2025 — not Jan 1
+    vi.setSystemTime(new Date(2025, 1, 15)); // Feb 15, 2025
     startCounterScheduler();
     await flushAsync();
+    // Second tick short-circuits (lastArchivedYear already set) — the non-archive path.
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    await flushAsync();
 
-    expect(recordSchedulerRun).toHaveBeenCalledWith('counter', true);
+    expect(archiveAndResetYearlyCounters).toHaveBeenCalledTimes(1);
+    expect(recordSchedulerRun).toHaveBeenNthCalledWith(2, 'counter', true);
   });
 
   it('records a successful scheduler run when the yearly archive succeeds', async () => {
@@ -194,9 +231,11 @@ describe('counterScheduler', () => {
   });
 
   it('stopCounterScheduler prevents further ticks', async () => {
-    vi.setSystemTime(new Date(2025, 5, 15)); // June 15 — no archive expected
+    vi.setSystemTime(new Date(2025, 5, 15)); // June 15
+    archiveAndResetYearlyCounters.mockRejectedValue(new Error('DB down')); // would retry every tick
     startCounterScheduler();
     await flushAsync();
+    expect(archiveAndResetYearlyCounters).toHaveBeenCalledTimes(1);
 
     stopCounterScheduler();
 
@@ -204,6 +243,6 @@ describe('counterScheduler', () => {
     await vi.advanceTimersByTimeAsync(7_200_000);
     await flushAsync();
 
-    expect(archiveAndResetYearlyCounters).not.toHaveBeenCalled();
+    expect(archiveAndResetYearlyCounters).toHaveBeenCalledTimes(1);
   });
 });

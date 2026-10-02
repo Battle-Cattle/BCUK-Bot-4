@@ -18,6 +18,12 @@ const DELAY_MS = 1000;
 
 const countdownCooldown = createCooldownGate();
 
+// Channels with a countdown currently running. The cooldown alone isn't enough:
+// GLOBAL_COOLDOWN_MS (default 3000ms, env-lowerable) isn't longer than a countdown
+// (3 x DELAY_MS plus send latency), so a second `!321` could otherwise start while
+// the first is still sending and interleave its steps.
+const countdownsInProgress = new Set<string>();
+
 /** Delays for `ms` milliseconds. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -35,8 +41,8 @@ export function registerCountdownTwitchRuntime(runtime: CountdownTwitchRuntime):
 /**
  * Handles a `!321` countdown command by sending each step ("3", "2", "1", "Go!")
  * to `channel` with a one-second delay between steps. No-ops for other commands,
- * if no runtime has been registered, or if `channel` is still on cooldown from a
- * previous countdown. Aborts the remaining steps (without throwing) if a send
+ * if no runtime has been registered, if a countdown is already running in `channel`,
+ * or if `channel` is still on cooldown from a previous countdown. Aborts the remaining steps (without throwing) if a send
  * fails partway through.
  *
  * @param channel - Twitch channel to send the countdown steps to.
@@ -52,14 +58,21 @@ export async function executeCountdownForTwitch(
   if (resolveCommand(rawMessage, precomputedCommand) !== COUNTDOWN_COMMAND) return;
   const runtime = countdownRuntime.get();
   if (!runtime) return;
-  if (!countdownCooldown.tryClaim(`twitch:${channel}`)) return;
-  for (const [i, step] of STEPS.entries()) {
-    if (i > 0) await sleep(DELAY_MS);
-    try {
-      await runtime.send(channel, step);
-    } catch (err) {
-      log.error(`Countdown failed at '${step}' in ${channel}:`, err);
-      return;
+  const key = `twitch:${channel}`;
+  if (countdownsInProgress.has(key)) return;
+  if (!countdownCooldown.tryClaim(key)) return;
+  countdownsInProgress.add(key);
+  try {
+    for (const [i, step] of STEPS.entries()) {
+      if (i > 0) await sleep(DELAY_MS);
+      try {
+        await runtime.send(channel, step);
+      } catch (err) {
+        log.error(`Countdown failed at '${step}' in ${channel}:`, err);
+        return;
+      }
     }
+  } finally {
+    countdownsInProgress.delete(key);
   }
 }

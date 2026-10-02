@@ -118,6 +118,23 @@ describe('runTimerCommandTick', () => {
     expect(send).toHaveBeenCalledWith('somestreamer', 'hello');
   });
 
+  it("rebases the min_messages baseline when the channel's message count resets (e.g. after a part/rejoin)", async () => {
+    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue(
+      [timerRow({ interval_seconds: 600, min_messages: 5 })] as any,
+    );
+    vi.mocked(getMessageCount).mockReturnValue(5000);
+    await runTimerCommandTick(); // seeds messagesAtLastFire at 5000
+    await vi.advanceTimersByTimeAsync(600_000);
+
+    vi.mocked(getMessageCount).mockReturnValue(0); // channel parted -> counter forgotten
+    await runTimerCommandTick(); // rebases the baseline to 0 instead of waiting for 5005
+    expect(send).not.toHaveBeenCalled();
+
+    vi.mocked(getMessageCount).mockReturnValue(5);
+    await runTimerCommandTick();
+    expect(send).toHaveBeenCalledWith('somestreamer', 'hello');
+  });
+
   it('prunes in-memory state once a timer disappears from the enabled-rows query', async () => {
     vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValueOnce([timerRow()] as any);
     await runTimerCommandTick(); // seeded

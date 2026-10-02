@@ -1,6 +1,9 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
 import { isMysqlDuplicateEntryError } from './commandStringUtils';
+import { createLogger } from '../shared/logger';
+
+const log = createLogger('DB');
 
 /** Kind of streamer activity recorded in `streamer_event_log`. */
 export type StreamerEventType = 'follow' | 'sub' | 'resub' | 'giftsub' | 'raid' | 'redemption';
@@ -96,7 +99,17 @@ export async function recordStreamerEvent(
   // PRUNE_EVERY_N_INSERTS longer than intended.
   const count = (insertsSincePrune.get(streamerId) ?? 0) + 1;
   insertsSincePrune.set(streamerId, count);
-  if (count >= PRUNE_EVERY_N_INSERTS) await ensurePruned(streamerId);
+  // Pruning is best-effort housekeeping: the INSERT above has already committed, so a failed
+  // DELETE (lock-wait timeout, deadlock) must not make the caller think the event wasn't
+  // recorded — it would skip the live push, and a retry would collide on redemption_id and skip
+  // it for good. The counter stays at/above the threshold on failure, so the next insert retries.
+  if (count >= PRUNE_EVERY_N_INSERTS) {
+    try {
+      await ensurePruned(streamerId);
+    } catch (err) {
+      log.warn(`recordStreamerEvent: prune failed for streamer ${streamerId}; will retry on next insert:`, err);
+    }
+  }
   return insertId;
 }
 
