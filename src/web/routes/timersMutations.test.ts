@@ -13,6 +13,7 @@ vi.mock('../../db', () => {
     assignUsersToTimer: vi.fn().mockResolvedValue(undefined),
     findUsersByIds: vi.fn().mockResolvedValue(new Map()),
     findUser: vi.fn().mockResolvedValue(null),
+    getMemberAccessLevel: vi.fn().mockResolvedValue(0),
     updateOwnTimerCommand: vi.fn().mockResolvedValue(undefined),
     setOwnTimerCommandEnabled: vi.fn().mockResolvedValue(undefined),
     removeOwnTimerCommand: vi.fn().mockResolvedValue(undefined),
@@ -34,13 +35,14 @@ import supertest from 'supertest';
 import router from './timersMutations';
 import {
   addTimerCommand, updateTimerCommand, removeTimerCommand, setTimerCommandEnabled,
-  assignUsersToTimer, findUsersByIds, findUser, TimerCommandNotFoundError, TimerSelfServiceDeniedError,
+  assignUsersToTimer, findUsersByIds, findUser, getMemberAccessLevel, TimerCommandNotFoundError, TimerSelfServiceDeniedError,
   updateOwnTimerCommand, setOwnTimerCommandEnabled, removeOwnTimerCommand, discardOwnNewTimerCommand,
 } from '../../db';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-const MOD_SESSION_USER = { discordId: '1', discordName: 'Mod', accessLevel: ACCESS_LEVEL_MOCK.MOD };
+const GUILD_ID = '900000000000000001';
+const MOD_SESSION_USER = { discordId: '1', discordName: 'Mod', accessLevel: ACCESS_LEVEL_MOCK.MOD, currentGuildId: GUILD_ID };
 const STREAMER_ID = '111111111111111111';
 const STREAMER_SESSION_USER = { discordId: STREAMER_ID, discordName: 'Streamer', accessLevel: ACCESS_LEVEL_MOCK.USER };
 
@@ -61,6 +63,7 @@ beforeEach(() => {
   vi.mocked(assignUsersToTimer).mockResolvedValue(undefined);
   vi.mocked(findUsersByIds).mockResolvedValue(new Map());
   vi.mocked(findUser).mockResolvedValue(null);
+  vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
   vi.mocked(updateOwnTimerCommand).mockResolvedValue(undefined);
   vi.mocked(setOwnTimerCommandEnabled).mockResolvedValue(undefined);
   vi.mocked(removeOwnTimerCommand).mockResolvedValue(undefined);
@@ -114,6 +117,16 @@ describe('POST /timers/add', () => {
     expect(res.headers.location).toBe('/timers?error=add_failed');
   });
 
+  it('redirects to ?error=assignee_not_in_guild without creating anything when a discord_id is not a member of the current guild', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    const res = await supertest(buildApp())
+      .post('/timers/add').send(`${VALID_FIELDS}&discord_ids=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/timers?error=assignee_not_in_guild');
+    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, VALID_DISCORD_ID);
+    expect(addTimerCommand).not.toHaveBeenCalled();
+    expect(assignUsersToTimer).not.toHaveBeenCalled();
+  });
+
   it('assigns users when discord_ids are provided and user has twitch_name', async () => {
     vi.mocked(findUsersByIds).mockResolvedValue(new Map([
       [VALID_DISCORD_ID, { discord_id: VALID_DISCORD_ID, discord_name: 'Alice', twitch_name: 'alice', access_level: AccessLevel.USER } as any],
@@ -121,6 +134,7 @@ describe('POST /timers/add', () => {
     const res = await supertest(buildApp()).post('/timers/add').send(`${VALID_FIELDS}&discord_ids=${VALID_DISCORD_ID}`);
     expect(res.headers.location).toBe('/timers');
     expect(assignUsersToTimer).toHaveBeenCalledWith(1, [VALID_DISCORD_ID]);
+    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, VALID_DISCORD_ID);
   });
 
   it('skips assigning user when findUsersByIds does not return a matching entry', async () => {

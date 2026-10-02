@@ -44,6 +44,7 @@ import {
   getRewardsForStreamer,
   upsertReward,
   setRewardVideos,
+  saveRewardWithVideos,
   deleteReward,
   getVideosForReward,
 } from './overlayVideos';
@@ -327,6 +328,47 @@ describe('setRewardVideos', () => {
     await setRewardVideos(1, 1, []);
     expect(conn.execute).toHaveBeenCalledTimes(2);
     expect(conn.commit).toHaveBeenCalled();
+  });
+});
+
+// ─── saveRewardWithVideos ─────────────────────────────────────────────────────
+
+describe('saveRewardWithVideos', () => {
+  it('upserts the reward and replaces its videos on one transaction, then commits', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ insertId: 42 }, []])     // upsert reward
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []])  // DELETE
+      .mockResolvedValueOnce([[{ id: 5 }], []])          // validate-SELECT IN
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]); // INSERT
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const id = await saveRewardWithVideos(1, 'reward-uuid', [{ videoId: 5, weight: 2 }]);
+    expect(id).toBe(42);
+    expect(pool.getConnection).toHaveBeenCalledTimes(1);
+    expect(pool.execute).not.toHaveBeenCalled();
+    const [upsertSql, upsertParams] = conn.execute.mock.calls[0]!;
+    expect(upsertSql).toContain('INSERT INTO overlay_reward');
+    expect(upsertParams).toEqual([1, 'reward-uuid']);
+    expect(conn.execute.mock.calls[1]![1]).toEqual([42]);
+    expect(conn.execute.mock.calls[3]![1]).toEqual([42, 5, 2]);
+    expect(conn.commit).toHaveBeenCalledTimes(1);
+    expect(conn.rollback).not.toHaveBeenCalled();
+  });
+
+  it('rolls back the reward upsert when a video does not belong to the streamer', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ insertId: 42 }, []])     // upsert reward
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []])  // DELETE
+      .mockResolvedValueOnce([[], []]);                  // validate-SELECT IN: none owned
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(saveRewardWithVideos(1, 'reward-uuid', [{ videoId: 999, weight: 1 }]))
+      .rejects.toThrow('does not belong to streamer');
+    expect(conn.rollback).toHaveBeenCalledTimes(1);
+    expect(conn.commit).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalled();
   });
 });
 

@@ -6,6 +6,7 @@ vi.mock('../../db', () => ({
   findUser: vi.fn(),
   getMemberAccessLevel: vi.fn(),
   getEffectiveAccessLevelForUser: vi.fn(),
+  getGuildsForMember: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('../../twitch/twitchChannelName', () => ({
@@ -16,7 +17,7 @@ vi.mock('./adminUserMutations', () => ({
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser } from '../../db';
+import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser, getGuildsForMember } from '../../db';
 import { AccessLevel } from '../../db';
 import { isLockWaitTimeoutDbError } from './adminUserMutations';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
@@ -31,6 +32,8 @@ import {
   resolveGuildId,
   resolveValidDiscordId,
   checkToggleTwitchAuth,
+  actorOutranksTargetInAllGuilds,
+  canEditGlobalUserFields,
 } from './adminUserValidation';
 import type { Request, Response } from 'express';
 
@@ -402,6 +405,25 @@ describe('checkToggleTwitchAuth', () => {
     vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
     vi.mocked(findUser).mockResolvedValue(null);
     vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.USER);
+    vi.mocked(getGuildsForMember).mockResolvedValue([]);
+  });
+
+  it('returns target_above_level when a non-owner admin does not outrank the target in another of their guilds', async () => {
+    mockActingUser(AccessLevel.ADMIN);
+    vi.mocked(getGuildsForMember).mockImplementation(async (id: string) =>
+      id === TARGET_ID
+        ? [{ guild_id: GUILD_ID, name: 'a', voice_channel_id: null, access_level: 0 }, { guild_id: '900000000000000002', name: 'b', voice_channel_id: null, access_level: 0 }]
+        : [{ guild_id: GUILD_ID, name: 'a', voice_channel_id: null, access_level: AccessLevel.ADMIN }],
+    );
+    expect(await checkToggleTwitchAuth(ADMIN_SESSION, GUILD_ID, TARGET_ID)).toBe('target_above_level');
+  });
+
+  it('lets an owner toggle a target regardless of the target\'s other guilds', async () => {
+    mockActingUser(AccessLevel.ADMIN, true);
+    vi.mocked(getGuildsForMember).mockImplementation(async (id: string) =>
+      id === TARGET_ID ? [{ guild_id: '900000000000000002', name: 'b', voice_channel_id: null, access_level: AccessLevel.ADMIN }] : [],
+    );
+    expect(await checkToggleTwitchAuth(ADMIN_SESSION, GUILD_ID, TARGET_ID)).toBeNull();
   });
 
   it('returns null when the actor is an admin and the target is a guild member', async () => {
@@ -449,6 +471,74 @@ describe('checkToggleTwitchAuth', () => {
     const result = await checkToggleTwitchAuth(MANAGER_SESSION, GUILD_ID, TARGET_ID);
     expect(result).toBe('target_above_level');
     expect(vi.mocked(getEffectiveAccessLevelForUser)).toHaveBeenCalledWith(GUILD_ID, expect.objectContaining({ discord_id: ACTOR_ID }));
+  });
+});
+
+// ─── actorOutranksTargetInAllGuilds / canEditGlobalUserFields ────────────────
+
+describe('actorOutranksTargetInAllGuilds', () => {
+  const ACTOR = '100000000000000001';
+  const TARGET = '300000000000000001';
+  const m = (guild_id: string, access_level: number) => ({ guild_id, name: 'g', voice_channel_id: null, access_level });
+
+  function mockGuilds(actor: ReturnType<typeof m>[], target: ReturnType<typeof m>[]): void {
+    vi.mocked(getGuildsForMember).mockImplementation(async (id: string) => (id === ACTOR ? actor : target));
+  }
+
+  it('passes vacuously when the target has no memberships', async () => {
+    mockGuilds([], []);
+    expect(await actorOutranksTargetInAllGuilds(ACTOR, TARGET)).toBe(true);
+  });
+
+  it('passes when the actor is an Admin or strictly above the target in each of the target\'s guilds', async () => {
+    mockGuilds([m('a', AccessLevel.ADMIN), m('b', AccessLevel.MANAGER)], [m('a', AccessLevel.ADMIN), m('b', AccessLevel.MOD)]);
+    expect(await actorOutranksTargetInAllGuilds(ACTOR, TARGET)).toBe(true);
+  });
+
+  it('fails when the actor is not a member of one of the target\'s guilds', async () => {
+    mockGuilds([m('a', AccessLevel.ADMIN)], [m('a', AccessLevel.USER), m('b', AccessLevel.USER)]);
+    expect(await actorOutranksTargetInAllGuilds(ACTOR, TARGET)).toBe(false);
+  });
+
+  it('fails when a non-Admin actor is at the target\'s level in one of their guilds', async () => {
+    mockGuilds([m('a', AccessLevel.MANAGER)], [m('a', AccessLevel.MANAGER)]);
+    expect(await actorOutranksTargetInAllGuilds(ACTOR, TARGET)).toBe(false);
+  });
+});
+
+describe('canEditGlobalUserFields', () => {
+  const GUILD_ID = '900000000000000001';
+  const ACTOR = '100000000000000001';
+  const TARGET = '300000000000000001';
+
+  beforeEach(() => {
+    vi.mocked(getGuildsForMember).mockResolvedValue([]);
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
+  });
+
+  it('returns true when the target has no user row yet', async () => {
+    vi.mocked(findUser).mockResolvedValue(null);
+    expect(await canEditGlobalUserFields({ discordId: ACTOR }, TARGET, GUILD_ID)).toBe(true);
+  });
+
+  it('returns false for an existing user who is not a member of the current guild', async () => {
+    vi.mocked(findUser).mockImplementation(async (id: string) => ({ discord_id: id, is_owner: false }) as any);
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    expect(await canEditGlobalUserFields({ discordId: ACTOR }, TARGET, GUILD_ID)).toBe(false);
+  });
+
+  it('returns true for a bot owner actor even when the target is not a member', async () => {
+    vi.mocked(findUser).mockImplementation(async (id: string) => ({ discord_id: id, is_owner: id === ACTOR }) as any);
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    expect(await canEditGlobalUserFields({ discordId: ACTOR }, TARGET, GUILD_ID)).toBe(true);
+  });
+
+  it('defers to actorOutranksTargetInAllGuilds for an existing member of the current guild', async () => {
+    vi.mocked(findUser).mockImplementation(async (id: string) => ({ discord_id: id, is_owner: false }) as any);
+    vi.mocked(getGuildsForMember).mockImplementation(async (id: string) =>
+      id === TARGET ? [{ guild_id: 'other', name: 'b', voice_channel_id: null, access_level: 0 }] : [],
+    );
+    expect(await canEditGlobalUserFields({ discordId: ACTOR }, TARGET, GUILD_ID)).toBe(false);
   });
 });
 

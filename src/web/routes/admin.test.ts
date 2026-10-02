@@ -6,6 +6,7 @@ vi.mock('../../db', () => ({
   getMemberAccessLevel: vi.fn(),
   getEffectiveAccessLevelForUser: vi.fn(),
   getGuildMemberUsers: vi.fn(),
+  getGuildsForMember: vi.fn(),
   setMemberAccessLevel: vi.fn(),
   removeGuildMember: vi.fn(),
   ACCESS_LEVEL_LABELS: { 0: 'User', 1: 'Mod', 2: 'Manager', 3: 'Admin' },
@@ -79,7 +80,7 @@ vi.mock('../../shared/logger', () => ({
 
 import supertest from 'supertest';
 import router from './admin';
-import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser, getGuildMemberUsers, setMemberAccessLevel, removeGuildMember } from '../../db';
+import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser, getGuildMemberUsers, getGuildsForMember, setMemberAccessLevel, removeGuildMember } from '../../db';
 import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { AccessLevel } from '../../db';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
@@ -128,6 +129,7 @@ beforeEach(() => {
     return AccessLevel.USER;
   });
   vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+  vi.mocked(getGuildsForMember).mockResolvedValue([]);
   vi.mocked(setMemberAccessLevel).mockResolvedValue(undefined);
   vi.mocked(removeGuildMember).mockResolvedValue(undefined);
   vi.mocked(reloadGuildRegistry).mockResolvedValue(undefined);
@@ -411,6 +413,56 @@ describe('POST /users/remove', () => {
   });
 });
 
+describe('POST /users/add — global fields of users from other guilds', () => {
+  const OTHER_GUILD = '900000000000000002';
+  const membership = (guild_id: string, access_level: number) => ({ guild_id, name: 'g', voice_channel_id: null, access_level });
+
+  beforeEach(() => {
+    vi.mocked(findUser).mockImplementation(async (id: string) => {
+      if (id === ADMIN.discordId || id === MANAGER.discordId) return { discord_id: id, is_owner: false } as any;
+      if (id === VALID_ID) return { discord_id: id, is_owner: false, twitch_name: 'theirchannel' } as any;
+      return null;
+    });
+  });
+
+  it('only grants membership (no global user/Twitch write) for an existing user who is not a member of this guild', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    const res = await supertest(buildApp(ADMIN)).post('/users/add').type('form')
+      .send({ discord_id: VALID_ID, discord_name: 'Renamed', access_level: '0', clear_twitch_name: '1' });
+    expect(res.headers.location).toBe('/admin/users');
+    expect(vi.mocked(addOrUpdateUserMutation)).not.toHaveBeenCalled();
+    expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, VALID_ID, 0);
+  });
+
+  it('only grants membership when the actor does not outrank an existing member in another guild they belong to', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(AccessLevel.USER);
+    vi.mocked(getGuildsForMember).mockImplementation(async (id: string) =>
+      id === VALID_ID ? [membership(GUILD_ID, AccessLevel.USER), membership(OTHER_GUILD, AccessLevel.USER)] : [membership(GUILD_ID, AccessLevel.ADMIN)],
+    );
+    await supertest(buildApp(ADMIN)).post('/users/add').type('form').send({ discord_id: VALID_ID, access_level: '0', twitch_name: 'newname' });
+    expect(vi.mocked(addOrUpdateUserMutation)).not.toHaveBeenCalled();
+    expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, VALID_ID, 0);
+  });
+
+  it('updates global fields for an existing member when the actor outranks them in every guild', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(AccessLevel.USER);
+    vi.mocked(getGuildsForMember).mockImplementation(async (id: string) =>
+      id === VALID_ID ? [membership(GUILD_ID, AccessLevel.USER)] : [membership(GUILD_ID, AccessLevel.ADMIN)],
+    );
+    await supertest(buildApp(ADMIN)).post('/users/add').type('form').send({ discord_id: VALID_ID, access_level: '0', twitch_name: 'newname' });
+    expect(vi.mocked(addOrUpdateUserMutation)).toHaveBeenCalledWith(expect.objectContaining({ discordId: VALID_ID, normalizedTwitchName: 'newname' }));
+  });
+
+  it('lets a bot owner update global fields of a user from another guild', async () => {
+    vi.mocked(findUser).mockImplementation(async (id: string) =>
+      (id === ADMIN.discordId ? { discord_id: id, is_owner: true } : { discord_id: id, is_owner: false, twitch_name: 'x' }) as any,
+    );
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    await supertest(buildApp(ADMIN)).post('/users/add').type('form').send({ discord_id: VALID_ID, access_level: '0' });
+    expect(vi.mocked(addOrUpdateUserMutation)).toHaveBeenCalled();
+  });
+});
+
 // --- POST /users/toggle-twitch ---
 
 describe('POST /users/toggle-twitch', () => {
@@ -434,6 +486,18 @@ describe('POST /users/toggle-twitch', () => {
     vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
     const res = await supertest(buildApp()).post('/users/toggle-twitch').type('form')
       .send({ discord_id: VALID_ID, is_twitch_bot_enabled: 'true' });
+    expect(res.headers.location).toBe('/admin/users?error=target_above_level');
+    expect(vi.mocked(toggleTwitchMutation)).not.toHaveBeenCalled();
+  });
+
+  it('redirects ?error=target_above_level when the target also belongs to a guild the actor does not outrank them in', async () => {
+    vi.mocked(getGuildsForMember).mockImplementation(async (id: string) =>
+      id === VALID_ID
+        ? [{ guild_id: GUILD_ID, name: 'a', voice_channel_id: null, access_level: 0 }, { guild_id: '900000000000000002', name: 'b', voice_channel_id: null, access_level: 0 }]
+        : [{ guild_id: GUILD_ID, name: 'a', voice_channel_id: null, access_level: AccessLevel.ADMIN }],
+    );
+    const res = await supertest(buildApp()).post('/users/toggle-twitch').type('form')
+      .send({ discord_id: VALID_ID, is_twitch_bot_enabled: 'false' });
     expect(res.headers.location).toBe('/admin/users?error=target_above_level');
     expect(vi.mocked(toggleTwitchMutation)).not.toHaveBeenCalled();
   });

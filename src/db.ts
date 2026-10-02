@@ -652,7 +652,7 @@ export async function deleteSfxFile(id: number): Promise<string | null> {
 
 export {
   getVideosForStreamer, addVideo, getVideoById, deleteVideo,
-  getRewardsForStreamer, upsertReward, setRewardVideos, deleteReward,
+  getRewardsForStreamer, upsertReward, setRewardVideos, saveRewardWithVideos, deleteReward,
   getVideosForReward,
 } from './db/overlayVideos';
 

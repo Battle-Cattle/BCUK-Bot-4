@@ -1,8 +1,9 @@
 import { Router, type Request, type Response } from 'express';
 import type { Logger } from 'winston';
-import { AccessLevel, findUser } from '../../db';
+import { AccessLevel, findUser, getMemberAccessLevel } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext, requireMod } from '../middleware';
+import { getCurrentGuildId } from '../session';
 import { normalizeDiscordId } from './validation';
 import { logAndRedirectError } from './errorHandling';
 
@@ -49,56 +50,76 @@ function readAssignmentFields(req: Request, idField: string): AssignmentRequestF
 }
 
 /**
- * POST `{basePath}/assign` handler — assigns a Twitch-linked Discord user to the entity
- * identified by `idField`.
+ * POST `{basePath}/assign` handler — assigns a Twitch-linked Discord user who is a member of the
+ * session's current guild to the entity identified by `idField`.
  * @param req - Express request; reads `idField` and `discord_id` from `req.body`.
  * @param res - Express response; redirects to `basePath` on success, or to
  *   `basePath?error=<code>` if fields are missing (`missing_fields`), IDs are malformed
  *   (`invalid_id`), the user doesn't exist or has no linked Twitch name
- *   (`invalid_assignment_user`), `mapAssignError` maps a thrown error to a specific code, or the
+ *   (`invalid_assignment_user`), the user isn't a member of the current guild
+ *   (`assignee_not_in_guild`), `mapAssignError` maps a thrown error to a specific code, or the
  *   assignment write fails for any other reason (`assign_failed`).
  * @param options - See {@link AssignmentRouterOptions}.
  */
 async function handleAssign<TId>(req: Request, res: Response, options: AssignmentRouterOptions<TId>): Promise<void> {
-  const { basePath, idField, parseId, assign, mapAssignError, log } = options;
+  const { basePath, assign, mapAssignError, log } = options;
 
-  const fields = readAssignmentFields(req, idField);
-  if (!fields) {
-    res.redirect(`${basePath}?error=missing_fields`);
+  const target = parseAssignTarget(req, options);
+  if ('error' in target) {
+    res.redirect(`${basePath}?error=${target.error}`);
     return;
   }
 
-  const id = parseId(fields.rawId);
-  const normalizedDiscordId = normalizeDiscordId(fields.discordId);
-  if (id === null || normalizedDiscordId === null) {
-    res.redirect(`${basePath}?error=invalid_id`);
-    return;
-  }
-
+  let errorCode: string | null;
   try {
-    const user = await findUser(normalizedDiscordId);
-    if (!user || !user.twitch_name) {
-      res.redirect(`${basePath}?error=invalid_assignment_user`);
-      return;
-    }
-
-    await assign(id, normalizedDiscordId);
+    errorCode = await checkAssignee(req, target.discordId);
+    if (!errorCode) await assign(target.id, target.discordId);
   } catch (err) {
-    const mappedErrorCode = mapAssignError?.(err);
-    if (mappedErrorCode) {
-      // An expected, mapped condition (e.g. a trigger conflict) — not a bug, so it isn't logged
-      // as an error, matching the pre-refactor behavior for Commands' conflict redirects.
-      res.redirect(`${basePath}?error=${mappedErrorCode}`);
+    // A mapped error is an expected condition (e.g. a trigger conflict) — not a bug, so it isn't
+    // logged as an error, matching the pre-refactor behavior for Commands' conflict redirects.
+    errorCode = mapAssignError?.(err) ?? null;
+    if (!errorCode) {
+      logAndRedirectError({
+        res, log, logLabel: `Assign user error (${basePath}):`, err, basePath, errorCode: 'assign_failed',
+      });
       return;
     }
-
-    logAndRedirectError({
-      res, log, logLabel: `Assign user error (${basePath}):`, err, basePath, errorCode: 'assign_failed',
-    });
-    return;
   }
 
-  res.redirect(basePath);
+  res.redirect(errorCode ? `${basePath}?error=${errorCode}` : basePath);
+}
+
+/**
+ * Reads and parses the assign form's entity id and Discord id.
+ * @param req - Express request; reads `idField` and `discord_id` from `req.body`.
+ * @param options - Supplies `idField` and `parseId`; see {@link AssignmentRouterOptions}.
+ * @returns The parsed ids, or `{ error }` with `missing_fields` or `invalid_id`.
+ */
+function parseAssignTarget<TId>(
+  req: Request,
+  options: AssignmentRouterOptions<TId>,
+): { id: TId; discordId: string } | { error: string } {
+  const fields = readAssignmentFields(req, options.idField);
+  if (!fields) return { error: 'missing_fields' };
+  const id = options.parseId(fields.rawId);
+  const discordId = normalizeDiscordId(fields.discordId);
+  if (id === null || discordId === null) return { error: 'invalid_id' };
+  return { id, discordId };
+}
+
+/**
+ * Checks that `discordId` may be assigned: the user exists, has a linked Twitch name, and is a
+ * member of the session's current guild (a Mod may only assign members of the guild they're
+ * managing, not streamers elsewhere).
+ * @param req - Express request; the current guild comes from the session.
+ * @param discordId - Normalized Discord ID of the user to assign.
+ * @returns null if assignable, otherwise `invalid_assignment_user` or `assignee_not_in_guild`.
+ */
+async function checkAssignee(req: Request, discordId: string): Promise<string | null> {
+  const user = await findUser(discordId);
+  if (!user || !user.twitch_name) return 'invalid_assignment_user';
+  if (await getMemberAccessLevel(getCurrentGuildId(req), discordId) === null) return 'assignee_not_in_guild';
+  return null;
 }
 
 /**

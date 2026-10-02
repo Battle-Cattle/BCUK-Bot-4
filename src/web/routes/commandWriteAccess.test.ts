@@ -9,6 +9,7 @@ vi.mock('../../db', () => {
     CommandNotFoundError,
     CommandSelfServiceDeniedError,
     findUser: vi.fn(),
+    getMemberAccessLevel: vi.fn(),
     discardOwnNewCustomCommand: vi.fn().mockResolvedValue(undefined),
     updateCustomCommand: vi.fn().mockResolvedValue(undefined),
     updateOwnCustomCommand: vi.fn().mockResolvedValue(undefined),
@@ -30,6 +31,7 @@ import {
   CommandSelfServiceDeniedError,
   discardOwnNewCustomCommand,
   findUser,
+  getMemberAccessLevel,
   removeCustomCommand,
   removeOwnCustomCommand,
   updateCustomCommand,
@@ -38,15 +40,18 @@ import {
 
 const STREAMER_ID = '111111111111111111';
 const OTHER_ID = '222222222222222222';
+const THIRD_ID = '333333333333333333';
+const GUILD_ID = '900000000000000001';
 
 function req(accessLevel: number, body: Record<string, unknown> = {}): any {
-  return { body, session: { user: { discordId: STREAMER_ID, accessLevel } } };
+  return { body, session: { user: { discordId: STREAMER_ID, accessLevel, currentGuildId: GUILD_ID } } };
 }
 
 const FORM = { triggerString: '!hi', output: 'hi', isDiscordEnabled: true, isMultiTwitch: true };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
 });
 
 describe('readCommandForm', () => {
@@ -75,6 +80,24 @@ describe('commandAccessErrorCode', () => {
 });
 
 describe('resolveNewCommandAssignees', () => {
+  it('checks every submitted discord_id for membership of the current guild', async () => {
+    await expect(resolveNewCommandAssignees(req(ACCESS_LEVEL_MOCK.MOD, { discord_ids: [OTHER_ID, THIRD_ID] })))
+      .resolves.toEqual({ discordIds: [OTHER_ID, THIRD_ID] });
+    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, OTHER_ID);
+    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, THIRD_ID);
+  });
+
+  it('returns assignee_not_in_guild when a Mod submits a discord_id outside the current guild', async () => {
+    vi.mocked(getMemberAccessLevel).mockImplementation(async (_guildId, id) => (id === THIRD_ID ? null : 0));
+    await expect(resolveNewCommandAssignees(req(ACCESS_LEVEL_MOCK.MOD, { discord_ids: [OTHER_ID, THIRD_ID] })))
+      .resolves.toEqual({ error: 'assignee_not_in_guild' });
+  });
+
+  it('skips the membership lookup when a Mod submits no discord_ids', async () => {
+    await expect(resolveNewCommandAssignees(req(ACCESS_LEVEL_MOCK.MOD))).resolves.toEqual({ discordIds: [] });
+    expect(getMemberAccessLevel).not.toHaveBeenCalled();
+  });
+
   it('uses the submitted discord_ids for a Mod', async () => {
     expect(await resolveNewCommandAssignees(req(ACCESS_LEVEL_MOCK.MOD, { discord_ids: [OTHER_ID] }))).toEqual({ discordIds: [OTHER_ID] });
     expect(findUser).not.toHaveBeenCalled();

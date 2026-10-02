@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { upsertReward, setRewardVideos, deleteReward } from '../../db';
+import { saveRewardWithVideos, deleteReward } from '../../db';
 import { parsePositiveIntId, parseWeight, parseRewardIdParam, trimField } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
@@ -42,10 +42,11 @@ router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) =
 
     if (videoIds.length === 0) return res.redirect('/overlay/settings?error=no_videos_selected');
 
-    const rewardId = await upsertReward(streamer.id, twitchRewardId);
-    await setRewardVideos(
-      rewardId,
+    // One transaction: a failed video replacement (e.g. a tampered video id) also rolls back a
+    // newly created reward row instead of leaving it behind with no videos.
+    await saveRewardWithVideos(
       streamer.id,
+      twitchRewardId,
       videoIds.map((videoId) => ({ videoId, weight: parseWeight(body[`weight_${videoId}`]) ?? 1 })),
     );
 
