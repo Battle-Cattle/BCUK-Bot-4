@@ -159,7 +159,7 @@ describe('postAnnouncement', () => {
   // still send/mutate) after a newer same-login operation has taken over. isCurrent must be
   // re-checked after each await so a superseded call stops instead of racing the newer one
   // (CodeRabbit review finding on PR #533).
-  it('sends the message but skips liveStates/DB updates once superseded partway through', async () => {
+  it('skips liveStates/DB updates and deletes the sent message once superseded partway through', async () => {
     const channel = makeTextChannel();
     vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
     let current = true;
@@ -173,6 +173,21 @@ describe('postAnnouncement', () => {
     expect(liveStates.size).toBe(0);
     expect(setStreamerLive).not.toHaveBeenCalled();
     expect(updateMultitwitch).not.toHaveBeenCalled();
+    // The unrecorded message is deleted so it can't sit alongside the newer operation's post.
+    expect(tryDeleteDiscordMessage).toHaveBeenCalledWith('ch1', 'msg1');
+  });
+
+  it('logs and still resolves when deleting a superseded announcement fails', async () => {
+    const channel = makeTextChannel();
+    vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
+    let current = true;
+    channel.send.mockImplementation(async () => { current = false; return { id: 'msg9', channelId: 'ch1' }; });
+    vi.mocked(tryDeleteDiscordMessage).mockRejectedValueOnce(new Error('discord down'));
+
+    await expect(postAnnouncement(new Map(), makeStreamer(), makeStream(), () => current)).resolves.toBeUndefined();
+
+    expect(tryDeleteDiscordMessage).toHaveBeenCalledWith('ch1', 'msg9');
+    expect(setStreamerLive).not.toHaveBeenCalled();
   });
 
   // CodeRabbit review finding on PR #533: setStreamerLive's own DB write has no ordering
@@ -337,7 +352,7 @@ describe('editAnnouncement', () => {
     expect(updateMultitwitch).not.toHaveBeenCalled();
   });
 
-  it('reposts the message but skips recording its id on state, and skips deleting the old one, once superseded partway through', async () => {
+  it('deletes the unrecorded repost, and keeps the old message, once superseded partway through', async () => {
     const channel = makeTextChannel();
     vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
     let current = true;
@@ -349,7 +364,9 @@ describe('editAnnouncement', () => {
 
     expect(channel.send).toHaveBeenCalled();
     expect(state.messageId).toBe(originalMessageId); // repost()'s own state mutation was skipped
-    expect(tryDeleteDiscordMessage).not.toHaveBeenCalled();
+    // The old message is kept; only the unrecorded repost is deleted again.
+    expect(tryDeleteDiscordMessage).not.toHaveBeenCalledWith('ch1', 'msg1');
+    expect(tryDeleteDiscordMessage).toHaveBeenCalledWith('ch1', 'msg2');
     expect(setStreamerLive).not.toHaveBeenCalled();
   });
 });
