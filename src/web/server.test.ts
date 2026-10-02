@@ -81,7 +81,7 @@ vi.mock('./routes/passkeys', () => ({ default: emptyRouter() }));
 vi.mock('./routes/guild', () => ({ default: markerRouter('guild') }));
 vi.mock('./routes/eventsubCallback', () => ({ default: emptyRouter() }));
 vi.mock('./routes/botAuth', () => ({ default: markerRouter('botAuth') }));
-vi.mock('./routes/botAuthCallback', () => ({ default: emptyRouter() }));
+vi.mock('./routes/botAuthCallback', () => ({ default: markerRouter('botAuthCallback') }));
 vi.mock('./routes/eventsubAdmin', () => ({ default: markerRouter('eventsubAdmin') }));
 vi.mock('./routes/dashboard', () => ({
   default: (() => {
@@ -186,6 +186,18 @@ describe('server route wiring', () => {
     expect(res.body).toEqual({ label: 'dashboard' });
     expect(requireAuth).toHaveBeenCalled();
     expect(requireGuildContext).toHaveBeenCalled();
+  });
+
+  it('counts each /auth request against authLimiter once, even when it falls through several /auth mounts', async () => {
+    // The botAuthCallback marker is on the last '/auth' mount, so a request to it falls
+    // through passkeys/auth/eventsubCallback first. With the limiter on each mount it was
+    // counted 3x and the 4th request was blocked; applied once, all 10 of the 10/min fit.
+    for (let i = 0; i < 10; i++) {
+      const res = await request(app).get('/auth/__marker_botAuthCallback').set('X-Forwarded-For', '203.0.113.77');
+      expect(res.status).toBe(200);
+    }
+    const blocked = await request(app).get('/auth/__marker_botAuthCallback').set('X-Forwarded-For', '203.0.113.77');
+    expect(blocked.status).toBe(429);
   });
 
   it('does not apply the 10/min auth rate limiter to unrelated routes mounted at "/"', async () => {

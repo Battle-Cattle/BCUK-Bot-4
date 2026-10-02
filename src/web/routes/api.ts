@@ -18,10 +18,9 @@ const router = Router();
  * a separate connection per guild — and the guild is taken from the session
  * (never the request body) so a Mod cannot drive or view another guild's state.
  *
- * The 400 branch is the normal path for `/status` (gated only by `requireAuth`),
- * but is a defensive fallback rather than the normal path on the `/voice/*` routes
- * below — those run `requireGuildContext` first, which already guarantees
- * `currentGuildId` is set (or redirects away) before this function ever runs.
+ * The 400 branch is a defensive fallback rather than the normal path — every route
+ * below runs `requireGuildContext` first, which already guarantees `currentGuildId`
+ * is set (or redirects away) before this function ever runs.
  *
  * @returns The current guild ID, or null when the response has already been sent.
  */
@@ -39,12 +38,15 @@ function getSessionGuildId(req: Request, res: Response): string | null {
  * few seconds. Voice status, the Discord "Server" name, and Twitch channels
  * are all scoped to the viewer's current guild so a Manager on guild B's
  * dashboard never sees guild A's now-playing info, server name, or Twitch
- * channels.
+ * channels. `requireGuildContext` re-validates the session's guild membership
+ * against the DB on every poll, so a user removed from the guild stops receiving
+ * its status immediately (the redirect it issues instead surfaces as a failed
+ * poll in `dashboard-status.js`).
  * @param req - Express request; guild is taken from the session.
  * @param res - Express response; returns `getGuildScopedStatus(guildId)`, 400
- *   if no guild is selected, or 500 if the lookup fails.
+ *   if no guild is selected (defensive), or 500 if the lookup fails.
  */
-router.get('/status', requireAuth, async (req, res) => {
+router.get('/status', requireAuth, requireGuildContext, async (req, res) => {
   const guildId = getSessionGuildId(req, res);
   if (!guildId) return;
   try {

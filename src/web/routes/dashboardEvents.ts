@@ -4,7 +4,8 @@ import type { StreamerEventType } from '../../db';
 import { getStreamerByDiscordId, getRecentStreamerEvents } from '../../db';
 import { DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER } from '../../shared/config';
 import { getSessionUser } from '../session';
-import { createStreamerSseEventsHandler, broadcastToChannel } from './sseChannel';
+import { broadcastToChannel } from './sseChannel';
+import { createStreamerSseEventsHandler } from './sseEventsHandlers';
 
 const log = createLogger('DashboardEvents');
 const router = Router();

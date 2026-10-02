@@ -64,13 +64,18 @@ beforeEach(() => {
 });
 
 describe('GET /status', () => {
+  it('runs requireGuildContext so revoked guild membership is re-checked on every poll', async () => {
+    await supertest(buildApp()).get('/status').expect(200);
+    expect(middlewareCallOrder).toEqual(['requireGuildContext']);
+  });
+
   it('returns the status snapshot for the session guild', async () => {
     const res = await supertest(buildApp()).get('/status').expect(200);
     expect(res.body).toEqual({ discord: {}, voice: {}, twitch: {} });
     expect(vi.mocked(getGuildScopedStatus)).toHaveBeenCalledWith(GUILD_ID);
   });
 
-  it('returns 400 when no guild is selected', async () => {
+  it('returns 400 when no guild is selected (defensive fallback)', async () => {
     const res = await supertest(buildApp(null)).get('/status').expect(400);
     expect(res.body).toEqual({ ok: false, error: 'No guild selected' });
     expect(vi.mocked(getGuildScopedStatus)).not.toHaveBeenCalled();
