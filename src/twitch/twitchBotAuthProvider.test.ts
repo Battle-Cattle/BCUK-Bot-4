@@ -148,6 +148,16 @@ describe('buildBotAuthProvider', () => {
       expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining(BOT_AUTH_CONNECT_URL));
     });
 
+    it('onRefreshFailure resolves (does not reject) even if raising the owner alert itself throws', async () => {
+      vi.mocked(clearBotChatTokenIfOwnedBy).mockRejectedValue(new Error('db down'));
+      vi.mocked(sendOwnerAlert).mockImplementationOnce(() => { throw new Error('alert failed'); });
+      const restart = vi.fn();
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
+
+      await expect(authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', invalidTokenError)).resolves.toBeUndefined();
+      expect(restart).not.toHaveBeenCalled();
+    });
+
     it('onRefreshFailure resolves (does not reject) when the transient rebuild loop hits a DB error', async () => {
       vi.mocked(getBotChatToken).mockRejectedValue(new Error('db down'));
       const restart = vi.fn();
