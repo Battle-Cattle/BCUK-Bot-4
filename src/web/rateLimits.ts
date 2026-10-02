@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 
 /**
  * Returns `req.session`, typed as possibly absent: express-session continues without attaching a
@@ -86,3 +86,34 @@ export function streamdeckLimiterKey(req: Request): string {
   if (token) return createHash('sha256').update(token).digest('hex');
   return ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? 'unknown');
 }
+
+/**
+ * Decides whether a Streamdeck API response should be left uncounted by
+ * {@link streamdeckAuthFailureLimiter}: everything except a 401 is "successful" for its purposes.
+ * @param _req - Express request (unused).
+ * @param res - Express response; reads `statusCode` once the response has finished.
+ * @returns false only for a 401 (failed Bearer-token authentication), true otherwise.
+ */
+export function streamdeckAuthFailureWasSuccessful(_req: Request, res: Response): boolean {
+  return res.statusCode !== 401;
+}
+
+/**
+ * IP-keyed limiter on failed Streamdeck authentication, mounted before the token-keyed
+ * `streamdeckLimiter`. That limiter keys on the raw Bearer token before it's verified (and
+ * `/api/streamdeck` skips the general IP limiter), so a caller sending a fresh random token per
+ * request would get a fresh bucket every time — each one still costing a SHA-256 plus a DB
+ * lookup. Only 401 responses count here (`skipSuccessfulRequests` with
+ * {@link streamdeckAuthFailureWasSuccessful}), so a valid key's normal traffic never touches
+ * this bucket, while guessing from one IP is cut off after `limit` failures per window.
+ */
+export const streamdeckAuthFailureLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: ipKey,
+  skipSuccessfulRequests: true,
+  requestWasSuccessful: streamdeckAuthFailureWasSuccessful,
+  message: 'Too many failed authentication attempts, please try again later.',
+});

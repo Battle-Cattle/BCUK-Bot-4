@@ -178,38 +178,63 @@ describe('requireAdmin', () => {
 // ─── requireOwner ─────────────────────────────────────────────────────────────
 
 describe('requireOwner', () => {
-  it('calls next() when isOwner is true, regardless of accessLevel', () => {
-    const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER, isOwner: true } } });
-    requireOwner(req, makeRes(), next);
+  it('calls next() when the DB user is the owner, regardless of accessLevel', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER, isOwner: true } } });
+    await requireOwner(req, makeRes(), next);
+    expect(vi.mocked(findUser)).toHaveBeenCalledWith('u1');
     expect(next).toHaveBeenCalled();
   });
 
-  it('returns 403 for an Admin who is not the owner', () => {
-    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN, isOwner: false } } });
+  it('returns 403 for an Admin who is not the owner', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: false } } });
     const res = makeRes();
-    requireOwner(req, res, next);
+    await requireOwner(req, res, next);
     expect(res.status).toHaveBeenCalledWith(403);
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('returns 403 when isOwner is absent', () => {
-    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN } } });
+  it('returns 403 and clears the cached flag when the session says owner but the DB no longer does', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: true } } });
     const res = makeRes();
-    requireOwner(req, res, next);
+    await requireOwner(req, res, next);
     expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+    expect(req.session.user.isOwner).toBe(false);
   });
 
-  it('returns 403 when no session user', () => {
+  it('returns 403 when the user row no longer exists', async () => {
+    vi.mocked(findUser).mockResolvedValue(null);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: true } } });
+    const res = makeRes();
+    await requireOwner(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('grants access and refreshes the cached flag when the DB was promoted to owner after login', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: false } } });
+    await requireOwner(req, makeRes(), next);
+    expect(next).toHaveBeenCalled();
+    expect(req.session.user.isOwner).toBe(true);
+  });
+
+  it('returns 403 when no session user, without querying the DB', async () => {
     const req = makeReq({ session: {} });
     const res = makeRes();
-    requireOwner(req, res, next);
+    await requireOwner(req, res, next);
     expect(res.status).toHaveBeenCalledWith(403);
+    expect(vi.mocked(findUser)).not.toHaveBeenCalled();
   });
 
-  it('renders error template with an Owner-required message', () => {
-    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN, isOwner: false } } });
+  it('renders error template with an Owner-required message', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: false } } });
     const res = makeRes();
-    requireOwner(req, res, next);
+    await requireOwner(req, res, next);
     const [, data] = res.render.mock.calls[0]!;
     expect(data.message).toContain('Owner');
   });
@@ -218,34 +243,38 @@ describe('requireOwner', () => {
 // ─── requireOwnerJson ─────────────────────────────────────────────────────────
 
 describe('requireOwnerJson', () => {
-  it('calls next() when isOwner is true, regardless of accessLevel', () => {
-    const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER, isOwner: true } } });
-    requireOwnerJson(req, makeRes(), next);
+  it('calls next() when the DB user is the owner, regardless of accessLevel', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER, isOwner: true } } });
+    await requireOwnerJson(req, makeRes(), next);
     expect(next).toHaveBeenCalled();
   });
 
-  it('returns a JSON 403 for an Admin who is not the owner', () => {
-    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN, isOwner: false } } });
+  it('returns a JSON 403 for an Admin who is not the owner', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: false } } });
     const res = makeRes();
-    requireOwnerJson(req, res, next);
+    await requireOwnerJson(req, res, next);
     expect(res.status).toHaveBeenCalledWith(403);
     expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
     expect(res.render).not.toHaveBeenCalled();
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('returns a JSON 403 when isOwner is absent', () => {
-    const req = makeReq({ session: { user: { accessLevel: AccessLevel.ADMIN } } });
+  it('returns a JSON 403 when the session says owner but the DB no longer does', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: true } } });
     const res = makeRes();
-    requireOwnerJson(req, res, next);
+    await requireOwnerJson(req, res, next);
     expect(res.status).toHaveBeenCalledWith(403);
     expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
+    expect(req.session.user.isOwner).toBe(false);
   });
 
-  it('returns a JSON 403 when no session user', () => {
+  it('returns a JSON 403 when no session user', async () => {
     const req = makeReq({ session: {} });
     const res = makeRes();
-    requireOwnerJson(req, res, next);
+    await requireOwnerJson(req, res, next);
     expect(res.status).toHaveBeenCalledWith(403);
     expect(res.json).toHaveBeenCalledWith({ error: 'forbidden' });
     expect(next).not.toHaveBeenCalled();

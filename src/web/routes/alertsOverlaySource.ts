@@ -4,7 +4,8 @@ import type { AlertPayload } from '../../twitch/eventsub/twitchEventSubRuntime';
 import { ALERT_ASSETS_FOLDER, ALERT_MAX_SSE_PER_CHANNEL } from '../../shared/config';
 import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 import { renderView } from './viewHelpers';
-import { createSseEventsHandler, createLoginValidator, broadcastToChannel } from './sseChannel';
+import { broadcastToChannel } from './sseChannel';
+import { createSseEventsHandler, createLoginValidator } from './sseEventsHandlers';
 
 const log = createLogger('AlertsOverlaySource');
 const router = Router();
@@ -62,8 +63,9 @@ router.get('/:login', (req, res, next) => {
  * @param req - Express request; reads the `login` route param.
  * @param res - Express response; on a valid login, upgrades to an `text/event-stream`
  *   connection kept alive with periodic pings and torn down on client disconnect; replies
- *   429 if the channel's connection limit (`MAX_SSE_CONNECTIONS_PER_CHANNEL`) is exceeded,
- *   or calls `next()` if `login` is malformed or reserved.
+ *   404 if `login` isn't a registered streamer, 429 if the channel's connection limit
+ *   (`MAX_SSE_CONNECTIONS_PER_CHANNEL`) or the shared unauthenticated-overlay pool's
+ *   total/per-IP limit is exceeded, or calls `next()` if `login` is malformed or reserved.
  */
 router.get('/:login/events', createSseEventsHandler({
   connections,

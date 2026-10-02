@@ -248,6 +248,16 @@ describe('isKeyApprovedForGuild', () => {
     vi.mocked(getPool).mockReturnValue(makePool([]) as any);
     expect(await isKeyApprovedForGuild('1', 'g1')).toBe(false);
   });
+
+  it('also requires current guild membership or owner status, not just an approval row', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await isKeyApprovedForGuild('1', 'g1');
+    const [sql, params] = vi.mocked(pool.execute).mock.calls[0]!;
+    expect(sql).toMatch(/FROM guild_member gm WHERE gm\.guild_id = s\.guild_id AND gm\.discord_id = s\.discord_id/);
+    expect(sql).toMatch(/u\.is_owner = 1/);
+    expect(params).toEqual(['1', 'g1']);
+  });
 });
 
 // ─── getApprovedGuildIdsForKey ─────────────────────────────────────────────────
@@ -261,6 +271,15 @@ describe('getApprovedGuildIdsForKey', () => {
   it('returns an empty array when no approved guilds', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([]) as any);
     expect(await getApprovedGuildIdsForKey('1')).toEqual([]);
+  });
+
+  it('excludes guilds the key owner is no longer a member of (unless owner)', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getApprovedGuildIdsForKey('1');
+    const [sql] = vi.mocked(pool.execute).mock.calls[0]!;
+    expect(sql).toMatch(/FROM guild_member gm/);
+    expect(sql).toMatch(/u\.is_owner = 1/);
   });
 });
 

@@ -53,6 +53,7 @@ import { ensureSessionCsrfToken } from './csrf';
 import { renderView } from './routes/viewHelpers';
 import {
   authLimiter,
+  streamdeckAuthFailureLimiter,
   ipKey,
   generalLimiterSkip,
   sessionLimiterKey,
@@ -193,13 +194,20 @@ app.use((req, res, next) => {
 });
 
 // Routes
-app.use('/auth/passkey', authLimiter, passkeysRouter);
-app.use('/auth', authLimiter, authRouter);
+// authLimiter is applied exactly once for the whole '/auth' prefix (which also covers
+// '/auth/passkey'), rather than on each '/auth'-mounted router: the routers below share
+// a prefix and fall through via next(), so a per-mount limiter counted a single request
+// once per layer it passed through (express-rate-limit's ERR_ERL_DOUBLE_COUNT).
+app.use('/auth', authLimiter);
+app.use('/auth/passkey', passkeysRouter);
+app.use('/auth', authRouter);
 // EventSub OAuth callback — must be outside requireAuth (Twitch redirects here without session)
-app.use('/auth', authLimiter, eventsubCallbackRouter);
+app.use('/auth', eventsubCallbackRouter);
 // Bot chat OAuth callback — same reasoning, Twitch redirects here without session (see #550).
-app.use('/auth', authLimiter, botAuthCallbackRouter);
-app.use('/api/streamdeck', streamdeckLimiter, streamdeckRouter);
+app.use('/auth', botAuthCallbackRouter);
+// streamdeckAuthFailureLimiter (IP-keyed, counts only 401s) runs first: the token-keyed
+// streamdeckLimiter alone gives every random unverified token its own fresh bucket.
+app.use('/api/streamdeck', streamdeckAuthFailureLimiter, streamdeckLimiter, streamdeckRouter);
 app.use('/', sfxPublicRouter);
 app.use('/', privacyRouter);
 app.use('/', tosRouter);

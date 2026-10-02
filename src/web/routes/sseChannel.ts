@@ -1,8 +1,6 @@
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response } from 'express';
 import { SSE_MAX_TOTAL_CONNECTIONS } from '../../shared/config';
-import { getStreamerByDiscordId, type DbStreamerEventSub } from '../../db';
-import { getSessionUser } from '../session';
-import type { createLogger } from '../../shared/logger';
+import { tryReservePoolSlot, releasePoolSlot, type SseConnectionPool } from './sseOverlayAccess';
 
 const KEEPALIVE_INTERVAL_MS = 25_000;
 
@@ -93,6 +91,49 @@ function startKeepalive(res: Response, cleanup: () => void): NodeJS.Timeout {
   return keepalive;
 }
 
+/**
+ * Adds `res` to `key`'s client Set unless that would exceed `maxPerChannel`.
+ * @param connections - The endpoint's connections map.
+ * @param key - The connection key.
+ * @param res - The response to register.
+ * @param maxPerChannel - Maximum concurrent connections for `key`.
+ * @returns true if added; false (and nothing changed) if `key` was already at its limit.
+ */
+function addClientWithinLimit<K>(
+  connections: Map<K, Set<Response>>, key: K, res: Response, maxPerChannel: number,
+): boolean {
+  const clients = connections.get(key) ?? new Set<Response>();
+  if (clients.size >= maxPerChannel) return false;
+  clients.add(res);
+  connections.set(key, clients);
+  return true;
+}
+
+/**
+ * Reserves a slot under the process-wide cap and, when given, the unauthenticated `pool`, then
+ * runs `addClient` for the per-key limit. All-or-nothing: if any limit is already reached, every
+ * slot reserved so far is released again.
+ * @param req - Express request; its client IP keys the pool's per-IP limit.
+ * @param pool - Optional unauthenticated sub-pool (see `SseConnectionPool`).
+ * @param addClient - Registers the client under its key; returns false if the per-key limit is reached.
+ * @returns A function that releases the pool slot (a no-op without a pool), or null if a limit
+ *   was reached and nothing was reserved.
+ */
+function reserveConnectionSlots(
+  req: Request, pool: SseConnectionPool | undefined, addClient: () => boolean,
+): (() => void) | null {
+  if (totalConnections >= SSE_MAX_TOTAL_CONNECTIONS) return null;
+  const poolIp = pool ? tryReservePoolSlot(pool, req) : '';
+  if (poolIp === null) return null;
+  const releasePool = (): void => { if (pool) releasePoolSlot(pool, poolIp); };
+  if (!addClient()) {
+    releasePool();
+    return null;
+  }
+  totalConnections++;
+  return releasePool;
+}
+
 /** Options for {@link attachSseConnection}. */
 export interface AttachSseConnectionOptions<K> {
   /** In-memory map of active SSE connections keyed by `K` (a channel login, Discord ID, streamer ID, etc). */
@@ -101,12 +142,17 @@ export interface AttachSseConnectionOptions<K> {
   key: K;
   /** Maximum concurrent SSE connections permitted for this key. */
   maxPerChannel: number;
+  /**
+   * Optional sub-pool (see {@link SseConnectionPool}) whose total and per-IP limits also apply,
+   * for endpoints reachable without authentication. Omit for authenticated streams.
+   */
+  pool?: SseConnectionPool;
 }
 
 /**
  * Registers `res` as an SSE connection for `key`: enforces the per-key connection limit, sends
  * the SSE handshake, and wires up the keepalive ping plus cleanup on disconnect or a failed
- * write. This is the lower-level building block behind {@link createSseEventsHandler} — call it
+ * write. This is the lower-level building block behind `createSseEventsHandler` (sseEventsHandlers.ts) — call it
  * directly when the connection key needs custom resolution (an authenticated Discord ID, a
  * streamer ID resolved via an async DB lookup, etc.) instead of a validated `:login` route param.
  * Shared by every SSE endpoint in the app (reward-video overlay, alerts overlay, companion app
@@ -116,31 +162,21 @@ export interface AttachSseConnectionOptions<K> {
  * @param res - Express response to register and stream to; also listened to for 'close'/'error'
  *   (an abrupt socket failure can fire these without `req` ever emitting 'close').
  * @param options - See {@link AttachSseConnectionOptions}.
- * @returns false if the process-wide cap (`SSE_MAX_TOTAL_CONNECTIONS`) or the key was already at
- *   `maxPerChannel` (a 429 has already been sent to `res` and the caller should stop handling the
- *   request); true once the connection is attached.
+ * @returns false if the process-wide cap (`SSE_MAX_TOTAL_CONNECTIONS`), the `pool`'s total or
+ *   per-IP limit, or the key's `maxPerChannel` was already reached (a 429 has already been sent to
+ *   `res` and the caller should stop handling the request); true once the connection is attached.
  */
 export function attachSseConnection<K>(
   req: Request,
   res: Response,
   options: AttachSseConnectionOptions<K>,
 ): boolean {
-  const { connections, key, maxPerChannel } = options;
-  if (totalConnections >= SSE_MAX_TOTAL_CONNECTIONS) {
+  const { connections, key, maxPerChannel, pool } = options;
+  const releasePool = reserveConnectionSlots(req, pool, () => addClientWithinLimit(connections, key, res, maxPerChannel));
+  if (!releasePool) {
     res.status(429).end();
     return false;
   }
-
-  if (!connections.has(key)) connections.set(key, new Set());
-  const clients = connections.get(key)!;
-  clients.add(res);
-  if (clients.size > maxPerChannel) {
-    clients.delete(res);
-    res.status(429).end();
-    return false;
-  }
-
-  totalConnections++;
 
   let cleaned = false;
   let keepalive: NodeJS.Timeout | null = null;
@@ -155,6 +191,7 @@ export function attachSseConnection<K>(
     cleaned = true;
     connectionCleanups.delete(res);
     totalConnections--;
+    releasePool();
     if (keepalive) clearInterval(keepalive);
     removeClient(connections, key, res);
   };
@@ -176,205 +213,20 @@ export function attachSseConnection<K>(
 }
 
 /**
- * Builds a validator for a `:login` route param: rejects logins that fail `loginRe` or match a
- * reserved word, otherwise normalizes to lowercase. Shared by a channel's plain browser-source
- * route and its `/events` SSE route so both apply the identical rule from one place.
- * @param loginRe - Allowed-character/length pattern for a raw login.
- * @param reservedLogins - Words that must not be treated as channel logins (e.g. `settings`).
- * @returns A function returning the normalized (lowercased) login, or null if invalid/reserved.
+ * Extends the teardown {@link attachSseConnection} registered for `res` so it also runs `extra`,
+ * covering every path that ends the connection, including a failed {@link broadcastToChannel}
+ * write that emits no close/error event.
+ * @param res - A response previously attached with {@link attachSseConnection}.
+ * @param extra - Additional teardown to run once the connection's own cleanup has run.
+ * @returns false if `res` has no registered cleanup (its connection was already torn down), in
+ *   which case nothing was chained and the caller should tear down `extra`'s resources itself.
  */
-export function createLoginValidator(
-  loginRe: RegExp,
-  reservedLogins: ReadonlySet<string>,
-): (login: string) => string | null {
-  return (login: string) => {
-    if (!loginRe.test(login) || reservedLogins.has(login.toLowerCase())) return null;
-    return login.toLowerCase();
-  };
-}
-
-/** Options for {@link createSseEventsHandler}. */
-export interface SseEventsHandlerOptions {
-  /** In-memory map of active SSE connections keyed by lowercased channel login. */
-  connections: Map<string, Set<Response>>;
-  /** Validates and normalizes the raw `:login` route param — see {@link createLoginValidator}. */
-  isValidLogin: (login: string) => string | null;
-  /** Maximum concurrent SSE connections permitted per channel. */
-  maxPerChannel: number;
-}
-
-/**
- * Builds a `/:login/events`-style SSE route handler, shared by the reward-video overlay and the
- * alerts overlay (each keeps its own `connections` map and push function, since those differ in
- * payload shape — this only factors out the identical connection lifecycle via
- * {@link attachSseConnection}).
- * @param options - See {@link SseEventsHandlerOptions}.
- * @returns An Express route handler: on a valid, non-reserved login, upgrades the response to
- *   `text/event-stream`; replies 429 if `maxPerChannel` is exceeded; calls `next()` if the login
- *   is malformed or reserved.
- */
-export function createSseEventsHandler(
-  options: SseEventsHandlerOptions,
-): (req: Request<{ login: string }>, res: Response, next: NextFunction) => void {
-  const { connections, isValidLogin, maxPerChannel } = options;
-
-  return (req, res, next) => {
-    const key = isValidLogin(req.params.login);
-    if (key === null) { next(); return; }
-    attachSseConnection(req, res, { connections, key, maxPerChannel });
-  };
-}
-
-/** Options for {@link createStreamerSseEventsHandler}. */
-export interface StreamerSseEventsHandlerOptions<K> {
-  /** In-memory map of active SSE connections keyed by `K` (a streamer ID, Twitch login, etc). */
-  connections: Map<K, Set<Response>>;
-  /** Maximum concurrent SSE connections permitted per key. */
-  maxPerChannel: number;
-  /** Derives the connection key from the resolved streamer row (e.g. `streamer.id`). */
-  resolveKey: (streamer: DbStreamerEventSub) => K;
-  /** Logger used to report an unexpected streamer lookup failure. */
-  log: ReturnType<typeof createLogger>;
-}
-
-/**
- * Builds a `/events`-style SSE route handler for the logged-in session user's own streamer
- * row: resolves it via `getStreamerByDiscordId`, replies 403 if they aren't a monitored
- * streamer, 500 (logged) if the lookup itself fails, otherwise delegates to
- * {@link attachSseConnection}. Shared by every per-streamer SSE endpoint (channel-points
- * pricing, dashboard events/status) — each keeps its own `connections` map and payload shape,
- * since those differ, but the "resolve the session's streamer" lifecycle around them is
- * identical. The streamer is re-resolved on every connection attempt (rather than trusting a
- * cached id) so a revoked streamer record takes effect immediately.
- * @param options - See {@link StreamerSseEventsHandlerOptions}.
- * @returns An Express route handler for the logged-in user's own streamer SSE stream.
- */
-export function createStreamerSseEventsHandler<K>(
-  options: StreamerSseEventsHandlerOptions<K>,
-): (req: Request, res: Response) => Promise<void> {
-  const { connections, maxPerChannel, resolveKey, log } = options;
-
-  return async (req, res) => {
-    let streamer: DbStreamerEventSub | null;
-    try {
-      streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
-    } catch (err) {
-      log.error('Failed to resolve streamer for SSE events:', err);
-      res.status(500).end();
-      return;
-    }
-    if (!streamer) {
-      res.status(403).end();
-      return;
-    }
-
-    attachSseConnection(req, res, { connections, key: resolveKey(streamer), maxPerChannel });
-  };
-}
-
-/** Options for {@link createOverlayStatusEventsHandler}. */
-export interface OverlayStatusEventsHandlerOptions {
-  /** In-memory map of active status-stream SSE connections, keyed by streamer ID. */
-  statusConnections: Map<number, Set<Response>>;
-  /** The overlay's own connections map (e.g. from `overlaySource.ts`/`alertsOverlaySource.ts`), keyed by lowercased Twitch login — polled to derive `connected`. */
-  overlayConnections: Map<string, Set<Response>>;
-  /** Maximum concurrent status-stream connections permitted per streamer. */
-  maxPerChannel: number;
-  /** How often (ms) to re-check `overlayConnections` for a state change. */
-  pollIntervalMs: number;
-  /** Logger used to report an unexpected streamer lookup failure. */
-  log: ReturnType<typeof createLogger>;
-}
-
-/**
- * Builds a `/settings/events`-style SSE route handler streaming `{ connected: boolean }`
- * snapshots of whether the logged-in user's own browser-source overlay currently has an open
- * connection, so a settings page can show a live status dot instead of the user only finding out
- * something's wrong when an overlay never fires. Shared by the reward-video and alerts overlay
- * settings pages (`overlayAdmin.ts`/`alertsAdmin.ts`) — each keeps its own `statusConnections` and
- * `overlayConnections` maps, since those differ, but the "resolve the session's streamer, then
- * poll for a connection-count change" lifecycle is identical. Polls on an interval rather than
- * reacting to a push event, since opening/closing an overlay's own SSE connection has no existing
- * event to subscribe to.
- * @param options - See {@link OverlayStatusEventsHandlerOptions}.
- * @returns An Express route handler: replies 403 if the user isn't a monitored streamer with a
- *   linked Twitch channel, 500 (logged) if the streamer lookup fails, 429 if `maxPerChannel` is
- *   exceeded, otherwise upgrades to `text/event-stream` and tears down the poll interval (along
- *   with the connection itself) on client disconnect.
- */
-export function createOverlayStatusEventsHandler(
-  options: OverlayStatusEventsHandlerOptions,
-): (req: Request, res: Response) => Promise<void> {
-  const { statusConnections, overlayConnections, maxPerChannel, pollIntervalMs, log } = options;
-
-  /**
-   * Route handler for one settings page's status stream: resolves the session's streamer, attaches
-   * the SSE connection, then polls `overlayConnections` for that streamer's login on an interval.
-   * @param req - Express request; reads `req.session.user`.
-   * @param res - Express response; see {@link createOverlayStatusEventsHandler}'s `@returns`.
-   */
-  return async (req, res) => {
-    let streamer: DbStreamerEventSub | null;
-    try {
-      streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
-    } catch (err) {
-      log.error('Failed to resolve streamer for overlay status SSE:', err);
-      res.status(500).end();
-      return;
-    }
-    if (!streamer || !streamer.twitch_name) {
-      res.status(403).end();
-      return;
-    }
-
-    const attached = attachSseConnection(req, res, {
-      connections: statusConnections,
-      key: streamer.id,
-      maxPerChannel,
-    });
-    if (!attached) return;
-
-    const streamerId = streamer.id;
-    const login = streamer.twitch_name.toLowerCase();
-    let lastConnected: boolean | null = null;
-
-    /** Re-checks whether `login`'s overlay has any open connection, broadcasting only on a change. */
-    const check = (): void => {
-      const isConnected = (overlayConnections.get(login)?.size ?? 0) > 0;
-      if (isConnected === lastConnected) return;
-      lastConnected = isConnected;
-      broadcastToChannel(statusConnections, streamerId, { connected: isConnected });
-    };
-
-    const interval = setInterval(check, pollIntervalMs);
-    // attachSseConnection's own cleanup can be triggered by 'close'/'error' on either req or res
-    // (an abrupt socket failure can fire res's events without req ever emitting 'close') — mirror
-    // that here so this interval doesn't outlive the connection under those same paths.
-    /** Idempotent teardown for this handler's poll interval, wired to every path that can end the connection below. */
-    const clearStatusInterval = (): void => clearInterval(interval);
-    req.on('close', clearStatusInterval);
-    res.on('close', clearStatusInterval);
-    res.on('error', clearStatusInterval);
-
-    // A failed res.write() inside broadcastToChannel's own `check()` call evicts this response via
-    // the same connectionCleanups entry attachSseConnection just registered for it — without
-    // emitting 'close'/'error' on either req or res, so the listeners above never fire for that
-    // path. Wrap that cleanup so it also stops this interval; this must happen BEFORE the first
-    // check() below runs, otherwise a failure on that very first write would find no cleanup
-    // entry left to wrap (attachSseConnection's own cleanup already deleted it) and leak the
-    // interval with nothing left to own its teardown.
-    const attachCleanup = connectionCleanups.get(res);
-    if (!attachCleanup) {
-      // attachSseConnection's connection was already torn down before we got here — nothing left
-      // to poll for.
-      clearInterval(interval);
-      return;
-    }
-    connectionCleanups.set(res, () => {
-      attachCleanup();
-      clearStatusInterval();
-    });
-
-    check();
-  };
+export function chainConnectionCleanup(res: Response, extra: () => void): boolean {
+  const cleanup = connectionCleanups.get(res);
+  if (!cleanup) return false;
+  connectionCleanups.set(res, () => {
+    cleanup();
+    extra();
+  });
+  return true;
 }

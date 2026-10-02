@@ -1,7 +1,8 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { CHANNEL_POINTS_MAX_SSE_PER_STREAMER } from '../../shared/config';
-import { createStreamerSseEventsHandler, broadcastToChannel } from './sseChannel';
+import { broadcastToChannel } from './sseChannel';
+import { createStreamerSseEventsHandler } from './sseEventsHandlers';
 
 const log = createLogger('ChannelPointsEvents');
 const router = Router();

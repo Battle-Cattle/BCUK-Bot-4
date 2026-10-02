@@ -211,18 +211,37 @@ export const requireAdmin = requireAccessLevel(AccessLevel.ADMIN, 'Admin');
 export const requireAdminJson = requireAccessLevelJson(AccessLevel.ADMIN);
 
 /**
+ * Re-reads the session user's owner flag from the database (rather than trusting the
+ * session's login-time `isOwner` cache) and refreshes the cached flag to match, so a
+ * revoked `user.is_owner` takes effect on the very next request instead of only at next
+ * login — the same freshness `requireGuildContext` gives guild access. Needed because the
+ * owner-gated routes (`/admin/health`, `/admin/bot-auth`) aren't behind `requireGuildContext`.
+ * @param req - Express request; reads and mutates `req.session.user.isOwner`.
+ * @returns True only when a session user exists and their DB row still has `is_owner` set;
+ *   false when there's no session user or the user row no longer exists.
+ */
+async function isLiveOwner(req: Request): Promise<boolean> {
+  const user = req.session.user;
+  if (!user) return false;
+  const dbUser = await findUser(user.discordId);
+  user.isOwner = dbUser?.is_owner ?? false;
+  return user.isOwner;
+}
+
+/**
  * Ensures the session user is the bot owner (`user.is_owner`), otherwise renders a
  * 403. Distinct from {@link requireAdmin}: `isOwner` is a global super-admin flag set
  * manually in the DB (see `user.is_owner` in schema.sql), not a per-guild `AccessLevel`
  * — an Admin in a given guild is not necessarily the owner. Used to gate features
  * still being trialled to the single most-trusted account before a wider rollout.
- * @param req - Express request; checked for `req.session.user?.isOwner`.
+ * Owner status is re-read from the DB on every call (see {@link isLiveOwner}).
+ * @param req - Express request; its session user's owner flag is re-checked against the DB.
  * @param res - Express response; used to render a 403 error page when denied.
  * @param next - Called when the session user is the owner.
- * @returns Nothing; either calls `next()` or renders the error view with a 403 status.
+ * @returns A promise that resolves once `next()` or the 403 error view has been issued.
  */
-export function requireOwner(req: Request, res: Response, next: NextFunction): void {
-  if (req.session.user?.isOwner) {
+export async function requireOwner(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (await isLiveOwner(req)) {
     next();
   } else {
     res.status(403);
@@ -241,14 +260,15 @@ export function requireOwner(req: Request, res: Response, next: NextFunction): v
  * generic parse-failure message. See issue #451. Kept separate from
  * {@link requireAccessLevelJson} (the generalized JSON variant for the
  * `AccessLevel` ladder) since owner status is a global `isOwner` flag, not
- * a per-guild access level.
- * @param req - Express request; checked for `req.session.user?.isOwner`.
+ * a per-guild access level. Owner status is re-read from the DB on every call
+ * (see {@link isLiveOwner}).
+ * @param req - Express request; its session user's owner flag is re-checked against the DB.
  * @param res - Express response; used to send a 403 JSON body when denied.
  * @param next - Called when the session user is the owner.
- * @returns Nothing; either calls `next()` or sends a 403 JSON response.
+ * @returns A promise that resolves once `next()` or the 403 JSON response has been issued.
  */
-export function requireOwnerJson(req: Request, res: Response, next: NextFunction): void {
-  if (req.session.user?.isOwner) {
+export async function requireOwnerJson(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (await isLiveOwner(req)) {
     next();
   } else {
     res.status(403).json({ error: 'forbidden' });
