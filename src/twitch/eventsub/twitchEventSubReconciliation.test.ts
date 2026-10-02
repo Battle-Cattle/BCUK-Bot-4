@@ -84,6 +84,31 @@ describe('runReconciliationTick', () => {
     );
   });
 
+  it('fetches UNFULFILLED redemptions to completion before starting the FULFILLED fetch', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    const events: string[] = [];
+    let releaseUnfulfilled!: () => void;
+    const unfulfilledGate = new Promise<void>((resolve) => { releaseUnfulfilled = resolve; });
+    vi.mocked(getRewardRedemptions).mockImplementation(async (_uid, _rewardId, status) => {
+      events.push(`start:${status}`);
+      if (status === 'UNFULFILLED') await unfulfilledGate;
+      events.push(`end:${status}`);
+      return { redemptions: [], cursor: null };
+    });
+
+    const tick = runReconciliationTick();
+    await vi.waitFor(() => expect(events).toContain('start:UNFULFILLED'));
+    await Promise.resolve();
+    await Promise.resolve();
+    // The FULFILLED request must not start while UNFULFILLED is still in flight — a redemption
+    // fulfilled in between would otherwise be missed by both.
+    expect(events).toEqual(['start:UNFULFILLED']);
+    releaseUnfulfilled();
+    await tick;
+
+    expect(events).toEqual(['start:UNFULFILLED', 'end:UNFULFILLED', 'start:FULFILLED', 'end:FULFILLED']);
+  });
+
   it('does not replay a redemption older than the initial one-poll-interval lookback', async () => {
     vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
     const tooOld = new Date(Date.now() - 120_000).toISOString(); // 2 intervals ago

@@ -45,6 +45,25 @@ async function persistStreamerLive(streamerId: number, messageId: string, channe
 }
 
 /**
+ * Deletes a message that a superseded caller sent after a newer same-login operation took over
+ * (see `withLoginLock`: a timeout stops waiting on an operation but doesn't cancel it). The message
+ * is never recorded anywhere, so left in place it would be an orphaned duplicate of whatever the
+ * newer operation posted (or a stale "now live" post if it found the stream offline). Best-effort:
+ * a failed delete is logged, not thrown.
+ * @param msg - The sent message's location.
+ * @param login - Streamer login, for logging.
+ * @returns Resolves once the delete has been attempted.
+ */
+async function discardSupersededMessage(msg: { id: string; channelId: string }, login: string): Promise<void> {
+  log.warn(`Announcement for ${login} was superseded while sending — deleting unrecorded message ${msg.id}`);
+  try {
+    await tryDeleteDiscordMessage(msg.channelId, msg.id);
+  } catch (err) {
+    log.error(`Failed to delete superseded announcement ${msg.id} for ${login}:`, err);
+  }
+}
+
+/**
  * Posts a new "now live" announcement message for a streamer and records the
  * resulting message location in both the in-memory live-state map and the DB.
  * No-ops (storing a state with null message fields) if the Discord client isn't ready.
@@ -53,8 +72,8 @@ async function persistStreamerLive(streamerId: number, messageId: string, channe
  * @param stream - The live Twitch stream data.
  * @param isCurrent - See `withLoginLock` in twitchMonitorPoll.ts; checked after each `await` so a
  *   caller superseded by a newer same-login operation stops instead of mutating `liveStates` or
- *   writing to the DB with stale context. A Discord message already sent before staleness is
- *   detected can't be un-sent, but nothing further is applied on top of it once stale.
+ *   writing to the DB with stale context. A Discord message sent before staleness is detected is
+ *   deleted again (see {@link discardSupersededMessage}) rather than left as a duplicate.
  * @returns Resolves once the announcement is posted (or skipped) and state is updated.
  */
 export async function postAnnouncement(
@@ -86,7 +105,10 @@ export async function postAnnouncement(
     }
     const textChannel = channel as TextChannel;
     const msg = await textChannel.send({ content, embeds: [embed] });
-    if (!isCurrent()) return; // superseded while sending — don't record this message against newer state
+    if (!isCurrent()) { // superseded while sending — don't record this message, and don't leave it as a duplicate
+      await discardSupersededMessage(msg, stream.user_login);
+      return;
+    }
 
     liveStates.set(key, makeLiveState(streamerData, stream, msg.id, msg.channelId));
 
@@ -106,13 +128,17 @@ export async function postAnnouncement(
  * @param embed - Rendered stream embed.
  * @param state - Live state to update with the new message's id/channel.
  * @param isCurrent - See {@link editAnnouncement}; checked after sending so a superseded caller
- *   doesn't record a sent message's id against state a newer operation now owns.
+ *   doesn't record a sent message's id against state a newer operation now owns (the message is
+ *   deleted again instead — see {@link discardSupersededMessage}).
  * @returns Resolves once the message is sent and `state` is updated (or updating is skipped
  *   because the caller has since been superseded).
  */
 async function repost(textChannel: TextChannel, content: string, embed: EmbedBuilder, state: LiveState, isCurrent: () => boolean): Promise<void> {
   const msg = await textChannel.send({ content, embeds: [embed] });
-  if (!isCurrent()) return;
+  if (!isCurrent()) {
+    await discardSupersededMessage(msg, state.login);
+    return;
+  }
   state.messageId = msg.id;
   state.channelId = msg.channelId;
 }
