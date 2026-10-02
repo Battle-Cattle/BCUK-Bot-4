@@ -100,7 +100,8 @@ function isInvalidRefreshTokenError(error: Error): boolean {
  * alerts the owner once after `MAX_TRANSIENT_REBUILD_ATTEMPTS`, and re-checks before every attempt
  * (skipping the wait if none has elapsed yet) whether a newer connection has since been saved (e.g.
  * the owner reconnected via `/admin/bot-auth`), abandoning immediately since retrying a superseded
- * connection is pointless.
+ * connection is pointless. A failed re-read of the stored token (a DB blip) counts as a failed
+ * attempt and backs off like any other, so recovery isn't silently abandoned.
  * @param userId - The Twitch user ID `onRefreshFailure` fired for, for logging only.
  * @param connectionId - The `connection_id` this provider was built for, for detecting
  *   supersession and for the in-flight guard described above.
@@ -116,7 +117,16 @@ async function rebuildAfterTransientRefreshFailure(userId: string, connectionId:
         await new Promise<void>((resolve) => setTimeout(resolve, backoffMs));
       }
 
-      const current = await getBotChatToken();
+      let current: Awaited<ReturnType<typeof getBotChatToken>>;
+      try {
+        current = await getBotChatToken();
+      } catch (lookupErr) {
+        // A DB blip mustn't end recovery silently: Twurple keeps this provider's refresh failure
+        // cached, so chat would stay broken after the DB recovers. Count it as a failed attempt
+        // and back off; the owner is alerted below if every attempt fails.
+        log.error(`Failed to re-read the stored chat token while recovering from a transient refresh failure for ${userId} (attempt ${attempt}/${MAX_TRANSIENT_REBUILD_ATTEMPTS}):`, lookupErr);
+        continue;
+      }
       if (!current || current.connectionId !== connectionId) return; // superseded by a reconnect since this failure fired
 
       log.warn(

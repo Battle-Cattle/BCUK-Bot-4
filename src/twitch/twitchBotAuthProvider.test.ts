@@ -155,6 +155,22 @@ describe('buildBotAuthProvider', () => {
 
       await expect(runRefreshFailureHandler('bot-uid', new Error('network blip'))).resolves.toBeUndefined();
       expect(restart).not.toHaveBeenCalled();
+      // Every attempt's lookup failed, so the owner is told recovery stopped.
+      expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining(BOT_AUTH_CONNECT_URL));
+    });
+
+    it('keeps retrying after a failed token lookup and rebuilds once the DB recovers', async () => {
+      vi.mocked(getBotChatToken)
+        .mockRejectedValueOnce(new Error('db down'))
+        .mockResolvedValue(STORED_BOT_TOKEN as any);
+      const restart = vi.fn().mockResolvedValue(undefined);
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
+
+      await runRefreshFailureHandler('bot-uid', new Error('network blip'));
+      expect(getBotChatToken).toHaveBeenCalledTimes(2);
+      expect(restart).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(sendOwnerAlert)).not.toHaveBeenCalled();
     });
   });
 
