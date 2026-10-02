@@ -1,12 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
 import { SSE_MAX_TOTAL_CONNECTIONS } from '../../shared/config';
-import {
-  getStreamerByDiscordId, getAllStreamersWithGroups, createManagedLookupCache,
-  DEFAULT_REFRESH_FAILURE_BACKOFF_MS, DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
-  type DbStreamerEventSub, type RefreshingLookupCache,
-} from '../../db';
+import { getStreamerByDiscordId, type DbStreamerEventSub } from '../../db';
 import { getSessionUser } from '../session';
-import { ipKey } from '../rateLimits';
+import {
+  isKnownStreamerLogin, unauthenticatedOverlayPool, tryReservePoolSlot, releasePoolSlot,
+  type SseConnectionPool,
+} from './sseOverlayAccess';
 import type { createLogger } from '../../shared/logger';
 
 const KEEPALIVE_INTERVAL_MS = 25_000;
@@ -16,99 +15,6 @@ const KEEPALIVE_INTERVAL_MS = 25_000;
 // this, an unauthenticated caller could exhaust sockets/timers/memory by opening connections under
 // many distinct regex-valid-but-unregistered keys, each well under its own per-key cap.
 let totalConnections = 0;
-
-/**
- * A sub-pool of the process-wide cap with its own total and per-IP limits, for SSE endpoints
- * that anyone can open without authenticating (the OBS browser-source overlays). Keeps those
- * callers from consuming the slots the authenticated streams (companion, dashboard, health,
- * settings status) rely on, and stops a single IP from taking the whole sub-pool.
- */
-export interface SseConnectionPool {
-  /** Maximum concurrent connections across the whole pool. */
-  readonly maxConnections: number;
-  /** Maximum concurrent connections in the pool from any one client IP (see `ipKey`). */
-  readonly maxPerIp: number;
-  /** Current number of connections attached under this pool. */
-  count: number;
-  /** Current connection count per client IP key; entries are deleted when they reach zero. */
-  readonly byIp: Map<string, number>;
-}
-
-/**
- * Creates an empty {@link SseConnectionPool}.
- * @param maxConnections - Pool-wide concurrent connection limit.
- * @param maxPerIp - Per-client-IP concurrent connection limit within the pool.
- * @returns A new pool with no connections counted.
- */
-export function createSseConnectionPool(maxConnections: number, maxPerIp: number): SseConnectionPool {
-  return { maxConnections, maxPerIp, count: 0, byIp: new Map() };
-}
-
-/**
- * Sub-cap for every unauthenticated overlay SSE connection (reward-video + alerts overlays
- * combined): 40% of the process-wide cap (200 at the default 500), so the remaining slots stay
- * available to authenticated streams even when the overlay pool is full.
- */
-export const UNAUTH_OVERLAY_SSE_MAX_CONNECTIONS = Math.max(1, Math.floor(SSE_MAX_TOTAL_CONNECTIONS * 0.4));
-
-/**
- * Per-IP limit within the unauthenticated overlay pool — generous enough for one streamer's OBS
- * running several overlay/alerts browser sources (across scenes) from the same machine.
- */
-export const UNAUTH_OVERLAY_SSE_MAX_PER_IP = 20;
-
-/** The shared pool both unauthenticated overlay SSE endpoints attach under. */
-export const unauthenticatedOverlayPool = createSseConnectionPool(
-  UNAUTH_OVERLAY_SSE_MAX_CONNECTIONS,
-  UNAUTH_OVERLAY_SSE_MAX_PER_IP,
-);
-
-/** How long the known-streamer-login set is served before a background refresh. */
-const KNOWN_LOGIN_CACHE_TTL_MS = 60_000;
-
-interface KnownStreamerLoginCache extends RefreshingLookupCache {
-  logins: Set<string>;
-}
-
-type KnownStreamerLoginLookup = ReturnType<typeof createManagedLookupCache<KnownStreamerLoginCache>>;
-
-let knownStreamerLoginCache: KnownStreamerLoginLookup | null = null;
-
-/**
- * Lazily creates the cached set of lowercased Twitch logins belonging to registered streamers, so
- * the unauthenticated overlay SSE routes can reject unknown logins without a DB hit per connect.
- * Created on first use rather than at import so modules that only import this file don't build
- * it. Stale-while-revalidate: a just-registered streamer may be 404'd until the next refresh,
- * which the overlay's `connectSse` client recovers from on its own via its reconnect backoff.
- * @returns The shared known-streamer-login cache.
- */
-function getKnownStreamerLoginCache(): KnownStreamerLoginLookup {
-  knownStreamerLoginCache ??= createManagedLookupCache<KnownStreamerLoginCache>({
-    cacheName: 'known streamer login cache',
-    ttlMs: KNOWN_LOGIN_CACHE_TTL_MS,
-    refreshFailureBackoffMs: DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
-    refreshFailureMaxBackoffMs: DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
-    createEmptyCache: () => ({ loadedAt: 0, logins: new Set() }),
-    loadCache: async () => {
-      const streamers = await getAllStreamersWithGroups();
-      const logins = new Set<string>();
-      for (const s of streamers) if (s.twitch_name) logins.add(s.twitch_name.toLowerCase());
-      return { loadedAt: Date.now(), logins };
-    },
-  });
-  return knownStreamerLoginCache;
-}
-
-/**
- * Reports whether `login` belongs to a registered streamer (any streamer row with a linked
- * Twitch name), via a short-TTL in-memory cache.
- * @param login - Already-lowercased Twitch login.
- * @returns true if a registered streamer has this login.
- */
-export async function isKnownStreamerLogin(login: string): Promise<boolean> {
-  const cache = await getKnownStreamerLoginCache().getCache();
-  return cache.logins.has(login);
-}
 
 /**
  * Maps a live SSE `Response` to its idempotent teardown (clears its keepalive interval, releases
@@ -191,6 +97,49 @@ function startKeepalive(res: Response, cleanup: () => void): NodeJS.Timeout {
   return keepalive;
 }
 
+/**
+ * Adds `res` to `key`'s client Set unless that would exceed `maxPerChannel`.
+ * @param connections - The endpoint's connections map.
+ * @param key - The connection key.
+ * @param res - The response to register.
+ * @param maxPerChannel - Maximum concurrent connections for `key`.
+ * @returns true if added; false (and nothing changed) if `key` was already at its limit.
+ */
+function addClientWithinLimit<K>(
+  connections: Map<K, Set<Response>>, key: K, res: Response, maxPerChannel: number,
+): boolean {
+  const clients = connections.get(key) ?? new Set<Response>();
+  if (clients.size >= maxPerChannel) return false;
+  clients.add(res);
+  connections.set(key, clients);
+  return true;
+}
+
+/**
+ * Reserves a slot under the process-wide cap and, when given, the unauthenticated `pool`, then
+ * runs `addClient` for the per-key limit. All-or-nothing: if any limit is already reached, every
+ * slot reserved so far is released again.
+ * @param req - Express request; its client IP keys the pool's per-IP limit.
+ * @param pool - Optional unauthenticated sub-pool (see `SseConnectionPool`).
+ * @param addClient - Registers the client under its key; returns false if the per-key limit is reached.
+ * @returns A function that releases the pool slot (a no-op without a pool), or null if a limit
+ *   was reached and nothing was reserved.
+ */
+function reserveConnectionSlots(
+  req: Request, pool: SseConnectionPool | undefined, addClient: () => boolean,
+): (() => void) | null {
+  if (totalConnections >= SSE_MAX_TOTAL_CONNECTIONS) return null;
+  const poolIp = pool ? tryReservePoolSlot(pool, req) : '';
+  if (poolIp === null) return null;
+  const releasePool = (): void => { if (pool) releasePoolSlot(pool, poolIp); };
+  if (!addClient()) {
+    releasePool();
+    return null;
+  }
+  totalConnections++;
+  return releasePool;
+}
+
 /** Options for {@link attachSseConnection}. */
 export interface AttachSseConnectionOptions<K> {
   /** In-memory map of active SSE connections keyed by `K` (a channel login, Discord ID, streamer ID, etc). */
@@ -229,30 +178,10 @@ export function attachSseConnection<K>(
   options: AttachSseConnectionOptions<K>,
 ): boolean {
   const { connections, key, maxPerChannel, pool } = options;
-  if (totalConnections >= SSE_MAX_TOTAL_CONNECTIONS) {
+  const releasePool = reserveConnectionSlots(req, pool, () => addClientWithinLimit(connections, key, res, maxPerChannel));
+  if (!releasePool) {
     res.status(429).end();
     return false;
-  }
-
-  const ip = pool ? ipKey(req) : '';
-  if (pool && (pool.count >= pool.maxConnections || (pool.byIp.get(ip) ?? 0) >= pool.maxPerIp)) {
-    res.status(429).end();
-    return false;
-  }
-
-  if (!connections.has(key)) connections.set(key, new Set());
-  const clients = connections.get(key)!;
-  clients.add(res);
-  if (clients.size > maxPerChannel) {
-    clients.delete(res);
-    res.status(429).end();
-    return false;
-  }
-
-  totalConnections++;
-  if (pool) {
-    pool.count++;
-    pool.byIp.set(ip, (pool.byIp.get(ip) ?? 0) + 1);
   }
 
   let cleaned = false;
@@ -268,12 +197,7 @@ export function attachSseConnection<K>(
     cleaned = true;
     connectionCleanups.delete(res);
     totalConnections--;
-    if (pool) {
-      pool.count--;
-      const remaining = (pool.byIp.get(ip) ?? 1) - 1;
-      if (remaining > 0) pool.byIp.set(ip, remaining);
-      else pool.byIp.delete(ip);
-    }
+    releasePool();
     if (keepalive) clearInterval(keepalive);
     removeClient(connections, key, res);
   };

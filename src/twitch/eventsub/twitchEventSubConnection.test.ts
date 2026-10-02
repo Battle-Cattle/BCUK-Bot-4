@@ -619,7 +619,7 @@ describe('StreamerConnection lifecycle', () => {
     conn.setSelfStopCallback(onSelfStop);
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-outage'));
-    await vi.waitFor(() => expect((conn as any).subscribeRetryTimer).not.toBeNull());
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
 
     expect(onSelfStop).not.toHaveBeenCalled();
     expect(removeStreamerFromMap).not.toHaveBeenCalled();
@@ -630,8 +630,8 @@ describe('StreamerConnection lifecycle', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(2));
     expect(subscribeForStreamer).toHaveBeenLastCalledWith('sess-outage', expect.anything());
-    await vi.waitFor(() => expect((conn as any).subscribeRetryAttempts).toBe(0));
-    expect((conn as any).subscribeRetryTimer).toBeNull();
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.attempts).toBe(0));
+    expect((conn as any).subscribeRetry.pending).toBe(false);
     expect(onSelfStop).not.toHaveBeenCalled();
   });
 
@@ -640,7 +640,7 @@ describe('StreamerConnection lifecycle', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-partial'));
-    await vi.waitFor(() => expect((conn as any).subscribeRetryTimer).not.toBeNull());
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
     await vi.advanceTimersByTimeAsync(5_000);
     await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(2));
   });
@@ -664,7 +664,7 @@ describe('StreamerConnection lifecycle', () => {
     }
     await vi.waitFor(() => expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('giving up')));
     (conn as any).clearKeepaliveTimer();
-    expect((conn as any).subscribeRetryTimer).toBeNull();
+    expect((conn as any).subscribeRetry.pending).toBe(false);
     await vi.advanceTimersByTimeAsync(600_000);
     expect(subscribeForStreamer).toHaveBeenCalledTimes(delays.length + 1);
     expect((conn as any).ws).not.toBeNull();
@@ -676,10 +676,10 @@ describe('StreamerConnection lifecycle', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-stop-retry'));
-    await vi.waitFor(() => expect((conn as any).subscribeRetryTimer).not.toBeNull());
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
 
     conn.stop();
-    expect((conn as any).subscribeRetryTimer).toBeNull();
+    expect((conn as any).subscribeRetry.pending).toBe(false);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(subscribeForStreamer).toHaveBeenCalledTimes(1);
   });
@@ -689,10 +689,10 @@ describe('StreamerConnection lifecycle', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-reload-retry'));
-    await vi.waitFor(() => expect((conn as any).subscribeRetryTimer).not.toBeNull());
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
 
     conn.reload(makeStreamerData());
-    expect((conn as any).subscribeRetryTimer).toBeNull();
+    expect((conn as any).subscribeRetry.pending).toBe(false);
     await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(2));
     (conn as any).clearKeepaliveTimer();
     (conn as any).clearConnectTimer();
@@ -705,10 +705,10 @@ describe('StreamerConnection lifecycle', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-fr-retry'));
-    await vi.waitFor(() => expect((conn as any).subscribeRetryTimer).not.toBeNull());
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
 
     ((conn as any).ws as MockWebSocket).listeners.get('error')!();
-    expect((conn as any).subscribeRetryTimer).toBeNull();
+    expect((conn as any).subscribeRetry.pending).toBe(false);
   });
 
   it('still self-stops when every failure was an auth/scope failure (nothing transient to retry)', async () => {
@@ -719,7 +719,7 @@ describe('StreamerConnection lifecycle', () => {
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-auth'));
     await vi.waitFor(() => expect(onSelfStop).toHaveBeenCalledWith('uid-123'));
-    expect((conn as any).subscribeRetryTimer).toBeNull();
+    expect((conn as any).subscribeRetry.pending).toBe(false);
   });
 
   it('self-stops when nothing is desired', async () => {

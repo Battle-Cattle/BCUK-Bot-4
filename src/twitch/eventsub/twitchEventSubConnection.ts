@@ -1,4 +1,5 @@
 import { createLogger } from '../../shared/logger';
+import { BackoffRetry } from './backoffRetry';
 import { recordEventSubConnected, recordEventSubReconnectAttempt, removeEventSubHealth } from '../../shared/healthStore';
 import { subscribeForStreamer, fetchValidEventSubToken, SubscribeOutcome, removeSessionSubscriptions, removeStreamerFromMap, dispatchNotification, handleRevocation, StreamerEventSubData } from './twitchEventSubSubscriptions';
 
@@ -91,8 +92,7 @@ export class StreamerConnection {
   private pendingMigrationOldSocket: WebSocket | null = null;
   private reconnectAttempts = 0;
   // Pending retry of a subscribe pass whose creates failed transiently — see scheduleSubscribeRetry.
-  private subscribeRetryTimer: ReturnType<typeof setTimeout> | null = null;
-  private subscribeRetryAttempts = 0;
+  private readonly subscribeRetry = new BackoffRetry(SUBSCRIBE_RETRY_BASE_MS, SUBSCRIBE_RETRY_MAX_MS, SUBSCRIBE_RETRY_MAX_ATTEMPTS);
   private isReconnecting = false;
   // Set when reload() runs while isReconnecting is true — at that point this.sessionId is
   // still the OLD session's id (the new session's welcome hasn't arrived yet), so subscribing
@@ -141,8 +141,7 @@ export class StreamerConnection {
     this.sessionId = null;
     this.clearKeepaliveTimer();
     this.clearConnectTimer();
-    this.clearSubscribeRetryTimer();
-    this.subscribeRetryAttempts = 0;
+    this.subscribeRetry.reset();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.migrationCloseTimer) {
       clearTimeout(this.migrationCloseTimer);
@@ -160,8 +159,7 @@ export class StreamerConnection {
    *  Cancels any pending transient-failure subscribe retry, since this reload subscribes afresh. */
   reload(newData: StreamerEventSubData): void {
     this.currentData = newData;
-    this.clearSubscribeRetryTimer();
-    this.subscribeRetryAttempts = 0;
+    this.subscribeRetry.reset();
     this.reloadChain = this.reloadChain
       .then(() => this.doReload())
       .catch((err: unknown) => { log.error(`[${this.name}] EventSub reload error:`, err); });
@@ -260,7 +258,7 @@ export class StreamerConnection {
     if (outcome.transientFailures > 0) {
       this.scheduleSubscribeRetry(outcome.transientFailures);
     } else {
-      this.subscribeRetryAttempts = 0;
+      this.subscribeRetry.reset();
     }
   }
 
@@ -274,30 +272,24 @@ export class StreamerConnection {
    * @param failures - How many creates failed transiently this pass, for logging.
    */
   private scheduleSubscribeRetry(failures: number): void {
-    this.clearSubscribeRetryTimer();
-    if (this.subscribeRetryAttempts >= SUBSCRIBE_RETRY_MAX_ATTEMPTS) {
-      log.error(`[${this.name}] ${failures} EventSub subscription(s) still failing after ${this.subscribeRetryAttempts} retries — giving up until the next reload/reconnect`);
+    const delay = this.subscribeRetry.schedule(() => { this.runSubscribeRetry(); });
+    if (delay === null) {
+      log.error(`[${this.name}] ${failures} EventSub subscription(s) still failing after ${this.subscribeRetry.attempts} retries — giving up until the next reload/reconnect`);
       return;
     }
-    const delay = Math.min(SUBSCRIBE_RETRY_MAX_MS, SUBSCRIBE_RETRY_BASE_MS * Math.pow(2, this.subscribeRetryAttempts));
-    this.subscribeRetryAttempts++;
-    log.warn(`[${this.name}] ${failures} EventSub subscription(s) failed transiently — retrying in ${delay}ms (attempt ${this.subscribeRetryAttempts})`);
-    this.subscribeRetryTimer = setTimeout(() => {
-      this.subscribeRetryTimer = null;
-      const sessionId = this.sessionId;
-      if (this.isStopped() || !sessionId) return;
-      // Mid-migration, sessionId is still the old session's — hand the retry to the new session's
-      // welcome via the same deferral reload() uses.
-      if (this.isReconnecting) { this.reloadPendingAfterMigration = true; return; }
-      this.reloadChain = this.reloadChain
-        .then(() => this.subscribeAndHandleEmpty(sessionId, 'No subscriptions after retry — disconnecting', true))
-        .catch((err: unknown) => { log.error(`[${this.name}] Subscribe retry error:`, err); });
-    }, delay);
+    log.warn(`[${this.name}] ${failures} EventSub subscription(s) failed transiently — retrying in ${delay}ms (attempt ${this.subscribeRetry.attempts})`);
   }
 
-  /** Cancels the pending transient-failure subscribe retry (see {@link scheduleSubscribeRetry}), if any. */
-  private clearSubscribeRetryTimer(): void {
-    if (this.subscribeRetryTimer) { clearTimeout(this.subscribeRetryTimer); this.subscribeRetryTimer = null; }
+  /** Runs a scheduled subscribe retry (see {@link scheduleSubscribeRetry}) against the live session. */
+  private runSubscribeRetry(): void {
+    const sessionId = this.sessionId;
+    if (this.isStopped() || !sessionId) return;
+    // Mid-migration, sessionId is still the old session's — hand the retry to the new session's
+    // welcome via the same deferral reload() uses.
+    if (this.isReconnecting) { this.reloadPendingAfterMigration = true; return; }
+    this.reloadChain = this.reloadChain
+      .then(() => this.subscribeAndHandleEmpty(sessionId, 'No subscriptions after retry — disconnecting', true))
+      .catch((err: unknown) => { log.error(`[${this.name}] Subscribe retry error:`, err); });
   }
 
   /**
@@ -451,7 +443,7 @@ export class StreamerConnection {
     this.clearKeepaliveTimer();
     this.clearConnectTimer();
     // The next session's welcome subscribes afresh, so a pending retry for this one is moot.
-    this.clearSubscribeRetryTimer();
+    this.subscribeRetry.cancel();
     this.ws = null;
     this.sessionId = null;
     if (!this.stopped) {
@@ -522,7 +514,7 @@ export class StreamerConnection {
       return;
     }
     log.info(`[${this.name}] Session established: ${this.sessionId}`);
-    this.clearSubscribeRetryTimer();
+    this.subscribeRetry.cancel();
     this.reloadChain = this.reloadChain
       .then(() => this.subscribeAndHandleEmpty(session.id, 'No subscriptions — disconnecting', true))
       .catch((err: unknown) => { log.error(`[${this.name}] Subscribe error:`, err); });
