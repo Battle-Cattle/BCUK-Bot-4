@@ -139,6 +139,14 @@ Export `registerXRuntime(runtime)` from the handler file to store the platform c
 
 ---
 
+## PR Reviews (Qlty)
+
+Qlty's PR comments (code smells such as file/function complexity, too many returns, duplication, plus diff-coverage gaps) are this repo's standards, not optional suggestions. **Never dismiss, defer or resolve a Qlty finding without fixing it**, and never reply that it "stays as is" or belongs in a follow-up. Fix every finding in the same PR, whether it's an inline review comment or a row in the "new issues" or coverage summary:
+- **Complexity, returns or structure:** refactor (extract helpers or a module) until the metric is under the threshold, keeping behaviour unchanged and tests green.
+- **Uncovered new lines:** add tests that cover them.
+
+After pushing, check that Qlty's next analysis no longer lists the finding.
+
 ## PR Reviews (CodeRabbit)
 
 CodeRabbit auto-reviews pushes but is rate-limited per developer; a rate-limited push gets a "Review limit reached" comment with a wait time and no actual diff review. **It never auto-retries** once the cooldown passes — a manual trigger is required every time, even if you just wait it out. After the wait time shown in the rate-limit comment has elapsed, post a PR comment:
