@@ -814,6 +814,70 @@ describe('StreamerConnection lifecycle', () => {
     expect((conn as any).reloadPendingAfterMigration).toBe(false);
   });
 
+  it('does not run a queued subscribe pass against a session a later migration replaced — re-runs it on the new one', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-q-a'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-q-a', expect.anything()));
+
+    // Hold the chain so a pass for sess-q-a is still queued when a migration to sess-q-b completes.
+    let release!: () => void;
+    (conn as any).reloadChain = new Promise<void>((resolve) => { release = resolve; });
+    (conn as any).queueSubscribePass('sess-q-a', 'empty', 'Queued pass error');
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-q-a', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=b' } },
+    }));
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-q-b'));
+    vi.mocked(subscribeForStreamer).mockClear();
+    release();
+
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-q-b', expect.anything()));
+    expect(subscribeForStreamer).not.toHaveBeenCalledWith('sess-q-a', expect.anything());
+  });
+
+  it('drops a queued subscribe pass whose session was replaced by a fresh connection, which subscribes itself', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-f-a'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-f-a', expect.anything()));
+
+    let release!: () => void;
+    (conn as any).reloadChain = new Promise<void>((resolve) => { release = resolve; });
+    (conn as any).queueSubscribePass('sess-f-a', 'empty', 'Queued pass error');
+    (conn as any).forceReconnect((conn as any).ws);
+    (conn as any).connect();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-f-b'));
+    vi.mocked(subscribeForStreamer).mockClear();
+    release();
+
+    // Only the fresh welcome's own pass runs; the stale one is neither run nor re-queued.
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-f-b', expect.anything()));
+    await vi.waitFor(() => expect(mockLog.info).toHaveBeenCalledWith(expect.stringContaining('replaced by a new connection')));
+    expect(subscribeForStreamer).toHaveBeenCalledTimes(1);
+    expect(subscribeForStreamer).not.toHaveBeenCalledWith('sess-f-a', expect.anything());
+  });
+
+  it('defers a queued subscribe pass that starts while its session is migrating', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-m-a'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-m-a', expect.anything()));
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-m-a', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=b' } },
+    }));
+    vi.mocked(subscribeForStreamer).mockClear();
+
+    (conn as any).queueSubscribePass('sess-m-a', 'empty', 'Queued pass error');
+    await vi.waitFor(() => expect((conn as any).reloadPendingAfterMigration).toBe(true));
+    expect(subscribeForStreamer).not.toHaveBeenCalled();
+
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-m-b'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-m-b', expect.anything()));
+    expect(subscribeForStreamer).not.toHaveBeenCalledWith('sess-m-a', expect.anything());
+  });
+
   it('still self-stops when every failure was an auth/scope failure (nothing transient to retry)', async () => {
     vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(0, 0, 3));
     const conn = new StreamerConnection(makeStreamerData());

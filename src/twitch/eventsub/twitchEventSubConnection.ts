@@ -29,6 +29,18 @@ const SUBSCRIBE_RETRY_MAX_MS = 5 * 60_000;
  *  the backed-off reconnect path keeps re-trying on a fresh session regardless). */
 const SUBSCRIBE_RETRY_MAX_ATTEMPTS = 8;
 
+/** One subscribe pass, as queued on a {@link StreamerConnection}'s reload chain. */
+interface SubscribePass {
+  /** The session the pass subscribes on. */
+  sessionId: string;
+  /** Logged when zero subscriptions result and the connection self-stops. */
+  emptyLogMessage: string;
+  /** Re-resolve a valid token before subscribing. */
+  refreshToken: boolean;
+  /** The connection's fresh-session generation when the pass was queued. */
+  generation: number;
+}
+
 export class StreamerConnection {
   readonly uid: string;
   private readonly name: string;
@@ -157,7 +169,28 @@ export class StreamerConnection {
     if (!this.sessionId) {
       return;
     }
-    await this.subscribeAndHandleEmpty(this.sessionId, 'No subscriptions after reload — disconnecting');
+    await this.subscribeAndHandleEmpty({
+      sessionId: this.sessionId,
+      emptyLogMessage: 'No subscriptions after reload — disconnecting',
+      refreshToken: false,
+      generation: this.freshSessionGeneration,
+    });
+  }
+
+  /**
+   * Queues a subscribe pass on {@link reloadChain} (see {@link subscribeAndHandleEmpty}), recording
+   * the current {@link freshSessionGeneration} so the pass can tell, when it runs, whether its
+   * session was replaced by a migration or by a fresh connection.
+   * @param sessionId - The session to subscribe on.
+   * @param emptyLogMessage - Logged when zero subscriptions result and the connection self-stops.
+   * @param errorLabel - Prefix for the error logged if the pass throws.
+   * @param refreshToken - Re-resolve a valid token before subscribing.
+   */
+  private queueSubscribePass(sessionId: string, emptyLogMessage: string, errorLabel: string, refreshToken = false): void {
+    const pass: SubscribePass = { sessionId, emptyLogMessage, refreshToken, generation: this.freshSessionGeneration };
+    this.reloadChain = this.reloadChain
+      .then(() => this.subscribeAndHandleEmpty(pass))
+      .catch((err: unknown) => { log.error(`[${this.name}] ${errorLabel}:`, err); });
   }
 
   /**
@@ -169,7 +202,9 @@ export class StreamerConnection {
    * unrelated reload. Once anything is live, the session is known-good, so the reconnect backoff is
    * reset here (rather than on socket open — see {@link onOpen}). Shared by doReload(), the
    * welcome handler, the deferred reload applied after a session migration, and the retry timer. No-ops if the
-   * connection was already stopped. If it's stopped while the subscribe call is in flight —
+   * connection was already stopped, or if the pass no longer owns its session when it starts (a queued pass
+   * can run after another migration replaced it; subscribing then would treat the subscriptions carried
+   * to the new session as stale and delete them). If it's stopped while the subscribe call is in flight —
    * e.g. `stop()` called from `twitchEventSub.ts` on shutdown or when a streamer is removed —
    * it deletes whatever that call created on the now-closed session (see
    * {@link removeSessionSubscriptions}) and returns without the zero-count handling, so a
@@ -179,64 +214,63 @@ export class StreamerConnection {
    * is ignored: a zero count from a dead session says nothing about the current one, and acting
    * on it would `stop()` a healthy replacement socket. If only migrations replaced it, the pass is
    * re-run on the migrated session instead of being dropped (see {@link carryPassOverMigration}).
-   * @param sessionId - The session to subscribe on.
-   * @param emptyLogMessage - Logged when zero subscriptions result and the connection self-stops.
-   * @param refreshToken - Re-resolve a valid token (see {@link refreshToken}) before subscribing.
+   * @param pass - The session to subscribe on, how to report an empty result, whether to re-resolve
+   *   the token first (see {@link refreshToken}), and the generation it was queued under.
    * @returns Resolves once subscribing (and any zero-count handling) is done.
    */
-  private async subscribeAndHandleEmpty(sessionId: string, emptyLogMessage: string, refreshToken = false): Promise<void> {
-    if (this.stopped) return;
-    const generation = this.freshSessionGeneration;
-    if (refreshToken) {
+  private async subscribeAndHandleEmpty(pass: SubscribePass): Promise<void> {
+    if (this.passOvertaken(pass)) return;
+    if (pass.refreshToken) {
       await this.refreshToken();
-      if (this.passOvertaken(sessionId, generation, emptyLogMessage)) return;
+      if (this.passOvertaken(pass)) return;
     }
     const data = this.currentData;
-    const outcome = await subscribeForStreamer(sessionId, data);
+    const outcome = await subscribeForStreamer(pass.sessionId, data);
     if (this.isStopped()) {
-      if (outcome.live > 0) await removeSessionSubscriptions(sessionId, data);
+      if (outcome.live > 0) await removeSessionSubscriptions(pass.sessionId, data);
       return;
     }
-    if (this.passOvertaken(sessionId, generation, emptyLogMessage)) return;
-    this.handleSubscribeOutcome(outcome, emptyLogMessage);
+    if (this.passOvertaken(pass)) return;
+    this.handleSubscribeOutcome(outcome, pass.emptyLogMessage);
   }
 
   /**
-   * Checks, after an await in a subscribe pass, whether the pass should stop: the connection was
-   * stopped, or `sessionId` is no longer the live session (then {@link carryPassOverMigration}
-   * decides whether to re-run it).
-   * @param sessionId - The session the pass is running against.
-   * @param generation - {@link freshSessionGeneration} when the pass started.
-   * @param emptyLogMessage - Passed through to a re-run pass.
+   * Checks, before a subscribe pass starts and after each of its awaits, whether it should stop:
+   * the connection was stopped, or the pass no longer owns its session — the session was replaced,
+   * or a migration away from it is in flight (then {@link carryPassOverMigration} decides whether
+   * to re-run it).
+   * @param pass - The pass being run.
    * @returns True if the pass should stop here.
    */
-  private passOvertaken(sessionId: string, generation: number, emptyLogMessage: string): boolean {
+  private passOvertaken(pass: SubscribePass): boolean {
     if (this.isStopped()) return true;
-    if (this.sessionId === sessionId) return false;
-    this.carryPassOverMigration(sessionId, generation, emptyLogMessage);
+    if (this.sessionId === pass.sessionId && !this.isReconnecting) return false;
+    this.carryPassOverMigration(pass);
     return true;
   }
 
   /**
-   * Handles a subscribe pass whose session was replaced while it awaited (its result is ignored).
-   * If only session migrations happened meanwhile (`generation` unchanged), nothing else will
-   * subscribe for this pass — a migration welcome doesn't, and a retry timer that already fired is
-   * spent — so the pass is re-run on the live session, or deferred to the next migration welcome if
-   * another migration is in flight. If the session was replaced any other way (stop, force-reconnect,
-   * a fresh welcome), that path subscribes afresh itself, so nothing is re-run.
-   * @param sessionId - The superseded session the pass ran against, for logging.
-   * @param generation - {@link freshSessionGeneration} when the pass started.
-   * @param emptyLogMessage - Passed through to the re-run pass.
+   * Handles a subscribe pass that no longer owns its session (any result it got is ignored). If
+   * only session migrations happened since it was queued (`pass.generation` unchanged), nothing else
+   * will subscribe for it — a migration welcome doesn't, and a retry timer that already fired is
+   * spent — so it's re-queued on the live session, or deferred to the migration's welcome if one is
+   * in flight. If the session was replaced any other way (stop, force-reconnect, a fresh welcome),
+   * that path subscribes afresh itself, so the pass is dropped.
+   * @param pass - The pass that lost its session.
    */
-  private carryPassOverMigration(sessionId: string, generation: number, emptyLogMessage: string): void {
-    log.info(`[${this.name}] Session ${sessionId} superseded while subscribing — ignoring its result`);
-    if (generation !== this.freshSessionGeneration) return;
+  private carryPassOverMigration(pass: SubscribePass): void {
+    if (pass.generation !== this.freshSessionGeneration) {
+      log.info(`[${this.name}] Session ${pass.sessionId} replaced by a new connection — dropping its subscribe pass`);
+      return;
+    }
     const liveSessionId = this.sessionId;
-    if (this.isReconnecting || !liveSessionId) { this.reloadPendingAfterMigration = true; return; }
-    log.info(`[${this.name}] Re-running the subscribe pass on migrated session ${liveSessionId}`);
-    this.reloadChain = this.reloadChain
-      .then(() => this.subscribeAndHandleEmpty(liveSessionId, emptyLogMessage))
-      .catch((err: unknown) => { log.error(`[${this.name}] Migrated subscribe pass error:`, err); });
+    if (this.isReconnecting || !liveSessionId) {
+      log.info(`[${this.name}] Session ${pass.sessionId} is migrating — deferring its subscribe pass to the new session`);
+      this.reloadPendingAfterMigration = true;
+      return;
+    }
+    log.info(`[${this.name}] Session ${pass.sessionId} was migrated — re-running its subscribe pass on ${liveSessionId}`);
+    this.queueSubscribePass(liveSessionId, pass.emptyLogMessage, 'Migrated subscribe pass error');
   }
 
   /**
@@ -287,9 +321,7 @@ export class StreamerConnection {
     // Mid-migration, sessionId is still the old session's — hand the retry to the new session's
     // welcome via the same deferral reload() uses.
     if (this.isReconnecting) { this.reloadPendingAfterMigration = true; return; }
-    this.reloadChain = this.reloadChain
-      .then(() => this.subscribeAndHandleEmpty(sessionId, 'No subscriptions after retry — disconnecting', true))
-      .catch((err: unknown) => { log.error(`[${this.name}] Subscribe retry error:`, err); });
+    this.queueSubscribePass(sessionId, 'No subscriptions after retry — disconnecting', 'Subscribe retry error', true);
   }
 
   /**
@@ -497,18 +529,14 @@ export class StreamerConnection {
       if (this.reloadPendingAfterMigration) {
         this.reloadPendingAfterMigration = false;
         log.info(`[${this.name}] Applying reload deferred during session migration`);
-        this.reloadChain = this.reloadChain
-          .then(() => this.subscribeAndHandleEmpty(session.id, 'No subscriptions after reload — disconnecting'))
-          .catch((err: unknown) => { log.error(`[${this.name}] Deferred reload error:`, err); });
+        this.queueSubscribePass(session.id, 'No subscriptions after reload — disconnecting', 'Deferred reload error');
       }
       return;
     }
     log.info(`[${this.name}] Session established: ${this.sessionId}`);
     this.freshSessionGeneration++;
     this.subscribeRetry.cancel();
-    this.reloadChain = this.reloadChain
-      .then(() => this.subscribeAndHandleEmpty(session.id, 'No subscriptions — disconnecting', true))
-      .catch((err: unknown) => { log.error(`[${this.name}] Subscribe error:`, err); });
+    this.queueSubscribePass(session.id, 'No subscriptions — disconnecting', 'Subscribe error', true);
   }
 
   /**
