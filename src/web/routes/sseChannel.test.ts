@@ -19,7 +19,7 @@ import {
 import {
   createSseConnectionPool, isKnownStreamerLogin, unauthenticatedOverlayPool,
   UNAUTH_OVERLAY_SSE_MAX_CONNECTIONS, UNAUTH_OVERLAY_SSE_MAX_PER_IP,
-  tryReservePoolSlot, releasePoolSlot,
+  tryReservePoolSlot, releasePoolSlot, createEmptyKnownLoginCache,
 } from './sseOverlayAccess';
 import { getStreamerByDiscordId, getAllStreamersWithGroups } from '../../db';
 import { getSessionUser } from '../session';
@@ -365,6 +365,12 @@ describe('isKnownStreamerLogin', () => {
 
     await expect(isKnownStreamerLogin('knownstreamer')).resolves.toBe(true);
     await expect(isKnownStreamerLogin('someoneelse')).resolves.toBe(false);
+  });
+
+  it('starts from an empty, never-loaded login set', () => {
+    const empty = createEmptyKnownLoginCache();
+    expect(empty.loadedAt).toBe(0);
+    expect(empty.logins.size).toBe(0);
   });
 });
 

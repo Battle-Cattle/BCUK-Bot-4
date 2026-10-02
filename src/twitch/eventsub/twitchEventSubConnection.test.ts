@@ -635,6 +635,23 @@ describe('StreamerConnection lifecycle', () => {
     expect(onSelfStop).not.toHaveBeenCalled();
   });
 
+  it('logs (and does not throw) when a scheduled subscribe retry itself fails', async () => {
+    vi.mocked(subscribeForStreamer)
+      .mockResolvedValueOnce(outcome(0, 2))
+      .mockRejectedValueOnce(new Error('helix down'))
+      .mockResolvedValue(outcome(2));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-retry-err'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(mockLog.error).toHaveBeenCalledWith(
+      expect.stringContaining('Subscribe retry error'), expect.any(Error),
+    ));
+    expect((conn as any).ws).not.toBeNull();
+  });
+
   it('retries a partially-failed subscribe pass too, without stopping the connection', async () => {
     vi.mocked(subscribeForStreamer).mockResolvedValueOnce(outcome(1, 1)).mockResolvedValue(outcome(2));
     const conn = new StreamerConnection(makeStreamerData());

@@ -60,8 +60,17 @@ export const unauthenticatedOverlayPool = createSseConnectionPool(
 /** How long the known-streamer-login set is served before a background refresh. */
 const KNOWN_LOGIN_CACHE_TTL_MS = 60_000;
 
-interface KnownStreamerLoginCache extends RefreshingLookupCache {
+/** The cached set of lowercased Twitch logins belonging to registered streamers. */
+export interface KnownStreamerLoginCache extends RefreshingLookupCache {
   logins: Set<string>;
+}
+
+/**
+ * The cache's starting value before (or if) the first load succeeds: an empty, never-loaded set.
+ * @returns An empty {@link KnownStreamerLoginCache} with `loadedAt` 0.
+ */
+export function createEmptyKnownLoginCache(): KnownStreamerLoginCache {
+  return { loadedAt: 0, logins: new Set() };
 }
 
 type KnownStreamerLoginLookup = ReturnType<typeof createManagedLookupCache<KnownStreamerLoginCache>>;
@@ -82,7 +91,7 @@ function getKnownStreamerLoginCache(): KnownStreamerLoginLookup {
     ttlMs: KNOWN_LOGIN_CACHE_TTL_MS,
     refreshFailureBackoffMs: DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
     refreshFailureMaxBackoffMs: DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
-    createEmptyCache: () => ({ loadedAt: 0, logins: new Set() }),
+    createEmptyCache: createEmptyKnownLoginCache,
     loadCache: async () => {
       const streamers = await getAllStreamersWithGroups();
       const logins = new Set<string>();
