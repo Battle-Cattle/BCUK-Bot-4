@@ -12,6 +12,7 @@ vi.mock('../../shared/config', () => ({}));
 // subscribeForStreamer/loadStreamersForEventSub, not dispatch.
 vi.mock('../../db', () => ({
   getAllEventSubStreamers: vi.fn(),
+  getStreamerById: vi.fn(),
   clearStreamerToken: vi.fn().mockResolvedValue(undefined),
   getEnabledAlertEventTypesBatch: vi.fn().mockResolvedValue(new Map()),
   DEFAULT_EVENT_CONFIG: {
@@ -54,8 +55,9 @@ import {
   loadStreamersForEventSub,
   subscribeForStreamer,
   removeSessionSubscriptions,
+  fetchValidEventSubToken,
 } from './twitchEventSubSubscriptions';
-import { getAllEventSubStreamers, getEnabledAlertEventTypesBatch } from '../../db';
+import { getAllEventSubStreamers, getEnabledAlertEventTypesBatch, getStreamerById } from '../../db';
 import { getValidToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
@@ -352,7 +354,7 @@ describe('subscribeForStreamer', () => {
   it('returns 0 and skips subscriptions when bot is not in the channel', async () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set()); // bot not in any channel
 
-    const count = await subscribeForStreamer('sess-x', {
+    const { live: count } = await subscribeForStreamer('sess-x', {
       uid: 'uid-x',
       token: 'tok',
       name: 'notInChannel',
@@ -364,12 +366,12 @@ describe('subscribeForStreamer', () => {
     expect(createEventSubSubscription).not.toHaveBeenCalled();
   });
 
-  it('returns 0 when every subscribe attempt fails with a missing scope, even though subscriptions are desired', async () => {
+  it('returns 0 live (and 0 transient failures) when every subscribe attempt fails with a missing scope, even though subscriptions are desired', async () => {
     vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
     vi.mocked(createEventSubSubscription).mockRejectedValue(new TwitchAuthError('403'));
 
-    const count = await subscribeForStreamer('sess-noscope', {
+    const { live: count, desired, transientFailures } = await subscribeForStreamer('sess-noscope', {
       uid: 'uid-noscope',
       token: 'tok-noscope',
       name: 'botInChannel',
@@ -381,6 +383,103 @@ describe('subscribeForStreamer', () => {
     // the count must reflect that, not the non-empty desired set, so a caller's zero-subscriptions
     // self-stop check can detect this connection has no working subscriptions.
     expect(count).toBe(0);
+    expect(desired).toBeGreaterThan(0);
+    // Auth/scope failures are not transient — retrying can't help until the user reconnects.
+    expect(transientFailures).toBe(0);
+  });
+
+  it('reports transient (non-auth) create failures separately so the caller can retry instead of stopping', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
+    vi.mocked(createEventSubSubscription).mockRejectedValue(new Error('503 Service Unavailable'));
+
+    const result = await subscribeForStreamer('sess-outage', {
+      uid: 'uid-outage',
+      token: 'tok-outage',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 20,
+    });
+
+    expect(result.live).toBe(0);
+    expect(result.desired).toBeGreaterThan(0);
+    expect(result.transientFailures).toBe(result.desired);
+    expect(hasAuthFailedSubs('botInChannel')).toBe(false);
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id-1');
+  });
+
+  it('counts a 409 Conflict on create as already live, without pruning same-type subscriptions on its account', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue(null);
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      {
+        id: 'sub-other-follow', type: 'channel.follow', sessionId: 'sess-elsewhere', status: 'enabled',
+        condition: { broadcaster_user_id: 'uid-conflict', moderator_user_id: 'uid-other' },
+      },
+    ] as any);
+
+    const result = await subscribeForStreamer('sess-conflict', {
+      uid: 'uid-conflict',
+      token: 'tok-conflict',
+      name: 'botInChannel',
+      config: { follow_enabled: true, sub_enabled: false, raid_enabled: false } as any,
+      streamerId: 20,
+    });
+
+    expect(result.live).toBe(result.desired);
+    expect(result.transientFailures).toBe(0);
+    // A 409 gives no id, so we can't tell which same-type subscription is the live one — leave it.
+    expect(deleteEventSubSubscription).not.toHaveBeenCalledWith('sub-other-follow', 'tok-conflict');
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id-1');
+  });
+
+  it('matches an existing subscription whose listed condition carries extra optional keys as empty strings', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
+    // Twitch echoes channel.raid's unused from_broadcaster_user_id back as "".
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      {
+        id: 'sub-live-raid', type: 'channel.raid', sessionId: 'sess-empty-keys', status: 'enabled',
+        condition: { to_broadcaster_user_id: 'uid-empty-keys', from_broadcaster_user_id: '' },
+      },
+    ] as any);
+
+    const result = await subscribeForStreamer('sess-empty-keys', {
+      uid: 'uid-empty-keys',
+      token: 'tok-empty-keys',
+      name: 'botInChannel',
+      config: { follow_enabled: false, sub_enabled: false, raid_enabled: true } as any,
+      streamerId: 20,
+    });
+
+    expect(createEventSubSubscription).not.toHaveBeenCalledWith(
+      'channel.raid', expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+    );
+    expect(deleteEventSubSubscription).not.toHaveBeenCalledWith('sub-live-raid', 'tok-empty-keys');
+    expect(result.live).toBeGreaterThan(0);
+  });
+
+  it('does not match a same-type subscription whose extra condition key has a non-empty value', async () => {
+    vi.mocked(getActiveChannels).mockReturnValue(new Set(['botinchannel']));
+    vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new-raid');
+    vi.mocked(listEventSubSubscriptions).mockResolvedValue([
+      {
+        id: 'sub-other-raid', type: 'channel.raid', sessionId: 'sess-extra-key', status: 'enabled',
+        condition: { to_broadcaster_user_id: 'uid-extra-key', from_broadcaster_user_id: 'uid-someone' },
+      },
+    ] as any);
+
+    await subscribeForStreamer('sess-extra-key', {
+      uid: 'uid-extra-key',
+      token: 'tok-extra-key',
+      name: 'botInChannel',
+      config: { follow_enabled: false, sub_enabled: false, raid_enabled: true } as any,
+      streamerId: 20,
+    });
+
+    expect(createEventSubSubscription).toHaveBeenCalledWith(
+      'channel.raid', expect.anything(), { to_broadcaster_user_id: 'uid-extra-key' }, 'sess-extra-key', 'tok-extra-key',
+    );
   });
 
   it('calls createEventSubSubscription for enabled subscription types', async () => {
@@ -388,7 +487,7 @@ describe('subscribeForStreamer', () => {
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-new');
     vi.mocked(listEventSubSubscriptions).mockResolvedValue([]);
 
-    const count = await subscribeForStreamer('sess-y', {
+    const { live: count } = await subscribeForStreamer('sess-y', {
       uid: 'uid-y',
       token: 'tok-y',
       name: 'botInChannel',
@@ -493,7 +592,7 @@ describe('subscribeForStreamer', () => {
       },
     ] as any);
 
-    const count = await subscribeForStreamer('sess-live-409', {
+    const { live: count } = await subscribeForStreamer('sess-live-409', {
       uid: 'uid-409',
       token: 'tok-409',
       name: 'botInChannel',
@@ -522,7 +621,7 @@ describe('subscribeForStreamer', () => {
       },
     ] as any);
 
-    const count = await subscribeForStreamer('sess-revoked', {
+    const { live: count } = await subscribeForStreamer('sess-revoked', {
       uid: 'uid-revoked',
       token: 'tok-revoked',
       name: 'botInChannel',
@@ -850,7 +949,7 @@ describe('subscribeForStreamer with sub_enabled', () => {
   });
 
   it('subscribes to channel.subscribe, subscription.message, and subscription.gift', async () => {
-    const count = await subscribeForStreamer('sess-sub', {
+    const { live: count } = await subscribeForStreamer('sess-sub', {
       uid: 'uid-sub',
       token: 'tok-sub',
       name: 'subStreamer',
@@ -899,7 +998,7 @@ describe('error handling in subscription setup', () => {
     vi.mocked(createEventSubSubscription).mockResolvedValue('sub-id');
     vi.mocked(listEventSubSubscriptions).mockRejectedValueOnce(new Error('list failed'));
 
-    const count = await subscribeForStreamer('sess-err', {
+    const { live: count } = await subscribeForStreamer('sess-err', {
       uid: 'uid-err',
       token: 'tok-err',
       name: 'errStreamer',
@@ -921,7 +1020,7 @@ describe('error handling in subscription setup', () => {
     // nothing exists: creation proceeds fresh, and cleanup has nothing to delete.
     vi.mocked(listEventSubSubscriptions).mockRejectedValueOnce(new Error('list failed'));
 
-    const count = await subscribeForStreamer('sess-err2', {
+    const { live: count } = await subscribeForStreamer('sess-err2', {
       uid: 'uid-err2',
       token: 'tok-err2',
       name: 'errStreamer',
@@ -1071,5 +1170,27 @@ describe('removeSessionSubscriptions', () => {
     expect(logMock.error).toHaveBeenCalledWith(
       'Failed to delete subscription a (channel.follow) left on stopped session for stoppedStreamer:', expect.any(Error),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchValidEventSubToken
+// ---------------------------------------------------------------------------
+describe('fetchValidEventSubToken', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('re-reads the streamer row and returns the token getValidToken resolves (refreshing if expired)', async () => {
+    const row = { id: 7, eventsub_access_token: 'old' } as any;
+    vi.mocked(getStreamerById).mockResolvedValueOnce(row);
+    vi.mocked(getValidToken).mockResolvedValueOnce('refreshed');
+    await expect(fetchValidEventSubToken(7)).resolves.toBe('refreshed');
+    expect(getStreamerById).toHaveBeenCalledWith(7);
+    expect(getValidToken).toHaveBeenCalledWith(row);
+  });
+
+  it('returns null when the streamer row no longer exists', async () => {
+    vi.mocked(getStreamerById).mockResolvedValueOnce(null);
+    await expect(fetchValidEventSubToken(7)).resolves.toBeNull();
+    expect(getValidToken).not.toHaveBeenCalled();
   });
 });

@@ -121,7 +121,8 @@ async function replayRedemptions(
 /**
  * Fetches recent redemptions for one reward (both UNFULFILLED — still in the queue — and
  * FULFILLED — including rewards with `should_redemptions_skip_request_queue` set, which never
- * appear as UNFULFILLED) and replays any redeemed after the reward's tracked cursor through
+ * appear as UNFULFILLED — sequentially in that order, so a redemption fulfilled mid-fetch isn't
+ * missed) and replays any redeemed after the reward's tracked cursor through
  * {@link handleRedemption}. `handleRedemption` itself dedupes on the redemption id and reports
  * back whether it actually processed the redemption or dropped it as a duplicate — a redemption
  * already delivered live via the WebSocket is a safe no-op here, and is not logged as a catch,
@@ -150,10 +151,11 @@ async function reconcileReward(info: StreamerInfo, uid: string, token: string, r
 
   let redemptions: TwitchRewardRedemption[];
   try {
-    const [unfulfilled, fulfilled] = await Promise.all([
-      fetchRedemptionsNewerThan(uid, rewardId, 'UNFULFILLED', token, cutoff),
-      fetchRedemptionsNewerThan(uid, rewardId, 'FULFILLED', token, cutoff),
-    ]);
+    // Sequential, UNFULFILLED first: a redemption is only ever moved UNFULFILLED → FULFILLED, so
+    // one that flips between the two requests is still caught by the later FULFILLED fetch. Fetched
+    // in parallel, the FULFILLED request could run first and miss it for this tick.
+    const unfulfilled = await fetchRedemptionsNewerThan(uid, rewardId, 'UNFULFILLED', token, cutoff);
+    const fulfilled = await fetchRedemptionsNewerThan(uid, rewardId, 'FULFILLED', token, cutoff);
     redemptions = [...unfulfilled, ...fulfilled];
   } catch (err) {
     log.error(`Failed to fetch redemptions for reward ${rewardId} (${info.login}):`, err);

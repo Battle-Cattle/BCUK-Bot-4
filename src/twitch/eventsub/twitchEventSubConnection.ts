@@ -1,6 +1,9 @@
 import { createLogger } from '../../shared/logger';
+import { BackoffRetry } from './backoffRetry';
+import { shouldSelfStop, type SubscribeOutcome } from './subscribeOutcome';
 import { recordEventSubConnected, recordEventSubReconnectAttempt, removeEventSubHealth } from '../../shared/healthStore';
-import { subscribeForStreamer, removeSessionSubscriptions, removeStreamerFromMap, dispatchNotification, handleRevocation, StreamerEventSubData } from './twitchEventSubSubscriptions';
+import { subscribeForStreamer, fetchValidEventSubToken, removeSessionSubscriptions, removeStreamerFromMap, StreamerEventSubData } from './twitchEventSubSubscriptions';
+import { buildReconnectUrl, rejectionReason, routeEventSubMessage, type EventSubMessage } from './twitchEventSubMessages';
 
 const log = createLogger('EventSub');
 
@@ -14,53 +17,18 @@ const RECONNECT_BACKOFF_MAX_MS = 30_000;
  *  subscription and nothing in the logs to explain why — unlike every other failure path here
  *  (keepalive timeout, socket error, socket close), which already force-reconnects. */
 const CONNECT_TIMEOUT_MS = 30_000;
-/** How long a message ID is remembered for deduplication (ms). */
-export const MESSAGE_TTL_MS = 10 * 60 * 1000;
 /** Grace period before closing the old WebSocket during a session migration (Twitch-specified window). */
 const SESSION_MIGRATION_CLOSE_DELAY_MS = 5_000;
+/** Base delay before retrying a subscribe pass whose creates failed transiently (5xx, 429, network,
+ *  timeout) — doubled per consecutive failed pass, capped at {@link SUBSCRIBE_RETRY_MAX_MS}. */
+const SUBSCRIBE_RETRY_BASE_MS = 5_000;
+/** Upper bound on the delay between transient-failure subscribe retries. */
+const SUBSCRIBE_RETRY_MAX_MS = 5 * 60_000;
+/** Consecutive transient-failure subscribe retries attempted before giving up until the next
+ *  reload/fresh session (a socket left with no subscriptions is closed by Twitch after ~10s, so
+ *  the backed-off reconnect path keeps re-trying on a fresh session regardless). */
+const SUBSCRIBE_RETRY_MAX_ATTEMPTS = 8;
 
-/** Metadata fields present on every EventSub WebSocket message. */
-export interface EventSubMetadata {
-  message_type: string;
-  message_id: string;
-  message_timestamp: string;
-}
-
-/** A single EventSub WebSocket message. */
-export interface EventSubMessage {
-  metadata: EventSubMetadata;
-  payload: {
-    session?: { id: string; keepalive_timeout_seconds: number; reconnect_url?: string | null };
-    subscription?: { type: string; status: string; condition: Record<string, string> };
-    event?: Record<string, unknown>;
-  };
-}
-
-/** Validates the Twitch-supplied reconnect URL against a strict allowlist. */
-export function buildReconnectUrl(reconnectUrl: string): string | null {
-  let parsed: URL;
-  try { parsed = new URL(reconnectUrl); } catch { return null; }
-  const validPorts = new Set(['', '443']);
-  const checkResults = {
-    protocol: parsed.protocol === 'wss:',
-    hostname: parsed.hostname === 'eventsub.wss.twitch.tv' || parsed.hostname.endsWith('.eventsub.wss.twitch.tv'),
-    username: !parsed.username,
-    password: !parsed.password,
-    port: validPorts.has(parsed.port),
-    pathname: parsed.pathname.replace(/\/$/, '') === '/ws',
-  };
-  const failed = Object.entries(checkResults).filter(([, v]) => !v).map(([k]) => k);
-  if (failed.length > 0) {
-    log.error(`Invalid reconnect URL — failed checks: ${failed.join(', ')} — url: ${reconnectUrl}`);
-    return null;
-  }
-  // Reconstruct from validated components so taint analysis sees a clean value
-  const safe = new URL(`wss://${parsed.hostname}/ws`);
-  safe.search = parsed.search;
-  return safe.href;
-}
-
-/** Manages a per-streamer EventSub WebSocket connection with reconnection and keepalive logic. */
 export class StreamerConnection {
   readonly uid: string;
   private readonly name: string;
@@ -81,6 +49,8 @@ export class StreamerConnection {
   // longer references — see handleSessionReconnect.
   private pendingMigrationOldSocket: WebSocket | null = null;
   private reconnectAttempts = 0;
+  // Pending retry of a subscribe pass whose creates failed transiently — see scheduleSubscribeRetry.
+  private readonly subscribeRetry = new BackoffRetry(SUBSCRIBE_RETRY_BASE_MS, SUBSCRIBE_RETRY_MAX_MS, SUBSCRIBE_RETRY_MAX_ATTEMPTS);
   private isReconnecting = false;
   // Set when reload() runs while isReconnecting is true — at that point this.sessionId is
   // still the OLD session's id (the new session's welcome hasn't arrived yet), so subscribing
@@ -117,7 +87,7 @@ export class StreamerConnection {
 
   /**
    * Closes the connection and removes this streamer from the subscription map: cancels every
-   * pending timer (keepalive, connect, reconnect, and any in-flight migration close — the socket
+   * pending timer (keepalive, connect, reconnect, subscribe retry, and any in-flight migration close — the socket
    * that timer was waiting to close is closed immediately instead, with a `'shutdown'` reason),
    * then closes the live socket, if any.
    * @returns void.
@@ -129,6 +99,7 @@ export class StreamerConnection {
     this.sessionId = null;
     this.clearKeepaliveTimer();
     this.clearConnectTimer();
+    this.subscribeRetry.reset();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.migrationCloseTimer) {
       clearTimeout(this.migrationCloseTimer);
@@ -142,9 +113,11 @@ export class StreamerConnection {
     removeStreamerFromMap(this.uid);
   }
 
-  /** Updates streamer data and re-subscribes on the live session (serialised via reloadChain). */
+  /** Updates streamer data and re-subscribes on the live session (serialised via reloadChain).
+   *  Cancels any pending transient-failure subscribe retry, since this reload subscribes afresh. */
   reload(newData: StreamerEventSubData): void {
     this.currentData = newData;
+    this.subscribeRetry.reset();
     this.reloadChain = this.reloadChain
       .then(() => this.doReload())
       .catch((err: unknown) => { log.error(`[${this.name}] EventSub reload error:`, err); });
@@ -183,27 +156,124 @@ export class StreamerConnection {
   }
 
   /**
-   * Subscribes for the current streamer data on the given session id and stops the
-   * connection (notifying onSelfStop) if zero subscriptions result. Shared by doReload()
-   * and the deferred reload applied after a session migration completes. No-ops if the
+   * Subscribes for the current streamer data on the given session id and stops the connection
+   * (notifying onSelfStop) only if nothing is desired, or nothing is live and every failure was an
+   * auth/scope failure (retrying can't help until the user reconnects Twitch). If any create failed
+   * transiently (5xx, 429, network, timeout), the connection is kept and the subscribe step retried
+   * with backoff (see {@link scheduleSubscribeRetry}) instead of dropping the streamer until an
+   * unrelated reload. Once anything is live, the session is known-good, so the reconnect backoff is
+   * reset here (rather than on socket open — see {@link onOpen}). Shared by doReload(), the
+   * welcome handler, the deferred reload applied after a session migration, and the retry timer. No-ops if the
    * connection was already stopped. If it's stopped while the subscribe call is in flight —
    * e.g. `stop()` called from `twitchEventSub.ts` on shutdown or when a streamer is removed —
    * it deletes whatever that call created on the now-closed session (see
    * {@link removeSessionSubscriptions}) and returns without the zero-count handling, so a
    * zombie API call can't leave live subscriptions behind or double-fire `onSelfStop`.
+   * Likewise, if `sessionId` is no longer this connection's live session by the time the call
+   * resolves (its socket died and was replaced, or a migration landed a new session), the result
+   * is ignored: a zero count from a dead session says nothing about the current one, and acting
+   * on it would `stop()` a healthy replacement socket.
+   * @param sessionId - The session to subscribe on.
+   * @param emptyLogMessage - Logged when zero subscriptions result and the connection self-stops.
+   * @param refreshToken - Re-resolve a valid token (see {@link refreshToken}) before subscribing.
+   * @returns Resolves once subscribing (and any zero-count handling) is done.
    */
-  private async subscribeAndHandleEmpty(sessionId: string, emptyLogMessage: string): Promise<void> {
+  private async subscribeAndHandleEmpty(sessionId: string, emptyLogMessage: string, refreshToken = false): Promise<void> {
     if (this.stopped) return;
+    if (refreshToken) {
+      await this.refreshToken();
+      if (this.isStopped() || this.sessionId !== sessionId) return;
+    }
     const data = this.currentData;
-    const count = await subscribeForStreamer(sessionId, data);
+    const outcome = await subscribeForStreamer(sessionId, data);
     if (this.isStopped()) {
-      if (count > 0) await removeSessionSubscriptions(sessionId, data);
+      if (outcome.live > 0) await removeSessionSubscriptions(sessionId, data);
       return;
     }
-    if (count === 0) {
+    if (this.sessionId !== sessionId) {
+      log.info(`[${this.name}] Session ${sessionId} superseded while subscribing — ignoring its result`);
+      return;
+    }
+    this.handleSubscribeOutcome(outcome, emptyLogMessage);
+  }
+
+  /**
+   * Acts on a live session's {@link SubscribeOutcome}: self-stops when nothing is desired or
+   * nothing is live with no transient failures (all auth/scope); otherwise keeps the connection,
+   * resets the reconnect backoff if anything is live, and schedules a retry if any create failed
+   * transiently (or clears the retry counter once a pass has none).
+   * @param outcome - The subscribe pass's result.
+   * @param emptyLogMessage - Logged when the connection self-stops.
+   */
+  private handleSubscribeOutcome(outcome: SubscribeOutcome, emptyLogMessage: string): void {
+    if (shouldSelfStop(outcome)) {
       log.info(`[${this.name}] ${emptyLogMessage}`);
       this.stop();
       this.onSelfStop?.(this.uid);
+      return;
+    }
+    if (outcome.live > 0) this.reconnectAttempts = 0;
+    if (outcome.transientFailures > 0) {
+      this.scheduleSubscribeRetry(outcome.transientFailures);
+    } else {
+      this.subscribeRetry.reset();
+    }
+  }
+
+  /**
+   * Schedules a retry of the subscribe step after a pass with transient create failures, with
+   * exponential backoff ({@link SUBSCRIBE_RETRY_BASE_MS} doubling, capped at
+   * {@link SUBSCRIBE_RETRY_MAX_MS}), giving up after {@link SUBSCRIBE_RETRY_MAX_ATTEMPTS}
+   * consecutive failed passes. The retry targets whatever session is live when it fires (so a
+   * session migration in between carries it over) and is cancelled by stop(), reload(), a fresh
+   * session welcome, or a force-reconnect — each of which subscribes afresh anyway.
+   * @param failures - How many creates failed transiently this pass, for logging.
+   */
+  private scheduleSubscribeRetry(failures: number): void {
+    const delay = this.subscribeRetry.schedule(() => { this.runSubscribeRetry(); });
+    if (delay === null) {
+      log.error(`[${this.name}] ${failures} EventSub subscription(s) still failing after ${this.subscribeRetry.attempts} retries — giving up until the next reload/reconnect`);
+      return;
+    }
+    log.warn(`[${this.name}] ${failures} EventSub subscription(s) failed transiently — retrying in ${delay}ms (attempt ${this.subscribeRetry.attempts})`);
+  }
+
+  /** Runs a scheduled subscribe retry (see {@link scheduleSubscribeRetry}) against the live session. */
+  private runSubscribeRetry(): void {
+    const sessionId = this.sessionId;
+    if (this.isStopped() || !sessionId) return;
+    // Mid-migration, sessionId is still the old session's — hand the retry to the new session's
+    // welcome via the same deferral reload() uses.
+    if (this.isReconnecting) { this.reloadPendingAfterMigration = true; return; }
+    this.reloadChain = this.reloadChain
+      .then(() => this.subscribeAndHandleEmpty(sessionId, 'No subscriptions after retry — disconnecting', true))
+      .catch((err: unknown) => { log.error(`[${this.name}] Subscribe retry error:`, err); });
+  }
+
+  /**
+   * Replaces `currentData.token` with a currently-valid token from the DB (refreshing it if
+   * expired) via {@link fetchValidEventSubToken}. The token handed over at construction/reload can
+   * be hours old by the time a non-migration reconnect re-subscribes, and an expired one would
+   * fail every create with a 401. Skipped if a reload() replaced `currentData` meanwhile (that data
+   * already carries a freshly-resolved token); on a lookup error or a null result (failed refresh)
+   * the existing token is kept.
+   * @returns Resolves once the token has been refreshed (or the attempt logged as failed).
+   */
+  private async refreshToken(): Promise<void> {
+    const data = this.currentData;
+    try {
+      const token = await fetchValidEventSubToken(data.streamerId);
+      // A null token means the refresh failed (transiently during a Twitch outage, or because the
+      // grant was revoked). Keep the existing token either way: swapping in null would read as
+      // "nothing to subscribe" and self-stop, whereas the old token either still works, fails
+      // transiently (and is retried), or 401s and is handled as an auth failure.
+      if (token === null) {
+        log.warn(`[${this.name}] Could not resolve a fresh EventSub token; subscribing with the existing one`);
+        return;
+      }
+      if (this.currentData === data) this.currentData = { ...data, token };
+    } catch (err) {
+      log.error(`[${this.name}] Failed to refresh EventSub token before subscribing:`, err);
     }
   }
 
@@ -238,14 +308,18 @@ export class StreamerConnection {
    * force-reconnect — the same staleness this file already guards against in {@link onClose},
    * {@link onError}, and {@link forceReconnect} itself). Without this guard, a delayed `open`
    * from an old socket would incorrectly clear the *current* socket's connect timer and reset
-   * {@link reconnectAttempts}/the keepalive timer for a connection that may not have opened yet.
+   * the keepalive timer for a connection that may not have opened yet. Deliberately does *not*
+   * reset {@link reconnectAttempts}: a socket that opens but ends up with no live subscriptions
+   * (e.g. a transient Twitch outage failing every create) is closed by Twitch ~10s later, and
+   * resetting here would turn that into a tight reconnect/resubscribe loop. The backoff is reset
+   * once the session is known-good instead — a migration welcome, or a subscribe pass with
+   * something live (see {@link handleSubscribeOutcome}).
    * @param socket - The socket that emitted the event.
    */
   private onOpen(socket: WebSocket): void {
     if (this.ws !== socket) return;
     log.info(`[${this.name}] WebSocket connected`);
     this.clearConnectTimer();
-    this.reconnectAttempts = 0;
     this.resetKeepaliveTimer();
     recordEventSubConnected(this.name, true);
   }
@@ -326,6 +400,8 @@ export class StreamerConnection {
     socket?.close();
     this.clearKeepaliveTimer();
     this.clearConnectTimer();
+    // The next session's welcome subscribes afresh, so a pending retry for this one is moot.
+    this.subscribeRetry.cancel();
     this.ws = null;
     this.sessionId = null;
     if (!this.stopped) {
@@ -345,24 +421,13 @@ export class StreamerConnection {
    */
   private handleMessage(msg: EventSubMessage): void {
     const { message_type, message_id, message_timestamp } = msg.metadata;
-    if (isStale(message_timestamp)) { log.warn(`[${this.name}] Stale message (${message_type}) — ignoring`); return; }
-    if (isDuplicate(message_id)) { log.warn(`[${this.name}] Duplicate message (${message_type}) — ignoring`); return; }
-    this.resetKeepaliveTimer();
-
-    if (message_type === 'session_welcome') {
-      this.onSessionWelcome(msg);
-    } else if (message_type === 'session_reconnect') {
-      const reconnectUrl = msg.payload.session?.reconnect_url;
-      if (reconnectUrl) this.handleSessionReconnect(reconnectUrl);
-    } else if (message_type === 'notification') {
-      const sub = msg.payload.subscription;
-      const event = msg.payload.event;
-      if (sub && event) dispatchNotification(sub.type, event, sub.condition);
-    } else if (message_type === 'revocation') {
-      const sub = msg.payload.subscription;
-      if (sub) handleRevocation(sub);
-    }
-    // session_keepalive: timer already reset above
+    const rejection = rejectionReason(message_id, message_timestamp);
+    if (rejection) { log.warn(`[${this.name}] ${rejection} message (${message_type}) — ignoring`); return; }
+    this.resetKeepaliveTimer(); // also covers session_keepalive, which needs nothing else
+    routeEventSubMessage(msg, {
+      onWelcome: (welcome) => { this.onSessionWelcome(welcome); },
+      onReconnect: (reconnectUrl) => { this.handleSessionReconnect(reconnectUrl); },
+    });
   }
 
   /**
@@ -370,6 +435,11 @@ export class StreamerConnection {
    * subscribes for the current streamer data. On a reconnect (session migration), existing
    * subscriptions carry over automatically — but if a reload() was deferred because it ran
    * while the old session id was still stale, it's applied now against the new session id.
+   * A fresh (non-migration) session re-resolves the token first, since it may have expired, and
+   * cancels any pending subscribe retry (this welcome's own subscribe pass supersedes it); the
+   * retry counter is kept, so repeated fresh sessions that keep failing transiently stay bounded.
+   * A migration welcome resets the reconnect backoff (see {@link onOpen}) and leaves a pending
+   * retry in place to run against the new session.
    */
   private onSessionWelcome(msg: EventSubMessage): void {
     const session = msg.payload.session!;
@@ -378,6 +448,8 @@ export class StreamerConnection {
     this.resetKeepaliveTimer();
     if (this.isReconnecting) {
       this.isReconnecting = false;
+      // Subscriptions carry over on a migration, so the session is known-good.
+      this.reconnectAttempts = 0;
       log.info(`[${this.name}] Reconnected — session ${this.sessionId}`);
       if (this.reloadPendingAfterMigration) {
         this.reloadPendingAfterMigration = false;
@@ -389,8 +461,9 @@ export class StreamerConnection {
       return;
     }
     log.info(`[${this.name}] Session established: ${this.sessionId}`);
+    this.subscribeRetry.cancel();
     this.reloadChain = this.reloadChain
-      .then(() => this.subscribeAndHandleEmpty(session.id, 'No subscriptions — disconnecting'))
+      .then(() => this.subscribeAndHandleEmpty(session.id, 'No subscriptions — disconnecting', true))
       .catch((err: unknown) => { log.error(`[${this.name}] Subscribe error:`, err); });
   }
 
@@ -406,7 +479,13 @@ export class StreamerConnection {
    */
   private handleSessionReconnect(reconnectUrl: string): void {
     const safeUrl = buildReconnectUrl(reconnectUrl);
-    if (!safeUrl) { log.error(`[${this.name}] Invalid reconnect URL — reconnecting`); this.scheduleReconnect(); return; }
+    if (!safeUrl) {
+      log.error(`[${this.name}] Invalid reconnect URL — reconnecting`);
+      // Tear down the current socket like every other reconnect path, rather than leaving it open
+      // (and leaked) alongside the replacement until Twitch eventually closes it.
+      this.forceReconnect(this.ws);
+      return;
+    }
     const oldSocket = this.ws;
     this.isReconnecting = true;
     log.info(`[${this.name}] Session reconnect — connecting to new session`);
@@ -464,33 +543,4 @@ export class StreamerConnection {
       this.forceReconnect(socket);
     }, (this.keepaliveTimeoutSecs + 10) * 1_000);
   }
-}
-
-// TTL-based dedup: messageId → expiry timestamp (shared across all per-streamer connections)
-export const seenMessageIds = new Map<string, number>();
-
-/** Removes all expired entries from the deduplication map. */
-export function purgeExpiredMessageIds(): void {
-  const now = Date.now();
-  for (const [id, expiry] of seenMessageIds) {
-    if (expiry < now) seenMessageIds.delete(id);
-  }
-}
-
-// Purge expired entries on a fixed interval so isDuplicate stays O(1).
-setInterval(purgeExpiredMessageIds, MESSAGE_TTL_MS).unref();
-
-/** Returns true if messageId has been seen within MESSAGE_TTL_MS; records it otherwise. */
-export function isDuplicate(messageId: string): boolean {
-  const now = Date.now();
-  const expiry = seenMessageIds.get(messageId);
-  if (expiry !== undefined && now <= expiry) return true;
-  seenMessageIds.set(messageId, now + MESSAGE_TTL_MS);
-  return false;
-}
-
-/** Returns true if the ISO timestamp is older than MESSAGE_TTL_MS or unparseable. */
-export function isStale(timestamp: string): boolean {
-  const ts = Date.parse(timestamp);
-  return !Number.isFinite(ts) || Date.now() - ts > MESSAGE_TTL_MS;
 }

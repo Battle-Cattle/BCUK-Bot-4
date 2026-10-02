@@ -66,6 +66,7 @@ import { setStreamerLive, clearStreamerLive } from '../../db';
 import { getStreams } from '../twitchApi';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
 import { postAnnouncement } from './twitchMonitorAnnouncements';
+import { withLoginLock } from './twitchMonitorLoginLock';
 import type { DbStreamGroup, DbStreamerFull } from '../../db';
 import type { TwitchStream } from '../twitchApi';
 import type { LiveState } from './twitchMonitorTypes';
@@ -177,6 +178,15 @@ describe('handleLiveStreamerOnStartup', () => {
     await handleLiveStreamerOnStartup(new Map(), makeStreamer({ discord_message_id: 'msg1', discord_channel_id: 'ch1' }), makeStream(), new Set());
     expect(postAnnouncement).not.toHaveBeenCalled();
   });
+
+  it('still tracks the stored message as live when tryEditStartupMessage throws, so later polls edit it instead of reposting', async () => {
+    const channel = { isTextBased: () => true, messages: { fetch: vi.fn().mockRejectedValue(new Error('network')) } };
+    vi.mocked(getDiscordClient).mockReturnValue({ channels: { fetch: vi.fn().mockResolvedValue(channel) } } as any);
+    vi.mocked(isDiscordNotFoundError).mockReturnValue(false);
+    const liveStates = new Map<string, LiveState>();
+    await handleLiveStreamerOnStartup(liveStates, makeStreamer({ id: 42, discord_message_id: 'msg1', discord_channel_id: 'ch1' }), makeStream(), new Set());
+    expect(liveStates.get('42')).toEqual(expect.objectContaining({ messageId: 'msg1', channelId: 'ch1' }));
+  });
 });
 
 // ─── handleOfflineStreamerOnStartup ───────────────────────────────────────────
@@ -276,6 +286,33 @@ describe('performStartupLiveCheck', () => {
 
     rejectFirst(new Error('announce failed'));
     await expect(check).resolves.not.toThrow();
+  });
+
+  it('runs each streamer\'s startup handling inside its login lock, so an immediate check queued meanwhile waits for it', async () => {
+    const stream = makeStream({ user_id: 'u1', user_login: 'alice', type: 'live' });
+    vi.mocked(getStreams).mockResolvedValue([stream]);
+    const streamer = makeStreamer({ twitch_name: 'Alice', discord_message_id: null });
+    const events: string[] = [];
+    let releasePost!: () => void;
+    const postGate = new Promise<void>((resolve) => { releasePost = resolve; });
+    vi.mocked(postAnnouncement).mockImplementation(async () => {
+      events.push('startup:start');
+      await postGate;
+      events.push('startup:end');
+    });
+
+    const check = performStartupLiveCheck(new Map(), new Map([['alice', 'u1']]), [streamer]);
+    for (let i = 0; i < 20 && !events.includes('startup:start'); i++) await Promise.resolve();
+    expect(events).toEqual(['startup:start']);
+
+    // Stands in for triggerImmediateLiveCheck (EventSub stream.online) arriving mid-startup.
+    const immediate = withLoginLock('alice', async () => { events.push('immediate'); });
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(events).toEqual(['startup:start']);
+
+    releasePost();
+    await Promise.all([check, immediate]);
+    expect(events).toEqual(['startup:start', 'startup:end', 'immediate']);
   });
 
   it('refreshes MultiTwitch for each changed group concurrently, isolating one failure from the other', async () => {
