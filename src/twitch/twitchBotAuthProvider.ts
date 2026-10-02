@@ -142,7 +142,8 @@ async function rebuildAfterTransientRefreshFailure(userId: string, connectionId:
  * Body of {@link buildBotAuthProvider}'s `onRefreshFailure` listener: on a transient failure,
  * rebuilds the connection (see {@link rebuildAfterTransientRefreshFailure}); on a confirmed
  * invalid/revoked refresh token, clears the stored token (if this connection still owns it),
- * restarts chat, and alerts the owner. May reject on a DB error — the listener catches it.
+ * restarts chat, and alerts the owner. If clearing the token fails, it skips the restart but still
+ * alerts the owner. May reject on a DB error in the transient path — the listener catches it.
  * @param userId - The Twitch user ID the failure fired for.
  * @param error - The refresh error Twurple reported.
  * @param connectionId - The `connection_id` the provider was built for.
@@ -154,7 +155,17 @@ async function handleRefreshFailure(userId: string, error: Error, connectionId: 
     await rebuildAfterTransientRefreshFailure(userId, connectionId, restart);
     return;
   }
-  const cleared = await clearBotChatTokenIfOwnedBy(connectionId);
+  let cleared: boolean;
+  try {
+    cleared = await clearBotChatTokenIfOwnedBy(connectionId);
+  } catch (clearErr) {
+    // The DB is unreachable, so the revoked token is still stored and chat keeps running on its
+    // last access token until Twitch rejects it. Don't restart (nothing was cleared), but still
+    // tell the owner — they need to reconnect the bot either way.
+    log.error(`Failed to clear ${userId}'s revoked chat token:`, clearErr);
+    void sendOwnerAlert(`🔴 Twitch chat bot's token was revoked/expired and could not refresh (clearing it from the database also failed). Reconnect it at ${BOT_AUTH_CONNECT_URL}`);
+    return;
+  }
   if (!cleared) {
     log.warn(`Not clearing the stored token for ${userId} — a reconnect replaced this connection first.`);
     return;

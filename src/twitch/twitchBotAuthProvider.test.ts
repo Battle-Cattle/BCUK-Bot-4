@@ -143,6 +143,9 @@ describe('buildBotAuthProvider', () => {
 
       await expect(authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', invalidTokenError)).resolves.toBeUndefined();
       expect(restart).not.toHaveBeenCalled();
+      // The owner is still told to reconnect even though the DB couldn't be cleared.
+      expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining(BOT_AUTH_CONNECT_URL));
     });
 
     it('onRefreshFailure resolves (does not reject) when the transient rebuild loop hits a DB error', async () => {
