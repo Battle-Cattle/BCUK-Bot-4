@@ -710,6 +710,28 @@ describe('StreamerConnection lifecycle', () => {
     expect((conn as any).subscribeRetry.attempts).toBe(1);
   });
 
+  it('re-resolves the token for a fresh welcome\'s pass deferred past a migration, instead of subscribing with a stale one', async () => {
+    const conn = new StreamerConnection({ ...makeStreamerData(), token: 'expired-token' });
+    conn.start();
+    // Hold the chain so the fresh welcome's pass is still queued when a migration starts.
+    let release!: () => void;
+    (conn as any).reloadChain = new Promise<void>((resolve) => { release = resolve; });
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-tok-a'));
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-tok-a', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=b' } },
+    }));
+    release();
+    await vi.waitFor(() => expect((conn as any).reloadPendingAfterMigration).toBe(true));
+    expect(subscribeForStreamer).not.toHaveBeenCalled();
+
+    vi.mocked(fetchValidEventSubToken).mockClear();
+    vi.mocked(fetchValidEventSubToken).mockResolvedValueOnce('fresh-token');
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-tok-b'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-tok-b', expect.objectContaining({ token: 'fresh-token' })));
+    expect(fetchValidEventSubToken).toHaveBeenCalledTimes(1);
+  });
+
   it('cancels a pending subscribe retry on stop()', async () => {
     vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(0, 1));
     const conn = new StreamerConnection(makeStreamerData());

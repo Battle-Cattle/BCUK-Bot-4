@@ -180,14 +180,17 @@ export class StreamerConnection {
   /**
    * Queues a subscribe pass on {@link reloadChain} (see {@link subscribeAndHandleEmpty}), recording
    * the current {@link freshSessionGeneration} so the pass can tell, when it runs, whether its
-   * session was replaced by a migration or by a fresh connection.
+   * session was replaced by a migration or by a fresh connection. Every queued pass re-resolves the
+   * token first ({@link refreshToken}): a queued pass can run long after `currentData` was last
+   * loaded (a fresh welcome's pass deferred past a migration, a retry, a carried-over pass), and an
+   * expired token fails the listing and every create with a 401, which reads as "all auth failures"
+   * and self-stops the connection. Only {@link doReload}, which runs with freshly loaded data, skips it.
    * @param sessionId - The session to subscribe on.
    * @param emptyLogMessage - Logged when zero subscriptions result and the connection self-stops.
    * @param errorLabel - Prefix for the error logged if the pass throws.
-   * @param refreshToken - Re-resolve a valid token before subscribing.
    */
-  private queueSubscribePass(sessionId: string, emptyLogMessage: string, errorLabel: string, refreshToken = false): void {
-    const pass: SubscribePass = { sessionId, emptyLogMessage, refreshToken, generation: this.freshSessionGeneration };
+  private queueSubscribePass(sessionId: string, emptyLogMessage: string, errorLabel: string): void {
+    const pass: SubscribePass = { sessionId, emptyLogMessage, refreshToken: true, generation: this.freshSessionGeneration };
     this.reloadChain = this.reloadChain
       .then(() => this.subscribeAndHandleEmpty(pass))
       .catch((err: unknown) => { log.error(`[${this.name}] ${errorLabel}:`, err); });
@@ -321,7 +324,7 @@ export class StreamerConnection {
     // Mid-migration, sessionId is still the old session's — hand the retry to the new session's
     // welcome via the same deferral reload() uses.
     if (this.isReconnecting) { this.reloadPendingAfterMigration = true; return; }
-    this.queueSubscribePass(sessionId, 'No subscriptions after retry — disconnecting', 'Subscribe retry error', true);
+    this.queueSubscribePass(sessionId, 'No subscriptions after retry — disconnecting', 'Subscribe retry error');
   }
 
   /**
@@ -539,7 +542,7 @@ export class StreamerConnection {
     log.info(`[${this.name}] Session established: ${this.sessionId}`);
     this.freshSessionGeneration++;
     this.subscribeRetry.reset();
-    this.queueSubscribePass(session.id, 'No subscriptions — disconnecting', 'Subscribe error', true);
+    this.queueSubscribePass(session.id, 'No subscriptions — disconnecting', 'Subscribe error');
   }
 
   /**
