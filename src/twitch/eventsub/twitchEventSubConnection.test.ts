@@ -728,6 +728,92 @@ describe('StreamerConnection lifecycle', () => {
     expect((conn as any).subscribeRetry.pending).toBe(false);
   });
 
+  it('re-runs a fired subscribe retry on the migrated session when a migration lands while it awaits the token', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValueOnce(outcome(1, 1)).mockResolvedValue(outcome(2));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-mig-a'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    // The retry fires and blocks on its token refresh.
+    let resolveToken!: (token: string) => void;
+    vi.mocked(fetchValidEventSubToken).mockReturnValueOnce(new Promise((resolve) => { resolveToken = resolve; }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(fetchValidEventSubToken).toHaveBeenCalledTimes(2));
+    vi.mocked(subscribeForStreamer).mockClear();
+
+    // A full session migration completes meanwhile.
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-mig-a', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=b' } },
+    }));
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-mig-b'));
+    resolveToken('token-abc');
+
+    // The overtaken retry is carried over to the migrated session instead of being dropped.
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-mig-b', expect.anything()));
+    expect(subscribeForStreamer).not.toHaveBeenCalledWith('sess-mig-a', expect.anything());
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.attempts).toBe(0));
+  });
+
+  it('logs (and does not throw) when a subscribe pass re-run on a migrated session fails', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValueOnce(outcome(1, 1));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-rerr-a'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    let resolveToken!: (token: string) => void;
+    vi.mocked(fetchValidEventSubToken).mockReturnValueOnce(new Promise((resolve) => { resolveToken = resolve; }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(fetchValidEventSubToken).toHaveBeenCalledTimes(2));
+
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-rerr-a', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=b' } },
+    }));
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-rerr-b'));
+    vi.mocked(subscribeForStreamer).mockRejectedValueOnce(new Error('helix down'));
+    resolveToken('token-abc');
+
+    await vi.waitFor(() => expect(mockLog.error).toHaveBeenCalledWith(
+      expect.stringContaining('Migrated subscribe pass error'), expect.any(Error),
+    ));
+    expect((conn as any).ws).not.toBeNull();
+  });
+
+  it('defers a subscribe pass overtaken mid-flight by a migration still in progress to that migration\'s welcome', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValueOnce(outcome(1, 1));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-def-a'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    // The retry fires and blocks inside subscribeForStreamer.
+    let resolveSubscribe!: (value: ReturnType<typeof outcome>) => void;
+    vi.mocked(subscribeForStreamer).mockReturnValueOnce(new Promise((resolve) => { resolveSubscribe = resolve; }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(2));
+
+    // Migration to B completes, then a second migration (to C) starts before the pass resolves.
+    const reconnectTo = (from: string, to: string) => makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: from, keepalive_timeout_seconds: 10, reconnect_url: `wss://eventsub.wss.twitch.tv/ws?session_id=${to}` } },
+    });
+    (conn as any).handleMessage(reconnectTo('sess-def-a', 'b'));
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-def-b'));
+    (conn as any).handleMessage(reconnectTo('sess-def-b', 'c'));
+    vi.mocked(subscribeForStreamer).mockClear();
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(2));
+    resolveSubscribe(outcome(1, 1));
+    await vi.waitFor(() => expect((conn as any).reloadPendingAfterMigration).toBe(true));
+    expect(subscribeForStreamer).not.toHaveBeenCalled();
+
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-def-c'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-def-c', expect.anything()));
+    expect((conn as any).reloadPendingAfterMigration).toBe(false);
+  });
+
   it('still self-stops when every failure was an auth/scope failure (nothing transient to retry)', async () => {
     vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(0, 0, 3));
     const conn = new StreamerConnection(makeStreamerData());

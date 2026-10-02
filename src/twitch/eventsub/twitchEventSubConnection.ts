@@ -56,6 +56,10 @@ export class StreamerConnection {
   // still the OLD session's id (the new session's welcome hasn't arrived yet), so subscribing
   // now would hit a doomed session. Consumed once onSessionWelcome() lands the new session id.
   private reloadPendingAfterMigration = false;
+  // Bumped whenever the session is replaced other than by a migration (stop, force-reconnect, a
+  // fresh welcome). A subscribe pass overtaken while this is unchanged was overtaken only by
+  // migrations, so nothing else will re-subscribe for it — see carryPassOverMigration.
+  private freshSessionGeneration = 0;
   private stopped = false;
 
   /**
@@ -97,6 +101,7 @@ export class StreamerConnection {
     this.isReconnecting = false;
     this.reloadPendingAfterMigration = false;
     this.sessionId = null;
+    this.freshSessionGeneration++;
     this.clearKeepaliveTimer();
     this.clearConnectTimer();
     this.subscribeRetry.reset();
@@ -172,7 +177,8 @@ export class StreamerConnection {
    * Likewise, if `sessionId` is no longer this connection's live session by the time the call
    * resolves (its socket died and was replaced, or a migration landed a new session), the result
    * is ignored: a zero count from a dead session says nothing about the current one, and acting
-   * on it would `stop()` a healthy replacement socket.
+   * on it would `stop()` a healthy replacement socket. If only migrations replaced it, the pass is
+   * re-run on the migrated session instead of being dropped (see {@link carryPassOverMigration}).
    * @param sessionId - The session to subscribe on.
    * @param emptyLogMessage - Logged when zero subscriptions result and the connection self-stops.
    * @param refreshToken - Re-resolve a valid token (see {@link refreshToken}) before subscribing.
@@ -180,9 +186,10 @@ export class StreamerConnection {
    */
   private async subscribeAndHandleEmpty(sessionId: string, emptyLogMessage: string, refreshToken = false): Promise<void> {
     if (this.stopped) return;
+    const generation = this.freshSessionGeneration;
     if (refreshToken) {
       await this.refreshToken();
-      if (this.isStopped() || this.sessionId !== sessionId) return;
+      if (this.passOvertaken(sessionId, generation, emptyLogMessage)) return;
     }
     const data = this.currentData;
     const outcome = await subscribeForStreamer(sessionId, data);
@@ -190,11 +197,46 @@ export class StreamerConnection {
       if (outcome.live > 0) await removeSessionSubscriptions(sessionId, data);
       return;
     }
-    if (this.sessionId !== sessionId) {
-      log.info(`[${this.name}] Session ${sessionId} superseded while subscribing — ignoring its result`);
-      return;
-    }
+    if (this.passOvertaken(sessionId, generation, emptyLogMessage)) return;
     this.handleSubscribeOutcome(outcome, emptyLogMessage);
+  }
+
+  /**
+   * Checks, after an await in a subscribe pass, whether the pass should stop: the connection was
+   * stopped, or `sessionId` is no longer the live session (then {@link carryPassOverMigration}
+   * decides whether to re-run it).
+   * @param sessionId - The session the pass is running against.
+   * @param generation - {@link freshSessionGeneration} when the pass started.
+   * @param emptyLogMessage - Passed through to a re-run pass.
+   * @returns True if the pass should stop here.
+   */
+  private passOvertaken(sessionId: string, generation: number, emptyLogMessage: string): boolean {
+    if (this.isStopped()) return true;
+    if (this.sessionId === sessionId) return false;
+    this.carryPassOverMigration(sessionId, generation, emptyLogMessage);
+    return true;
+  }
+
+  /**
+   * Handles a subscribe pass whose session was replaced while it awaited (its result is ignored).
+   * If only session migrations happened meanwhile (`generation` unchanged), nothing else will
+   * subscribe for this pass — a migration welcome doesn't, and a retry timer that already fired is
+   * spent — so the pass is re-run on the live session, or deferred to the next migration welcome if
+   * another migration is in flight. If the session was replaced any other way (stop, force-reconnect,
+   * a fresh welcome), that path subscribes afresh itself, so nothing is re-run.
+   * @param sessionId - The superseded session the pass ran against, for logging.
+   * @param generation - {@link freshSessionGeneration} when the pass started.
+   * @param emptyLogMessage - Passed through to the re-run pass.
+   */
+  private carryPassOverMigration(sessionId: string, generation: number, emptyLogMessage: string): void {
+    log.info(`[${this.name}] Session ${sessionId} superseded while subscribing — ignoring its result`);
+    if (generation !== this.freshSessionGeneration) return;
+    const liveSessionId = this.sessionId;
+    if (this.isReconnecting || !liveSessionId) { this.reloadPendingAfterMigration = true; return; }
+    log.info(`[${this.name}] Re-running the subscribe pass on migrated session ${liveSessionId}`);
+    this.reloadChain = this.reloadChain
+      .then(() => this.subscribeAndHandleEmpty(liveSessionId, emptyLogMessage))
+      .catch((err: unknown) => { log.error(`[${this.name}] Migrated subscribe pass error:`, err); });
   }
 
   /**
@@ -404,6 +446,7 @@ export class StreamerConnection {
     this.subscribeRetry.cancel();
     this.ws = null;
     this.sessionId = null;
+    this.freshSessionGeneration++;
     if (!this.stopped) {
       // If this socket died mid-migration before its welcome landed, drop any reload that
       // was deferred for it — the eventual reconnect's own session_welcome will subscribe
@@ -461,6 +504,7 @@ export class StreamerConnection {
       return;
     }
     log.info(`[${this.name}] Session established: ${this.sessionId}`);
+    this.freshSessionGeneration++;
     this.subscribeRetry.cancel();
     this.reloadChain = this.reloadChain
       .then(() => this.subscribeAndHandleEmpty(session.id, 'No subscriptions — disconnecting', true))
