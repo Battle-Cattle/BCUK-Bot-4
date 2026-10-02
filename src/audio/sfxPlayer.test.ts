@@ -78,6 +78,17 @@ describe('playFile', () => {
     expect(vi.mocked(startPlayback)).toHaveBeenCalledWith(expect.anything(), 'guild-A');
   });
 
+  it('throws VoiceNotConnectedError without starting playback if the guild disconnects while the file is being resolved', async () => {
+    vi.mocked(isConnected).mockReturnValueOnce(true).mockReturnValue(false);
+    vi.mocked(fs.promises.stat).mockResolvedValue({ isFile: () => true } as Awaited<ReturnType<typeof fs.promises.stat>>);
+
+    await expect(playFile(path.posix.join(SFX_ROOT, 'ding.mp3'), 'guild-A')).rejects.toThrow(VoiceNotConnectedError);
+
+    expect(vi.mocked(isConnected)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(createAudioResource)).not.toHaveBeenCalled();
+    expect(vi.mocked(startPlayback)).not.toHaveBeenCalled();
+  });
+
   it('throws when the sound file does not exist on disk', async () => {
     vi.mocked(isConnected).mockReturnValue(true);
     vi.mocked(fs.promises.realpath).mockRejectedValue(enoent());

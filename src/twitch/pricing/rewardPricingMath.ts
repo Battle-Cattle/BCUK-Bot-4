@@ -11,6 +11,9 @@ export interface RewardPricingConfig {
 /** Smallest `curve` value {@link computePrice} will actually use — see there for why. */
 const MIN_CURVE = 0.01;
 
+/** Tolerance for float error when snapping {@link computePrice}'s bounds to whole numbers. */
+const FLOAT_EPSILON = 1e-9;
+
 /**
  * Computes the current redemption price from demand and a reward's pricing config.
  * price = round(baseCost * (1 + clamp(demand,0,1)^curve * maxMultiplier)), then, if
@@ -28,7 +31,8 @@ const MIN_CURVE = 0.01;
  *
  * @param demand - Current demand value; clamped to [0,1] before use.
  * @param config - The reward's pricing configuration.
- * @returns The price, always bounded to [baseCost, baseCost*(1+maxMultiplier)].
+ * @returns The integer price, bounded to [baseCost, baseCost*(1+maxMultiplier)] — with rounding
+ *   enabled, to the whole numbers inside that range (ceil of the min, floor of the max).
  */
 export function computePrice(demand: number, config: RewardPricingConfig): number {
   const usage = Math.min(1, Math.max(0, demand));
@@ -36,9 +40,13 @@ export function computePrice(demand: number, config: RewardPricingConfig): numbe
   const curved = Math.pow(usage, curve);
   const raw = config.baseCost * (1 + curved * config.maxMultiplier);
   if (config.roundToNearest && config.roundToNearest > 0) {
-    const max = config.baseCost * (1 + config.maxMultiplier);
+    // Integer bounds: Twitch only accepts whole-number costs, and the raw max can be fractional
+    // (e.g. 101 * 1.55 = 156.55), so clamping to it directly could return a non-integer price.
+    // The epsilon absorbs float error so e.g. 100 * 1.15 = 114.99999999999999 floors to 115, not 114.
+    const min = Math.ceil(config.baseCost - FLOAT_EPSILON);
+    const max = Math.max(min, Math.floor(config.baseCost * (1 + config.maxMultiplier) + FLOAT_EPSILON));
     const rounded = Math.round(raw / config.roundToNearest) * config.roundToNearest;
-    return Math.max(config.baseCost, Math.min(max, rounded));
+    return Math.max(min, Math.min(max, rounded));
   }
   return Math.round(raw);
 }

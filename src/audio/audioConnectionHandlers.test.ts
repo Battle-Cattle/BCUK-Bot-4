@@ -285,4 +285,26 @@ describe('cleanupFailedConnect', () => {
     expect(previous.destroy).toHaveBeenCalled();
     expect(deps.tearDown).toHaveBeenCalled();
   });
+
+  it('skips destroy on an already-destroyed nextConnection and still clears state', () => {
+    const next = makeConnection('destroyed');
+    next.destroy.mockImplementation(() => { throw new Error('already destroyed'); });
+    const deps = makeDeps({ getConnection: vi.fn(() => next as any) });
+    expect(() => cleanupFailedConnect(null, next as any, deps)).not.toThrow();
+    expect(next.destroy).not.toHaveBeenCalled();
+    expect(deps.setConnection).toHaveBeenCalledWith(null);
+    expect(deps.tearDown).toHaveBeenCalled();
+  });
+
+  it('skips destroy on an already-destroyed previousConnection and still clears state', () => {
+    const previous = makeConnection('destroyed');
+    previous.destroy.mockImplementation(() => { throw new Error('already destroyed'); });
+    const next = makeConnection();
+    const deps = makeDeps({ getConnection: vi.fn(() => previous as any) });
+    expect(() => cleanupFailedConnect(previous as any, next as any, deps)).not.toThrow();
+    expect(next.destroy).toHaveBeenCalled();
+    expect(previous.destroy).not.toHaveBeenCalled();
+    expect(deps.setConnection).toHaveBeenCalledWith(null);
+    expect(deps.tearDown).toHaveBeenCalled();
+  });
 });

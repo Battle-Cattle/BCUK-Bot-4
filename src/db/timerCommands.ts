@@ -361,7 +361,9 @@ export async function discardOwnNewTimerCommand(id: number, discordId: string): 
  * Lists every enabled timer command joined with each of its assigned users' linked Twitch
  * channel, for the scheduler's per-tick read. A timer assigned to several streamers appears
  * once per assigned channel, each firing independently — assignees with no linked Twitch name,
- * or one that fails to normalize, are excluded, since there's no channel to post to. The channel
+ * or one that fails to normalize, are excluded, since there's no channel to post to; so are
+ * assignees whose Twitch bot is turned off (`is_twitch_bot_enabled = 0`), since the bot isn't in
+ * (or shouldn't be posting to) that channel — matching the custom-command lookup. The channel
  * is normalized here (matching `getTwitchEnabledChannels`/`getAllTwitchLinkedUsers`) rather than
  * trusting `user.twitch_name` as stored: the scheduler uses this same string as the lookup key
  * into `twitchChatActivity`'s per-channel message counts, which are always recorded under the
@@ -376,6 +378,7 @@ export async function getAllEnabledTimerCommandsWithChannel(): Promise<TimerComm
      JOIN timer_command_streamer tcs ON tcs.timer_id = tc.id
      JOIN \`user\` u ON u.discord_id = tcs.discord_id
      WHERE tc.enabled = 1 AND u.twitch_name IS NOT NULL AND u.twitch_name <> ''
+       AND u.is_twitch_bot_enabled = 1
      ORDER BY tc.id, u.discord_id`,
   );
   return rows

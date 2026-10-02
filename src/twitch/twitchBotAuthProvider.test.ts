@@ -121,6 +121,40 @@ describe('buildBotAuthProvider', () => {
     });
   });
 
+  describe('listener error containment (Twurple drops the listener promise, so a rejection would be unhandled)', () => {
+    const invalidTokenError = Object.assign(new Error('Encountered HTTP status code 401'), {
+      statusCode: 401,
+      body: JSON.stringify({ status: 401, message: 'Invalid refresh token' }),
+    });
+
+    it('onRefresh resolves (does not reject) when saving the refreshed token fails', async () => {
+      vi.mocked(saveBotChatTokenIfOwnedBy).mockRejectedValue(new Error('db down'));
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, vi.fn());
+
+      await expect(authProviderHandlers.refreshHandlers[0]!('bot-uid', {
+        accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600, obtainmentTimestamp: Date.now(),
+      })).resolves.toBeUndefined();
+    });
+
+    it('onRefreshFailure resolves (does not reject) when clearing a revoked token fails', async () => {
+      vi.mocked(clearBotChatTokenIfOwnedBy).mockRejectedValue(new Error('db down'));
+      const restart = vi.fn();
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
+
+      await expect(authProviderHandlers.refreshFailureHandlers[0]!('bot-uid', invalidTokenError)).resolves.toBeUndefined();
+      expect(restart).not.toHaveBeenCalled();
+    });
+
+    it('onRefreshFailure resolves (does not reject) when the transient rebuild loop hits a DB error', async () => {
+      vi.mocked(getBotChatToken).mockRejectedValue(new Error('db down'));
+      const restart = vi.fn();
+      buildBotAuthProvider(STORED_BOT_TOKEN as any, restart);
+
+      await expect(runRefreshFailureHandler('bot-uid', new Error('network blip'))).resolves.toBeUndefined();
+      expect(restart).not.toHaveBeenCalled();
+    });
+  });
+
   describe('onRefreshFailure — confirmed invalid/revoked refresh token', () => {
     const invalidTokenError = Object.assign(new Error('Encountered HTTP status code 401'), {
       statusCode: 401,

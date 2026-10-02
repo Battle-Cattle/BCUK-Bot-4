@@ -24,18 +24,23 @@ let runGeneration = 0;
 /**
  * Polls once for the yearly counter archive and reschedules itself hourly while its run is
  * still active, recording the outcome (archive attempted or skipped) into `healthStore`.
+ *
+ * Attempts the previous year's archive on every tick, not just on 1 January, so a bot that was
+ * down for the whole of 1 January still catches up once it's back. Idempotency comes from the
+ * persistent `counter_archive_run` marker that `archiveAndResetYearlyCounters` claims inside its
+ * transaction (it returns 0 when the year was already archived); `lastArchivedYear` is only an
+ * in-memory short-circuit to skip that DB round trip once this process has seen it succeed.
  * @param myGeneration - This run's generation number (see {@link runGeneration}), used to detect
  *   a stale reschedule from an earlier, since-stopped run.
  * @returns Resolves once this tick (and its reschedule, if still the active run) completes.
  */
 async function tick(myGeneration: number): Promise<void> {
-  const now = new Date();
-  const prevYear = now.getFullYear() - 1;
+  const prevYear = new Date().getFullYear() - 1;
 
-  if (now.getMonth() === 0 && now.getDate() === 1 && lastArchivedYear !== prevYear) {
+  if (lastArchivedYear !== prevYear) {
     try {
       const count = await archiveAndResetYearlyCounters(prevYear);
-      log.info(`Archived and reset ${count} counter(s) for year ${prevYear}.`);
+      if (count > 0) log.info(`Archived and reset ${count} counter(s) for year ${prevYear}.`);
       lastArchivedYear = prevYear;
       recordSchedulerRun('counter', true);
     } catch (err) {
@@ -70,7 +75,7 @@ export function startCounterScheduler(): void {
   runGeneration += 1;
   tick(runGeneration).catch((err: unknown) => log.error('Startup error:', err));
   const hoursUntil = Math.round(msUntilNextJan1() / 3_600_000);
-  log.info(`Started — polling hourly, next yearly archive in ~${hoursUntil}h.`);
+  log.info(`Started — polling hourly (catching up any missed yearly archive), next year boundary in ~${hoursUntil}h.`);
 }
 
 /** Stops the hourly counter-archive poll, cancelling any pending timer. */

@@ -172,11 +172,16 @@ export async function saveAlertConfig(
  * {@link setAlertImage} and {@link setAlertSound}, which differ only in which fixed, trusted
  * column name they target — never derived from user input.
  *
- * Locks the row with `SELECT … FOR UPDATE` before the snapshot (mirroring `deleteSfxFile`'s
- * rationale in `db/sfx.ts`), so two concurrent uploads/deletes for the same streamer/eventType
- * can't both read the same "previous" filename — which would otherwise let one request's newly
- * uploaded file be silently orphaned on disk (never recorded as "previous" by the other, and so
- * never cleaned up by either).
+ * First ensures the row exists with an `INSERT … AS new_row ON DUPLICATE KEY UPDATE` no-op
+ * upsert, then locks it with `SELECT … FOR UPDATE` before the snapshot (mirroring
+ * `deleteSfxFile`'s rationale in `db/sfx.ts`), so two concurrent uploads/deletes for the same
+ * streamer/eventType can't both read the same "previous" filename — which would otherwise let one
+ * request's newly uploaded file be silently orphaned on disk. Upserting first (rather than
+ * `SELECT … FOR UPDATE` then a plain `INSERT` when no row exists) matters for the very first
+ * upload: a locking read of a missing row only takes a gap lock, so two concurrent first uploads
+ * (e.g. image + sound) would both reach the `INSERT` and one would fail with a deadlock or
+ * duplicate key. The upsert instead serialises them on the unique key's record lock, and a newly
+ * created row has a NULL asset column, so the "previous" snapshot is still correct.
  * @param column The asset column to update (`image_filename` or `sound_filename`).
  * @param streamerId DB row ID of the streamer.
  * @param eventType The alert event type being configured.
@@ -191,18 +196,17 @@ async function setAlertAssetColumn(
   filename: string | null,
 ): Promise<string | null> {
   const previous = await withTransaction(async (conn) => {
+    // No-op on duplicate: only guarantees the row exists (and is X-locked) before the snapshot.
+    await conn.execute(
+      `INSERT INTO alert_config (streamer_id, event_type, enabled, message_template)
+       VALUES (?, ?, 0, ?) AS new_row
+       ON DUPLICATE KEY UPDATE streamer_id = alert_config.streamer_id`,
+      [streamerId, eventType, DEFAULT_MESSAGE_TEMPLATES[eventType]],
+    );
     const [rows] = await conn.execute<mysql.RowDataPacket[]>(
       `SELECT ${column} FROM alert_config WHERE streamer_id = ? AND event_type = ? FOR UPDATE`,
       [streamerId, eventType],
     );
-    if (rows.length === 0) {
-      await conn.execute(
-        `INSERT INTO alert_config (streamer_id, event_type, enabled, message_template, ${column})
-         VALUES (?, ?, 0, ?, ?)`,
-        [streamerId, eventType, DEFAULT_MESSAGE_TEMPLATES[eventType], filename],
-      );
-      return null;
-    }
     const previous: string | null = rows[0]?.[column] ?? null;
     await conn.execute(
       `UPDATE alert_config SET ${column} = ? WHERE streamer_id = ? AND event_type = ?`,

@@ -7,14 +7,15 @@ export interface MockConnection {
   commit: Mock;
   rollback: Mock;
   release: Mock;
+  destroy: Mock;
 }
 
 /**
  * Builds a fake mysql2 `PoolConnection`. `execute` resolves to `[[], []]` by
  * default — override it (or pass `overrides.execute`) with
  * `mockResolvedValue`/`mockResolvedValueOnce` for specific row/result data.
- * `beginTransaction`/`commit`/`rollback` resolve to `undefined`; `release` is a
- * plain spy. Pass `overrides` to replace any field wholesale.
+ * `beginTransaction`/`commit`/`rollback` resolve to `undefined`; `release` and
+ * `destroy` are plain spies. Pass `overrides` to replace any field wholesale.
  */
 export function makeMockConnection(overrides: Partial<MockConnection> = {}): MockConnection {
   return {
@@ -23,6 +24,7 @@ export function makeMockConnection(overrides: Partial<MockConnection> = {}): Moc
     commit: vi.fn().mockResolvedValue(undefined),
     rollback: vi.fn().mockResolvedValue(undefined),
     release: vi.fn(),
+    destroy: vi.fn(),
     ...overrides,
   };
 }

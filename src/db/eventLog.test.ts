@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
 
 vi.mock('./pool', () => ({ getPool: vi.fn() }));
 vi.mock('mysql2/promise', () => ({ default: {} }));
+vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
 import { getPool } from './pool';
 import { recordStreamerEvent, getRecentStreamerEvents, __resetEventLogPruneCountersForTests } from './eventLog';
@@ -69,7 +71,9 @@ describe('recordStreamerEvent', () => {
       .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, []]) // INSERT
       .mockRejectedValueOnce(new Error('DB down')); // DELETE
 
-    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).rejects.toThrow('DB down');
+    // The INSERT already committed, so the failed prune is logged rather than surfaced — the
+    // caller still gets the new row's id and pushes the live event.
+    await expect(recordStreamerEvent(5, 'follow', 'someviewer', null)).resolves.toBe(1);
     pool.execute.mockClear();
     pool.execute.mockResolvedValue([{ insertId: 1, affectedRows: 1 }, []]);
 

@@ -59,6 +59,20 @@ function pruneStaleTimerState(currentKeys: ReadonlySet<string>): void {
 }
 
 /**
+ * Rebases a row's message-count baseline if the channel's running count has gone backwards. The
+ * count is reset to 0 when the bot parts a channel (`forgetChannelChatActivity`), but this row's
+ * state can outlive that part, leaving `messagesAtLastFire` far above the fresh count — without a
+ * rebase, `count - messagesAtLastFire` would stay negative and a `min_messages` timer would stay
+ * silent until chat re-crossed the old total. Treats the reset as the new baseline instead.
+ * @param channel - The row's Twitch channel.
+ * @param state - The row's in-memory firing state; mutated in place.
+ */
+function rebaseIfMessageCountReset(channel: string, state: TimerRuntimeState): void {
+  const count = getMessageCount(channel);
+  if (count < state.messagesAtLastFire) state.messagesAtLastFire = count;
+}
+
+/**
  * Resolves each of `channels`' current Twitch Shared Chat session id, in parallel, deduplicating
  * by underlying Twitch user id so a channel is only looked up once regardless of how many rows
  * reference it. A channel with no known user id, or whose session lookup fails/returns null, maps
@@ -140,6 +154,7 @@ export async function runTimerCommandTick(): Promise<void> {
           timerState.set(key, { lastFiredAt: now, messagesAtLastFire: getMessageCount(row.channel) });
           continue;
         }
+        rebaseIfMessageCountReset(row.channel, state);
         if (shouldFire(row, state, now)) eligibleRows.push(row);
       }
 

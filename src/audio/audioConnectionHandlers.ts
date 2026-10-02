@@ -106,8 +106,20 @@ export function releasePreviousConnection(
 }
 
 /**
+ * Destroys `connection` unless it is already in `Destroyed` status — `VoiceConnection.destroy()`
+ * throws on an already-destroyed connection (e.g. one a concurrent disconnect handler tore down).
+ *
+ * @param connection - The connection to destroy, or null (no-op).
+ */
+function destroyIfAlive(connection: VoiceConnection | null): void {
+  if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
+}
+
+/**
  * Tears down connections after a failed connect attempt, restoring the state
- * machine so a reconnect can be scheduled.
+ * machine so a reconnect can be scheduled. Skips `destroy()` on any connection
+ * already destroyed, so that throw can't mask the original connect error or skip
+ * the rest of the cleanup.
  *
  * @param previousConnection - The connection held before the failed attempt, or null.
  * @param nextConnection - The partially-created connection that failed, or null.
@@ -118,7 +130,7 @@ export function cleanupFailedConnect(
   nextConnection: VoiceConnection | null,
   deps: ConnectionHandlerDeps,
 ): void {
-  nextConnection?.destroy();
+  destroyIfAlive(nextConnection);
   const current = deps.getConnection();
   if (nextConnection && current === nextConnection) {
     // Promotion already occurred before the failure; nextConnection is now destroyed so
@@ -127,7 +139,7 @@ export function cleanupFailedConnect(
     deps.tearDown();
   } else if (previousConnection && current === previousConnection) {
     // Failed before promoting; previousConnection was never released.
-    previousConnection.destroy();
+    destroyIfAlive(previousConnection);
     deps.setConnection(null);
     deps.tearDown();
   }
