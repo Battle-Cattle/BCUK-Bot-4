@@ -1,5 +1,5 @@
-import mysql from 'mysql2/promise';
-import { getPool, withTransactionOrNotFound } from './pool';
+import mysql, { type PoolConnection } from 'mysql2/promise';
+import { getPool, withTransaction, withTransactionOrNotFound } from './pool';
 import { getOrCreate } from '../shared/mapUtils';
 
 export interface OverlayVideo {
@@ -164,6 +164,42 @@ export async function upsertReward(streamerId: number, twitchRewardId: string): 
 }
 
 /**
+ * Replaces the set of videos assigned to an already-verified reward, on the caller's
+ * transaction connection. Throws if any video in `videos` doesn't belong to `streamerId`, so the
+ * caller's transaction rolls back the whole replacement.
+ * @param conn Connection with an open transaction.
+ * @param rewardId Primary key of the `overlay_reward` row (ownership already checked).
+ * @param streamerId DB row ID of the owning streamer.
+ * @param videos The videos (and their weights) to assign to the reward.
+ */
+async function replaceRewardVideosOnConn(
+  conn: PoolConnection,
+  rewardId: number,
+  streamerId: number,
+  videos: Array<{ videoId: number; weight: number }>,
+): Promise<void> {
+  await conn.execute(`DELETE FROM overlay_reward_video WHERE reward_id = ?`, [rewardId]);
+  if (videos.length === 0) return;
+
+  const [ownedRows] = await conn.execute<mysql.RowDataPacket[]>(
+    `SELECT id FROM overlay_video WHERE streamer_id = ? AND id IN (${videos.map(() => '?').join(', ')})`,
+    [streamerId, ...videos.map((v) => v.videoId)],
+  );
+  const ownedIds = new Set<number>(ownedRows.map((r) => r.id));
+  const invalid = videos.find((v) => !ownedIds.has(v.videoId));
+  if (invalid) {
+    throw new Error(`Video ${invalid.videoId} does not belong to streamer ${streamerId}`);
+  }
+
+  const placeholders = videos.map(() => '(?, ?, ?)').join(', ');
+  const params = videos.flatMap((v) => [rewardId, v.videoId, Math.max(1, v.weight)]);
+  await conn.execute(
+    `INSERT INTO overlay_reward_video (reward_id, video_id, weight) VALUES ${placeholders}`,
+    params,
+  );
+}
+
+/**
  * Replaces the set of videos assigned to a reward with `videos`, scoped to the owning streamer.
  * A no-op if `rewardId` doesn't belong to `streamerId`. Throws if any video in `videos` doesn't
  * belong to `streamerId`, rolling back the whole replacement.
@@ -185,25 +221,34 @@ export async function setRewardVideos(
     if (check.length === 0) {
       notFound();
     }
-    await conn.execute(`DELETE FROM overlay_reward_video WHERE reward_id = ?`, [rewardId]);
-    if (videos.length === 0) return;
+    await replaceRewardVideosOnConn(conn, rewardId, streamerId, videos);
+  });
+}
 
-    const [ownedRows] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT id FROM overlay_video WHERE streamer_id = ? AND id IN (${videos.map(() => '?').join(', ')})`,
-      [streamerId, ...videos.map((v) => v.videoId)],
+/**
+ * Creates (or reuses) a streamer's overlay reward for `twitchRewardId` and replaces its assigned
+ * videos, atomically in one transaction — so if the video replacement fails (e.g. a tampered
+ * video id the streamer doesn't own), a freshly inserted `overlay_reward` row is rolled back
+ * rather than left behind with no videos.
+ * @param streamerId DB row ID of the owning streamer.
+ * @param twitchRewardId Twitch channel-point reward id.
+ * @param videos The videos (and their weights) to assign to the reward.
+ * @returns The reward row's primary key.
+ */
+export async function saveRewardWithVideos(
+  streamerId: number,
+  twitchRewardId: string,
+  videos: Array<{ videoId: number; weight: number }>,
+): Promise<number> {
+  return withTransaction(async (conn) => {
+    const [result] = await conn.execute<mysql.ResultSetHeader>(
+      `INSERT INTO overlay_reward (streamer_id, twitch_reward_id) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)`,
+      [streamerId, twitchRewardId],
     );
-    const ownedIds = new Set<number>(ownedRows.map((r) => r.id));
-    const invalid = videos.find((v) => !ownedIds.has(v.videoId));
-    if (invalid) {
-      throw new Error(`Video ${invalid.videoId} does not belong to streamer ${streamerId}`);
-    }
-
-    const placeholders = videos.map(() => '(?, ?, ?)').join(', ');
-    const params = videos.flatMap((v) => [rewardId, v.videoId, Math.max(1, v.weight)]);
-    await conn.execute(
-      `INSERT INTO overlay_reward_video (reward_id, video_id, weight) VALUES ${placeholders}`,
-      params,
-    );
+    const rewardId = result.insertId;
+    await replaceRewardVideosOnConn(conn, rewardId, streamerId, videos);
+    return rewardId;
   });
 }
 

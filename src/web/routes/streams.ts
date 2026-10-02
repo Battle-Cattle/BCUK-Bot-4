@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getStreamGroupsForGuild, getStreamersForGuild, getAllEventSubStreamers, getAllUsers } from '../../db';
+import { getStreamGroupsForGuild, getStreamersForGuild, getAllEventSubStreamers, getGuildMemberUsers } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager, requireManagerJson } from '../middleware';
 import { getCurrentGuildId } from '../session';
@@ -29,7 +29,8 @@ function getFriendlyError(key: string): string {
 
 /**
  * GET /streams — renders the streams page with the session's current guild's
- * stream groups, streamers, and (admin only) EventSub status per streamer.
+ * stream groups, streamers, the guild's members eligible to be added as
+ * streamers, and (admin only) EventSub status per streamer.
  * @param req - Express request; reads `req.session.user` (including
  *   `currentGuildId`), `error`, and `success` query params.
  * @param res - Express response; renders the `streams` view, or a 500 error page
@@ -39,20 +40,21 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
   try {
     const isAdmin = (req.session.user?.accessLevel ?? 0) >= AccessLevel.ADMIN;
     const guildId = getCurrentGuildId(req);
-    const [groups, streamers, eventSubStreamers, allUsers] = await Promise.all([
+    const [groups, streamers, eventSubStreamers, guildUsers] = await Promise.all([
       getStreamGroupsForGuild(guildId),
       getStreamersForGuild(guildId),
       isAdmin ? getAllEventSubStreamers() : Promise.resolve([]),
-      getAllUsers(),
+      getGuildMemberUsers(guildId),
     ]);
 
     // EventSub status keyed by streamer row id — admin only
     const eventSubById: Record<number, (typeof eventSubStreamers)[0]> = {};
     for (const s of eventSubStreamers) eventSubById[s.id] = s;
 
-    // Users eligible to be added as streamers: have a Twitch name, not already a streamer
+    // Users eligible to be added as streamers: members of this guild with a Twitch name,
+    // not already a streamer
     const existingStreamerIds = new Set(streamers.map((s) => s.discord_id));
-    const eligibleUsers = allUsers.filter(
+    const eligibleUsers = guildUsers.filter(
       (u) => u.twitch_name && !existingStreamerIds.has(u.discord_id),
     );
 

@@ -29,6 +29,7 @@ import {
   checkManagerEditAuth,
   checkRemoveAuth,
   checkToggleTwitchAuth,
+  canEditGlobalUserFields,
   ManagerEditAuthError,
   handleDbError,
   resolveValidDiscordId,
@@ -123,7 +124,9 @@ async function runGuardedUserMutation(
 /**
  * POST /admin/users/add — adds a Discord user (creating/updating their global user
  * row and Twitch identity) and grants them membership of the current guild at the
- * requested access level. Reloads the guild registry afterwards, since a new member
+ * requested access level. For an existing user the actor may not rewrite globally
+ * (see `canEditGlobalUserFields`), only the membership is granted and the submitted
+ * name/Twitch fields are ignored. Reloads the guild registry afterwards, since a new member
  * may provision a previously-inert guild.
  * @param req - Express request; reads `discord_id`, `discord_name`, `access_level`,
  *   `twitch_name`, and `clear_twitch_name` from `req.body`, plus the acting manager's
@@ -161,14 +164,20 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
     const addAuthErr = await checkManagerEditAuth(sessionUser, trimmedDiscordId, level, guildId);
     if (addAuthErr) throw new ManagerEditAuthError(addAuthErr);
     // Ensure the global user row (whitelist + Twitch identity) exists, then grant
-    // membership of the current guild at the chosen level.
-    await addOrUpdateUserMutation({
-      discordId: trimmedDiscordId,
-      discordName: trimmedDiscordName,
-      level,
-      normalizedTwitchName,
-      shouldClearTwitchName,
-    });
+    // membership of the current guild at the chosen level. An existing user this actor may
+    // not rewrite globally (e.g. one who only belongs to other guilds) just gets the
+    // membership — see canEditGlobalUserFields.
+    if (await canEditGlobalUserFields(sessionUser, trimmedDiscordId, guildId)) {
+      await addOrUpdateUserMutation({
+        discordId: trimmedDiscordId,
+        discordName: trimmedDiscordName,
+        level,
+        normalizedTwitchName,
+        shouldClearTwitchName,
+      });
+    } else {
+      log.info(`Add user: ${trimmedDiscordId} is managed by other guilds; granting membership of ${guildId} without changing their global user fields`);
+    }
     await setMemberAccessLevel(guildId, trimmedDiscordId, level);
     // Reloaded here, inside the guarded operation, rather than after runGuardedUserMutation
     // returns: a newly-added member may have provisioned a previously-inert guild, and
@@ -262,7 +271,8 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
 
 /**
  * POST /admin/users/toggle-twitch — toggles whether a user participates in the
- * Twitch bot.
+ * Twitch bot. The flag is global, so a non-owner actor must outrank the target in
+ * every guild the target belongs to (see `checkToggleTwitchAuth`).
  * @param req - Express request; reads `discord_id` and `is_twitch_bot_enabled`
  *   from `req.body`.
  * @param res - Express response; redirects to `/admin/users` on success, or to

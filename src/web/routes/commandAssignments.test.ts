@@ -8,6 +8,7 @@ vi.mock('../../db', () => {
     assignUserToCommand: vi.fn().mockResolvedValue(undefined),
     unassignUserFromCommand: vi.fn().mockResolvedValue(undefined),
     findUser: vi.fn().mockResolvedValue(null),
+    getMemberAccessLevel: vi.fn().mockResolvedValue(0),
     CommandConflictError,
     isMysqlDuplicateEntryError: vi.fn().mockReturnValue(false),
     AccessLevel: ACCESS_LEVEL_MOCK,
@@ -25,11 +26,12 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import supertest from 'supertest';
 import router from './commandAssignments';
-import { assignUserToCommand, unassignUserFromCommand, findUser, CommandConflictError, isMysqlDuplicateEntryError } from '../../db';
+import { assignUserToCommand, unassignUserFromCommand, findUser, getMemberAccessLevel, CommandConflictError, isMysqlDuplicateEntryError } from '../../db';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-const MOD_SESSION_USER = { discordId: '1', discordName: 'Mod', accessLevel: ACCESS_LEVEL_MOCK.MOD };
+const GUILD_ID = '900000000000000001';
+const MOD_SESSION_USER = { discordId: '1', discordName: 'Mod', accessLevel: ACCESS_LEVEL_MOCK.MOD, currentGuildId: GUILD_ID };
 
 /** Builds a supertest-ready app: the command assignments router with a urlencoded body parser and a Mod session user by default. */
 function buildApp(sessionUser: unknown = MOD_SESSION_USER) {
@@ -42,6 +44,7 @@ const VALID_DISCORD_ID = '123456789012345678'; // 18 digits
 beforeEach(() => {
   vi.clearAllMocks();
   middlewareCallOrder.length = 0;
+  vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
   vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, discord_name: 'Alice', is_twitch_bot_enabled: true, twitch_name: 'alice', access_level: AccessLevel.USER } as any);
   vi.mocked(assignUserToCommand).mockResolvedValue(undefined);
   vi.mocked(unassignUserFromCommand).mockResolvedValue(undefined);
@@ -64,6 +67,16 @@ describe('POST /commands/assign', () => {
       .send(`command_id=${VALID_COMMAND_ID}&discord_id=${VALID_DISCORD_ID}`);
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/commands');
+  });
+
+  it('redirects to ?error=assignee_not_in_guild when the user is not a member of the current guild', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    const res = await supertest(buildApp())
+      .post('/commands/assign')
+      .send(`command_id=${VALID_COMMAND_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/commands?error=assignee_not_in_guild');
+    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, VALID_DISCORD_ID);
+    expect(assignUserToCommand).not.toHaveBeenCalled();
   });
 
   it('redirects to ?error=missing_fields when fields are absent', async () => {

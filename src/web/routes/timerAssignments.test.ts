@@ -6,6 +6,7 @@ vi.mock('../../db', () => ({
   assignUserToTimer: vi.fn().mockResolvedValue(undefined),
   unassignUserFromTimer: vi.fn().mockResolvedValue(undefined),
   findUser: vi.fn().mockResolvedValue(null),
+  getMemberAccessLevel: vi.fn().mockResolvedValue(0),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('../csrf', () => ({
@@ -19,11 +20,12 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import supertest from 'supertest';
 import router from './timerAssignments';
-import { assignUserToTimer, unassignUserFromTimer, findUser } from '../../db';
+import { assignUserToTimer, unassignUserFromTimer, findUser, getMemberAccessLevel } from '../../db';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-const MOD_SESSION_USER = { discordId: '1', discordName: 'Mod', accessLevel: ACCESS_LEVEL_MOCK.MOD };
+const GUILD_ID = '900000000000000001';
+const MOD_SESSION_USER = { discordId: '1', discordName: 'Mod', accessLevel: ACCESS_LEVEL_MOCK.MOD, currentGuildId: GUILD_ID };
 
 /** Builds a supertest-ready app: the timer assignments router with a urlencoded body parser and a Mod session user by default. */
 function buildApp(sessionUser: unknown = MOD_SESSION_USER) {
@@ -35,6 +37,7 @@ const VALID_DISCORD_ID = '123456789012345678'; // 18 digits
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
   vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, discord_name: 'Alice', twitch_name: 'alice', access_level: AccessLevel.USER } as any);
   vi.mocked(assignUserToTimer).mockResolvedValue(undefined);
   vi.mocked(unassignUserFromTimer).mockResolvedValue(undefined);
@@ -50,6 +53,16 @@ describe('POST /timers/assign', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/timers');
     expect(vi.mocked(assignUserToTimer)).toHaveBeenCalledWith(5, VALID_DISCORD_ID);
+  });
+
+  it('redirects to ?error=assignee_not_in_guild when the user is not a member of the current guild', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    const res = await supertest(buildApp())
+      .post('/timers/assign')
+      .send(`timer_id=${VALID_TIMER_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/timers?error=assignee_not_in_guild');
+    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, VALID_DISCORD_ID);
+    expect(assignUserToTimer).not.toHaveBeenCalled();
   });
 
   it('redirects to ?error=missing_fields when fields are absent', async () => {

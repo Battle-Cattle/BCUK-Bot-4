@@ -2,6 +2,7 @@ import type { Request } from 'express';
 import {
   discardOwnNewTimerCommand,
   findUser,
+  getMemberAccessLevel,
   removeOwnTimerCommand,
   removeTimerCommand,
   setOwnTimerCommandEnabled,
@@ -14,6 +15,7 @@ import {
 } from '../../db';
 import { parseDiscordIdList } from './validation';
 import { canManageTimerCatalog } from './timerPermissions';
+import { getCurrentGuildId } from '../session';
 
 // Which timer write the session user gets: Mod+ use the unrestricted catalog writes; a streamer
 // below Mod gets timers on their own channel only, and their updates/toggles/deletes go through the
@@ -32,14 +34,21 @@ export function timerAccessErrorCode(err: unknown): string | null {
 }
 
 /**
- * Works out who a new timer is assigned to. Mod+ pick any users via `discord_ids`; a streamer
- * below Mod always gets the timer on their own channel only, which needs a linked Twitch account.
- * @param req - Express request; reads `discord_ids` and the session user.
- * @returns The Discord IDs to assign, or an `error` code (`twitch_not_linked`) to redirect with.
+ * Works out who a new timer is assigned to. Mod+ pick users via `discord_ids`, all of whom must be
+ * members of the session's current guild; a streamer below Mod always gets the timer on their own
+ * channel only (they're a member by `requireGuildContext`), which needs a linked Twitch account.
+ * @param req - Express request; reads `discord_ids`, the session user and its current guild.
+ * @returns The Discord IDs to assign, or an `error` code (`assignee_not_in_guild`,
+ *   `twitch_not_linked`) to redirect with.
  */
 export async function resolveNewTimerAssignees(req: Request): Promise<{ discordIds: string[] } | { error: string }> {
   if (canManageTimerCatalog(req)) {
-    return { discordIds: parseDiscordIdList(req.body.discord_ids) };
+    const discordIds = parseDiscordIdList(req.body.discord_ids);
+    if (discordIds.length === 0) return { discordIds };
+    const guildId = getCurrentGuildId(req);
+    const levels = await Promise.all(discordIds.map((id) => getMemberAccessLevel(guildId, id)));
+    if (levels.some((level) => level === null)) return { error: 'assignee_not_in_guild' };
+    return { discordIds };
   }
   const selfId = req.session.user!.discordId;
   const self = await findUser(selfId);
