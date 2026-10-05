@@ -65,7 +65,7 @@
     "@types/node": "^26.6.3",
     "@types/supertest": "^7.2.1",
     "@types/ws": "^8.18.1",
-    "@vitest/coverage-v8": "^5.0.2",
+    "@vitest/coverage-v8": "^5.0.3",
     "@vitest/eslint-plugin": "^1.6.27",
     "eslint": "^10.11.0",
     "eslint-plugin-jsdoc": "^65.0.0",
