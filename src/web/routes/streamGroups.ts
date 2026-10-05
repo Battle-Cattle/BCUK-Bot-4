@@ -7,7 +7,7 @@ import { getCurrentGuildId } from '../session';
 import { parsePositiveIntId, parseCheckboxField } from './validation';
 import { redirectStreamsInvalid, redirectStreamsFailure } from './streamsErrors';
 import { triggerRestart } from './streamRestart';
-import { DiscordAPIError } from 'discord.js';
+import { ChannelType, DiscordAPIError } from 'discord.js';
 import { getDiscordClient } from '../../discord/discordClientStore';
 import { isDiscordNotFoundError } from '../../discord/discordUtils';
 import type { StreamsErrorCode } from './streamsErrors';
@@ -23,10 +23,15 @@ function hasMissingValues(...values: Array<string | undefined>): boolean {
 /** A Discord snowflake channel ID — 17–20 decimal digits. */
 const DISCORD_CHANNEL_ID_RE = /^\d{17,20}$/;
 
+/** Channel types announcements may be posted in: a server's text or announcement channels. */
+const ANNOUNCEMENT_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([ChannelType.GuildText, ChannelType.GuildAnnouncement]);
+
 /**
- * Confirms `channelId` is a text-based channel in `guildId`, so a Manager can
+ * Confirms `channelId` is a text or announcement channel in `guildId`, so a Manager can
  * only point announcements at a channel in the guild they're managing (the
  * Twitch monitor later posts `live_message` there via `client.channels.fetch`).
+ * Threads and voice channels are rejected even though discord.js reports them as
+ * text-based (`isTextBased()` only checks for a message manager).
  * A not-found or missing-access fetch counts as an invalid channel; any other
  * Discord error is rethrown for the caller's catch-and-redirect.
  * @param guildId - The session's current guild ID.
@@ -47,7 +52,7 @@ async function checkGuildTextChannel(guildId: string, channelId: string): Promis
     }
     throw err;
   }
-  if (!channel || !('guildId' in channel) || channel.guildId !== guildId || !channel.isTextBased()) {
+  if (!channel || !('guildId' in channel) || channel.guildId !== guildId || !ANNOUNCEMENT_CHANNEL_TYPES.has(channel.type)) {
     return 'invalid_channel';
   }
   return null;

@@ -38,15 +38,15 @@ import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 import { getDiscordClient } from '../../discord/discordClientStore';
-import { DiscordAPIError, RESTJSONErrorCodes, type Client } from 'discord.js';
+import { ChannelType, DiscordAPIError, RESTJSONErrorCodes, type Client } from 'discord.js';
 
 const GUILD_ID = '900000000000000001';
 type SessionUser = SessionUserFixture;
 const CHANNEL_ID = '800000000000000001';
 const fetchChannel = vi.fn();
 /** Builds a fake Discord channel as returned by `client.channels.fetch`. */
-function fakeChannel(guildId: string, textBased = true) {
-  return { guildId, isTextBased: () => textBased };
+function fakeChannel(guildId: string, type: ChannelType = ChannelType.GuildText) {
+  return { guildId, type };
 }
 const MANAGER: SessionUser = makeSessionUser({ accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID });
 
@@ -345,8 +345,14 @@ describe('POST /streams/groups/add|update — discord_channel guild scoping', ()
     expect(updateStreamGroup).not.toHaveBeenCalled();
   });
 
-  it.each(['/streams/groups/add', '/streams/groups/update'])('%s rejects a channel in this guild that is not text-based', async (path) => {
-    fetchChannel.mockResolvedValueOnce(fakeChannel(GUILD_ID, false));
+  it.each([
+    ['/streams/groups/add', ChannelType.GuildVoice],
+    ['/streams/groups/update', ChannelType.GuildVoice],
+    ['/streams/groups/add', ChannelType.PublicThread],
+    ['/streams/groups/update', ChannelType.PrivateThread],
+    ['/streams/groups/add', ChannelType.GuildCategory],
+  ])('%s rejects a channel of type %s in this guild (not a text or announcement channel)', async (path, type) => {
+    fetchChannel.mockResolvedValueOnce(fakeChannel(GUILD_ID, type));
     const res = await supertest(buildApp()).post(path).send(body(CHANNEL_ID));
     expect(res.headers.location).toContain('error=invalid_channel');
     expect(addStreamGroup).not.toHaveBeenCalled();
@@ -354,7 +360,7 @@ describe('POST /streams/groups/add|update — discord_channel guild scoping', ()
   });
 
   it('rejects a DM-style channel with no guildId', async () => {
-    fetchChannel.mockResolvedValueOnce({ isTextBased: () => true });
+    fetchChannel.mockResolvedValueOnce({ type: ChannelType.DM });
     const res = await supertest(buildApp()).post('/streams/groups/add').send(body(CHANNEL_ID));
     expect(res.headers.location).toContain('error=invalid_channel');
     expect(addStreamGroup).not.toHaveBeenCalled();
@@ -390,6 +396,13 @@ describe('POST /streams/groups/add|update — discord_channel guild scoping', ()
     const res = await supertest(buildApp()).post('/streams/groups/add').send(body(CHANNEL_ID));
     expect(res.headers.location).toContain('error=discord_unavailable');
     expect(addStreamGroup).not.toHaveBeenCalled();
+  });
+
+  it('saves the group when the channel is an announcement channel in the current guild', async () => {
+    fetchChannel.mockResolvedValueOnce(fakeChannel(GUILD_ID, ChannelType.GuildAnnouncement));
+    const res = await supertest(buildApp()).post('/streams/groups/add').send(body(CHANNEL_ID));
+    expect(res.headers.location).toBe('/admin/streams');
+    expect(addStreamGroup).toHaveBeenCalled();
   });
 
   it('saves the group when the channel is a text channel in the current guild', async () => {

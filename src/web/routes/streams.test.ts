@@ -39,7 +39,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../../discord/discordClientStore', () => ({
   getDiscordClient: () => ({
-    channels: { fetch: () => Promise.resolve({ guildId: '900000000000000001', isTextBased: () => true }) },
+    channels: { fetch: () => Promise.resolve({ guildId: '900000000000000001', type: 0 /* ChannelType.GuildText */ }) },
   }),
 }));
 
