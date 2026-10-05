@@ -77,9 +77,8 @@ export function createSseEventsHandler(
       res.status(404).end();
       return;
     }
-    // The client may have gone away while the lookup above was awaited (a cold cache load hits
-    // the DB); attaching now would register close listeners that never fire and leak the slots.
-    if (res.closed || req.destroyed) return;
+    // attachSseConnection skips a client that went away while the lookup above was awaited (a
+    // cold cache load hits the DB).
     attachSseConnection(req, res, { connections, key, maxPerChannel, pool });
   };
 }

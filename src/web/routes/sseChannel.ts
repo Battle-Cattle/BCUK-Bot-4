@@ -162,15 +162,20 @@ export interface AttachSseConnectionOptions<K> {
  * @param res - Express response to register and stream to; also listened to for 'close'/'error'
  *   (an abrupt socket failure can fire these without `req` ever emitting 'close').
  * @param options - See {@link AttachSseConnectionOptions}.
- * @returns false if the process-wide cap (`SSE_MAX_TOTAL_CONNECTIONS`), the `pool`'s total or
- *   per-IP limit, or the key's `maxPerChannel` was already reached (a 429 has already been sent to
- *   `res` and the caller should stop handling the request); true once the connection is attached.
+ * Nothing is reserved if the client has already gone away — callers often await a lookup before
+ * attaching, and a connection registered after its socket closed would never see the
+ * 'close'/'error' events that release its slots.
+ * @returns false if the client already disconnected (nothing is sent or reserved), or if the
+ *   process-wide cap (`SSE_MAX_TOTAL_CONNECTIONS`), the `pool`'s total or per-IP limit, or the
+ *   key's `maxPerChannel` was already reached (a 429 has already been sent to `res`); either way
+ *   the caller should stop handling the request. True once the connection is attached.
  */
 export function attachSseConnection<K>(
   req: Request,
   res: Response,
   options: AttachSseConnectionOptions<K>,
 ): boolean {
+  if (res.closed || req.destroyed) return false;
   const { connections, key, maxPerChannel, pool } = options;
   const releasePool = reserveConnectionSlots(req, pool, () => addClientWithinLimit(connections, key, res, maxPerChannel));
   if (!releasePool) {

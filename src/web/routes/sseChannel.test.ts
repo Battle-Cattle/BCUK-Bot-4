@@ -456,6 +456,30 @@ describe('attachSseConnection', () => {
     }
   });
 
+  it('returns false without reserving or responding when the response has already closed', () => {
+    const res = Object.assign(makeRes(), { closed: true });
+    const { req } = makeReq('gone');
+    const pool = createSseConnectionPool(10, 10);
+
+    expect(attachSseConnection(req as any, res as any, { connections, key: 'gone', maxPerChannel: 5, pool })).toBe(false);
+
+    expect(connections.has('gone')).toBe(false);
+    expect(pool.count).toBe(0);
+    expect(res.status).not.toHaveBeenCalled();
+    expect(res.setHeader).not.toHaveBeenCalled();
+  });
+
+  it('returns false without reserving when the request socket has been destroyed', () => {
+    const res = makeRes();
+    const { req } = makeReq('gone2');
+    (req as any).destroyed = true;
+
+    expect(attachSseConnection(req as any, res as any, { connections, key: 'gone2', maxPerChannel: 5 })).toBe(false);
+
+    expect(connections.has('gone2')).toBe(false);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
   it('runs cleanup and rethrows when sending the handshake throws (e.g. a dead socket)', () => {
     const res = makeRes();
     res.flushHeaders.mockImplementation(() => { throw new Error('socket hang up'); });
