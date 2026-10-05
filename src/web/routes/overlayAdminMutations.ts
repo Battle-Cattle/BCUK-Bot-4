@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router, type NextFunction, type Request, type Response } from 'express';
+import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -12,7 +12,7 @@ import { OVERLAY_FOLDER, OVERLAY_MAX_FILE_MB } from '../../shared/config';
 import { parsePositiveIntId } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
-import { createMulterErrorRedirectHandler, makeUploadMiddleware } from './uploadMiddleware';
+import { createMulterErrorRedirectHandler, makeUploadMiddleware, makeRequireStreamerBeforeUpload, writeFileOrCleanup } from './uploadMiddleware';
 import { safeResolve } from '../../shared/pathUtils';
 
 const log = createLogger('OverlayAdmin');
@@ -49,28 +49,6 @@ export function detectVideoType(buf: Buffer): 'webm' | 'mp4' | null {
 }
 
 /**
- * Writes `buffer` to `fullPath`; if the write fails partway (e.g. `ENOSPC`), best-effort removes
- * the partial file — logging, not throwing, if that removal also fails — and rethrows the
- * original write error so the caller's `upload_failed` handling still applies.
- * @param fullPath - Absolute destination path (already safe-resolved).
- * @param buffer - File contents to write.
- * @returns Resolves once the file is fully written.
- * @throws The original write error, after attempting cleanup.
- */
-async function writeFileOrCleanup(fullPath: string, buffer: Buffer): Promise<void> {
-  try {
-    await fs.promises.writeFile(fullPath, buffer);
-  } catch (err) {
-    try {
-      await fs.promises.rm(fullPath, { force: true });
-    } catch (rmErr) {
-      log.error(`Failed to remove partially written file ${fullPath}:`, rmErr);
-    }
-    throw err;
-  }
-}
-
-/**
  * Writes an uploaded overlay video to the streamer's folder under a random name and records it
  * in the DB, deleting the file again if the DB insert fails.
  * @param streamer - Owning streamer.
@@ -87,7 +65,7 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.
   const filename = `${randomUUID()}.${ext}`;
   await fs.promises.mkdir(dir, { recursive: true });
   const fullPath = path.join(dir, filename);
-  await writeFileOrCleanup(fullPath, file.buffer);
+  await writeFileOrCleanup(fullPath, file.buffer, log);
   try {
     await addVideo(streamer.id, name, filename);
   } catch (e) {
@@ -111,23 +89,13 @@ export const handleUploadError = createMulterErrorRedirectHandler('/overlay/sett
 /** Express middleware running Multer's single-file (`video`) parser, redirecting on error. */
 const uploadVideo = makeUploadMiddleware(upload, 'video', handleUploadError);
 
-/**
- * Express middleware that redirects non-streamers (`not_a_streamer`) *before* Multer buffers the
- * upload into memory, so an authenticated non-streamer can't force a full-size in-memory upload
- * only to be rejected afterwards. The route handler still re-checks via `requireStreamer`.
- * @param req - Express request; reads `session.user.discordId`.
- * @param res - Express response; redirected when the requester isn't a streamer, or to
- *   `?error=upload_failed` if the lookup fails.
- * @param next - Called to continue to the upload middleware when the requester is a streamer.
- * @returns Resolves once the request has been redirected or passed on.
- */
-async function requireStreamerBeforeUpload(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    if (await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT)) next();
-  } catch (err) {
-    logAndRedirectError({ res, log, logLabel: 'Overlay video upload streamer check error:', err, basePath: '/overlay/settings', errorCode: 'upload_failed' });
-  }
-}
+/** Redirects non-streamers before Multer buffers the upload (see `makeRequireStreamerBeforeUpload`). */
+const requireStreamerBeforeUpload = makeRequireStreamerBeforeUpload({
+  notAStreamerRedirect: NOT_A_STREAMER_REDIRECT,
+  basePath: '/overlay/settings',
+  log,
+  logLabel: 'Overlay video upload streamer check error:',
+});
 
 /**
  * POST /overlay/settings/videos/upload — uploads a video file (webm/mp4,

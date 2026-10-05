@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import type { NextFunction, Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
@@ -12,7 +12,7 @@ import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB } from '../
 import { safeResolve } from '../../shared/pathUtils';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
-import { createMulterErrorRedirectHandler, makeUploadMiddleware } from './uploadMiddleware';
+import { createMulterErrorRedirectHandler, makeUploadMiddleware, makeRequireStreamerBeforeUpload, writeFileOrCleanup } from './uploadMiddleware';
 import { detectAudioType } from './sfxFileUpload';
 import { NOT_A_STREAMER_REDIRECT, parseEventType } from './alertsShared';
 
@@ -71,28 +71,6 @@ async function removeOldAsset(streamerId: number, filename: string | null): Prom
   }
 }
 
-/**
- * Writes `buffer` to `fullPath`; if the write fails partway (e.g. `ENOSPC`), best-effort removes
- * the partial file — logging, not throwing, if that removal also fails — and rethrows the
- * original write error so the caller's `upload_failed` handling still applies.
- * @param fullPath - Absolute destination path (already safe-resolved).
- * @param buffer - File contents to write.
- * @returns Resolves once the file is fully written.
- * @throws The original write error, after attempting cleanup.
- */
-async function writeFileOrCleanup(fullPath: string, buffer: Buffer): Promise<void> {
-  try {
-    await fs.promises.writeFile(fullPath, buffer);
-  } catch (err) {
-    try {
-      await fs.promises.rm(fullPath, { force: true });
-    } catch (rmErr) {
-      log.error(`Failed to remove partially written file ${fullPath}:`, rmErr);
-    }
-    throw err;
-  }
-}
-
 /** Persists a new asset filename for a streamer's alert config row (`setAlertImage`/`setAlertSound`). */
 type AssetSetter = (streamerId: number, eventType: AlertEventType, filename: string | null) => Promise<string | null>;
 
@@ -136,7 +114,7 @@ async function saveUploadedAsset(
   await fs.promises.mkdir(dir, { recursive: true });
   const fullPath = safeResolve(ALERT_ASSETS_FOLDER, String(streamer.id), filename);
   if (!fullPath) return { errorCode: 'invalid_path' };
-  await writeFileOrCleanup(fullPath, file.buffer);
+  await writeFileOrCleanup(fullPath, file.buffer, log);
 
   let previous: string | null;
   try {
@@ -224,23 +202,13 @@ function makeDeleteHandler(
  */
 const handleUploadError = createMulterErrorRedirectHandler('/alerts/settings', log, 'Alert upload middleware error:');
 
-/**
- * Express middleware that redirects non-streamers (`not_a_streamer`) *before* Multer buffers the
- * upload into memory, so an authenticated non-streamer can't force a full-size in-memory upload
- * only to be rejected afterwards. The route handler still re-checks via `requireStreamer`.
- * @param req - Express request; reads `session.user.discordId`.
- * @param res - Express response; redirected when the requester isn't a streamer, or to
- *   `?error=upload_failed` if the lookup fails.
- * @param next - Called to continue to the upload middleware when the requester is a streamer.
- * @returns Resolves once the request has been redirected or passed on.
- */
-async function requireStreamerBeforeUpload(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    if (await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT)) next();
-  } catch (err) {
-    logAndRedirectError({ res, log, logLabel: 'Alert upload streamer check error:', err, basePath: '/alerts/settings', errorCode: 'upload_failed' });
-  }
-}
+/** Redirects non-streamers before Multer buffers the upload (see `makeRequireStreamerBeforeUpload`). */
+const requireStreamerBeforeUpload = makeRequireStreamerBeforeUpload({
+  notAStreamerRedirect: NOT_A_STREAMER_REDIRECT,
+  basePath: '/alerts/settings',
+  log,
+  logLabel: 'Alert upload streamer check error:',
+});
 
 /** Express middleware running Multer's single-file (`image`) parser, redirecting on error. */
 const uploadImage = makeUploadMiddleware(imageUpload, 'image', handleUploadError);
