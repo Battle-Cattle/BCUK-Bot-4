@@ -71,6 +71,7 @@ vi.mock('./commands/counterHandler', () => ({ registerCounterTwitchRuntime: vi.f
 vi.mock('./commands/multiCommandHandler', () => ({ registerMultiTwitchRuntime: vi.fn() }));
 vi.mock('./commands/shoutoutHandler', () => ({ registerShoutoutRuntime: vi.fn() }));
 vi.mock('./commands/countdownHandler', () => ({ registerCountdownTwitchRuntime: vi.fn() }));
+vi.mock('./commands/followageHandler', () => ({ registerFollowageRuntime: vi.fn() }));
 vi.mock('./twitch/eventsub/twitchEventSubRuntime', () => ({
   registerEventSubOverlayRuntime: vi.fn(),
   registerEventSubTwitchRuntime: vi.fn(),

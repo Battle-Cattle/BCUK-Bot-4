@@ -18,6 +18,7 @@ import {
   getAllEventSubStreamers,
   getStreamerByDiscordId,
   getStreamerById,
+  getStreamerByTwitchUserId,
   saveStreamerToken,
   clearStreamerToken,
   initEventConfig,
@@ -198,6 +199,30 @@ describe('getStreamerById', () => {
     const result = await getStreamerById(7);
     expect(result).not.toBeNull();
     expect(result!.id).toBe(7);
+    expect(result!.twitch_name).toBe('bob');
+  });
+});
+
+// ─── getStreamerByTwitchUserId ────────────────────────────────────────────────
+
+describe('getStreamerByTwitchUserId', () => {
+  it('returns null when no rows found', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([]) as any);
+    expect(await getStreamerByTwitchUserId('nope')).toBeNull();
+  });
+
+  it('queries by twitch_user_id with the given id', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getStreamerByTwitchUserId('uid9');
+    expect(pool.execute.mock.calls[0]![0]).toContain('s.twitch_user_id = ?');
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['uid9']);
+  });
+
+  it('maps and returns the found row', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([makeRow({ twitch_user_id: 'uid9', twitch_name: 'bob' })]) as any);
+    const result = await getStreamerByTwitchUserId('uid9');
+    expect(result!.twitch_user_id).toBe('uid9');
     expect(result!.twitch_name).toBe('bob');
   });
 });

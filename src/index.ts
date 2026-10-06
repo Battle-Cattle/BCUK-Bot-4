@@ -19,6 +19,7 @@ import { registerCounterTwitchRuntime } from './commands/counterHandler';
 import { registerMultiTwitchRuntime } from './commands/multiCommandHandler';
 import { registerShoutoutRuntime } from './commands/shoutoutHandler';
 import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
+import { registerFollowageRuntime } from './commands/followageHandler';
 import {
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
   registerEventSubAlertRuntime, registerEventSubDashboardRuntime, registerEventSubReloadRuntime,
@@ -211,6 +212,7 @@ async function main(): Promise<void> {
   registerMultiTwitchRuntime({ send: sayInChannel, getActiveChannels, getLoginUserIds: getActiveChannelUserIds });
   registerShoutoutRuntime({ send: sayInChannel });
   registerCountdownTwitchRuntime({ send: sayInChannel });
+  registerFollowageRuntime({ send: sayInChannel });
   registerEventSubOverlayRuntime({ pushOverlayEvent });
   registerEventSubCompanionRuntime({ pushCompanionEvent });
   registerEventSubAlertRuntime({ pushAlertEvent });

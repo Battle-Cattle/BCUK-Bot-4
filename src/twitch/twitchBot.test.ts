@@ -152,6 +152,10 @@ vi.mock('../commands/countdownHandler', () => ({
   executeCountdownForTwitch: vi.fn(),
 }));
 
+vi.mock('../commands/followageHandler', () => ({
+  executeFollowageForTwitch: vi.fn(),
+}));
+
 vi.mock('./twitchChatActivity', () => ({
   recordChatMessage: vi.fn(),
   forgetChannelChatActivity: vi.fn(),
@@ -190,6 +194,7 @@ import { executeMultiCommandForTwitch } from '../commands/multiCommandHandler';
 import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { handleCommand } from '../commands/commandRouter';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
+import { executeFollowageForTwitch } from '../commands/followageHandler';
 import { recordChatMessage } from './twitchChatActivity';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -247,6 +252,7 @@ function makeChatMessage(overrides: {
   isVip?: boolean;
   isBroadcaster?: boolean;
   displayName?: string;
+  userId?: string;
   channelId?: string | null;
   sourceChannelId?: string | null;
 } = {}): any {
@@ -256,6 +262,7 @@ function makeChatMessage(overrides: {
       isVip: overrides.isVip ?? false,
       isBroadcaster: overrides.isBroadcaster ?? false,
       displayName: overrides.displayName,
+      userId: overrides.userId ?? 'user-id',
     },
     channelId: overrides.channelId ?? null,
     sourceChannelId: overrides.sourceChannelId ?? null,
@@ -371,15 +378,16 @@ describe('handleTwitchMessage', () => {
     expect(recordChatMessage).toHaveBeenCalledWith('streamer');
   });
 
-  it('dispatches all six executors for a normal message', async () => {
+  it('dispatches all seven executors for a normal message', async () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeCounterCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeMultiCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeShoutoutForTwitch).mockResolvedValue(undefined);
     vi.mocked(handleCommand).mockResolvedValue(undefined);
     vi.mocked(executeCountdownForTwitch).mockResolvedValue(undefined);
+    vi.mocked(executeFollowageForTwitch).mockResolvedValue(undefined);
 
-    sendMessage('#streamer', 'alice', '!cmd', { displayName: 'Alice' });
+    sendMessage('#streamer', 'alice', '!cmd', { displayName: 'Alice', userId: 'alice-id', channelId: 'streamer-id' });
 
     expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', '!cmd');
     expect(executeMultiCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', '!cmd');
@@ -391,6 +399,7 @@ describe('handleTwitchMessage', () => {
     await vi.waitFor(() => expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce());
     expect(executeCounterCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', 'guild-A', '!cmd');
     expect(executeCountdownForTwitch).toHaveBeenCalledWith('streamer', '!cmd', '!cmd');
+    expect(executeFollowageForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'streamer-id', { id: 'alice-id', name: 'Alice' }, '!cmd');
   });
 
   it('resolves the target guild via the linked streamer\'s active voice presence', async () => {

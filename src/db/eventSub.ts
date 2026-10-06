@@ -128,6 +128,24 @@ export async function getStreamerById(id: number): Promise<DbStreamerEventSub | 
 }
 
 /**
+ * Look up a streamer by their Twitch numeric user ID (as stored when they connected Twitch).
+ * Returns null if not found.
+ *
+ * @param twitchUserId - Twitch user ID to search for.
+ */
+export async function getStreamerByTwitchUserId(twitchUserId: string): Promise<DbStreamerEventSub | null> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT ${EVENT_SUB_SELECT}
+     FROM streamer s
+     JOIN \`user\` u ON u.discord_id = s.discord_id
+     LEFT JOIN streamer_event_config c ON c.streamer_id = s.id
+     WHERE s.twitch_user_id = ?`,
+    [twitchUserId],
+  );
+  return rows[0] ? mapStreamerEventSub(rows[0]) : null;
+}
+
+/**
  * Encrypt and persist a streamer's EventSub OAuth tokens. Throws if
  * `EVENTSUB_TOKEN_SECRET` is not configured, to prevent storing plaintext credentials.
  *
