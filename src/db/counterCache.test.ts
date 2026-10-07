@@ -20,7 +20,7 @@ vi.mock('./lookupCache', () => ({
 vi.mock('./counters', () => ({
   getAllCounters: vi.fn(),
 }));
-vi.mock('./commandLocks', () => ({
+vi.mock('./commandWriteGuard', () => ({
   isAnyCommandTakenAcrossTables: vi.fn(),
 }));
 vi.mock('./commandStringUtils', () => ({
@@ -33,7 +33,7 @@ vi.mock('./commandStringUtils', () => ({
 
 import { findCounterByCommand, isCounterCommandTaken } from './counterCache';
 import { getAllCounters } from './counters';
-import { isAnyCommandTakenAcrossTables } from './commandLocks';
+import { isAnyCommandTakenAcrossTables } from './commandWriteGuard';
 import type { DbCounter } from './counters';
 
 function makeCounter(id: number, trigger: string, check: string, guildId = 'guild-1'): DbCounter {

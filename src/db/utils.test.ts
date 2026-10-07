@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('./pool', () => ({ getPool: vi.fn() }));
 
-import { fromBit, affectedOrExists, rowExists, hashesMatch, getRowCount } from './utils';
+import { fromBit, affectedOrExists, rowExists, hashesMatch, getRowCount, buildInClausePlaceholders, isMysqlDuplicateEntryError } from './utils';
 import { getPool } from './pool';
 
 describe('fromBit', () => {
@@ -161,5 +161,38 @@ describe('hashesMatch', () => {
 
   it('returns false for hashes of different lengths without throwing', () => {
     expect(hashesMatch('ab', 'abcd')).toBe(false);
+  });
+});
+
+describe('buildInClausePlaceholders', () => {
+  it('builds one comma-separated placeholder per value', () => {
+    expect(buildInClausePlaceholders(3)).toBe('?, ?, ?');
+  });
+
+  it('returns an empty string for zero values', () => {
+    expect(buildInClausePlaceholders(0)).toBe('');
+  });
+});
+
+describe('isMysqlDuplicateEntryError', () => {
+  it('returns true for an object with code ER_DUP_ENTRY', () => {
+    expect(isMysqlDuplicateEntryError({ code: 'ER_DUP_ENTRY' })).toBe(true);
+  });
+
+  it('returns true for an object with errno 1062', () => {
+    expect(isMysqlDuplicateEntryError({ errno: 1062 })).toBe(true);
+  });
+
+  it('returns false for non-MySQL errors', () => {
+    expect(isMysqlDuplicateEntryError(new Error('generic'))).toBe(false);
+    expect(isMysqlDuplicateEntryError({ code: 'ER_NO_SUCH_TABLE' })).toBe(false);
+    expect(isMysqlDuplicateEntryError({ errno: 1064 })).toBe(false);
+  });
+
+  it('returns false for null, undefined, and primitives', () => {
+    expect(isMysqlDuplicateEntryError(null)).toBe(false);
+    expect(isMysqlDuplicateEntryError(undefined)).toBe(false);
+    expect(isMysqlDuplicateEntryError('string')).toBe(false);
+    expect(isMysqlDuplicateEntryError(1062)).toBe(false);
   });
 });

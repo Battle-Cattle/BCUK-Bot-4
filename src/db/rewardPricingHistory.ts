@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
-import { buildInClausePlaceholders } from './commandStringUtils';
+import { buildInClausePlaceholders } from './utils';
 
 /** One recorded price/demand point for a reward, at a point in time. */
 export interface RewardPricingHistoryPoint {

@@ -1,9 +1,10 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
-import { requireTrimmedString, normalizeCommand, CommandConflictError, type SqlExecutor } from './commandStringUtils';
-import { runSerializedCommandWrite, isAnyCommandTakenAcrossTables } from './commandLocks';
+import { requireTrimmedString, normalizeCommand } from './commandStringUtils';
+import { CommandConflictError } from './commandErrors';
+import { runSerializedCommandWrite, isAnyCommandTakenAcrossTables } from './commandWriteGuard';
 import { assertNotReservedCommand } from './reservedCommands';
-import { fromBit, affectedOrExists } from './utils';
+import { fromBit, affectedOrExists, type SqlExecutor } from './utils';
 import {
   createManagedLookupCache,
   type RefreshingLookupCache,

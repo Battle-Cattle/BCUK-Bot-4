@@ -1,8 +1,7 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 import { markRedemptionEffect } from './redemptionLedger';
-import { fromBit } from './utils';
-import { buildInClausePlaceholders } from './commandStringUtils';
+import { fromBit, buildInClausePlaceholders } from './utils';
 
 /** A reward's dynamic-pricing configuration and current demand state. */
 export interface RewardPricingRow {
