@@ -193,6 +193,17 @@ describe('getCustomRewards', () => {
     expect(String(url)).toContain('broadcaster_id=bc1');
     expect(init?.method).toBeUndefined(); // defaults to GET
     expect(result).toEqual(rewards);
+    expect(String(url)).not.toContain('only_manageable_rewards');
+  });
+
+  it('restricts the listing to rewards this app can manage when onlyManageable is set', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: [] }));
+
+    await getCustomRewards('bc1', 'user-token', { onlyManageable: true });
+
+    const [url] = vi.mocked(globalThis.fetch).mock.calls[0]!;
+    expect(String(url)).toContain('broadcaster_id=bc1');
+    expect(String(url)).toContain('only_manageable_rewards=true');
   });
 
   it('throws with the response status on a 401 response', async () => {

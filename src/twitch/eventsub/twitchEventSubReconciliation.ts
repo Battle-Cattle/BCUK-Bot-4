@@ -194,7 +194,9 @@ async function reconcileStreamer(uid: string, info: StreamerInfo): Promise<void>
 
   let rewards;
   try {
-    rewards = await getCustomRewards(uid, token);
+    // Twitch only serves redemptions of rewards this app created (403 for any other), so listing
+    // the rest would just spend two wasted Helix calls per reward on every tick.
+    rewards = await getCustomRewards(uid, token, { onlyManageable: true });
   } catch (err) {
     log.error(`Failed to list custom rewards for ${info.login}:`, err);
     markStreamerFetchFailed(uid);
