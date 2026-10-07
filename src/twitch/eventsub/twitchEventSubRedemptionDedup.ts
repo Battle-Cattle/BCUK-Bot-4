@@ -1,19 +1,10 @@
-/** How long a redemption id is remembered for deduplication (ms). */
+/**
+ * How long a redemption id is remembered for deduplication (ms). Reconciliation can replay
+ * redemptions older than this (see `REDEMPTION_RECOVERY_WINDOW_MS` in
+ * `twitchEventSubReconciliationCursors.ts`); those are kept safe by the durable
+ * `redemption_handled` ledger, not by this cache.
+ */
 export const REDEMPTION_DEDUP_TTL_MS = 10 * 60 * 1000;
-
-/**
- * How far back EventSub reconciliation may replay redemptions (ms). Replays older than the
- * in-memory {@link REDEMPTION_DEDUP_TTL_MS} are kept safe by the durable `redemption_handled`
- * ledger that `handleRedemption` checks, not by this module's cache.
- */
-export const REDEMPTION_RECOVERY_WINDOW_MS = 60 * 60 * 1000;
-
-/**
- * How long `redemption_handled` ledger rows are kept (ms). Must comfortably exceed
- * {@link REDEMPTION_RECOVERY_WINDOW_MS}: a replay that no longer finds its redemption's row would
- * process it again.
- */
-export const REDEMPTION_LEDGER_RETENTION_MS = 6 * 60 * 60 * 1000;
 
 // TTL-based dedup keyed by Twitch's own redemption id, not the EventSub message envelope id.
 // twitchEventSubConnection.ts's message_id dedup (isDuplicate/seenMessageIds) only catches the

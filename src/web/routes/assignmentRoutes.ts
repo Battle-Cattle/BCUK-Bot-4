@@ -1,11 +1,12 @@
 import { Router, type Request, type Response } from 'express';
 import type { Logger } from 'winston';
-import { AccessLevel, findUser, getMemberAccessLevel } from '../../db';
+import { findUser, getMemberAccessLevel } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext, requireMod } from '../middleware';
 import { getCurrentGuildId } from '../session';
 import { normalizeDiscordId } from './validation';
 import { logAndRedirectError } from './errorHandling';
+import { canManageCatalog } from './selfServiceAccess';
 
 /** Options for {@link createAssignmentRouter}. */
 export interface AssignmentRouterOptions<TId> {
@@ -130,9 +131,7 @@ async function checkAssignee(req: Request, discordId: string): Promise<string | 
  * @returns True when the unassign is allowed.
  */
 function isModOrSelf(req: Request, discordId: string): boolean {
-  const user = req.session.user;
-  if (!user) return false;
-  return user.accessLevel >= AccessLevel.MOD || user.discordId === discordId;
+  return canManageCatalog(req) || req.session.user?.discordId === discordId;
 }
 
 /**

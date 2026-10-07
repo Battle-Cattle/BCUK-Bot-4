@@ -9,14 +9,9 @@ import { getValidToken } from '../twitchUserTokens';
 import { SUBSCRIPTION_GROUPS, isGroupEnabled } from './twitchEventSubSubscriptionGroups';
 import { conditionsEqual, ensureSubscription, type SubscribeAttempt } from './twitchEventSubCreate';
 import type { SubscribeOutcome } from './subscribeOutcome';
-
-export type { SubscribeOutcome } from './subscribeOutcome';
 import { setStreamerInfo } from './twitchEventSubDispatch';
 
 const log = createLogger('EventSub');
-
-export { dispatchNotification, handleRevocation, removeStreamerFromMap } from './twitchEventSubDispatch';
-export { hasAuthFailedSubs, clearAuthFailedSubs } from './twitchEventSubCreate';
 
 /** True if `condition` identifies `uid` as the broadcaster — every {@link SubSpec} in
  *  `SUBSCRIPTION_GROUPS` sets one of these two fields to the target streamer's uid. Used to

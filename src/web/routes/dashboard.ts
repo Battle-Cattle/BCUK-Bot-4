@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { getGuildScopedStatus } from '../guildScopedStatus';
 import { csrfProtection } from '../csrf';
 import { getStreamerByDiscordId, getSfxTriggerCount, getCustomCommandCount, getCounterCount, getRecentStreamerEvents } from '../../db';
-import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
+import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
 import { renderView } from './viewHelpers';
 import { renderOrError } from './errorHandling';
 import { RECENT_EVENTS_LIMIT, type DashboardEvent } from './dashboardEvents';

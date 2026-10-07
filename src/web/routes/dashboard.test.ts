@@ -16,7 +16,7 @@ vi.mock('../../db', () => ({
   getRecentStreamerEvents: vi.fn(),
 }));
 
-vi.mock('../../twitch/eventsub/twitchEventSubSubscriptions', () => ({
+vi.mock('../../twitch/eventsub/twitchEventSubCreate', () => ({
   hasAuthFailedSubs: vi.fn(),
 }));
 
@@ -37,7 +37,7 @@ import { getGuildScopedStatus } from '../guildScopedStatus';
 import {
   getStreamerByDiscordId, getSfxTriggerCount, getCustomCommandCount, getCounterCount, getRecentStreamerEvents,
 } from '../../db';
-import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
+import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const STATUS = { discord: { ready: true }, voice: {}, twitch: {} };

@@ -23,18 +23,15 @@ import {
   addOrUpdateUserMutation,
   toggleTwitchMutation,
 } from './adminUserMutations';
+import { accessLevelError, parseTwitchNameInput, parseTwitchEnabled, resolveValidDiscordId } from './adminUserValidation';
 import {
-  accessLevelError,
-  parseTwitchNameInput,
-  parseTwitchEnabled,
   checkManagerEditAuth,
   checkRemoveAuth,
   checkToggleTwitchAuth,
   canEditGlobalUserFields,
   ManagerEditAuthError,
-  handleDbError,
-  resolveValidDiscordId,
-} from './adminUserValidation';
+} from './adminUserAuth';
+import { handleDbError } from './adminUserErrors';
 
 const log = createLogger('Web');
 const router = Router();

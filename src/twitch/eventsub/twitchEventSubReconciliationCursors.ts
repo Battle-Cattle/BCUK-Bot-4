@@ -1,11 +1,24 @@
 import { createLogger } from '../../shared/logger';
-import { REDEMPTION_RECOVERY_WINDOW_MS } from './twitchEventSubRedemptionDedup';
 
 // Reconciliation cursor state: where each reward's redemption reconciliation resumes from, what
 // (if anything) is holding it back, and when each broadcaster was last present. Split out of
 // twitchEventSubReconciliation.ts, which only orchestrates (fetches, replays, runs the tick) and
 // never touches these maps directly. Shares its logger name so log output is unchanged.
 const log = createLogger('EventSubReconciliation');
+
+/**
+ * How far back EventSub reconciliation may replay redemptions (ms). Replays older than the
+ * in-memory `REDEMPTION_DEDUP_TTL_MS` (`twitchEventSubRedemptionDedup.ts`) are kept safe by the
+ * durable `redemption_handled` ledger that `handleRedemption` checks, not by that cache.
+ */
+export const REDEMPTION_RECOVERY_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * How long `redemption_handled` ledger rows are kept (ms). Must comfortably exceed
+ * {@link REDEMPTION_RECOVERY_WINDOW_MS}: a replay that no longer finds its redemption's row would
+ * process it again.
+ */
+export const REDEMPTION_LEDGER_RETENTION_MS = 6 * 60 * 60 * 1000;
 
 /** How often the reconciliation tick runs (ms), and how far a reward's first poll looks back. */
 export const RECONCILIATION_POLL_INTERVAL_MS = 60_000;

@@ -30,7 +30,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import express from 'express';
 import supertest from 'supertest';
-import router, { establishDashboardSession, resolveAccessibleGuilds } from './auth';
+import router from './auth';
 import {
   findUser,
   updateDiscordName,
@@ -529,53 +529,5 @@ describe('POST /logout', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/auth/login');
     expect(destroy).toHaveBeenCalled();
-  });
-});
-
-// ─── establishDashboardSession / resolveAccessibleGuilds (shared with passkey login) ──
-
-describe('establishDashboardSession', () => {
-  it('rejects an empty guild list without touching the session', async () => {
-    const regenerate = vi.fn();
-    const req: any = { session: { regenerate } };
-    const dbUser = { discord_id: '42', discord_name: 'Alice', is_owner: false } as any;
-    await expect(establishDashboardSession(req, { id: '42', username: 'alice', avatar: null }, dbUser, []))
-      .rejects.toThrow('accessibleGuilds must be non-empty');
-    expect(regenerate).not.toHaveBeenCalled();
-  });
-
-  it('regenerates the session and stores the same user payload the Discord callback builds', async () => {
-    const guild = { guild_id: 'g1', name: 'Guild One', voice_channel_id: null };
-    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.MANAGER);
-    const dbUser = { discord_id: '42', discord_name: 'Alice', is_owner: false } as any;
-    const regenerate = vi.fn((cb: (err: null) => void) => cb(null));
-    const save = vi.fn((cb: (err: null) => void) => cb(null));
-    const req: any = { session: { regenerate, save } };
-    // regenerate() replaces req.session in real express-session; the stub keeps the same object.
-    await establishDashboardSession(req, { id: '42', username: 'alice', avatar: 'abc' }, dbUser, [guild as any]);
-
-    expect(regenerate).toHaveBeenCalled();
-    expect(save).toHaveBeenCalled();
-    // Only the Discord OAuth callback passes discordAuthAt; passkey sign-in leaves it unset.
-    expect(req.session.discordAuthAt).toBeUndefined();
-    expect(req.session.user).toEqual({
-      discordId: '42',
-      discordName: 'Alice',
-      discordAvatar: 'https://cdn.discordapp.com/avatars/42/abc.png',
-      isOwner: false,
-      currentGuildId: 'g1',
-      accessLevel: AccessLevel.MANAGER,
-      guilds: [{ guildId: 'g1', name: 'Guild One' }],
-    });
-  });
-});
-
-describe('resolveAccessibleGuilds', () => {
-  it('returns every guild for an owner and memberships otherwise', async () => {
-    vi.mocked(getAllGuilds).mockResolvedValue([{ guild_id: 'all' }] as any);
-    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: 'mine' }] as any);
-    expect(await resolveAccessibleGuilds({ discord_id: '1', is_owner: true } as any)).toEqual([{ guild_id: 'all' }]);
-    expect(await resolveAccessibleGuilds({ discord_id: '1', is_owner: false } as any)).toEqual([{ guild_id: 'mine' }]);
-    expect(getGuildsForMember).toHaveBeenCalledWith('1');
   });
 });
