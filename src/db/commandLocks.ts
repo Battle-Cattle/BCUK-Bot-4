@@ -84,13 +84,37 @@ export async function acquireNamedLock(connection: mysql.PoolConnection, lockNam
   throw new Error(`${lockFailureMessage(lockStatus, lockName)} (lock_status=${String(lockStatus)}).`);
 }
 
-/** Releases a MySQL named lock on `connection`. Swallows and logs any error — releasing must never block the caller's cleanup. */
-export async function releaseNamedLock(connection: mysql.PoolConnection, lockName: string): Promise<void> {
+/**
+ * Releases a MySQL named lock on `connection`, reporting whether it worked. Swallows and logs any
+ * error — releasing must never block the caller's cleanup. If `RELEASE_LOCK` fails, the connection
+ * is destroyed rather than left usable: the session may still hold the `GET_LOCK`, and handing it
+ * back to the pool would keep that lock held indefinitely by an idle pooled connection. Destroying
+ * the session makes MySQL drop every named lock it held. A later `connection.release()` by the
+ * caller is a no-op on a destroyed pool connection, so existing callers stay safe.
+ * @param connection - Pool connection the lock was acquired on.
+ * @param lockName - Name of the lock to release.
+ * @returns True if `RELEASE_LOCK` ran; false if it failed and the connection was destroyed.
+ */
+async function tryReleaseNamedLock(connection: mysql.PoolConnection, lockName: string): Promise<boolean> {
   try {
     await connection.execute('SELECT RELEASE_LOCK(?)', [lockName]);
+    return true;
   } catch (error) {
-    log.warn(`Failed to release command write lock '${lockName}':`, error);
+    log.warn(`Failed to release command write lock '${lockName}'; destroying connection so the lock can't leak back into the pool:`, error);
+    connection.destroy();
+    return false;
   }
+}
+
+/**
+ * Releases a MySQL named lock on `connection`. Never rejects; on a failed `RELEASE_LOCK` the
+ * connection is destroyed instead of being left to return to the pool still holding the lock
+ * (see {@link tryReleaseNamedLock}).
+ * @param connection - Pool connection the lock was acquired on.
+ * @param lockName - Name of the lock to release.
+ */
+export async function releaseNamedLock(connection: mysql.PoolConnection, lockName: string): Promise<void> {
+  await tryReleaseNamedLock(connection, lockName);
 }
 
 /**
@@ -106,15 +130,18 @@ async function acquireNamedLocks(connection: mysql.PoolConnection, lockNames: st
 }
 
 /**
- * Releases `lockNames` in reverse-acquisition order.
+ * Releases `lockNames` in reverse-acquisition order. Stops at the first failed release: that
+ * failure destroys the connection (see {@link tryReleaseNamedLock}), which already drops every named
+ * lock the session held.
  * @param connection - Pool connection the locks were acquired on.
  * @param lockNames - Lock names to release, in the same order they were acquired.
- * @returns Resolves once every release attempt has completed.
+ * @returns True if every lock was released; false if a release failed and the connection was destroyed.
  */
-async function releaseNamedLocks(connection: mysql.PoolConnection, lockNames: string[]): Promise<void> {
+async function releaseNamedLocks(connection: mysql.PoolConnection, lockNames: string[]): Promise<boolean> {
   for (const lockName of [...lockNames].reverse()) {
-    await releaseNamedLock(connection, lockName);
+    if (!(await tryReleaseNamedLock(connection, lockName))) return false;
   }
+  return true;
 }
 
 /**
@@ -308,7 +335,9 @@ export async function commandExists(id: number, executor: SqlExecutor = getPool(
  * during a non-final attempt rolls back and retries; any other error (including a collision,
  * which throws {@link CommandConflictError}) rolls back and propagates immediately. Lock
  * release is attempted and the connection returned to the pool in a `finally`; a release
- * failure is logged and swallowed rather than masking the original error.
+ * failure is logged and swallowed rather than masking the original error, and destroys the
+ * connection instead of returning it (see {@link releaseNamedLock}) — including a caller-supplied
+ * one, since it may otherwise keep holding the lock.
  * @param commandOrCommands - The command(s) this write claims; also used for the collision check.
  * @param options - Ids to exclude from the collision check, if updating an existing row, and
  *   `guildId` to scope the counter-table half of the check to one guild (see
@@ -358,8 +387,10 @@ export async function runSerializedCommandWrite<T>(
     });
   } finally {
     if (connection) {
-      try { await releaseNamedLocks(connection, lockNames); } catch (err) { log.warn('Failed to release named locks:', err); }
-      if (!callerConnection) connection.release();
+      let released = false;
+      try { released = await releaseNamedLocks(connection, lockNames); } catch (err) { log.warn('Failed to release named locks:', err); }
+      // A failed release already destroyed the connection — don't hand it back to the pool.
+      if (!callerConnection && released) connection.release();
     }
   }
 }

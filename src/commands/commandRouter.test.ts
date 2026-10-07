@@ -93,10 +93,10 @@ describe('handleCommand', () => {
 
   it('ignores the command while audio is already playing in that guild', async () => {
     vi.mocked(isPlaying).mockReturnValue(true);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
 
     await handleCommand('!ding', 'twitch', GUILD_A);
 
-    expect(vi.mocked(findCachedSfxTrigger)).not.toHaveBeenCalled();
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
     expect(vi.mocked(isPlaying)).toHaveBeenCalledWith(GUILD_A);
   });
@@ -114,9 +114,9 @@ describe('handleCommand', () => {
     vi.clearAllMocks();
     vi.spyOn(Date, 'now').mockReturnValue(mockNow);
 
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
     await handleCommand('!ding', 'twitch', GUILD_A);
 
-    expect(vi.mocked(findCachedSfxTrigger)).not.toHaveBeenCalled();
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
 
@@ -167,25 +167,53 @@ describe('handleCommand', () => {
 
   it('blocks a second concurrent call via the inFlight flag', async () => {
     vi.mocked(isPlaying).mockReturnValue(false);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
+    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
 
-    // findCachedSfxTrigger resolves immediately for the first call, but the second call
-    // arrives while the first is still awaiting — simulate by running both
-    // handleCommand calls concurrently without awaiting the first.
-    let resolveFirst!: (value: SfxLookupResult) => void;
-    const firstLookupPromise = new Promise<SfxLookupResult>((resolve) => { resolveFirst = resolve; });
-    vi.mocked(findCachedSfxTrigger).mockReturnValueOnce(firstLookupPromise as ReturnType<typeof findCachedSfxTrigger>);
+    // Hold the first call inside playFile so the second arrives while the slot is claimed.
+    let resolveFirst!: () => void;
+    vi.mocked(playFile).mockReturnValueOnce(new Promise<void>((resolve) => { resolveFirst = resolve; }));
 
     const first = handleCommand('!ding', 'twitch', GUILD_A);
+    await vi.waitFor(() => expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1));
 
-    // Second call arrives while first is suspended inside findCachedSfxTrigger
     await handleCommand('!ding', 'twitch', GUILD_A);
-    expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledTimes(1); // second was blocked
+    expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1); // second was blocked
 
-    // Let the first call complete
-    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
-    resolveFirst(LOOKUP);
+    resolveFirst();
     await first;
+    expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
+  });
 
+  it('a non-trigger message whose lookup is still pending does not block a concurrent trigger', async () => {
+    vi.mocked(isPlaying).mockReturnValue(false);
+    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
+
+    let resolveHello!: (value: SfxLookupResult | null) => void;
+    const helloLookup = new Promise<SfxLookupResult | null>((resolve) => { resolveHello = resolve; });
+    vi.mocked(findCachedSfxTrigger)
+      .mockReturnValueOnce(helloLookup as ReturnType<typeof findCachedSfxTrigger>)
+      .mockResolvedValueOnce(LOOKUP);
+
+    const hello = handleCommand('hello', 'twitch', GUILD_A);
+    await handleCommand('!ding', 'twitch', GUILD_A);
+    expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
+
+    resolveHello(null);
+    await hello;
+    expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
+    // Ordinary chat never reaches the cooldown/in-flight check, so it logs nothing about it.
+    expect(log.info).not.toHaveBeenCalledWith(expect.stringContaining("ignoring 'hello'"));
+  });
+
+  it('looks the trigger up only once per message', async () => {
+    vi.mocked(isPlaying).mockReturnValue(false);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
+    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
+
+    await handleCommand('!ding', 'twitch', GUILD_A);
+
+    expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
   });
 

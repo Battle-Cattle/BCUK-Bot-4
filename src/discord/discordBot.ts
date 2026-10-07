@@ -176,9 +176,13 @@ function recordShardActivity(): void {
  * {@link GATEWAY_STALL_THRESHOLD_MS}, discord.js's own reconnect loop is presumed stuck. Logs, DMs
  * the owner, and forces a fresh login the same way `shardDisconnect` does (including tearing down
  * orphaned voice connections first).
+ *
+ * Skipped while a login-failure backoff retry is pending (`reconnectTimer`): that backoff (up to
+ * {@link RECONNECT_MAX_DELAY_MS}) can legitimately outlast the stall threshold, and forcing a login
+ * here would cancel it, defeat the backoff and re-alert the owner on every check.
  */
 function checkGatewayStall(): void {
-  if (gatewayConnected || isWatchdogRecoveryPending()) return;
+  if (gatewayConnected || isWatchdogRecoveryPending() || reconnectTimer !== null) return;
   const stalledForMs = Date.now() - lastShardActivityAt;
   if (stalledForMs < GATEWAY_STALL_THRESHOLD_MS) return;
   const stalledForSec = Math.round(stalledForMs / 1000);

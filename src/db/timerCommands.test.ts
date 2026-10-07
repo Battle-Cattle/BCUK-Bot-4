@@ -306,6 +306,13 @@ describe('getAllEnabledTimerCommandsWithChannel', () => {
     expect(pool.execute.mock.calls[0]![1]).toBeUndefined();
   });
 
+  it('only includes channels whose Twitch bot is enabled', async () => {
+    const pool = makeMockPool({ rows: [] });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getAllEnabledTimerCommandsWithChannel();
+    expect(pool.execute.mock.calls[0]![0]).toMatch(/u\.is_twitch_bot_enabled = 1/);
+  });
+
   it('normalizes the channel so it matches the lowercased key chat activity is recorded under', async () => {
     // If this returned the raw stored value unnormalized, a channel with any uppercase
     // characters would produce a `row.channel` that never matches the lowercase key

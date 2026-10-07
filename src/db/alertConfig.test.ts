@@ -284,29 +284,54 @@ describe('saveAlertConfig', () => {
 // ─── setAlertImage / setAlertSound ─────────────────────────────────────────────
 
 describe('setAlertImage', () => {
-  it('inserts a default row with the asset set when no matching row exists, returning null', async () => {
-    const conn = makeMockConnection({ execute: vi.fn().mockResolvedValue([[], []]) });
+  it('upserts a default row first, then returns null when the freshly created row had no asset', async () => {
+    const conn = makeMockConnection({
+      execute: vi.fn()
+        .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+        .mockResolvedValueOnce([[{ image_filename: null }], []])
+        .mockResolvedValueOnce([{ affectedRows: 1 }, []]),
+    });
     vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
     const result = await setAlertImage(1, 'follow', 'new.png');
     expect(result).toBeNull();
-    expect(conn.execute).toHaveBeenCalledTimes(2);
-    const [insertSql, insertParams] = conn.execute.mock.calls[1]!;
+    expect(conn.execute).toHaveBeenCalledTimes(3);
+    const [insertSql, insertParams] = conn.execute.mock.calls[0]!;
     expect(insertSql.toUpperCase()).toContain('INSERT');
-    expect(insertParams).toEqual([1, 'follow', 'Thanks {display_name} for the follow!', 'new.png']);
+    expect(insertSql).toContain('AS new_row');
+    expect(insertSql.toUpperCase()).toContain('ON DUPLICATE KEY UPDATE');
+    expect(insertParams).toEqual([1, 'follow', 'Thanks {display_name} for the follow!']);
+    const [updateSql, updateParams] = conn.execute.mock.calls[2]!;
+    expect(updateSql.toUpperCase()).toContain('UPDATE ALERT_CONFIG SET IMAGE_FILENAME');
+    expect(updateParams).toEqual(['new.png', 1, 'follow']);
+  });
+
+  it('never issues a plain INSERT that could race a concurrent first upload', async () => {
+    const conn = makeMockConnection({
+      execute: vi.fn()
+        .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+        .mockResolvedValueOnce([[{ image_filename: null }], []])
+        .mockResolvedValueOnce([{ affectedRows: 1 }, []]),
+    });
+    vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
+    await setAlertImage(1, 'follow', 'new.png');
+    const inserts = conn.execute.mock.calls.filter((call: unknown[]) => String(call[0]).toUpperCase().includes('INSERT'));
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]![0].toUpperCase()).toContain('ON DUPLICATE KEY UPDATE');
   });
 
   it('returns the previous filename and updates to the new one', async () => {
     const conn = makeMockConnection({
       execute: vi.fn()
+        .mockResolvedValueOnce([{ affectedRows: 0 }, []])
         .mockResolvedValueOnce([[{ image_filename: 'old.png' }], []])
         .mockResolvedValueOnce([{ affectedRows: 1 }, []]),
     });
     vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
     const result = await setAlertImage(1, 'follow', 'new.png');
     expect(result).toBe('old.png');
-    const [selectSql] = conn.execute.mock.calls[0]!;
+    const [selectSql] = conn.execute.mock.calls[1]!;
     expect(selectSql.toUpperCase()).toContain('FOR UPDATE');
-    const [updateSql, updateParams] = conn.execute.mock.calls[1]!;
+    const [updateSql, updateParams] = conn.execute.mock.calls[2]!;
     expect(updateSql.toUpperCase()).toContain('UPDATE');
     expect(updateParams).toEqual(['new.png', 1, 'follow']);
   });
@@ -320,30 +345,52 @@ describe('setAlertImage', () => {
     expect(conn.commit).toHaveBeenCalledTimes(1);
     expect(conn.rollback).not.toHaveBeenCalled();
   });
+
+  it('rolls back and rethrows when the update fails', async () => {
+    const conn = makeMockConnection({
+      execute: vi.fn()
+        .mockResolvedValueOnce([{ affectedRows: 0 }, []])
+        .mockResolvedValueOnce([[{ image_filename: 'old.png' }], []])
+        .mockRejectedValueOnce(new Error('boom')),
+    });
+    vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
+    await expect(setAlertImage(1, 'follow', 'new.png')).rejects.toThrow('boom');
+    expect(conn.rollback).toHaveBeenCalledTimes(1);
+    expect(conn.commit).not.toHaveBeenCalled();
+  });
 });
 
 describe('setAlertSound', () => {
-  it('inserts a default row with the asset set when no matching row exists, returning null', async () => {
-    const conn = makeMockConnection({ execute: vi.fn().mockResolvedValue([[], []]) });
+  it('upserts a default row first, then returns null when the freshly created row had no asset', async () => {
+    const conn = makeMockConnection({
+      execute: vi.fn()
+        .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+        .mockResolvedValueOnce([[{ sound_filename: null }], []])
+        .mockResolvedValueOnce([{ affectedRows: 1 }, []]),
+    });
     vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
     const result = await setAlertSound(1, 'raid', 'air.mp3');
     expect(result).toBeNull();
-    expect(conn.execute).toHaveBeenCalledTimes(2);
-    const [insertSql, insertParams] = conn.execute.mock.calls[1]!;
-    expect(insertSql.toUpperCase()).toContain('INSERT');
-    expect(insertParams).toEqual([1, 'raid', 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!', 'air.mp3']);
+    expect(conn.execute).toHaveBeenCalledTimes(3);
+    const [insertSql, insertParams] = conn.execute.mock.calls[0]!;
+    expect(insertSql.toUpperCase()).toContain('ON DUPLICATE KEY UPDATE');
+    expect(insertParams).toEqual([1, 'raid', 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!']);
+    const [updateSql, updateParams] = conn.execute.mock.calls[2]!;
+    expect(updateSql.toUpperCase()).toContain('UPDATE ALERT_CONFIG SET SOUND_FILENAME');
+    expect(updateParams).toEqual(['air.mp3', 1, 'raid']);
   });
 
   it('returns the previous filename and updates to the new one', async () => {
     const conn = makeMockConnection({
       execute: vi.fn()
+        .mockResolvedValueOnce([{ affectedRows: 0 }, []])
         .mockResolvedValueOnce([[{ sound_filename: 'old.mp3' }], []])
         .mockResolvedValueOnce([{ affectedRows: 1 }, []]),
     });
     vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
     const result = await setAlertSound(1, 'raid', 'air.mp3');
     expect(result).toBe('old.mp3');
-    const [updateSql, updateParams] = conn.execute.mock.calls[1]!;
+    const [updateSql, updateParams] = conn.execute.mock.calls[2]!;
     expect(updateSql.toUpperCase()).toContain('UPDATE');
     expect(updateParams).toEqual(['air.mp3', 1, 'raid']);
   });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import path from 'path';
 import { mockLogger } from '../test-utils/loggerMock';
 
@@ -454,15 +454,48 @@ describe('deleteUnlinkedUserRecord', () => {
     await expect(deleteUnlinkedUserRecord('123')).resolves.toBe(false);
   });
 
-  it('guards every foreign key to `user` declared in schema.sql', () => {
-    const schema = readFileSync(path.join(__dirname, '../../schema.sql'), 'utf8');
-    const referencing: string[] = [];
-    for (const [, table, body] of schema.matchAll(/CREATE TABLE IF NOT EXISTS `?(\w+)`?\s*\(([\s\S]*?)\)\s*ENGINE/g)) {
-      for (const [, column] of body!.matchAll(/FOREIGN KEY \((\w+)\) REFERENCES `?user`?\s*\(discord_id\)/g)) {
-        referencing.push(`${table}.${column}`);
+  it('releases the connection back to the pool after resetting the lock timeout', async () => {
+    const pool = makePool(undefined, [{ affectedRows: 1 }, []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await deleteUnlinkedUserRecord('123');
+    expect(pool._conn.execute).toHaveBeenLastCalledWith('SET SESSION innodb_lock_wait_timeout = DEFAULT');
+    expect(pool._conn.release).toHaveBeenCalledTimes(1);
+    expect(pool._conn.destroy).not.toHaveBeenCalled();
+  });
+
+  it('destroys the connection instead of releasing it when the lock-timeout reset fails', async () => {
+    const pool = makePool();
+    pool._conn.execute
+      .mockResolvedValueOnce([[], []]) // SET 5s timeout
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]) // DELETE
+      .mockRejectedValueOnce(new Error('reset failed')); // SET DEFAULT
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(deleteUnlinkedUserRecord('123')).resolves.toBe(true);
+    expect(pool._conn.destroy).toHaveBeenCalledTimes(1);
+    expect(pool._conn.release).not.toHaveBeenCalled();
+  });
+
+  it('guards every foreign key to `user` declared in schema.sql or in a table only migrations/ creates', () => {
+    const root = path.join(__dirname, '../..');
+    const migrationsDir = path.join(root, 'migrations');
+    const createTable = /CREATE TABLE (?:IF NOT EXISTS )?`?(\w+)`?\s*\(([\s\S]*?)\)\s*ENGINE/g;
+    const userFk = /FOREIGN KEY \((\w+)\) REFERENCES `?user`?\s*\(discord_id\)/g;
+    // schema.sql is authoritative for the tables it declares; migrations can carry older shapes
+    // of those tables, so only tables missing from schema.sql (e.g. webauthn_*) are read from them.
+    const tables = new Map<string, string>();
+    for (const [, table, body] of readFileSync(path.join(root, 'schema.sql'), 'utf8').matchAll(createTable)) {
+      tables.set(table!, body!);
+    }
+    for (const file of readdirSync(migrationsDir).filter((f) => f.endsWith('.sql'))) {
+      for (const [, table, body] of readFileSync(path.join(migrationsDir, file), 'utf8').matchAll(createTable)) {
+        if (!tables.has(table!)) tables.set(table!, body!);
       }
     }
-    expect(referencing.length).toBeGreaterThan(0);
+    const referencing: string[] = [];
+    for (const [table, body] of tables) {
+      for (const [, column] of body.matchAll(userFk)) referencing.push(`${table}.${column}`);
+    }
+    expect(referencing).toContain('webauthn_credentials.discord_id');
     const guarded = USER_REFERENCING_COLUMNS.map(([table, column]) => `${table}.${column}`);
     expect(guarded).toEqual(expect.arrayContaining(referencing));
   });

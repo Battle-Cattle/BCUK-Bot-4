@@ -27,6 +27,7 @@ vi.mock('./pool', () => {
 vi.mock('mysql2/promise', () => ({ default: {} }));
 vi.mock('./commandLocks', () => ({
   runSerializedCommandWrite: vi.fn(async (_cmds: unknown, _opts: unknown, fn: (conn: unknown) => Promise<unknown>) => fn(mockConnection)),
+  isAnyCommandTakenAcrossTables: vi.fn(async () => false),
 }));
 vi.mock('./commandStringUtils', () => ({
   requireTrimmedString: vi.fn((v: string, _name: string, _max?: number) => {
@@ -78,7 +79,7 @@ import {
   invalidateArchiveColumnsCache,
   CounterNotFoundError,
 } from './counters';
-import { runSerializedCommandWrite } from './commandLocks';
+import { runSerializedCommandWrite, isAnyCommandTakenAcrossTables } from './commandLocks';
 import { assertNotReservedCommand } from './reservedCommands';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
@@ -89,6 +90,7 @@ function makePool(rows: unknown[] = [], meta: unknown = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(isAnyCommandTakenAcrossTables).mockResolvedValue(false);
   // The archive-columns cache is a module-level singleton (5-minute TTL in
   // production) so it must be reset between tests, or a later test's
   // getCounterHistory call would silently reuse an earlier test's cached columns
@@ -369,6 +371,13 @@ describe('addCounter', () => {
 
 // ─── updateCounter ────────────────────────────────────────────────────────────
 
+/** Queues the under-lock re-read of the counter's current commands, then a successful UPDATE. */
+function mockLockedCounterRow(trigger: string, check: string) {
+  mockConnection.execute
+    .mockResolvedValueOnce([[{ trigger_command: trigger, check_command: check }], []])
+    .mockResolvedValue([{ affectedRows: 1 }, []]);
+}
+
 describe('updateCounter', () => {
   it('throws when trigger and check are the same', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!old', check_command: '!oldcheck' }]) as any);
@@ -384,7 +393,7 @@ describe('updateCounter', () => {
 
   it('calls assertNotReservedCommand for both commands', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!old', check_command: '!oldcheck' }]) as any);
-    mockConnection.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
+    mockLockedCounterRow('!old', '!oldcheck');
     await updateCounter('guild-1', { id: 1, triggerCommand: '!new', checkCommand: '!newcheck', message: 'm', incrementMessage: 'i', resetYearly: false });
     expect(assertNotReservedCommand).toHaveBeenCalledWith('!new');
     expect(assertNotReservedCommand).toHaveBeenCalledWith('!newcheck');
@@ -405,11 +414,63 @@ describe('updateCounter', () => {
 
   it('scopes the UPDATE statement to the given guild id', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!old', check_command: '!oldcheck' }]) as any);
-    mockConnection.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
+    mockLockedCounterRow('!old', '!oldcheck');
     await updateCounter('guild-1', { id: 1, triggerCommand: '!new', checkCommand: '!newcheck', message: 'm', incrementMessage: 'i', resetYearly: false });
-    const [sql, params] = mockConnection.execute.mock.calls[0]!;
+    const [sql, params] = mockConnection.execute.mock.calls[1]!; // [0] is the under-lock re-read
     expect(sql).toContain('WHERE id = ? AND guild_id = ?');
     expect(params).toEqual(['!new', '!newcheck', 'm', 'i', 0, 1, 'guild-1']);
+  });
+
+  it('locks old and new commands but disables the built-in collision check', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!old', check_command: '!oldcheck' }]) as any);
+    mockLockedCounterRow('!old', '!oldcheck');
+    await updateCounter('guild-1', { id: 1, triggerCommand: '!new', checkCommand: '!newcheck', message: 'm', incrementMessage: 'i', resetYearly: false });
+    expect(runSerializedCommandWrite).toHaveBeenCalledWith(
+      ['!old', '!oldcheck', '!new', '!newcheck'],
+      { guildId: 'guild-1' },
+      expect.any(Function),
+      { includeCustomCommandTable: false, includeCounterTable: false },
+    );
+  });
+
+  it('collision-checks only the commands the counter is gaining', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!old', check_command: '!oldcheck' }]) as any);
+    mockLockedCounterRow('!old', '!oldcheck');
+    await updateCounter('guild-1', { id: 1, triggerCommand: '!old', checkCommand: '!newcheck', message: 'm', incrementMessage: 'i', resetYearly: false });
+    expect(isAnyCommandTakenAcrossTables).toHaveBeenCalledWith(['!newcheck'], { excludeCounterId: 1, guildId: 'guild-1' }, mockConnection);
+  });
+
+  it('still allows editing a counter whose unchanged commands already collide (no collision check at all)', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!clash', check_command: '!check' }]) as any);
+    mockLockedCounterRow('!clash', '!check');
+    vi.mocked(isAnyCommandTakenAcrossTables).mockResolvedValue(true); // would collide if checked
+    await updateCounter('guild-1', { id: 1, triggerCommand: '!clash', checkCommand: '!check', message: 'new msg', incrementMessage: 'i', resetYearly: true });
+    expect(isAnyCommandTakenAcrossTables).not.toHaveBeenCalled();
+    expect(mockConnection.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows renaming a colliding command away from the collision', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!clash', check_command: '!check' }]) as any);
+    mockLockedCounterRow('!clash', '!check');
+    await updateCounter('guild-1', { id: 1, triggerCommand: '!fresh', checkCommand: '!check', message: 'm', incrementMessage: 'i', resetYearly: false });
+    expect(isAnyCommandTakenAcrossTables).toHaveBeenCalledWith(['!fresh'], { excludeCounterId: 1, guildId: 'guild-1' }, mockConnection);
+    expect(mockConnection.execute.mock.calls[1]![1]).toEqual(['!fresh', '!check', 'm', 'i', 0, 1, 'guild-1']);
+  });
+
+  it('throws CommandConflictError (without updating) when a newly gained command is taken', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!old', check_command: '!oldcheck' }]) as any);
+    mockLockedCounterRow('!old', '!oldcheck');
+    vi.mocked(isAnyCommandTakenAcrossTables).mockResolvedValueOnce(true);
+    await expect(updateCounter('guild-1', { id: 1, triggerCommand: '!taken', checkCommand: '!oldcheck', message: 'm', incrementMessage: 'i', resetYearly: false }))
+      .rejects.toThrow('!taken');
+    expect(mockConnection.execute).toHaveBeenCalledTimes(1); // only the re-read
+  });
+
+  it('throws CounterNotFoundError when the counter vanished before the locks were taken', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ trigger_command: '!old', check_command: '!oldcheck' }]) as any);
+    mockConnection.execute.mockResolvedValueOnce([[], []]);
+    await expect(updateCounter('guild-1', { id: 1, triggerCommand: '!new', checkCommand: '!newcheck', message: 'm', incrementMessage: 'i', resetYearly: false }))
+      .rejects.toBeInstanceOf(CounterNotFoundError);
   });
 });
 
@@ -427,8 +488,10 @@ describe('removeCounter', () => {
     await removeCounter('guild-1', 1);
     expect(runSerializedCommandWrite).toHaveBeenCalledWith(
       ['!hits', '!checkhits'],
-      { excludeCounterId: 1, guildId: 'guild-1' },
+      { guildId: 'guild-1' },
       expect.any(Function),
+      // Lock only: a counter that already collides must still be deletable.
+      { includeCustomCommandTable: false, includeCounterTable: false },
     );
   });
 
@@ -545,6 +608,16 @@ describe('incrementCounter', () => {
 // ─── archiveAndResetYearlyCounters ────────────────────────────────────────────
 
 describe('archiveAndResetYearlyCounters', () => {
+  /** Pool whose transaction connection claims the marker (affectedRows 1), then runs the UPDATE. */
+  function archivePool(updateAffected: number, claimAffected = 1) {
+    const pool = makePool();
+    pool._conn.execute
+      .mockResolvedValueOnce([{ affectedRows: claimAffected }, []])
+      .mockResolvedValueOnce([{ affectedRows: updateAffected }, []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    return pool;
+  }
+
   it('throws for a year before 2020', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
     await expect(archiveAndResetYearlyCounters(2019)).rejects.toThrow('Invalid archive year: 2019');
@@ -556,32 +629,103 @@ describe('archiveAndResetYearlyCounters', () => {
   });
 
   it('accepts year 2020 (lower boundary)', async () => {
-    const pool = makePool();
-    pool.execute.mockResolvedValue([{ affectedRows: 3 }, []]);
-    vi.mocked(getPool).mockReturnValue(pool as any);
+    archivePool(3);
     await expect(archiveAndResetYearlyCounters(2020)).resolves.toBe(3);
   });
 
   it('accepts year 2100 (upper boundary)', async () => {
-    const pool = makePool();
-    pool.execute.mockResolvedValue([{ affectedRows: 0 }, []]);
-    vi.mocked(getPool).mockReturnValue(pool as any);
+    archivePool(0);
     await expect(archiveAndResetYearlyCounters(2100)).resolves.toBe(0);
   });
 
-  it('returns the number of affected rows', async () => {
-    const pool = makePool();
-    pool.execute.mockResolvedValue([{ affectedRows: 5 }, []]);
-    vi.mocked(getPool).mockReturnValue(pool as any);
+  it('claims the year marker, then archives, in one committed transaction', async () => {
+    const pool = archivePool(5);
     expect(await archiveAndResetYearlyCounters(2024)).toBe(5);
+    const conn = pool._conn;
+    expect(conn.beginTransaction).toHaveBeenCalledTimes(1);
+    const [claimSql, claimParams] = conn.execute.mock.calls[0]!;
+    expect(claimSql).toContain('INSERT IGNORE INTO counter_archive_run');
+    expect(claimParams).toEqual([2024]);
+    const [updateSql] = conn.execute.mock.calls[1] as [string];
+    expect(updateSql).toContain('value2024');
+    expect(conn.commit).toHaveBeenCalledTimes(1);
+    expect(conn.rollback).not.toHaveBeenCalled();
   });
 
-  it('includes the column name for the given year in the SQL', async () => {
+  it('is a no-op returning 0 when the year marker already exists', async () => {
+    const pool = archivePool(9, 0);
+    expect(await archiveAndResetYearlyCounters(2024)).toBe(0);
+    expect(pool._conn.execute).toHaveBeenCalledTimes(1); // no UPDATE
+    expect(pool._conn.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls back the marker claim when the UPDATE fails, so a later tick retries', async () => {
     const pool = makePool();
-    pool.execute.mockResolvedValue([{ affectedRows: 1 }, []]);
+    pool._conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockRejectedValueOnce(new Error("Unknown column 'value2024'"));
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await archiveAndResetYearlyCounters(2024);
-    const [sql] = pool.execute.mock.calls[0] as [string];
-    expect(sql).toContain('value2024');
+    await expect(archiveAndResetYearlyCounters(2024)).rejects.toThrow("Unknown column 'value2024'");
+    expect(pool._conn.rollback).toHaveBeenCalledTimes(1);
+    expect(pool._conn.commit).not.toHaveBeenCalled();
+    expect(pool._conn.release).toHaveBeenCalled();
+  });
+
+  it('propagates (after rollback) when the counter_archive_run table is missing', async () => {
+    const pool = makePool();
+    pool._conn.execute.mockRejectedValueOnce(new Error("Table 'counter_archive_run' doesn't exist"));
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(archiveAndResetYearlyCounters(2024)).rejects.toThrow("doesn't exist");
+    expect(pool._conn.rollback).toHaveBeenCalledTimes(1);
+  });
+
+  describe('archive column', () => {
+    it('adds the missing value<year> column before the transaction', async () => {
+      const pool = archivePool(2);
+      pool.query.mockResolvedValueOnce([[], []]); // column lookup: not found
+      expect(await archiveAndResetYearlyCounters(2026)).toBe(2);
+      const [lookupSql, lookupParams] = pool.query.mock.calls[0]!;
+      expect(lookupSql).toContain('information_schema.COLUMNS');
+      expect(lookupParams).toEqual(['value2026']);
+      expect(pool.query.mock.calls[1]![0]).toBe('ALTER TABLE counter ADD COLUMN `value2026` INT NULL');
+      expect(pool.query.mock.invocationCallOrder[1]!).toBeLessThan(pool._conn.beginTransaction.mock.invocationCallOrder[0]!);
+    });
+
+    it('skips the ALTER when the column already exists', async () => {
+      const pool = archivePool(2);
+      pool.query.mockResolvedValueOnce([[{ 1: 1 }], []]);
+      expect(await archiveAndResetYearlyCounters(2026)).toBe(2);
+      expect(pool.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('treats a concurrent add (ER_DUP_FIELDNAME) as success', async () => {
+      const pool = archivePool(1);
+      pool.query
+        .mockResolvedValueOnce([[], []])
+        .mockRejectedValueOnce(Object.assign(new Error("Duplicate column name 'value2026'"), { code: 'ER_DUP_FIELDNAME', errno: 1060 }));
+      expect(await archiveAndResetYearlyCounters(2026)).toBe(1);
+    });
+
+    it('propagates other ALTER failures without starting the transaction', async () => {
+      const pool = archivePool(1);
+      pool.query
+        .mockResolvedValueOnce([[], []])
+        .mockRejectedValueOnce(Object.assign(new Error('ALTER command denied'), { code: 'ER_TABLEACCESS_DENIED_ERROR', errno: 1142 }));
+      await expect(archiveAndResetYearlyCounters(2026)).rejects.toThrow('ALTER command denied');
+      expect(pool._conn.beginTransaction).not.toHaveBeenCalled();
+    });
+
+    it('invalidates the archive-columns cache after adding the column', async () => {
+      const pool = archivePool(0);
+      const isColumnListQuery = (sql: unknown) => String(sql).includes("LIKE 'value2%'");
+      await getCounterHistory('guild-1', 1); // loads and caches the (empty) column list
+      await getCounterHistory('guild-1', 1); // served from cache
+      expect(pool.query.mock.calls.filter(([sql]) => isColumnListQuery(sql))).toHaveLength(1);
+
+      pool.query.mockResolvedValueOnce([[], []]); // column lookup: not found → ALTER
+      await archiveAndResetYearlyCounters(2024);
+      await getCounterHistory('guild-1', 1);
+      expect(pool.query.mock.calls.filter(([sql]) => isColumnListQuery(sql))).toHaveLength(2);
+    });
   });
 });
