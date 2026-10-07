@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
-import { isMysqlDuplicateEntryError } from './commandStringUtils';
+import { isMysqlDuplicateEntryError } from './utils';
 
 /** A passkey as shown in the user's settings page — no key material. */
 export interface PasskeySummary {

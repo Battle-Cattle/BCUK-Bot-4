@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
-import { isMysqlDuplicateEntryError } from './commandStringUtils';
+import { isMysqlDuplicateEntryError } from './utils';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('DB');

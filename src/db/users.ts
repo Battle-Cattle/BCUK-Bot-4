@@ -2,8 +2,7 @@ import mysql from 'mysql2/promise';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import { getPool } from './pool';
 import { createLogger } from '../shared/logger';
-import { fromBit } from './utils';
-import { buildInClausePlaceholders } from './commandStringUtils';
+import { fromBit, buildInClausePlaceholders } from './utils';
 
 const log = createLogger('DB');
 
