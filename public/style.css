@@ -398,6 +398,9 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
    that makes the chart on wide cards (uncapped, a ~1200px-wide card would need a ~300px-tall chart
    to stay undistorted). */
 .price-history-chart { display: block; width: 100%; max-width: 640px; height: auto; aspect-ratio: 480 / 120; cursor: crosshair; touch-action: none; }
+/* Empty-state placeholder sized to match the chart. Lives here rather than in an inline style=""
+   attribute, which the CSP (style-src 'self', no 'unsafe-inline') would block. */
+.price-history-empty { height: 120px; display: flex; align-items: center; justify-content: center; }
 .price-history-tooltip {
   position: absolute; z-index: 20; pointer-events: none;
   background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;

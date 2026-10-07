@@ -50,7 +50,7 @@ function formatTooltipElapsed(ms) {
 function updateCrosshair(svg, tooltip, clientX) {
   const crosshair = svg.querySelector('.price-history-crosshair');
   if (clientX === null) {
-    if (crosshair) crosshair.style.display = 'none';
+    if (crosshair) crosshair.classList.add('is-hidden');
     tooltip.style.display = 'none';
     return;
   }
@@ -74,7 +74,7 @@ function updateCrosshair(svg, tooltip, clientX) {
   const pointX = plotLeft + ((t - rangeStart) / (rangeEnd - rangeStart)) * (plotRight - plotLeft);
 
   if (crosshair) {
-    crosshair.style.display = '';
+    crosshair.classList.remove('is-hidden');
     const line = crosshair.querySelector('.price-history-crosshair-line');
     const dot = crosshair.querySelector('.price-history-crosshair-dot');
     if (line) { line.setAttribute('x1', String(pointX)); line.setAttribute('x2', String(pointX)); }
@@ -147,7 +147,7 @@ const CHART_PADDING = { top: 10, right: 12, bottom: 20, left: 44 };
  */
 function buildPriceHistoryChartMarkup(points, rangeStartMs, rangeEndMs) {
   if (points.length === 0) {
-    return `<div class="hint price-history-empty" style="height:${CHART_HEIGHT}px;display:flex;align-items:center;justify-content:center;">No price history yet for this range.</div>`;
+    return `<div class="hint price-history-empty">No price history yet for this range.</div>`;
   }
 
   const sorted = [...points].sort((a, b) => a[0] - b[0]);
@@ -188,7 +188,7 @@ function buildPriceHistoryChartMarkup(points, rangeStartMs, rangeEndMs) {
   <polyline points="${polyline}" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
   <circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="4" fill="var(--primary)" stroke="var(--bg-card)" stroke-width="2"/>
   <text x="${last.x.toFixed(1)}" y="${(last.y - 8).toFixed(1)}" text-anchor="end" class="price-history-end-label">${lastCost.toLocaleString()} pts</text>
-  <g class="price-history-crosshair" style="display:none;">
+  <g class="price-history-crosshair is-hidden">
     <line class="price-history-crosshair-line" y1="${plotTop}" y2="${plotBottom}" stroke="var(--muted)" stroke-width="1"/>
     <circle class="price-history-crosshair-dot" r="4" fill="var(--primary)" stroke="var(--bg-card)" stroke-width="2"/>
   </g>

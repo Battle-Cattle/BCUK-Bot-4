@@ -8,6 +8,21 @@ describe('renderPriceHistoryChart', () => {
     expect(svg).not.toContain('<svg');
   });
 
+  // The panel's CSP is style-src 'self' with no 'unsafe-inline', so browsers ignore inline
+  // style="" attributes — anything the chart relies on (the crosshair starting hidden, the
+  // placeholder's size) must come from a class instead.
+  it('emits no inline style attributes, which the CSP would block', () => {
+    const empty = renderPriceHistoryChart([], 1_700_000_000_000, 1_700_010_000_000);
+    const chart = renderPriceHistoryChart(
+      [{ t: 1_700_000_000_000, cost: 200 }, { t: 1_700_010_000_000, cost: 800 }],
+      1_700_000_000_000,
+      1_700_010_000_000,
+    );
+    expect(empty).not.toMatch(/\sstyle=/);
+    expect(chart).not.toMatch(/\sstyle=/);
+    expect(chart).toContain('<g class="price-history-crosshair is-hidden">');
+  });
+
   it('renders an svg with a polyline through the given points', () => {
     const points = [
       { t: 1_700_000_000_000, cost: 200 },
@@ -140,7 +155,7 @@ describe('assertSafeChartHtml', () => {
   });
 
   it('passes through the empty-state placeholder unchanged', () => {
-    const html = '<div class="hint price-history-empty" style="height:120px;">No price history yet for this range.</div>';
+    const html = '<div class="hint price-history-empty">No price history yet for this range.</div>';
     expect(assertSafeChartHtml(html)).toBe(html);
   });
 
