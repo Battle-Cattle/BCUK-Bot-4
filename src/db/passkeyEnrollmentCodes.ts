@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
-import { isMysqlDuplicateEntryError } from './commandStringUtils';
+import { isMysqlDuplicateEntryError } from './utils';
 
 /** Outcome of checking a passkey enrollment code. */
 export type EnrollmentCodeResult = 'ok' | 'invalid' | 'expired';

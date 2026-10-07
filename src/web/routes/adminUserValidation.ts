@@ -95,7 +95,7 @@ export function parseTwitchNameInput(
 
 /**
  * Thrown by an authorization check run inside a `runUserMutation` callback (see
- * `adminUserMutationQueue.ts`) so the check is evaluated atomically with the write it guards,
+ * `shared/userMutationQueue.ts`) so the check is evaluated atomically with the write it guards,
  * rather than before the write is even enqueued — see `checkManagerEditAuth`'s and
  * `checkToggleTwitchAuth`'s own doc comments for why that ordering matters. Callers catch this
  * specifically to redirect with `code` instead of falling through to a generic DB-failure redirect.

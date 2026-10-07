@@ -25,13 +25,16 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 vi.mock('./commandLocks', () => ({
   acquireNamedLock: vi.fn().mockResolvedValue(undefined),
   releaseNamedLock: vi.fn().mockResolvedValue(undefined),
-  commandExists: vi.fn().mockResolvedValue(false),
+}));
+vi.mock('./commandWriteGuard', () => ({
   runSerializedCommandWrite: vi.fn(),
 }));
 vi.mock('./commandConflicts', () => ({
   assertDiscordTriggerAvailable: vi.fn().mockResolvedValue(undefined),
   assertMultiTwitchTriggerAvailable: vi.fn().mockResolvedValue(undefined),
   assertNoSingleTwitchAssignmentOverlap: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('./commandAssignments', () => ({
   assignUserToCommandWithinTransaction: vi.fn().mockResolvedValue(undefined),
   assignUsersToCommandWithinTransaction: vi.fn().mockResolvedValue(undefined),
 }));
@@ -40,6 +43,8 @@ vi.mock('./reservedCommands', () => ({
 }));
 vi.mock('./commandStringUtils', () => ({
   requireTrimmedString: vi.fn((s: string) => (s ? s.trim() : '')),
+}));
+vi.mock('./commandErrors', () => ({
   CommandNotFoundError: class CommandNotFoundError extends Error {
     id: number;
     constructor(id: number) { super(`Command not found: ${id}`); this.id = id; }
@@ -63,14 +68,14 @@ import {
   assignUsersToCommand,
   unassignUserFromCommand,
 } from './customCommands';
-import { runSerializedCommandWrite, acquireNamedLock, releaseNamedLock } from './commandLocks';
+import { acquireNamedLock, releaseNamedLock } from './commandLocks';
+import { runSerializedCommandWrite } from './commandWriteGuard';
 import {
   assertDiscordTriggerAvailable,
   assertMultiTwitchTriggerAvailable,
   assertNoSingleTwitchAssignmentOverlap,
-  assignUserToCommandWithinTransaction,
-  assignUsersToCommandWithinTransaction,
 } from './commandConflicts';
+import { assignUserToCommandWithinTransaction, assignUsersToCommandWithinTransaction } from './commandAssignments';
 import { assertNotReservedCommand } from './reservedCommands';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 

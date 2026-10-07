@@ -14,12 +14,11 @@ import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { createMulterErrorRedirectHandler, makeUploadMiddleware, makeRequireStreamerBeforeUpload, writeFileOrCleanup } from './uploadMiddleware';
 import { safeResolve } from '../../shared/pathUtils';
+import { detectVideoType } from './uploadFileTypes';
+import { NOT_A_STREAMER_REDIRECT } from './overlayAdminShared';
 
 const log = createLogger('OverlayAdmin');
 export const router = Router();
-
-/** Redirect target used when the requester isn't a streamer, scoped to the overlay admin page. */
-const NOT_A_STREAMER_REDIRECT = '/overlay/settings?error=not_a_streamer';
 
 /** Maximum upload size in megabytes, passed to templates to avoid direct process.env access in EJS. */
 export const MAX_UPLOAD_MB = OVERLAY_MAX_FILE_MB;
@@ -32,21 +31,6 @@ export const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES },
 });
-
-/**
- * Detect video type from buffer magic bytes, independent of the client-supplied MIME type.
- * WebM: EBML header 0x1A 0x45 0xDF 0xA3
- * MP4: ftyp box signature at bytes 4–7: 0x66 0x74 0x79 0x70
- */
-export function detectVideoType(buf: Buffer): 'webm' | 'mp4' | null {
-  if (buf.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) {
-    return 'webm';
-  }
-  if (buf.subarray(4, 8).equals(Buffer.from([0x66, 0x74, 0x79, 0x70]))) {
-    return 'mp4';
-  }
-  return null;
-}
 
 /**
  * Writes an uploaded overlay video to the streamer's folder under a random name and records it

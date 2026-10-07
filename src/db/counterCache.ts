@@ -7,7 +7,7 @@ import {
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
 } from './lookupCache';
 import { normalizeCommandList, normalizeCommand } from './commandStringUtils';
-import { isAnyCommandTakenAcrossTables } from './commandLocks';
+import { isAnyCommandTakenAcrossTables } from './commandWriteGuard';
 import { getAllCounters, type DbCounter, type DbMatchedCounter, type CounterMatchType } from './counters';
 
 // ─── Cache interface ──────────────────────────────────────────────────────────

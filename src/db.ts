@@ -301,9 +301,8 @@ export async function unassignUserFromCommand(commandId: number, discordId: stri
     invalidateCustomCommandLookupCache,
   );
 }
-export {
-  CommandNotFoundError, CommandSelfServiceDeniedError, CommandConflictError, isMysqlDuplicateEntryError,
-} from './db/commandLocks';
+export { CommandNotFoundError, CommandSelfServiceDeniedError, CommandConflictError } from './db/commandErrors';
+export { isMysqlDuplicateEntryError } from './db/utils';
 export { ReservedCommandError } from './db/reservedCommands';
 
 // ─── Counter commands ───────────────────────────────────────────────────────

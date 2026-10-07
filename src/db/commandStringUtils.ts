@@ -1,8 +1,4 @@
-import mysql from 'mysql2/promise';
-
-export type SqlExecutor = mysql.Pool | mysql.PoolConnection;
-
-// ─── String normalisation ────────────────────────────────────────────────────
+// Normalisation helpers for command trigger strings and required text fields.
 
 /**
  * Trims `value` and throws if the result is blank or exceeds `maxLength`.
@@ -49,60 +45,4 @@ export function normalizeCommandList(commandOrCommands: string | string[]): stri
  */
 export function normalizeCommandInputs(commandOrCommands: string | string[]): string[] {
   return Array.from(new Set(normalizeCommandList(commandOrCommands)));
-}
-
-/**
- * Builds a comma-separated `?` placeholder list for use in a SQL `IN (...)` clause.
- * @param count Number of placeholders to generate.
- * @returns A string of `count` placeholders joined by `, `.
- */
-export function buildInClausePlaceholders(count: number): string {
-  return Array.from({ length: count }, () => '?').join(', ');
-}
-
-// ─── Error types ─────────────────────────────────────────────────────────────
-
-/** Thrown when a custom-command lookup/mutation matches no row. */
-export class CommandNotFoundError extends Error {
-  constructor(id: number) {
-    super(`Command not found: ${id}`);
-    this.name = 'CommandNotFoundError';
-  }
-}
-
-/**
- * Thrown when a streamer below Mod tries to change a custom command they don't own outright
- * (see `isCommandSelfManageableBy`).
- */
-export class CommandSelfServiceDeniedError extends Error {
-  constructor(id: number) {
-    super(`Command not self-manageable: ${id}`);
-    this.name = 'CommandSelfServiceDeniedError';
-  }
-}
-
-/** Thrown when one or more command strings are already taken by another command/counter. */
-export class CommandConflictError extends Error {
-  /** The command string(s) that caused the conflict. */
-  readonly commands: string[];
-
-  constructor(commands: string[]) {
-    super(`Command already taken: ${commands.join(', ')}`);
-    this.name = 'CommandConflictError';
-    this.commands = commands;
-  }
-}
-
-/**
- * Checks whether `error` is a MySQL duplicate-entry error (unique index violation).
- * @param error Value to check, typically a caught error.
- * @returns True if `error` is a MySQL `ER_DUP_ENTRY` / errno 1062 error.
- */
-export function isMysqlDuplicateEntryError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-
-  const mysqlError = error as { code?: string; errno?: number };
-  return mysqlError.code === 'ER_DUP_ENTRY' || mysqlError.errno === 1062;
 }

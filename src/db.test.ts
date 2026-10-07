@@ -49,10 +49,9 @@ vi.mock('./db/customCommands', () => ({
   unassignUserFromCommand: vi.fn(),
 }));
 
-vi.mock('./db/commandLocks', () => ({
+vi.mock('./db/commandErrors', () => ({
   CommandNotFoundError: class extends Error {},
   CommandConflictError: class extends Error {},
-  isMysqlDuplicateEntryError: vi.fn(),
 }));
 
 vi.mock('./db/reservedCommands', () => ({

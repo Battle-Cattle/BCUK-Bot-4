@@ -1,7 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
-import type { SqlExecutor } from './commandStringUtils';
-import { fromBit } from './utils';
+import { fromBit, type SqlExecutor } from './utils';
 
 /**
  * How far a channel-point redemption has got through `handleRedemption`'s required effects, as

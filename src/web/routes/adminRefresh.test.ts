@@ -29,7 +29,8 @@ import supertest from 'supertest';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 // Import module last so mocks are in place before module-level code runs
-import router, { refreshStates, getRefreshState } from './adminRefresh';
+import router from './adminRefresh';
+import { refreshStates, getRefreshState } from '../../discord/guildRefreshState';
 
 const GUILD_ID = '900000000000000001';
 const OTHER_GUILD_ID = '900000000000000002';

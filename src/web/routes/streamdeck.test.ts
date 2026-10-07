@@ -18,7 +18,7 @@ vi.mock('../../db', () => ({
   findSoundFiles: vi.fn(),
 }));
 
-vi.mock('../../commands/soundSelector', () => ({
+vi.mock('../../audio/soundSelector', () => ({
   pickWeightedRandom: vi.fn(),
 }));
 

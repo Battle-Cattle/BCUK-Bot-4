@@ -4,10 +4,6 @@ import {
   normalizeCommand,
   normalizeCommandList,
   normalizeCommandInputs,
-  isMysqlDuplicateEntryError,
-  CommandNotFoundError,
-  CommandSelfServiceDeniedError,
-  CommandConflictError,
 } from './commandStringUtils';
 
 describe('normalizeCommand', () => {
@@ -80,54 +76,5 @@ describe('normalizeCommandInputs', () => {
 
   it('deduplicates while filtering blanks', () => {
     expect(normalizeCommandInputs(['!a', '', '!a'])).toEqual(['!a']);
-  });
-});
-
-describe('isMysqlDuplicateEntryError', () => {
-  it('returns true for an object with code ER_DUP_ENTRY', () => {
-    expect(isMysqlDuplicateEntryError({ code: 'ER_DUP_ENTRY' })).toBe(true);
-  });
-
-  it('returns true for an object with errno 1062', () => {
-    expect(isMysqlDuplicateEntryError({ errno: 1062 })).toBe(true);
-  });
-
-  it('returns false for non-MySQL errors', () => {
-    expect(isMysqlDuplicateEntryError(new Error('generic'))).toBe(false);
-    expect(isMysqlDuplicateEntryError({ code: 'ER_NO_SUCH_TABLE' })).toBe(false);
-    expect(isMysqlDuplicateEntryError({ errno: 1064 })).toBe(false);
-  });
-
-  it('returns false for null, undefined, and primitives', () => {
-    expect(isMysqlDuplicateEntryError(null)).toBe(false);
-    expect(isMysqlDuplicateEntryError(undefined)).toBe(false);
-    expect(isMysqlDuplicateEntryError('string')).toBe(false);
-    expect(isMysqlDuplicateEntryError(1062)).toBe(false);
-  });
-});
-
-describe('CommandNotFoundError', () => {
-  it('has the correct name and message', () => {
-    const err = new CommandNotFoundError(42);
-    expect(err.name).toBe('CommandNotFoundError');
-    expect(err.message).toContain('42');
-  });
-});
-
-describe('CommandSelfServiceDeniedError', () => {
-  it('has the correct name and message', () => {
-    const err = new CommandSelfServiceDeniedError(42);
-    expect(err.name).toBe('CommandSelfServiceDeniedError');
-    expect(err.message).toContain('42');
-  });
-});
-
-describe('CommandConflictError', () => {
-  it('includes all conflicting command names in the message', () => {
-    const err = new CommandConflictError(['!a', '!b']);
-    expect(err.name).toBe('CommandConflictError');
-    expect(err.message).toContain('!a');
-    expect(err.message).toContain('!b');
-    expect(err.commands).toEqual(['!a', '!b']);
   });
 });

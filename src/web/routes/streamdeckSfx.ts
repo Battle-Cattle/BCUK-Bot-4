@@ -1,7 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { findCachedSfxTrigger, getAllSfxTriggers, getApprovedGuildIdsForKey } from '../../db';
-import { pickWeightedRandom } from '../../commands/soundSelector';
+import { pickWeightedRandom } from '../../audio/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
 import { requireApiKey } from '../middleware';

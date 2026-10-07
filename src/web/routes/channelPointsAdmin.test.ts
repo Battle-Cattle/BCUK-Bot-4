@@ -40,6 +40,11 @@ vi.mock('./channelPointsAdminMutations', async () => {
   return { router: Router() };
 });
 
+vi.mock('./channelPointsAdminPricingMutations', async () => {
+  const { Router } = await import('express');
+  return { router: Router() };
+});
+
 vi.mock('./channelPointsEvents', async () => {
   const { Router } = await import('express');
   return { default: Router() };

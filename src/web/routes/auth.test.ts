@@ -41,7 +41,7 @@ import {
   AccessLevel,
 } from '../../db';
 import { fetchMemberDisplayName } from '../../discord/discordApi';
-import { userMutationQueue } from './adminUserMutationQueue';
+import { userMutationQueue } from '../../shared/userMutationQueue';
 
 function buildApp(sessionOverrides: Record<string, unknown> = {}, captureSession?: (session: any) => void) {
   const app = express();
