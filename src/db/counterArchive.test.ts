@@ -90,6 +90,18 @@ describe('getCounterHistory', () => {
     expect(await getCounterHistory('guild-1', 99)).toBeNull();
   });
 
+  it('still returns the counter, with no history, when the archive-column lookup fails', async () => {
+    const row = { id: 1, trigger_command: '!hits', check_command: '!checkhits', message: 'm', increment_message: 'i', reset_yearly: 1, current_value: 5 };
+    const pool = makePool([row]);
+    pool.query.mockRejectedValueOnce(new Error('information_schema unavailable'));
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await getCounterHistory('guild-1', 1);
+    expect(result?.history).toEqual([]);
+    expect(result?.counter.id).toBe(1);
+    const [sql] = pool.execute.mock.calls[0]!;
+    expect(sql).not.toContain('value20');
+  });
+
   it('scopes the lookup to the given guild id', async () => {
     const pool = makePool([]);
     vi.mocked(getPool).mockReturnValue(pool as any);
