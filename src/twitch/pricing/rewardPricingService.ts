@@ -8,7 +8,7 @@ import { getValidToken } from '../eventsub/twitchApiEventSub';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
 import { computePrice, decayDemand, applyRedemption, computeRedemptionIncrement } from './rewardPricingMath';
 import { createLogger } from '../../shared/logger';
-import { createRuntimeRegistry } from '../../commands/twitchRuntime';
+import { createRuntimeRegistry } from '../../shared/runtimeRegistry';
 
 const log = createLogger('RewardPricing');
 

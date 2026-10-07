@@ -5,7 +5,7 @@ vi.mock('../../db', () => ({
   getVideosForReward: vi.fn(), getStreamerById: vi.fn(), findCachedAlertConfig: vi.fn(), recordStreamerEvent: vi.fn(),
   getRedemptionProgress: vi.fn(), markRedemptionEffect: vi.fn(),
 }));
-vi.mock('../../commands/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
+vi.mock('../../audio/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../commands/shoutoutHandler', () => ({ buildShoutoutMessage: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../monitor/twitchMonitor', () => ({ triggerImmediateLiveCheck: vi.fn().mockResolvedValue(undefined) }));
@@ -23,7 +23,7 @@ import {
 import {
   getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent, getRedemptionProgress, markRedemptionEffect,
 } from '../../db';
-import { pickWeightedRandom } from '../../commands/soundSelector';
+import { pickWeightedRandom } from '../../audio/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 import { applyRedemptionPricing } from '../pricing/rewardPricingService';
