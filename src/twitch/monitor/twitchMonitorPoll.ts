@@ -13,7 +13,6 @@ const log = createLogger('TwitchMonitor');
 // for the full rationale/doc) so twitchMonitorOffline.ts can also route its deferred
 // offline-check callback through the same per-login lock. Re-exported so existing importers
 // (twitchMonitor.ts, this file's tests) don't need to change their import path.
-export { withLoginLock } from './twitchMonitorLoginLock';
 
 /** Params bundle for {@link handleLiveStreamer} — groups the per-streamer poll context into a single argument. */
 interface LiveStreamerParams {

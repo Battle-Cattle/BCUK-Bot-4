@@ -15,7 +15,8 @@ import {
 } from './twitchMonitorMultitwitch';
 import { deleteAnnouncement } from './twitchMonitorAnnouncements';
 import { performStartupLiveCheck } from './twitchMonitorStartup';
-import { handlePollStreamer, dispatchStreamerPolls, withLoginLock } from './twitchMonitorPoll';
+import { handlePollStreamer, dispatchStreamerPolls } from './twitchMonitorPoll';
+import { withLoginLock } from './twitchMonitorLoginLock';
 import { recordMonitorPoll, normalizeError } from '../../shared/healthStore';
 
 const log = createLogger('TwitchMonitor');

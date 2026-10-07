@@ -49,9 +49,8 @@ vi.mock('./twitchEventSubHandler', () => ({
   handleChannelUpdate: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { hasAuthFailedSubs, clearAuthFailedSubs } from './twitchEventSubCreate';
 import {
-  hasAuthFailedSubs,
-  clearAuthFailedSubs,
   loadStreamersForEventSub,
   subscribeForStreamer,
   removeSessionSubscriptions,

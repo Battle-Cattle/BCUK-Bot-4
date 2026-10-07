@@ -9,7 +9,7 @@ import { getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricing
 import type { RewardPricingRow, StreamerPricingSettings } from '../../db';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
-import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
+import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
 import { computePrice } from '../../twitch/pricing/rewardPricingMath';
 import { simulateConstantUsageCycle } from '../../twitch/pricing/rewardPricingSimulation';
 import { renderPriceHistoryChart } from '../priceHistoryChart';

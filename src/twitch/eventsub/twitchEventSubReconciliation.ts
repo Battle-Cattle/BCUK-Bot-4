@@ -4,7 +4,6 @@ import { getAllStreamerInfo, type StreamerInfo } from './twitchEventSubDispatch'
 import { getValidToken } from './twitchApiEventSub';
 import { getCustomRewards, getRewardRedemptions, TwitchRewardRedemption } from '../twitchApi';
 import { handleRedemption, RedemptionEvent } from './twitchEventSubHandler';
-import { REDEMPTION_LEDGER_RETENTION_MS } from './twitchEventSubRedemptionDedup';
 import {
   RECONCILIATION_POLL_INTERVAL_MS,
   MAX_CURSOR_LAG_MS,
@@ -15,11 +14,11 @@ import {
   pruneStaleReconciliationCursors,
   markBroadcastersSeen,
   __resetReconciliationCursorStateForTests,
+  REDEMPTION_LEDGER_RETENTION_MS,
 } from './twitchEventSubReconciliationCursors';
 
 // Cursor state (where each reward resumes from, and when each broadcaster was last present) lives
 // in twitchEventSubReconciliationCursors.ts; this module fetches, replays and runs the tick.
-export { MAX_CURSOR_LAG_MS, CURSOR_RETENTION_MS } from './twitchEventSubReconciliationCursors';
 
 const log = createLogger('EventSubReconciliation');
 
