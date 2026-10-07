@@ -4,7 +4,8 @@ import { getGuildMemberUsers, updateDiscordName } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager, requireManagerJson } from '../middleware';
 import { getCurrentGuildId } from '../session';
-import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
+import { fetchMemberDisplayName } from '../../discord/discordApi';
+import { getDiscordClient } from '../../discord/discordClientStore';
 import { runUserMutation } from './adminUserMutationQueue';
 import {
   type RefreshOutcome, type RefreshState, refreshStates, getRefreshState, forgetGuildRefreshState,

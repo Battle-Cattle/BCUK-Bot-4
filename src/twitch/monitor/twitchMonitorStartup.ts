@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { getDiscordClient } from '../../discord/discordBot';
+import { getDiscordClient } from '../../discord/discordClientStore';
 
 const log = createLogger('TwitchMonitor');
 import { getTextChannel, tryDeleteDiscordMessage, tryEditDiscordMessage } from '../../discord/discordUtils';

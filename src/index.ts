@@ -5,7 +5,8 @@ import { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatc
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startChannelReconciliationPoll, stopChannelReconciliationPoll } from './twitch/twitchChannelReconciliationPoll';
-import { startDiscordBot, stopDiscordBot, getDiscordClient, waitForDiscordReady } from './discord/discordBot';
+import { startDiscordBot, stopDiscordBot, waitForDiscordReady } from './discord/discordBot';
+import { getDiscordClient } from './discord/discordClientStore';
 import { reloadGuildRegistry } from './discord/guildRegistry';
 import { resolveGuildIdForDiscordId } from './discord/voicePresence';
 import { registerTwitchGuildResolutionRuntime } from './twitch/twitchGuildResolutionRuntime';

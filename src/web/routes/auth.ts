@@ -14,7 +14,7 @@ import {
   type DbGuild,
   type DbUser,
 } from '../../db';
-import { fetchMemberDisplayName } from '../../discord/discordBot';
+import { fetchMemberDisplayName } from '../../discord/discordApi';
 import { csrfProtection, oauthStateMatches } from '../csrf';
 import { requireAuth } from '../middleware';
 import { filterQueryParam, isLoopbackRedirectUri } from './validation';
