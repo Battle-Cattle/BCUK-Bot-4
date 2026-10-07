@@ -6,7 +6,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../../db', () => ({
   getAllTimerCommandsWithAssignments: vi.fn(),
-  getAllUsers: vi.fn(),
+  getGuildMemberUsers: vi.fn(),
   findUser: vi.fn(),
   isTimerSelfManageableBy: (ids: string[], id: string) => ids.length === 1 && ids[0] === id,
   AccessLevel: ACCESS_LEVEL_MOCK,
@@ -37,17 +37,18 @@ vi.mock('./timerAssignments', async () => {
 
 import supertest from 'supertest';
 import router from './timers';
-import { findUser, getAllTimerCommandsWithAssignments, getAllUsers } from '../../db';
+import { findUser, getAllTimerCommandsWithAssignments, getGuildMemberUsers } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3; isOwner: boolean };
-const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: 2, isOwner: false };
+type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3; isOwner: boolean; currentGuildId: string };
+const GUILD_ID = '900000000000000001';
+const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: 2, isOwner: false, currentGuildId: GUILD_ID };
 
 function buildApp(sessionUser: SessionUser = USER) {
   return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser, mockRender: 'spread' });
 }
 
-const STREAMER: SessionUser = { discordId: '111', discordName: 'Alice', discordAvatar: null, accessLevel: 0, isOwner: false };
+const STREAMER: SessionUser = { discordId: '111', discordName: 'Alice', discordAvatar: null, accessLevel: 0, isOwner: false, currentGuildId: GUILD_ID };
 
 function timerAssignedTo(id: number, discordIds: string[]): any {
   return {
@@ -60,7 +61,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   middlewareCallOrder.length = 0;
   vi.mocked(getAllTimerCommandsWithAssignments).mockResolvedValue([]);
-  vi.mocked(getAllUsers).mockResolvedValue([]);
+  vi.mocked(getGuildMemberUsers).mockResolvedValue([]);
 });
 
 describe('GET /timers', () => {
@@ -79,7 +80,7 @@ describe('GET /timers', () => {
 
     const res = await supertest(buildApp(STREAMER)).get('/timers');
 
-    expect(getAllUsers).not.toHaveBeenCalled();
+    expect(getGuildMemberUsers).not.toHaveBeenCalled();
     expect(res.body.canManageCatalog).toBe(false);
     expect(res.body.twitchLinked).toBe(true);
     expect(res.body.assignableUsers).toEqual([]);
@@ -114,7 +115,7 @@ describe('GET /timers', () => {
         assigned_users: [{ discord_id: '111', discord_name: 'Alice', twitch_name: 'alice', access_level: 0, is_orphaned_user: false }],
       } as any,
     ]);
-    vi.mocked(getAllUsers).mockResolvedValue([
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([
       { discord_id: '111', twitch_name: 'alice' } as any,
       { discord_id: '222', twitch_name: 'bob' } as any,
       { discord_id: '333', twitch_name: null } as any,
@@ -122,6 +123,7 @@ describe('GET /timers', () => {
 
     const res = await supertest(buildApp()).get('/timers');
 
+    expect(getGuildMemberUsers).toHaveBeenCalledWith(GUILD_ID);
     expect(res.body.timers).toHaveLength(1);
     // only discord_id '222' (twitch_name present, not already assigned) should be unassigned
     expect(res.body.timers[0].unassigned_users).toEqual([{ discord_id: '222', twitch_name: 'bob' }]);

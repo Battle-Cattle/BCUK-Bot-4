@@ -12,7 +12,7 @@ import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB } from '../
 import { safeResolve } from '../../shared/pathUtils';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
-import { createMulterErrorRedirectHandler, makeUploadMiddleware } from './uploadMiddleware';
+import { createMulterErrorRedirectHandler, makeUploadMiddleware, makeRequireStreamerBeforeUpload, writeFileOrCleanup } from './uploadMiddleware';
 import { detectAudioType } from './sfxFileUpload';
 import { NOT_A_STREAMER_REDIRECT, parseEventType } from './alertsShared';
 
@@ -114,7 +114,7 @@ async function saveUploadedAsset(
   await fs.promises.mkdir(dir, { recursive: true });
   const fullPath = safeResolve(ALERT_ASSETS_FOLDER, String(streamer.id), filename);
   if (!fullPath) return { errorCode: 'invalid_path' };
-  await fs.promises.writeFile(fullPath, file.buffer);
+  await writeFileOrCleanup(fullPath, file.buffer, log);
 
   let previous: string | null;
   try {
@@ -202,6 +202,14 @@ function makeDeleteHandler(
  */
 const handleUploadError = createMulterErrorRedirectHandler('/alerts/settings', log, 'Alert upload middleware error:');
 
+/** Redirects non-streamers before Multer buffers the upload (see `makeRequireStreamerBeforeUpload`). */
+const requireStreamerBeforeUpload = makeRequireStreamerBeforeUpload({
+  notAStreamerRedirect: NOT_A_STREAMER_REDIRECT,
+  basePath: '/alerts/settings',
+  log,
+  logLabel: 'Alert upload streamer check error:',
+});
+
 /** Express middleware running Multer's single-file (`image`) parser, redirecting on error. */
 const uploadImage = makeUploadMiddleware(imageUpload, 'image', handleUploadError);
 
@@ -211,8 +219,8 @@ const uploadSound = makeUploadMiddleware(soundUpload, 'sound', handleUploadError
 /**
  * POST /alerts/settings/:eventType/image — uploads an image/GIF (magic-byte validated) for one
  * of the requesting streamer's alert event types, replacing (and removing on disk) any
- * previously-uploaded image. csrfProtection runs BEFORE uploadImage so a bad token is rejected
- * before Multer buffers the file; the client sends the token in an X-CSRF-Token header.
+ * previously-uploaded image. csrfProtection and requireStreamerBeforeUpload run BEFORE
+ * uploadImage so a bad token or a non-streamer is rejected before Multer buffers the file; the client sends the token in an X-CSRF-Token header.
  * @param req - Express request; reads the `eventType` route param and the `image` file.
  * @param res - Express response; redirects to `/alerts/settings?success=image_uploaded` on
  *   success, or to `/alerts/settings?error=<code>` if the requester isn't a streamer
@@ -221,7 +229,7 @@ const uploadSound = makeUploadMiddleware(soundUpload, 'sound', handleUploadError
  *   (`invalid_path`), the file exceeds the size limit (`file_too_large`), or saving fails
  *   (`upload_failed`).
  */
-router.post('/settings/:eventType/image', requireAuth, csrfProtection, uploadImage, makeUploadHandler(detectImageType, setAlertImage, 'image'));
+router.post('/settings/:eventType/image', requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadImage, makeUploadHandler(detectImageType, setAlertImage, 'image'));
 
 /**
  * POST /alerts/settings/:eventType/sound — uploads a sound (magic-byte validated, via the
@@ -232,7 +240,7 @@ router.post('/settings/:eventType/image', requireAuth, csrfProtection, uploadIma
  *   success, or to `/alerts/settings?error=<code>` with the same error codes as the image
  *   upload route above.
  */
-router.post('/settings/:eventType/sound', requireAuth, csrfProtection, uploadSound, makeUploadHandler(detectAudioType, setAlertSound, 'sound'));
+router.post('/settings/:eventType/sound', requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadSound, makeUploadHandler(detectAudioType, setAlertSound, 'sound'));
 
 /**
  * POST /alerts/settings/:eventType/image/delete — removes the requesting streamer's uploaded

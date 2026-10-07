@@ -12,7 +12,7 @@ vi.mock('../../db', async () => {
   class ReservedCommandError extends Error {}
   return {
     getAllCustomCommandsWithAssignments: vi.fn().mockResolvedValue([]),
-    getAllUsers: vi.fn().mockResolvedValue([]),
+    getGuildMemberUsers: vi.fn().mockResolvedValue([]),
     getOverridesForGuild: vi.fn().mockResolvedValue([]),
     addCustomCommand: vi.fn().mockResolvedValue(1),
     updateCustomCommand: vi.fn().mockResolvedValue(undefined),
@@ -64,7 +64,7 @@ import {
   findUser,
   findUsersByIds,
   getAllCustomCommandsWithAssignments,
-  getAllUsers,
+  getGuildMemberUsers,
   getOverridesForGuild,
   isMysqlDuplicateEntryError,
   removeOverride,
@@ -72,12 +72,14 @@ import {
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
+const GUILD_ID = '900000000000000001';
+
 /** Builds a supertest-ready app: the commands router with a stubbed session and a render mock that sends `rendered:<view>` (locals ignored). */
 function buildApp() {
   return buildTestApp({
     router,
     bodyParser: 'urlencoded',
-    sessionUser: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER, currentGuildId: null },
+    sessionUser: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID },
     mockRender: 'text',
   });
 }
@@ -85,7 +87,7 @@ function buildApp() {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([]);
-  vi.mocked(getAllUsers).mockResolvedValue([]);
+  vi.mocked(getGuildMemberUsers).mockResolvedValue([]);
   vi.mocked(getOverridesForGuild).mockResolvedValue([]);
   vi.mocked(addCustomCommand).mockResolvedValue(1);
   vi.mocked(updateCustomCommand).mockResolvedValue(undefined);
@@ -119,7 +121,7 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER } };
+      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID } };
       next();
     });
     app.use(router);
@@ -139,7 +141,7 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER } };
+      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID } };
       next();
     });
     app.use(router);
@@ -156,7 +158,7 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER } };
+      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID } };
       next();
     });
     app.use(router);
@@ -195,7 +197,11 @@ describe('GET /commands', () => {
     expect(capturedLocals.commands[1].guildOverride).toBeNull();
 
     vi.mocked(getOverridesForGuild).mockClear();
-    await supertest(buildApp()).get('/commands');
+    await supertest(buildTestApp({
+      router,
+      sessionUser: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.USER, currentGuildId: null },
+      mockRender: 'text',
+    })).get('/commands');
     expect(vi.mocked(getOverridesForGuild)).not.toHaveBeenCalled();
   });
 
@@ -210,7 +216,7 @@ describe('GET /commands', () => {
         assigned_users: [{ discord_id: '111', twitch_name: 'assigned_user' }],
       } as any,
     ]);
-    vi.mocked(getAllUsers).mockResolvedValue([
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([
       { discord_id: '111', twitch_name: 'assigned_user' } as any,
       { discord_id: '222', twitch_name: 'other_user' } as any,
       { discord_id: '333', twitch_name: null } as any,
@@ -227,12 +233,13 @@ describe('GET /commands', () => {
       next();
     });
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER } };
+      req.session = { user: { discordId: '1', discordName: 'TestUser', accessLevel: AccessLevel.MANAGER, currentGuildId: GUILD_ID } };
       next();
     });
     app.use(router);
 
     await supertest(app).get('/commands');
+    expect(getGuildMemberUsers).toHaveBeenCalledWith(GUILD_ID);
     expect(capturedLocals.commands).toHaveLength(1);
     // only discord_id '222' (twitch_name present, not already assigned) should be unassigned
     expect(capturedLocals.commands[0].unassigned_users).toEqual([
@@ -326,7 +333,7 @@ describe('GET /commands — streamer self-service view', () => {
 
   it('does not load or expose the user list for assignment', async () => {
     const locals = await renderAsStreamer();
-    expect(getAllUsers).not.toHaveBeenCalled();
+    expect(getGuildMemberUsers).not.toHaveBeenCalled();
     expect(locals.assignableUsers).toEqual([]);
     expect(locals.commands[0].unassigned_users).toEqual([]);
   });
@@ -341,7 +348,7 @@ describe('GET /commands — streamer self-service view', () => {
     let capturedLocals: any;
     const app = buildTestApp({
       router,
-      sessionUser: { discordId: STREAMER_ID, accessLevel: AccessLevel.MOD, currentGuildId: null },
+      sessionUser: { discordId: STREAMER_ID, accessLevel: AccessLevel.MOD, currentGuildId: GUILD_ID },
       mockRender: (_view, locals, res) => { capturedLocals = locals; res.send('ok'); },
     });
     await supertest(app).get('/commands');

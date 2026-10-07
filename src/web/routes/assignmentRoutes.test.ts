@@ -4,6 +4,7 @@ import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   findUser: vi.fn().mockResolvedValue(null),
+  getMemberAccessLevel: vi.fn().mockResolvedValue(0),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 vi.mock('../csrf', () => ({
@@ -17,14 +18,15 @@ vi.mock('../middleware', () => ({
 
 import supertest from 'supertest';
 import { createAssignmentRouter } from './assignmentRoutes';
-import { findUser } from '../../db';
+import { findUser, getMemberAccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-/** Builds a supertest-ready app mounting a `createAssignmentRouter` instance with a urlencoded body parser (and a session user, when given). */
-function buildApp(router: ReturnType<typeof createAssignmentRouter>, sessionUser?: unknown) {
-  return sessionUser === undefined
-    ? buildTestApp({ router, bodyParser: 'urlencoded' })
-    : buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
+const GUILD_ID = '900000000000000001';
+const MOD_SESSION_USER = { discordId: '1', accessLevel: ACCESS_LEVEL_MOCK.MOD, currentGuildId: GUILD_ID };
+
+/** Builds a supertest-ready app mounting a `createAssignmentRouter` instance with a urlencoded body parser and a session user (a Mod in `GUILD_ID` by default). */
+function buildApp(router: ReturnType<typeof createAssignmentRouter>, sessionUser: unknown = MOD_SESSION_USER) {
+  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
 }
 
 const VALID_ID = '5';
@@ -39,6 +41,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   middlewareCallOrder.length = 0;
   vi.mocked(findUser).mockResolvedValue({ discord_id: VALID_DISCORD_ID, discord_name: 'Alice', twitch_name: 'alice' } as any);
+  vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
 });
 
 describe('createAssignmentRouter — assign', () => {
@@ -63,6 +66,21 @@ describe('createAssignmentRouter — assign', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/things');
     expect(assign).toHaveBeenCalledWith(5, VALID_DISCORD_ID);
+    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, VALID_DISCORD_ID);
+  });
+
+  it('redirects to ?error=assignee_not_in_guild without assigning when the user is not a member of the current guild', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    const assign = vi.fn();
+    const router = createAssignmentRouter({
+      basePath: '/things', idField: 'thing_id', parseId, assign, unassign: vi.fn(), log: mockLogger() as any,
+    });
+    const res = await supertest(buildApp(router))
+      .post('/things/assign')
+      .send(`thing_id=${VALID_ID}&discord_id=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/things?error=assignee_not_in_guild');
+    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, VALID_DISCORD_ID);
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it('redirects to ?error=missing_fields when fields are absent', async () => {
@@ -174,6 +192,19 @@ describe('createAssignmentRouter — unassign', () => {
       .post('/things/unassign')
       .send(`thing_id=${VALID_ID}&discord_id=${VALID_DISCORD_ID}`);
     expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/things');
+    expect(unassign).toHaveBeenCalledWith(5, VALID_DISCORD_ID);
+  });
+
+  it('still unassigns a user who is no longer a member of the current guild', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    const unassign = vi.fn().mockResolvedValue(undefined);
+    const router = createAssignmentRouter({
+      basePath: '/things', idField: 'thing_id', parseId, assign: vi.fn(), unassign, log: mockLogger() as any,
+    });
+    const res = await supertest(buildApp(router))
+      .post('/things/unassign')
+      .send(`thing_id=${VALID_ID}&discord_id=${VALID_DISCORD_ID}`);
     expect(res.headers.location).toBe('/things');
     expect(unassign).toHaveBeenCalledWith(5, VALID_DISCORD_ID);
   });

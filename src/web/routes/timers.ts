@@ -1,10 +1,11 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Request } from 'express';
-import { DbTimerCommandWithAssignments, DbUser, findUser, getAllTimerCommandsWithAssignments, getAllUsers } from '../../db';
+import { DbTimerCommandWithAssignments, DbUser, findUser, getAllTimerCommandsWithAssignments, getGuildMemberUsers } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
 import { filterQueryParam } from './validation';
 import { renderView } from './viewHelpers';
+import { getCurrentGuildId } from '../session';
 import { renderOrError } from './errorHandling';
 import timersMutationsRouter from './timersMutations';
 import timerAssignmentsRouter from './timerAssignments';
@@ -16,7 +17,7 @@ const router = Router();
 const KNOWN_ERRORS = new Set([
   'missing_fields', 'invalid_interval', 'invalid_min_messages', 'invalid_id',
   'timer_not_found', 'add_failed', 'update_failed', 'remove_failed', 'toggle_failed',
-  'assign_failed', 'unassign_failed', 'invalid_assignment_user',
+  'assign_failed', 'unassign_failed', 'invalid_assignment_user', 'assignee_not_in_guild',
   'forbidden', 'twitch_not_linked',
 ]);
 
@@ -35,15 +36,15 @@ interface TimerPageData {
 }
 
 /**
- * Loads what the timers page shows. Mod+ get the whole catalog and every Twitch-linked user to
- * assign; a streamer below Mod gets only the timers on their own channel, and no user list (so
+ * Loads what the timers page shows. Mod+ get the whole catalog and every Twitch-linked member of
+ * the current guild to assign; a streamer below Mod gets only the timers on their own channel, and no user list (so
  * other users' Discord/Twitch names aren't exposed to them).
  * @param req - Express request; reads the session user.
  * @returns The timers, assignable users and Twitch-link state for the page.
  */
 async function loadTimerPageData(req: Request): Promise<TimerPageData> {
   if (canManageTimerCatalog(req)) {
-    const [timers, users] = await Promise.all([getAllTimerCommandsWithAssignments(), getAllUsers()]);
+    const [timers, users] = await Promise.all([getAllTimerCommandsWithAssignments(), getGuildMemberUsers(getCurrentGuildId(req))]);
     return { timers, assignableUsers: users.filter((entry) => entry.twitch_name), twitchLinked: true };
   }
   const discordId = req.session.user!.discordId;
@@ -57,8 +58,9 @@ async function loadTimerPageData(req: Request): Promise<TimerPageData> {
 
 /**
  * GET /timers — renders the Timers page. Mod+ see the global timer-command catalog, each with its
- * list of assigned Twitch-linked streamers, plus an add form that can assign any of them. A
- * streamer below Mod sees and self-manages only the timers on their own Twitch channel.
+ * list of assigned Twitch-linked streamers, plus an add form that can assign any Twitch-linked
+ * member of the current guild. A streamer below Mod sees and self-manages only the timers on their
+ * own Twitch channel.
  * `requireGuildContext` refreshes the access level first, so a demoted session can't keep the
  * catalog view.
  */

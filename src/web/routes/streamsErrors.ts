@@ -14,11 +14,14 @@ const STREAMS_BASE_PATH = '/admin/streams';
 export const STREAMS_ERROR_CODES = [
   'missing_fields',
   'invalid_id',
+  'invalid_channel',
+  'discord_unavailable',
   'add_group_failed',
   'duplicate_group_name',
   'update_group_failed',
   'remove_group_failed',
   'add_streamer_failed',
+  'streamer_not_member',
   'remove_streamer_failed',
   'eventsub_disconnect_failed',
 ] as const;
@@ -29,11 +32,14 @@ export type StreamsErrorCode = (typeof STREAMS_ERROR_CODES)[number];
 export const STREAMS_ERROR_MESSAGES: Record<StreamsErrorCode, string> = {
   missing_fields:             'All required fields must be filled in.',
   invalid_id:                 'Invalid ID — please try again.',
+  invalid_channel:            'Discord channel must be the ID of a text channel in this server.',
+  discord_unavailable:        'The Discord bot is not connected yet — please try again shortly.',
   add_group_failed:           'Failed to add stream group. Please try again.',
   duplicate_group_name:       'A stream group with that name already exists.',
   update_group_failed:        'Failed to update stream group. Please try again.',
   remove_group_failed:        'Failed to remove stream group. Please try again.',
   add_streamer_failed:        'Failed to add streamer. Please try again.',
+  streamer_not_member:        'That user is not a member of this server.',
   remove_streamer_failed:     'Failed to remove streamer. Please try again.',
   eventsub_disconnect_failed: 'Failed to disconnect Twitch account. Please try again.',
 };

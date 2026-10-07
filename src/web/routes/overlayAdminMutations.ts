@@ -12,7 +12,7 @@ import { OVERLAY_FOLDER, OVERLAY_MAX_FILE_MB } from '../../shared/config';
 import { parsePositiveIntId } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
-import { createMulterErrorRedirectHandler, makeUploadMiddleware } from './uploadMiddleware';
+import { createMulterErrorRedirectHandler, makeUploadMiddleware, makeRequireStreamerBeforeUpload, writeFileOrCleanup } from './uploadMiddleware';
 import { safeResolve } from '../../shared/pathUtils';
 
 const log = createLogger('OverlayAdmin');
@@ -65,7 +65,7 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.
   const filename = `${randomUUID()}.${ext}`;
   await fs.promises.mkdir(dir, { recursive: true });
   const fullPath = path.join(dir, filename);
-  await fs.promises.writeFile(fullPath, file.buffer);
+  await writeFileOrCleanup(fullPath, file.buffer, log);
   try {
     await addVideo(streamer.id, name, filename);
   } catch (e) {
@@ -89,11 +89,19 @@ export const handleUploadError = createMulterErrorRedirectHandler('/overlay/sett
 /** Express middleware running Multer's single-file (`video`) parser, redirecting on error. */
 const uploadVideo = makeUploadMiddleware(upload, 'video', handleUploadError);
 
+/** Redirects non-streamers before Multer buffers the upload (see `makeRequireStreamerBeforeUpload`). */
+const requireStreamerBeforeUpload = makeRequireStreamerBeforeUpload({
+  notAStreamerRedirect: NOT_A_STREAMER_REDIRECT,
+  basePath: '/overlay/settings',
+  log,
+  logLabel: 'Overlay video upload streamer check error:',
+});
+
 /**
  * POST /overlay/settings/videos/upload — uploads a video file (webm/mp4,
- * validated by magic bytes) for the requesting streamer. csrfProtection runs
- * BEFORE uploadVideo so a bad token is rejected before Multer buffers the
- * file; the client (overlayAdmin.js) sends the token in an X-CSRF-Token
+ * validated by magic bytes) for the requesting streamer. csrfProtection and
+ * requireStreamerBeforeUpload run BEFORE uploadVideo so a bad token or a
+ * non-streamer is rejected before Multer buffers the file; the client (overlayAdmin.js) sends the token in an X-CSRF-Token
  * header — available before body parsing and never placed in the URL.
  * @param req - Express request; reads `name` and the `video` file from
  *   `req.body`/`req.file`.
@@ -104,7 +112,7 @@ const uploadVideo = makeUploadMiddleware(upload, 'video', handleUploadError);
  *   (`invalid_path`), the file exceeds the size limit (`file_too_large`,
  *   redirected by `handleUploadError`), or saving fails (`upload_failed`).
  */
-router.post('/settings/videos/upload', requireAuth, csrfProtection, uploadVideo, async (req, res) => {
+router.post('/settings/videos/upload', requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadVideo, async (req, res) => {
   try {
     const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
     if (!streamer) return;

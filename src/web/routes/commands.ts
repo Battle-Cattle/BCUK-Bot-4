@@ -6,13 +6,14 @@ import {
   DbUser,
   findUser,
   getAllCustomCommandsWithAssignments,
-  getAllUsers,
+  getGuildMemberUsers,
   getOverridesForGuild,
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
 import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
+import { getCurrentGuildId } from '../session';
 import commandMutationsRouter from './commandMutations';
 import commandAssignmentsRouter from './commandAssignments';
 import commandGuildOverridesRouter from './commandGuildOverrides';
@@ -32,7 +33,7 @@ const KNOWN_ERRORS = new Set([
   'remove_failed',
   'assign_failed',
   'unassign_failed',
-  'invalid_assignment_user',
+  'invalid_assignment_user', 'assignee_not_in_guild',
   'override_failed',
   'override_reset_failed',
   'forbidden',
@@ -56,13 +57,13 @@ interface CommandPageData {
 }
 
 /**
- * Loads what the commands page shows. Mod+ get the whole catalog and every Twitch-linked user to
- * assign; a streamer below Mod gets only the commands on their own channel, and no user list.
+ * Loads what the commands page shows. Mod+ get the whole catalog and every Twitch-linked member of
+ * the current guild to assign; a streamer below Mod gets only the commands on their own channel, and no user list.
  * @param req - Express request; reads the session user.
  */
 async function loadCommandPageData(req: Request): Promise<CommandPageData> {
   if (canManageCommandCatalog(req)) {
-    const [commands, users] = await Promise.all([getAllCustomCommandsWithAssignments(), getAllUsers()]);
+    const [commands, users] = await Promise.all([getAllCustomCommandsWithAssignments(), getGuildMemberUsers(getCurrentGuildId(req))]);
     return { commands, assignableUsers: users.filter((entry) => entry.twitch_name), twitchLinked: true };
   }
   const discordId = req.session.user!.discordId;

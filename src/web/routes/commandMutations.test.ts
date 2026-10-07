@@ -14,6 +14,7 @@ vi.mock('../../db', () => {
     assignUsersToCommand: vi.fn().mockResolvedValue(undefined),
     findUsersByIds: vi.fn().mockResolvedValue(new Map()),
     findUser: vi.fn().mockResolvedValue(null),
+    getMemberAccessLevel: vi.fn().mockResolvedValue(0),
     updateOwnCustomCommand: vi.fn().mockResolvedValue(undefined),
     removeOwnCustomCommand: vi.fn().mockResolvedValue(undefined),
     discardOwnNewCustomCommand: vi.fn().mockResolvedValue(undefined),
@@ -37,14 +38,15 @@ import supertest from 'supertest';
 import router from './commandMutations';
 import {
   addCustomCommand, updateCustomCommand, removeCustomCommand,
-  assignUsersToCommand, findUsersByIds, findUser, updateOwnCustomCommand, removeOwnCustomCommand, discardOwnNewCustomCommand, CommandSelfServiceDeniedError,
+  assignUsersToCommand, findUsersByIds, findUser, getMemberAccessLevel, updateOwnCustomCommand, removeOwnCustomCommand, discardOwnNewCustomCommand, CommandSelfServiceDeniedError,
   CommandConflictError, CommandNotFoundError, ReservedCommandError,
   isMysqlDuplicateEntryError,
 } from '../../db';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-const MOD_SESSION_USER = { discordId: '1', discordName: 'Mod', accessLevel: ACCESS_LEVEL_MOCK.MOD };
+const GUILD_ID = '900000000000000001';
+const MOD_SESSION_USER = { discordId: '1', discordName: 'Mod', accessLevel: ACCESS_LEVEL_MOCK.MOD, currentGuildId: GUILD_ID };
 
 /** Builds a supertest-ready app: the command mutations router with a urlencoded body parser and a Mod session user by default. */
 function buildApp(sessionUser: unknown = MOD_SESSION_USER) {
@@ -62,6 +64,7 @@ beforeEach(() => {
   vi.mocked(assignUsersToCommand).mockResolvedValue(undefined);
   vi.mocked(findUsersByIds).mockResolvedValue(new Map());
   vi.mocked(findUser).mockResolvedValue(null);
+  vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
   vi.mocked(updateOwnCustomCommand).mockResolvedValue(undefined);
   vi.mocked(removeOwnCustomCommand).mockResolvedValue(undefined);
   vi.mocked(discardOwnNewCustomCommand).mockResolvedValue(undefined);
@@ -125,6 +128,16 @@ describe('POST /commands/add', () => {
     expect(res.headers.location).toBe('/commands?error=add_failed');
   });
 
+  it('redirects to ?error=assignee_not_in_guild without creating anything when a discord_id is not a member of the current guild', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    const res = await supertest(buildApp())
+      .post('/commands/add').send(`trigger_string=!clap&output=Clap&discord_ids=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/commands?error=assignee_not_in_guild');
+    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, VALID_DISCORD_ID);
+    expect(addCustomCommand).not.toHaveBeenCalled();
+    expect(assignUsersToCommand).not.toHaveBeenCalled();
+  });
+
   it('assigns users when discord_ids are provided and user has twitch_name', async () => {
     vi.mocked(findUsersByIds).mockResolvedValue(new Map([
       [VALID_DISCORD_ID, { discord_id: VALID_DISCORD_ID, discord_name: 'Alice', is_twitch_bot_enabled: false, twitch_name: 'alice', access_level: AccessLevel.USER } as any],
@@ -134,6 +147,7 @@ describe('POST /commands/add', () => {
       .send(`trigger_string=!clap&output=Clap&discord_ids=${VALID_DISCORD_ID}`);
     expect(res.headers.location).toBe('/commands');
     expect(assignUsersToCommand).toHaveBeenCalledWith(1, [VALID_DISCORD_ID]);
+    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, VALID_DISCORD_ID);
   });
 
   it('assigns every valid user when discord_ids is sent as a repeated field (array)', async () => {

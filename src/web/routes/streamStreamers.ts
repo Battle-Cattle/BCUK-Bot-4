@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { addStreamer, removeStreamer, findUser } from '../../db';
+import { addStreamer, removeStreamer, findUser, getMemberAccessLevel } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { getCurrentGuildId } from '../session';
@@ -13,12 +13,14 @@ const router = Router();
 
 /**
  * POST /streams/streamers/add — adds a user (who must already have a Twitch
- * name) as a streamer in a stream group, then restarts the Twitch monitor.
+ * name and be a member of the current guild) as a streamer in a stream group,
+ * then restarts the Twitch monitor.
  * @param req - Express request; reads `discord_id` and `group_id` from
  *   `req.body`.
  * @param res - Express response; redirects to `/admin/streams` on success, or to
  *   `/admin/streams?error=<code>` for missing/invalid fields or no Twitch name
- *   (`missing_fields`), a malformed `group_id` (`invalid_id`), or a DB failure
+ *   (`missing_fields`), a malformed `group_id` (`invalid_id`), a user who isn't
+ *   a member of the current guild (`streamer_not_member`), or a DB failure
  *   (`add_streamer_failed`).
  */
 router.post('/streams/streamers/add', requireManager, csrfProtection, async (req, res) => {
@@ -31,9 +33,13 @@ router.post('/streams/streamers/add', requireManager, csrfProtection, async (req
   if (parsedGroupId === null) return redirectStreamsInvalid(res, 'invalid_id');
 
   try {
+    const guildId = getCurrentGuildId(req);
     const user = await findUser(discordId);
     if (!user?.twitch_name) return redirectStreamsInvalid(res, 'missing_fields');
-    await addStreamer(discordId, parsedGroupId, getCurrentGuildId(req));
+    if ((await getMemberAccessLevel(guildId, discordId)) === null) {
+      return redirectStreamsInvalid(res, 'streamer_not_member');
+    }
+    await addStreamer(discordId, parsedGroupId, guildId);
     triggerRestart();
   } catch (err) {
     return redirectStreamsFailure(res, log, 'Add streamer error:', err, 'add_streamer_failed');
