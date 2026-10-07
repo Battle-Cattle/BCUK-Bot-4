@@ -1,7 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Request, type Response } from 'express';
 import { getBotChatToken, saveBotChatTokenIfLatestAttempt, restoreBotChatTokenIfOwnedByConnection, type BotChatToken } from '../../db';
-import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { exchangeCode, getUserFromToken } from '../../twitch/twitchUserTokens';
 import { restartTwitchBot } from '../../twitch/twitchBot';
 import { TWITCH_BOT_OAUTH_REDIRECT_URI } from '../../shared/config';
 import { logAndRedirectError } from './errorHandling';

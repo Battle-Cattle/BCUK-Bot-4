@@ -2,41 +2,15 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
 import { COMPANION_MAX_SSE_PER_TOKEN } from '../../shared/config';
-import type { StreamerEventType } from '../../db';
 import { getStreamerByDiscordId, getRecentStreamerEvents, findDiscordIdByTokenHash } from '../../db';
 import { RECENT_EVENTS_LIMIT } from './dashboardEvents';
 import { attachSseConnection, broadcastToChannel } from './sseChannel';
+import type {
+  CompanionActivityEvent, CompanionActivityEventType, CompanionEvent,
+} from '../../twitch/eventsub/twitchEventSubRuntime';
 
 const log = createLogger('CompanionEvents');
 const router = Router();
-
-/** Non-redemption streamer activity types forwarded to the companion app. */
-export type CompanionActivityEventType = Exclude<StreamerEventType, 'redemption'>;
-
-/** A channel-point reward redemption forwarded to a user's companion app. */
-export interface CompanionRedemptionEvent {
-  type: 'channel_points_redemption';
-  rewardId: string;
-  rewardTitle: string;
-  userLogin: string;
-  userName: string;
-  userInput: string;
-  redeemedAt: string;
-}
-
-/** A follow/sub/resub/giftsub/raid activity event forwarded to a user's companion app. */
-export interface CompanionActivityEvent {
-  type: CompanionActivityEventType;
-  /** Stable `streamer_event_log.id`, unique across both this live push and the `/events/recent`
-   *  backfill — lets the client dedupe/order exactly instead of by `occurredAt` heuristic. */
-  id: number;
-  displayName: string;
-  detail: string | null;
-  occurredAt: string;
-}
-
-/** An event forwarded to a user's companion app over the `/api/companion/events` SSE stream. */
-export type CompanionEvent = CompanionRedemptionEvent | CompanionActivityEvent;
 
 // In-memory map of active SSE connections keyed by Discord ID.
 export const connections = new Map<string, Set<import('express').Response>>();

@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../twitch/twitchApi', () => ({ getCustomRewards: vi.fn() }));
-vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({ getValidToken: vi.fn() }));
+vi.mock('../../twitch/twitchUserTokens', () => ({ getValidToken: vi.fn() }));
 
 import { getCustomRewards } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../../twitch/twitchUserTokens';
 import { fetchStreamerRewards } from './streamerRewards';
 
 const log = { warn: vi.fn() } as any;

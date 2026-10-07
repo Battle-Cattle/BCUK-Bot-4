@@ -9,7 +9,7 @@ vi.mock('../../db', () => ({
   restoreBotChatTokenIfOwnedByConnection: vi.fn(),
 }));
 
-vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
+vi.mock('../../twitch/twitchUserTokens', () => ({
   exchangeCode: vi.fn(),
   getUserFromToken: vi.fn(),
 }));
@@ -28,7 +28,7 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './botAuthCallback';
 import { getBotChatToken, saveBotChatTokenIfLatestAttempt, restoreBotChatTokenIfOwnedByConnection } from '../../db';
-import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { exchangeCode, getUserFromToken } from '../../twitch/twitchUserTokens';
 import { restartTwitchBot } from '../../twitch/twitchBot';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
