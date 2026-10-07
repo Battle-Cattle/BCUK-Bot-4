@@ -10,6 +10,18 @@ vi.mock('../../shared/config', () => ({
   SSE_MAX_TOTAL_CONNECTIONS: 1000,
 }));
 
+// The /:login/events route only accepts logins of registered streamers; every login these
+// tests connect under is registered here except 'unregistered'.
+vi.mock('../../db', () => ({
+  getStreamerByDiscordId: vi.fn(),
+  getAllStreamersWithGroups: vi.fn(async () =>
+    ['testchannel', 'freshchannel', 'pingchannel', 'brokenpipe', 'alreadygone', 'closingchannel', 'sharedchannel']
+      .map((twitch_name) => ({ twitch_name }))),
+  createManagedLookupCache: (opts: { loadCache: () => Promise<unknown> }) => ({ getCache: () => opts.loadCache(), invalidate: () => {} }),
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS: 5000,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60000,
+}));
+
 vi.mock('fs', () => ({
   default: {
     readdirSync: () => ['controllerOverlay.ejs', 'overlaySource.ejs'],
@@ -31,7 +43,7 @@ import router, { MAX_SSE_CONNECTIONS_PER_CHANNEL, connections, pushOverlayEvent 
 import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 
 /** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely — needed to control fake timers and the request's 'close' event deterministically. */
-function getRouteHandler(routePath: string): (req: any, res: any, next: any) => void {
+function getRouteHandler(routePath: string): (req: any, res: any, next: any) => Promise<void> {
   const layer = (router as any).stack.find((l: any) => l.route?.path === routePath);
   return layer.route.stack[0].handle;
 }
@@ -52,6 +64,7 @@ function makeSseReq(login: string) {
   return {
     req: {
       params: { login },
+      ip: '10.0.0.1',
       on: (event: string, cb: () => void) => {
         if (event === 'close') closeCb = cb;
       },
@@ -99,6 +112,12 @@ describe('GET /:login', () => {
     expect(res.status).toBe(200);
     expect(res.body.view).toBe('overlaySource');
     expect(res.body.login).toBe('somechannel');
+  });
+
+  it('returns 404 for a well-formed login that is not a registered streamer', async () => {
+    const res = await supertest(buildApp()).get('/unregistered/events');
+    expect(res.status).toBe(404);
+    expect(connections.has('unregistered')).toBe(false);
   });
 
   it('falls through (404) for a reserved login', async () => {
@@ -166,12 +185,12 @@ describe('GET /:login/events — SSE connection limit', () => {
 });
 
 describe('GET /:login/events — connection lifecycle (direct handler invocation)', () => {
-  it('registers a new Set for a channel with no prior connections', () => {
+  it('registers a new Set for a channel with no prior connections', async () => {
     const handler = getRouteHandler('/:login/events');
     const res = makeSseRes();
     const { req, triggerClose } = makeSseReq('freshchannel');
 
-    handler(req, res, vi.fn());
+    await handler(req, res, vi.fn());
 
     expect(connections.get('freshchannel')?.has(res as any)).toBe(true);
     expect(res.write).toHaveBeenCalledWith(': connected\n\n');
@@ -179,14 +198,14 @@ describe('GET /:login/events — connection lifecycle (direct handler invocation
     triggerClose(); // clears the 25s keepalive interval so it doesn't leak into other tests
   });
 
-  it('sends a ping every 25 seconds', () => {
+  it('sends a ping every 25 seconds', async () => {
     vi.useFakeTimers();
     try {
       const handler = getRouteHandler('/:login/events');
       const res = makeSseRes();
       const { req, triggerClose } = makeSseReq('pingchannel');
 
-      handler(req, res, vi.fn());
+      await handler(req, res, vi.fn());
       res.write.mockClear();
 
       vi.advanceTimersByTime(25_000);
@@ -197,14 +216,14 @@ describe('GET /:login/events — connection lifecycle (direct handler invocation
     }
   });
 
-  it('clears the interval and evicts the client when a ping write fails', () => {
+  it('clears the interval and evicts the client when a ping write fails', async () => {
     vi.useFakeTimers();
     try {
       const handler = getRouteHandler('/:login/events');
       const res = makeSseRes();
       const { req } = makeSseReq('brokenpipe');
 
-      handler(req, res, vi.fn());
+      await handler(req, res, vi.fn());
       res.write.mockImplementation(() => {
         throw new Error('broken pipe');
       });
@@ -219,14 +238,14 @@ describe('GET /:login/events — connection lifecycle (direct handler invocation
     }
   });
 
-  it('does not throw on a failed ping when the channel entry is already gone', () => {
+  it('does not throw on a failed ping when the channel entry is already gone', async () => {
     vi.useFakeTimers();
     try {
       const handler = getRouteHandler('/:login/events');
       const res = makeSseRes();
       const { req } = makeSseReq('alreadygone');
 
-      handler(req, res, vi.fn());
+      await handler(req, res, vi.fn());
       connections.delete('alreadygone');
 
       res.write.mockImplementation(() => {
@@ -241,27 +260,27 @@ describe('GET /:login/events — connection lifecycle (direct handler invocation
     }
   });
 
-  it('removes the client (and empty Set) when the request closes', () => {
+  it('removes the client (and empty Set) when the request closes', async () => {
     const handler = getRouteHandler('/:login/events');
     const res = makeSseRes();
     const { req, triggerClose } = makeSseReq('closingchannel');
 
-    handler(req, res, vi.fn());
+    await handler(req, res, vi.fn());
     expect(connections.get('closingchannel')?.has(res as any)).toBe(true);
 
     triggerClose();
     expect(connections.get('closingchannel')).toBeUndefined();
   });
 
-  it('removes only the closing client, keeping the channel entry when others remain', () => {
+  it('removes only the closing client, keeping the channel entry when others remain', async () => {
     const handler = getRouteHandler('/:login/events');
     const res1 = makeSseRes();
     const res2 = makeSseRes();
     const { req: req1, triggerClose: closeReq1 } = makeSseReq('sharedchannel');
     const { req: req2 } = makeSseReq('sharedchannel');
 
-    handler(req1, res1, vi.fn());
-    handler(req2, res2, vi.fn());
+    await handler(req1, res1, vi.fn());
+    await handler(req2, res2, vi.fn());
 
     closeReq1();
     expect(connections.get('sharedchannel')?.has(res1 as any)).toBe(false);

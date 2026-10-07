@@ -11,7 +11,7 @@ import { renderOrError } from './errorHandling';
 import { router as mutationsRouter } from './alertsAdminMutations';
 import { router as assetMutationsRouter, MAX_IMAGE_MB, MAX_SOUND_MB } from './alertsAssetMutations';
 import { connections as alertsSourceConnections } from './alertsOverlaySource';
-import { createOverlayStatusEventsHandler } from './sseChannel';
+import { createOverlayStatusEventsHandler } from './sseEventsHandlers';
 
 const log = createLogger('AlertsAdmin');
 const router = Router();

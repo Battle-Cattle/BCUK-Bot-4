@@ -14,7 +14,7 @@ import { renderError, renderView } from './viewHelpers';
 import { router as mutationsRouter, MAX_UPLOAD_MB } from './overlayAdminMutations';
 import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';
 import { connections as overlaySourceConnections } from './overlaySource';
-import { createOverlayStatusEventsHandler } from './sseChannel';
+import { createOverlayStatusEventsHandler } from './sseEventsHandlers';
 
 const log = createLogger('OverlayAdmin');
 const router = Router();

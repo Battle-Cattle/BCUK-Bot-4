@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { describe, it, expect, vi } from 'vitest';
-import type { Request } from 'express';
+import express, { type Request, type Response } from 'express';
+import supertest from 'supertest';
 import type { SessionUser } from '../types/express';
 import { ACCESS_LEVEL_MOCK } from '../test-utils/accessLevelMock';
 
@@ -13,6 +14,8 @@ import {
   sessionLimiterKey,
   sessionLimiterSkip,
   streamdeckLimiterKey,
+  streamdeckAuthFailureLimiter,
+  streamdeckAuthFailureWasSuccessful,
 } from './rateLimits';
 
 const authedUser: SessionUser = {
@@ -171,5 +174,54 @@ describe('streamdeckLimiterKey', () => {
       headers: {},
     } as unknown as Request;
     expect(streamdeckLimiterKey(req)).toBe('unknown');
+  });
+});
+
+describe('streamdeckAuthFailureWasSuccessful', () => {
+  it('treats only a 401 as a failure', () => {
+    const req = {} as Request;
+    expect(streamdeckAuthFailureWasSuccessful(req, { statusCode: 401 } as Response)).toBe(false);
+    expect(streamdeckAuthFailureWasSuccessful(req, { statusCode: 200 } as Response)).toBe(true);
+    expect(streamdeckAuthFailureWasSuccessful(req, { statusCode: 403 } as Response)).toBe(true);
+    expect(streamdeckAuthFailureWasSuccessful(req, { statusCode: 500 } as Response)).toBe(true);
+  });
+});
+
+describe('streamdeckAuthFailureLimiter', () => {
+  // Mirrors requireApiKey: 401 for anything but the one valid token. The limiter's MemoryStore is
+  // module-level, so each test uses its own client IP (via X-Forwarded-For) to get a fresh bucket.
+  function buildApp() {
+    const app = express();
+    app.set('trust proxy', 1);
+    app.use('/api/streamdeck', streamdeckAuthFailureLimiter, (req, res) => {
+      if (req.headers['authorization'] === 'Bearer valid-key') res.json({ ok: true });
+      else res.status(401).json({ ok: false, error: 'Unauthorized' });
+    });
+    return app;
+  }
+
+  it('429s an IP that keeps sending random tokens, even though each token is different', async () => {
+    const app = buildApp();
+    const statuses: number[] = [];
+    for (let i = 0; i < 31; i++) {
+      const res = await supertest(app)
+        .get('/api/streamdeck/sfx')
+        .set('X-Forwarded-For', '198.51.100.1')
+        .set('Authorization', `Bearer random-${i}`);
+      statuses.push(res.status);
+    }
+    expect(statuses.slice(0, 30).every((s) => s === 401)).toBe(true);
+    expect(statuses[30]).toBe(429);
+  });
+
+  it('does not count a valid key\'s successful requests', async () => {
+    const app = buildApp();
+    for (let i = 0; i < 40; i++) {
+      const res = await supertest(app)
+        .get('/api/streamdeck/sfx')
+        .set('X-Forwarded-For', '198.51.100.2')
+        .set('Authorization', 'Bearer valid-key');
+      expect(res.status).toBe(200);
+    }
   });
 });
