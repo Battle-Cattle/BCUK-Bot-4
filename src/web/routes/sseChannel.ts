@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { SSE_MAX_TOTAL_CONNECTIONS } from '../../shared/config';
-import { tryReservePoolSlot, releasePoolSlot, type SseConnectionPool } from './sseOverlayAccess';
+import { tryReservePoolSlot, releasePoolSlot, type SseConnectionPool } from './sseConnectionPool';
 
 const KEEPALIVE_INTERVAL_MS = 25_000;
 

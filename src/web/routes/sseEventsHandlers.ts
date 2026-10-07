@@ -1,7 +1,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import { getStreamerByDiscordId, type DbStreamerEventSub } from '../../db';
 import { getSessionUser } from '../session';
-import { isKnownStreamerLogin, unauthenticatedOverlayPool, type SseConnectionPool } from './sseOverlayAccess';
+import { isKnownStreamerLogin, unauthenticatedOverlayPool } from './sseOverlayAccess';
+import type { SseConnectionPool } from './sseConnectionPool';
 import { attachSseConnection, broadcastToChannel, chainConnectionCleanup } from './sseChannel';
 import type { createLogger } from '../../shared/logger';
 
