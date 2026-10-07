@@ -46,6 +46,12 @@ describe('fetchMemberDisplayName', () => {
     expect(mockGuild.members.fetch).toHaveBeenCalledWith({ user: 'user123', force: true });
   });
 
+  it('returns null when the client goes away between the readiness check and the guild lookup', async () => {
+    vi.mocked(getDiscordClient).mockReturnValueOnce(client as any).mockReturnValueOnce(null);
+    expect(await fetchMemberDisplayName('user123', 'guild-id', false)).toBeNull();
+    expect(client.guilds.fetch).not.toHaveBeenCalled();
+  });
+
   it('returns null when guild member fetch throws', async () => {
     readyClient();
     mockGuild.members.fetch.mockRejectedValueOnce(new Error('not found'));
