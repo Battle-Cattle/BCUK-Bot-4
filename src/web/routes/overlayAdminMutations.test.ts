@@ -49,7 +49,8 @@ import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
 import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
-import { buildTestApp } from '../../test-utils/expressTestApp';
+import type { RequestHandler } from 'express';
+import { buildTestApp, drainBodyBeforeRedirect } from '../../test-utils/expressTestApp';
 
 // Minimal buffers with correct magic bytes for each format
 const WEBM_BUF = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00, 0x00, 0x00, 0x00]);
@@ -66,8 +67,8 @@ const MOCK_STREAMER = {
 };
 
 /** Builds a supertest-ready app: the overlay admin mutations router with a stubbed session (no render stub — these routes redirect). */
-function buildApp(sessionUser: SessionUser = USER) {
-  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
+function buildApp(sessionUser: SessionUser = USER, before: RequestHandler[] = []) {
+  return buildTestApp({ router: [...before, router], bodyParser: 'urlencoded', sessionUser });
 }
 
 beforeEach(() => {
@@ -168,7 +169,7 @@ describe('POST /settings/videos/upload', () => {
 
   it('rejects a non-streamer before Multer buffers the upload (oversized body gets not_a_streamer, not file_too_large)', async () => {
     const oversized = Buffer.alloc(1024 * 1024 + 1024, 1);
-    const res = await supertest(buildApp())
+    const res = await supertest(buildApp(USER, [drainBodyBeforeRedirect]))
       .post('/settings/videos/upload')
       .attach('video', oversized, { filename: 'big.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');

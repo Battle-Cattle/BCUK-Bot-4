@@ -54,7 +54,8 @@ import { getStreamerByDiscordId, setAlertImage, setAlertSound } from '../../db';
 import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
-import { buildTestApp } from '../../test-utils/expressTestApp';
+import type { RequestHandler } from 'express';
+import { buildTestApp, drainBodyBeforeRedirect } from '../../test-utils/expressTestApp';
 
 // Minimal buffers with correct magic bytes for each format
 const PNG_BUF = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
@@ -71,8 +72,8 @@ const MOCK_STREAMER = {
 };
 
 /** Builds a supertest-ready app: the alerts asset mutations router with a stubbed session (no render stub — these routes redirect). */
-function buildApp(sessionUser: SessionUser = USER) {
-  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
+function buildApp(sessionUser: SessionUser = USER, before: RequestHandler[] = []) {
+  return buildTestApp({ router: [...before, router], bodyParser: 'urlencoded', sessionUser });
 }
 
 beforeEach(() => {
@@ -186,7 +187,7 @@ describe('POST /settings/:eventType/image', () => {
 
   it('rejects a non-streamer before Multer buffers the upload (oversized body gets not_a_streamer, not file_too_large)', async () => {
     const oversized = Buffer.concat([PNG_BUF, Buffer.alloc(1024 * 1024 + 1024, 1)]);
-    const res = await supertest(buildApp())
+    const res = await supertest(buildApp(USER, [drainBodyBeforeRedirect]))
       .post('/settings/follow/image')
       .attach('image', oversized, 'big.png');
     expect(res.headers.location).toBe('/alerts/settings?error=not_a_streamer');
