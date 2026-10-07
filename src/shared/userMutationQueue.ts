@@ -1,5 +1,5 @@
-import { createMutationQueue } from '../../shared/mutationQueue';
-import { withTimeout } from '../../shared/withTimeout';
+import { createMutationQueue } from './mutationQueue';
+import { withTimeout } from './withTimeout';
 
 /**
  * Serializes per-`discord_id` writes across admin mutations (add/edit/remove/toggle) and the

@@ -12,7 +12,7 @@ import { forgetGuildRefreshState } from './guildRefreshState';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
 import { sendOwnerAlert } from './ownerAlerts';
 import { upsertGuild, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
-import { runUserMutation } from '../web/routes/adminUserMutationQueue';
+import { runUserMutation } from '../shared/userMutationQueue';
 import { createLogger } from '../shared/logger';
 import { getDiscordClient, setDiscordClient } from './discordClientStore';
 

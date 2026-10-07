@@ -20,7 +20,7 @@ import { WEB_PORT } from '../../shared/config';
 import { normalizeDiscordId, filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
-import { runUserMutation } from './adminUserMutationQueue';
+import { runUserMutation } from '../../shared/userMutationQueue';
 
 const log = createLogger('Web');
 const router = Router();
