@@ -4,7 +4,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const mockLog = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => mockLog }));
 vi.mock('./twitchEventSubSubscriptions', () => ({
-  subscribeForStreamer: vi.fn().mockResolvedValue(1),
+  subscribeForStreamer: vi.fn().mockResolvedValue({ desired: 1, live: 1, transientFailures: 0 }),
+  fetchValidEventSubToken: vi.fn().mockResolvedValue('token-abc'),
   removeSessionSubscriptions: vi.fn().mockResolvedValue(undefined),
   removeStreamerFromMap: vi.fn(),
   dispatchNotification: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock('../../shared/healthStore', () => ({
   removeEventSubHealth: vi.fn(),
 }));
 
+import { StreamerConnection } from './twitchEventSubConnection';
 import {
   buildReconnectUrl,
   isDuplicate,
@@ -23,11 +25,11 @@ import {
   MESSAGE_TTL_MS,
   purgeExpiredMessageIds,
   seenMessageIds,
-  StreamerConnection,
-  EventSubMessage,
-} from './twitchEventSubConnection';
+  type EventSubMessage,
+} from './twitchEventSubMessages';
 import {
   subscribeForStreamer,
+  fetchValidEventSubToken,
   removeSessionSubscriptions,
   dispatchNotification,
   handleRevocation,
@@ -195,6 +197,11 @@ function makeMsg(overrides: Partial<EventSubMessage> & { message_type: string; m
   };
 }
 
+/** Builds a subscribeForStreamer outcome with `live` subscriptions out of `desired`. */
+function outcome(live: number, transientFailures = 0, desired = Math.max(live + transientFailures, 1)) {
+  return { desired, live, transientFailures };
+}
+
 function makeStreamerData() {
   return { uid: 'uid-123', token: 'token-abc', name: 'streamer', config: null, streamerId: 1 };
 }
@@ -222,17 +229,17 @@ vi.stubGlobal('WebSocket', MockWebSocket);
 describe('StreamerConnection.handleMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(subscribeForStreamer).mockResolvedValue(1);
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(1));
   });
 
   it('session_welcome (non-reconnecting): sets sessionId and calls subscribeForStreamer', async () => {
     const conn = new StreamerConnection(makeStreamerData());
     await (conn as any).handleMessage(makeWelcomeMsg('sess-abc'));
-    expect(subscribeForStreamer).toHaveBeenCalledWith('sess-abc', expect.objectContaining({ uid: 'uid-123' }));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-abc', expect.objectContaining({ uid: 'uid-123' })));
   });
 
   it('session_welcome (non-reconnecting): calls onSelfStop when subscribeForStreamer returns 0', async () => {
-    vi.mocked(subscribeForStreamer).mockResolvedValue(0);
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(0));
     const conn = new StreamerConnection(makeStreamerData());
     const onSelfStop = vi.fn();
     conn.setSelfStopCallback(onSelfStop);
@@ -241,7 +248,7 @@ describe('StreamerConnection.handleMessage', () => {
   });
 
   it('ignores a pending subscribeAndHandleEmpty result once the connection has been stopped', async () => {
-    let resolveSubscribe!: (value: number) => void;
+    let resolveSubscribe!: (value: ReturnType<typeof outcome>) => void;
     vi.mocked(subscribeForStreamer).mockReturnValue(new Promise((resolve) => { resolveSubscribe = resolve; }));
 
     const conn = new StreamerConnection(makeStreamerData());
@@ -253,14 +260,14 @@ describe('StreamerConnection.handleMessage', () => {
     // The welcome's subscribeForStreamer call is now in flight (pending). Stop the
     // connection externally — e.g. twitchEventSub.ts removing this streamer — while it's
     // still awaiting Twitch's response.
-    expect(subscribeForStreamer).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(1));
     conn.stop();
     vi.mocked(removeStreamerFromMap).mockClear();
 
     // The pending subscribe now resolves with zero subscriptions — without the `stopped`
     // guard, this would call stop() a second time and fire onSelfStop for an already-closed
     // connection.
-    resolveSubscribe(0);
+    resolveSubscribe(outcome(0));
     await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(1));
     // Flush a few more microtask ticks to give a missing guard a chance to fire.
     await Promise.resolve();
@@ -272,7 +279,7 @@ describe('StreamerConnection.handleMessage', () => {
   });
 
   it('deletes subscriptions a subscribe call created after the connection was stopped mid-flight', async () => {
-    let resolveSubscribe!: (value: number) => void;
+    let resolveSubscribe!: (value: ReturnType<typeof outcome>) => void;
     vi.mocked(subscribeForStreamer).mockReturnValue(new Promise((resolve) => { resolveSubscribe = resolve; }));
     const data = makeStreamerData();
     const conn = new StreamerConnection(data);
@@ -280,16 +287,17 @@ describe('StreamerConnection.handleMessage', () => {
     conn.setSelfStopCallback(onSelfStop);
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-abc'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(1));
 
     conn.stop();
-    resolveSubscribe(3);
+    resolveSubscribe(outcome(3));
 
     await vi.waitFor(() => expect(removeSessionSubscriptions).toHaveBeenCalledWith('sess-abc', data));
     expect(onSelfStop).not.toHaveBeenCalled();
   });
 
   it('does not clean up subscriptions when the connection is still live', async () => {
-    vi.mocked(subscribeForStreamer).mockResolvedValue(2);
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(2));
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-live'));
@@ -297,6 +305,57 @@ describe('StreamerConnection.handleMessage', () => {
     await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-live', expect.anything()));
     await Promise.resolve();
     expect(removeSessionSubscriptions).not.toHaveBeenCalled();
+  });
+
+  it('ignores a zero-count result from a session superseded mid-subscribe instead of stopping the healthy replacement', async () => {
+    let resolveFirst!: (value: ReturnType<typeof outcome>) => void;
+    vi.mocked(subscribeForStreamer)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce(outcome(2));
+    const conn = new StreamerConnection(makeStreamerData());
+    const onSelfStop = vi.fn();
+    conn.setSelfStopCallback(onSelfStop);
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-A'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-A', expect.anything()));
+
+    // Socket A dies and a replacement socket B welcomes while A's subscribe is still in flight.
+    (conn as any).forceReconnect((conn as any).ws);
+    (conn as any).connect();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-B'));
+
+    // A's creates all failed against the dead session.
+    resolveFirst(outcome(0));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-B', expect.anything()));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onSelfStop).not.toHaveBeenCalled();
+    expect(removeStreamerFromMap).not.toHaveBeenCalled();
+    expect((conn as any).sessionId).toBe('sess-B');
+    expect((conn as any).ws).not.toBeNull();
+  });
+
+  it('session_welcome (non-reconnecting): re-resolves a valid token before subscribing', async () => {
+    vi.mocked(fetchValidEventSubToken).mockResolvedValueOnce('fresh-token');
+    const conn = new StreamerConnection({ ...makeStreamerData(), token: 'expired-token' });
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-fresh'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-fresh', expect.objectContaining({ token: 'fresh-token' })));
+    expect(fetchValidEventSubToken).toHaveBeenCalledWith(1);
+  });
+
+  it('session_welcome (non-reconnecting): keeps the existing token and still subscribes if the token lookup fails', async () => {
+    vi.mocked(fetchValidEventSubToken).mockRejectedValueOnce(new Error('db down'));
+    const conn = new StreamerConnection({ ...makeStreamerData(), token: 'old-token' });
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-err'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-err', expect.objectContaining({ token: 'old-token' })));
+    expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('Failed to refresh EventSub token'), expect.any(Error));
+  });
+
+  it('session_welcome (non-reconnecting): keeps the existing token when the refresh resolves null', async () => {
+    vi.mocked(fetchValidEventSubToken).mockResolvedValueOnce(null);
+    const conn = new StreamerConnection({ ...makeStreamerData(), token: 'old-token' });
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-null'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-null', expect.objectContaining({ token: 'old-token' })));
   });
 
   it('session_welcome when isReconnecting: does NOT call subscribeForStreamer', async () => {
@@ -385,7 +444,7 @@ describe('StreamerConnection.handleMessage', () => {
 describe('StreamerConnection lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(subscribeForStreamer).mockResolvedValue(1);
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(1));
     vi.useFakeTimers();
   });
 
@@ -519,10 +578,389 @@ describe('StreamerConnection lifecycle', () => {
     expect((conn as any).connectTimer).not.toBeNull();
     expect((conn as any).ws).toBe(secondWs);
 
-    // B's own open then arrives for real and correctly resets state.
+    // B's own open then arrives for real and clears its connect timer. The reconnect backoff is
+    // deliberately not reset on open — only once the session proves good (see the backoff tests).
     secondWs.listeners.get('open')!();
-    expect((conn as any).reconnectAttempts).toBe(0);
+    expect((conn as any).reconnectAttempts).toBe(1);
     expect((conn as any).connectTimer).toBeNull();
+  });
+
+  it('keeps the reconnect backoff across a socket that opens but gets no live subscriptions, resetting it once one does', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(0, 2));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    ((conn as any).ws as MockWebSocket).listeners.get('error')!();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const ws = (conn as any).ws as MockWebSocket;
+    ws.listeners.get('open')!();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-empty'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-empty', expect.anything()));
+    await vi.advanceTimersByTimeAsync(0);
+    // Every create failed transiently — Twitch will close this empty socket, and the next
+    // reconnect must back off further rather than restart from 1s.
+    expect((conn as any).reconnectAttempts).toBe(1);
+
+    ws.listeners.get('close')!({ code: 4003, reason: 'connection unused' } as any);
+    expect((conn as any).reconnectAttempts).toBe(2);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect((conn as any).ws).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect((conn as any).ws).not.toBeNull();
+
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(2));
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-good'));
+    await vi.waitFor(() => expect((conn as any).reconnectAttempts).toBe(0));
+  });
+
+  it('keeps the connection and retries the subscribe step with backoff when creates fail transiently', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValueOnce(outcome(0, 2)).mockResolvedValue(outcome(2));
+    const conn = new StreamerConnection(makeStreamerData());
+    const onSelfStop = vi.fn();
+    conn.setSelfStopCallback(onSelfStop);
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-outage'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    expect(onSelfStop).not.toHaveBeenCalled();
+    expect(removeStreamerFromMap).not.toHaveBeenCalled();
+    expect((conn as any).ws).not.toBeNull();
+
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('retrying in 5000ms'));
+    expect(subscribeForStreamer).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(2));
+    expect(subscribeForStreamer).toHaveBeenLastCalledWith('sess-outage', expect.anything());
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.attempts).toBe(0));
+    expect((conn as any).subscribeRetry.pending).toBe(false);
+    expect(onSelfStop).not.toHaveBeenCalled();
+  });
+
+  it('logs (and does not throw) when a scheduled subscribe retry itself fails', async () => {
+    vi.mocked(subscribeForStreamer)
+      .mockResolvedValueOnce(outcome(0, 2))
+      .mockRejectedValueOnce(new Error('helix down'))
+      .mockResolvedValue(outcome(2));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-retry-err'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(mockLog.error).toHaveBeenCalledWith(
+      expect.stringContaining('Subscribe retry error'), expect.any(Error),
+    ));
+    expect((conn as any).ws).not.toBeNull();
+  });
+
+  it('retries a partially-failed subscribe pass too, without stopping the connection', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValueOnce(outcome(1, 1)).mockResolvedValue(outcome(2));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-partial'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(2));
+  });
+
+  it('bounds transient-failure subscribe retries with exponential backoff', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(0, 1));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    ((conn as any).ws as MockWebSocket).listeners.get('open')!(); // clears the connect timeout
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-down'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(1));
+
+    // 5s, 10s, 20s, 40s, 80s, 160s, then capped at 300s — 8 retries in total.
+    const delays = [5_000, 10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000];
+    for (const [i, delay] of delays.entries()) {
+      await vi.waitFor(() => expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining(`retrying in ${delay}ms (attempt ${i + 1})`)));
+      // Keep the keepalive watchdog from force-reconnecting during the long waits.
+      (conn as any).clearKeepaliveTimer();
+      await vi.advanceTimersByTimeAsync(delay);
+      await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(i + 2));
+    }
+    await vi.waitFor(() => expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('giving up')));
+    (conn as any).clearKeepaliveTimer();
+    expect((conn as any).subscribeRetry.pending).toBe(false);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(subscribeForStreamer).toHaveBeenCalledTimes(delays.length + 1);
+    expect((conn as any).ws).not.toBeNull();
+    expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('giving up'));
+  });
+
+  it('gives a fresh session its own retry budget after an earlier session exhausted it', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(1, 1));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-budget-a'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    // Exhaust the budget on the first session.
+    (conn as any).subscribeRetry.cancel();
+    (conn as any).subscribeRetry.attemptCount = 8;
+
+    // The socket is replaced by a fresh connection whose pass is again only partially live.
+    (conn as any).forceReconnect((conn as any).ws);
+    (conn as any).connect();
+    vi.mocked(subscribeForStreamer).mockClear();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-budget-b'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-budget-b', expect.anything()));
+
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+    expect((conn as any).subscribeRetry.attempts).toBe(1);
+  });
+
+  it('re-resolves the token for a fresh welcome\'s pass deferred past a migration, instead of subscribing with a stale one', async () => {
+    const conn = new StreamerConnection({ ...makeStreamerData(), token: 'expired-token' });
+    conn.start();
+    // Hold the chain so the fresh welcome's pass is still queued when a migration starts.
+    let release!: () => void;
+    (conn as any).reloadChain = new Promise<void>((resolve) => { release = resolve; });
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-tok-a'));
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-tok-a', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=b' } },
+    }));
+    release();
+    await vi.waitFor(() => expect((conn as any).reloadPendingAfterMigration).toBe(true));
+    expect(subscribeForStreamer).not.toHaveBeenCalled();
+
+    vi.mocked(fetchValidEventSubToken).mockClear();
+    vi.mocked(fetchValidEventSubToken).mockResolvedValueOnce('fresh-token');
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-tok-b'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-tok-b', expect.objectContaining({ token: 'fresh-token' })));
+    expect(fetchValidEventSubToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a pending subscribe retry on stop()', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(0, 1));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-stop-retry'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    conn.stop();
+    expect((conn as any).subscribeRetry.pending).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(subscribeForStreamer).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a pending subscribe retry on reload(), which subscribes afresh itself', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValueOnce(outcome(0, 1)).mockResolvedValue(outcome(1));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-reload-retry'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    conn.reload(makeStreamerData());
+    expect((conn as any).subscribeRetry.pending).toBe(false);
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(2));
+    (conn as any).clearKeepaliveTimer();
+    (conn as any).clearConnectTimer();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(subscribeForStreamer).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels a pending subscribe retry when the socket is force-reconnected', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(0, 1));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-fr-retry'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    ((conn as any).ws as MockWebSocket).listeners.get('error')!();
+    expect((conn as any).subscribeRetry.pending).toBe(false);
+  });
+
+  it('re-runs a fired subscribe retry on the migrated session when a migration lands while it awaits the token', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValueOnce(outcome(1, 1)).mockResolvedValue(outcome(2));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-mig-a'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    // The retry fires and blocks on its token refresh.
+    let resolveToken!: (token: string) => void;
+    vi.mocked(fetchValidEventSubToken).mockReturnValueOnce(new Promise((resolve) => { resolveToken = resolve; }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(fetchValidEventSubToken).toHaveBeenCalledTimes(2));
+    vi.mocked(subscribeForStreamer).mockClear();
+
+    // A full session migration completes meanwhile.
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-mig-a', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=b' } },
+    }));
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-mig-b'));
+    resolveToken('token-abc');
+
+    // The overtaken retry is carried over to the migrated session instead of being dropped.
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-mig-b', expect.anything()));
+    expect(subscribeForStreamer).not.toHaveBeenCalledWith('sess-mig-a', expect.anything());
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.attempts).toBe(0));
+  });
+
+  it('logs (and does not throw) when a subscribe pass re-run on a migrated session fails', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValueOnce(outcome(1, 1));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-rerr-a'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    let resolveToken!: (token: string) => void;
+    vi.mocked(fetchValidEventSubToken).mockReturnValueOnce(new Promise((resolve) => { resolveToken = resolve; }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(fetchValidEventSubToken).toHaveBeenCalledTimes(2));
+
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-rerr-a', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=b' } },
+    }));
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-rerr-b'));
+    vi.mocked(subscribeForStreamer).mockRejectedValueOnce(new Error('helix down'));
+    resolveToken('token-abc');
+
+    await vi.waitFor(() => expect(mockLog.error).toHaveBeenCalledWith(
+      expect.stringContaining('Migrated subscribe pass error'), expect.any(Error),
+    ));
+    expect((conn as any).ws).not.toBeNull();
+  });
+
+  it('defers a subscribe pass overtaken mid-flight by a migration still in progress to that migration\'s welcome', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValueOnce(outcome(1, 1));
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-def-a'));
+    await vi.waitFor(() => expect((conn as any).subscribeRetry.pending).toBe(true));
+
+    // The retry fires and blocks inside subscribeForStreamer.
+    let resolveSubscribe!: (value: ReturnType<typeof outcome>) => void;
+    vi.mocked(subscribeForStreamer).mockReturnValueOnce(new Promise((resolve) => { resolveSubscribe = resolve; }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(2));
+
+    // Migration to B completes, then a second migration (to C) starts before the pass resolves.
+    const reconnectTo = (from: string, to: string) => makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: from, keepalive_timeout_seconds: 10, reconnect_url: `wss://eventsub.wss.twitch.tv/ws?session_id=${to}` } },
+    });
+    (conn as any).handleMessage(reconnectTo('sess-def-a', 'b'));
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-def-b'));
+    (conn as any).handleMessage(reconnectTo('sess-def-b', 'c'));
+    vi.mocked(subscribeForStreamer).mockClear();
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(2));
+    resolveSubscribe(outcome(1, 1));
+    await vi.waitFor(() => expect((conn as any).reloadPendingAfterMigration).toBe(true));
+    expect(subscribeForStreamer).not.toHaveBeenCalled();
+
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-def-c'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-def-c', expect.anything()));
+    expect((conn as any).reloadPendingAfterMigration).toBe(false);
+  });
+
+  it('does not run a queued subscribe pass against a session a later migration replaced — re-runs it on the new one', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-q-a'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-q-a', expect.anything()));
+
+    // Hold the chain so a pass for sess-q-a is still queued when a migration to sess-q-b completes.
+    let release!: () => void;
+    (conn as any).reloadChain = new Promise<void>((resolve) => { release = resolve; });
+    (conn as any).queueSubscribePass('sess-q-a', 'empty', 'Queued pass error');
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-q-a', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=b' } },
+    }));
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-q-b'));
+    vi.mocked(subscribeForStreamer).mockClear();
+    release();
+
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-q-b', expect.anything()));
+    expect(subscribeForStreamer).not.toHaveBeenCalledWith('sess-q-a', expect.anything());
+  });
+
+  it('drops a queued subscribe pass whose session was replaced by a fresh connection, which subscribes itself', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-f-a'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-f-a', expect.anything()));
+
+    let release!: () => void;
+    (conn as any).reloadChain = new Promise<void>((resolve) => { release = resolve; });
+    (conn as any).queueSubscribePass('sess-f-a', 'empty', 'Queued pass error');
+    (conn as any).forceReconnect((conn as any).ws);
+    (conn as any).connect();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-f-b'));
+    vi.mocked(subscribeForStreamer).mockClear();
+    release();
+
+    // Only the fresh welcome's own pass runs; the stale one is neither run nor re-queued.
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-f-b', expect.anything()));
+    await vi.waitFor(() => expect(mockLog.info).toHaveBeenCalledWith(expect.stringContaining('replaced by a new connection')));
+    expect(subscribeForStreamer).toHaveBeenCalledTimes(1);
+    expect(subscribeForStreamer).not.toHaveBeenCalledWith('sess-f-a', expect.anything());
+  });
+
+  it('defers a queued subscribe pass that starts while its session is migrating', async () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-m-a'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-m-a', expect.anything()));
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-m-a', keepalive_timeout_seconds: 10, reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?session_id=b' } },
+    }));
+    vi.mocked(subscribeForStreamer).mockClear();
+
+    (conn as any).queueSubscribePass('sess-m-a', 'empty', 'Queued pass error');
+    await vi.waitFor(() => expect((conn as any).reloadPendingAfterMigration).toBe(true));
+    expect(subscribeForStreamer).not.toHaveBeenCalled();
+
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-m-b'));
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-m-b', expect.anything()));
+    expect(subscribeForStreamer).not.toHaveBeenCalledWith('sess-m-a', expect.anything());
+  });
+
+  it('still self-stops when every failure was an auth/scope failure (nothing transient to retry)', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(0, 0, 3));
+    const conn = new StreamerConnection(makeStreamerData());
+    const onSelfStop = vi.fn();
+    conn.setSelfStopCallback(onSelfStop);
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-auth'));
+    await vi.waitFor(() => expect(onSelfStop).toHaveBeenCalledWith('uid-123'));
+    expect((conn as any).subscribeRetry.pending).toBe(false);
+  });
+
+  it('self-stops when nothing is desired', async () => {
+    vi.mocked(subscribeForStreamer).mockResolvedValue({ desired: 0, live: 0, transientFailures: 0 });
+    const conn = new StreamerConnection(makeStreamerData());
+    const onSelfStop = vi.fn();
+    conn.setSelfStopCallback(onSelfStop);
+    conn.start();
+    await (conn as any).handleMessage(makeWelcomeMsg('sess-nothing'));
+    await vi.waitFor(() => expect(onSelfStop).toHaveBeenCalledWith('uid-123'));
+  });
+
+  it('tears down the current socket when session_reconnect carries an invalid reconnect_url', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const ws = (conn as any).ws as MockWebSocket;
+    (conn as any).handleMessage(makeWelcomeMsg('sess-bad-url'));
+
+    (conn as any).handleMessage(makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-bad-url', keepalive_timeout_seconds: 10, reconnect_url: 'wss://evil.example.com/ws' } },
+    }));
+
+    expect(ws.close).toHaveBeenCalled();
+    expect((conn as any).ws).toBeNull();
+    expect((conn as any).sessionId).toBeNull();
+    expect((conn as any).reconnectTimer).not.toBeNull();
+    // The torn-down socket's late close event must not schedule a second reconnect.
+    ws.listeners.get('close')!({ code: 1000, reason: '' } as any);
+    expect((conn as any).reconnectAttempts).toBe(1);
   });
 
   it('reconnects if the WebSocket never leaves CONNECTING (no open/error/close ever fires)', () => {
@@ -668,7 +1106,7 @@ describe('StreamerConnection lifecycle', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-live'));
-    vi.mocked(subscribeForStreamer).mockResolvedValue(0);
+    vi.mocked(subscribeForStreamer).mockResolvedValue(outcome(0));
 
     conn.reload(makeStreamerData());
     await vi.waitFor(() => expect(removeStreamerFromMap).toHaveBeenCalled());
@@ -761,6 +1199,8 @@ describe('StreamerConnection lifecycle', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();
     await (conn as any).handleMessage(makeWelcomeMsg('sess-old'));
+    // Let the welcome's own (token-refresh-then-subscribe) chain land before measuring the reload.
+    await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledWith('sess-old', expect.anything()));
 
     // Enter the migration window: session_reconnect swaps in a new socket, but sessionId
     // is still 'sess-old' until the new session's welcome arrives.
@@ -804,11 +1244,11 @@ describe('StreamerConnection lifecycle', () => {
 
     // First reload's subscribeForStreamer call stays pending until resolveFirst() fires,
     // so we can prove the second reload's call doesn't start until the first one settles.
-    let resolveFirst!: (value: number) => void;
-    const firstDeferred = new Promise<number>((resolve) => { resolveFirst = resolve; });
+    let resolveFirst!: (value: ReturnType<typeof outcome>) => void;
+    const firstDeferred = new Promise<ReturnType<typeof outcome>>((resolve) => { resolveFirst = resolve; });
     vi.mocked(subscribeForStreamer)
       .mockImplementationOnce(() => firstDeferred)
-      .mockResolvedValueOnce(1);
+      .mockResolvedValueOnce(outcome(1));
 
     conn.reload(makeStreamerData());
     conn.reload(makeStreamerData());
@@ -822,7 +1262,7 @@ describe('StreamerConnection lifecycle', () => {
     await Promise.resolve();
     expect(subscribeForStreamer).toHaveBeenCalledTimes(1);
 
-    resolveFirst(1);
+    resolveFirst(outcome(1));
     await vi.waitFor(() => expect(subscribeForStreamer).toHaveBeenCalledTimes(2));
   });
 });

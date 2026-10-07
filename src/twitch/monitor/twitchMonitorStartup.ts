@@ -9,6 +9,7 @@ import { LiveState, makeLiveState } from './twitchMonitorTypes';
 import { buildEmbed, templateVars } from './twitchMonitorEmbed';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
 import { postAnnouncement } from './twitchMonitorAnnouncements';
+import { withLoginLock } from './twitchMonitorLoginLock';
 import { fillTemplate } from '../../shared/textTemplate';
 
 /**
@@ -20,23 +21,31 @@ import { fillTemplate } from '../../shared/textTemplate';
  * bot was down); the caller falls back to {@link postAnnouncement} in that case.
  * Any other error is logged (once here, and again inside
  * {@link tryEditDiscordMessage} for the underlying Discord failure) and rethrown.
+ * Also returns false, without recording any state, if `isCurrent` reports this call was
+ * superseded while awaiting (the caller's {@link postAnnouncement} then bails out the same way).
+ * @param liveStates - Map of live streamer states, keyed by streamer DB row id.
+ * @param streamer - Full streamer record (including its stream group) from the database.
+ * @param liveStream - The current live Twitch stream data.
+ * @param isCurrent - See {@link withLoginLock}; checked after each `await` before recording state.
+ * @returns Whether the stored message was edited and recorded as live.
  */
 export async function tryEditStartupMessage(
   liveStates: Map<string, LiveState>,
   streamer: DbStreamerFull,
   liveStream: TwitchStream,
+  isCurrent: () => boolean = () => true,
 ): Promise<boolean> {
   const discordClient = getDiscordClient();
   if (!discordClient) return false;
   if (!streamer.discord_channel_id || !streamer.discord_message_id) return false;
   try {
     const channel = await getTextChannel(discordClient, streamer.discord_channel_id);
-    if (!channel) return false;
+    if (!channel || !isCurrent()) return false;
     const vars = templateVars(liveStream.user_login, liveStream);
     const content = fillTemplate(streamer.group.live_message, vars, 'keep');
     const embed = buildEmbed(liveStream);
     const edited = await tryEditDiscordMessage(discordClient, streamer.discord_channel_id, streamer.discord_message_id, { content, embeds: [embed] });
-    if (!edited) return false;
+    if (!edited || !isCurrent()) return false;
     liveStates.set(String(streamer.id), makeLiveState(streamer, liveStream, streamer.discord_message_id, streamer.discord_channel_id));
     await setStreamerLive(streamer.id, streamer.discord_message_id, streamer.discord_channel_id, liveStream.game_name);
     return true;
@@ -50,11 +59,16 @@ export async function tryEditStartupMessage(
  * Handles a streamer found to already be live at bot startup: if a previous
  * announcement message is recorded, tries to edit it in place via
  * {@link tryEditStartupMessage}; otherwise (or if the edit isn't possible)
- * falls back to posting a fresh announcement via {@link postAnnouncement}.
+ * falls back to posting a fresh announcement via {@link postAnnouncement}. If the edit
+ * throws a non-not-found error, no new announcement is posted; the stored message is
+ * tracked in `liveStates` so subsequent polls keep editing it.
  * @param liveStates - Map of live streamer states, keyed by streamer DB row id.
  * @param streamer - Full streamer record (including its stream group) from the database.
  * @param liveStream - The current live Twitch stream data.
  * @param groupsWithChanges - Accumulator of stream group IDs whose MultiTwitch state needs refreshing.
+ * @param isCurrent - See {@link withLoginLock}; passed to the edit/post helpers and checked before
+ *   recording state after an `await`, so a run that outlived its lock timeout can't overwrite the
+ *   state a newer operation for this login already set.
  * @returns Resolves once the streamer's announcement has been reconciled.
  */
 export async function handleLiveStreamerOnStartup(
@@ -62,6 +76,7 @@ export async function handleLiveStreamerOnStartup(
   streamer: DbStreamerFull,
   liveStream: TwitchStream,
   groupsWithChanges: Set<number>,
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
   if (streamer.discord_message_id && streamer.discord_channel_id) {
     if (!getDiscordClient()) {
@@ -69,16 +84,19 @@ export async function handleLiveStreamerOnStartup(
       return;
     }
     try {
-      if (await tryEditStartupMessage(liveStates, streamer, liveStream)) {
+      if (await tryEditStartupMessage(liveStates, streamer, liveStream, isCurrent)) {
         groupsWithChanges.add(streamer.group.id);
         return;
       }
     } catch {
-      // Edit failed (already logged) — skip postAnnouncement for this streamer
+      // Edit failed (already logged) — skip postAnnouncement for this streamer, but still track
+      // the stored message as live (as the no-client branch above does) so later polls edit it
+      // via editAnnouncement instead of posting a duplicate and orphaning the original.
+      if (isCurrent()) liveStates.set(String(streamer.id), makeLiveState(streamer, liveStream, streamer.discord_message_id, streamer.discord_channel_id));
       return;
     }
   }
-  await postAnnouncement(liveStates, streamer, liveStream);
+  await postAnnouncement(liveStates, streamer, liveStream, isCurrent);
 }
 
 /**
@@ -89,11 +107,14 @@ export async function handleLiveStreamerOnStartup(
  * the cleanup is done directly here instead.
  * @param streamer - Full streamer record (including its stream group) from the database.
  * @param groupsWithChanges - Accumulator of stream group IDs whose MultiTwitch state needs refreshing.
+ * @param isCurrent - See {@link withLoginLock}; checked after the delete so a run that outlived its
+ *   lock timeout doesn't clear live state a newer operation for this login has since recorded.
  * @returns Resolves once the stale announcement is cleaned up (or skipped on delete failure).
  */
 export async function handleOfflineStreamerOnStartup(
   streamer: DbStreamerFull,
   groupsWithChanges: Set<number>,
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
   // Stream ended while bot was offline — liveStates is empty at startup so
   // deleteAnnouncement() would early-return without clearing DB state. Do it directly.
@@ -105,6 +126,7 @@ export async function handleOfflineStreamerOnStartup(
       return;
     }
   }
+  if (!isCurrent()) return;
   await clearStreamerLive(streamer.id, streamer.discord_message_id);
   groupsWithChanges.add(streamer.group.id);
 }
@@ -113,7 +135,8 @@ export async function handleOfflineStreamerOnStartup(
  * Runs the one-time live-status reconciliation performed when the bot starts:
  * fetches current live streams for all tracked streamers, reconciles each
  * streamer's announcement state via {@link handleLiveStreamerOnStartup} or
- * {@link handleOfflineStreamerOnStartup}, then refreshes MultiTwitch fields for
+ * {@link handleOfflineStreamerOnStartup} (each inside that login's {@link withLoginLock}, so it
+ * can't race an EventSub-triggered immediate check for the same login), then refreshes MultiTwitch fields for
  * every stream group that changed.
  * @param liveStates - Map of live streamer states, keyed by streamer DB row id (mutated in place).
  * @param loginToUserId - Map of lowercased Twitch login to Twitch user ID for all tracked streamers.
@@ -144,19 +167,23 @@ export async function performStartupLiveCheck(
 
   // Each streamer's reconciliation (a different Discord message/channel) is independent, and
   // handleLiveStreamerOnStartup/handleOfflineStreamerOnStartup already isolate their own
-  // errors internally — so these run concurrently instead of one streamer at a time.
+  // errors internally — so these run concurrently instead of one streamer at a time. Each runs
+  // behind its login's withLoginLock, the same lock triggerImmediateLiveCheck and the poll loop
+  // use: during restartTwitchMonitor an EventSub stream.online can trigger an immediate check
+  // while this startup pass is still posting/editing that streamer's announcement, and without
+  // the lock both could see no liveStates entry and each post a "now live" message.
   await Promise.allSettled(
     streamersData.map(async (streamer) => {
       const loginKey = streamer.twitch_name?.toLowerCase();
       const userId = loginKey ? loginToUserId.get(loginKey) : undefined;
-      if (!userId) return;
+      if (!loginKey || !userId) return;
 
       const liveStream = liveByUserId.get(userId);
 
       if (liveStream) {
-        await handleLiveStreamerOnStartup(liveStates, streamer, liveStream, groupsWithChanges);
+        await withLoginLock(loginKey, (isCurrent) => handleLiveStreamerOnStartup(liveStates, streamer, liveStream, groupsWithChanges, isCurrent));
       } else if (streamer.discord_message_id) {
-        await handleOfflineStreamerOnStartup(streamer, groupsWithChanges);
+        await withLoginLock(loginKey, (isCurrent) => handleOfflineStreamerOnStartup(streamer, groupsWithChanges, isCurrent));
       }
     }).map((work) => work.catch((err: unknown) => log.error('Startup reconciliation failed for a streamer:', err))),
   );
