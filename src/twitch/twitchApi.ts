@@ -305,6 +305,38 @@ export async function getCustomRewards(broadcasterId: string, userToken: string)
   return data.data;
 }
 
+/** A single follower record, as returned by Twitch's Get Channel Followers endpoint. */
+export interface TwitchChannelFollower {
+  user_id: string;
+  user_login: string;
+  user_name: string;
+  /** RFC3339 timestamp of when the user followed the channel. */
+  followed_at: string;
+}
+
+/**
+ * Looks up whether `userId` follows `broadcasterId`, via Helix's Get Channel Followers endpoint
+ * filtered to that one user. Requires a user token with the `moderator:read:followers` scope
+ * belonging to the broadcaster (or one of their moderators) — app tokens can't read follow dates.
+ * Wrapped in fetchHelixWithRetry: a chat-triggered read, so a transient network error is worth retrying.
+ * @param broadcasterId - Twitch user ID of the channel being followed.
+ * @param userId - Twitch user ID of the (possible) follower.
+ * @param userToken - Broadcaster OAuth user token with the moderator:read:followers scope.
+ * @returns The follow record, or null if `userId` doesn't follow `broadcasterId`.
+ * @throws If Twitch returns a non-OK status (e.g. 401 for a token missing the scope).
+ */
+export async function getChannelFollower(
+  broadcasterId: string,
+  userId: string,
+  userToken: string,
+): Promise<TwitchChannelFollower | null> {
+  const url = `https://api.twitch.tv/helix/channels/followers?broadcaster_id=${encodeURIComponent(broadcasterId)}&user_id=${encodeURIComponent(userId)}`;
+  const res = await fetchHelixWithRetry(url, authHeaders(userToken));
+  if (!res.ok) throw new Error(`[TwitchAPI] getChannelFollower failed: ${res.status}`);
+  const data = await res.json() as { data: TwitchChannelFollower[] };
+  return data.data[0] ?? null;
+}
+
 /** A single channel-points redemption, as returned by Twitch's Get Custom Reward Redemptions endpoint. */
 export interface TwitchRewardRedemption {
   id: string;

@@ -10,7 +10,7 @@ vi.mock('../shared/config', () => ({
 import {
   getUsers, getStreams, getChannelInfo, getSharedChatSession, getAppToken,
   getCustomRewards, updateRewardCost, createCustomReward, updateCustomReward, deleteCustomReward,
-  getRewardRedemptions,
+  getRewardRedemptions, getChannelFollower,
   TwitchRewardUnsupportedError, TwitchRewardAuthError,
 } from './twitchApi';
 
@@ -155,6 +155,30 @@ describe('getSharedChatSession', () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, TOKEN_RESPONSE));
     await getAppToken();
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('getChannelFollower', () => {
+  it('queries by broadcaster and user with the user token, returning the follow record', async () => {
+    const follow = { user_id: 'u2', user_login: 'bob', user_name: 'Bob', followed_at: '2024-03-12T10:00:00Z' };
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: [follow], total: 1 }));
+
+    const result = await getChannelFollower('bc1', 'u2', 'user-token');
+
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
+    expect(String(url)).toContain('/channels/followers?broadcaster_id=bc1&user_id=u2');
+    expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer user-token');
+    expect(result).toEqual(follow);
+  });
+
+  it('returns null when the user does not follow the channel', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: [], total: 0 }));
+    expect(await getChannelFollower('bc1', 'u2', 'user-token')).toBeNull();
+  });
+
+  it('throws with the response status on a non-OK response', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(401, {}));
+    await expect(getChannelFollower('bc1', 'u2', 'user-token')).rejects.toThrow('getChannelFollower failed: 401');
   });
 });
 

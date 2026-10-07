@@ -8,6 +8,7 @@ import { executeCounterCommandForTwitch } from '../commands/counterHandler';
 import { executeMultiCommandForTwitch } from '../commands/multiCommandHandler';
 import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
+import { executeFollowageForTwitch } from '../commands/followageHandler';
 import { fireAndForget, extractCommand } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
@@ -200,6 +201,11 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
       log,
     );
     fireAndForget(executeCountdownForTwitch(normalizedChannel, message, command), 'Countdown error', log);
+    fireAndForget(
+      executeFollowageForTwitch(normalizedChannel, message, msg.channelId, { id: msg.userInfo.userId, name: displayName }, command),
+      'Followage error',
+      log,
+    );
   } catch (err) {
     log.error('Unexpected error in message handler:', err);
   }
