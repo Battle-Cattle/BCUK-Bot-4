@@ -42,7 +42,7 @@ vi.mock('../../audio/audioPlayer', () => ({
   disconnect: vi.fn(),
 }));
 
-vi.mock('../../discord/discordBot', () => ({
+vi.mock('../../discord/discordClientStore', () => ({
   getDiscordClient: vi.fn(),
 }));
 

@@ -9,14 +9,14 @@ vi.mock('../db', () => ({
   getEffectiveAccessLevelForUser: vi.fn().mockResolvedValue(0),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
-vi.mock('../discord/discordBot', () => ({
+vi.mock('../discord/discordApi', () => ({
   fetchMemberDisplayName: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
 import { establishDashboardSession, resolveAccessibleGuilds } from './loginSession';
 import { getAllGuilds, getGuildsForMember, getEffectiveAccessLevelForUser, updateDiscordName, AccessLevel } from '../db';
-import { fetchMemberDisplayName } from '../discord/discordBot';
+import { fetchMemberDisplayName } from '../discord/discordApi';
 
 beforeEach(() => {
   vi.clearAllMocks();

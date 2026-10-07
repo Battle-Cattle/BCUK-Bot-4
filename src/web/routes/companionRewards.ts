@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
 import { getStreamerByDiscordId } from '../../db';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../../twitch/twitchUserTokens';
 
 const log = createLogger('CompanionRewards');
 const router = Router();

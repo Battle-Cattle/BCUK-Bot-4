@@ -25,7 +25,7 @@ vi.mock('@simplewebauthn/server', () => ({
   generateAuthenticationOptions: vi.fn(),
   verifyAuthenticationResponse: vi.fn(),
 }));
-vi.mock('../../discord/discordBot', () => ({ fetchDiscordUserProfile: vi.fn(), sendDiscordDirectMessage: vi.fn() }));
+vi.mock('../../discord/discordApi', () => ({ fetchDiscordUserProfile: vi.fn(), sendDiscordDirectMessage: vi.fn() }));
 vi.mock('../loginSession', () => ({
   resolveAccessibleGuilds: vi.fn(),
   establishDashboardSession: vi.fn(),
@@ -61,7 +61,7 @@ import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
-import { fetchDiscordUserProfile, sendDiscordDirectMessage } from '../../discord/discordBot';
+import { fetchDiscordUserProfile, sendDiscordDirectMessage } from '../../discord/discordApi';
 import { hashEnrollmentCode, generateEnrollmentCode } from './passkeysEnrollmentCode';
 import { resolveAccessibleGuilds, establishDashboardSession } from '../loginSession';
 import { makeSessionUser } from '../../test-utils/fixtures';

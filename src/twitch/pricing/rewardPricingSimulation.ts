@@ -1,5 +1,4 @@
-import { RewardPricingConfig, computePrice, decayDemand, computeRedemptionIncrement } from './rewardPricingMath';
-import { PriceHistoryPoint } from '../../web/priceHistoryChart';
+import { RewardPricingConfig, PriceHistoryPoint, computePrice, decayDemand, computeRedemptionIncrement } from './rewardPricingMath';
 
 /** Config needed to simulate a full constant-usage ramp + cooldown cycle for one reward. */
 export interface SimulationConfig extends RewardPricingConfig {

@@ -5,12 +5,12 @@ const { mockLog } = vi.hoisted(() => ({ mockLog: { info: vi.fn(), warn: vi.fn(),
 vi.mock('../shared/logger', () => ({ createLogger: () => mockLog }));
 vi.mock('../shared/config', () => ({ GLOBAL_COOLDOWN_MS: 3_000 }));
 vi.mock('../twitch/twitchApi', () => ({ getUsers: vi.fn(), getChannelFollower: vi.fn() }));
-vi.mock('../twitch/eventsub/twitchApiEventSub', () => ({ getValidToken: vi.fn() }));
+vi.mock('../twitch/twitchUserTokens', () => ({ getValidToken: vi.fn() }));
 vi.mock('../db', () => ({ getStreamerByTwitchUserId: vi.fn() }));
 
 import { executeFollowageForTwitch, registerFollowageRuntime, formatFollowDuration } from './followageHandler';
 import { getUsers, getChannelFollower } from '../twitch/twitchApi';
-import { getValidToken } from '../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../twitch/twitchUserTokens';
 import { getStreamerByTwitchUserId } from '../db';
 
 const mockRuntime = { send: vi.fn() };

@@ -6,8 +6,10 @@ vi.mock('../../db', () => ({
   getGuildMemberUsers: vi.fn(),
   updateDiscordName: vi.fn(),
 }));
-vi.mock('../../discord/discordBot', () => ({
+vi.mock('../../discord/discordClientStore', () => ({
   getDiscordClient: vi.fn(),
+}));
+vi.mock('../../discord/discordApi', () => ({
   fetchMemberDisplayName: vi.fn(),
 }));
 vi.mock('../middleware', () => ({
@@ -21,7 +23,8 @@ vi.mock('../csrf', () => ({
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import { getGuildMemberUsers, updateDiscordName } from '../../db';
-import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
+import { fetchMemberDisplayName } from '../../discord/discordApi';
+import { getDiscordClient } from '../../discord/discordClientStore';
 import supertest from 'supertest';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 

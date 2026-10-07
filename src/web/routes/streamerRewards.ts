@@ -1,7 +1,7 @@
 import type { Logger } from 'winston';
 import type { DbStreamerEventSub } from '../../db';
 import { getCustomRewards, type TwitchCustomReward } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../../twitch/twitchUserTokens';
 
 /**
  * Fetches a streamer's live Twitch custom channel-point rewards for an admin page's reward

@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
-vi.mock('../../discord/discordBot', () => ({ getDiscordClient: vi.fn().mockReturnValue(null) }));
+vi.mock('../../discord/discordClientStore', () => ({ getDiscordClient: vi.fn().mockReturnValue(null) }));
 vi.mock('../../discord/discordUtils', () => ({ tryEditDiscordMessage: vi.fn() }));
 vi.mock('./twitchMonitorEmbed', () => ({ buildEmbed: vi.fn().mockReturnValue({ title: 'embed' }) }));
 
 import { groupGameKey, buildMultiTwitchContext, getMultitwitchPreview, updateMultitwitch } from './twitchMonitorMultitwitch';
-import { getDiscordClient } from '../../discord/discordBot';
+import { getDiscordClient } from '../../discord/discordClientStore';
 import { tryEditDiscordMessage } from '../../discord/discordUtils';
 import type { LiveState } from './twitchMonitorTypes';
 

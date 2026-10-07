@@ -13,7 +13,7 @@ import {
   type DbGuild,
   type DbUser,
 } from '../db';
-import { fetchMemberDisplayName } from '../discord/discordBot';
+import { fetchMemberDisplayName } from '../discord/discordApi';
 import { runUserMutation } from '../shared/userMutationQueue';
 import type { SessionUser } from '../types/express';
 

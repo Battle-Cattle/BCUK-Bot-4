@@ -33,7 +33,7 @@ vi.mock('../../shared/statusStore', () => ({
   setVoicePlaying: vi.fn(),
 }));
 
-vi.mock('../../discord/discordBot', () => ({
+vi.mock('../../discord/discordClientStore', () => ({
   getDiscordClient: vi.fn(),
 }));
 
@@ -49,7 +49,7 @@ import { findCachedSfxTrigger, getAllSfxTriggers, isKeyApprovedForGuild, getAppr
 import { pickWeightedRandom } from '../../audio/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
-import { getDiscordClient } from '../../discord/discordBot';
+import { getDiscordClient } from '../../discord/discordClientStore';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 

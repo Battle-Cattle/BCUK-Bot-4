@@ -5,7 +5,7 @@ const { logMock } = vi.hoisted(() => ({
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => logMock }));
 vi.mock('../../shared/statusStore', () => ({ setTwitchChannelLive: vi.fn() }));
-vi.mock('../../discord/discordBot', () => ({ getDiscordClient: vi.fn() }));
+vi.mock('../../discord/discordClientStore', () => ({ getDiscordClient: vi.fn() }));
 vi.mock('../../db', () => ({
   getAllStreamersWithGroups: vi.fn(),
   setStreamerLive: vi.fn().mockResolvedValue(undefined),
@@ -31,7 +31,7 @@ import {
 import { getAllStreamersWithGroups, clearStreamerLive } from '../../db';
 import { getUsers, getStreams } from '../twitchApi';
 import { cancelOfflineTimersForLogin, handleStreamOffline } from './twitchMonitorOffline';
-import { getDiscordClient } from '../../discord/discordBot';
+import { getDiscordClient } from '../../discord/discordClientStore';
 import * as twitchMonitorAnnouncements from './twitchMonitorAnnouncements';
 import { getHealthSnapshot } from '../../shared/healthStore';
 
