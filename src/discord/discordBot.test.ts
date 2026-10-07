@@ -59,6 +59,7 @@ let customCmds: CustomCommandModule;
 let mockInstance: ReturnType<typeof makeMockClient>;
 let mockGuild: { name: string; members: { fetch: ReturnType<typeof vi.fn> } };
 let mockLog: ReturnType<typeof mockLogger>;
+let clientStore: typeof import('./discordClientStore');
 
 function makeMockClient() {
   mockGuild = { name: 'TestGuild', members: { fetch: vi.fn().mockResolvedValue({ displayName: 'Alice' }) } };
@@ -88,20 +89,24 @@ beforeEach(async () => {
   commands = await import('../commands/commandRouter.js') as CommandRouterModule;
   customCmds = await import('../commands/customCommandHandler.js') as CustomCommandModule;
   const loggerModule = await import('../shared/logger.js');
+  // discordBot.ts and the gateway modules it imports each create their own 'Discord' logger;
+  // hand them all one instance so assertions see every line regardless of which module logged it.
+  mockLog = mockLogger();
+  vi.mocked(loggerModule.createLogger).mockImplementation(() => mockLog as any);
+  clientStore = await import('./discordClientStore.js');
   mod = await import('./discordBot.js') as DiscordBotModule;
-  mockLog = vi.mocked(loggerModule.createLogger).mock.results[0]?.value;
 });
 
 // ─── getDiscordClient ─────────────────────────────────────────────────────────
 
 describe('getDiscordClient', () => {
   it('returns null before startDiscordBot is called', () => {
-    expect(mod.getDiscordClient()).toBeNull();
+    expect(clientStore.getDiscordClient()).toBeNull();
   });
 
   it('returns null after startDiscordBot but before clientReady fires', () => {
     mod.startDiscordBot();
-    expect(mod.getDiscordClient()).toBeNull();
+    expect(clientStore.getDiscordClient()).toBeNull();
   });
 
   it('is idempotent — a second call while booting does not create a second Client', () => {
@@ -112,94 +117,10 @@ describe('getDiscordClient', () => {
 
   it('returns the client instance after clientReady fires', async () => {
     mod.startDiscordBot();
-    expect(mod.getDiscordClient()).toBeNull();
+    expect(clientStore.getDiscordClient()).toBeNull();
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await readyCb(mockInstance);
-    expect(mod.getDiscordClient()).toBe(mockInstance);
-  });
-});
-
-// ─── fetchMemberDisplayName ───────────────────────────────────────────────────
-
-describe('fetchMemberDisplayName', () => {
-  it('returns null when client is not ready', async () => {
-    expect(await mod.fetchMemberDisplayName('123', 'guild-id', false)).toBeNull();
-  });
-
-  it('returns the member displayName when client is ready and fetch succeeds', async () => {
-    mod.startDiscordBot();
-    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await readyCb(mockInstance);  // fires clientReady → sets client
-
-    const result = await mod.fetchMemberDisplayName('user123', 'guild-id', false);
-    expect(result).toBe('Alice');
-  });
-
-  it('returns null when guild member fetch throws', async () => {
-    mockGuild.members.fetch.mockRejectedValueOnce(new Error('not found'));
-    mod.startDiscordBot();
-    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await readyCb(mockInstance);
-
-    const result = await mod.fetchMemberDisplayName('missing', 'guild-id', false);
-    expect(result).toBeNull();
-  });
-});
-
-// ─── fetchDiscordUserProfile ──────────────────────────────────────────────────
-
-describe('fetchDiscordUserProfile', () => {
-  it('returns null when client is not ready', async () => {
-    expect(await mod.fetchDiscordUserProfile('123')).toBeNull();
-  });
-
-  it('returns the username and avatar hash when the fetch succeeds', async () => {
-    mod.startDiscordBot();
-    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await readyCb(mockInstance);
-
-    expect(await mod.fetchDiscordUserProfile('user123')).toEqual({ username: 'alice', avatar: 'abc123' });
-    expect(mockInstance.users.fetch).toHaveBeenCalledWith('user123');
-  });
-
-  it('returns null when the user fetch throws', async () => {
-    mockInstance.users.fetch.mockRejectedValueOnce(new Error('unknown user'));
-    mod.startDiscordBot();
-    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await readyCb(mockInstance);
-
-    expect(await mod.fetchDiscordUserProfile('missing')).toBeNull();
-  });
-});
-
-// ─── sendDiscordDirectMessage ─────────────────────────────────────────────────
-
-describe('sendDiscordDirectMessage', () => {
-  async function readyBot() {
-    mod.startDiscordBot();
-    const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
-    await readyCb(mockInstance);
-  }
-
-  it('returns false when client is not ready', async () => {
-    expect(await mod.sendDiscordDirectMessage('123', 'hi')).toBe(false);
-  });
-
-  it('DMs the user with mentions disabled', async () => {
-    const send = vi.fn().mockResolvedValue({});
-    mockInstance.users.fetch.mockResolvedValueOnce({ send });
-    await readyBot();
-
-    expect(await mod.sendDiscordDirectMessage('user123', 'your code')).toBe(true);
-    expect(mockInstance.users.fetch).toHaveBeenCalledWith('user123');
-    expect(send).toHaveBeenCalledWith({ content: 'your code', allowedMentions: { parse: [] } });
-  });
-
-  it('returns false when Discord refuses the DM', async () => {
-    mockInstance.users.fetch.mockResolvedValueOnce({ send: vi.fn().mockRejectedValue(new Error('Cannot send messages to this user')) });
-    await readyBot();
-
-    expect(await mod.sendDiscordDirectMessage('user123', 'your code')).toBe(false);
+    expect(clientStore.getDiscordClient()).toBe(mockInstance);
   });
 });
 
@@ -659,7 +580,7 @@ describe('startDiscordBot — gateway watchdog', () => {
     // stopDiscordBot() destroyed the dead client, and startDiscordBot() logged back in.
     expect(mockInstance.destroy).toHaveBeenCalledOnce();
     expect(mockInstance.login).toHaveBeenCalledTimes(2);
-    expect(mod.getDiscordClient()).toBeNull();
+    expect(clientStore.getDiscordClient()).toBeNull();
   });
 
   it('records the Discord connection as down when a shard disconnects permanently', async () => {
@@ -751,7 +672,7 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     mod.startDiscordBot();
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await readyCb(mockInstance);
-    expect(mod.getDiscordClient()).toBe(mockInstance);
+    expect(clientStore.getDiscordClient()).toBe(mockInstance);
 
     // getDiscordClient() stays non-null here (only shardDisconnect/stopDiscordBot clear it) — the
     // watchdog must key off actual gateway connectivity, not client existence, or it would never
@@ -770,7 +691,7 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     mod.startDiscordBot();
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await readyCb(mockInstance);
-    expect(mod.getDiscordClient()).toBe(mockInstance);
+    expect(clientStore.getDiscordClient()).toBe(mockInstance);
 
     // This bot is single-shard, so 'shardReconnecting' alone means the gateway is down — no
     // 'shardError'/'shardDisconnect' ever needs to fire for the watchdog to need to catch this.
@@ -895,7 +816,7 @@ describe('startDiscordBot — login failure reconnect backoff', () => {
     await flushMicrotasks();
 
     expect(mockLog.error).toHaveBeenCalledWith('Login failed:', expect.any(Error));
-    expect(mod.getDiscordClient()).toBeNull();
+    expect(clientStore.getDiscordClient()).toBeNull();
 
     // First retry backs off 5s (RECONNECT_BASE_DELAY_MS).
     await vi.advanceTimersByTimeAsync(5_000);
@@ -904,7 +825,7 @@ describe('startDiscordBot — login failure reconnect backoff', () => {
     // This attempt succeeds — fire clientReady.
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await readyCb(mockInstance);
-    expect(mod.getDiscordClient()).toBe(mockInstance);
+    expect(clientStore.getDiscordClient()).toBe(mockInstance);
   });
 
   it('backs off exponentially across repeated login failures, capped at the max delay', async () => {
@@ -972,7 +893,7 @@ describe('startDiscordBot — login failure reconnect backoff', () => {
     expect(mockInstance.login).toHaveBeenCalledTimes(2);
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await readyCb(mockInstance);
-    expect(mod.getDiscordClient()).toBe(mockInstance);
+    expect(clientStore.getDiscordClient()).toBe(mockInstance);
 
     // A later shard disconnect forces a fresh login, which fails again — the backoff for this
     // new failure must start from RECONNECT_BASE_DELAY_MS again, not continue from where the
@@ -1026,7 +947,7 @@ describe('startDiscordBot — login failure reconnect backoff', () => {
 describe('stopDiscordBot', () => {
   it('does not throw when called before startDiscordBot (existing?.destroy is safe)', () => {
     expect(() => mod.stopDiscordBot()).not.toThrow();
-    expect(mod.getDiscordClient()).toBeNull();
+    expect(clientStore.getDiscordClient()).toBeNull();
   });
 
   it('records the Discord connection as down', async () => {
@@ -1044,11 +965,11 @@ describe('stopDiscordBot', () => {
     mod.startDiscordBot();
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     await readyCb(mockInstance);
-    expect(mod.getDiscordClient()).not.toBeNull();
+    expect(clientStore.getDiscordClient()).not.toBeNull();
 
     mod.stopDiscordBot();
 
-    expect(mod.getDiscordClient()).toBeNull();
+    expect(clientStore.getDiscordClient()).toBeNull();
     expect(mockInstance.destroy).toHaveBeenCalledOnce();
   });
 
@@ -1059,16 +980,16 @@ describe('stopDiscordBot', () => {
     mockInstance.destroy.mockRejectedValueOnce(new Error('destroy failed'));
 
     expect(() => mod.stopDiscordBot()).not.toThrow();
-    expect(mod.getDiscordClient()).toBeNull();
+    expect(clientStore.getDiscordClient()).toBeNull();
     await flushMicrotasks();
   });
 
   it('destroys a booting client when stopDiscordBot is called before clientReady fires', () => {
     mod.startDiscordBot();
-    expect(mod.getDiscordClient()).toBeNull();
+    expect(clientStore.getDiscordClient()).toBeNull();
     mod.stopDiscordBot();
     expect(mockInstance.destroy).toHaveBeenCalledOnce();
-    expect(mod.getDiscordClient()).toBeNull();
+    expect(clientStore.getDiscordClient()).toBeNull();
   });
 
   it('discards a clientReady event that fires after stopDiscordBot', async () => {
@@ -1076,6 +997,6 @@ describe('stopDiscordBot', () => {
     const readyCb = mockInstance.once.mock.calls.find(([event]: string[]) => event === 'clientReady')?.[1];
     mod.stopDiscordBot();
     await readyCb(mockInstance); // fires late, after stop
-    expect(mod.getDiscordClient()).toBeNull();
+    expect(clientStore.getDiscordClient()).toBeNull();
   });
 });
