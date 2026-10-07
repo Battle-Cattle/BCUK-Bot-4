@@ -2,6 +2,9 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 
 const ALGORITHM = 'aes-256-gcm';
 const ENC_PREFIX = 'enc:';
+// encryptToken always writes a full 16-byte GCM tag. Pinning the length on decrypt makes Node
+// reject a truncated tag (which would otherwise verify against only its first few bytes).
+const AUTH_TAG_LENGTH = 16;
 
 /**
  * Validates and decodes the AES-256 key.
@@ -40,7 +43,7 @@ export function decryptToken(stored: string, secret: string): string {
   const key = parseKey(secret);
   const [ivB64, tagB64, dataB64] = stored.slice(ENC_PREFIX.length).split('.');
   if (!ivB64 || !tagB64 || !dataB64) throw new Error('Invalid encrypted token format');
-  const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivB64, 'base64'));
+  const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivB64, 'base64'), { authTagLength: AUTH_TAG_LENGTH });
   decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
   return Buffer.concat([decipher.update(Buffer.from(dataB64, 'base64')), decipher.final()]).toString('utf8');
 }

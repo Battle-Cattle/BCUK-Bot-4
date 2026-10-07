@@ -69,7 +69,7 @@ export function renderPriceHistoryChart(
   options?: { ariaLabel?: string; elapsedTimeAxis?: boolean },
 ): string {
   if (points.length === 0) {
-    return assertSafeChartHtml(`<div class="hint price-history-empty" style="height:${HEIGHT}px;display:flex;align-items:center;justify-content:center;">No price history yet for this range.</div>`);
+    return assertSafeChartHtml(`<div class="hint price-history-empty">No price history yet for this range.</div>`);
   }
 
   const sorted = [...points].sort((a, b) => a.t - b.t);
@@ -115,7 +115,7 @@ export function renderPriceHistoryChart(
   <polyline points="${polyline}" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
   <circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="4" fill="var(--primary)" stroke="var(--bg-card)" stroke-width="2"/>
   <text x="${last.x.toFixed(1)}" y="${(last.y - 8).toFixed(1)}" text-anchor="end" class="price-history-end-label">${escapeHtml(last.cost.toLocaleString())} pts</text>
-  <g class="price-history-crosshair" style="display:none;">
+  <g class="price-history-crosshair is-hidden">
     <line class="price-history-crosshair-line" y1="${plotTop}" y2="${plotBottom}" stroke="var(--muted)" stroke-width="1"/>
     <circle class="price-history-crosshair-dot" r="4" fill="var(--primary)" stroke="var(--bg-card)" stroke-width="2"/>
   </g>
