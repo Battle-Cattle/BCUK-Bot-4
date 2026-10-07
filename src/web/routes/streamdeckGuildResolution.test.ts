@@ -8,13 +8,13 @@ vi.mock('../../discord/voicePresence', () => ({
   getActiveGuildForUser: vi.fn(),
 }));
 
-vi.mock('../../discord/discordBot', () => ({
+vi.mock('../../discord/discordClientStore', () => ({
   getDiscordClient: vi.fn(),
 }));
 
 import { isKeyApprovedForGuild } from '../../db';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
-import { getDiscordClient } from '../../discord/discordBot';
+import { getDiscordClient } from '../../discord/discordClientStore';
 import {
   resolveGuildIdFromChannelId,
   ensureGuildApproved,

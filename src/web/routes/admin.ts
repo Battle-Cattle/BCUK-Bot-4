@@ -14,8 +14,9 @@ import { getSessionUser, getCurrentGuildId } from '../session';
 import { trimField, filterQueryParam } from './validation';
 import { renderView } from './viewHelpers';
 import { renderOrError } from './errorHandling';
-import { runUserMutationForActorAndTarget } from './adminUserMutationQueue';
-import adminRefreshRouter, { getRefreshState } from './adminRefresh';
+import { runUserMutationForActorAndTarget } from '../../shared/userMutationQueue';
+import adminRefreshRouter from './adminRefresh';
+import { getRefreshState } from '../../discord/guildRefreshState';
 import {
   DuplicateTwitchNameError,
   isDuplicateTwitchNameDbError,

@@ -20,7 +20,7 @@ vi.mock('../../twitch/twitchApi', () => ({
   getCustomRewards: vi.fn(),
 }));
 
-vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
+vi.mock('../../twitch/twitchUserTokens', () => ({
   getValidToken: vi.fn(),
 }));
 
@@ -30,7 +30,7 @@ import supertest from 'supertest';
 import router from './companionRewards';
 import { getStreamerByDiscordId } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../../twitch/twitchUserTokens';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 /** Builds a supertest-ready app: the companion-rewards router with no session stub (key-authenticated). */

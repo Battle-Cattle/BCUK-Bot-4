@@ -9,7 +9,7 @@ const { isDiscordNotFoundErrorMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
-vi.mock('../../discord/discordBot', () => ({ getDiscordClient: vi.fn() }));
+vi.mock('../../discord/discordClientStore', () => ({ getDiscordClient: vi.fn() }));
 vi.mock('../../discord/discordUtils', () => ({
   isDiscordNotFoundError: isDiscordNotFoundErrorMock,
   tryDeleteDiscordMessage: vi.fn().mockResolvedValue(undefined),
@@ -60,7 +60,7 @@ import {
   handleOfflineStreamerOnStartup,
   performStartupLiveCheck,
 } from './twitchMonitorStartup';
-import { getDiscordClient } from '../../discord/discordBot';
+import { getDiscordClient } from '../../discord/discordClientStore';
 import { isDiscordNotFoundError, tryDeleteDiscordMessage } from '../../discord/discordUtils';
 import { setStreamerLive, clearStreamerLive } from '../../db';
 import { getStreams } from '../twitchApi';

@@ -1,7 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { getStreamerById, saveStreamerToken, initEventConfig, initAlertConfigs } from '../../db';
-import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { exchangeCode, getUserFromToken } from '../../twitch/twitchUserTokens';
 import { TWITCH_EVENTSUB_REDIRECT_URI } from '../../shared/config';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { clearAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';

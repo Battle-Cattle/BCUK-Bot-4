@@ -13,7 +13,7 @@ import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { logAndRedirectError } from './errorHandling';
 import { checkEnrollmentCode } from './passkeysEnrollmentCode';
-import { sendDiscordDirectMessage } from '../../discord/discordBot';
+import { sendDiscordDirectMessage } from '../../discord/discordApi';
 import {
   RP_NAME,
   RP_ID,

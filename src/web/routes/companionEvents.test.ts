@@ -35,8 +35,9 @@ vi.mock('../../db', () => ({
 
 import supertest from 'supertest';
 import router, {
-  pushCompanionEvent, disconnectCompanionConnections, MAX_SSE_CONNECTIONS_PER_TOKEN, connections, type CompanionEvent,
+  pushCompanionEvent, disconnectCompanionConnections, MAX_SSE_CONNECTIONS_PER_TOKEN, connections,
 } from './companionEvents';
+import type { CompanionEvent } from '../../twitch/eventsub/twitchEventSubRuntime';
 import { RECENT_EVENTS_LIMIT } from './dashboardEvents';
 import { getStreamerByDiscordId, getRecentStreamerEvents, findDiscordIdByTokenHash } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';

@@ -4,21 +4,18 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { updatePricingCooldownForReward } from '../../db';
 import { createCustomReward, updateCustomReward } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../../twitch/twitchUserTokens';
 import { parseRewardIdParam } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import {
   parseRewardFields, effectiveCooldownSeconds, handleRewardDeleteAction,
+  NOT_A_STREAMER_REDIRECT,
 } from './channelPointsAdminShared';
 import { deleteRewardAndPricing } from '../../twitch/pricing/rewardPricingService';
-import { router as pricingMutationsRouter } from './channelPointsAdminPricingMutations';
 
 const log = createLogger('ChannelPointsAdminMutations');
 export const router = Router();
-
-/** Redirect target used when the requester isn't a streamer, scoped to the channel-points admin page. */
-const NOT_A_STREAMER_REDIRECT = '/channel-points?error=not_a_streamer';
 
 /**
  * POST /channel-points/rewards — creates a new custom reward on Twitch.
@@ -108,4 +105,3 @@ router.post('/rewards/:twitchRewardId/delete', requireAuth, csrfProtection, (req
 
 // Pricing config and pricing-settings routes live in their own module to keep this file scoped
 // to reward CRUD — see channelPointsAdminPricingMutations.ts.
-router.use(pricingMutationsRouter);

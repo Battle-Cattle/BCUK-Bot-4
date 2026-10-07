@@ -6,8 +6,10 @@ vi.mock('../../db', () => ({
   getGuildMemberUsers: vi.fn(),
   updateDiscordName: vi.fn(),
 }));
-vi.mock('../../discord/discordBot', () => ({
+vi.mock('../../discord/discordClientStore', () => ({
   getDiscordClient: vi.fn(),
+}));
+vi.mock('../../discord/discordApi', () => ({
   fetchMemberDisplayName: vi.fn(),
 }));
 vi.mock('../middleware', () => ({
@@ -21,12 +23,14 @@ vi.mock('../csrf', () => ({
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import { getGuildMemberUsers, updateDiscordName } from '../../db';
-import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
+import { fetchMemberDisplayName } from '../../discord/discordApi';
+import { getDiscordClient } from '../../discord/discordClientStore';
 import supertest from 'supertest';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 // Import module last so mocks are in place before module-level code runs
-import router, { refreshStates, getRefreshState } from './adminRefresh';
+import router from './adminRefresh';
+import { refreshStates, getRefreshState } from '../../discord/guildRefreshState';
 
 const GUILD_ID = '900000000000000001';
 const OTHER_GUILD_ID = '900000000000000002';

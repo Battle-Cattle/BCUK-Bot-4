@@ -1,5 +1,5 @@
-import type { AlertEventType, TextAnimation } from '../../db';
-import { createRuntimeRegistry } from '../../commands/twitchRuntime';
+import type { AlertEventType, StreamerEventType, TextAnimation } from '../../db';
+import { createRuntimeRegistry } from '../../shared/runtimeRegistry';
 
 // Runtime injection for the overlay push function — avoids a direct import of the
 // web layer from core Twitch handler code.  registerEventSubOverlayRuntime is called
@@ -37,13 +37,43 @@ export function registerEventSubOverlayRuntime(runtime: EventSubOverlayRuntime):
  * Public contract for the companion app runtime injection.
  * Passed to {@link registerEventSubCompanionRuntime} from index.ts.
  */
+// Payload types for the companion-app SSE stream. They live here, with the runtime that carries
+// them, so the EventSub handler that builds them doesn't import the web route that serves them.
+/** Non-redemption streamer activity types forwarded to the companion app. */
+export type CompanionActivityEventType = Exclude<StreamerEventType, 'redemption'>;
+
+/** A channel-point reward redemption forwarded to a user's companion app. */
+export interface CompanionRedemptionEvent {
+  type: 'channel_points_redemption';
+  rewardId: string;
+  rewardTitle: string;
+  userLogin: string;
+  userName: string;
+  userInput: string;
+  redeemedAt: string;
+}
+
+/** A follow/sub/resub/giftsub/raid activity event forwarded to a user's companion app. */
+export interface CompanionActivityEvent {
+  type: CompanionActivityEventType;
+  /** Stable `streamer_event_log.id`, unique across both this live push and the `/events/recent`
+   *  backfill — lets the client dedupe/order exactly instead of by `occurredAt` heuristic. */
+  id: number;
+  displayName: string;
+  detail: string | null;
+  occurredAt: string;
+}
+
+/** An event forwarded to a user's companion app over the `/api/companion/events` SSE stream. */
+export type CompanionEvent = CompanionRedemptionEvent | CompanionActivityEvent;
+
 interface EventSubCompanionRuntime {
   /**
    * Push a companion event to the named Discord user's SSE stream.
    * @param discordId - Discord snowflake of the streamer who owns the redemption.
    * @param event - The companion event payload to deliver.
    */
-  pushCompanionEvent: (discordId: string, event: import('../../web/routes/companionEvents').CompanionEvent) => void;
+  pushCompanionEvent: (discordId: string, event: CompanionEvent) => void;
 }
 
 export const companionRuntimeRegistry = createRuntimeRegistry<EventSubCompanionRuntime>();

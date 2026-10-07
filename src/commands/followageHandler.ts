@@ -1,9 +1,10 @@
 import { createLogger } from '../shared/logger';
 import { getUsers, getChannelFollower } from '../twitch/twitchApi';
-import { getValidToken } from '../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../twitch/twitchUserTokens';
 import { getStreamerByTwitchUserId } from '../db';
 import { resolveCommand } from './commandUtils';
-import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
+import { createRuntimeRegistry } from '../shared/runtimeRegistry';
+import type { TwitchSendRuntime } from './twitchRuntime';
 import { createCooldownGate } from './cooldownGate';
 
 const log = createLogger('Followage');
