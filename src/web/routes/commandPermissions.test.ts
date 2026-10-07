@@ -7,7 +7,7 @@ vi.mock('../../db', async () => ({
   isCommandSelfManageableBy: (await vi.importActual<typeof import('../../db/commandSelfService')>('../../db/commandSelfService')).isCommandSelfManageableBy,
 }));
 
-import { canManageCommandCatalog, isCommandAssignedTo, isCommandSelfManageable } from './commandPermissions';
+import { isCommandSelfManageable } from './commandPermissions';
 
 const SELF = '111111111111111111';
 const OTHER = '222222222222222222';
@@ -23,30 +23,6 @@ function command(overrides: Record<string, unknown> = {}): any {
     ...overrides,
   };
 }
-
-function reqWithLevel(accessLevel?: number): any {
-  return { session: { user: accessLevel === undefined ? undefined : { discordId: SELF, accessLevel } } };
-}
-
-describe('canManageCommandCatalog', () => {
-  it('is true for Mod and above', () => {
-    expect(canManageCommandCatalog(reqWithLevel(ACCESS_LEVEL_MOCK.MOD))).toBe(true);
-    expect(canManageCommandCatalog(reqWithLevel(ACCESS_LEVEL_MOCK.ADMIN))).toBe(true);
-  });
-
-  it('is false for a plain user or no session user', () => {
-    expect(canManageCommandCatalog(reqWithLevel(ACCESS_LEVEL_MOCK.USER))).toBe(false);
-    expect(canManageCommandCatalog(reqWithLevel())).toBe(false);
-  });
-});
-
-describe('isCommandAssignedTo', () => {
-  it('is true only when the user is among the assignees', () => {
-    const shared = command({ assigned_users: [{ discord_id: OTHER }, { discord_id: SELF }] });
-    expect(isCommandAssignedTo(shared, SELF)).toBe(true);
-    expect(isCommandAssignedTo(command({ assigned_users: [{ discord_id: OTHER }] }), SELF)).toBe(false);
-  });
-});
 
 describe('isCommandSelfManageable', () => {
   it('is true for a Twitch-only command assigned to the streamer alone', () => {

@@ -11,13 +11,14 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
+import { canManageCatalog, isAssignedTo } from './selfServiceAccess';
 import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { getCurrentGuildId } from '../session';
 import commandMutationsRouter from './commandMutations';
 import commandAssignmentsRouter from './commandAssignments';
 import commandGuildOverridesRouter from './commandGuildOverrides';
-import { canManageCommandCatalog, isCommandAssignedTo, isCommandSelfManageable } from './commandPermissions';
+import { isCommandSelfManageable } from './commandPermissions';
 
 const log = createLogger('Web');
 const router = Router();
@@ -62,14 +63,14 @@ interface CommandPageData {
  * @param req - Express request; reads the session user.
  */
 async function loadCommandPageData(req: Request): Promise<CommandPageData> {
-  if (canManageCommandCatalog(req)) {
+  if (canManageCatalog(req)) {
     const [commands, users] = await Promise.all([getAllCustomCommandsWithAssignments(), getGuildMemberUsers(getCurrentGuildId(req))]);
     return { commands, assignableUsers: users.filter((entry) => entry.twitch_name), twitchLinked: true };
   }
   const discordId = req.session.user!.discordId;
   const [commands, self] = await Promise.all([getAllCustomCommandsWithAssignments(), findUser(discordId)]);
   return {
-    commands: commands.filter((command) => isCommandAssignedTo(command, discordId)),
+    commands: commands.filter((command) => isAssignedTo(command, discordId)),
     assignableUsers: [],
     twitchLinked: !!self?.twitch_name,
   };
@@ -83,7 +84,7 @@ async function loadCommandPageData(req: Request): Promise<CommandPageData> {
 router.get('/commands', requireGuildContext, csrfProtection, async (req, res) => {
   try {
     const guildId = req.session.user?.currentGuildId ?? null;
-    const isCatalogManager = canManageCommandCatalog(req);
+    const isCatalogManager = canManageCatalog(req);
     const discordId = req.session.user!.discordId;
     const [{ commands, assignableUsers, twitchLinked }, overrides] = await Promise.all([
       loadCommandPageData(req),

@@ -1,42 +1,15 @@
-import type { Request } from 'express';
 import { SSE_MAX_TOTAL_CONNECTIONS } from '../../shared/config';
 import {
   getAllStreamersWithGroups, createManagedLookupCache,
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS, DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
   type RefreshingLookupCache,
 } from '../../db';
-import { ipKey } from '../rateLimits';
+import { createSseConnectionPool } from './sseConnectionPool';
 
 // Access controls for the SSE endpoints anyone can open without authenticating (the OBS
-// browser-source overlays): a connection sub-pool with its own total and per-IP limits, and the
-// known-streamer-login lookup that turns away logins nobody registered. Used by sseChannel.ts.
-
-/**
- * A sub-pool of the process-wide cap with its own total and per-IP limits, for SSE endpoints
- * that anyone can open without authenticating (the OBS browser-source overlays). Keeps those
- * callers from consuming the slots the authenticated streams (companion, dashboard, health,
- * settings status) rely on, and stops a single IP from taking the whole sub-pool.
- */
-export interface SseConnectionPool {
-  /** Maximum concurrent connections across the whole pool. */
-  readonly maxConnections: number;
-  /** Maximum concurrent connections in the pool from any one client IP (see `ipKey`). */
-  readonly maxPerIp: number;
-  /** Current number of connections attached under this pool. */
-  count: number;
-  /** Current connection count per client IP key; entries are deleted when they reach zero. */
-  readonly byIp: Map<string, number>;
-}
-
-/**
- * Creates an empty {@link SseConnectionPool}.
- * @param maxConnections - Pool-wide concurrent connection limit.
- * @param maxPerIp - Per-client-IP concurrent connection limit within the pool.
- * @returns A new pool with no connections counted.
- */
-export function createSseConnectionPool(maxConnections: number, maxPerIp: number): SseConnectionPool {
-  return { maxConnections, maxPerIp, count: 0, byIp: new Map() };
-}
+// browser-source overlays): the shared unauthenticated sub-pool (see `sseConnectionPool.ts`) and
+// the known-streamer-login lookup that turns away logins nobody registered. Used by
+// sseEventsHandlers.ts.
 
 /**
  * Sub-cap for every unauthenticated overlay SSE connection (reward-video + alerts overlays
@@ -111,33 +84,4 @@ function getKnownStreamerLoginCache(): KnownStreamerLoginLookup {
 export async function isKnownStreamerLogin(login: string): Promise<boolean> {
   const cache = await getKnownStreamerLoginCache().getCache();
   return cache.logins.has(login);
-}
-
-/**
- * Claims one slot in `pool` for the request's client IP, if both the pool-wide and per-IP limits
- * have room.
- * @param pool - The sub-pool to reserve in.
- * @param req - Express request; its client IP (see `ipKey`) keys the per-IP limit.
- * @returns The IP key the slot was counted under (pass it to {@link releasePoolSlot}), or null if
- *   a limit was already reached and nothing was reserved.
- */
-export function tryReservePoolSlot(pool: SseConnectionPool, req: Request): string | null {
-  const ip = ipKey(req);
-  const perIp = pool.byIp.get(ip) ?? 0;
-  if (pool.count >= pool.maxConnections || perIp >= pool.maxPerIp) return null;
-  pool.count++;
-  pool.byIp.set(ip, perIp + 1);
-  return ip;
-}
-
-/**
- * Releases a slot claimed by {@link tryReservePoolSlot}, dropping the IP's entry at zero.
- * @param pool - The sub-pool the slot was reserved in.
- * @param ip - The IP key returned by {@link tryReservePoolSlot}.
- */
-export function releasePoolSlot(pool: SseConnectionPool, ip: string): void {
-  pool.count--;
-  const remaining = (pool.byIp.get(ip) ?? 1) - 1;
-  if (remaining > 0) pool.byIp.set(ip, remaining);
-  else pool.byIp.delete(ip);
 }
