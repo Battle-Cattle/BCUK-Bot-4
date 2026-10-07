@@ -97,6 +97,16 @@ describe('isAnyCommandTakenAcrossTables', () => {
     const counterCall = pool.execute.mock.calls.find((args) => (args[0] as string).includes('counter'));
     expect(counterCall![0]).not.toContain('guild_id');
   });
+
+  it('excludes excludeCounterId from the counter query only', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[]]) };
+    await isAnyCommandTakenAcrossTables('!test', { excludeCounterId: 9 }, pool as any);
+    const counterCall = pool.execute.mock.calls.find((args) => (args[0] as string).includes('FROM counter'));
+    const customCmdCall = pool.execute.mock.calls.find((args) => (args[0] as string).includes('custom_command'));
+    expect(counterCall![0]).toContain('AND id != ?');
+    expect(counterCall![1]).toEqual(['!test', '!test', 9]);
+    expect(customCmdCall![1]).not.toContain(9);
+  });
 });
 
 // ─── runSerializedCommandWrite ────────────────────────────────────────────────
