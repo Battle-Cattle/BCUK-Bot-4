@@ -307,8 +307,9 @@ export { ReservedCommandError } from './db/reservedCommands';
 
 // ─── Counter commands ───────────────────────────────────────────────────────
 
-export { CounterNotFoundError, getAllCounters, getCountersForGuild, getCounterCount, getCounterHistory } from './db/counters';
-export { findCounterByCommand, isCounterCommandTaken } from './db/counterCache';
+export { CounterNotFoundError, getAllCounters, getCountersForGuild, getCounterCount, isCounterCommandTaken } from './db/counters';
+export { getCounterHistory } from './db/counterArchive';
+export { findCounterByCommand } from './db/counterCache';
 
 import {
   addCounter as addCounterRecord,
@@ -316,8 +317,8 @@ import {
   removeCounter as removeCounterRecord,
   resetCounterCurrentValue as resetCounterCurrentValueRecord,
   incrementCounter as incrementCounterRecord,
-  archiveAndResetYearlyCounters as archiveAndResetYearlyCountersRecord,
 } from './db/counters';
+import { archiveAndResetYearlyCounters as archiveAndResetYearlyCountersRecord } from './db/counterArchive';
 import type { UpdateCounterInput, CounterFieldsInput } from './db/counters';
 import { invalidateCounterLookupCache } from './db/counterCache';
 
