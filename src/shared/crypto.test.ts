@@ -69,6 +69,12 @@ describe('decryptToken', () => {
     parts[2] = parts[2]!.split('').reverse().join('');
     expect(() => decryptToken(parts.join('.'), VALID_SECRET)).toThrow();
   });
+  it('rejects a truncated auth tag instead of verifying only its prefix', () => {
+    const token = encryptToken('hello', VALID_SECRET);
+    const [iv, tag, data] = token.slice('enc:'.length).split('.');
+    const shortTag = Buffer.from(tag!, 'base64').subarray(0, 4).toString('base64');
+    expect(() => decryptToken(`enc:${iv}.${shortTag}.${data}`, VALID_SECRET)).toThrow();
+  });
 });
 
 describe('generateSecretAndHash', () => {
