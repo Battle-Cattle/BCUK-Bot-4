@@ -9,6 +9,7 @@ import {
 } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
+import { resolveNewAssignees } from './selfServiceAccess';
 import { parsePositiveIntId } from './validation';
 import { logAndRedirectError, handleReservedOrConflictCommandError } from './errorHandling';
 import {
@@ -16,7 +17,6 @@ import {
   discardNewCommandAsSessionUser,
   readCommandForm,
   removeCommandAsSessionUser,
-  resolveNewCommandAssignees,
   updateCommandAsSessionUser,
 } from './commandWriteAccess';
 
@@ -79,7 +79,7 @@ router.post('/commands/add', requireGuildContext, csrfProtection, async (req, re
   let commandId: number;
   let discordIds: string[];
   try {
-    const assignees = await resolveNewCommandAssignees(req);
+    const assignees = await resolveNewAssignees(req);
     if ('error' in assignees) return res.redirect(`/commands?error=${assignees.error}`);
     discordIds = assignees.discordIds;
     commandId = await addCustomCommand(form.triggerString, form.output, form.isDiscordEnabled, form.isMultiTwitch);
