@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { dispatchNotification, handleRevocation } from './twitchEventSubSubscriptions';
+import { dispatchNotification, handleRevocation } from './twitchEventSubDispatch';
 
 // Connection-independent handling of EventSub WebSocket messages: the message types, the
 // reconnect-URL allowlist, process-wide message-id dedup and staleness checks, and routing a

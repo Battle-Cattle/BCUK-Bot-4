@@ -29,7 +29,7 @@ vi.mock('../../twitch/eventsub/twitchEventSub', () => ({
   reloadEventSubSubscriptions: vi.fn(),
 }));
 
-vi.mock('../../twitch/eventsub/twitchEventSubSubscriptions', () => ({
+vi.mock('../../twitch/eventsub/twitchEventSubCreate', () => ({
   clearAuthFailedSubs: vi.fn(),
 }));
 
@@ -39,7 +39,7 @@ import router, { isExpectedTwitchAccount, validateOAuthCallback } from './events
 import { getStreamerById, saveStreamerToken, initEventConfig, initAlertConfigs } from '../../db';
 import { exchangeCode, getUserFromToken } from '../../twitch/twitchUserTokens';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
-import { clearAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
+import { clearAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';

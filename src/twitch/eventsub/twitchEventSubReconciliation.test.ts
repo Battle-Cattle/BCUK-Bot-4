@@ -23,9 +23,11 @@ import { getCustomRewards, getRewardRedemptions } from '../twitchApi';
 import { handleRedemption } from './twitchEventSubHandler';
 import {
   runReconciliationTick, startEventSubReconciliation, stopEventSubReconciliation,
-  __resetReconciliationCursorsForTests, CURSOR_RETENTION_MS, MAX_CURSOR_LAG_MS,
+  __resetReconciliationCursorsForTests,
 } from './twitchEventSubReconciliation';
-import { REDEMPTION_RECOVERY_WINDOW_MS, REDEMPTION_LEDGER_RETENTION_MS } from './twitchEventSubRedemptionDedup';
+import {
+  CURSOR_RETENTION_MS, MAX_CURSOR_LAG_MS, REDEMPTION_RECOVERY_WINDOW_MS, REDEMPTION_LEDGER_RETENTION_MS,
+} from './twitchEventSubReconciliationCursors';
 
 const streamer = { id: 1, twitch_name: 'streamerA', eventsub_access_token: 'tok' } as any;
 const config = { follow_enabled: true } as any;

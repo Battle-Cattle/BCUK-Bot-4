@@ -9,7 +9,7 @@ import { trimField, filterQueryParam, parseCheckboxField } from './validation';
 import { renderError, renderView, getFriendlyErrorMessage } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
-import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
+import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
 import { TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, EVENTSUB_TOKEN_SECRET } from '../../shared/config';
 
 const log = createLogger('Web');

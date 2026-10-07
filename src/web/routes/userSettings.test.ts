@@ -26,7 +26,7 @@ vi.mock('../../twitch/eventsub/twitchEventSub', () => ({
   reloadEventSubSubscriptions: vi.fn(),
 }));
 
-vi.mock('../../twitch/eventsub/twitchEventSubSubscriptions', () => ({
+vi.mock('../../twitch/eventsub/twitchEventSubCreate', () => ({
   hasAuthFailedSubs: vi.fn().mockReturnValue(false),
 }));
 

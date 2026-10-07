@@ -2,7 +2,8 @@ import { createLogger } from '../../shared/logger';
 import { BackoffRetry } from './backoffRetry';
 import { shouldSelfStop, type SubscribeOutcome } from './subscribeOutcome';
 import { recordEventSubConnected, recordEventSubReconnectAttempt, removeEventSubHealth } from '../../shared/healthStore';
-import { subscribeForStreamer, fetchValidEventSubToken, removeSessionSubscriptions, removeStreamerFromMap, StreamerEventSubData } from './twitchEventSubSubscriptions';
+import { subscribeForStreamer, fetchValidEventSubToken, removeSessionSubscriptions, StreamerEventSubData } from './twitchEventSubSubscriptions';
+import { removeStreamerFromMap } from './twitchEventSubDispatch';
 import { buildReconnectUrl, rejectionReason, routeEventSubMessage, type EventSubMessage } from './twitchEventSubMessages';
 
 const log = createLogger('EventSub');

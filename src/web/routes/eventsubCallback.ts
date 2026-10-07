@@ -4,7 +4,7 @@ import { getStreamerById, saveStreamerToken, initEventConfig, initAlertConfigs }
 import { exchangeCode, getUserFromToken } from '../../twitch/twitchUserTokens';
 import { TWITCH_EVENTSUB_REDIRECT_URI } from '../../shared/config';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
-import { clearAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
+import { clearAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
 import { logAndRedirectError } from './errorHandling';
 import { oauthStateMatches } from '../csrf';
 
