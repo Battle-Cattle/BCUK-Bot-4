@@ -4,11 +4,11 @@ import {
   getPricingSettingsForStreamer, getStreamerById, getRedemptionProgress, markRedemptionEffect,
   type StreamerPricingSettings, type DbStreamerEventSub, type RewardPricingRow,
 } from '../../db';
-import { getValidToken } from '../eventsub/twitchApiEventSub';
+import { getValidToken } from '../twitchUserTokens';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
 import { computePrice, decayDemand, applyRedemption, computeRedemptionIncrement } from './rewardPricingMath';
 import { createLogger } from '../../shared/logger';
-import { createRuntimeRegistry } from '../../commands/twitchRuntime';
+import { createRuntimeRegistry } from '../../shared/runtimeRegistry';
 
 const log = createLogger('RewardPricing');
 

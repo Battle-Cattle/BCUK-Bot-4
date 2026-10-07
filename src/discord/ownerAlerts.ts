@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { createRuntimeRegistry } from '../commands/twitchRuntime';
+import { createRuntimeRegistry } from '../shared/runtimeRegistry';
 import { findOwnerUser } from '../db';
 import { getHealthSnapshot, onHealthChanged } from '../shared/healthStore';
 import { deriveComponentOks } from './ownerAlertHealth';

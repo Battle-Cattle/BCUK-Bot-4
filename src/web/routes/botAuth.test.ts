@@ -7,7 +7,7 @@ vi.mock('../../db', () => ({
   getBotChatToken: vi.fn(),
 }));
 
-vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
+vi.mock('../../twitch/twitchUserTokens', () => ({
   getUserFromToken: vi.fn(),
 }));
 
@@ -47,7 +47,7 @@ import supertest from 'supertest';
 import { randomBytes } from 'crypto';
 import router from './botAuth';
 import { getBotChatToken } from '../../db';
-import { getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getUserFromToken } from '../../twitch/twitchUserTokens';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const OWNER_SESSION_USER = {

@@ -18,7 +18,7 @@ vi.mock('../../db', () => ({
   findSoundFiles: vi.fn(),
 }));
 
-vi.mock('../../commands/soundSelector', () => ({
+vi.mock('../../audio/soundSelector', () => ({
   pickWeightedRandom: vi.fn(),
 }));
 
@@ -42,7 +42,7 @@ vi.mock('../../audio/audioPlayer', () => ({
   disconnect: vi.fn(),
 }));
 
-vi.mock('../../discord/discordBot', () => ({
+vi.mock('../../discord/discordClientStore', () => ({
   getDiscordClient: vi.fn(),
 }));
 

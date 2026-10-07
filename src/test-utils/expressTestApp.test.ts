@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { buildTestApp } from './expressTestApp';
+import { buildTestApp, drainBodyBeforeRedirect } from './expressTestApp';
 
 /** A tiny router used to exercise buildTestApp: echoes session/body state and can trigger res.render. */
 function makeRouter() {
@@ -83,5 +83,31 @@ describe('buildTestApp', () => {
     const app = buildTestApp({ router: [makeRouter(), other] });
     const res = await supertest(app).get('/other');
     expect(res.body).toEqual({ ok: true });
+  });
+});
+
+describe('drainBodyBeforeRedirect', () => {
+  it('reads the whole unread body before sending the redirect', async () => {
+    let bodyEnded = false;
+    const app = express();
+    app.use(drainBodyBeforeRedirect);
+    app.post('/upload', (req, res) => {
+      req.on('end', () => { bodyEnded = true; });
+      res.redirect('/rejected');
+    });
+    const res = await supertest(app).post('/upload').send(Buffer.alloc(2 * 1024 * 1024, 1));
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/rejected');
+    expect(bodyEnded).toBe(true);
+  });
+
+  it('redirects immediately when the body was already consumed', async () => {
+    const app = express();
+    app.use(express.json());
+    app.use(drainBodyBeforeRedirect);
+    app.post('/done', (_req, res) => res.redirect(303, '/next'));
+    const res = await supertest(app).post('/done').send({ a: 1 });
+    expect(res.status).toBe(303);
+    expect(res.headers.location).toBe('/next');
   });
 });

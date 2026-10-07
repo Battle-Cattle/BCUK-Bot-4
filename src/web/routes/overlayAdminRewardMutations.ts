@@ -3,16 +3,13 @@ import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { saveRewardWithVideos, deleteReward } from '../../db';
-import { parsePositiveIntId, parseWeight, parseRewardIdParam, trimField } from './validation';
+import { parsePositiveIntId, parseWeight, parseRewardIdParam, trimField, toStringArray } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
-import { toStringArray } from './overlayAdminShared';
+import { NOT_A_STREAMER_REDIRECT } from './overlayAdminShared';
 
 const log = createLogger('OverlayAdminReward');
 export const router = Router();
-
-/** Redirect target used when the requester isn't a streamer, scoped to the overlay admin page. */
-const NOT_A_STREAMER_REDIRECT = '/overlay/settings?error=not_a_streamer';
 
 /**
  * POST /overlay/settings/rewards — creates or updates a reward assignment,

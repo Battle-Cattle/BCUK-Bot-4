@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { randomBytes } from 'crypto';
 import { getBotChatToken } from '../../db';
-import { getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getUserFromToken } from '../../twitch/twitchUserTokens';
 import { TWITCH_CLIENT_ID, TWITCH_BOT_OAUTH_REDIRECT_URI, EVENTSUB_TOKEN_SECRET } from '../../shared/config';
 import { requireOwner } from '../middleware';
 import { csrfProtection } from '../csrf';
