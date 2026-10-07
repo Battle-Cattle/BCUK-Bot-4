@@ -23,14 +23,12 @@ vi.mock('../../db', () => {
 import {
   discardNewTimerAsSessionUser,
   removeTimerAsSessionUser,
-  resolveNewTimerAssignees,
   setTimerEnabledAsSessionUser,
   timerAccessErrorCode,
   updateTimerAsSessionUser,
 } from './timerWriteAccess';
 import {
   discardOwnNewTimerCommand,
-  findUser,
   getMemberAccessLevel,
   removeOwnTimerCommand,
   removeTimerCommand,
@@ -43,8 +41,6 @@ import {
 } from '../../db';
 
 const STREAMER_ID = '111111111111111111';
-const OTHER_ID = '222222222222222222';
-const THIRD_ID = '333333333333333333';
 const GUILD_ID = '900000000000000001';
 
 function req(accessLevel: number, body: Record<string, unknown> = {}): any {
@@ -63,43 +59,6 @@ describe('timerAccessErrorCode', () => {
     expect(timerAccessErrorCode(new (TimerCommandNotFoundError as any)(1))).toBe('timer_not_found');
     expect(timerAccessErrorCode(new (TimerSelfServiceDeniedError as any)(1))).toBe('forbidden');
     expect(timerAccessErrorCode(new Error('boom'))).toBeNull();
-  });
-});
-
-describe('resolveNewTimerAssignees', () => {
-  it('checks every submitted discord_id for membership of the current guild', async () => {
-    await expect(resolveNewTimerAssignees(req(ACCESS_LEVEL_MOCK.MOD, { discord_ids: [OTHER_ID, THIRD_ID] })))
-      .resolves.toEqual({ discordIds: [OTHER_ID, THIRD_ID] });
-    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, OTHER_ID);
-    expect(getMemberAccessLevel).toHaveBeenCalledWith(GUILD_ID, THIRD_ID);
-  });
-
-  it('returns assignee_not_in_guild when a Mod submits a discord_id outside the current guild', async () => {
-    vi.mocked(getMemberAccessLevel).mockImplementation(async (_guildId, id) => (id === THIRD_ID ? null : 0));
-    await expect(resolveNewTimerAssignees(req(ACCESS_LEVEL_MOCK.MOD, { discord_ids: [OTHER_ID, THIRD_ID] })))
-      .resolves.toEqual({ error: 'assignee_not_in_guild' });
-  });
-
-  it('skips the membership lookup when a Mod submits no discord_ids', async () => {
-    await expect(resolveNewTimerAssignees(req(ACCESS_LEVEL_MOCK.MOD))).resolves.toEqual({ discordIds: [] });
-    expect(getMemberAccessLevel).not.toHaveBeenCalled();
-  });
-
-  it('lets a Mod pick any users from discord_ids', async () => {
-    await expect(resolveNewTimerAssignees(req(ACCESS_LEVEL_MOCK.MOD, { discord_ids: OTHER_ID })))
-      .resolves.toEqual({ discordIds: [OTHER_ID] });
-    expect(findUser).not.toHaveBeenCalled();
-  });
-
-  it('assigns a linked streamer to themselves only, ignoring discord_ids', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: STREAMER_ID, twitch_name: 'streamer' } as any);
-    await expect(resolveNewTimerAssignees(req(ACCESS_LEVEL_MOCK.USER, { discord_ids: OTHER_ID })))
-      .resolves.toEqual({ discordIds: [STREAMER_ID] });
-  });
-
-  it('returns twitch_not_linked for a streamer with no Twitch account', async () => {
-    vi.mocked(findUser).mockResolvedValue(null);
-    await expect(resolveNewTimerAssignees(req(ACCESS_LEVEL_MOCK.USER))).resolves.toEqual({ error: 'twitch_not_linked' });
   });
 });
 

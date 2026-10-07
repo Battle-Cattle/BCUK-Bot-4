@@ -4,12 +4,12 @@ import { addTimerCommand, assignUsersToTimer, findUsersByIds } from '../../db';
 import type { TimerCommandInput } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
+import { resolveNewAssignees } from './selfServiceAccess';
 import { normalizeRequiredText, parseCheckboxField, parsePositiveIntId } from './validation';
 import { logAndRedirectError } from './errorHandling';
 import {
   discardNewTimerAsSessionUser,
   removeTimerAsSessionUser,
-  resolveNewTimerAssignees,
   setTimerEnabledAsSessionUser,
   timerAccessErrorCode,
   updateTimerAsSessionUser,
@@ -119,7 +119,7 @@ router.post('/timers/add', requireGuildContext, csrfProtection, async (req, res)
   let timerId: number;
   let discordIds: string[];
   try {
-    const assignees = await resolveNewTimerAssignees(req);
+    const assignees = await resolveNewAssignees(req);
     if ('error' in assignees) return res.redirect(`/timers?error=${assignees.error}`);
     discordIds = assignees.discordIds;
     timerId = await addTimerCommand(result.input);

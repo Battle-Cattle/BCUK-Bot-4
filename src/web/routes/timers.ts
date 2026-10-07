@@ -3,13 +3,14 @@ import { Router, type Request } from 'express';
 import { DbTimerCommandWithAssignments, DbUser, findUser, getAllTimerCommandsWithAssignments, getGuildMemberUsers } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
+import { canManageCatalog, isAssignedTo } from './selfServiceAccess';
 import { filterQueryParam } from './validation';
 import { renderView } from './viewHelpers';
 import { getCurrentGuildId } from '../session';
 import { renderOrError } from './errorHandling';
 import timersMutationsRouter from './timersMutations';
 import timerAssignmentsRouter from './timerAssignments';
-import { canManageTimerCatalog, isTimerAssignedTo, isTimerSelfManageable } from './timerPermissions';
+import { isTimerSelfManageable } from './timerPermissions';
 
 const log = createLogger('Web');
 const router = Router();
@@ -43,14 +44,14 @@ interface TimerPageData {
  * @returns The timers, assignable users and Twitch-link state for the page.
  */
 async function loadTimerPageData(req: Request): Promise<TimerPageData> {
-  if (canManageTimerCatalog(req)) {
+  if (canManageCatalog(req)) {
     const [timers, users] = await Promise.all([getAllTimerCommandsWithAssignments(), getGuildMemberUsers(getCurrentGuildId(req))]);
     return { timers, assignableUsers: users.filter((entry) => entry.twitch_name), twitchLinked: true };
   }
   const discordId = req.session.user!.discordId;
   const [timers, self] = await Promise.all([getAllTimerCommandsWithAssignments(), findUser(discordId)]);
   return {
-    timers: timers.filter((timer) => isTimerAssignedTo(timer, discordId)),
+    timers: timers.filter((timer) => isAssignedTo(timer, discordId)),
     assignableUsers: [],
     twitchLinked: !!self?.twitch_name,
   };
@@ -66,7 +67,7 @@ async function loadTimerPageData(req: Request): Promise<TimerPageData> {
  */
 router.get('/timers', requireGuildContext, csrfProtection, async (req, res) => {
   await renderOrError({ res, log, logLabel: 'Timers page error:', sessionUser: req.session.user, errorMessage: 'Failed to load timers page.' }, async () => {
-    const isCatalogManager = canManageTimerCatalog(req);
+    const isCatalogManager = canManageCatalog(req);
     const discordId = req.session.user!.discordId;
     const { timers, assignableUsers, twitchLinked } = await loadTimerPageData(req);
     const timersForView: TimerViewModel[] = timers.map((timer) => {

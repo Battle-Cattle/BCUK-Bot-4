@@ -12,5 +12,4 @@ router.use(enrollmentCodeRouter);
 router.use(registrationRouter);
 router.use(loginRouter);
 
-export { chooseUserHandle, sanitizeDeviceLabel } from './passkeysShared';
 export default router;
