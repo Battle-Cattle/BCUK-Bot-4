@@ -6,8 +6,7 @@ import {
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
 } from './lookupCache';
-import { normalizeCommandList, normalizeCommand } from './commandStringUtils';
-import { isAnyCommandTakenAcrossTables } from './commandWriteGuard';
+import { normalizeCommand } from './commandStringUtils';
 import { getAllCounters, type DbCounter, type DbMatchedCounter, type CounterMatchType } from './counters';
 
 // ─── Cache interface ──────────────────────────────────────────────────────────
@@ -100,17 +99,4 @@ export async function findCounterByCommand(guildId: string, command: string): Pr
   const cache = await counterLookupCacheState.getCache();
   const counter = cache.byCommand.get(cacheKey(guildId, normalizedCommand));
   return counter ? { ...counter } : null;
-}
-
-/** Returns true if any of the given commands conflict with an existing counter in this guild
- *  (optionally excluding one by ID). Counters in other guilds never collide. */
-export async function isCounterCommandTaken(guildId: string, commandOrCommands: string | string[], excludeCounterId?: number): Promise<boolean> {
-  if (Array.isArray(commandOrCommands)) {
-    const normalizedCommands = normalizeCommandList(commandOrCommands);
-    if (new Set(normalizedCommands).size !== normalizedCommands.length) {
-      return true;
-    }
-  }
-
-  return isAnyCommandTakenAcrossTables(commandOrCommands, { excludeCounterId, guildId });
 }

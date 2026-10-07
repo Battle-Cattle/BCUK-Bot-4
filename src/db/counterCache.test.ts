@@ -20,9 +20,6 @@ vi.mock('./lookupCache', () => ({
 vi.mock('./counters', () => ({
   getAllCounters: vi.fn(),
 }));
-vi.mock('./commandWriteGuard', () => ({
-  isAnyCommandTakenAcrossTables: vi.fn(),
-}));
 vi.mock('./commandStringUtils', () => ({
   normalizeCommandList: vi.fn((arr: string[]) => arr.map((s: string) => s.trim().toLowerCase())),
   normalizeCommand: vi.fn((command: string) => {
@@ -31,9 +28,8 @@ vi.mock('./commandStringUtils', () => ({
   }),
 }));
 
-import { findCounterByCommand, isCounterCommandTaken } from './counterCache';
+import { findCounterByCommand } from './counterCache';
 import { getAllCounters } from './counters';
-import { isAnyCommandTakenAcrossTables } from './commandWriteGuard';
 import type { DbCounter } from './counters';
 
 function makeCounter(id: number, trigger: string, check: string, guildId = 'guild-1'): DbCounter {
@@ -182,33 +178,6 @@ describe('buildCounterLookupCache (via findCounterByCommand)', () => {
     const result = await findCounterByCommand('guild-1', '!anything');
 
     expect(result).toBeNull();
-  });
-});
-
-// ─── isCounterCommandTaken ───────────────────────────────────────────────────
-
-describe('isCounterCommandTaken', () => {
-  it('returns true immediately for an array containing duplicates without delegating to isAnyCommandTakenAcrossTables', async () => {
-    const result = await isCounterCommandTaken('guild-1', ['!hits', '!hits']);
-
-    expect(result).toBe(true);
-    expect(isAnyCommandTakenAcrossTables).not.toHaveBeenCalled();
-  });
-
-  it('delegates to isAnyCommandTakenAcrossTables for a single string input, scoped to the given guild', async () => {
-    vi.mocked(isAnyCommandTakenAcrossTables).mockResolvedValue(false);
-
-    await isCounterCommandTaken('guild-1', '!hits', 42);
-
-    expect(isAnyCommandTakenAcrossTables).toHaveBeenCalledWith('!hits', { excludeCounterId: 42, guildId: 'guild-1' });
-  });
-
-  it('delegates to isAnyCommandTakenAcrossTables for an array with no duplicates, scoped to the given guild', async () => {
-    vi.mocked(isAnyCommandTakenAcrossTables).mockResolvedValue(false);
-
-    await isCounterCommandTaken('guild-1', ['!hits', '!checkhits']);
-
-    expect(isAnyCommandTakenAcrossTables).toHaveBeenCalledWith(['!hits', '!checkhits'], { excludeCounterId: undefined, guildId: 'guild-1' });
   });
 });
 

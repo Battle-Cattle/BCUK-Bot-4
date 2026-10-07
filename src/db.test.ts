@@ -63,19 +63,22 @@ vi.mock('./db/counters', () => ({
   CounterNotFoundError: class extends Error {},
   getAllCounters: vi.fn(),
   getCounterCount: vi.fn(),
-  getCounterHistory: vi.fn(),
+  isCounterCommandTaken: vi.fn(),
   addCounter: vi.fn(),
   updateCounter: vi.fn(),
   removeCounter: vi.fn(),
   resetCounterCurrentValue: vi.fn(),
   incrementCounter: vi.fn(),
+}));
+
+vi.mock('./db/counterArchive', () => ({
+  getCounterHistory: vi.fn(),
   archiveAndResetYearlyCounters: vi.fn(),
 }));
 
 vi.mock('./db/counterCache', () => ({
   invalidateCounterLookupCache: vi.fn(),
   findCounterByCommand: vi.fn(),
-  isCounterCommandTaken: vi.fn(),
 }));
 
 vi.mock('./db/streamMonitor', () => ({
@@ -207,8 +210,8 @@ import {
   removeCounter as removeCounterRecord,
   resetCounterCurrentValue as resetCounterCurrentValueRecord,
   incrementCounter as incrementCounterRecord,
-  archiveAndResetYearlyCounters as archiveAndResetYearlyCountersRecord,
 } from './db/counters';
+import { archiveAndResetYearlyCounters as archiveAndResetYearlyCountersRecord } from './db/counterArchive';
 import { invalidateAlertConfigLookupCache } from './db/alertConfigCache';
 import {
   initAlertConfigs as initAlertConfigsRecord,
