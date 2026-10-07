@@ -32,13 +32,6 @@ vi.mock('../../twitch/pricing/rewardPricingService', () => ({
   deleteRewardAndPricing: vi.fn().mockResolvedValue(undefined),
 }));
 
-// This module composes channelPointsAdminPricingMutations's router too; stub it out so this
-// file only exercises the reward-CRUD routes defined directly in channelPointsAdminMutations.
-vi.mock('./channelPointsAdminPricingMutations', async () => {
-  const { Router } = await import('express');
-  return { router: Router() };
-});
-
 import supertest from 'supertest';
 import { router } from './channelPointsAdminMutations';
 import { getStreamerByDiscordId, updatePricingCooldownForReward } from '../../db';

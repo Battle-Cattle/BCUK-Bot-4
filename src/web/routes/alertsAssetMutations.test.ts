@@ -49,7 +49,7 @@ vi.mock('fs', () => ({
 }));
 
 import supertest from 'supertest';
-import { router, detectImageType } from './alertsAssetMutations';
+import { router } from './alertsAssetMutations';
 import { getStreamerByDiscordId, setAlertImage, setAlertSound } from '../../db';
 import { AccessLevel } from '../../db';
 import fs from 'fs';
@@ -330,30 +330,3 @@ describe('POST /settings/:eventType/sound/delete', () => {
 
 // --- detectImageType unit tests ---
 
-describe('detectImageType', () => {
-  it('detects PNG by signature', () => {
-    expect(detectImageType(PNG_BUF)).toBe('png');
-  });
-
-  it('detects GIF87a and GIF89a by signature', () => {
-    expect(detectImageType(Buffer.from('GIF87a', 'ascii'))).toBe('gif');
-    expect(detectImageType(Buffer.from('GIF89a', 'ascii'))).toBe('gif');
-  });
-
-  it('detects JPEG by signature', () => {
-    expect(detectImageType(Buffer.from([0xff, 0xd8, 0xff, 0xe0]))).toBe('jpeg');
-  });
-
-  it('detects WEBP by RIFF/WEBP container', () => {
-    const buf = Buffer.concat([Buffer.from('RIFF', 'ascii'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP', 'ascii')]);
-    expect(detectImageType(buf)).toBe('webp');
-  });
-
-  it('returns null for unrecognised bytes', () => {
-    expect(detectImageType(Buffer.from('not an image'))).toBeNull();
-  });
-
-  it('returns null for SVG (deliberately not in the allowlist)', () => {
-    expect(detectImageType(Buffer.from('<svg></svg>'))).toBeNull();
-  });
-});

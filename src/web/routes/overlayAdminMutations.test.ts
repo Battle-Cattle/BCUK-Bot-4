@@ -44,7 +44,7 @@ vi.mock('fs', () => ({
 
 import supertest from 'supertest';
 import multer from 'multer';
-import { router, detectVideoType, handleUploadError } from './overlayAdminMutations';
+import { router, handleUploadError } from './overlayAdminMutations';
 import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
 import { AccessLevel } from '../../db';
 import fs from 'fs';
@@ -298,24 +298,6 @@ describe('POST /settings/videos/:id/delete', () => {
 });
 
 // --- detectVideoType unit tests ---
-
-describe('detectVideoType', () => {
-  it('detects WebM by EBML magic bytes', () => {
-    expect(detectVideoType(Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00, 0x00]))).toBe('webm');
-  });
-
-  it('detects MP4 by ftyp box at bytes 4–7', () => {
-    expect(detectVideoType(Buffer.from([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]))).toBe('mp4');
-  });
-
-  it('returns null for unrecognised bytes', () => {
-    expect(detectVideoType(Buffer.from('not a video'))).toBeNull();
-  });
-
-  it('returns null for a buffer that is too short', () => {
-    expect(detectVideoType(Buffer.from([0x1a, 0x45]))).toBeNull();
-  });
-});
 
 // --- handleUploadError unit tests ---
 

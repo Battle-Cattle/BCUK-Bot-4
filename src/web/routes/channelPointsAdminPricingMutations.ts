@@ -14,14 +14,12 @@ import { logAndRedirectError } from './errorHandling';
 import {
   parseNonNegativeNumberField, parsePositiveNumberField,
   parseRoundToNearestField, effectiveCooldownSeconds, handleRewardDeleteAction,
+  NOT_A_STREAMER_REDIRECT,
 } from './channelPointsAdminShared';
 import { applyDecayTick, resetAndDeletePricing } from '../../twitch/pricing/rewardPricingService';
 
 const log = createLogger('ChannelPointsAdminPricingMutations');
 export const router = Router();
-
-/** Redirect target used when the requester isn't a streamer, scoped to the channel-points admin page. */
-const NOT_A_STREAMER_REDIRECT = '/channel-points?error=not_a_streamer';
 
 /**
  * Determines the `cooldown_seconds` a saved pricing config should use: the reward's live Twitch
