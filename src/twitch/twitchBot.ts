@@ -135,10 +135,6 @@ export function __resetTwitchChannelDiscordIdCacheForTests(): void {
   twitchChannelDiscordIdLookupCache.invalidate();
 }
 
-// Re-exported so existing importers of the privilege-tracking test reset keep working unchanged
-// after it moved to twitchChannelPrivilege.ts.
-export { __resetTwitchPrivilegedChannelsForTests } from './twitchChannelPrivilege';
-
 /** Resolves which guild a Twitch chat command should target: the linked streamer's active voice guild. */
 async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promise<string | null> {
   const discordId = await resolveDiscordIdForTwitchChannel(normalizedChannel);

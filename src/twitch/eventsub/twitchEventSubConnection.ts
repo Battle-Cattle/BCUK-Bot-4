@@ -1,6 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { recordEventSubConnected, recordEventSubReconnectAttempt, removeEventSubHealth } from '../../shared/healthStore';
-import { removeStreamerFromMap, type StreamerEventSubData } from './twitchEventSubSubscriptions';
+import { type StreamerEventSubData } from './twitchEventSubSubscriptions';
+import { removeStreamerFromMap } from './twitchEventSubDispatch';
 import { SubscribePassRunner } from './twitchEventSubSubscribePass';
 import { buildReconnectUrl, rejectionReason, routeEventSubMessage, type EventSubMessage } from './twitchEventSubMessages';
 

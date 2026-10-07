@@ -169,10 +169,10 @@ import {
   restartTwitchBot,
   sayInChannel,
   __resetTwitchChannelDiscordIdCacheForTests,
-  __resetTwitchPrivilegedChannelsForTests,
   CONNECT_TIMEOUT_MS,
   DISCONNECT_TIMEOUT_MS,
 } from './twitchBot';
+import { __resetTwitchPrivilegedChannelsForTests } from './twitchChannelPrivilege';
 import { __resetTwitchSendQueueForTests } from './twitchSendQueue';
 import {
   joinTwitchChannel,

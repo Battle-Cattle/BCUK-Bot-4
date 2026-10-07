@@ -7,6 +7,8 @@ vi.mock('./twitchEventSubSubscriptions', () => ({
   subscribeForStreamer: vi.fn().mockResolvedValue({ desired: 1, live: 1, transientFailures: 0 }),
   fetchValidEventSubToken: vi.fn().mockResolvedValue('token-abc'),
   removeSessionSubscriptions: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('./twitchEventSubDispatch', () => ({
   removeStreamerFromMap: vi.fn(),
   dispatchNotification: vi.fn(),
   handleRevocation: vi.fn(),
@@ -31,10 +33,8 @@ import {
   subscribeForStreamer,
   fetchValidEventSubToken,
   removeSessionSubscriptions,
-  dispatchNotification,
-  handleRevocation,
-  removeStreamerFromMap,
 } from './twitchEventSubSubscriptions';
+import { dispatchNotification, handleRevocation, removeStreamerFromMap } from './twitchEventSubDispatch';
 import { recordEventSubConnected, removeEventSubHealth } from '../../shared/healthStore';
 
 // ---------------------------------------------------------------------------

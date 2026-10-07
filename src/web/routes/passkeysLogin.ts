@@ -7,7 +7,7 @@ import {
 } from '@simplewebauthn/server';
 import { findUser, findPasskey, recordPasskeyUse, type DbUser, type StoredPasskey } from '../../db';
 import { fetchDiscordUserProfile } from '../../discord/discordApi';
-import { resolveAccessibleGuilds, establishDashboardSession, type DiscordProfile } from './auth';
+import { resolveAccessibleGuilds, establishDashboardSession, type DiscordProfile } from '../loginSession';
 import { RP_ID, EXPECTED_ORIGIN, storeChallenge, takeChallenge, isCredentialResponse } from './passkeysShared';
 
 const log = createLogger('Web');

@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
-vi.mock('./twitchEventSubSubscriptions', () => ({ dispatchNotification: vi.fn(), handleRevocation: vi.fn() }));
+vi.mock('./twitchEventSubDispatch', () => ({ dispatchNotification: vi.fn(), handleRevocation: vi.fn() }));
 
 import { rejectionReason, routeEventSubMessage, seenMessageIds, type EventSubMessage } from './twitchEventSubMessages';
-import { dispatchNotification, handleRevocation } from './twitchEventSubSubscriptions';
+import { dispatchNotification, handleRevocation } from './twitchEventSubDispatch';
 
 const now = () => new Date().toISOString();
 

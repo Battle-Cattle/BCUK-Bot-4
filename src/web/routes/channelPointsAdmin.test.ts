@@ -29,7 +29,7 @@ vi.mock('../../twitch/twitchUserTokens', () => ({
   getValidToken: vi.fn(),
 }));
 
-vi.mock('../../twitch/eventsub/twitchEventSubSubscriptions', () => ({
+vi.mock('../../twitch/eventsub/twitchEventSubCreate', () => ({
   hasAuthFailedSubs: vi.fn(),
 }));
 
@@ -55,7 +55,7 @@ import router from './channelPointsAdmin';
 import { getStreamerByDiscordId, getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
-import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
+import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 
