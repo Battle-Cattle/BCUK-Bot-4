@@ -492,25 +492,54 @@ export async function incrementCounter(id: number): Promise<number> {
 }
 
 /**
+ * Adds the `counter.<columnName>` archive column (`INT NULL`) if it doesn't exist yet, so each
+ * year's archive doesn't depend on someone adding the column by hand beforehand. Tolerates a
+ * concurrent add (`ER_DUP_FIELDNAME`) and invalidates the archive-columns cache after adding.
+ * Requires the bot's DB user to have `ALTER` on `counter`; without it this throws and the
+ * scheduler retries on its next tick.
+ * @param columnName A `value<year>` column name drawn from `ARCHIVE_YEAR_COLUMNS` (never user input).
+ * @returns Resolves once the column is known to exist.
+ */
+async function ensureArchiveColumn(columnName: string): Promise<void> {
+  const [rows] = await getPool().query<mysql.RowDataPacket[]>(
+    `SELECT 1 FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'counter' AND COLUMN_NAME = ?`,
+    [columnName],
+  );
+  if (rows.length > 0) return;
+  try {
+    await getPool().query(`ALTER TABLE counter ADD COLUMN \`${columnName}\` INT NULL`);
+  } catch (err) {
+    const mysqlError = err as { code?: string; errno?: number };
+    if (mysqlError.code !== 'ER_DUP_FIELDNAME' && mysqlError.errno !== 1060) throw err;
+  }
+  invalidateArchiveColumnsCache();
+}
+
+/**
  * Archives the current value of every yearly-reset counter into that year's `value<year>`
  * column (only for counters where the column is still `NULL`), then resets `current_value` to 0 —
  * at most once per `year`, tracked by a persistent `counter_archive_run` marker row.
  *
- * Runs in one transaction: first claims `year` by inserting its marker row (`INSERT IGNORE`);
+ * First makes sure the `value<year>` column exists, adding it if it doesn't (see
+ * {@link ensureArchiveColumn}); that runs before the transaction because DDL implicitly commits.
+ *
+ * Then runs one transaction: first claims `year` by inserting its marker row (`INSERT IGNORE`);
  * if the row already existed, that year was already archived and this returns 0 without touching
  * any counter. Otherwise runs the archive/reset `UPDATE`. Any failure (including a missing
- * `counter_archive_run` table or `value<year>` column) rolls back the marker too, so the next
- * scheduler tick retries. The marker is what lets the scheduler attempt archival on every tick
- * (catching up after downtime spanning 1 January) without re-resetting counters mid-year.
+ * `counter_archive_run` table) rolls back the marker too, so the next scheduler tick retries.
+ * The marker is what lets the scheduler attempt archival on every tick (catching up after
+ * downtime spanning 1 January) without re-resetting counters mid-year.
  * @param year Calendar year to archive into; must be a key of `ARCHIVE_YEAR_COLUMNS`.
  * @returns The number of counters archived and reset (0 if `year` was already archived).
- * @throws If `year` is not a valid archive year, or the transaction fails.
+ * @throws If `year` is not a valid archive year, the column can't be added, or the transaction fails.
  */
 export async function archiveAndResetYearlyCounters(year: number): Promise<number> {
   const columnName = ARCHIVE_YEAR_COLUMNS.get(year);
   if (!columnName) {
     throw new Error(`[DB] Invalid archive year: ${year}`);
   }
+  await ensureArchiveColumn(columnName);
   return withTransaction(async (conn) => {
     const [claim] = await conn.execute<mysql.ResultSetHeader>(
       'INSERT IGNORE INTO counter_archive_run (archive_year) VALUES (?)',

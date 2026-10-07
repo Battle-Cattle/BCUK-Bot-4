@@ -678,4 +678,54 @@ describe('archiveAndResetYearlyCounters', () => {
     await expect(archiveAndResetYearlyCounters(2024)).rejects.toThrow("doesn't exist");
     expect(pool._conn.rollback).toHaveBeenCalledTimes(1);
   });
+
+  describe('archive column', () => {
+    it('adds the missing value<year> column before the transaction', async () => {
+      const pool = archivePool(2);
+      pool.query.mockResolvedValueOnce([[], []]); // column lookup: not found
+      expect(await archiveAndResetYearlyCounters(2026)).toBe(2);
+      const [lookupSql, lookupParams] = pool.query.mock.calls[0]!;
+      expect(lookupSql).toContain('information_schema.COLUMNS');
+      expect(lookupParams).toEqual(['value2026']);
+      expect(pool.query.mock.calls[1]![0]).toBe('ALTER TABLE counter ADD COLUMN `value2026` INT NULL');
+      expect(pool.query.mock.invocationCallOrder[1]!).toBeLessThan(pool._conn.beginTransaction.mock.invocationCallOrder[0]!);
+    });
+
+    it('skips the ALTER when the column already exists', async () => {
+      const pool = archivePool(2);
+      pool.query.mockResolvedValueOnce([[{ 1: 1 }], []]);
+      expect(await archiveAndResetYearlyCounters(2026)).toBe(2);
+      expect(pool.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('treats a concurrent add (ER_DUP_FIELDNAME) as success', async () => {
+      const pool = archivePool(1);
+      pool.query
+        .mockResolvedValueOnce([[], []])
+        .mockRejectedValueOnce(Object.assign(new Error("Duplicate column name 'value2026'"), { code: 'ER_DUP_FIELDNAME', errno: 1060 }));
+      expect(await archiveAndResetYearlyCounters(2026)).toBe(1);
+    });
+
+    it('propagates other ALTER failures without starting the transaction', async () => {
+      const pool = archivePool(1);
+      pool.query
+        .mockResolvedValueOnce([[], []])
+        .mockRejectedValueOnce(Object.assign(new Error('ALTER command denied'), { code: 'ER_TABLEACCESS_DENIED_ERROR', errno: 1142 }));
+      await expect(archiveAndResetYearlyCounters(2026)).rejects.toThrow('ALTER command denied');
+      expect(pool._conn.beginTransaction).not.toHaveBeenCalled();
+    });
+
+    it('invalidates the archive-columns cache after adding the column', async () => {
+      const pool = archivePool(0);
+      const isColumnListQuery = (sql: unknown) => String(sql).includes("LIKE 'value2%'");
+      await getCounterHistory('guild-1', 1); // loads and caches the (empty) column list
+      await getCounterHistory('guild-1', 1); // served from cache
+      expect(pool.query.mock.calls.filter(([sql]) => isColumnListQuery(sql))).toHaveLength(1);
+
+      pool.query.mockResolvedValueOnce([[], []]); // column lookup: not found → ALTER
+      await archiveAndResetYearlyCounters(2024);
+      await getCounterHistory('guild-1', 1);
+      expect(pool.query.mock.calls.filter(([sql]) => isColumnListQuery(sql))).toHaveLength(2);
+    });
+  });
 });
