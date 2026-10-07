@@ -3,16 +3,13 @@ import {
   CommandNotFoundError,
   CommandSelfServiceDeniedError,
   discardOwnNewCustomCommand,
-  findUser,
-  getMemberAccessLevel,
   removeCustomCommand,
   removeOwnCustomCommand,
   updateCustomCommand,
   updateOwnCustomCommand,
 } from '../../db';
-import { normalizeRequiredText, normalizeSingleTokenRequiredText, parseCheckboxField, parseDiscordIdList } from './validation';
-import { canManageCommandCatalog } from './commandPermissions';
-import { getCurrentGuildId } from '../session';
+import { canManageCatalog } from './selfServiceAccess';
+import { normalizeRequiredText, normalizeSingleTokenRequiredText, parseCheckboxField } from './validation';
 
 // Which command write the session user gets: Mod+ use the unrestricted catalog writes; a streamer
 // below Mod gets Twitch-only commands on their own channel, and their updates/deletes go through
@@ -39,7 +36,7 @@ export function readCommandForm(req: Request): CommandForm | null {
   const triggerString = normalizeSingleTokenRequiredText(trigger_string);
   const normalizedOutput = normalizeRequiredText(output);
   if (!triggerString || !normalizedOutput) return null;
-  const isCatalogManager = canManageCommandCatalog(req);
+  const isCatalogManager = canManageCatalog(req);
   return {
     triggerString,
     output: normalizedOutput,
@@ -60,29 +57,6 @@ export function commandAccessErrorCode(err: unknown): string | null {
 }
 
 /**
- * Works out who a new command is assigned to. Mod+ pick users via `discord_ids`, all of whom must be
- * members of the session's current guild; a streamer below Mod always gets the command on their own
- * channel only (they're a member by `requireGuildContext`), which needs a linked Twitch account.
- * @param req - Express request; reads `discord_ids`, the session user and its current guild.
- * @returns The Discord IDs to assign, or an `error` code (`assignee_not_in_guild`,
- *   `twitch_not_linked`) to redirect with.
- */
-export async function resolveNewCommandAssignees(req: Request): Promise<{ discordIds: string[] } | { error: string }> {
-  if (canManageCommandCatalog(req)) {
-    const discordIds = parseDiscordIdList(req.body.discord_ids);
-    if (discordIds.length === 0) return { discordIds };
-    const guildId = getCurrentGuildId(req);
-    const levels = await Promise.all(discordIds.map((id) => getMemberAccessLevel(guildId, id)));
-    if (levels.some((level) => level === null)) return { error: 'assignee_not_in_guild' };
-    return { discordIds };
-  }
-  const selfId = req.session.user!.discordId;
-  const self = await findUser(selfId);
-  if (!self?.twitch_name) return { error: 'twitch_not_linked' };
-  return { discordIds: [selfId] };
-}
-
-/**
  * Updates a command as the session user: the unrestricted `updateCustomCommand` for Mod+, or the
  * owner-checked, Twitch-only `updateOwnCustomCommand` for a streamer below Mod.
  * @param req - Express request; reads the session user.
@@ -92,7 +66,7 @@ export async function resolveNewCommandAssignees(req: Request): Promise<{ discor
  *   {@link commandAccessErrorCode}).
  */
 export async function updateCommandAsSessionUser(req: Request, commandId: number, form: CommandForm): Promise<void> {
-  if (canManageCommandCatalog(req)) {
+  if (canManageCatalog(req)) {
     return updateCustomCommand(commandId, form.triggerString, form.output, form.isDiscordEnabled, form.isMultiTwitch);
   }
   return updateOwnCustomCommand(commandId, form.triggerString, form.output, req.session.user!.discordId);
@@ -107,7 +81,7 @@ export async function updateCommandAsSessionUser(req: Request, commandId: number
  *   {@link commandAccessErrorCode}).
  */
 export async function removeCommandAsSessionUser(req: Request, commandId: number): Promise<void> {
-  if (canManageCommandCatalog(req)) return removeCustomCommand(commandId);
+  if (canManageCatalog(req)) return removeCustomCommand(commandId);
   return removeOwnCustomCommand(commandId, req.session.user!.discordId);
 }
 
@@ -120,6 +94,6 @@ export async function removeCommandAsSessionUser(req: Request, commandId: number
  * @returns Resolves once the cleanup completes; rejects if it fails or is denied.
  */
 export async function discardNewCommandAsSessionUser(req: Request, commandId: number): Promise<void> {
-  if (canManageCommandCatalog(req)) return removeCustomCommand(commandId);
+  if (canManageCatalog(req)) return removeCustomCommand(commandId);
   return discardOwnNewCustomCommand(commandId, req.session.user!.discordId);
 }
