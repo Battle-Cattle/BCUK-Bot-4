@@ -24,7 +24,7 @@ vi.mock('../../audio/audioPlayer', () => ({
   disconnect: vi.fn(),
 }));
 
-vi.mock('../../discord/discordBot', () => ({
+vi.mock('../../discord/discordClientStore', () => ({
   getDiscordClient: vi.fn(),
 }));
 
@@ -39,7 +39,7 @@ import router from './streamdeckVoice';
 import { isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
-import { getDiscordClient } from '../../discord/discordBot';
+import { getDiscordClient } from '../../discord/discordClientStore';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 

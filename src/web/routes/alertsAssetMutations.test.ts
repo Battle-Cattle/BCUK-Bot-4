@@ -49,12 +49,13 @@ vi.mock('fs', () => ({
 }));
 
 import supertest from 'supertest';
-import { router, detectImageType } from './alertsAssetMutations';
+import { router } from './alertsAssetMutations';
 import { getStreamerByDiscordId, setAlertImage, setAlertSound } from '../../db';
 import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
-import { buildTestApp } from '../../test-utils/expressTestApp';
+import type { RequestHandler } from 'express';
+import { buildTestApp, drainBodyBeforeRedirect } from '../../test-utils/expressTestApp';
 
 // Minimal buffers with correct magic bytes for each format
 const PNG_BUF = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
@@ -71,8 +72,8 @@ const MOCK_STREAMER = {
 };
 
 /** Builds a supertest-ready app: the alerts asset mutations router with a stubbed session (no render stub — these routes redirect). */
-function buildApp(sessionUser: SessionUser = USER) {
-  return buildTestApp({ router, bodyParser: 'urlencoded', sessionUser });
+function buildApp(sessionUser: SessionUser = USER, before: RequestHandler[] = []) {
+  return buildTestApp({ router: [...before, router], bodyParser: 'urlencoded', sessionUser });
 }
 
 beforeEach(() => {
@@ -186,7 +187,7 @@ describe('POST /settings/:eventType/image', () => {
 
   it('rejects a non-streamer before Multer buffers the upload (oversized body gets not_a_streamer, not file_too_large)', async () => {
     const oversized = Buffer.concat([PNG_BUF, Buffer.alloc(1024 * 1024 + 1024, 1)]);
-    const res = await supertest(buildApp())
+    const res = await supertest(buildApp(USER, [drainBodyBeforeRedirect]))
       .post('/settings/follow/image')
       .attach('image', oversized, 'big.png');
     expect(res.headers.location).toBe('/alerts/settings?error=not_a_streamer');
@@ -329,30 +330,3 @@ describe('POST /settings/:eventType/sound/delete', () => {
 
 // --- detectImageType unit tests ---
 
-describe('detectImageType', () => {
-  it('detects PNG by signature', () => {
-    expect(detectImageType(PNG_BUF)).toBe('png');
-  });
-
-  it('detects GIF87a and GIF89a by signature', () => {
-    expect(detectImageType(Buffer.from('GIF87a', 'ascii'))).toBe('gif');
-    expect(detectImageType(Buffer.from('GIF89a', 'ascii'))).toBe('gif');
-  });
-
-  it('detects JPEG by signature', () => {
-    expect(detectImageType(Buffer.from([0xff, 0xd8, 0xff, 0xe0]))).toBe('jpeg');
-  });
-
-  it('detects WEBP by RIFF/WEBP container', () => {
-    const buf = Buffer.concat([Buffer.from('RIFF', 'ascii'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP', 'ascii')]);
-    expect(detectImageType(buf)).toBe('webp');
-  });
-
-  it('returns null for unrecognised bytes', () => {
-    expect(detectImageType(Buffer.from('not an image'))).toBeNull();
-  });
-
-  it('returns null for SVG (deliberately not in the allowlist)', () => {
-    expect(detectImageType(Buffer.from('<svg></svg>'))).toBeNull();
-  });
-});

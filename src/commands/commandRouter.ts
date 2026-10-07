@@ -1,6 +1,6 @@
 import { createLogger } from '../shared/logger';
 import { findCachedSfxTrigger, type SfxLookupResult } from '../db';
-import { pickWeightedRandom } from './soundSelector';
+import { pickWeightedRandom } from '../audio/soundSelector';
 import { isPlaying } from '../audio/audioPlayer';
 import { playFile, VoiceNotConnectedError } from '../audio/sfxPlayer';
 import { SFX_FOLDER, GLOBAL_COOLDOWN_MS } from '../shared/config';

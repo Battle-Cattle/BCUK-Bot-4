@@ -15,7 +15,7 @@ vi.mock('../../db', () => ({
   markRedemptionEffect: vi.fn(),
 }));
 
-vi.mock('../eventsub/twitchApiEventSub', () => ({ getValidToken: vi.fn() }));
+vi.mock('../twitchUserTokens', () => ({ getValidToken: vi.fn() }));
 vi.mock('../twitchApi', () => {
   class TwitchRewardUnsupportedError extends Error {}
   class TwitchRewardAuthError extends Error {}
@@ -28,7 +28,7 @@ import {
   getPricingForReward, recordPricingUpdate, recordPricingHistory, markPricingUnsupported, deletePricingConfig,
   getPricingSettingsForStreamer, getStreamerById, getRedemptionProgress, markRedemptionEffect,
 } from '../../db';
-import { getValidToken } from '../eventsub/twitchApiEventSub';
+import { getValidToken } from '../twitchUserTokens';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
 import {
   applyRedemptionPricing, applyDecayTick, resetAndDeletePricing, deleteRewardAndPricing,

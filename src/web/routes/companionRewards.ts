@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
 import { getStreamerByDiscordId } from '../../db';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../../twitch/twitchUserTokens';
 
 const log = createLogger('CompanionRewards');
 const router = Router();
@@ -37,7 +37,8 @@ function toCompanionReward(reward: TwitchCustomReward): CompanionKnownReward {
  * authenticated user's live Twitch custom channel-point rewards, so the companion app knows what
  * `channel_points_redemption` events to expect from `/api/companion/events`. Responds with an
  * empty list (not an error) when the user isn't a connected streamer or has no valid Twitch
- * token, matching `fetchTwitchRewards` in the Channel Points admin page.
+ * token, like `fetchStreamerRewards` (`streamerRewards.ts`) — but unlike that helper it reports a
+ * Twitch/token failure as a 500 rather than an empty list, so the app can tell "none" from "failed".
  */
 router.get('/rewards', requireCompanionKey, async (req, res) => {
   try {

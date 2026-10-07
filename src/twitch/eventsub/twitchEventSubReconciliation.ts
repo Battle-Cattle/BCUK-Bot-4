@@ -1,7 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { getStreamerById, DEFAULT_EVENT_CONFIG, pruneRedemptionLedger } from '../../db';
 import { getAllStreamerInfo, type StreamerInfo } from './twitchEventSubDispatch';
-import { getValidToken } from './twitchApiEventSub';
+import { getValidToken } from '../twitchUserTokens';
 import { getCustomRewards, getRewardRedemptions, TwitchRewardRedemption } from '../twitchApi';
 import { handleRedemption, RedemptionEvent } from './twitchEventSubHandler';
 import { REDEMPTION_LEDGER_RETENTION_MS } from './twitchEventSubRedemptionDedup';

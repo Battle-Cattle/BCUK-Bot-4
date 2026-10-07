@@ -1,3 +1,10 @@
+/** One point on a reward's price curve (real history or a simulation), as plotted by the price chart. */
+export interface PriceHistoryPoint {
+  /** Timestamp in ms (epoch ms for real history, ms elapsed for a simulation). */
+  t: number;
+  cost: number;
+}
+
 /** Per-reward pricing parameters used by {@link computePrice}. */
 export interface RewardPricingConfig {
   baseCost: number;

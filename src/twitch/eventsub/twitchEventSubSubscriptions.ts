@@ -4,7 +4,8 @@ import type { DbStreamerEventSub, EventSubConfig, AlertEventType } from '../../d
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
 import { normalizeTwitchChannelName } from '../twitchChannelName';
-import { listEventSubSubscriptions, deleteEventSubSubscription, getValidToken } from './twitchApiEventSub';
+import { listEventSubSubscriptions, deleteEventSubSubscription } from './twitchApiEventSub';
+import { getValidToken } from '../twitchUserTokens';
 import { SUBSCRIPTION_GROUPS, isGroupEnabled } from './twitchEventSubSubscriptionGroups';
 import { conditionsEqual, ensureSubscription, type SubscribeAttempt } from './twitchEventSubCreate';
 import type { SubscribeOutcome } from './subscribeOutcome';

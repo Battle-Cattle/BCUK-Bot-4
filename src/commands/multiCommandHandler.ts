@@ -5,7 +5,8 @@ const log = createLogger('MultiCmd');
 import { resolveSharedChatSessionId } from './customCommandHandler';
 import { resolveCommand } from './commandUtils';
 import { sendDedupedBySession } from './twitchBroadcast';
-import { createRuntimeRegistry, type TwitchBroadcastRuntime } from './twitchRuntime';
+import { createRuntimeRegistry } from '../shared/runtimeRegistry';
+import type { TwitchBroadcastRuntime } from './twitchRuntime';
 import { createCooldownGate } from './cooldownGate';
 
 const MULTI_COMMAND = '!multi';

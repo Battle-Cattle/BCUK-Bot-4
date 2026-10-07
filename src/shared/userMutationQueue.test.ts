@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { runUserMutation, runUserMutationForActorAndTarget, userMutationQueue } from './adminUserMutationQueue';
+import { runUserMutation, runUserMutationForActorAndTarget, userMutationQueue } from './userMutationQueue';
 
 beforeEach(() => {
   vi.useFakeTimers();

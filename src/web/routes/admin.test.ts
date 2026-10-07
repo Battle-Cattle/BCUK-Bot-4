@@ -55,7 +55,6 @@ vi.mock('./adminRefresh', async () => {
   const { Router } = await import('express');
   return {
     default: Router(),
-    getRefreshState: vi.fn(() => ({ outcome: 'idle', updatedCount: 0, failureCount: 0, startedAt: null, finishedAt: null })),
   };
 });
 
@@ -300,7 +299,7 @@ describe('POST /users/update', () => {
   // it's enqueued, so its target-level read can never go stale against a write that already
   // landed for the same discordId. This proves the check is re-evaluated fresh on every call
   // rather than being decided once up front — combined with runUserMutation's own strict
-  // per-discordId serialization (tested in adminUserMutationQueue.test.ts/mutationQueue.test.ts),
+  // per-discordId serialization (tested in shared/userMutationQueue.test.ts/mutationQueue.test.ts),
   // that means a concurrent promotion landing between a Manager's stale read and their write can
   // no longer let a since-invalid edit through.
   it('re-checks authorization fresh on every call — rejects once the target has since been promoted', async () => {

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createLogger } from '../../shared/logger';
-import { createEventSubSubscription, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
+import { createEventSubSubscription, deleteEventSubSubscription } from './twitchApiEventSub';
+import { TwitchAuthError } from '../twitchUserTokens';
 import type { SubSpec } from './twitchEventSubSubscriptionGroups';
 
 // Creating (or keeping) one EventSub subscription for one spec, and the auth-failure skip list
