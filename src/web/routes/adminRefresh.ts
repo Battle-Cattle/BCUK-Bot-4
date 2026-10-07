@@ -5,13 +5,8 @@ import { csrfProtection } from '../csrf';
 import { requireManager, requireManagerJson } from '../middleware';
 import { getCurrentGuildId } from '../session';
 import { getDiscordClient, fetchMemberDisplayName } from '../../discord/discordBot';
-import { runUserMutation } from './adminUserMutationQueue';
-import {
-  type RefreshOutcome, type RefreshState, refreshStates, getRefreshState, forgetGuildRefreshState,
-} from '../../discord/guildRefreshState';
-
-export type { RefreshOutcome, RefreshState };
-export { refreshStates, getRefreshState, forgetGuildRefreshState };
+import { runUserMutation } from '../../shared/userMutationQueue';
+import { type RefreshOutcome, type RefreshState, refreshStates, getRefreshState } from '../../discord/guildRefreshState';
 
 const log = createLogger('Web');
 

@@ -14,7 +14,7 @@ import {
   type DbUser,
 } from '../db';
 import { fetchMemberDisplayName } from '../discord/discordBot';
-import { runUserMutation } from './routes/adminUserMutationQueue';
+import { runUserMutation } from '../shared/userMutationQueue';
 import type { SessionUser } from '../types/express';
 
 const log = createLogger('Web');

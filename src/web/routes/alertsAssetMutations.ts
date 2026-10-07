@@ -13,7 +13,7 @@ import { safeResolve } from '../../shared/pathUtils';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { createMulterErrorRedirectHandler, makeUploadMiddleware, makeRequireStreamerBeforeUpload, writeFileOrCleanup } from './uploadMiddleware';
-import { detectAudioType } from './sfxFileUpload';
+import { detectAudioType, detectImageType } from './uploadFileTypes';
 import { NOT_A_STREAMER_REDIRECT, parseEventType } from './alertsShared';
 
 const log = createLogger('AlertsAdmin');
@@ -25,34 +25,6 @@ export const MAX_SOUND_MB = ALERT_MAX_SOUND_MB;
 
 const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_IMAGE_MB * 1024 * 1024 } });
 const soundUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_SOUND_MB * 1024 * 1024 } });
-
-/**
- * Detect an image file's type from its magic bytes, independent of the client-supplied MIME
- * type. Deliberately excludes SVG (script/XSS risk if ever reflected back to a browser source).
- * - PNG: `\x89PNG\r\n\x1a\n` signature
- * - GIF: `GIF87a` or `GIF89a` signature
- * - JPEG: `\xFF\xD8\xFF` signature
- * - WEBP: `RIFF....WEBP` container
- */
-export function detectImageType(buf: Buffer): 'png' | 'gif' | 'jpeg' | 'webp' | null {
-  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
-    return 'png';
-  }
-  if (buf.subarray(0, 6).equals(Buffer.from('GIF87a', 'ascii')) || buf.subarray(0, 6).equals(Buffer.from('GIF89a', 'ascii'))) {
-    return 'gif';
-  }
-  if (buf.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) {
-    return 'jpeg';
-  }
-  if (
-    buf.length >= 12 &&
-    buf.subarray(0, 4).equals(Buffer.from('RIFF', 'ascii')) &&
-    buf.subarray(8, 12).equals(Buffer.from('WEBP', 'ascii'))
-  ) {
-    return 'webp';
-  }
-  return null;
-}
 
 /**
  * Removes a previously-stored asset file, tolerating it already being gone. Always called after
