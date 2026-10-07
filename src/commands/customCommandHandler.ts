@@ -9,7 +9,8 @@ import { NO_MENTIONS, trySendDiscordReply } from '../discord/discordUtils';
 import type { MultiTwitchGroupInfo } from '../twitch/monitor/twitchMonitorTypes';
 import { fillTemplate } from '../shared/textTemplate';
 import { sendDedupedBySession } from './twitchBroadcast';
-import { createRuntimeRegistry, type TwitchBroadcastRuntime } from './twitchRuntime';
+import { createRuntimeRegistry } from '../shared/runtimeRegistry';
+import type { TwitchBroadcastRuntime } from './twitchRuntime';
 import { createCooldownGate } from './cooldownGate';
 
 // ─── Cooldown ─────────────────────────────────────────────────────────────────

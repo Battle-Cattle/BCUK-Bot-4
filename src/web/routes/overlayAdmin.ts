@@ -4,11 +4,9 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { getStreamerByDiscordId } from '../../db';
-import type { DbStreamerEventSub } from '../../db';
 import { getVideosForStreamer, getRewardsForStreamer } from '../../db';
 import { PUBLIC_URL, OVERLAY_STATUS_MAX_SSE_PER_STREAMER } from '../../shared/config';
-import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { fetchStreamerRewards } from './streamerRewards';
 import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { router as mutationsRouter, MAX_UPLOAD_MB } from './overlayAdminMutations';
@@ -35,25 +33,6 @@ const KNOWN_SUCCESSES = new Set([
 ]);
 
 /**
- * Fetches a streamer's live Twitch custom (channel-point) rewards, for display alongside the
- * overlay reward-to-video assignment UI. Returns an empty list rather than throwing if the
- * streamer has no linked Twitch account, no valid token, or the Helix call fails.
- * @param streamer Streamer whose custom rewards to fetch.
- * @returns The streamer's Twitch custom rewards, or an empty array if unavailable.
- */
-async function fetchTwitchRewards(streamer: DbStreamerEventSub): Promise<TwitchCustomReward[]> {
-  if (!streamer.twitch_user_id) return [];
-  const token = await getValidToken(streamer);
-  if (!token) return [];
-  try {
-    return await getCustomRewards(streamer.twitch_user_id, token);
-  } catch (err) {
-    log.warn('Failed to fetch Twitch custom rewards:', err);
-    return [];
-  }
-}
-
-/**
  * GET /overlay/settings — renders the overlay settings page with the user's
  * uploaded videos, configured rewards, and live Twitch custom rewards (if the
  * user is a streamer).
@@ -69,7 +48,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       ? await Promise.all([
           getVideosForStreamer(streamer.id),
           getRewardsForStreamer(streamer.id),
-          fetchTwitchRewards(streamer),
+          fetchStreamerRewards(streamer, log),
         ])
       : [[], [], []];
 

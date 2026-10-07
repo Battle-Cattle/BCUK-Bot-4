@@ -3,7 +3,8 @@ import { getUsers, getChannelInfo, getStreams, TwitchChannelInfo, TwitchStream }
 
 const log = createLogger('Shoutout');
 import { resolveCommand } from './commandUtils';
-import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
+import { createRuntimeRegistry } from '../shared/runtimeRegistry';
+import type { TwitchSendRuntime } from './twitchRuntime';
 
 const SO_COMMAND = '!so';
 

@@ -1,9 +1,9 @@
 import type { EventSubConfig, AlertEventType, StreamerEventType, RedemptionProgress } from '../../db';
-import type { CompanionActivityEvent, CompanionActivityEventType } from '../../web/routes/companionEvents';
+import type { CompanionActivityEvent, CompanionActivityEventType } from './twitchEventSubRuntime';
 import {
   getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent, getRedemptionProgress, markRedemptionEffect,
 } from '../../db';
-import { pickWeightedRandom } from '../../commands/soundSelector';
+import { pickWeightedRandom } from '../../audio/soundSelector';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
 import { createLogger } from '../../shared/logger';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';

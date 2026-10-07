@@ -12,13 +12,13 @@ vi.mock('../../db', () => ({
   DEFAULT_EVENT_CONFIG: { follow_enabled: false, sub_enabled: false, raid_enabled: false },
 }));
 vi.mock('./twitchEventSubDispatch', () => ({ getAllStreamerInfo: vi.fn() }));
-vi.mock('./twitchApiEventSub', () => ({ getValidToken: vi.fn() }));
+vi.mock('../twitchUserTokens', () => ({ getValidToken: vi.fn() }));
 vi.mock('../twitchApi', () => ({ getCustomRewards: vi.fn(), getRewardRedemptions: vi.fn() }));
 vi.mock('./twitchEventSubHandler', () => ({ handleRedemption: vi.fn() }));
 
 import { getStreamerById, pruneRedemptionLedger } from '../../db';
 import { getAllStreamerInfo } from './twitchEventSubDispatch';
-import { getValidToken } from './twitchApiEventSub';
+import { getValidToken } from '../twitchUserTokens';
 import { getCustomRewards, getRewardRedemptions } from '../twitchApi';
 import { handleRedemption } from './twitchEventSubHandler';
 import {

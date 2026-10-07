@@ -6,7 +6,7 @@ import {
   deletePasskeyEnrollmentCode,
   listPasskeyDescriptorsForUser,
 } from '../../db';
-import { sendDiscordDirectMessage } from '../../discord/discordBot';
+import { sendDiscordDirectMessage } from '../../discord/discordApi';
 import { createLogger } from '../../shared/logger';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';

@@ -13,7 +13,7 @@ vi.mock('../../db', () => ({
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
-vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
+vi.mock('../../twitch/twitchUserTokens', () => ({
   exchangeCode: vi.fn(),
   getUserFromToken: vi.fn(),
 }));
@@ -37,7 +37,7 @@ import express from 'express';
 import supertest from 'supertest';
 import router, { isExpectedTwitchAccount, validateOAuthCallback } from './eventsubCallback';
 import { getStreamerById, saveStreamerToken, initEventConfig, initAlertConfigs } from '../../db';
-import { exchangeCode, getUserFromToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { exchangeCode, getUserFromToken } from '../../twitch/twitchUserTokens';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { clearAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
 import { AccessLevel } from '../../db';

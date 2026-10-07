@@ -29,7 +29,7 @@ vi.mock('../audio/sfxPlayer', () => ({
   },
 }));
 
-vi.mock('./soundSelector', () => ({
+vi.mock('../audio/soundSelector', () => ({
   pickWeightedRandom: vi.fn(),
 }));
 
@@ -41,7 +41,7 @@ import { handleCommand, forgetGuildCommandState } from './commandRouter';
 import { findCachedSfxTrigger } from '../db';
 import { isPlaying } from '../audio/audioPlayer';
 import { playFile, VoiceNotConnectedError } from '../audio/sfxPlayer';
-import { pickWeightedRandom } from './soundSelector';
+import { pickWeightedRandom } from '../audio/soundSelector';
 import { setVoicePlaying } from '../shared/statusStore';
 
 // Base time far in the future so `Date.now() - 0` always exceeds GLOBAL_COOLDOWN_MS

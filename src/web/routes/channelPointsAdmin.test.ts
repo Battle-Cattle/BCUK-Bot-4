@@ -25,7 +25,7 @@ vi.mock('../../twitch/twitchApi', () => ({
   getCustomRewards: vi.fn(),
 }));
 
-vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
+vi.mock('../../twitch/twitchUserTokens', () => ({
   getValidToken: vi.fn(),
 }));
 
@@ -40,6 +40,11 @@ vi.mock('./channelPointsAdminMutations', async () => {
   return { router: Router() };
 });
 
+vi.mock('./channelPointsAdminPricingMutations', async () => {
+  const { Router } = await import('express');
+  return { router: Router() };
+});
+
 vi.mock('./channelPointsEvents', async () => {
   const { Router } = await import('express');
   return { default: Router() };
@@ -49,7 +54,7 @@ import supertest from 'supertest';
 import router from './channelPointsAdmin';
 import { getStreamerByDiscordId, getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../../twitch/twitchUserTokens';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';

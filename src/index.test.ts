@@ -30,8 +30,11 @@ vi.mock('./discord/ownerAlerts', () => ({
 vi.mock('./discord/discordBot', () => ({
   startDiscordBot: vi.fn(),
   stopDiscordBot: vi.fn(),
-  getDiscordClient: vi.fn(),
   waitForDiscordReady: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('./discord/discordClientStore', () => ({
+  getDiscordClient: vi.fn(),
+  setDiscordClient: vi.fn(),
 }));
 vi.mock('./discord/guildRegistry', () => ({
   reloadGuildRegistry: vi.fn().mockResolvedValue(undefined),
@@ -429,7 +432,7 @@ describe('owner-alert runtime', () => {
 
   it('send throws when the Discord client is not ready', async () => {
     const { registerOwnerAlertRuntime } = await import('./discord/ownerAlerts.js');
-    const { getDiscordClient } = await import('./discord/discordBot.js');
+    const { getDiscordClient } = await import('./discord/discordClientStore.js');
     vi.mocked(getDiscordClient).mockReturnValue(undefined as any);
 
     await runMain();
@@ -440,7 +443,7 @@ describe('owner-alert runtime', () => {
 
   it('send fetches the user and DMs them when the client is ready', async () => {
     const { registerOwnerAlertRuntime } = await import('./discord/ownerAlerts.js');
-    const { getDiscordClient } = await import('./discord/discordBot.js');
+    const { getDiscordClient } = await import('./discord/discordClientStore.js');
     const userSend = vi.fn().mockResolvedValue(undefined);
     const fetch = vi.fn().mockResolvedValue({ send: userSend });
     vi.mocked(getDiscordClient).mockReturnValue({ users: { fetch } } as any);

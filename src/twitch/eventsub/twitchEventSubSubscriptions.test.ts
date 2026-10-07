@@ -34,6 +34,8 @@ vi.mock('./twitchApiEventSub', () => ({
   createEventSubSubscription: vi.fn().mockResolvedValue('sub-id-1'),
   listEventSubSubscriptions: vi.fn().mockResolvedValue([]),
   deleteEventSubSubscription: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../twitchUserTokens', () => ({
   getValidToken: vi.fn().mockResolvedValue('token-abc'),
   TwitchAuthError: class TwitchAuthError extends Error {},
 }));
@@ -57,7 +59,8 @@ import {
   fetchValidEventSubToken,
 } from './twitchEventSubSubscriptions';
 import { getAllEventSubStreamers, getEnabledAlertEventTypesBatch, getStreamerById } from '../../db';
-import { getValidToken, createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription, TwitchAuthError } from './twitchApiEventSub';
+import { createEventSubSubscription, listEventSubSubscriptions, deleteEventSubSubscription } from './twitchApiEventSub';
+import { getValidToken, TwitchAuthError } from '../twitchUserTokens';
 import { getUsers } from '../twitchApi';
 import { getActiveChannels } from '../twitchChannelMembership';
 
